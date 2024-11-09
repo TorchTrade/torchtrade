@@ -1,0 +1,2 @@
+alpaca-py
+python-dotenv
