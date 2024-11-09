@@ -1,0 +1,193 @@
+from typing import List, Union, Callable, Dict, Optional
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+import numpy as np
+import pandas as pd
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from alpaca.data.requests import CryptoBarsRequest
+from alpaca.data.historical.crypto import CryptoHistoricalDataClient
+
+class AlpacaObservationClass:
+    def __init__(
+        self,
+        symbol: str,
+        timeframes: Union[List[TimeFrame], TimeFrame],
+        window_sizes: Union[List[int], int] = 1,
+        feature_preprocessing_fn: Optional[Callable] = None,
+    ):
+        """
+        Initialize the AlpacaObservationClass.
+
+        Args:
+            symbol: The cryptocurrency symbol to fetch data for
+            timeframes: Single TimeFrame or list of TimeFrames to fetch data for
+            window_sizes: Single integer or list of integers specifying window_sizes.
+                        If a list is provided, it must have the same length as timeframes.
+            feature_preprocessing_fn: Optional custom preprocessing function that takes a DataFrame
+                                   and returns a DataFrame with feature columns
+        """
+        self.symbol = symbol
+        self.timeframes = (
+            [timeframes] if isinstance(timeframes, TimeFrame) else timeframes
+        )
+        self.window_sizes = (
+            [window_sizes] if isinstance(window_sizes, int) else window_sizes
+        )
+        
+        # Validate that timeframes and window_sizes have matching lengths when both are lists
+        if isinstance(timeframes, list) and isinstance(window_sizes, list):
+            if len(self.timeframes) != len(self.window_sizes):
+                raise ValueError("If both timeframes and window_sizes are lists, they must have the same length")
+        
+        self.feature_preprocessing_fn = (
+            feature_preprocessing_fn or self._default_preprocessing
+        )
+        self.client = CryptoHistoricalDataClient()
+
+    def _default_preprocessing(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Default preprocessing function if none is provided."""
+        df = df.reset_index()
+        df.dropna(inplace=True)
+        df.drop_duplicates(inplace=True)
+        df = df.drop(columns=["symbol"])
+
+        # Generating features
+        df["feature_close"] = df["close"].pct_change().fillna(0)
+        df["feature_open"] = df["open"] / df["close"]
+        df["feature_high"] = df["high"] / df["close"]
+        df["feature_low"] = df["low"] / df["close"]
+        df.dropna(inplace=True)
+        return df
+
+    def _get_numpy_obs(self, df: pd.DataFrame) -> np.ndarray:
+        """Convert feature columns to numpy array."""
+        feature_cols = [col for col in df.columns if "feature" in col]
+        if not feature_cols:
+            raise ValueError("No feature columns found in preprocessed DataFrame")
+        return np.array(df[feature_cols], dtype=np.float32)
+
+    def _fetch_single_timeframe(
+        self, timeframe: TimeFrame, window_size: int
+    ) -> pd.DataFrame:
+        """Fetch and preprocess data for a single timeframe."""
+        now = datetime.now(ZoneInfo("America/New_York"))
+        request = CryptoBarsRequest(
+            symbol_or_symbols=self.symbol,
+            timeframe=timeframe,
+            start=now - timedelta(days=1),
+            end=now,
+            limit=window_size
+        )
+        return self.client.get_crypto_bars(request).df
+
+    def get_keys(self) -> List[str]:
+        """
+        Get the list of keys that will be present in the observations dictionary.
+        
+        Returns:
+            List of strings formatted as '{timeframe_amount}{timeframe_unit}_{window_size}d'
+        """
+        return [
+            f"{tf.amount}{tf.unit.name}_{ws}d"
+            for tf, ws in zip(self.timeframes, self.window_sizes)
+        ]
+
+    def get_features(self) -> List[str]:
+        """Get the list of feature columns that will be present in the observations."""
+        #features = [f for f in self.feature_preprocessing_fn(pd.DataFrame()).columns if "feature" in f]
+        #return features
+        # TODO: Implement this method
+        raise NotImplementedError("get_features method not implemented")
+
+    def get_observations(self) -> Dict[str, np.ndarray]:
+        """
+        Fetch and process observations for all specified timeframes and window sizes.
+
+        Returns:
+            Dictionary with keys formatted as '{timeframe}_{window_size}d' and numpy array values
+        """
+        observations = {}
+
+        for timeframe, window_size in zip(self.timeframes, self.window_sizes):
+            key = f"{timeframe.amount}{timeframe.unit.name}_{window_size}d"
+            df = self._fetch_single_timeframe(timeframe, window_size)
+            processed_df = self.feature_preprocessing_fn(df)
+            observations[key] = self._get_numpy_obs(processed_df)
+
+        return observations
+
+
+
+# Example usage:
+if __name__ == "__main__":
+    # Single timeframe example
+    print("Testing single timeframe...")
+    window_size = 10
+    observer = AlpacaObservationClass(
+        symbol="BTC/USD",
+        timeframes=TimeFrame(15, TimeFrameUnit.Minute),
+        window_sizes=window_size,
+    )
+    expected_keys = observer.get_keys()
+    observations = observer.get_observations()
+    #features = observer.get_features()
+    
+    assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
+    # Default preprocessing has 4 features: feature_close, feature_open, feature_high, feature_low
+    assert observations[expected_keys[0]].shape == (window_size, 4), \
+        f"Expected shape (10, 4) for default features, got {observations[expected_keys[0]].shape}"
+    print("Single timeframe test passed!")
+
+    # Example with multiple timeframes and window sizes
+    print("\nTesting multiple timeframes...")
+    window_sizes = [10, 20]
+    observer = AlpacaObservationClass(
+        symbol="BTC/USD",
+        timeframes=[
+            TimeFrame(15, TimeFrameUnit.Minute),
+            TimeFrame(1, TimeFrameUnit.Hour)
+        ],
+        window_sizes=window_sizes
+    )
+    
+    expected_keys = observer.get_keys()
+    print("Expected keys:", expected_keys)
+    observations = observer.get_observations()
+    #features = observer.get_features()
+    
+    assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
+    assert len(observations) == 2, "Expected exactly 2 observations"
+    
+    # Check shapes for each timeframe/window combination
+    expected_shapes = { key: (w, 4) for key, w in zip(expected_keys, window_sizes)
+    }
+    
+    for key, expected_shape in expected_shapes.items():
+        assert observations[key].shape == expected_shape, \
+            f"Shape mismatch for {key}: expected {expected_shape}, got {observations[key].shape}"
+    print("Multiple timeframes test passed!")
+
+    # Custom preprocessing example
+    print("\nTesting custom preprocessing...")
+    def custom_preprocessing(df):
+        df = df.reset_index()
+        df.dropna(inplace=True)
+        df["feature_volatility"] = df["high"] - df["low"]
+        df["feature_volume_ma"] = df["volume"].rolling(window=3).mean()
+        df.dropna(inplace=True)  # Drop NaN values from rolling window
+        return df
+
+    observer_custom = AlpacaObservationClass(
+        symbol="BTC/USD",
+        timeframes=TimeFrame(15, TimeFrameUnit.Minute),
+        window_sizes=10,
+        feature_preprocessing_fn=custom_preprocessing,
+    )
+    
+    observations_custom = observer_custom.get_observations()
+    key = observer_custom.get_keys()[0]
+    #features_custom = observer_custom.get_features()
+    # Custom preprocessing has 2 features and loses 2 rows due to rolling window
+    assert observations_custom[key].shape == (8, 2), \
+        f"Expected shape (8, 2) for custom features, got {observations_custom[key].shape}"
+    print("Custom preprocessing test passed!")
