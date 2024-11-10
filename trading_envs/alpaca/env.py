@@ -1,22 +1,24 @@
 import gym
 from gym import spaces
 import numpy as np
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, List
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dataclasses import dataclass
 from alpaca.obs_class import AlpacaObservationClass
 from alpaca.order_executor import AlpacaOrderClass, TradeMode
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+import time
+
 
 @dataclass
 class TradingEnvConfig:
     symbol: str = "BTC/USD"
     initial_balance: float = 10000.0
+    action_levels: List = [-1.0, 0.0, 1.0]  # Sell, Hold, Buy
     max_position: float = 1.0  # Maximum position size as a fraction of balance
-    trading_fee: float = 0.001  # 0.1% trading fee
-    time_step_size: int = 15  # minutes
-    history_window: int = 10  # Number of past observations to include
+    time_step_size: int = 3  # minutes
+    history_window: int = 100  # Number of past observations to include
     reward_scaling: float = 1.0
     position_penalty: float = 0.0001  # Penalty for holding positions
     done_on_bankruptcy: bool = True
@@ -47,13 +49,9 @@ class CryptoTradingEnv(gym.Env):
             paper=config.paper
         )
         
+        self.action_levels = config.action_levels
         # Define action and observation spaces
-        self.action_space = spaces.Box(
-            low=-1.0,  # -1 = full sell
-            high=1.0,  # +1 = full buy
-            shape=(1,),
-            dtype=np.float32
-        )
+        self.action_space = spaces.Discrete(len(self.action_levels))
         
         # Get the number of features from the observer
         num_features = self.observer.get_observations()[self.observer.get_keys()[0]].shape[1]
@@ -174,7 +172,7 @@ class CryptoTradingEnv(gym.Env):
         old_portfolio_value = self._get_portfolio_value()
         
         # Convert action to trade size
-        action_value = float(action[0])  # Range: [-1, 1]
+        action_value = self.action_levels[action] # action_index
         desired_position_size = action_value * self.config.max_position
         
         # Get current position
