@@ -59,12 +59,13 @@ class AlpacaObservationClass:
         df.dropna(inplace=True)
         return df
 
-    def _get_numpy_obs(self, df: pd.DataFrame) -> np.ndarray:
-        """Convert feature columns to numpy array."""
-        feature_cols = [col for col in df.columns if "feature" in col]
-        if not feature_cols:
-            raise ValueError("No feature columns found in preprocessed DataFrame")
-        return np.array(df[feature_cols], dtype=np.float32)
+    def _get_numpy_obs(self, df: pd.DataFrame, columns: List[str] = None) -> np.ndarray:
+        """Convert specified columns to numpy array."""
+        if columns is None:
+            columns = [col for col in df.columns if "feature" in col]
+        if not columns:
+            raise ValueError(f"No columns found in preprocessed DataFrame matching: {columns}")
+        return np.array(df[columns], dtype=np.float32)
 
     def _fetch_single_timeframe(
         self, timeframe: TimeFrame, window_size: int
@@ -99,23 +100,38 @@ class AlpacaObservationClass:
         # TODO: Implement this method
         raise NotImplementedError("get_features method not implemented")
 
-    def get_observations(self) -> Dict[str, np.ndarray]:
+    def get_observations(self, return_base_ohlc: bool = False) -> Dict[str, np.ndarray]:
         """
         Fetch and process observations for all specified timeframes and window sizes.
 
+        Args:
+            return_base_ohlc: If True, includes the raw OHLC data from the first timeframe
+                            in the observations dictionary under the 'base_features' key.
+
         Returns:
-            Dictionary with keys formatted as '{timeframe}_{window_size}d' and numpy array values
+            Dictionary with keys formatted as '{timeframe}_{window_size}d' and numpy array values.
+            If return_base_ohlc is True, includes 'base_features'and 'base_timestamps' keys with raw OHLC and timestamp data.
         """
         observations = {}
 
         for timeframe, window_size in zip(self.timeframes, self.window_sizes):
             key = f"{timeframe.amount}{timeframe.unit.name}_{window_size}d"
             df = self._fetch_single_timeframe(timeframe, window_size)
+            
+            # Store base OHLC features if this is the first timeframe and return_base_ohlc is True
+            if return_base_ohlc and timeframe == self.timeframes[0]:
+                base_df = df.reset_index()
+                base_df.dropna(inplace=True)
+                base_df.drop_duplicates(inplace=True)
+                observations['base_features'] = self._get_numpy_obs(
+                    base_df, 
+                    columns=['open', 'high', 'low', 'close']
+                )
+                observations['base_timestamps'] = base_df['timestamp'].values
             processed_df = self.feature_preprocessing_fn(df)
             observations[key] = self._get_numpy_obs(processed_df)
 
         return observations
-
 
 
 # Example usage:
