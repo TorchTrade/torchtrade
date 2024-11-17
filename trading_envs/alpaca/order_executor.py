@@ -62,7 +62,7 @@ class AlpacaOrderClass:
         """
         self.symbol = symbol
         self.trade_mode = trade_mode
-        self.client = TradingClient(api_key, api_secret, paper=paper)
+        self.client = TradingClient(api_key, secret_key=api_secret, paper=paper)
         self.last_order_id = None
 
     def trade(
