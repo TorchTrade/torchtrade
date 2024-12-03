@@ -57,8 +57,8 @@ class CryptoTradingEnv(gym.Env):
         
         #assert config.initial_balance <= buying_power, "Initial balance exceeds buying power"
         if config.initial_balance > buying_power:
-            warn(f"Initial balance is lower than buying_power. Setting initial balance to {buying_power}")
-            self.config.initial_balance = min(config.initial_balance, buying_power)
+            warn(f"Initial balance is lower than buying_power. Setting initial balance to {cash}")
+            self.config.initial_balance = min(config.initial_balance, cash)
         
         self.action_levels = config.action_levels
         # Define action and observation spaces
@@ -167,7 +167,7 @@ class CryptoTradingEnv(gym.Env):
 
         # Wait until target time
         while datetime.now(ZoneInfo("America/New_York")) < target_time:
-            time.sleep(self.config.sleep_timeout)
+            time.sleep(1)
 
     def reset(self) -> Dict[str, np.ndarray]:
         """Reset the environment."""
@@ -207,13 +207,18 @@ class CryptoTradingEnv(gym.Env):
             trade_amount = abs(trade_size) * self.balance
 
             # Execute trade
-            #if side == "sell":
-            success = self.trader.trade(
-                side=side, amount=trade_amount, order_type="market"
-            )
+            if side == "sell" and current_position_size < 0:
+                pass
+            else:
+                success = self.trader.trade(
+                    side=side, amount=trade_amount, order_type="market"
+                )
 
             if not success:
                 print(f"Trade failed: {side} {trade_amount}")
+
+        # Wait for next time step
+        self._wait_for_next_timestamp()
 
         # Update portfolio value
         new_portfolio_value = self._get_portfolio_value()
