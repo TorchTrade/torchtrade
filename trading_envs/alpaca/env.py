@@ -10,7 +10,7 @@ from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from gymnasium import spaces
 from obs_class import AlpacaObservationClass
 from order_executor import AlpacaOrderClass, TradeMode
-
+from warnings import warn
 
 @dataclass
 class TradingEnvConfig:
@@ -52,11 +52,13 @@ class CryptoTradingEnv(gym.Env):
 
         # TODO: check if initial_balance is in the account
         account = self.trader.client.get_account()
-        buy_power = float(account.buying_power)
+        buying_power = float(account.buying_power)
         cash = float(account.cash)
         
-        assert config.initial_balance <= buy_power, "Initial balance exceeds buying power"
-        
+        #assert config.initial_balance <= buying_power, "Initial balance exceeds buying power"
+        if config.initial_balance > buying_power:
+            warn(f"Initial balance is lower than buying_power. Setting initial balance to {buying_power}")
+            self.config.initial_balance = min(config.initial_balance, buying_power)
         
         self.action_levels = config.action_levels
         # Define action and observation spaces
@@ -205,6 +207,7 @@ class CryptoTradingEnv(gym.Env):
             trade_amount = abs(trade_size) * self.balance
 
             # Execute trade
+            #if side == "sell":
             success = self.trader.trade(
                 side=side, amount=trade_amount, order_type="market"
             )
@@ -292,7 +295,7 @@ if __name__ == "__main__":
         total_reward += reward
         env.render()
 
-        print(f"Action: {action[0]:.2f}, Reward: {reward:.4f}")
+        print(f"Action: {env.action_levels[action]}, Reward: {reward:.4f}")
         print(f"Info: {info}\n")
 
     print(f"Episode finished! Total reward: {total_reward:.4f}")
