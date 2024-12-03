@@ -50,6 +50,14 @@ class CryptoTradingEnv(gym.Env):
             paper=config.paper,
         )
 
+        # TODO: check if initial_balance is in the account
+        account = self.trader.client.get_account()
+        buy_power = float(account.buying_power)
+        cash = float(account.cash)
+        
+        assert config.initial_balance <= buy_power, "Initial balance exceeds buying power"
+        
+        
         self.action_levels = config.action_levels
         # Define action and observation spaces
         self.action_space = spaces.Discrete(len(self.action_levels))
@@ -134,6 +142,7 @@ class CryptoTradingEnv(gym.Env):
     def _wait_for_next_timestamp(self) -> None:
         """Wait until the next time step."""
         # Get current time in NY timezone
+        # TODO: make the wait time configurable and depending on the time step size and time frame
         current_time = datetime.now(ZoneInfo("America/New_York"))
 
         # Calculate the next time step
@@ -264,11 +273,11 @@ if __name__ == "__main__":
     load_dotenv()
 
     # Create environment configuration
-    config = TradingEnvConfig(symbol="BTC/USD", initial_balance=10000.0, paper=True)
+    config = TradingEnvConfig(symbol="BTC/USD", initial_balance=10000.0, paper=True, time_step_size=3)
 
     # Create environment
     env = CryptoTradingEnv(
-        config, api_key=os.getenv("API_KEY"), api_secret=os.getenv("API_SECRET")
+        config, api_key=os.getenv("API_KEY"), api_secret=os.getenv("SECRET_KEY")
     )
 
     # Run a simple test episode

@@ -61,6 +61,8 @@ class AlpacaOrderClass:
             paper: Whether to use paper trading (default: True)
         """
         self.symbol = symbol
+        # TODO how to get asset_id?
+        self.asset_id = "64bbff51-59d6-4b3c-9351-13ad85e3c752"
         self.trade_mode = trade_mode
         self.client = TradingClient(api_key, secret_key=api_secret, paper=paper)
         self.last_order_id = None
@@ -166,7 +168,7 @@ class AlpacaOrderClass:
 
             # Get position status
             try:
-                position = self.client.get_open_position(symbol_or_asset_id=self.symbol)
+                position = self.client.get_open_position(symbol_or_asset_id=self.asset_id)
                 status["position_status"] = PositionStatus(
                     qty=float(position.qty),
                     market_value=float(position.market_value),
@@ -239,7 +241,7 @@ class AlpacaOrderClass:
                 )
             else:
                 # Close entire position
-                self.client.close_position(symbol_or_asset_id=self.symbol)
+                self.client.close_position(symbol_or_asset_id=self.asset_id)
             return True
         except Exception as e:
             print(f"Error closing position: {str(e)}")
