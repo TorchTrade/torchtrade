@@ -137,6 +137,9 @@ class CryptoTradingEnv(gym.Env):
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
 
+        account = self.trader.client.get_account()
+        self.balance = float(account.cash)
+
         if position_status is None:
             return self.balance
         return self.balance + position_status.market_value
