@@ -216,6 +216,7 @@ class CryptoTradingEnv(gym.Env):
 
         # Execute trade if necessary
         trade_amount = None
+        success = None
         if abs(trade_size) > 0:
             side = "buy" if trade_size > 0 else "sell"
             trade_amount = round(abs(trade_size) * self.balance, 2)
