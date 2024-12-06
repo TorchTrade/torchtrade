@@ -1,7 +1,8 @@
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
+from warnings import warn
 from zoneinfo import ZoneInfo
 
 import gymnasium as gym
@@ -10,7 +11,7 @@ from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from gymnasium import spaces
 from obs_class import AlpacaObservationClass
 from order_executor import AlpacaOrderClass, TradeMode
-from warnings import warn
+
 
 @dataclass
 class TradingEnvConfig:
@@ -18,8 +19,9 @@ class TradingEnvConfig:
     initial_balance: float = 10000.0
     action_levels = [-1.0, 0.0, 1.0]  # Sell, Hold, Buy
     max_position: float = 1.0  # Maximum position size as a fraction of balance
-    time_step_size: int = 3  # minutes
-    history_window: int = 100  # Number of past observations to include
+    time_frames: Union[List[TimeFrame], TimeFrame] = TimeFrame(1, TimeFrameUnit.Minute)
+    window_sizes: Union[List[int], int] = 10
+    execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute)
     reward_scaling: float = 1.0
     position_penalty: float = 0.0001  # Penalty for holding positions
     done_on_bankruptcy: bool = True
@@ -38,8 +40,8 @@ class CryptoTradingEnv(gym.Env):
         # TODO adapt such that the observer can handle multiple timeframes in the crypto env
         self.observer = AlpacaObservationClass(
             symbol=config.symbol,
-            timeframes=TimeFrame(config.time_step_size, TimeFrameUnit.Minute),
-            window_sizes=config.history_window,
+            timeframes=config.time_frames,
+            window_sizes=config.window_sizes,
         )
 
         self.trader = AlpacaOrderClass(
@@ -50,16 +52,22 @@ class CryptoTradingEnv(gym.Env):
             paper=config.paper,
         )
 
+        # Execute trades on the specified time frame
+        self.execute_on_value = config.execute_on.amount
+        self.execute_on_unit = str(config.execute_on.unit)
+
         # TODO: check if initial_balance is in the account
         account = self.trader.client.get_account()
         buying_power = float(account.buying_power)
         cash = float(account.cash)
-        
-        #assert config.initial_balance <= buying_power, "Initial balance exceeds buying power"
+
+        # assert config.initial_balance <= buying_power, "Initial balance exceeds buying power"
         if config.initial_balance > buying_power:
-            warn(f"Initial balance is lower than buying_power. Setting initial balance to {cash}")
+            warn(
+                f"Initial balance is lower than buying_power. Setting initial balance to {cash}"
+            )
             self.config.initial_balance = min(config.initial_balance, cash)
-        
+
         self.action_levels = config.action_levels
         # Define action and observation spaces
         self.action_space = spaces.Discrete(len(self.action_levels))
@@ -70,12 +78,13 @@ class CryptoTradingEnv(gym.Env):
         ].shape[1]
 
         # Observation space includes market data features and current position info
+        # TODO: needs to be adapted for multiple timeframes
         self.observation_space = spaces.Dict(
             {
                 "market_data": spaces.Box(
                     low=-np.inf,
                     high=np.inf,
-                    shape=(config.history_window, num_features),
+                    shape=(config.window_sizes[0], num_features),
                     dtype=np.float32,
                 ),
                 "account_state": spaces.Box(
@@ -102,6 +111,7 @@ class CryptoTradingEnv(gym.Env):
         if position_status is None:
             position_size = 0.0
             position_value = 0.0
+
         else:
             position_size = position_status.qty
             position_value = position_status.market_value
@@ -145,31 +155,31 @@ class CryptoTradingEnv(gym.Env):
         return self.balance + position_status.market_value
 
     def _wait_for_next_timestamp(self) -> None:
-        """Wait until the next time step."""
+        """Wait until the next time step based on the configured execute_on_value and execute_on_unit."""
+
+        # Mapping units to timedelta arguments
+        unit_to_timedelta = {
+            "TimeFrameUnit.Minute": "minutes",
+            "TimeFrameUnit.Hour": "hours",
+            "TimeFrameUnit.Day": "days",
+        }
+
+        if self.execute_on_unit not in unit_to_timedelta:
+            raise ValueError(f"Unsupported time unit: {self.execute_on_unit}")
+
+        # Calculate the wait duration in timedelta
+        wait_duration = timedelta(
+            **{unit_to_timedelta[self.execute_on_unit]: self.execute_on_value}
+        )
+
         # Get current time in NY timezone
-        # TODO: make the wait time configurable and depending on the time step size and time frame
         current_time = datetime.now(ZoneInfo("America/New_York"))
 
         # Calculate the next time step
-        minutes_since_midnight = current_time.hour * 60 + current_time.minute
-        next_step_minutes = (
-            (minutes_since_midnight // self.config.time_step_size) + 1
-        ) * self.config.time_step_size
+        next_step = (current_time + wait_duration).replace(second=0, microsecond=0)
 
-        # Calculate the target time for the next observation
-        target_time = current_time.replace(
-            hour=next_step_minutes // 60,
-            minute=next_step_minutes % 60,
-            second=0,
-            microsecond=0,
-        )
-
-        # If target time is earlier than current time, move to next day
-        if target_time <= current_time:
-            target_time = target_time + timedelta(days=1)
-
-        # Wait until target time
-        while datetime.now(ZoneInfo("America/New_York")) < target_time:
+        # Wait until the target time
+        while datetime.now(ZoneInfo("America/New_York")) < next_step:
             time.sleep(1)
 
     def reset(self) -> Dict[str, np.ndarray]:
@@ -194,7 +204,7 @@ class CryptoTradingEnv(gym.Env):
         old_portfolio_value = self._get_portfolio_value()
 
         # Convert action to trade size
-        desired_position_size = self.action_levels[action]  # action_index
+        desired_position_size = self.action_levels[action]
 
         # Get current position
         status = self.trader.get_status()
@@ -205,18 +215,15 @@ class CryptoTradingEnv(gym.Env):
         trade_size = desired_position_size - current_position_size
 
         # Execute trade if necessary
+        trade_amount = None
         if abs(trade_size) > 0:
             side = "buy" if trade_size > 0 else "sell"
-            trade_amount = abs(trade_size) * self.balance
+            trade_amount = round(abs(trade_size) * self.balance, 2)
 
             # Execute trade
-            if side == "sell" and current_position_size < 0:
-                pass
-            else:
-                success = self.trader.trade(
-                    side=side, amount=trade_amount, order_type="market"
-                )
-
+            success = self.trader.trade(
+                side=side, amount=trade_amount, order_type="market"
+            )
             if not success:
                 print(f"Trade failed: {side} {trade_amount}")
 
@@ -225,6 +232,9 @@ class CryptoTradingEnv(gym.Env):
 
         # Update portfolio value
         new_portfolio_value = self._get_portfolio_value()
+
+        # Get new observation
+        observation = self._get_observation()
 
         # Calculate reward
         reward = self._calculate_reward(
@@ -242,9 +252,6 @@ class CryptoTradingEnv(gym.Env):
             ):
                 done = True
 
-        # Get new observation
-        observation = self._get_observation()
-
         # Store values for next step
         self.last_portfolio_value = new_portfolio_value
 
@@ -254,6 +261,10 @@ class CryptoTradingEnv(gym.Env):
             "portfolio_return": (new_portfolio_value - self.initial_portfolio_value)
             / self.initial_portfolio_value,
             "position_size": desired_position_size,
+            "trade_size": trade_amount,
+            "trade_success": success,
+            "trade_mode": self.trader.trade_mode,
+            "action": self.action_levels[action],
         }
 
         return observation, reward, done, info
@@ -284,7 +295,17 @@ if __name__ == "__main__":
     load_dotenv()
 
     # Create environment configuration
-    config = TradingEnvConfig(symbol="BTC/USD", initial_balance=10000.0, paper=True, time_step_size=3)
+    config = TradingEnvConfig(
+        symbol="BTC/USD",
+        initial_balance=10000.0,
+        paper=True,
+        time_frames=[
+            TimeFrame(1, TimeFrameUnit.Minute),
+            #TimeFrame(15, TimeFrameUnit.Minute),
+        ],
+        window_sizes=[15], # 30],
+        execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+    )
 
     # Create environment
     env = CryptoTradingEnv(
