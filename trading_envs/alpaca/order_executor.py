@@ -11,9 +11,35 @@ from alpaca.trading.requests import (
     LimitOrderRequest,
     MarketOrderRequest,
     StopLimitOrderRequest,
+    TakeProfitRequest,
+    StopLossRequest,
 )
 from dotenv import load_dotenv
 
+
+# Common Time in Force Options:
+# GTC (Good Till Canceled) – The order remains open until it is executed or manually canceled by the trader. It does not expire at the end of the trading day.
+# DAY (Day Order) – The order is only valid for the current trading day and expires if not executed by the market close.
+# FOK (Fill or Kill) – The order must be fully executed immediately, or it is canceled.
+# IOC (Immediate or Cancel) – The order must be executed immediately (fully or partially); any remaining portion is canceled.
+# GTD (Good Till Date/Time) – The order stays active until a specified date and time, unless it is executed or canceled.
+# AON (All or None) – The order must be fully executed at once or not at all.
+# For Alpaca:
+"""
+Represents the various time in force options for an Order.
+
+The Time-In-Force values supported by Alpaca vary based on the order's security type. Here is a breakdown of the supported TIFs for each specific security type:
+- Equity trading: day, gtc, opg, cls, ioc, fok.
+- Options trading: day.
+- Crypto trading: gtc, ioc.
+Below are the descriptions of each TIF:
+- day: A day order is eligible for execution only on the day it is live. By default, the order is only valid during Regular Trading Hours (9:30am - 4:00pm ET). If unfilled after the closing auction, it is automatically canceled. If submitted after the close, it is queued and submitted the following trading day. However, if marked as eligible for extended hours, the order can also execute during supported extended hours.
+- gtc: The order is good until canceled. Non-marketable GTC limit orders are subject to price adjustments to offset corporate actions affecting the issue. We do not currently support Do Not Reduce(DNR) orders to opt out of such price adjustments.
+- opg: Use this TIF with a market/limit order type to submit “market on open” (MOO) and “limit on open” (LOO) orders. This order is eligible to execute only in the market opening auction. Any unfilled orders after the open will be cancelled. OPG orders submitted after 9:28am but before 7:00pm ET will be rejected. OPG orders submitted after 7:00pm will be queued and routed to the following day’s opening auction. On open/on close orders are routed to the primary exchange. Such orders do not necessarily execute exactly at 9:30am / 4:00pm ET but execute per the exchange’s auction rules.
+- cls: Use this TIF with a market/limit order type to submit “market on close” (MOC) and “limit on close” (LOC) orders. This order is eligible to execute only in the market closing auction. Any unfilled orders after the close will be cancelled. CLS orders submitted after 3:50pm but before 7:00pm ET will be rejected. CLS orders submitted after 7:00pm will be queued and routed to the following day’s closing auction. Only available with API v2.
+- ioc: An Immediate Or Cancel (IOC) order requires all or part of the order to be executed immediately. Any unfilled portion of the order is canceled. Only available with API v2. Most market makers who receive IOC orders will attempt to fill the order on a principal basis only, and cancel any unfilled balance. On occasion, this can result in the entire order being cancelled if the market maker does not have any existing inventory of the security in question.
+- fok: A Fill or Kill (FOK) order is only executed if the entire order quantity can be filled, otherwise the order is canceled. Only available with API v2.
+"""
 
 class TradeMode(Enum):
     NOTIONAL = "notional"
@@ -62,9 +88,13 @@ class AlpacaOrderClass:
         """
         self.symbol = symbol
         # TODO how to get asset_id?
-        self.asset_id = "64bbff51-59d6-4b3c-9351-13ad85e3c752"
         self.trade_mode = trade_mode
         self.client = TradingClient(api_key, secret_key=api_secret, paper=paper)
+        try:
+            self.asset_id = self.client.get_asset(self.symbol).id
+        except Exception as e:
+            print(f"Error getting asset: {str(e)}")
+            self.asset_id = None
         self.last_order_id = None
 
     def trade(
@@ -74,7 +104,9 @@ class AlpacaOrderClass:
         order_type: str = "market",
         limit_price: Optional[float] = None,
         stop_price: Optional[float] = None,
-        time_in_force: str = "gtc",
+        time_in_force: str = "ioc", # gtc
+        take_profit: Optional[float] = None,
+        stop_loss: Optional[float] = None,
     ) -> bool:
         """
         Execute a trade with the specified parameters.
@@ -102,6 +134,12 @@ class AlpacaOrderClass:
                 "symbol": self.symbol,
                 "side": order_side,
                 "time_in_force": time_in_force,
+                "take_profit": TakeProfitRequest(
+                    limit_price=take_profit,
+                ) if take_profit is not None else None,
+                "stop_loss": StopLossRequest(
+                    limit_price=stop_loss,
+                ) if stop_loss is not None else None,
             }
 
             # Add amount based on trade mode
@@ -136,6 +174,7 @@ class AlpacaOrderClass:
 
             # Submit the order
             response = self.client.submit_order(request)
+            print("Order response: ", response)
             self.last_order_id = response.id
             return True
 
