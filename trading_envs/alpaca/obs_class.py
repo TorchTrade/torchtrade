@@ -33,7 +33,7 @@ class AlpacaObservationClass:
         self.window_sizes = (
             [window_sizes] if isinstance(window_sizes, int) else window_sizes
         )
-        
+        self.default_lookback = 60
         # Validate that timeframes and window_sizes have matching lengths when both are lists
         if isinstance(timeframes, list) and isinstance(window_sizes, list):
             if len(self.timeframes) != len(self.window_sizes):
@@ -71,11 +71,14 @@ class AlpacaObservationClass:
         self, timeframe: TimeFrame, window_size: int
     ) -> pd.DataFrame:
         """Fetch and preprocess data for a single timeframe."""
+        if timeframe.unit == TimeFrameUnit.Day and self.default_lookback > self.default_lookback:
+            raise ValueError("Default lookback is greater than 30 days, which is not allowed for daily data")
+        
         now = datetime.now(ZoneInfo("America/New_York"))
         request = CryptoBarsRequest(
             symbol_or_symbols=self.symbol,
             timeframe=timeframe,
-            start=now - timedelta(days=1),
+            start=now - timedelta(days=self.default_lookback), # TODO: this is critical
             end=now,
             limit=window_size
         )
@@ -86,19 +89,28 @@ class AlpacaObservationClass:
         Get the list of keys that will be present in the observations dictionary.
         
         Returns:
-            List of strings formatted as '{timeframe_amount}{timeframe_unit}_{window_size}d'
+            List of strings formatted as '{timeframe_amount}{timeframe_unit}_{window_size}'
         """
         return [
-            f"{tf.amount}{tf.unit.name}_{ws}d"
+            f"{tf.amount}{tf.unit.name}_{ws}"
             for tf, ws in zip(self.timeframes, self.window_sizes)
         ]
 
     def get_features(self) -> List[str]:
         """Get the list of feature columns that will be present in the observations."""
-        #features = [f for f in self.feature_preprocessing_fn(pd.DataFrame()).columns if "feature" in f]
-        #return features
-        # TODO: Implement this method
-        raise NotImplementedError("get_features method not implemented")
+        def get_dummy_data(window_size: int):
+            df = pd.DataFrame()
+            df["open"] = np.random.rand(window_size)
+            df["high"] = np.random.rand(window_size)
+            df["low"] = np.random.rand(window_size)
+            df["close"] = np.random.rand(window_size)
+            return df
+        # TODO: we could do this for all window sizes in case we have different processings per time frame
+        #features = []
+        #for window_size in self.window_sizes:
+            #dummy_df = get_dummy_data(window_size)
+            #features.extend([f for f in self.feature_preprocessing_fn(dummy_df).columns if "feature" in f])
+        return self.feature_preprocessing_fn(get_dummy_data(self.window_sizes[0])).columns
 
     def get_observations(self, return_base_ohlc: bool = False) -> Dict[str, np.ndarray]:
         """
@@ -109,13 +121,13 @@ class AlpacaObservationClass:
                             in the observations dictionary under the 'base_features' key.
 
         Returns:
-            Dictionary with keys formatted as '{timeframe}_{window_size}d' and numpy array values.
+            Dictionary with keys formatted as '{timeframe}_{window_size}' and numpy array values.
             If return_base_ohlc is True, includes 'base_features'and 'base_timestamps' keys with raw OHLC and timestamp data.
         """
         observations = {}
 
         for timeframe, window_size in zip(self.timeframes, self.window_sizes):
-            key = f"{timeframe.amount}{timeframe.unit.name}_{window_size}d"
+            key = f"{timeframe.amount}{timeframe.unit.name}_{window_size}"
             df = self._fetch_single_timeframe(timeframe, window_size)
             
             # Store base OHLC features if this is the first timeframe and return_base_ohlc is True
