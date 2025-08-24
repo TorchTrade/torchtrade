@@ -15,10 +15,10 @@ Specifics for the broker, such as "get current observation" or "execute trade," 
 
   
   Example Envs:
-    - Paper trade single time frame / multi time frame
-    - Live env ...
-    - Offline Env versions that can read historical data from the paper trading environment.
-    ...
+  - Paper trade single time frame / multi time frame
+  - Live env ...
+  - Offline Env versions that can read historical data from the paper trading environment.
+  -  ...
 
 It is essential to have independent components and to develop them stepwise, with continuous progress and rapid iteration to improve versions.
 
