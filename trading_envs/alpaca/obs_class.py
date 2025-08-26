@@ -96,10 +96,11 @@ class AlpacaObservationClass:
             for tf, ws in zip(self.timeframes, self.window_sizes)
         ]
 
-    def get_features(self) -> List[str]:
-        """Get the list of feature columns that will be present in the observations."""
+    def get_features(self) -> Dict[str, List[str]]:
+        """Returns a dictionary with the observation features and the original features."""
         def get_dummy_data(window_size: int):
             df = pd.DataFrame()
+            df["symbol"] = [self.symbol]*window_size
             df["open"] = np.random.rand(window_size)
             df["high"] = np.random.rand(window_size)
             df["low"] = np.random.rand(window_size)
@@ -110,7 +111,10 @@ class AlpacaObservationClass:
         #for window_size in self.window_sizes:
             #dummy_df = get_dummy_data(window_size)
             #features.extend([f for f in self.feature_preprocessing_fn(dummy_df).columns if "feature" in f])
-        return self.feature_preprocessing_fn(get_dummy_data(self.window_sizes[0])).columns
+        dummy_df = self.feature_preprocessing_fn(get_dummy_data(self.window_sizes[0]))
+        observation_features = [f for f in dummy_df.columns if "feature" in f]
+        original_features = [f for f in dummy_df.columns if "feature" not in f]
+        return {"observation_features": observation_features, "original_features": original_features}
 
     def get_observations(self, return_base_ohlc: bool = False) -> Dict[str, np.ndarray]:
         """
