@@ -16,7 +16,7 @@ class AlpacaObservationClass:
         feature_preprocessing_fn: Optional[Callable] = None,
     ):
         """
-        Initialize the AlpacaObservationClass.
+        Initialize the AlpacaObservationClass. Default observation features are close, open, high, low. 
 
         Args:
             symbol: The cryptocurrency symbol to fetch data for
@@ -105,6 +105,7 @@ class AlpacaObservationClass:
             df["high"] = np.random.rand(window_size)
             df["low"] = np.random.rand(window_size)
             df["close"] = np.random.rand(window_size)
+            df["volume"] = np.random.rand(window_size)
             return df
         # TODO: we could do this for all window sizes in case we have different processings per time frame
         #features = []
