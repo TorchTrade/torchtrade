@@ -51,7 +51,8 @@ class AlpacaObservationClass:
         df.drop_duplicates(inplace=True)
         df = df.drop(columns=["symbol"])
 
-        # Generating features
+        # Generating base features
+        # TODO: should those be unnormalized?
         df["feature_close"] = df["close"].pct_change().fillna(0)
         df["feature_open"] = df["open"] / df["close"]
         df["feature_high"] = df["high"] / df["close"]
