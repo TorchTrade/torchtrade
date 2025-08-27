@@ -86,15 +86,10 @@ class AlpacaOrderClass:
             api_secret: Alpaca API secret
             paper: Whether to use paper trading (default: True)
         """
+        assert "/" not in symbol, "Symbol should not contain '/'; e.g. use BTCUSD instead of BTC/USD"
         self.symbol = symbol
-        # TODO how to get asset_id?
         self.trade_mode = trade_mode
         self.client = TradingClient(api_key, secret_key=api_secret, paper=paper)
-        try:
-            self.asset_id = self.client.get_asset(self.symbol).id
-        except Exception as e:
-            print(f"Error getting asset: {str(e)}")
-            self.asset_id = None
         self.last_order_id = None
 
     def trade(
@@ -181,6 +176,23 @@ class AlpacaOrderClass:
         except Exception as e:
             print(f"Error executing trade: {str(e)}")
             return False
+        
+    def get_clock(self) -> Dict:
+        """
+        Get the current market clock.
+
+        Returns:
+            Dict[str, Union[Clock]]: The current market clock.
+
+        Example:
+            >>> clock = order_manager.get_clock()
+            >>> print(clock)
+            {'is_open': True,
+            'next_close': datetime.datetime(2025, 8, 27, 16, 0, tzinfo=TzInfo(-04:00)),
+            'next_open': datetime.datetime(2025, 8, 28, 9, 30, tzinfo=TzInfo(-04:00)),
+            'timestamp': datetime.datetime(2025, 8, 27, 14, 12, 49, 663325, tzinfo=TzInfo(-04:00))}
+        """
+        return self.client.get_clock()
 
     def get_status(self) -> Dict[str, Union[OrderStatus, PositionStatus]]:
         """
@@ -207,7 +219,7 @@ class AlpacaOrderClass:
 
             # Get position status
             try:
-                position = self.client.get_open_position(symbol_or_asset_id=self.asset_id)
+                position = self.client.get_open_position(symbol_or_asset_id=self.symbol)
                 status["position_status"] = PositionStatus(
                     qty=float(position.qty),
                     market_value=float(position.market_value),
@@ -216,7 +228,8 @@ class AlpacaOrderClass:
                     unrealized_plpc=float(position.unrealized_plpc),
                     current_price=float(position.current_price),
                 )
-            except Exception:
+            except Exception as e:
+                print(f"Error getting position status: {str(e)}")
                 status["position_status"] = None  # No open position
 
             return status
@@ -280,7 +293,7 @@ class AlpacaOrderClass:
                 )
             else:
                 # Close entire position
-                self.client.close_position(symbol_or_asset_id=self.asset_id)
+                self.client.close_position(symbol_or_asset_id=self.symbol)
             return True
         except Exception as e:
             print(f"Error closing position: {str(e)}")
