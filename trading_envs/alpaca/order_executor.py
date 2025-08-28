@@ -91,6 +91,7 @@ class AlpacaOrderClass:
         self.trade_mode = trade_mode
         self.client = TradingClient(api_key, secret_key=api_secret, paper=paper)
         self.last_order_id = None
+        self.transaction_fee = 0.025
 
     def trade(
         self,
