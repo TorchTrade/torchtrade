@@ -75,6 +75,7 @@ class AlpacaOrderClass:
         api_key: str,
         api_secret: str,
         paper: bool = True,
+        transaction_fee: float = 0.025,
     ):
         """
         Initialize the AlpacaOrderClass.
@@ -86,12 +87,17 @@ class AlpacaOrderClass:
             api_secret: Alpaca API secret
             paper: Whether to use paper trading (default: True)
         """
-        assert "/" not in symbol, "Symbol should not contain '/'; e.g. use BTCUSD instead of BTC/USD"
-        self.symbol = symbol
+        if "/" in symbol:
+            import warnings
+            warnings.warn(
+                f"Symbols {symbol} contains '/'; will be changed to {symbol.replace('/', '')}. "
+            )
+            symbol = symbol.replace('/', '')
+        self.symbol = symbol.replace('/', '')
         self.trade_mode = trade_mode
         self.client = TradingClient(api_key, secret_key=api_secret, paper=paper)
         self.last_order_id = None
-        self.transaction_fee = 0.025
+        self.transaction_fee = transaction_fee
 
     def trade(
         self,
@@ -140,9 +146,11 @@ class AlpacaOrderClass:
 
             # Add amount based on trade mode
             if self.trade_mode == TradeMode.NOTIONAL:
-                order_params["notional"] = amount
+                order_params["notional"] = round(amount - amount * self.transaction_fee, 2)
             else:
-                order_params["qty"] = amount
+                order_params["qty"] = round(amount - amount * self.transaction_fee, 2)
+
+
 
             # Create appropriate order request based on order type
             if order_type.lower() == "market":
