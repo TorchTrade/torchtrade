@@ -11,28 +11,29 @@ from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from gymnasium import spaces
 from obs_class import AlpacaObservationClass
 from order_executor import AlpacaOrderClass, TradeMode
-
+from decimal import Decimal, ROUND_DOWN
 
 @dataclass
-class TradingEnvConfig:
+class AlpacaTradingEnvConfig:
     symbol: str = "BTC/USD"
     initial_balance: float = 10000.0
-    action_levels = [-1.0, 0.0, 1.0]  # Sell, Hold, Buy
+    max_trade_amount: Optional[float] = None
+    action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Do-Nothing, Buy-all
     max_position: float = 1.0  # Maximum position size as a fraction of balance
     time_frames: Union[List[TimeFrame], TimeFrame] = TimeFrame(1, TimeFrameUnit.Minute)
     window_sizes: Union[List[int], int] = 10
-    execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute)
+    execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute) # On which timeframe to execute trades
     reward_scaling: float = 1.0
     position_penalty: float = 0.0001  # Penalty for holding positions
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
     paper: bool = True
+    trade_mode: TradeMode = TradeMode.NOTIONAL
 
-
-class CryptoTradingEnv(gym.Env):
+class AlpacaTradingEnv(gym.Env):
     metadata = {"render.modes": ["human"]}
 
-    def __init__(self, config: TradingEnvConfig, api_key: str, api_secret: str):
+    def __init__(self, config: AlpacaTradingEnvConfig, api_key: str, api_secret: str):
         super().__init__()
         self.config = config
 
@@ -45,11 +46,12 @@ class CryptoTradingEnv(gym.Env):
         )
 
         self.trader = AlpacaOrderClass(
-            symbol=config.symbol,
-            trade_mode=TradeMode.NOTIONAL,
+            symbol=config.symbol.replace('/', ''),
+            trade_mode=config.trade_mode,
             api_key=api_key,
             api_secret=api_secret,
             paper=config.paper,
+            transaction_fee=0.03,
         )
 
         # Execute trades on the specified time frame
@@ -60,6 +62,10 @@ class CryptoTradingEnv(gym.Env):
         account = self.trader.client.get_account()
         buying_power = float(account.buying_power)
         cash = float(account.cash)
+        if self.config.max_trade_amount is None:
+            self.max_trade_amount = self.config.max_trade_amount
+        else:
+            self.max_trade_amount = None
 
         # assert config.initial_balance <= buying_power, "Initial balance exceeds buying power"
         if config.initial_balance > buying_power:
@@ -200,11 +206,12 @@ class CryptoTradingEnv(gym.Env):
         self, action: np.ndarray
     ) -> Tuple[Dict[str, np.ndarray], float, bool, Dict]:
         """Execute one environment step."""
-        # Store initial portfolio value for reward calculation
+
+        # Store old portfolio value for reward calc
         old_portfolio_value = self._get_portfolio_value()
 
-        # Convert action to trade size
-        desired_position_size = self.action_levels[action]
+        # Map action -> desired fraction of portfolio in [-1, 1]
+        desired_action = self.action_levels[action]
 
         # Get current position
         status = self.trader.get_status()
@@ -212,21 +219,38 @@ class CryptoTradingEnv(gym.Env):
         current_position_size = float(position_status.qty) if position_status else 0.0
 
         # Calculate trade size
-        trade_size = desired_position_size - current_position_size
+        trade_size = desired_action - current_position_size
 
         # Execute trade if necessary
         trade_amount = None
         success = None
-        if abs(trade_size) > 0:
+        if trade_size > 0 and current_position_size >= 0 or trade_size < 0 and current_position_size > 0:
             side = "buy" if trade_size > 0 else "sell"
-            trade_amount = round(abs(trade_size) * self.balance, 2)
+            if self.config.trade_mode == TradeMode.NOTIONAL:
+                if side == "buy":
+                    amount = abs(trade_size) * self.balance
+                else:
+                    total_position_value = (status["position_status"].qty * status["position_status"].current_price)
+                    amount = abs(trade_size) * total_position_value
+
+                if self.config.max_trade_amount is not None and side == "buy":
+                    trade_amount = min(trade_amount, self.config.max_trade_amount)
+            
+            elif self.config.trade_mode == TradeMode.QUANTITY:
+                # TODO: implement quantity trading
+                warn("Quantity trading not implemented yet")
+                trade_amount = abs(trade_size)
 
             # Execute trade
-            success = self.trader.trade(
-                side=side, amount=trade_amount, order_type="market"
-            )
-            if not success:
-                print(f"Trade failed: {side} {trade_amount}")
+            success = None
+            try:
+                if amount > 10:
+                    success = self.trader.trade(side=side, amount=amount, order_type="market")
+                else:
+                    pass
+            except Exception as e:
+                print(f"Trade failed: {side} {amount}")
+                print(e)
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -239,7 +263,7 @@ class CryptoTradingEnv(gym.Env):
 
         # Calculate reward
         reward = self._calculate_reward(
-            old_portfolio_value, new_portfolio_value, desired_position_size
+            old_portfolio_value, new_portfolio_value, desired_action
         )
 
         # Check if episode should end
@@ -261,7 +285,6 @@ class CryptoTradingEnv(gym.Env):
             "portfolio_value": new_portfolio_value,
             "portfolio_return": (new_portfolio_value - self.initial_portfolio_value)
             / self.initial_portfolio_value,
-            "position_size": desired_position_size,
             "trade_size": trade_amount,
             "trade_success": success,
             "trade_mode": self.trader.trade_mode,
@@ -271,6 +294,7 @@ class CryptoTradingEnv(gym.Env):
         return observation, reward, done, info
 
     def render(self, mode="human"):
+        # TODO implement dashboard rendering 
         """Render the environment."""
         if mode == "human":
             portfolio_value = self._get_portfolio_value()
@@ -296,20 +320,19 @@ if __name__ == "__main__":
     load_dotenv()
 
     # Create environment configuration
-    config = TradingEnvConfig(
+    config = AlpacaTradingEnvConfig(
         symbol="BTC/USD",
-        initial_balance=10000.0,
+        initial_balance=500.0,
         paper=True,
         time_frames=[
             TimeFrame(1, TimeFrameUnit.Minute),
-            #TimeFrame(15, TimeFrameUnit.Minute),
         ],
         window_sizes=[15], # 30],
         execute_on=TimeFrame(1, TimeFrameUnit.Minute),
     )
 
     # Create environment
-    env = CryptoTradingEnv(
+    env = AlpacaTradingEnv(
         config, api_key=os.getenv("API_KEY"), api_secret=os.getenv("SECRET_KEY")
     )
 
