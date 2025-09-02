@@ -34,7 +34,7 @@ It is essential to have independent components and to develop them stepwise, wit
 - find way to create combined observation -> Tensordict
 
 - https://www.reddit.com/r/algotrading/comments/1n3zd42/live_algo_results_after_30_days_of_trading_btc_on/ INTERESTING. 1h data 5x leverage on binance. 
-
+-  use https://neptune.ai/walkthrough for logging of training Build own dashboard for live environments.
 
 ### Offline Data Environment
 Create an "server" environment that uses offline data and can be called similar to the alpaca server.
