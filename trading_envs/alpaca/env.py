@@ -16,7 +16,6 @@ from decimal import Decimal, ROUND_DOWN
 @dataclass
 class AlpacaTradingEnvConfig:
     symbol: str = "BTC/USD"
-    initial_balance: float = 10000.0
     max_trade_amount: Optional[float] = None
     action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Do-Nothing, Buy-all
     max_position: float = 1.0  # Maximum position size as a fraction of balance
@@ -58,21 +57,18 @@ class AlpacaTradingEnv(gym.Env):
         self.execute_on_value = config.execute_on.amount
         self.execute_on_unit = str(config.execute_on.unit)
 
-        # TODO: check if initial_balance is in the account
+        # reset settings 
+        self.trader.close_all_positions()
+        self.trader.cancel_open_orders()
+        
         account = self.trader.client.get_account()
-        buying_power = float(account.buying_power)
         cash = float(account.cash)
+        self.initial_portfolio_value = cash
+
         if self.config.max_trade_amount is None:
             self.max_trade_amount = self.config.max_trade_amount
         else:
             self.max_trade_amount = None
-
-        # assert config.initial_balance <= buying_power, "Initial balance exceeds buying power"
-        if config.initial_balance > buying_power:
-            warn(
-                f"Initial balance is lower than buying_power. Setting initial balance to {cash}"
-            )
-            self.config.initial_balance = min(config.initial_balance, cash)
 
         self.action_levels = config.action_levels
         # Define action and observation spaces
@@ -112,6 +108,8 @@ class AlpacaTradingEnv(gym.Env):
 
         # Get account state
         status = self.trader.get_status()
+        account = self.trader.client.get_account()
+        cash = float(account.cash) # should we use buying power?
         position_status = status.get("position_status", None)
 
         if position_status is None:
@@ -123,7 +121,7 @@ class AlpacaTradingEnv(gym.Env):
             position_value = position_status.market_value
 
         account_state = np.array(
-            [self.balance, position_size, position_value], dtype=np.float32
+            [cash, position_size, position_value], dtype=np.float32
         )
 
         return {"market_data": market_data, "account_state": account_state}
@@ -141,7 +139,7 @@ class AlpacaTradingEnv(gym.Env):
         ) / old_portfolio_value
 
         # Apply position penalty
-        position_penalty = abs(position_size) * self.config.position_penalty
+        position_penalty = 0.0 #abs(position_size) * self.config.position_penalty
 
         # Scale the reward
         reward = (portfolio_return - position_penalty) * self.config.reward_scaling
@@ -193,115 +191,145 @@ class AlpacaTradingEnv(gym.Env):
         # Cancel all orders and close all positions
         self.trader.cancel_open_orders()
         self.trader.close_all_positions()
-
-        # Reset balance
-        self.balance = self.config.initial_balance
-        self.initial_portfolio_value = self.config.initial_balance
-        self.last_portfolio_value = self.config.initial_balance
+        account = self.trader.client.get_account()
+        self.balance = float(account.cash)
+        self.last_portfolio_value = self.balance
 
         # Get initial observation
         return self._get_observation()
 
-    def step(
-        self, action: np.ndarray
-    ) -> Tuple[Dict[str, np.ndarray], float, bool, Dict]:
+    def step(self, action: np.ndarray) -> Tuple[Dict[str, np.ndarray], float, bool, Dict]:
         """Execute one environment step."""
-
-        # Store old portfolio value for reward calc
+        
+        # Store old portfolio value for reward calculation
         old_portfolio_value = self._get_portfolio_value()
-
-        # Map action -> desired fraction of portfolio in [-1, 1]
-        desired_action = self.action_levels[action]
-
-        # Get current position
-        status = self.trader.get_status()
-        position_status = status.get("position_status", None)
-        current_position_size = float(position_status.qty) if position_status else 0.0
-
-        # Calculate trade size
-        trade_size = desired_action - current_position_size
-
-        # Execute trade if necessary
-        trade_amount = None
-        success = None
-        if trade_size > 0 and current_position_size >= 0 or trade_size < 0 and current_position_size > 0:
-            side = "buy" if trade_size > 0 else "sell"
-            if self.config.trade_mode == TradeMode.NOTIONAL:
-                if side == "buy":
-                    amount = abs(trade_size) * self.balance
-                else:
-                    total_position_value = (status["position_status"].qty * status["position_status"].current_price)
-                    amount = abs(trade_size) * total_position_value
-
-                if self.config.max_trade_amount is not None and side == "buy":
-                    trade_amount = min(trade_amount, self.config.max_trade_amount)
-            
-            elif self.config.trade_mode == TradeMode.QUANTITY:
-                # TODO: implement quantity trading
-                warn("Quantity trading not implemented yet")
-                trade_amount = abs(trade_size)
-
-            # Execute trade
-            success = None
-            try:
-                if amount > 10:
-                    success = self.trader.trade(side=side, amount=amount, order_type="market")
-                else:
-                    pass
-            except Exception as e:
-                print(f"Trade failed: {side} {amount}")
-                print(e)
-
+        
+        # Get desired action and current position
+        desired_position = self.action_levels[action]
+        current_position = self._get_current_position_fraction()
+        
+        # Calculate and execute trade if needed
+        trade_info = self._execute_trade_if_needed(desired_position, current_position)
+        
         # Wait for next time step
         self._wait_for_next_timestamp()
-
-        # Update portfolio value
+        
+        # Get updated state
         new_portfolio_value = self._get_portfolio_value()
-
-        # Get new observation
         observation = self._get_observation()
-
-        # Calculate reward
-        reward = self._calculate_reward(
-            old_portfolio_value, new_portfolio_value, desired_action
-        )
-
-        # Check if episode should end
-        done = False
-
-        if self.config.done_on_bankruptcy:
-            # Check if portfolio value has dropped below bankruptcy threshold
-            if (
-                new_portfolio_value
-                < self.config.bankrupt_threshold * self.initial_portfolio_value
-            ):
-                done = True
-
-        # Store values for next step
-        self.last_portfolio_value = new_portfolio_value
-
-        # Additional info for debugging
-        info = {
-            "portfolio_value": new_portfolio_value,
-            "portfolio_return": (new_portfolio_value - self.initial_portfolio_value)
-            / self.initial_portfolio_value,
-            "trade_size": trade_amount,
-            "trade_success": success,
-            "trade_mode": self.trader.trade_mode,
-            "action": self.action_levels[action],
-        }
-
+        
+        # Calculate reward and check termination
+        reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, desired_position)
+        done = self._check_termination(new_portfolio_value)
+        
+        # Prepare info dict
+        info = self._create_info_dict(new_portfolio_value, trade_info, desired_position)
+        
         return observation, reward, done, info
+
+    def _get_current_position_fraction(self) -> float:
+        """Get current position as a fraction of portfolio."""
+        status = self.trader.get_status()
+        position_status = status.get("position_status")
+        
+        if position_status is None:
+            return 0.0
+        
+        portfolio_value = self._get_portfolio_value()
+        if portfolio_value == 0:
+            return 0.0
+            
+        return float(position_status.market_value) / portfolio_value
+
+    def _execute_trade_if_needed(self, desired_position: float, current_position: float) -> Dict:
+        """Execute trade if position change is needed."""
+        trade_info = {"executed": False, "amount": 0, "side": None, "success": None}
+        
+        position_change = desired_position - current_position
+        
+        # Skip if change is negligible
+        if abs(position_change) <= 0.05:  # 5% threshold
+            return trade_info
+        
+        # Determine trade details
+        side = "buy" if position_change > 0 else "sell"
+        amount = self._calculate_trade_amount(position_change, side)
+        
+        # Execute if amount is significant
+        if amount >= 10:  # Minimum trade amount
+            try:
+                success = self.trader.trade(side=side, amount=amount, order_type="market")
+                trade_info.update({
+                    "executed": True,
+                    "amount": amount,
+                    "side": side,
+                    "success": success
+                })
+            except Exception as e:
+                print(f"Trade failed: {side} ${amount:.2f} - {str(e)}")
+                trade_info["success"] = False
+        
+        return trade_info
+
+    def _calculate_trade_amount(self, position_change: float, side: str) -> float:
+        """Calculate the dollar amount to trade."""
+        if self.config.trade_mode == TradeMode.QUANTITY:
+            warn("Quantity trading not implemented yet")
+            return abs(position_change)
+        
+        # NOTIONAL mode
+        if side == "buy":
+            base_amount = abs(position_change) * self.balance
+            if self.config.max_trade_amount is not None:
+                return min(base_amount, self.config.max_trade_amount)
+            return base_amount
+        else:  # sell
+            status = self.trader.get_status()
+            if status.get("position_status"):
+                position_value = (status["position_status"].qty * 
+                                status["position_status"].current_price)
+                return abs(position_change) * position_value
+            return 0.0
+
+    def _check_termination(self, portfolio_value: float) -> bool:
+        """Check if episode should terminate."""
+        if not self.config.done_on_bankruptcy:
+            return False
+        
+        bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
+        return portfolio_value < bankruptcy_threshold
+
+    def _create_info_dict(self, portfolio_value: float, trade_info: Dict, action_value: float) -> Dict:
+        """Create info dictionary for debugging."""
+        portfolio_return = ((portfolio_value - self.initial_portfolio_value) / 
+                        self.initial_portfolio_value)
+
+        account = self.trader.client.get_account()
+        cash = float(account.cash)
+        position_status = self.trader.get_status().get("position_status", None)
+        
+        return {
+            "portfolio_value": portfolio_value,
+            "portfolio_return": portfolio_return,
+            "cash": cash,
+            "position_qty": position_status.qty if position_status else 0,
+            "position_market_value": position_status.market_value if position_status else 0,
+            "trade_executed": trade_info["executed"],
+            "trade_amount": trade_info["amount"],
+            "trade_success": trade_info["success"],
+            "trade_side": trade_info["side"],
+            "action": action_value,
+            "trade_mode": self.trader.trade_mode,
+        }
 
     def render(self, mode="human"):
         # TODO implement dashboard rendering 
         """Render the environment."""
         if mode == "human":
             portfolio_value = self._get_portfolio_value()
-            returns = (
-                portfolio_value - self.initial_portfolio_value
-            ) / self.initial_portfolio_value
-            print(f"Portfolio Value: ${portfolio_value:.2f} (Return: {returns:.2%})")
+            portfolio_return = ((portfolio_value - self.initial_portfolio_value) / 
+                        self.initial_portfolio_value)
+            print(f"Portfolio Value: ${portfolio_value:.2f} (Return: {portfolio_return:.2%})")
 
     def close(self):
         """Clean up resources."""
@@ -322,7 +350,6 @@ if __name__ == "__main__":
     # Create environment configuration
     config = AlpacaTradingEnvConfig(
         symbol="BTC/USD",
-        initial_balance=500.0,
         paper=True,
         time_frames=[
             TimeFrame(1, TimeFrameUnit.Minute),
