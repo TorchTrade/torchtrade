@@ -97,7 +97,6 @@ class AlpacaOrderClass:
         self.trade_mode = trade_mode
         self.client = TradingClient(api_key, secret_key=api_secret, paper=paper)
         self.last_order_id = None
-        self.transaction_fee = transaction_fee
 
     def trade(
         self,
@@ -146,9 +145,13 @@ class AlpacaOrderClass:
 
             # Add amount based on trade mode
             if self.trade_mode == TradeMode.NOTIONAL:
-                order_params["notional"] = round(amount - amount * self.transaction_fee, 2)
+                if side.lower() == "buy":
+                    order_params["notional"] = amount
+                else:
+                    self.close_position() # For now we close the full position
+                    return True
             else:
-                order_params["qty"] = round(amount - amount * self.transaction_fee, 2)
+                order_params["qty"] = round(amount, 1)
 
 
 
