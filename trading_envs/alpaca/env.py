@@ -16,7 +16,6 @@ from decimal import Decimal, ROUND_DOWN
 @dataclass
 class AlpacaTradingEnvConfig:
     symbol: str = "BTC/USD"
-    max_trade_amount: Optional[float] = None
     action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Do-Nothing, Buy-all
     max_position: float = 1.0  # Maximum position size as a fraction of balance
     time_frames: Union[List[TimeFrame], TimeFrame] = TimeFrame(1, TimeFrameUnit.Minute)
@@ -50,7 +49,6 @@ class AlpacaTradingEnv(gym.Env):
             api_key=api_key,
             api_secret=api_secret,
             paper=config.paper,
-            transaction_fee=0.03,
         )
 
         # Execute trades on the specified time frame
@@ -64,11 +62,6 @@ class AlpacaTradingEnv(gym.Env):
         account = self.trader.client.get_account()
         cash = float(account.cash)
         self.initial_portfolio_value = cash
-
-        if self.config.max_trade_amount is None:
-            self.max_trade_amount = self.config.max_trade_amount
-        else:
-            self.max_trade_amount = None
 
         self.action_levels = config.action_levels
         # Define action and observation spaces
@@ -130,7 +123,6 @@ class AlpacaTradingEnv(gym.Env):
         self,
         old_portfolio_value: float,
         new_portfolio_value: float,
-        position_size: float,
     ) -> float:
         """Calculate the step reward."""
         # Calculate portfolio return
@@ -138,11 +130,9 @@ class AlpacaTradingEnv(gym.Env):
             new_portfolio_value - old_portfolio_value
         ) / old_portfolio_value
 
-        # Apply position penalty
-        position_penalty = 0.0 #abs(position_size) * self.config.position_penalty
 
         # Scale the reward
-        reward = (portfolio_return - position_penalty) * self.config.reward_scaling
+        reward = portfolio_return * self.config.reward_scaling
 
         return reward
 
@@ -194,6 +184,7 @@ class AlpacaTradingEnv(gym.Env):
         account = self.trader.client.get_account()
         self.balance = float(account.cash)
         self.last_portfolio_value = self.balance
+        self.current_position = 0.0
 
         # Get initial observation
         return self._get_observation()
@@ -205,11 +196,13 @@ class AlpacaTradingEnv(gym.Env):
         old_portfolio_value = self._get_portfolio_value()
         
         # Get desired action and current position
-        desired_position = self.action_levels[action]
-        current_position = self._get_current_position_fraction()
+        desired_action = self.action_levels[action]
         
         # Calculate and execute trade if needed
-        trade_info = self._execute_trade_if_needed(desired_position, current_position)
+        trade_info = self._execute_trade_if_needed(desired_action)
+
+        if trade_info["executed"]:
+            self.current_position = 1 if trade_info["side"] == "buy" else 0
         
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -219,11 +212,11 @@ class AlpacaTradingEnv(gym.Env):
         observation = self._get_observation()
         
         # Calculate reward and check termination
-        reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, desired_position)
+        reward = self._calculate_reward(old_portfolio_value, new_portfolio_value)
         done = self._check_termination(new_portfolio_value)
         
         # Prepare info dict
-        info = self._create_info_dict(new_portfolio_value, trade_info, desired_position)
+        info = self._create_info_dict(new_portfolio_value, trade_info, desired_action)
         
         return observation, reward, done, info
 
@@ -241,55 +234,49 @@ class AlpacaTradingEnv(gym.Env):
             
         return float(position_status.market_value) / portfolio_value
 
-    def _execute_trade_if_needed(self, desired_position: float, current_position: float) -> Dict:
+    def _execute_trade_if_needed(self, desired_position: float) -> Dict:
         """Execute trade if position change is needed."""
         trade_info = {"executed": False, "amount": 0, "side": None, "success": None}
         
-        position_change = desired_position - current_position
         
-        # Skip if change is negligible
-        if abs(position_change) <= 0.05:  # 5% threshold
+        # If holding position or no change in position, do nothing
+        if desired_position == 0 or desired_position == self.current_position:
             return trade_info
         
         # Determine trade details
-        side = "buy" if position_change > 0 else "sell"
-        amount = self._calculate_trade_amount(position_change, side)
+        side = "buy" if desired_position > 0 else "sell"
+        amount = self._calculate_trade_amount(side)
         
-        # Execute if amount is significant
-        if amount >= 10:  # Minimum trade amount
-            try:
-                success = self.trader.trade(side=side, amount=amount, order_type="market")
-                trade_info.update({
-                    "executed": True,
-                    "amount": amount,
-                    "side": side,
-                    "success": success
-                })
-            except Exception as e:
-                print(f"Trade failed: {side} ${amount:.2f} - {str(e)}")
-                trade_info["success"] = False
+        try:
+            success = self.trader.trade(side=side, amount=amount, order_type="market")
+            trade_info.update({
+                "executed": True,
+                "amount": amount,
+                "side": side,
+                "success": success
+            })
+        except Exception as e:
+            print(f"Trade failed: {side} ${amount:.2f} - {str(e)}")
+            trade_info["success"] = False
         
         return trade_info
 
-    def _calculate_trade_amount(self, position_change: float, side: str) -> float:
+    def _calculate_trade_amount(self, side: str) -> float:
         """Calculate the dollar amount to trade."""
         if self.config.trade_mode == TradeMode.QUANTITY:
-            warn("Quantity trading not implemented yet")
-            return abs(position_change)
+            raise NotImplementedError
         
         # NOTIONAL mode
         if side == "buy":
-            base_amount = abs(position_change) * self.balance
-            if self.config.max_trade_amount is not None:
-                return min(base_amount, self.config.max_trade_amount)
-            return base_amount
+            return self.balance # buy with all cash we have
         else:  # sell
-            status = self.trader.get_status()
-            if status.get("position_status"):
-                position_value = (status["position_status"].qty * 
-                                status["position_status"].current_price)
-                return abs(position_change) * position_value
-            return 0.0
+            # TODO: if we do fine grained trading this needs to be calculated now we sell all available
+            return -1
+            # status = self.trader.get_status()
+            # if status.get("position_status"):
+            #     position_value = (status["position_status"].qty * 
+            #                     status["position_status"].current_price)
+            #     return position_value # sell all we have
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""
@@ -329,7 +316,7 @@ class AlpacaTradingEnv(gym.Env):
             portfolio_value = self._get_portfolio_value()
             portfolio_return = ((portfolio_value - self.initial_portfolio_value) / 
                         self.initial_portfolio_value)
-            print(f"Portfolio Value: ${portfolio_value:.2f} (Return: {portfolio_return:.2%})")
+            print(f"Portfolio Value: ${portfolio_value:.2f} (Total Return: {portfolio_return:.2%})")
 
     def close(self):
         """Clean up resources."""
@@ -367,10 +354,11 @@ if __name__ == "__main__":
     obs = env.reset()
     done = False
     total_reward = 0
-
+    actions = [2, 0, 1, 2, 1]
     while not done:
         # Random action for testing
-        action = env.action_space.sample()
+        # action = env.action_space.sample()
+        action = actions.pop(0)
         obs, reward, done, info = env.step(action)
         total_reward += reward
         env.render()
