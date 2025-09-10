@@ -15,11 +15,11 @@ Specifics for the broker, such as "get current observation" or "execute trade," 
 
   
   Example Envs:
-  - Start with a simple robust setup, minimal as possible that is working. then we can iterate and improve add complexity
+  - Start with a simple robust setup, minimal as possible that is working. then we can iterate and improve, add complexity
   - Paper trade single time frame / multi time frame
   - Live env ...
   - Offline Env versions that can read historical data from the paper trading environment.
-  -  ...
+  -  Raspberry Pi server [X]
 
 It is essential to have independent components and to develop them stepwise, with continuous progress and rapid iteration to improve versions.
 
