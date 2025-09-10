@@ -5,13 +5,16 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from warnings import warn
 from zoneinfo import ZoneInfo
 
-import gymnasium as gym
 import numpy as np
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from gymnasium import spaces
-from .obs_class import AlpacaObservationClass
-from .order_executor import AlpacaOrderClass, TradeMode
-from decimal import Decimal, ROUND_DOWN
+from obs_class import AlpacaObservationClass
+from order_executor import AlpacaOrderClass, TradeMode
+from tensordict import TensorDict, TensorDictBase
+from torchrl.data.tensor_specs import BoundedTensorSpec, CompositeSpec, DiscreteTensorSpec
+from torchrl.envs import EnvBase
+import torch
+from torchrl.data import Categorical, Bounded
 
 @dataclass
 class AlpacaTradingEnvConfig:
@@ -27,12 +30,10 @@ class AlpacaTradingEnvConfig:
     bankrupt_threshold: float = 0.1  # 10% of initial balance
     paper: bool = True
     trade_mode: TradeMode = TradeMode.NOTIONAL
+    seed: Optional[int] = 42
 
-class AlpacaTradingEnv(gym.Env):
-    metadata = {"render.modes": ["human"]}
-
+class AlpacaTorchTradingEnv(EnvBase):
     def __init__(self, config: AlpacaTradingEnvConfig, api_key: str, api_secret: str):
-        super().__init__()
         self.config = config
 
         # Initialize Alpaca clients
@@ -65,7 +66,7 @@ class AlpacaTradingEnv(gym.Env):
 
         self.action_levels = config.action_levels
         # Define action and observation spaces
-        self.action_space = spaces.Discrete(len(self.action_levels))
+        self.action_spec = Categorical(len(self.action_levels))
 
         # Get the number of features from the observer
         num_features = self.observer.get_observations()[
@@ -74,26 +75,20 @@ class AlpacaTradingEnv(gym.Env):
 
         # Observation space includes market data features and current position info
         # TODO: needs to be adapted for multiple timeframes
-        self.observation_space = spaces.Dict(
-            {
-                "market_data": spaces.Box(
-                    low=-np.inf,
-                    high=np.inf,
-                    shape=(config.window_sizes[0], num_features),
-                    dtype=np.float32,
-                ),
-                "account_state": spaces.Box(
-                    low=-np.inf,
-                    high=np.inf,
-                    shape=(3,),  # [balance, position_size, position_value]
-                    dtype=np.float32,
-                ),
-            }
-        )
+        self.observation_spec = CompositeSpec(shape=())
+        self.market_data_key = "market_data"
+        self.account_state_key = "account_state"
 
-        self.reset()
+        market_data_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(config.window_sizes[0], num_features), dtype=torch.float)
+        account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(3,), dtype=torch.float)
+        self.observation_spec.set(self.market_data_key, market_data_spec)
+        self.observation_spec.set(self.account_state_key, account_state_spec)
 
-    def _get_observation(self) -> Dict[str, np.ndarray]:
+        self._reset(TensorDict({}))
+        super().__init__()
+
+
+    def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
         # Get market data
         obs_dict = self.observer.get_observations(return_base_ohlc=True)
@@ -113,11 +108,12 @@ class AlpacaTradingEnv(gym.Env):
             position_size = position_status.qty
             position_value = position_status.market_value
 
-        account_state = np.array(
-            [cash, position_size, position_value], dtype=np.float32
+        account_state = torch.tensor(
+            [cash, position_size, position_value], dtype=torch.float
         )
 
-        return {"market_data": market_data, "account_state": account_state}
+        return TensorDict({self.market_data_key: torch.from_numpy(market_data).unsqueeze(0),
+                           self.account_state_key: account_state.unsqueeze(0)}, batch_size=())
 
     def _calculate_reward(
         self,
@@ -176,27 +172,41 @@ class AlpacaTradingEnv(gym.Env):
         while datetime.now(ZoneInfo("America/New_York")) < next_step:
             time.sleep(1)
 
-    def reset(self) -> Dict[str, np.ndarray]:
+    def _set_seed(self, seed: int):
+        """Set the seed for the environment."""
+        if seed is not None:
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+        else:
+            np.random.seed(self.config.seed)
+            torch.manual_seed(self.config.seed)
+
+    def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
         # Cancel all orders and close all positions
         self.trader.cancel_open_orders()
-        self.trader.close_all_positions()
+        #self.trader.close_all_positions() # NOTE: Not sure if we want this as we could loose money
         account = self.trader.client.get_account()
         self.balance = float(account.cash)
         self.last_portfolio_value = self.balance
-        self.current_position = 0.0
+        status = self.trader.get_status()
+        position_status = status.get("position_status")
+        if position_status is None:
+            self.current_position = 0.0
+        else:
+            self.current_position = 1 if position_status.qty > 0 else 0
 
         # Get initial observation
         return self._get_observation()
 
-    def step(self, action: np.ndarray) -> Tuple[Dict[str, np.ndarray], float, bool, Dict]:
+    def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
         
         # Store old portfolio value for reward calculation
         old_portfolio_value = self._get_portfolio_value()
         
         # Get desired action and current position
-        desired_action = self.action_levels[action]
+        desired_action = self.action_levels[tensordict.get("action", 0)]
         
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
@@ -209,16 +219,19 @@ class AlpacaTradingEnv(gym.Env):
         
         # Get updated state
         new_portfolio_value = self._get_portfolio_value()
-        observation = self._get_observation()
+        next_tensordict = self._get_observation()
         
         # Calculate reward and check termination
         reward = self._calculate_reward(old_portfolio_value, new_portfolio_value)
         done = self._check_termination(new_portfolio_value)
+
+        next_tensordict.set("reward", reward)
+        next_tensordict.set("done", done)
         
-        # Prepare info dict
-        info = self._create_info_dict(new_portfolio_value, trade_info, desired_action)
+        # TODO: Make a dashboard that shows the portfolio value and action history etc
+        _ = self._create_info_dict(new_portfolio_value, trade_info, desired_action)
         
-        return observation, reward, done, info
+        return next_tensordict
 
     def _get_current_position_fraction(self) -> float:
         """Get current position as a fraction of portfolio."""
@@ -309,14 +322,6 @@ class AlpacaTradingEnv(gym.Env):
             "trade_mode": self.trader.trade_mode,
         }
 
-    def render(self, mode="human"):
-        # TODO implement dashboard rendering 
-        """Render the environment."""
-        if mode == "human":
-            portfolio_value = self._get_portfolio_value()
-            portfolio_return = ((portfolio_value - self.initial_portfolio_value) / 
-                        self.initial_portfolio_value)
-            print(f"Portfolio Value: ${portfolio_value:.2f} (Total Return: {portfolio_return:.2%})")
 
     def close(self):
         """Clean up resources."""
@@ -325,15 +330,12 @@ class AlpacaTradingEnv(gym.Env):
         self.trader.close_all_positions()
 
 
-# Example usage:
+
 if __name__ == "__main__":
     import os
-
     from dotenv import load_dotenv
-
     # Load environment variables
     load_dotenv()
-
     # Create environment configuration
     config = AlpacaTradingEnvConfig(
         symbol="BTC/USD",
@@ -346,25 +348,8 @@ if __name__ == "__main__":
     )
 
     # Create environment
-    env = AlpacaTradingEnv(
+    env = AlpacaTorchTradingEnv(
         config, api_key=os.getenv("API_KEY"), api_secret=os.getenv("SECRET_KEY")
     )
-
-    # Run a simple test episode
-    obs = env.reset()
-    done = False
-    total_reward = 0
-    actions = [2, 0, 1, 2, 1]
-    while not done:
-        # Random action for testing
-        # action = env.action_space.sample()
-        action = actions.pop(0)
-        obs, reward, done, info = env.step(action)
-        total_reward += reward
-        env.render()
-
-        print(f"Action: {env.action_levels[action]}, Reward: {reward:.4f}")
-        print(f"Info: {info}\n")
-
-    print(f"Episode finished! Total reward: {total_reward:.4f}")
-    env.close()
+    td = env.reset()
+    print(td)
