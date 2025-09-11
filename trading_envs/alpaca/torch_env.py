@@ -8,8 +8,8 @@ from zoneinfo import ZoneInfo
 import numpy as np
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from gymnasium import spaces
-from obs_class import AlpacaObservationClass
-from order_executor import AlpacaOrderClass, TradeMode
+from .obs_class import AlpacaObservationClass
+from .order_executor import AlpacaOrderClass, TradeMode
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data.tensor_specs import BoundedTensorSpec, CompositeSpec, DiscreteTensorSpec
 from torchrl.envs import EnvBase
@@ -31,6 +31,7 @@ class AlpacaTradingEnvConfig:
     paper: bool = True
     trade_mode: TradeMode = TradeMode.NOTIONAL
     seed: Optional[int] = 42
+    include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
 
 class AlpacaTorchTradingEnv(EnvBase):
     def __init__(self, config: AlpacaTradingEnvConfig, api_key: str, api_secret: str):
@@ -73,15 +74,23 @@ class AlpacaTorchTradingEnv(EnvBase):
             self.observer.get_keys()[0]
         ].shape[1]
 
+        # get market data obs names
+        market_data_names = self.observer.get_keys()
+
         # Observation space includes market data features and current position info
         # TODO: needs to be adapted for multiple timeframes
         self.observation_spec = CompositeSpec(shape=())
+           
         self.market_data_key = "market_data"
         self.account_state_key = "account_state"
 
         market_data_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(config.window_sizes[0], num_features), dtype=torch.float)
         account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(3,), dtype=torch.float)
-        self.observation_spec.set(self.market_data_key, market_data_spec)
+        self.market_data_keys = []
+        for market_data_name in market_data_names:
+            market_data_key = "market_data_" + market_data_name
+            self.observation_spec.set(market_data_key, market_data_spec)
+            self.market_data_keys.append(market_data_key)
         self.observation_spec.set(self.account_state_key, account_state_spec)
 
         self._reset(TensorDict({}))
@@ -94,10 +103,18 @@ class AlpacaTorchTradingEnv(EnvBase):
         obs_dict = self.observer.get_observations(return_base_ohlc=True)
         market_data = obs_dict[self.observer.get_keys()[0]]
 
+        base_features = obs_dict["base_features"]
+        base_timestamps = obs_dict["base_timestamps"]
+        # Convert to Unix timestamps (seconds)
+        timestamps = base_timestamps.astype('datetime64[s]').astype(np.int64)
+        base_timestamps = torch.from_numpy(timestamps)
+        
+        market_data = [obs_dict[features_name] for features_name in self.observer.get_keys()]
+
         # Get account state
         status = self.trader.get_status()
         account = self.trader.client.get_account()
-        cash = float(account.cash) # should we use buying power?
+        cash = float(account.cash) # NOTE: should we use buying power?
         position_status = status.get("position_status", None)
 
         if position_status is None:
@@ -112,8 +129,15 @@ class AlpacaTorchTradingEnv(EnvBase):
             [cash, position_size, position_value], dtype=torch.float
         )
 
-        return TensorDict({self.market_data_key: torch.from_numpy(market_data).unsqueeze(0),
-                           self.account_state_key: account_state.unsqueeze(0)}, batch_size=())
+        out_td = TensorDict({self.account_state_key: account_state.unsqueeze(0)}, batch_size=())
+        for market_data_name, data in zip(self.market_data_keys, market_data):
+            out_td.set(market_data_name, torch.from_numpy(data).unsqueeze(0))
+
+        if self.config.include_base_features:
+            out_td.set("base_features", torch.from_numpy(base_features).unsqueeze(0))
+            out_td.set("base_timestamps", base_timestamps.unsqueeze(0))
+
+        return out_td
 
     def _calculate_reward(
         self,
@@ -342,9 +366,11 @@ if __name__ == "__main__":
         paper=True,
         time_frames=[
             TimeFrame(1, TimeFrameUnit.Minute),
+            TimeFrame(1, TimeFrameUnit.Hour),
         ],
-        window_sizes=[15], # 30],
+        window_sizes=[15, 10],
         execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        include_base_features=True,
     )
 
     # Create environment
