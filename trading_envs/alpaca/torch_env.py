@@ -33,7 +33,7 @@ class AlpacaTradingEnvConfig:
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
 
 class AlpacaTorchTradingEnv(EnvBase):
-    def __init__(self, config: AlpacaTradingEnvConfig, api_key: str, api_secret: str):
+    def __init__(self, config: AlpacaTradingEnvConfig, api_key: str, api_secret: str, feature_preprocessing_fn: Optional[Callable] = None):
         self.config = config
 
         # Initialize Alpaca clients
@@ -42,6 +42,7 @@ class AlpacaTorchTradingEnv(EnvBase):
             symbol=config.symbol,
             timeframes=config.time_frames,
             window_sizes=config.window_sizes,
+            feature_preprocessing_fn=feature_preprocessing_fn,
         )
 
         self.trader = AlpacaOrderClass(
