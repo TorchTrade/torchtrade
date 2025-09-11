@@ -251,6 +251,7 @@ class AlpacaTorchTradingEnv(EnvBase):
         next_tensordict.set("reward", reward)
         next_tensordict.set("done", done)
         next_tensordict.set("truncated", False)
+        next_tensordict.set("terminated", False)
         
         # TODO: Make a dashboard that shows the portfolio value and action history etc
         _ = self._create_info_dict(new_portfolio_value, trade_info, desired_action)
