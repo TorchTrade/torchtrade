@@ -14,6 +14,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
+from .dashboard import TradingDashboard
 
 @dataclass
 class AlpacaTradingEnvConfig:
@@ -31,6 +32,8 @@ class AlpacaTradingEnvConfig:
     trade_mode: TradeMode = TradeMode.NOTIONAL
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
+    enable_dashboard: bool = False
+    dashboard_port: int = 8000
 
 class AlpacaTorchTradingEnv(EnvBase):
     def __init__(self, config: AlpacaTradingEnvConfig, api_key: str, api_secret: str):
@@ -51,6 +54,11 @@ class AlpacaTorchTradingEnv(EnvBase):
             api_secret=api_secret,
             paper=config.paper,
         )
+        # Initialize dashboard
+        self.dashboard = None
+        if config.enable_dashboard:
+            self.dashboard = TradingDashboard(port=config.dashboard_port)
+            self.dashboard.start_server()
 
         # Execute trades on the specified time frame
         self.execute_on_value = config.execute_on.amount
@@ -250,8 +258,12 @@ class AlpacaTorchTradingEnv(EnvBase):
         next_tensordict.set("reward", reward)
         next_tensordict.set("done", done)
         
-        # TODO: Make a dashboard that shows the portfolio value and action history etc
-        _ = self._create_info_dict(new_portfolio_value, trade_info, desired_action)
+        # Create info dict (your existing code)
+        info_dict = self._create_info_dict(new_portfolio_value, trade_info, desired_action)
+        
+        # Log to dashboard if enabled
+        if self.dashboard:
+            self.dashboard.log_step(info_dict, reward)
         
         return next_tensordict
 
@@ -337,7 +349,9 @@ class AlpacaTorchTradingEnv(EnvBase):
         # Cancel all orders and close all positions
         self.trader.cancel_open_orders()
         self.trader.close_all_positions()
-
+        # Stop dashboard
+        if self.dashboard:
+            self.dashboard.stop_server()
 
 
 if __name__ == "__main__":
