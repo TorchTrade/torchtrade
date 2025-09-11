@@ -93,6 +93,8 @@ class AlpacaTorchTradingEnv(EnvBase):
             self.market_data_keys.append(market_data_key)
         self.observation_spec.set(self.account_state_key, account_state_spec)
 
+        self.reward_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(1,), dtype=torch.float)
+
         self._reset(TensorDict({}))
         super().__init__()
 
