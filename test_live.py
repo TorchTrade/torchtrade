@@ -38,12 +38,12 @@ def main():
         symbol="BTC/USD",
         paper=True,
         time_frames=[
-            TimeFrame(5, TimeFrameUnit.Minute),
+            TimeFrame(1, TimeFrameUnit.Minute),
             TimeFrame(15, TimeFrameUnit.Minute),
             TimeFrame(1, TimeFrameUnit.Hour),
         ],
         window_sizes=[6, 12, 24], # 30],
-        execute_on=TimeFrame(5, TimeFrameUnit.Minute), # 5 min
+        execute_on=TimeFrame(1, TimeFrameUnit.Minute), # 5 min
     )
 
     # Create environment
