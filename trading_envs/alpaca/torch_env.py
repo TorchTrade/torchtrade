@@ -7,11 +7,10 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
-from gymnasium import spaces
 from .obs_class import AlpacaObservationClass
 from .order_executor import AlpacaOrderClass, TradeMode
 from tensordict import TensorDict, TensorDictBase
-from torchrl.data.tensor_specs import BoundedTensorSpec, CompositeSpec, DiscreteTensorSpec
+from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
@@ -150,7 +149,6 @@ class AlpacaTorchTradingEnv(EnvBase):
             new_portfolio_value - old_portfolio_value
         ) / old_portfolio_value
 
-
         # Scale the reward
         reward = portfolio_return * self.config.reward_scaling
 
@@ -257,19 +255,6 @@ class AlpacaTorchTradingEnv(EnvBase):
         
         return next_tensordict
 
-    def _get_current_position_fraction(self) -> float:
-        """Get current position as a fraction of portfolio."""
-        status = self.trader.get_status()
-        position_status = status.get("position_status")
-        
-        if position_status is None:
-            return 0.0
-        
-        portfolio_value = self._get_portfolio_value()
-        if portfolio_value == 0:
-            return 0.0
-            
-        return float(position_status.market_value) / portfolio_value
 
     def _execute_trade_if_needed(self, desired_position: float) -> Dict:
         """Execute trade if position change is needed."""
