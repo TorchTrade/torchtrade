@@ -1,2 +1,5 @@
 alpaca-py
 python-dotenv
+torchrl
+wandb
+tqdm

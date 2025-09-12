@@ -69,7 +69,7 @@ class AlpacaObservationClass:
         return np.array(df[columns], dtype=np.float32)
 
     def _fetch_single_timeframe(
-        self, timeframe: TimeFrame, window_size: int
+        self, timeframe: TimeFrame #, window_size: int
     ) -> pd.DataFrame:
         """Fetch and preprocess data for a single timeframe."""
         if timeframe.unit == TimeFrameUnit.Day and self.default_lookback > self.default_lookback:
@@ -81,7 +81,7 @@ class AlpacaObservationClass:
             timeframe=timeframe,
             start=now - timedelta(days=self.default_lookback), # TODO: this is critical
             end=now,
-            limit=window_size
+            #limit=window_size
         )
         return self.client.get_crypto_bars(request).df
 
@@ -134,7 +134,7 @@ class AlpacaObservationClass:
 
         for timeframe, window_size in zip(self.timeframes, self.window_sizes):
             key = f"{timeframe.amount}{timeframe.unit.name}_{window_size}"
-            df = self._fetch_single_timeframe(timeframe, window_size)
+            df = self._fetch_single_timeframe(timeframe)
             
             # Store base OHLC features if this is the first timeframe and return_base_ohlc is True
             if return_base_ohlc and timeframe == self.timeframes[0]:
@@ -147,6 +147,8 @@ class AlpacaObservationClass:
                 )
                 observations['base_timestamps'] = base_df['timestamp'].values
             processed_df = self.feature_preprocessing_fn(df)
+            # apply window size
+            processed_df = processed_df.iloc[-window_size:]
             observations[key] = self._get_numpy_obs(processed_df)
 
         return observations

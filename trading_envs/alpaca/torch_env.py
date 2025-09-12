@@ -102,14 +102,15 @@ class AlpacaTorchTradingEnv(EnvBase):
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
         # Get market data
-        obs_dict = self.observer.get_observations(return_base_ohlc=True)
+        obs_dict = self.observer.get_observations(return_base_ohlc=True if self.config.include_base_features else False)
         market_data = obs_dict[self.observer.get_keys()[0]]
 
-        base_features = obs_dict["base_features"]
-        base_timestamps = obs_dict["base_timestamps"]
-        # Convert to Unix timestamps (seconds)
-        timestamps = base_timestamps.astype('datetime64[s]').astype(np.int64)
-        base_timestamps = torch.from_numpy(timestamps)
+        if self.config.include_base_features:
+            base_features = obs_dict["base_features"]
+            base_timestamps = obs_dict["base_timestamps"]
+            # Convert to Unix timestamps (seconds)
+            timestamps = base_timestamps.astype('datetime64[s]').astype(np.int64)
+            base_timestamps = torch.from_numpy(timestamps)
         
         market_data = [obs_dict[features_name] for features_name in self.observer.get_keys()]
 
