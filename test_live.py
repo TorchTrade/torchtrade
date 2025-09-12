@@ -19,16 +19,88 @@ from torchrl.data import (
 )
 import functools
 from dotenv import load_dotenv
-
+from torchrl.envs.transforms import InitTracker, RewardSum, StepCounter
+from torchrl.envs import (
+    Compose,
+    DoubleToFloat,
+    TransformedEnv,
+)
 # Load environment variables
 load_dotenv()
+
+
+import pandas as pd
+import numpy as np
+import ta  # pip install ta
+
+def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Preprocess OHLCV dataframe with engineered features for RL trading.
+
+    Expected columns: ["open", "high", "low", "close", "volume"]
+    Index can be datetime or integer.
+    """
+
+    df = df.copy().reset_index(drop=True)
+
+    # --- Basic features ---
+    # Log returns
+    df["features_return_log"] = np.log(df["close"]).diff()
+
+    # Rolling volatility (5-period)
+    df["features_volatility"] = df["features_return_log"].rolling(window=5).std()
+
+    # ATR (14) normalized
+    df["features_atr"] = ta.volatility.AverageTrueRange(
+        high=df["high"], low=df["low"], close=df["close"], window=14
+    ).average_true_range() / df["close"]
+
+    # --- Momentum & trend ---
+    ema_12 = ta.trend.EMAIndicator(close=df["close"], window=12).ema_indicator()
+    ema_24 = ta.trend.EMAIndicator(close=df["close"], window=24).ema_indicator()
+    df["features_ema_12"] = ema_12
+    df["features_ema_24"] = ema_24
+    df["features_ema_slope"] = ema_12.diff()
+
+    macd = ta.trend.MACD(close=df["close"], window_slow=26, window_fast=12, window_sign=9)
+    df["features_macd_hist"] = macd.macd_diff()
+
+    df["features_rsi_14"] = ta.momentum.RSIIndicator(close=df["close"], window=14).rsi()
+
+    # --- Volatility bands ---
+    bb = ta.volatility.BollingerBands(close=df["close"], window=20, window_dev=2)
+    df["features_bb_pct"] = bb.bollinger_pband()
+
+    # --- Volume / flow ---
+    df["features_volume_z"] = (
+        (df["volume"] - df["volume"].rolling(20).mean()) /
+        df["volume"].rolling(20).std()
+    )
+    df["features_vwap_dev"] = df["close"] - (
+        (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
+    )
+
+    # --- Candle structure ---
+    df["features_body_ratio"] = (df["close"] - df["open"]) / (df["high"] - df["low"] + 1e-9)
+    df["features_upper_wick"] = (df["high"] - df[["close", "open"]].max(axis=1)) / (
+        df["high"] - df["low"] + 1e-9
+    )
+    df["features_lower_wick"] = (df[["close", "open"]].min(axis=1) - df["low"]) / (
+        df["high"] - df["low"] + 1e-9
+    )
+
+    # Drop rows with NaN from indicators
+    df.dropna(inplace=True)
+
+    return df
+
 
 
 def main():
     device = torch.device("cpu")
 
     total_eval_steps = 1000
-    max_rollout_steps = 20 # 20  calc for execute on timeframe
+    max_rollout_steps = 72 #  72 steps a 5min -> 6h per episode -> 4 episodes per day
     policy_type = "random"
 
     torch.manual_seed(42)
@@ -39,18 +111,34 @@ def main():
         paper=True,
         time_frames=[
             TimeFrame(1, TimeFrameUnit.Minute),
+            TimeFrame(5, TimeFrameUnit.Minute),
             TimeFrame(15, TimeFrameUnit.Minute),
             TimeFrame(1, TimeFrameUnit.Hour),
         ],
-        window_sizes=[6, 12, 24], # 30],
-        execute_on=TimeFrame(1, TimeFrameUnit.Minute), # 5 min
+        window_sizes=[12, 8, 8, 24],  # ~12m, 40m, 2h, 1d
+        execute_on=TimeFrame(5, TimeFrameUnit.Minute), # Try 15min
     )
 
     # Create environment
     env = AlpacaTorchTradingEnv(
-        config, api_key=os.getenv("API_KEY"), api_secret=os.getenv("SECRET_KEY")
+        config, api_key=os.getenv("API_KEY"),
+        api_secret=os.getenv("SECRET_KEY"),
+        feature_preprocessing_fn=custom_preprocessing
     )
 
+    def apply_env_transforms(env, max_episode_steps=1000):
+        transformed_env = TransformedEnv(
+            env,
+            Compose(
+                InitTracker(),
+                StepCounter(max_episode_steps),
+                DoubleToFloat(),
+                RewardSum(),
+            ),
+        )
+        return transformed_env
+
+    env = apply_env_transforms(env, max_rollout_steps)
     scratch_dir = None
     storage_cls = (
         functools.partial(LazyTensorStorage, device=device)
@@ -80,6 +168,7 @@ def main():
                 max_rollout_steps,
                 auto_cast_to_device=True,
                 break_when_any_done=True, # we want to continue sample until we reach the required steps
+                #set_truncated=True,
             )
 
         episode_end = (
