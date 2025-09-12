@@ -84,11 +84,11 @@ class AlpacaTorchTradingEnv(EnvBase):
         self.market_data_key = "market_data"
         self.account_state_key = "account_state"
 
-        market_data_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(config.window_sizes[0], num_features), dtype=torch.float)
         account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(3,), dtype=torch.float)
         self.market_data_keys = []
-        for market_data_name in market_data_names:
+        for i, market_data_name in enumerate(market_data_names):
             market_data_key = "market_data_" + market_data_name
+            market_data_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(config.window_sizes[i], num_features), dtype=torch.float)
             self.observation_spec.set(market_data_key, market_data_spec)
             self.market_data_keys.append(market_data_key)
         self.observation_spec.set(self.account_state_key, account_state_spec)
@@ -131,13 +131,13 @@ class AlpacaTorchTradingEnv(EnvBase):
             [cash, position_size, position_value], dtype=torch.float
         )
 
-        out_td = TensorDict({self.account_state_key: account_state.unsqueeze(0)}, batch_size=())
+        out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
         for market_data_name, data in zip(self.market_data_keys, market_data):
-            out_td.set(market_data_name, torch.from_numpy(data).unsqueeze(0))
+            out_td.set(market_data_name, torch.from_numpy(data))
 
         if self.config.include_base_features:
-            out_td.set("base_features", torch.from_numpy(base_features).unsqueeze(0))
-            out_td.set("base_timestamps", base_timestamps.unsqueeze(0))
+            out_td.set("base_features", torch.from_numpy(base_features))
+            out_td.set("base_timestamps", base_timestamps)
 
         return out_td
 
