@@ -23,7 +23,8 @@ Specifics for the broker, such as "get current observation" or "execute trade," 
 
 It is essential to have independent components and to develop them stepwise, with continuous progress and rapid iteration to improve versions.
 
-
+## Data can be downloaded from Market Data:
+https://data.binance.vision/?prefix=data/spot/monthly/klines/BTCUSDT/1m/
 
 # TODO:
 
