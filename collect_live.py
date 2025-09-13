@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-from tqdm import tqdm
+import tqdm
 from torchrl._utils import timeit
-from torchrl.envs.utils import ExplorationType, set_exploration_type
 torch.set_float32_matmul_precision("high")
 from trading_envs.alpaca.torch_env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
@@ -25,6 +24,7 @@ from torchrl.envs import (
     DoubleToFloat,
     TransformedEnv,
 )
+from torchrl.collectors import SyncDataCollector
 # Load environment variables
 load_dotenv()
 
@@ -94,12 +94,29 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-
+def make_collector(train_env, frames_per_batch=1, total_frames=10000, policy=None, compile_mode=False, device="cpu"):
+    """Make collector."""
+    if device in ("", None):
+        if torch.cuda.is_available():
+            device = torch.device("cuda:0")
+        else:
+            device = torch.device("cpu")
+    collector = SyncDataCollector(
+        train_env,
+        policy,
+        init_random_frames=0,
+        frames_per_batch=frames_per_batch,
+        total_frames=total_frames,
+        device=device,
+    )
+    collector.set_seed(42)
+    return collector
 
 def main():
     device = torch.device("cpu")
 
-    total_eval_steps = 1000
+    total_farming_steps = 10000
+    save_buffer_every = 10
     max_rollout_steps = 72 #  72 steps a 5min -> 6h per episode -> 4 episodes per day
     policy_type = "random"
 
@@ -155,48 +172,51 @@ def main():
             batch_size=1,
             shared=False,
         )
+    collector = make_collector(env, policy=None, frames_per_batch=1, total_frames=total_farming_steps)
 
 
-    # Run Evaluation
-    total_collected = 0
-    pbar = tqdm(total=total_eval_steps, desc="Evaluating", unit="steps")
-    for i in range(1000):
-        with set_exploration_type(
-            ExplorationType.DETERMINISTIC
-        ), torch.no_grad(), timeit("eval"):
-            eval_rollout = env.rollout(
-                max_rollout_steps,
-                auto_cast_to_device=True,
-                break_when_any_done=True, # we want to continue sample until we reach the required steps
-                #set_truncated=True,
-            )
+    # Run Farming
+    # Main loop
+    collected_frames = 0
+    pbar = tqdm.tqdm(total=total_farming_steps)
+    collector_iter = iter(collector)
+    total_iter = len(collector)
+    for i in range(total_iter):
+        timeit.printevery(num_prints=1000, total_count=total_iter, erase=True)
+
+        with timeit("collect"):
+            tensordict = next(collector_iter)
+
+        current_frames = tensordict.numel()
+        pbar.update(current_frames)
+
+        with timeit("rb - extend"):
+            # Add to replay buffer
+            tensordict = tensordict.reshape(-1)
+            replay_buffer.extend(tensordict)
+
+        collected_frames += current_frames
 
         episode_end = (
-            eval_rollout["next", "done"]
-            if eval_rollout["next", "done"].any()
-            else eval_rollout["next", "truncated"]
+            tensordict["next", "done"]
+            if tensordict["next", "done"].any()
+            else tensordict["next", "truncated"]
         )
-        episode_rewards = eval_rollout["next", "episode_reward"][episode_end]
-        episode_length = eval_rollout["next", "step_count"][episode_end]
-        print("*** Evaluation Stats: ***")
-        print(f"Episode rewards: {episode_rewards.mean()}")
-        print(f"Episode rewards std: {episode_rewards.std()}")
-        print(f"Episode count: {len(episode_rewards)}")
-        print(f"Episode length: {episode_length.sum() / len(episode_length)}")
-        # could do some preprocessing here
-        eval_rollout = eval_rollout.cpu().reshape(-1)
-        steps_collected = eval_rollout.batch_size[0]
-        total_collected += steps_collected
-        pbar.update(steps_collected)
-        pbar.set_postfix({
-            'collected': f'{total_collected}/{total_eval_steps}'
-        })
-        replay_buffer.extend(eval_rollout)
-        replay_buffer.dumps(f"./replay_buffer_{policy_type}.pt")
-        if total_collected >= total_eval_steps:
-            break
+        episode_rewards = tensordict["next", "episode_reward"][episode_end]
 
-    pbar.close()
+        # Logging
+        metrics_to_log = {}
+        if len(episode_rewards) > 0:
+            episode_length = tensordict["next", "step_count"][episode_end]
+            metrics_to_log["train/reward"] = episode_rewards.mean()
+            metrics_to_log["train/episode_length"] = episode_length.sum() / len(
+                episode_length
+            )
+        print(metrics_to_log)
+        if collected_frames % save_buffer_every == 0:
+            replay_buffer.dumps(f"./replay_buffer_{policy_type}.pt")
+
+
     
 
     
