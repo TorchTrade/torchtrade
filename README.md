@@ -9,6 +9,10 @@ conda activate alpaca_env
 ```
 
 
+## Documentation
+
+Run `mkdocs serve` to start the documentation server.
+
 # GOAL:
 The objective should be to have a set of environments, including base environments, and a simple way to construct custom environments with TorchRL for trading across different brokers. We should start with Alpaca, for example. 
 Specifics for the broker, such as "get current observation" or "execute trade," should be separate packages, as these are independent functions. Ideally, we just import them and use them in the TorchRL Env. 
