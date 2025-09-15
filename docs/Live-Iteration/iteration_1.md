@@ -161,3 +161,56 @@ I was then checking if we even had a positive reward for a sell action:
 ![alt text](images/images_iteration_1/realized_profit.png)
 
 And indeed, out of the 295 positive rewards, only 2 were for sell actions!
+
+
+## Fixing the Reward Function
+The updated reward function is now:
+
+```python 
+
+    def _calculate_reward(
+        self,
+        old_portfolio_value: float,
+        new_portfolio_value: float,
+        action: float,
+        trade_info: Dict,
+    ) -> float:
+        """Calculate the step reward.
+
+        This function computes the reward for the agent at a single step in the environment. 
+        The reward is primarily based on realized profit from executed SELL actions. 
+        It can also include a small penalty if the agent attempts an invalid action 
+        (e.g., trying to SELL with no position or BUY when already in position).
+
+        Args:
+            old_portfolio_value (float): Portfolio value before the action.
+            new_portfolio_value (float): Portfolio value after the action.
+            action (float): Action taken by the agent. For example:
+                1 = BUY, -1 = SELL, 0 = HOLD
+            trade_info (dict): Trade information from the Alpaca client. Expected keys:
+                - "executed" (bool): Whether the trade was successfully executed.
+                - Other fields as needed for trade details (e.g., price, size).
+
+        Returns:
+            float: The reward for this step, scaled by `self.config.reward_scaling`.
+                Positive if realized profit was made, small negative for invalid actions,
+                or 0 otherwise.
+        """
+
+        if action == -1 and trade_info["executed"]:
+            # Calculate portfolio return on realized profit
+            portfolio_return = (
+                new_portfolio_value - old_portfolio_value
+            ) / old_portfolio_value
+        elif not trade_info["executed"] and action != 0:
+            # small penalty if agent tries an invalid action
+            portfolio_return = - 0.001
+        else:
+            portfolio_return = 0.0
+
+        # Scale the reward
+        reward = portfolio_return * self.config.reward_scaling
+
+        return reward
+
+```

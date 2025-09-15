@@ -68,6 +68,8 @@ class AlpacaTorchTradingEnv(EnvBase):
         self.action_levels = config.action_levels
         # Define action and observation spaces
         self.action_spec = Categorical(len(self.action_levels))
+        # self.hold_action = self.action_levels[1]
+        # assert self.hold_action == 0.0, "Hold action should be 0.0, possibly action levels are not [-1, 0, 1]!"
 
         # Get the number of features from the observer
         num_features = self.observer.get_observations()[
@@ -146,12 +148,41 @@ class AlpacaTorchTradingEnv(EnvBase):
         self,
         old_portfolio_value: float,
         new_portfolio_value: float,
+        action: float,
+        trade_info: Dict,
     ) -> float:
-        """Calculate the step reward."""
-        # Calculate portfolio return
-        portfolio_return = (
-            new_portfolio_value - old_portfolio_value
-        ) / old_portfolio_value
+        """Calculate the step reward.
+
+        This function computes the reward for the agent at a single step in the environment. 
+        The reward is primarily based on realized profit from executed SELL actions. 
+        It can also include a small penalty if the agent attempts an invalid action 
+        (e.g., trying to SELL with no position or BUY when already in position).
+
+        Args:
+            old_portfolio_value (float): Portfolio value before the action.
+            new_portfolio_value (float): Portfolio value after the action.
+            action (float): Action taken by the agent. For example:
+                1 = BUY, -1 = SELL, 0 = HOLD
+            trade_info (dict): Trade information from the Alpaca client. Expected keys:
+                - "executed" (bool): Whether the trade was successfully executed.
+                - Other fields as needed for trade details (e.g., price, size).
+
+        Returns:
+            float: The reward for this step, scaled by `self.config.reward_scaling`.
+                Positive if realized profit was made, small negative for invalid actions,
+                or 0 otherwise.
+        """
+
+        if action == -1 and trade_info["executed"]:
+            # Calculate portfolio return on realized profit
+            portfolio_return = (
+                new_portfolio_value - old_portfolio_value
+            ) / old_portfolio_value
+        elif not trade_info["executed"] and action != 0:
+            # small penalty if agent tries an invalid action
+            portfolio_return = - 0.001
+        else:
+            portfolio_return = 0.0
 
         # Scale the reward
         reward = portfolio_return * self.config.reward_scaling
@@ -239,6 +270,7 @@ class AlpacaTorchTradingEnv(EnvBase):
 
         if trade_info["executed"]:
             self.current_position = 1 if trade_info["side"] == "buy" else 0
+
         
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -248,7 +280,7 @@ class AlpacaTorchTradingEnv(EnvBase):
         next_tensordict = self._get_observation()
         
         # Calculate reward and check termination
-        reward = self._calculate_reward(old_portfolio_value, new_portfolio_value)
+        reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, desired_action, trade_info)
         done = self._check_termination(new_portfolio_value)
 
         next_tensordict.set("reward", reward)
