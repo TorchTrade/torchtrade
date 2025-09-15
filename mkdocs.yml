@@ -1,0 +1,69 @@
+site_name: AlpacaTrading
+theme:
+ name: material
+ features:
+  - navigation.tabs
+  - navigation.tracking
+  - navigation.sections
+  - navigation.top
+  - search.suggest
+  - search.highlight
+  - content.tabs.link
+  - content.code.annotation
+  - content.code.copy
+ language: en
+ palette:
+  - scheme: default
+    toggle:
+      icon: material/toggle-switch-off-outline
+      name: Switch to Dark Mode
+    primary: blue
+    accent: purple
+  - scheme: slate
+    toggle:
+      icon: material/toggle-switch
+      name: Switch to Light Mode
+    primary: black
+    accent: lime
+
+  # logo: res/arc_icon.jpg
+  # favicon: res/arc_icon.jpg
+
+
+extra:
+  social:
+    # github
+    - icon: fontawesome/brands/github-alt
+      link: https://github.com/BY571
+    # twitter
+    - icon: fontawesome/brands/twitter
+      link: https://twitter.com
+    # linkedin
+    - icon: fontawesome/brands/linkedin
+      link: https://linkedin.com
+
+markdown_extensions:
+  - admonition
+  - pymdownx.tasklist
+  - pymdownx.details
+  - pymdownx.snippets
+  - pymdownx.mark
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - footnotes
+  - tables
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+
+plugins:
+    - search
+    #- awesome-pages
+    #- git-revision-date
+
+repo_url: https://github.com/TorchTrade/torchrl_alpaca_env
+
+
+
+copyright: © 2025 <a href="https://torchtrade.com" target="_blank" rel="noopener">TorchTrade</a>
