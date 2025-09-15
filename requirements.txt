@@ -3,3 +3,4 @@ python-dotenv
 torchrl
 wandb
 tqdm
+mkdocs-material
