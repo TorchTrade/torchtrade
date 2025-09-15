@@ -39,3 +39,8 @@ https://data.binance.vision/?prefix=data/spot/monthly/klines/BTCUSDT/1m/
 
 ### Offline Data Environment
 Create an "server" environment that uses offline data and can be called similar to the alpaca server.
+
+### New Vision on RL and Trading
+First principle thinking. We do not need to have a sequential setup. Its more like a one step setting. Past infromation should be in the features of the market data information. Account information can be used and adapted on the fly similar to domain randomization to train on different settings/situations leading to better generalization. 
+
+We could further use GRPO to train online on those one step data sets as it has proven to be a good algorithm for those 1 step settings. We could maybe rewrite a data sampling function and then train extremely fast iterating over those samples. 
