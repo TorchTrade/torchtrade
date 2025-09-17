@@ -108,6 +108,9 @@ class MarketDataObservationSampler():
             obs[tf.to_pandas_freq()] = window
         return obs
 
+    def get_max_steps(self)->int:
+        return self.max_steps
+
     def reset(self)->None:
         """Reset the observation sampler."""
         self.unseen_timestamps = list(self.exec_times)
