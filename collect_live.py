@@ -26,7 +26,7 @@ from torchrl.envs import (
 )
 from torchrl.collectors import SyncDataCollector
 # Load environment variables
-load_dotenv()
+load_dotenv(dotenv_path=".env")
 
 
 import pandas as pd
