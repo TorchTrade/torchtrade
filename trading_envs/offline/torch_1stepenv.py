@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 from warnings import warn
 from zoneinfo import ZoneInfo
-import numpy as np
 
 import numpy as np
 import pandas as pd
@@ -13,7 +12,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
-from .utils import TimeFrame, TimeFrameUnit
+from .utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
 
 class MarketDataObservationSampler():
     def __init__(
@@ -61,14 +60,22 @@ class MarketDataObservationSampler():
         # Use the start of each execute_on period
         self.exec_times = self.df.resample(execute_on.to_pandas_freq()).first().index
         
-        # Filter exec_times to ensure we have enough data for the largest window
-        max_window_duration = max(ws * tf.value for tf, ws in zip(time_frames, window_sizes))
-        min_start_time = self.df.index.min() + pd.Timedelta(minutes=max_window_duration)  # Rough estimate in minutes
-        self.exec_times = self.exec_times[self.exec_times >= min_start_time]
-        
-        self.max_steps = len(self.exec_times) - 1
+        # Maximum lookback window
+        window_durations = [tf_to_timedelta(tf) * ws for tf, ws in zip(time_frames, window_sizes)]
+        self.max_window_duration = max(window_durations)
 
-    def get_random_timestamp(self, without_replacement: bool = False):
+        # Filter execution times
+        exec_times = self.df.resample(execute_on.to_pandas_freq()).first().index
+        self.min_start_time = self.df.index.min() + self.max_window_duration
+        self.exec_times = exec_times[exec_times >= self.min_start_time]
+        self.unseen_timestamps = list(self.exec_times)
+        
+        self.max_steps = len(self.exec_times)
+
+    def get_random_timestamp(self, without_replacement: bool = False)->pd.Timestamp:
+        """Get a random timestamp from the dataset.
+        If without_replacement is True, the timestamp is removed from the list of unseen timestamps.
+        """
         if without_replacement:
             random_idx = np.random.choice(len(self.unseen_timestamps), size=1, replace=False)
             return self.unseen_timestamps.pop(random_idx.item())
@@ -76,15 +83,22 @@ class MarketDataObservationSampler():
             random_idx = np.random.randint(0, len(self.exec_times))
             return self.exec_times[random_idx]
 
-    def get_random_observation(self, without_replacement: bool = False):
+    def get_random_observation(self, without_replacement: bool = False)->Tuple[Dict[str, pd.DataFrame], pd.Timestamp]:
+        """Get a random observation from the dataset.
+        If without_replacement is True, the timestamp is removed from the list of unseen timestamps.
+        """
         timestamp = self.get_random_timestamp(without_replacement)
         return self.get_observation(timestamp), timestamp
 
-    def get_sequential_observation(self):
-        timestamp = self.unseen_timestamps.pop()
+    def get_sequential_observation(self)->Tuple[Dict[str, pd.DataFrame], pd.Timestamp]:
+        """Get the next observation in the dataset.
+        The timestamp is removed from the list of unseen timestamps.
+        """
+        timestamp = self.unseen_timestamps.pop(0)
         return self.get_observation(timestamp), timestamp
 
-    def get_observation(self, timestamp: pd.Timestamp):
+    def get_observation(self, timestamp: pd.Timestamp)->Dict[str, pd.DataFrame]:
+        """Get an observation from the dataset at the given timestamp."""
         obs = {}
         for tf, ws in zip(self.time_frames, self.window_sizes):
             resampled = self.resampled_dfs[tf.to_pandas_freq()]
@@ -94,8 +108,9 @@ class MarketDataObservationSampler():
             obs[tf.to_pandas_freq()] = window
         return obs
 
-    def reset(self):
-        self.unseen_timestamps = set(self.exec_times)
+    def reset(self)->None:
+        """Reset the observation sampler."""
+        self.unseen_timestamps = list(self.exec_times)
         
 
 @dataclass
