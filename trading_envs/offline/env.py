@@ -2,23 +2,8 @@ import pandas as pd
 import numpy as np
 import gymnasium as gym  # Use gymnasium (modern gym) for RL environments
 from gymnasium import spaces
-from enum import Enum
 from typing import List
 
-# Define TimeFrameUnit as an Enum for units like Minute, Hour
-class TimeFrameUnit(Enum):
-    Minute = 'T'  # Pandas freq for minutes
-    Hour = 'H'    # Pandas freq for hours
-    # Add more if needed, e.g., Day = 'D'
-
-# Define TimeFrame class
-class TimeFrame:
-    def __init__(self, value: int, unit: TimeFrameUnit):
-        self.value = value
-        self.unit = unit
-
-    def to_pandas_freq(self) -> str:
-        return f"{self.value}{self.unit.value}"
 
 # MultiTimeFrameTradingEnv: A flexible, high-performance Gym environment for RL trading
 class MultiTimeFrameTradingEnv(gym.Env):
