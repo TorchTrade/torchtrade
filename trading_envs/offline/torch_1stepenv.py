@@ -21,7 +21,8 @@ class MarketDataObservationSampler():
         time_frames: Union[List[TimeFrame], TimeFrame] = TimeFrame(1, TimeFrameUnit.Minute),
         window_sizes: Union[List[int], int] = 10,
         execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute),
-        feature_processing_fn: Optional[Callable] = None
+        feature_processing_fn: Optional[Callable] = None,
+        features_start_with: str = "features_"
     ):
         required_columns = ["timestamp", "open", "high", "low", "close", "volume"]
         # Check if columns match
@@ -54,11 +55,17 @@ class MarketDataObservationSampler():
             }).dropna()
             if feature_processing_fn is not None:
                 resampled = feature_processing_fn(resampled)
+                # Keep timestamp and columns starting with "feature_"
+                cols_to_keep = [col for col in resampled.columns if col.startswith(features_start_with)]
+                # Subset the dataframe
+                resampled = resampled[cols_to_keep]
+
             self.resampled_dfs[tf.to_pandas_freq()] = resampled
         
         # Get execution timestamps: the points where the agent acts (resampled to execute_on)
         # Use the start of each execute_on period
         self.exec_times = self.df.resample(execute_on.to_pandas_freq()).first().index
+        self.execute_base_features = self.df.resample(execute_on.to_pandas_freq()).first()
         
         # Maximum lookback window
         window_durations = [tf_to_timedelta(tf) * ws for tf, ws in zip(time_frames, window_sizes)]
@@ -102,7 +109,7 @@ class MarketDataObservationSampler():
         obs = {}
         for tf, ws in zip(self.time_frames, self.window_sizes):
             resampled = self.resampled_dfs[tf.to_pandas_freq()]
-            window = resampled.loc[:timestamp].tail(ws)
+            window = resampled.loc[:timestamp].tail(ws).values
             if len(window) < ws:
                 raise ValueError("Not enough data for the largest window")
             obs[tf.to_pandas_freq()] = window
