@@ -22,9 +22,13 @@ class MarketDataObservationSampler():
         time_frames: Union[List[TimeFrame], TimeFrame] = TimeFrame(1, TimeFrameUnit.Minute),
         window_sizes: Union[List[int], int] = 10,
         execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute),
-        feature_processing_fn: Optional[Callable] = None
+        feature_processing_fn: Optional[Callable] = None,
+        features_start_with: str = "features_"
     ):
 ```
+
+#### Get Observation
+
 
 We have currently 2 different ways of sample observations:
 
@@ -70,10 +74,9 @@ Example Observation output from the sampler:
 ![alt text](imgs/sampler_example_obs.png)
 
 
+#### Next Observation
 
-### TODO:
-- make feature processing function work
-- add next observation. Ideally we want to receive current and next observation. maybe add include next obs as flag. [Done]
+**Retrieve the next observation from the sampler.**
     We return the time stamp for get_random_observation and get_sequential_observation. This time stamp can be used to get the next observation:
     ```python
     from pandas import Timedelta
@@ -81,6 +84,20 @@ Example Observation output from the sampler:
     next_timestamp = timestamp + Timedelta(minutes=5) # if we execute on 5 min timeframe
     next_obs = sampler.get_observation(next_timestamp)
     ``` 
+
+We have a tutorial notebook that shows how to use the sampler: [Tutorial Notebook](../tutorials/1StepEnv.ipynb)
+
+
+#### Base Features
+
+For some calculations like reward you might need the base open, high, low, close, volume, information. This can be retrieved from the sampler with:
+
+```python
+    def get_base_features(self, timestamp: pd.Timestamp)->pd.DataFrame:
+        """Get the base features from the dataset at the given timestamp."""
+        return self.execute_base_features.loc[timestamp]
+```
+
     
 
 ### Account Information Sampling

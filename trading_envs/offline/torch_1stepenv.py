@@ -121,7 +121,10 @@ class MarketDataObservationSampler():
     def reset(self)->None:
         """Reset the observation sampler."""
         self.unseen_timestamps = list(self.exec_times)
-        
+
+    def get_base_features(self, timestamp: pd.Timestamp)->pd.DataFrame:
+        """Get the base features from the dataset at the given timestamp."""
+        return self.execute_base_features.loc[timestamp]
 
 @dataclass
 class AlpacaTradingEnvConfig:
