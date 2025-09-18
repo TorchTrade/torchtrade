@@ -133,6 +133,23 @@ class AlpacaTorchTradingEnv(EnvBase):
         account_state = torch.tensor(
             [cash, position_size, position_value], dtype=torch.float
         )
+        """
+        if position_status is None:
+            position_size = 0.0
+            position_value = 0.0
+            entry_price = 0.0
+            unrealized_pnl = 0.0
+            holding_time = 0
+        else:
+            position_size = position_status.qty
+            position_value = position_status.market_value
+            entry_price = position_status.entry_price
+            current_price = market_data[-1]["close"]  # or mid
+            unrealized_pnl = (current_price - entry_price) * position_size
+            holding_time = t - position_status.entry_step
+        """
+
+        # TODO:  entry_price, unrealized_pnl, holding_time?? 
 
         out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
         for market_data_name, data in zip(self.market_data_keys, market_data):
