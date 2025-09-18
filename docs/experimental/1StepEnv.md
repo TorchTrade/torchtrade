@@ -119,6 +119,53 @@ For some calculations like reward you might need the base open, high, low, close
     Currently the account information is [cash, portfolio_value, position_size]. Should we add buy price? (sell if short) -> getting in position price.
 
 
+#### buy entry price selection Example 
+
+```python
+def sample_entry_price(t, price_series, volume_series=None,
+                       method='uniform', k=20, alpha=0.3, slip_params=None):
+    # price_series: array indexed by time with fields 'open','mid', ...
+    # returns P_entry_exec, entry_idx
+    window_indices = range(max(0, t-k), t)  # strictly before t
+    opens = [price_series[i].open for i in window_indices]
+
+    if method == 'uniform':
+        entry_idx = random.choice(window_indices)
+        P_base = price_series[entry_idx].open
+
+    elif method == 'min':
+        entry_idx = window_indices[np.argmin(opens)]
+        P_base = min(opens)
+
+    elif method == 'mean':
+        entry_idx = t-1  # or choose representative index
+        P_base = sum(opens)/len(opens)
+
+    elif method == 'ewma':
+        weights = [(1-alpha)**(len(opens)-1-i) for i in range(len(opens))]
+        weights = [w/sum(weights) for w in weights]
+        P_base = sum(w*p for w,p in zip(weights, opens))
+        entry_idx = t-1  # EWMA considered 'recent'
+
+    elif method == 'vwap':
+        assert volume_series is not None
+        vols = [volume_series[i] for i in window_indices]
+        P_base = sum(p*v for p,v in zip(opens, vols)) / sum(vols)
+        entry_idx = t-1
+
+    elif method == 'empirical':
+        # sample a historical hold time d, then set entry_idx = t-d if valid
+        d = sample_hold_time_from_empirical()
+        entry_idx = max(0, t-d)
+        P_base = price_series[entry_idx].open
+
+    # add execution slippage
+    slip = sample_slippage(slip_params)  # e.g. Normal(mu, sigma), clipped
+    P_entry_exec = P_base * (1 + abs(slip))  # long entry pays ask
+
+    return P_entry_exec, entry_idx
+```
+
 ### Reward Computation
 
 
