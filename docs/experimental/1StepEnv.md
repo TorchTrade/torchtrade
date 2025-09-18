@@ -73,7 +73,15 @@ Example Observation output from the sampler:
 
 ### TODO:
 - make feature processing function work
-- add next observation. Ideally we want to receive current and next observation. maybe add include next obs as flag. 
+- add next observation. Ideally we want to receive current and next observation. maybe add include next obs as flag. [Done]
+    We return the time stamp for get_random_observation and get_sequential_observation. This time stamp can be used to get the next observation:
+    ```python
+    from pandas import Timedelta
+    obs, timestamp = sampler.get_random_observation()
+    next_timestamp = timestamp + Timedelta(minutes=5) # if we execute on 5 min timeframe
+    next_obs = sampler.get_observation(next_timestamp)
+    ``` 
+    
 
 ### Account Information Sampling
 
