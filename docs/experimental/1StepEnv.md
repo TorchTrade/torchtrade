@@ -4,6 +4,17 @@
 
 Further, as we use tensordict and multitimeframe observations we have the situation that part of the observation is static (market data) while account information depends on balance and position information. We can precompute all static observation information and update or even sample the account information on the fly per step similar to domain randomization to make the algorithm more stable to changes in balance and position information. 
 
+At each step the agent is given a market observation that can be randomly sampled from the dataset (or sequentially) and a partly random account information. Such that the agent at each time step is confronted with a new situation. Which might be at 50% of the time the agent is not in position and at 50% of the time the agent is in position. If the agent is in position it needs to decide if based on the current market observation it should sell or hold. If the agent is not in position it needs to decide if based on the current market observation it should buy or hold.
+
+**Reward in position:**
+Reward for in position is computed if the agent makes the decision to sell. Then we would compute the reward based on the difference between the buy price and the sell price at the next timestamp. Some noise can be added to the next timestamp to make the environment more realistic and simulate market volatility and slippage.
+
+    Buy price could be selected from the last x time steps: randomly, min, mean,...
+
+**Reward out of position:**
+Reward for out of position is computed if the agent makes the decision to buy. Then we would compute the reward based on the difference between the buy price and the sell price at the next timestamp or some time step in the future. Some noise can be added to the next timestamp to make the environment more realistic and simulate market volatility and slippage.
+
+    Sell price could be selected from the next x time steps: randomly, min, mean,...
 
 Example tensordict:
 
@@ -102,6 +113,14 @@ For some calculations like reward you might need the base open, high, low, close
 
 ### Account Information Sampling
 
+
+    # TODO: implement.
+
+    Currently the account information is [cash, portfolio_value, position_size]. Should we add buy price? (sell if short) -> getting in position price.
+
+
 ### Reward Computation
+
+
 
 ## GRPO Integration
