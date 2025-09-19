@@ -64,6 +64,7 @@ class AlpacaTorchTradingEnv(EnvBase):
         account = self.trader.client.get_account()
         cash = float(account.cash)
         self.initial_portfolio_value = cash
+        self.position_hold_counter = 0
 
         self.action_levels = config.action_levels
         # Define action and observation spaces
@@ -86,7 +87,7 @@ class AlpacaTorchTradingEnv(EnvBase):
         self.market_data_key = "market_data"
         self.account_state_key = "account_state"
 
-        account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(3,), dtype=torch.float)
+        account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(6,), dtype=torch.float)
         self.market_data_keys = []
         for i, market_data_name in enumerate(market_data_names):
             market_data_key = "market_data_" + market_data_name
@@ -123,31 +124,24 @@ class AlpacaTorchTradingEnv(EnvBase):
         position_status = status.get("position_status", None)
 
         if position_status is None:
-            position_size = 0.0
-            position_value = 0.0
-
-        else:
-            position_size = position_status.qty
-            position_value = position_status.market_value
-
-        account_state = torch.tensor(
-            [cash, position_size, position_value], dtype=torch.float
-        )
-        """
-        if position_status is None:
+            self.position_hold_counter = 0
             position_size = 0.0
             position_value = 0.0
             entry_price = 0.0
-            unrealized_pnl = 0.0
-            holding_time = 0
+            unrealized_pnlpc = 0.0
+            holding_time = self.position_hold_counter
+
         else:
+            self.position_hold_counter += 1
             position_size = position_status.qty
             position_value = position_status.market_value
-            entry_price = position_status.entry_price
-            current_price = market_data[-1]["close"]  # or mid
-            unrealized_pnl = (current_price - entry_price) * position_size
-            holding_time = t - position_status.entry_step
-        """
+            entry_price = position_status.avg_entry_price
+            unrealized_pnlpc = position_status.unrealized_plpc
+            holding_time = self.position_hold_counter
+
+        account_state = torch.tensor(
+            [cash, position_size, position_value, entry_price, unrealized_pnlpc, holding_time], dtype=torch.float
+        )
 
         # TODO:  entry_price, unrealized_pnl, holding_time?? 
 
@@ -265,6 +259,7 @@ class AlpacaTorchTradingEnv(EnvBase):
         self.last_portfolio_value = self.balance
         status = self.trader.get_status()
         position_status = status.get("position_status")
+        self.position_hold_counter = 0
         if position_status is None:
             self.current_position = 0.0
         else:
