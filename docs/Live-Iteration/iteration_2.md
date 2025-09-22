@@ -153,3 +153,64 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 ```
 
 ## Inspection of the Collected Data
+
+#### Colony1:
+
+In total we collected 14 episodes on colony1 which is a total of 1008 steps.
+
+```python
+episode_lengths
+>>> tensor([72, 72, 72, 72, 72, 72, 72, 72, 72, 72, 72, 72, 72, 72])
+```
+
+The episode rewards are:
+
+```python
+episode_rewards
+>>> tensor([-0.0427, -0.0490, -0.0506, -0.0572, -0.0422, -0.0408, -0.0446, -0.0631,
+        -0.0513, -0.0370, -0.0502, -0.0496, -0.0277, -0.0437])
+```
+
+In total we had two steps with positive reward!:
+
+```python
+positive_reward_idx = torch.where(td["next", "reward"] > 0,)[0]
+for idx in positive_reward_idx:
+    print("time step", idx.item())
+    print("account", td[idx]["account_state"])
+    print("action", td[idx]["action"])
+    print("next_account", td[idx]["next","account_state"])
+    print("reward", td[idx]["next","reward"])
+    print("\n")
+
+>>> time step 570
+>>> account tensor([   10.9200,     0.0047,   546.8505])
+>>> action tensor(0)
+>>> next_account tensor([557.8900,   0.0000,   0.0000])
+>>> reward tensor([0.0002])
+
+
+>>> time step 795
+>>> account tensor([    9.3100,     0.0040,   462.8808])
+>>> action tensor(0)
+>>> next_account tensor([472.3500,   0.0000,   0.0000])
+>>> reward tensor([0.0003])
+```
+
+#### Colony2:
+In total we collected 8 episodes on colony2 which is a total of 576 steps.
+
+```python
+episode_lengths
+>>> tensor([72, 72, 72, 72, 72, 72, 72, 72])
+```
+
+The episode rewards are:
+
+```python
+episode_rewards
+>>> tensor([-0.0573, -0.0404, -0.0515, -0.0507, -0.0433, -0.0428, -0.0652, -0.0609])
+
+```
+
+In total we had two steps with positive reward!:

@@ -101,54 +101,46 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 ```
-## New Reward Function
+## New Account State
+
+In this iteration we changed the account state to include the following information:
+
+- cash
+- position_size
+- position_value
+- entry_price
+- unrealized_pnlpc
+- holding_time
+
+Before it was:
+
+- cash
+- position_size
+- position_value
+
+And the agent could not know at which price it entered the position or how long it held the position and how the unrealized pnl was (even though this is in a way redundant to the current price and entry price).
 
 ```python 
 
-    def _calculate_reward(
-        self,
-        old_portfolio_value: float,
-        new_portfolio_value: float,
-        action: float,
-        trade_info: Dict,
-    ) -> float:
-        """Calculate the step reward.
+    if position_status is None:
+        self.position_hold_counter = 0
+        position_size = 0.0
+        position_value = 0.0
+        entry_price = 0.0
+        unrealized_pnlpc = 0.0
+        holding_time = self.position_hold_counter
 
-        This function computes the reward for the agent at a single step in the environment. 
-        The reward is primarily based on realized profit from executed SELL actions. 
-        It can also include a small penalty if the agent attempts an invalid action 
-        (e.g., trying to SELL with no position or BUY when already in position).
+    else:
+        self.position_hold_counter += 1
+        position_size = position_status.qty
+        position_value = position_status.market_value
+        entry_price = position_status.avg_entry_price
+        unrealized_pnlpc = position_status.unrealized_plpc
+        holding_time = self.position_hold_counter
 
-        Args:
-            old_portfolio_value (float): Portfolio value before the action.
-            new_portfolio_value (float): Portfolio value after the action.
-            action (float): Action taken by the agent. For example:
-                1 = BUY, -1 = SELL, 0 = HOLD
-            trade_info (dict): Trade information from the Alpaca client. Expected keys:
-                - "executed" (bool): Whether the trade was successfully executed.
-                - Other fields as needed for trade details (e.g., price, size).
-
-        Returns:
-            float: The reward for this step, scaled by `self.config.reward_scaling`.
-                Positive if realized profit was made, small negative for invalid actions,
-                or 0 otherwise.
-        """
-
-        if action == -1 and trade_info["executed"]:
-            # Calculate portfolio return on realized profit
-            portfolio_return = (
-                new_portfolio_value - old_portfolio_value
-            ) / old_portfolio_value
-        elif not trade_info["executed"] and action != 0:
-            # small penalty if agent tries an invalid action
-            portfolio_return = - 0.001
-        else:
-            portfolio_return = 0.0
-
-        # Scale the reward
-        reward = portfolio_return * self.config.reward_scaling
-
-        return reward
+    account_state = torch.tensor(
+        [cash, position_size, position_value, entry_price, unrealized_pnlpc, holding_time], dtype=torch.float
+    )
 
 ```
 
