@@ -13,6 +13,7 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
 from .utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
+from pandas import Timedelta
 
 class MarketDataObservationSampler():
     def __init__(
@@ -137,15 +138,23 @@ class AlpacaTradingEnvConfig:
     reward_scaling: float = 1.0
     position_penalty: float = 0.0001  # Penalty for holding positions
     seed: Optional[int] = 42
-    include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
+    in_position_lookback: int = 10
+    future_close_window: int = 10
+    cash_min_max: Tuple[float, float] = (1000, 10000)
+    max_quantity: float = 1.0
 
 class Torch1StepTradingEnv(EnvBase):
-    def __init__(self, config: AlpacaTradingEnvConfig, api_key: str, api_secret: str, feature_preprocessing_fn: Optional[Callable] = None):
+    def __init__(self, data: pd.DataFrame, config: AlpacaTradingEnvConfig, api_key: str, api_secret: str, feature_preprocessing_fn: Optional[Callable] = None):
         self.config = config
 
-        # Initialize Alpaca clients
-        # TODO adapt such that the observer can handle multiple timeframes in the crypto env
-
+        self.market_data_sampler = MarketDataObservationSampler(
+            df=data,
+            time_frames=self.config.time_frames,
+            window_sizes=self.config.window_sizes,
+            execute_on=self.config.execute_on,
+            feature_processing_fn=feature_preprocessing_fn,
+            features_start_with="features_"
+        )
 
         # Execute trades on the specified time frame
         self.execute_on_value = config.execute_on.amount
@@ -158,6 +167,12 @@ class Torch1StepTradingEnv(EnvBase):
         account = self.trader.client.get_account()
         cash = float(account.cash)
         self.initial_portfolio_value = cash
+
+        self.cash_min = config.cash_min_max[0]
+        self.cash_max = config.cash_min_max[1]
+        self.max_quantity = config.max_quantity
+        self.in_position_lookback = 10
+        self.future_close_window = 10
 
         self.action_levels = config.action_levels
         # Define action and observation spaces
@@ -180,7 +195,8 @@ class Torch1StepTradingEnv(EnvBase):
         self.market_data_key = "market_data"
         self.account_state_key = "account_state"
 
-        account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(3,), dtype=torch.float)
+        # Account state spec: [cash, portfolio_value, position_size, entry_price, unrealized_pnlpct, holding_time]
+        account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(6,), dtype=torch.float)
         self.market_data_keys = []
         for i, market_data_name in enumerate(market_data_names):
             market_data_key = "market_data_" + market_data_name
@@ -198,43 +214,48 @@ class Torch1StepTradingEnv(EnvBase):
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
         # Get market data
-        obs_dict = self.observer.get_observations(return_base_ohlc=True if self.config.include_base_features else False)
-        market_data = obs_dict[self.observer.get_keys()[0]]
+        market_data, timestamp = self.market_data_sampler.get_random_observation(without_replacement=True)
 
-        if self.config.include_base_features:
-            base_features = obs_dict["base_features"]
-            base_timestamps = obs_dict["base_timestamps"]
-            # Convert to Unix timestamps (seconds)
-            timestamps = base_timestamps.astype('datetime64[s]').astype(np.int64)
-            base_timestamps = torch.from_numpy(timestamps)
-        
-        market_data = [obs_dict[features_name] for features_name in self.observer.get_keys()]
+        base_features = self.market_data_sampler.get_base_features(timestamp)
 
-        # Get account state
-        status = self.trader.get_status()
-        account = self.trader.client.get_account()
-        cash = float(account.cash) # NOTE: should we use buying power?
-        position_status = status.get("position_status", None)
-
-        if position_status is None:
-            position_size = 0.0
-            position_value = 0.0
-
-        else:
-            position_size = position_status.qty
-            position_value = position_status.market_value
-
-        account_state = torch.tensor(
-            [cash, position_size, position_value], dtype=torch.float
-        )
+        # sample if in position or not
+        pct = random.random()
+        if pct < 0.5:
+            self.in_position = True
+            # sample entry price
+            time_steps = np.random.randint(0, self.in_position_lookback)
+            timedeltas = time_steps *Timedelta(minutes=self.execute_on_value)
+            entry_price = self.market_data_sampler.execute_base_features.loc[timestamp - timedeltas].close
+            # calc hold time
+            hold_time = time_steps
+            # sample cash
+            cash = np.random.uniform(self.cash_min, self.cash_max)
+            # calc unrealized pnl pct
+            # NOTE: We probably dont want to give a hint for the real price of the asset sample between
+            # high and low of that time step
+            current_price = np.random.uniform(self.market_data_sampler.execute_base_features.loc[timestamp].low,
+            self.market_data_sampler.execute_base_features.loc[timestamp].high)
+            unrealized_pnlpc = (current_price - entry_price) / entry_price
+            # sample quantity
+            quantity = np.random.uniform(0, self.max_quantity)
+            position_size = quantity
+            position_value = quantity * current_price
+            account_state = torch.tensor(
+                [cash, position_size, position_value, entry_price, unrealized_pnlpc, hold_time], dtype=torch.float
+            )
+            self.portfolio_value = cash + position_value
+        else: # not in position
+            self.in_position = False
+            # sample cash
+            cash = np.random.uniform(self.cash_min, self.cash_max)
+            account_state = torch.tensor(
+                [cash, 0.0, 0.0, 0.0, 0.0, 0], dtype=torch.float
+            )
+            self.portfolio_value = cash
 
         out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
         for market_data_name, data in zip(self.market_data_keys, market_data):
             out_td.set(market_data_name, torch.from_numpy(data))
-
-        if self.config.include_base_features:
-            out_td.set("base_features", torch.from_numpy(base_features))
-            out_td.set("base_timestamps", base_timestamps)
 
         return out_td
 
@@ -283,45 +304,6 @@ class Torch1StepTradingEnv(EnvBase):
 
         return reward
 
-    def _get_portfolio_value(self) -> float:
-        """Calculate total portfolio value."""
-        status = self.trader.get_status()
-        position_status = status.get("position_status", None)
-
-        account = self.trader.client.get_account()
-        self.balance = float(account.cash)
-
-        if position_status is None:
-            return self.balance
-        return self.balance + position_status.market_value
-
-    def _wait_for_next_timestamp(self) -> None:
-        """Wait until the next time step based on the configured execute_on_value and execute_on_unit."""
-
-        # Mapping units to timedelta arguments
-        unit_to_timedelta = {
-            "TimeFrameUnit.Minute": "minutes",
-            "TimeFrameUnit.Hour": "hours",
-            "TimeFrameUnit.Day": "days",
-        }
-
-        if self.execute_on_unit not in unit_to_timedelta:
-            raise ValueError(f"Unsupported time unit: {self.execute_on_unit}")
-
-        # Calculate the wait duration in timedelta
-        wait_duration = timedelta(
-            **{unit_to_timedelta[self.execute_on_unit]: self.execute_on_value}
-        )
-
-        # Get current time in NY timezone
-        current_time = datetime.now(ZoneInfo("America/New_York"))
-
-        # Calculate the next time step
-        next_step = (current_time + wait_duration).replace(second=0, microsecond=0)
-
-        # Wait until the target time
-        while datetime.now(ZoneInfo("America/New_York")) < next_step:
-            time.sleep(1)
 
     def _set_seed(self, seed: int):
         """Set the seed for the environment."""
@@ -334,27 +316,12 @@ class Torch1StepTradingEnv(EnvBase):
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
-        # Cancel all orders and close all positions
-        self.trader.cancel_open_orders()
-        #self.trader.close_all_positions() # NOTE: Not sure if we want this as we could loose money
-        account = self.trader.client.get_account()
-        self.balance = float(account.cash)
-        self.last_portfolio_value = self.balance
-        status = self.trader.get_status()
-        position_status = status.get("position_status")
-        if position_status is None:
-            self.current_position = 0.0
-        else:
-            self.current_position = 1 if position_status.qty > 0 else 0
-
         # Get initial observation
+        self.market_data_sampler.reset()
         return self._get_observation()
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
-        
-        # Store old portfolio value for reward calculation
-        old_portfolio_value = self._get_portfolio_value()
         
         # Get desired action and current position
         desired_action = self.action_levels[tensordict.get("action", 0)]
@@ -365,9 +332,6 @@ class Torch1StepTradingEnv(EnvBase):
         if trade_info["executed"]:
             self.current_position = 1 if trade_info["side"] == "buy" else 0
 
-        
-        # Wait for next time step
-        self._wait_for_next_timestamp()
         
         # Get updated state
         new_portfolio_value = self._get_portfolio_value()
