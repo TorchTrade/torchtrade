@@ -143,8 +143,6 @@ class AlpacaTorchTradingEnv(EnvBase):
             [cash, position_size, position_value, entry_price, unrealized_pnlpc, holding_time], dtype=torch.float
         )
 
-        # TODO:  entry_price, unrealized_pnl, holding_time?? 
-
         out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
         for market_data_name, data in zip(self.market_data_keys, market_data):
             out_td.set(market_data_name, torch.from_numpy(data))
