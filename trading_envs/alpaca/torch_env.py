@@ -87,7 +87,7 @@ class AlpacaTorchTradingEnv(EnvBase):
         self.market_data_key = "market_data"
         self.account_state_key = "account_state"
 
-        # Account state spec: [cash, portfolio_value, position_size, entry_price, unrealized_pnlpct, hold_counter]
+        # Account state spec: [cash, portfolio_value, position_size, entry_price, unrealized_pnlpct, holding_time]
         account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(6,), dtype=torch.float)
         self.market_data_keys = []
         for i, market_data_name in enumerate(market_data_names):
