@@ -113,10 +113,43 @@ For some calculations like reward you might need the base open, high, low, close
 
 ### Account Information Sampling
 
+    How we currently sample and compute the account information:
 
-    # TODO: implement.
+    We sample if the agent is in position or not. If the agent is in position we sample the entry price, hold time, cash, unrealized pnl pct, position size, position value, portfolio value. If the agent is not in position we sample the cash, portfolio value.
 
-    Currently the account information is [cash, portfolio_value, position_size]. Should we add buy price? (sell if short) -> getting in position price.
+    ```python
+    # sample if in position or not
+    pct = random.random()
+    if pct < 0.5:
+        self.in_position = True
+        # sample entry price
+        time_steps = np.random.randint(0, self.in_position_lookback)
+        timedeltas = time_steps *Timedelta(minutes=self.execute_on_value)
+        entry_price = self.market_data_sampler.execute_base_features.loc[timestamp - timedeltas].close
+        # calc hold time
+        hold_time = time_steps
+        # sample cash
+        cash = np.random.uniform(self.cash_min, self.cash_max)
+        # calc unrealized pnl pct
+        current_price = self.market_data_sampler.execute_base_features.loc[timestamp].close
+        unrealized_pnlpc = (current_price - entry_price) / entry_price
+        # sample quantity
+        quantity = np.random.uniform(0, self.max_quantity)
+        position_size = quantity
+        position_value = quantity * entry_price
+        account_state = torch.tensor(
+            [cash, position_size, position_value, entry_price, unrealized_pnlpc, hold_time], dtype=torch.float
+        )
+        self.portfolio_value = cash + position_value
+    else: # not in position
+        self.in_position = False
+        # sample cash
+        cash = np.random.uniform(self.cash_min, self.cash_max)
+        account_state = torch.tensor(
+            [cash, 0.0, 0.0, 0.0, 0.0, 0], dtype=torch.float
+        )
+        self.portfolio_value = cash
+    ```
 
 
 #### buy entry price selection Example 
@@ -168,6 +201,7 @@ def sample_entry_price(t, price_series, volume_series=None,
 
 ### Reward Computation
 
+Discounted future rewards: if we are in position we should not compute the reward only on the current step but also on the future steps. As we might miss the best opportunity to sell if we only compute the reward on the current step. Probably we should discount the future rewards as there is a trade off between immediate security and future opportunities.
 
 
 ## GRPO Integration

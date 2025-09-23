@@ -214,9 +214,9 @@ class Torch1StepTradingEnv(EnvBase):
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
         # Get market data
-        market_data, timestamp = self.market_data_sampler.get_random_observation(without_replacement=True)
+        market_data, self.timestamp = self.market_data_sampler.get_random_observation(without_replacement=True)
 
-        base_features = self.market_data_sampler.get_base_features(timestamp)
+        base_features = self.market_data_sampler.get_base_features(self.timestamp)
 
         # sample if in position or not
         pct = random.random()
@@ -225,7 +225,7 @@ class Torch1StepTradingEnv(EnvBase):
             # sample entry price
             time_steps = np.random.randint(0, self.in_position_lookback)
             timedeltas = time_steps *Timedelta(minutes=self.execute_on_value)
-            entry_price = self.market_data_sampler.execute_base_features.loc[timestamp - timedeltas].close
+            entry_price = self.market_data_sampler.execute_base_features.loc[self.timestamp - timedeltas].close
             # calc hold time
             hold_time = time_steps
             # sample cash
@@ -233,8 +233,8 @@ class Torch1StepTradingEnv(EnvBase):
             # calc unrealized pnl pct
             # NOTE: We probably dont want to give a hint for the real price of the asset sample between
             # high and low of that time step
-            current_price = np.random.uniform(self.market_data_sampler.execute_base_features.loc[timestamp].low,
-            self.market_data_sampler.execute_base_features.loc[timestamp].high)
+            current_price = np.random.uniform(self.market_data_sampler.execute_base_features.loc[self.timestamp].low,
+                                              self.market_data_sampler.execute_base_features.loc[self.timestamp].high)
             unrealized_pnlpc = (current_price - entry_price) / entry_price
             # sample quantity
             quantity = np.random.uniform(0, self.max_quantity)
@@ -358,6 +358,16 @@ class Torch1StepTradingEnv(EnvBase):
         
         
         # If holding position or no change in position, do nothing
+        if self.in_position:
+            if desired_position == 0:
+                # hold action -> do nothing
+                return trade_info
+            elif desired_position == 1:
+                # if we are in position we cant buy more -> do nothing
+                return trade_info
+            else:
+                # sell all
+                
         if desired_position == 0 or desired_position == self.current_position:
             return trade_info
         
