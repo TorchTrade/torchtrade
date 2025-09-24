@@ -8,9 +8,19 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
-from .utils import TimeFrame, TimeFrameUnit
+from utils import TimeFrame, TimeFrameUnit
 from pandas import Timedelta
 from sampler import MarketDataObservationSampler
+
+from torchrl.data import (
+    Composite,
+    LazyMemmapStorage,
+    TensorDictReplayBuffer,
+    SamplerWithoutReplacement,
+)
+import torch
+import random
+
 
 @dataclass
 class AlpacaTradingEnvConfig:
@@ -28,7 +38,10 @@ class AlpacaTradingEnvConfig:
     cash_min_max: Tuple[float, float] = (1000, 10000)
     max_quantity: float = 1.0
 
-class Torch1StepTradingEnv(EnvBase):
+class OneStepTradingEnvOn(EnvBase):
+    """
+    Online one-step environment that takes in real-time market data and allows the agent to trade for one step. 
+    """
     def __init__(self, data: pd.DataFrame, config: AlpacaTradingEnvConfig, api_key: str, api_secret: str, feature_preprocessing_fn: Optional[Callable] = None):
         self.config = config
 
@@ -300,5 +313,127 @@ class Torch1StepTradingEnv(EnvBase):
             "trade_mode": self.trader.trade_mode,
         }
 
+@dataclass
+class OneStepTradingEnvOffConfig:
+    action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Do-Nothing, Buy-all
+    seed: Optional[int] = 42
+    storage_size: int = 10000000
+    batch_size: int = 1
+
 
 class OneStepTradingEnvOff(EnvBase):
+    """
+    Offline one-step environment that takes in a tensordict of real executed trades and allows the agent to trade for one step.
+    Offline because we dont sample new positions or or compute the reward in a different way. We just allow the agent to reexperience its own data and maybe
+    improve its performance.
+
+    We could adapt the reward function to allow the agent to further improve its performance, but this is not implemented yet.
+    """
+    def __init__(self, tensordict: TensorDictBase, config: OneStepTradingEnvOffConfig):
+        self.config = config
+        self.tensordict = tensordict
+
+        self.replay_buffer = TensorDictReplayBuffer(pin_memory=False,
+                                                    prefetch=4,
+                                                    #split_trajs=False,
+                                                    storage=LazyMemmapStorage(config.storage_size),
+                                                    batch_size=config.batch_size,
+                                                    #shared=shared,
+                                                    sampler=SamplerWithoutReplacement(drop_last=True), # to have fixed epochs
+                                                    )
+
+        self.replay_buffer.extend(self.tensordict)
+
+        all_keys = self.replay_buffer.storage._storage.keys()
+        self.market_keys = [key for key in all_keys if key.startswith("market_data_")]
+        if "account_state" in all_keys:
+            self.account_state_key = "account_state"
+        else:
+            raise ValueError("Account state key not found in replay buffer")
+
+
+        self.action_spec = Categorical(3)
+        self.observation_spec = CompositeSpec(shape=())
+        for key in self.market_keys:
+            self.observation_spec.set(key, Bounded(low=-torch.inf, high=torch.inf, shape=(self.replay_buffer.storage._storage[key].shape[1:]), dtype=torch.float))
+        self.observation_spec.set(self.account_state_key,
+                                Bounded(low=-torch.inf, high=torch.inf,
+                                shape=(self.replay_buffer.storage._storage[self.account_state_key].shape[1],),
+                                dtype=torch.float))
+        self.reward_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(1,), dtype=torch.float)
+
+        super().__init__()
+
+
+    def _set_seed(self, seed: int) -> None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+
+    def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
+        # here we sample from the buffer and return the current state, keep the next state as information
+        # keep also the old action!
+        tensordict = self.replay_buffer.sample()
+        self.next_state  = tensordict.pop("next")
+        self.old_action = tensordict.pop("action")
+        if "episode_reward" in tensordict:
+            tensordict.pop("episode_reward")
+        tensordict.pop("collector")
+        self.old_done = tensordict.pop("done")
+        self.old_terminated = tensordict.pop("terminated")
+        self.old_truncated = tensordict.pop("truncated")
+        return tensordict.squeeze(0) # get rid of batch dimension
+
+
+    def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
+        # we receive the tensordict with a new action compute the reward and add the next state information
+        old_account_state = tensordict.get(self.account_state_key)
+
+        action = tensordict.get("action")
+
+        if action == 1: # hold
+            new_account_state = old_account_state
+            new_account_state["holding_time"] += 1
+            # TODO: we should update portfolio value and unrealized pnlpc but therefore we would need base features
+            out_tensordict = self.next_state.clone()
+            out_tensordict.pop("reward")
+            out_tensordict.set("reward", 0.0)
+            out_tensordict.set("done", 1)
+            out_tensordict.set("terminated", 1)
+            out_tensordict.set("truncated", 0)
+            return out_tensordict
+
+   
+
+
+        return tensordict
+
+    def _calculate_reward(self, old_portfolio_value: float, new_portfolio_value: float, action_value: float) -> float:
+        # calculate the reward based on the portfolio value change
+        return new_portfolio_value - old_portfolio_value
+
+
+
+
+
+if __name__ == "__main__":
+
+    data = TensorDictReplayBuffer(
+            pin_memory=False,
+            prefetch=4,
+            #split_trajs=False,
+            storage=LazyMemmapStorage(1000000),
+            batch_size=1,
+            #shared=shared,
+            #sampler=SamplerWithoutReplacement(drop_last=True),
+        )
+    data.loads("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/real_live_data/replay_buffer_random_iter3_colony2.pt")
+    td = data.storage._storage.clone()
+    td = td[:td["index"].max().item()]
+
+    env = OneStepTradingEnvOff(td, OneStepTradingEnvOffConfig())
+    td = env.reset()
+    print(td)
+    action =  env.action_spec.sample()
+    next_td = env.step(td.set("action", action))
+    print(next_td)

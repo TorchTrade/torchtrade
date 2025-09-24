@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Tuple, Union, Callable
 import numpy as np
 import pandas as pd
 
-from .utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
+from utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
 
 class MarketDataObservationSampler():
     def __init__(

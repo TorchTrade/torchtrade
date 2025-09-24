@@ -4,3 +4,4 @@ torchrl
 wandb
 tqdm
 mkdocs-material
+hydra-core
