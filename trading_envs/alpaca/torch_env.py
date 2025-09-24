@@ -110,11 +110,11 @@ class AlpacaTorchTradingEnv(EnvBase):
         market_data = obs_dict[self.observer.get_keys()[0]]
 
         if self.config.include_base_features:
-            base_features = obs_dict["base_features"]
-            base_timestamps = obs_dict["base_timestamps"]
+            base_features = obs_dict["base_features"][-1]
+            #base_timestamps = obs_dict["base_timestamps"][-1]
             # Convert to Unix timestamps (seconds)
-            timestamps = base_timestamps.astype('datetime64[s]').astype(np.int64)
-            base_timestamps = torch.from_numpy(timestamps)
+            #timestamps = base_timestamps.astype('datetime64[s]').astype(np.int64)
+            #base_timestamps = torch.from_numpy(timestamps)
         
         market_data = [obs_dict[features_name] for features_name in self.observer.get_keys()]
 
@@ -150,7 +150,7 @@ class AlpacaTorchTradingEnv(EnvBase):
 
         if self.config.include_base_features:
             out_td.set("base_features", torch.from_numpy(base_features))
-            out_td.set("base_timestamps", base_timestamps)
+            #out_td.set("base_timestamps", base_timestamps)
 
         return out_td
 
