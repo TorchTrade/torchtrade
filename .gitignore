@@ -210,3 +210,5 @@ __marimo__/
 trading_envs/data
 real_live_data/
 replay_buffer_random.pt
+outputs/
+*.pth
