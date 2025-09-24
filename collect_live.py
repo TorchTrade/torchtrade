@@ -18,7 +18,7 @@ from torchrl.data import (
 )
 import functools
 from dotenv import load_dotenv
-from torchrl.envs.transforms import InitTracker, RewardSum, StepCounter
+from torchrl.envs.transforms import InitTracker, RewardSum, StepCounter, UnsqueezeTransform, SqueezeTransform
 from torchrl.envs import (
     Compose,
     DoubleToFloat,
@@ -121,7 +121,7 @@ def main():
     policy_type = "random"
     policy = make_discrete_iql_model(device)
     policy.eval()
-    policy.load_state_dict(torch.load("policy.pth", map_location="cpu"))  
+    policy.load_state_dict(torch.load("iql_policy.pth", map_location="cpu"))  
 
     torch.manual_seed(42)
     np.random.seed(42)
@@ -155,6 +155,11 @@ def main():
                 StepCounter(max_episode_steps),
                 DoubleToFloat(),
                 RewardSum(),
+                UnsqueezeTransform(dim=0, allow_positive_dim=True, in_keys=["market_data_1Minute_12",
+                                                                            "market_data_5Minute_8",
+                                                                            "market_data_15Minute_8",
+                                                                            "market_data_1Hour_24",
+                                                                            "account_state"]),
             ),
         )
         return transformed_env
@@ -178,6 +183,16 @@ def main():
         )
     collector = make_collector(env, policy=policy, frames_per_batch=1, total_frames=total_farming_steps)
 
+    squeezer = SqueezeTransform(dim=-3, in_keys=["market_data_1Minute_12",
+                                                                "market_data_5Minute_8",
+                                                                "market_data_15Minute_8",
+                                                                "market_data_1Hour_24",
+                                                                "account_state",
+                                                                ("next", "market_data_1Minute_12"),
+                                                                ("next", "market_data_5Minute_8"),
+                                                                ("next", "market_data_15Minute_8"),
+                                                                ("next", "market_data_1Hour_24"),
+                                                                ("next", "account_state")])
 
     # Run Farming
     # Main loop
@@ -191,6 +206,13 @@ def main():
         with timeit("collect"):
             tensordict = next(collector_iter)
 
+        if "encoding5min" in tensordict.keys():
+            tensordict.pop("encoding5min")
+            tensordict.pop("encoding15min")
+            tensordict.pop("encoding1h")
+            tensordict.pop("encoding1min")
+            tensordict.pop("encoding_account_state")
+        squeezer(tensordict)
         current_frames = tensordict.numel()
         pbar.update(current_frames)
 
