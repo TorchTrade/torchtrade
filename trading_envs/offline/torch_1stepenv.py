@@ -1,9 +1,5 @@
-import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple, Union, Callable
-from warnings import warn
-from zoneinfo import ZoneInfo
+from typing import Dict, List, Optional, Tuple, Union, Callable
 
 import numpy as np
 import pandas as pd
@@ -12,120 +8,9 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
-from .utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
+from .utils import TimeFrame, TimeFrameUnit
 from pandas import Timedelta
-
-class MarketDataObservationSampler():
-    def __init__(
-        self,
-        df: pd.DataFrame,
-        time_frames: Union[List[TimeFrame], TimeFrame] = TimeFrame(1, TimeFrameUnit.Minute),
-        window_sizes: Union[List[int], int] = 10,
-        execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute),
-        feature_processing_fn: Optional[Callable] = None,
-        features_start_with: str = "features_"
-    ):
-        required_columns = ["timestamp", "open", "high", "low", "close", "volume"]
-        # Check if columns match
-        if list(df.columns) != required_columns:
-            print("⚠️ Columns do not match the required format.")
-            print("Current columns:", list(df.columns))
-            print("Updating columns to:", required_columns)
-            df.columns = required_columns
-        else:
-            print("✅ Columns already in correct format:", required_columns)
-        
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-        df = df.set_index("timestamp").sort_index()
-        self.df = df
-        
-        self.time_frames = time_frames
-        self.window_sizes = window_sizes
-        self.execute_on = execute_on
-        self.feature_processing_fn = feature_processing_fn
-        
-        # Precompute resampled OHLCV DataFrames for each timeframe (high performance)
-        self.resampled_dfs = {}
-        for tf in time_frames:
-            resampled = self.df.resample(tf.to_pandas_freq()).agg({
-                'open': 'first',
-                'high': 'max',
-                'low': 'min',
-                'close': 'last',
-                'volume': 'sum'
-            }).dropna()
-            if feature_processing_fn is not None:
-                resampled = feature_processing_fn(resampled)
-                # Keep timestamp and columns starting with "feature_"
-                cols_to_keep = [col for col in resampled.columns if col.startswith(features_start_with)]
-                # Subset the dataframe
-                resampled = resampled[cols_to_keep]
-
-            self.resampled_dfs[tf.to_pandas_freq()] = resampled
-        
-        # Get execution timestamps: the points where the agent acts (resampled to execute_on)
-        # Use the start of each execute_on period
-        self.exec_times = self.df.resample(execute_on.to_pandas_freq()).first().index
-        self.execute_base_features = self.df.resample(execute_on.to_pandas_freq()).first()
-        
-        # Maximum lookback window
-        window_durations = [tf_to_timedelta(tf) * ws for tf, ws in zip(time_frames, window_sizes)]
-        self.max_window_duration = max(window_durations)
-
-        # Filter execution times
-        exec_times = self.df.resample(execute_on.to_pandas_freq()).first().index
-        self.min_start_time = self.df.index.min() + self.max_window_duration
-        self.exec_times = exec_times[exec_times >= self.min_start_time]
-        self.unseen_timestamps = list(self.exec_times)
-        
-        self.max_steps = len(self.exec_times)
-
-    def get_random_timestamp(self, without_replacement: bool = False)->pd.Timestamp:
-        """Get a random timestamp from the dataset.
-        If without_replacement is True, the timestamp is removed from the list of unseen timestamps.
-        """
-        if without_replacement:
-            random_idx = np.random.choice(len(self.unseen_timestamps), size=1, replace=False)
-            return self.unseen_timestamps.pop(random_idx.item())
-        else:
-            random_idx = np.random.randint(0, len(self.exec_times))
-            return self.exec_times[random_idx]
-
-    def get_random_observation(self, without_replacement: bool = False)->Tuple[Dict[str, pd.DataFrame], pd.Timestamp]:
-        """Get a random observation from the dataset.
-        If without_replacement is True, the timestamp is removed from the list of unseen timestamps.
-        """
-        timestamp = self.get_random_timestamp(without_replacement)
-        return self.get_observation(timestamp), timestamp
-
-    def get_sequential_observation(self)->Tuple[Dict[str, pd.DataFrame], pd.Timestamp]:
-        """Get the next observation in the dataset.
-        The timestamp is removed from the list of unseen timestamps.
-        """
-        timestamp = self.unseen_timestamps.pop(0)
-        return self.get_observation(timestamp), timestamp
-
-    def get_observation(self, timestamp: pd.Timestamp)->Dict[str, pd.DataFrame]:
-        """Get an observation from the dataset at the given timestamp."""
-        obs = {}
-        for tf, ws in zip(self.time_frames, self.window_sizes):
-            resampled = self.resampled_dfs[tf.to_pandas_freq()]
-            window = resampled.loc[:timestamp].tail(ws).values
-            if len(window) < ws:
-                raise ValueError("Not enough data for the largest window")
-            obs[tf.to_pandas_freq()] = window
-        return obs
-
-    def get_max_steps(self)->int:
-        return self.max_steps
-
-    def reset(self)->None:
-        """Reset the observation sampler."""
-        self.unseen_timestamps = list(self.exec_times)
-
-    def get_base_features(self, timestamp: pd.Timestamp)->pd.DataFrame:
-        """Get the base features from the dataset at the given timestamp."""
-        return self.execute_base_features.loc[timestamp]
+from sampler import MarketDataObservationSampler
 
 @dataclass
 class AlpacaTradingEnvConfig:
@@ -181,12 +66,10 @@ class Torch1StepTradingEnv(EnvBase):
         # assert self.hold_action == 0.0, "Hold action should be 0.0, possibly action levels are not [-1, 0, 1]!"
 
         # Get the number of features from the observer
-        num_features = self.observer.get_observations()[
-            self.observer.get_keys()[0]
-        ].shape[1]
+        num_features = self.market_data_sampler.get_random_observation()[0].shape[1]
 
         # get market data obs names
-        market_data_names = self.observer.get_keys()
+        market_data_names = self.market_data_sampler.get_keys()
 
         # Observation space includes market data features and current position info
         # TODO: needs to be adapted for multiple timeframes
@@ -210,54 +93,6 @@ class Torch1StepTradingEnv(EnvBase):
         self._reset(TensorDict({}))
         super().__init__()
 
-
-    def _get_observation(self) -> TensorDictBase:
-        """Get the current observation state."""
-        # Get market data
-        market_data, self.timestamp = self.market_data_sampler.get_random_observation(without_replacement=True)
-
-        base_features = self.market_data_sampler.get_base_features(self.timestamp)
-
-        # sample if in position or not
-        pct = random.random()
-        if pct < 0.5:
-            self.in_position = True
-            # sample entry price
-            time_steps = np.random.randint(0, self.in_position_lookback)
-            timedeltas = time_steps *Timedelta(minutes=self.execute_on_value)
-            entry_price = self.market_data_sampler.execute_base_features.loc[self.timestamp - timedeltas].close
-            # calc hold time
-            hold_time = time_steps
-            # sample cash
-            cash = np.random.uniform(self.cash_min, self.cash_max)
-            # calc unrealized pnl pct
-            # NOTE: We probably dont want to give a hint for the real price of the asset sample between
-            # high and low of that time step
-            current_price = np.random.uniform(self.market_data_sampler.execute_base_features.loc[self.timestamp].low,
-                                              self.market_data_sampler.execute_base_features.loc[self.timestamp].high)
-            unrealized_pnlpc = (current_price - entry_price) / entry_price
-            # sample quantity
-            quantity = np.random.uniform(0, self.max_quantity)
-            position_size = quantity
-            position_value = quantity * current_price
-            account_state = torch.tensor(
-                [cash, position_size, position_value, entry_price, unrealized_pnlpc, hold_time], dtype=torch.float
-            )
-            self.portfolio_value = cash + position_value
-        else: # not in position
-            self.in_position = False
-            # sample cash
-            cash = np.random.uniform(self.cash_min, self.cash_max)
-            account_state = torch.tensor(
-                [cash, 0.0, 0.0, 0.0, 0.0, 0], dtype=torch.float
-            )
-            self.portfolio_value = cash
-
-        out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
-        for market_data_name, data in zip(self.market_data_keys, market_data):
-            out_td.set(market_data_name, torch.from_numpy(data))
-
-        return out_td
 
     def _calculate_reward(
         self,
@@ -318,16 +153,61 @@ class Torch1StepTradingEnv(EnvBase):
         """Reset the environment."""
         # Get initial observation
         self.market_data_sampler.reset()
-        return self._get_observation()
+
+        market_data, self.timestamp = self.market_data_sampler.get_random_observation(without_replacement=True)
+
+        base_features = self.market_data_sampler.get_base_features(self.timestamp)
+
+        # sample if in position or not
+        pct = random.random()
+        if pct < 0.5:
+            self.in_position = True
+            # sample entry price
+            time_steps = np.random.randint(0, self.in_position_lookback)
+            timedeltas = time_steps *Timedelta(minutes=self.execute_on_value)
+            entry_price = self.market_data_sampler.execute_base_features.loc[self.timestamp - timedeltas].close
+            # calc hold time
+            hold_time = time_steps
+            # sample cash
+            cash = np.random.uniform(self.cash_min, self.cash_max)
+            # calc unrealized pnl pct
+            # NOTE: We probably dont want to give a hint for the real price of the asset sample between
+            # high and low of that time step
+            current_price = np.random.uniform(self.market_data_sampler.execute_base_features.loc[self.timestamp].low,
+                                              self.market_data_sampler.execute_base_features.loc[self.timestamp].high)
+            unrealized_pnlpc = (current_price - entry_price) / entry_price
+            # sample quantity
+            quantity = np.random.uniform(0, self.max_quantity)
+            position_size = quantity
+            position_value = quantity * current_price
+            account_state = torch.tensor(
+                [cash, position_size, position_value, entry_price, unrealized_pnlpc, hold_time], dtype=torch.float
+            )
+            self.portfolio_value = cash + position_value
+        else: # not in position
+            self.in_position = False
+            # sample cash
+            cash = np.random.uniform(self.cash_min, self.cash_max)
+            account_state = torch.tensor(
+                [cash, 0.0, 0.0, 0.0, 0.0, 0], dtype=torch.float
+            )
+            self.portfolio_value = cash
+
+        out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
+        for market_data_name, data in zip(self.market_data_keys, market_data):
+            out_td.set(market_data_name, torch.from_numpy(data))
+
+        return out_td
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
         
         # Get desired action and current position
         desired_action = self.action_levels[tensordict.get("action", 0)]
+        account_state = tensordict.get(self.account_state_key)
         
         # Calculate and execute trade if needed
-        trade_info = self._execute_trade_if_needed(desired_action)
+        trade_info = self._execute_trade_if_needed(desired_action, account_state)
 
         if trade_info["executed"]:
             self.current_position = 1 if trade_info["side"] == "buy" else 0
@@ -352,67 +232,50 @@ class Torch1StepTradingEnv(EnvBase):
         return next_tensordict
 
 
-    def _execute_trade_if_needed(self, desired_position: float) -> Dict:
+    def _execute_trade_if_needed(self, desired_position: float, account_state: torch.Tensor) -> torch.Tensor:
         """Execute trade if position change is needed."""
-        trade_info = {"executed": False, "amount": 0, "side": None, "success": None}
-        
+
+        cash, position_size, position_value, entry_price, unrealized_pnlpc, hold_time = account_state
         
         # If holding position or no change in position, do nothing
         if self.in_position:
             if desired_position == 0:
                 # hold action -> do nothing
-                return trade_info
+                # TODO: we need to increase hold time
+                return account_state
             elif desired_position == 1:
+                # TODO: we need to increase hold time
                 # if we are in position we cant buy more -> do nothing
-                return trade_info
+                return account_state
             else:
                 # sell all
-                
-        if desired_position == 0 or desired_position == self.current_position:
-            return trade_info
-        
-        # Determine trade details
-        side = "buy" if desired_position > 0 else "sell"
-        amount = self._calculate_trade_amount(side)
-        
-        try:
-            success = self.trader.trade(side=side, amount=amount, order_type="market")
-            trade_info.update({
-                "executed": True,
-                "amount": amount,
-                "side": side,
-                "success": success
-            })
-        except Exception as e:
-            print(f"Trade failed: {side} ${amount:.2f} - {str(e)}")
-            trade_info["success"] = False
-        
-        return trade_info
+                current_close = self.market_data_sampler.execute_base_features.loc[self.timestamp].close
+                amount = position_size
+                new_cash = cash + current_close * amount
+                new_account_state = torch.tensor(
+                    [new_cash, 0.0, 0.0, 0.0, 0.0, 0], dtype=torch.float
+                )
+                return new_account_state
 
-    def _calculate_trade_amount(self, side: str) -> float:
-        """Calculate the dollar amount to trade."""
-        if self.config.trade_mode == TradeMode.QUANTITY:
-            raise NotImplementedError
-        
-        # NOTIONAL mode
-        if side == "buy":
-            return self.balance # buy with all cash we have
-        else:  # sell
-            # TODO: if we do fine grained trading this needs to be calculated now we sell all available
-            return -1
-            # status = self.trader.get_status()
-            # if status.get("position_status"):
-            #     position_value = (status["position_status"].qty * 
-            #                     status["position_status"].current_price)
-            #     return position_value # sell all we have
+        # If not in position
+        else:
+            if desired_position == 0:
+                # hold action -> do nothing
+                return account_state
+            elif desired_position == -1:
+                # if we are not in position we cant sell -> do nothing
+                return account_state
+            else:
+                # buy
+                current_close = self.market_data_sampler.execute_base_features.loc[self.timestamp].close
+                amount = self._calculate_trade_amount("buy")
+                new_cash = cash - current_close * amount
+                new_account_state = torch.tensor(
+                    [new_cash, amount, amount * current_close, current_close, 0.0, 0], dtype=torch.float
+                )
+                return new_account_state
 
-    def _check_termination(self, portfolio_value: float) -> bool:
-        """Check if episode should terminate."""
-        if not self.config.done_on_bankruptcy:
-            return False
-        
-        bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
-        return portfolio_value < bankruptcy_threshold
+
 
     def _create_info_dict(self, portfolio_value: float, trade_info: Dict, action_value: float) -> Dict:
         """Create info dictionary for debugging."""
@@ -438,35 +301,4 @@ class Torch1StepTradingEnv(EnvBase):
         }
 
 
-    def close(self):
-        """Clean up resources."""
-        # Cancel all orders and close all positions
-        self.trader.cancel_open_orders()
-        self.trader.close_all_positions()
-
-
-
-if __name__ == "__main__":
-    import os
-    from dotenv import load_dotenv
-    # Load environment variables
-    load_dotenv()
-    # Create environment configuration
-    config = AlpacaTradingEnvConfig(
-        symbol="BTC/USD",
-        paper=True,
-        time_frames=[
-            TimeFrame(1, TimeFrameUnit.Minute),
-            TimeFrame(1, TimeFrameUnit.Hour),
-        ],
-        window_sizes=[15, 10],
-        execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-        include_base_features=True,
-    )
-
-    # Create environment
-    env = AlpacaTorchTradingEnv(
-        config, api_key=os.getenv("API_KEY"), api_secret=os.getenv("SECRET_KEY")
-    )
-    td = env.reset()
-    print(td)
+class OneStepTradingEnvOff(EnvBase):

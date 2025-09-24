@@ -1,0 +1,118 @@
+
+from typing import Dict, List, Optional, Tuple, Union, Callable
+import numpy as np
+import pandas as pd
+
+from .utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
+
+class MarketDataObservationSampler():
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        time_frames: Union[List[TimeFrame], TimeFrame] = TimeFrame(1, TimeFrameUnit.Minute),
+        window_sizes: Union[List[int], int] = 10,
+        execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute),
+        feature_processing_fn: Optional[Callable] = None,
+        features_start_with: str = "features_"
+    ):
+        required_columns = ["timestamp", "open", "high", "low", "close", "volume"]
+        # Check if columns match
+        if list(df.columns) != required_columns:
+            print("⚠️ Columns do not match the required format.")
+            print("Current columns:", list(df.columns))
+            print("Updating columns to:", required_columns)
+            df.columns = required_columns
+        else:
+            print("✅ Columns already in correct format:", required_columns)
+        
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        df = df.set_index("timestamp").sort_index()
+        self.df = df
+        
+        self.time_frames = time_frames
+        self.window_sizes = window_sizes
+        self.execute_on = execute_on
+        self.feature_processing_fn = feature_processing_fn
+        
+        # Precompute resampled OHLCV DataFrames for each timeframe (high performance)
+        self.resampled_dfs = {}
+        for tf in time_frames:
+            resampled = self.df.resample(tf.to_pandas_freq()).agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'volume': 'sum'
+            }).dropna()
+            if feature_processing_fn is not None:
+                resampled = feature_processing_fn(resampled)
+                # Keep timestamp and columns starting with "feature_"
+                cols_to_keep = [col for col in resampled.columns if col.startswith(features_start_with)]
+                # Subset the dataframe
+                resampled = resampled[cols_to_keep]
+
+            self.resampled_dfs[tf.to_pandas_freq()] = resampled
+        
+        # Get execution timestamps: the points where the agent acts (resampled to execute_on)
+        # Use the start of each execute_on period
+        self.exec_times = self.df.resample(execute_on.to_pandas_freq()).first().index
+        self.execute_base_features = self.df.resample(execute_on.to_pandas_freq()).first()
+        
+        # Maximum lookback window
+        window_durations = [tf_to_timedelta(tf) * ws for tf, ws in zip(time_frames, window_sizes)]
+        self.max_window_duration = max(window_durations)
+
+        # Filter execution times
+        exec_times = self.df.resample(execute_on.to_pandas_freq()).first().index
+        self.min_start_time = self.df.index.min() + self.max_window_duration
+        self.exec_times = exec_times[exec_times >= self.min_start_time]
+        self.unseen_timestamps = list(self.exec_times)
+        
+        self.max_steps = len(self.exec_times)
+
+    def get_random_timestamp(self, without_replacement: bool = False)->pd.Timestamp:
+        """Get a random timestamp from the dataset.
+        If without_replacement is True, the timestamp is removed from the list of unseen timestamps.
+        """
+        if without_replacement:
+            random_idx = np.random.choice(len(self.unseen_timestamps), size=1, replace=False)
+            return self.unseen_timestamps.pop(random_idx.item())
+        else:
+            random_idx = np.random.randint(0, len(self.exec_times))
+            return self.exec_times[random_idx]
+
+    def get_random_observation(self, without_replacement: bool = False)->Tuple[Dict[str, pd.DataFrame], pd.Timestamp]:
+        """Get a random observation from the dataset.
+        If without_replacement is True, the timestamp is removed from the list of unseen timestamps.
+        """
+        timestamp = self.get_random_timestamp(without_replacement)
+        return self.get_observation(timestamp), timestamp
+
+    def get_sequential_observation(self)->Tuple[Dict[str, pd.DataFrame], pd.Timestamp]:
+        """Get the next observation in the dataset.
+        The timestamp is removed from the list of unseen timestamps.
+        """
+        timestamp = self.unseen_timestamps.pop(0)
+        return self.get_observation(timestamp), timestamp
+
+    def get_observation(self, timestamp: pd.Timestamp)->Dict[str, pd.DataFrame]:
+        """Get an observation from the dataset at the given timestamp."""
+        obs = {}
+        for tf, ws in zip(self.time_frames, self.window_sizes):
+            resampled = self.resampled_dfs[tf.to_pandas_freq()]
+            window = resampled.loc[:timestamp].tail(ws).values
+            if len(window) < ws:
+                raise ValueError("Not enough data for the largest window")
+            obs[tf.to_pandas_freq()] = window
+        return obs
+
+    def get_max_steps(self)->int:
+        return self.max_steps
+
+    def reset(self)->None:
+        """Reset the observation sampler."""
+        self.unseen_timestamps = list(self.exec_times)
+
+    def get_base_features(self, timestamp: pd.Timestamp)->pd.DataFrame:
+        """Get the base features from the dataset at the given timestamp."""
+        return self.execute_base_features.loc[timestamp]
