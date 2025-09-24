@@ -28,10 +28,10 @@ from torchrl.collectors import SyncDataCollector
 # Load environment variables
 load_dotenv(dotenv_path=".env")
 
-
 import pandas as pd
 import numpy as np
-import ta  # pip install ta
+import ta 
+from examples.iql_live_policy import make_discrete_iql_model
 
 def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -119,6 +119,9 @@ def main():
     save_buffer_every = 10
     max_rollout_steps = 72 #  72 steps a 5min -> 6h per episode -> 4 episodes per day
     policy_type = "random"
+    policy = make_discrete_iql_model(device)
+    policy.eval()
+    policy.load_state_dict(torch.load("policy.pth", map_location="cpu"))  
 
     torch.manual_seed(42)
     np.random.seed(42)
@@ -134,13 +137,14 @@ def main():
         ],
         window_sizes=[12, 8, 8, 24],  # ~12m, 40m, 2h, 1d
         execute_on=TimeFrame(5, TimeFrameUnit.Minute), # Try 15min
+        include_base_features=True,
     )
 
     # Create environment
     env = AlpacaTorchTradingEnv(
         config, api_key=os.getenv("API_KEY"),
         api_secret=os.getenv("SECRET_KEY"),
-        feature_preprocessing_fn=custom_preprocessing
+        feature_preprocessing_fn=custom_preprocessing,
     )
 
     def apply_env_transforms(env, max_episode_steps=1000):
@@ -167,12 +171,12 @@ def main():
             pin_memory=False,
             prefetch=3,
             storage=storage_cls(
-                1000000,
+                10_000,
             ),
             batch_size=1,
             shared=False,
         )
-    collector = make_collector(env, policy=None, frames_per_batch=1, total_frames=total_farming_steps)
+    collector = make_collector(env, policy=policy, frames_per_batch=1, total_frames=total_farming_steps)
 
 
     # Run Farming
