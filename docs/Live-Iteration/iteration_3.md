@@ -145,3 +145,54 @@ And the agent could not know at which price it entered the position or how long 
 ```
 
 ## Inspection of the Collected Data
+
+We have collected 15 episodes on colony2 with 2 positive trades. Both colony1 and colony2 did errored out due to some weird API error.
+
+Colony1:
+
+```bash
+
+requests.exceptions.ConnectionError: HTTPSConnectionPool(host='paper-api.alpaca.markets', port=443): Max retries exceeded with url: /v2/account (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0xffff673686d0>: Failed to resolve 'paper-api.alpaca.markets' ([Errno -3] Temporary failure in name resolution)"))
+
+```
+
+Colony2:
+
+```bash
+
+  File "/home/colony2/miniconda3/envs/alpaca_env/lib/python3.9/site-packages/requests/adapters.py", line 659, in send
+    raise ConnectionError(err, request=request)
+requests.exceptions.ConnectionError: ('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))
+
+
+```
+
+But besides that overall results look good. Account state seems more informative now. Ready for some tests to train a policy on the new colony2 data even though it has few positive trades. But just to see how a deployed policy would perform.
+
+Positive trades from colony2:
+
+```python
+
+time step 502
+account tensor([     6.3800,      0.0027,    312.1673, 115623.7031,     -0.0032,
+             2.0000])
+action tensor(0)
+next_account tensor([318.5800,   0.0000,   0.0000,   0.0000,   0.0000,   0.0000])
+reward tensor([0.0001])
+
+
+time step 698
+account tensor([     5.1600,      0.0023,    256.9382, 112426.6250,     -0.0019,
+             1.0000])
+action tensor(0)
+next_account tensor([262.1900,   0.0000,   0.0000,   0.0000,   0.0000,   0.0000])
+reward tensor([0.0004])
+
+```
+
+Results from colony1 can be neglected as it only collected 182 steps due to the error.
+
+
+
+However, we need to use these samples from iteration3 to test and compare the OneStepEnv and the regular sequential env!
+
