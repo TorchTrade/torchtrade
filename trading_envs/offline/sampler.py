@@ -81,21 +81,21 @@ class MarketDataObservationSampler():
             random_idx = np.random.randint(0, len(self.exec_times))
             return self.exec_times[random_idx]
 
-    def get_random_observation(self, without_replacement: bool = False)->Tuple[Dict[str, pd.DataFrame], pd.Timestamp]:
+    def get_random_observation(self, without_replacement: bool = False)->Tuple[np.ndarray, pd.Timestamp]:
         """Get a random observation from the dataset.
         If without_replacement is True, the timestamp is removed from the list of unseen timestamps.
         """
         timestamp = self.get_random_timestamp(without_replacement)
         return self.get_observation(timestamp), timestamp
 
-    def get_sequential_observation(self)->Tuple[Dict[str, pd.DataFrame], pd.Timestamp]:
+    def get_sequential_observation(self)->Tuple[np.ndarray, pd.Timestamp]:
         """Get the next observation in the dataset.
         The timestamp is removed from the list of unseen timestamps.
         """
         timestamp = self.unseen_timestamps.pop(0)
         return self.get_observation(timestamp), timestamp
 
-    def get_observation(self, timestamp: pd.Timestamp)->Dict[str, pd.DataFrame]:
+    def get_observation(self, timestamp: pd.Timestamp)->np.ndarray:
         """Get an observation from the dataset at the given timestamp."""
         obs = {}
         for tf, ws in zip(self.time_frames, self.window_sizes):
@@ -108,6 +108,9 @@ class MarketDataObservationSampler():
 
     def get_max_steps(self)->int:
         return self.max_steps
+
+    def get_observation_keys(self)->List[str]:
+        return list(self.resampled_dfs.keys())
 
     def reset(self)->None:
         """Reset the observation sampler."""
