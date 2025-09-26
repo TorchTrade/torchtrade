@@ -207,7 +207,7 @@ marimo/_lsp/
 __marimo__/
 
 # Data
-trading_envs/data
+torchtrade/data
 real_live_data/
 replay_buffer_random.pt
 outputs/
