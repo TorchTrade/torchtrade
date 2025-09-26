@@ -8,3 +8,5 @@ Finally, the best strategy could then be deployed in a live env (paper or real).
 
 - [Darwin Godel Machine](https://arxiv.org/abs/2505.22954)
    We could even go more insane using Darwin Godel Machine: Open-Ended Evolution of Self-Improving Agents.
+- [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)
+- [ShinkaEvolve](https://sakana.ai/shinka-evolve/) next generation of AlphaEvolve
