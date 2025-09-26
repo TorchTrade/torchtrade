@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Tuple, Union, Callable
 import numpy as np
 import pandas as pd
 
-from utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
 
 class MarketDataObservationSampler():
     def __init__(
@@ -48,8 +48,12 @@ class MarketDataObservationSampler():
                 resampled = feature_processing_fn(resampled)
                 # Keep timestamp and columns starting with "feature_"
                 cols_to_keep = [col for col in resampled.columns if col.startswith(features_start_with)]
+                cols_to_keep.append("timestamp")
                 # Subset the dataframe
                 resampled = resampled[cols_to_keep]
+                resampled = resampled.reset_index().set_index("timestamp")
+                if 'index' in resampled.columns:
+                    resampled = resampled.drop(columns=['index'])
 
             self.resampled_dfs[tf.to_pandas_freq()] = resampled
         
@@ -62,7 +66,8 @@ class MarketDataObservationSampler():
         window_durations = [tf_to_timedelta(tf) * ws for tf, ws in zip(time_frames, window_sizes)]
         self.max_window_duration = max(window_durations)
 
-        # Filter execution times
+        # Filter execution times 
+        # TODO: this only works if we fill the nan values with 0s
         exec_times = self.df.resample(execute_on.to_pandas_freq()).first().index
         self.min_start_time = self.df.index.min() + self.max_window_duration
         self.exec_times = exec_times[exec_times >= self.min_start_time]

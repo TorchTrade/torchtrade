@@ -8,14 +8,14 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 import numpy as np
-from sampler import MarketDataObservationSampler
+from torchtrade.envs.offline.sampler import MarketDataObservationSampler
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
 import pandas as pd
-from utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
 
 @dataclass
 class SeqLongOnlyEnvConfig:
@@ -384,8 +384,71 @@ class SeqLongOnlyEnv(EnvBase):
             plt.show()
 
 
+import ta
+import pandas as pd
+import numpy as np
+def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Preprocess OHLCV dataframe with engineered features for RL trading.
+
+    Expected columns: ["open", "high", "low", "close", "volume"]
+    Index can be datetime or integer.
+    """
+
+    df = df.copy().reset_index(drop=False)
+
+    # --- Basic features ---
+    # Log returns
+    df["features_return_log"] = np.log(df["close"]).diff()
+
+    # Rolling volatility (5-period)
+    df["features_volatility"] = df["features_return_log"].rolling(window=5).std()
+
+    # ATR (14) normalized
+    df["features_atr"] = ta.volatility.AverageTrueRange(
+        high=df["high"], low=df["low"], close=df["close"], window=14
+    ).average_true_range() / df["close"]
+
+    # --- Momentum & trend ---
+    ema_12 = ta.trend.EMAIndicator(close=df["close"], window=12).ema_indicator()
+    ema_24 = ta.trend.EMAIndicator(close=df["close"], window=24).ema_indicator()
+    df["features_ema_12"] = ema_12
+    df["features_ema_24"] = ema_24
+    df["features_ema_slope"] = ema_12.diff()
+
+    macd = ta.trend.MACD(close=df["close"], window_slow=26, window_fast=12, window_sign=9)
+    df["features_macd_hist"] = macd.macd_diff()
+
+    df["features_rsi_14"] = ta.momentum.RSIIndicator(close=df["close"], window=14).rsi()
+
+    # --- Volatility bands ---
+    bb = ta.volatility.BollingerBands(close=df["close"], window=20, window_dev=2)
+    df["features_bb_pct"] = bb.bollinger_pband()
+
+    # --- Volume / flow ---
+    df["features_volume_z"] = (
+        (df["volume"] - df["volume"].rolling(20).mean()) /
+        df["volume"].rolling(20).std()
+    )
+    df["features_vwap_dev"] = df["close"] - (
+        (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
+    )
+
+    # --- Candle structure ---
+    df["features_body_ratio"] = (df["close"] - df["open"]) / (df["high"] - df["low"] + 1e-9)
+    df["features_upper_wick"] = (df["high"] - df[["close", "open"]].max(axis=1)) / (
+        df["high"] - df["low"] + 1e-9
+    )
+    df["features_lower_wick"] = (df[["close", "open"]].min(axis=1) - df["low"]) / (
+        df["high"] - df["low"] + 1e-9
+    )
+
+    # Drop rows with NaN from indicators
+    #df.dropna(inplace=True)
+    df.fillna(0, inplace=True)
 
 
+    return df
 
 if __name__ == "__main__":
     import pandas as pd
@@ -400,9 +463,9 @@ if __name__ == "__main__":
     window_sizes=[12, 8, 8, 24]  # ~12m, 40m, 2h, 1d
     execute_on=TimeFrame(5, TimeFrameUnit.Minute) # Try 15min
 
-    df = pd.read_csv("./trading_envs/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
+    df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
 
-    df = df[0:(1440 * 7)] # 1440 minutes = 1 day
+    #df = df[0:(1440 * 7)] # 1440 minutes = 1 day
 
     config = SeqLongOnlyEnvConfig(
         symbol="BTC/USD",
@@ -414,7 +477,7 @@ if __name__ == "__main__":
         transaction_fee=0.015,
         bankrupt_threshold=0.1,
     )
-    env = SeqLongOnlyEnv(df, config)
+    env = SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
 
     td = env.reset()
     for i in range(env.max_steps):
