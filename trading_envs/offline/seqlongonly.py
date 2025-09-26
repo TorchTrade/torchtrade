@@ -398,6 +398,9 @@ if __name__ == "__main__":
     execute_on=TimeFrame(5, TimeFrameUnit.Minute) # Try 15min
 
     df = pd.read_csv("./trading_envs/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
+
+    df = df[0:(1440 * 7)] # 1440 minutes = 1 day
+
     config = SeqLongOnlyEnvConfig(
         symbol="BTC/USD",
         time_frames=time_frames,
@@ -411,7 +414,7 @@ if __name__ == "__main__":
     env = SeqLongOnlyEnv(df, config)
 
     td = env.reset()
-    for i in range(200):
+    for i in range(env.max_steps):
         #action  =  env.action_spec.sample()
         action = np.random.choice([0, 1, 2], p=[0.15, 0.35, 0.5])
         td.set("action", action)

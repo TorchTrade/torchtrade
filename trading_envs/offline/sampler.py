@@ -67,6 +67,8 @@ class MarketDataObservationSampler():
         self.min_start_time = self.df.index.min() + self.max_window_duration
         self.exec_times = exec_times[exec_times >= self.min_start_time]
         self.unseen_timestamps = list(self.exec_times)
+        if len(self.exec_times) == 0:
+            raise ValueError("Window duration is too large for the given dataset, no execution times found")
         
         self.max_steps = len(self.exec_times) -1
 
