@@ -22,7 +22,9 @@ class SeqLongOnlyEnvConfig:
     window_sizes: Union[List[int], int] = 10
     execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute) # On which timeframe to execute trades
     initial_cash: float = 1000
+    transaction_fee: float = 0.025 
     bankrupt_threshold: float = 0.1  # 10% of initial balance
+    slippage: float = 0.01
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
 
@@ -30,6 +32,12 @@ class SeqLongOnlyEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: SeqLongOnlyEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
         self.action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Do-Nothing, Buy-all
         self.config = config
+        self.transaction_fee = config.transaction_fee
+        self.slippage = config.slippage
+        if not (0 <= config.transaction_fee <= 1):
+            raise ValueError("Transaction fee must be between 0 and 1 (e.g., 0.025 for 2.5%).")
+        if not (0 <= config.slippage <= 1):
+            raise ValueError("Slippage must be between 0 and 1 (e.g., 0.05 for 5%).")
 
         self.sampler = MarketDataObservationSampler(
             df,
@@ -74,7 +82,8 @@ class SeqLongOnlyEnv(EnvBase):
         self.observation_spec.set(self.account_state_key, account_state_spec)
 
         self.reward_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(1,), dtype=torch.float)
-
+        self.max_steps = self.sampler.get_max_steps()
+        self.step_counter = 0
         super().__init__()
 
 
@@ -140,8 +149,13 @@ class SeqLongOnlyEnv(EnvBase):
         else:
             portfolio_return = 0.0
 
+        if self.position_hold_counter > 50:  # Penalize long holds
+            hold_reward = - 0.0001 * self.position_hold_counter
+        else:
+            hold_reward = 0.0
+
         # Scale the reward
-        reward = portfolio_return
+        reward = portfolio_return + hold_reward
 
         return reward
 
@@ -170,11 +184,13 @@ class SeqLongOnlyEnv(EnvBase):
         self.position_size = 0.0
         self.entry_price = 0.0
         self.unrealized_pnlpc = 0.0
+        self.step_counter = 0
 
         return self._get_observation()
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
+        self.step_counter += 1
         
         # Store old portfolio value for reward calculation
         old_portfolio_value = self._get_portfolio_value()
@@ -188,8 +204,6 @@ class SeqLongOnlyEnv(EnvBase):
         if trade_info["executed"]:
             self.current_position = 1 if trade_info["side"] == "buy" else 0
 
-        
-
         # Get updated state
         next_tensordict = self._get_observation()
         new_portfolio_value = self._get_portfolio_value()
@@ -201,7 +215,7 @@ class SeqLongOnlyEnv(EnvBase):
         next_tensordict.set("reward", reward)
         next_tensordict.set("done", done)
         next_tensordict.set("truncated", False)
-        next_tensordict.set("terminated", False)
+        next_tensordict.set("terminated", done)
         
         # TODO: Make a dashboard that shows the portfolio value and action history etc
        # _ = self._create_info_dict(new_portfolio_value, trade_info, desired_action)
@@ -211,17 +225,18 @@ class SeqLongOnlyEnv(EnvBase):
 
     def _execute_trade_if_needed(self, desired_position: float) -> Dict:
         """Execute trade if position change is needed."""
-        trade_info = {"executed": False, "amount": 0, "side": None, "success": None}
-        
+        trade_info = {"executed": False, "amount": 0, "side": None, "success": None, "price_noise": 0.0, "fee_paid": 0.0}
         
         # If holding position or no change in position, do nothing
         if desired_position == 0 or desired_position == self.current_position:
             # Compute unrealized PnL, add hold counter update last_portfolio_value
             self.position_hold_counter += 1
             current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
-            unrealized_pnlpc = (current_price - self.entry_price) / (self.entry_price + 1e-10)
-            self.unrealized_pnlpc = unrealized_pnlpc
-            self.position_value = self.position_size * current_price
+            if self.position_size > 0:
+                self.unrealized_pnlpc = round((current_price - self.entry_price) / self.entry_price, 3)
+            else:
+                self.unrealized_pnlpc = 0.0
+            self.position_value = round(self.position_size * current_price, 3)
             
             return trade_info
         
@@ -229,21 +244,29 @@ class SeqLongOnlyEnv(EnvBase):
         side = "buy" if desired_position > 0 else "sell"
         amount = self._calculate_trade_amount(side)
 
+        # Get base price and apply noise to simulate slippage
+        base_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+        # Apply ±5% noise to the price to simulate market slippage
+        price_noise_factor = np.random.uniform(1 - self.slippage, 1 + self.slippage)
+        execution_price = base_price * price_noise_factor
+
         if side == "buy":
+            fee_paid = amount * self.transaction_fee
+            effective_amount = amount - fee_paid
             self.balance -= amount
-            buy_price = self.sampler.get_base_features(self.current_timestamp)["close"]
-            # TODO: add some noise to buy price + fee!!
-            self.position_size = amount / buy_price
-            self.entry_price = buy_price
+            self.position_size = round(effective_amount / execution_price, 3)
+            self.entry_price = execution_price
             self.position_hold_counter = 0
-            self.position_value = self.position_size * buy_price
+            self.position_value = round(self.position_size * execution_price, 3)
             self.unrealized_pnlpc = 0.0
             
         else:
+            # Sell all available position
             sell_amount = self.position_size
-            sell_price = self.sampler.get_base_features(self.current_timestamp)["close"]
-            # TODO: add some noise to sell price + fee!!
-            self.balance += sell_amount * sell_price
+            # Calculate proceeds and fee based on noisy execution price
+            proceeds = sell_amount * execution_price
+            fee_paid = proceeds * self.transaction_fee
+            self.balance += round(proceeds - fee_paid, 3)
             self.position_size = 0.0
             self.position_hold_counter = 0
             self.position_value = 0.0
@@ -252,9 +275,11 @@ class SeqLongOnlyEnv(EnvBase):
         
         trade_info.update({
             "executed": True,
-            "amount": amount,
+            "amount": amount if side == "buy" else sell_amount,
             "side": side,
-            "success": True
+            "success": True,
+            "price_noise": price_noise_factor,
+            "fee_paid": fee_paid
         })
         
         return trade_info
@@ -264,7 +289,7 @@ class SeqLongOnlyEnv(EnvBase):
         
         if side == "buy":
             # add some noise as we probably wont buy to the exact price
-            amount = self.balance - np.random.uniform(0, self.balance * 0.05)
+            amount = self.balance - np.random.uniform(0, self.balance * 0.015)
             return amount
         else:
             # sell all available
@@ -273,7 +298,7 @@ class SeqLongOnlyEnv(EnvBase):
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""
         bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
-        return portfolio_value < bankruptcy_threshold
+        return portfolio_value < bankruptcy_threshold or self.step_counter >= self.max_steps
 
     # def _create_info_dict(self, portfolio_value: float, trade_info: Dict, action_value: float) -> Dict:
     #     """Create info dictionary for debugging."""
@@ -322,11 +347,21 @@ if __name__ == "__main__":
         window_sizes=window_sizes,
         execute_on=execute_on,
         include_base_features=False,
+        slippage=0.01,
+        transaction_fee=0.015,
+        bankrupt_threshold=0.1,
     )
     env = SeqLongOnlyEnv(df, config)
     td = env.reset()
-    for i in range(4):
+    for i in range(env.max_steps):
         action  =  env.action_spec.sample()
+
         td.set("action", action)
+        print(action)
         td = env.step(td)
-        print(td)
+        td = td["next"]
+        print(i, " -- ", td["account_state"][0]+ td["account_state"][2])
+        if td["done"]:
+            print(td["done"])
+            break
+        

@@ -68,7 +68,7 @@ class MarketDataObservationSampler():
         self.exec_times = exec_times[exec_times >= self.min_start_time]
         self.unseen_timestamps = list(self.exec_times)
         
-        self.max_steps = len(self.exec_times)
+        self.max_steps = len(self.exec_times) -1
 
     def get_random_timestamp(self, without_replacement: bool = False)->pd.Timestamp:
         """Get a random timestamp from the dataset.
