@@ -84,6 +84,11 @@ class SeqLongOnlyEnv(EnvBase):
         self.reward_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(1,), dtype=torch.float)
         self.max_steps = self.sampler.get_max_steps()
         self.step_counter = 0
+
+        self.base_price_history = []
+        self.action_history = []
+        self.reward_history = []
+        self.portfolio_value_history = []
         super().__init__()
 
 
@@ -200,6 +205,9 @@ class SeqLongOnlyEnv(EnvBase):
         
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
+        self.action_history.append(desired_action if trade_info["executed"] else 0)
+        self.base_price_history.append(self.sampler.get_base_features(self.current_timestamp)["close"])
+        self.portfolio_value_history.append(old_portfolio_value)
 
         if trade_info["executed"]:
             self.current_position = 1 if trade_info["side"] == "buy" else 0
@@ -210,6 +218,8 @@ class SeqLongOnlyEnv(EnvBase):
         
         # Calculate reward and check termination
         reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, desired_action, trade_info)
+        self.reward_history.append(reward)
+
         done = self._check_termination(new_portfolio_value)
 
         next_tensordict.set("reward", reward)
@@ -228,7 +238,7 @@ class SeqLongOnlyEnv(EnvBase):
         trade_info = {"executed": False, "amount": 0, "side": None, "success": None, "price_noise": 0.0, "fee_paid": 0.0}
         
         # If holding position or no change in position, do nothing
-        if desired_position == 0 or desired_position == self.current_position:
+        if desired_position == 0 or desired_position == self.current_position or (self.current_position == 1 and desired_position == 1) or (self.current_position == 0 and desired_position == -1):
             # Compute unrealized PnL, add hold counter update last_portfolio_value
             self.position_hold_counter += 1
             current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
@@ -259,6 +269,7 @@ class SeqLongOnlyEnv(EnvBase):
             self.position_hold_counter = 0
             self.position_value = round(self.position_size * execution_price, 3)
             self.unrealized_pnlpc = 0.0
+            self.current_position = 1.0
             
         else:
             # Sell all available position
@@ -272,6 +283,7 @@ class SeqLongOnlyEnv(EnvBase):
             self.position_value = 0.0
             self.unrealized_pnlpc = 0.0
             self.entry_price = 0.0
+            self.current_position = 0.0
         
         trade_info.update({
             "executed": True,
@@ -299,26 +311,6 @@ class SeqLongOnlyEnv(EnvBase):
         """Check if episode should terminate."""
         bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
         return portfolio_value < bankruptcy_threshold or self.step_counter >= self.max_steps
-
-    # def _create_info_dict(self, portfolio_value: float, trade_info: Dict, action_value: float) -> Dict:
-    #     """Create info dictionary for debugging."""
-    #     portfolio_return = ((portfolio_value - self.initial_portfolio_value) / 
-    #                     self.initial_portfolio_value)
-
-    #     return {
-    #         "portfolio_value": portfolio_value,
-    #         "portfolio_return": portfolio_return,
-    #         "cash": cash,
-    #         "position_qty": position_status.qty if position_status else 0,
-    #         "position_market_value": position_status.market_value if position_status else 0,
-    #         "trade_executed": trade_info["executed"],
-    #         "trade_amount": trade_info["amount"],
-    #         "trade_success": trade_info["success"],
-    #         "trade_side": trade_info["side"],
-    #         "action": action_value,
-    #         "trade_mode": self.trader.trade_mode,
-    #     }
-
 
     def close(self):
         """Clean up resources."""
@@ -352,10 +344,11 @@ if __name__ == "__main__":
         bankrupt_threshold=0.1,
     )
     env = SeqLongOnlyEnv(df, config)
-    td = env.reset()
-    for i in range(env.max_steps):
-        action  =  env.action_spec.sample()
 
+    td = env.reset()
+    for i in range(200):
+        #action  =  env.action_spec.sample()
+        action = np.random.choice([0, 1, 2], p=[0.2, 0.3, 0.5])
         td.set("action", action)
         print(action)
         td = env.step(td)
@@ -364,4 +357,59 @@ if __name__ == "__main__":
         if td["done"]:
             print(td["done"])
             break
-        
+    import matplotlib.pyplot as plt
+    from datetime import datetime
+
+    # Assuming env provides the necessary data
+    price_history = env.base_price_history
+    time_indices = list(range(len(price_history)))
+    action_history = env.action_history
+    reward_history = env.reward_history
+    portfolio_value_history = env.portfolio_value_history
+
+    # Calculate buy-and-hold balance
+    initial_balance = portfolio_value_history[0]  # Starting balance
+    initial_price = price_history[0]      # Price at time 0
+    units_held = initial_balance / initial_price  # Number of units bought at t=0
+    buy_and_hold_balance = [units_held * price for price in price_history]  # Value of units over time
+
+    # Create subplots: price history on top, balance history on bottom
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True, gridspec_kw={'height_ratios': [3, 2]})
+
+    # Plot price history on the top subplot
+    ax1.plot(time_indices, price_history, label='Price History', color='blue', linewidth=2)
+
+    # Plot buy/sell actions on the price history
+    buy_indices = [i for i, action in enumerate(action_history) if action == 1]
+    buy_prices = [price_history[i] for i in buy_indices]
+    sell_indices = [i for i, action in enumerate(action_history) if action == -1]
+    sell_prices = [price_history[i] for i in sell_indices]
+
+    ax1.scatter(buy_indices, buy_prices, marker='^', color='green', s=100, label='Buy (1)')
+    ax1.scatter(sell_indices, sell_prices, marker='v', color='red', s=100, label='Sell (-1)')
+
+    # Customize price plot
+    ax1.set_ylabel('Price (USD)')
+    ax1.set_title('Price History with Buy/Sell Actions')
+    ax1.legend()
+    ax1.grid(True)
+
+    # Plot balance history and buy-and-hold on the bottom subplot
+    ax2.plot(time_indices, portfolio_value_history, label='Portfolio Value History', color='green', linestyle='-', linewidth=2)
+    ax2.plot(time_indices, buy_and_hold_balance, label='Buy and Hold', color='purple', linestyle='-', linewidth=2)
+
+    # Customize balance plot
+    ax2.set_xlabel('Time (Index)' if not isinstance(time_indices[0], (str, datetime)) else 'Time')
+    ax2.set_ylabel('Portfolio Value (USD)')
+    ax2.set_title('Portfolio Value History vs Buy and Hold')
+    ax2.legend()
+    ax2.grid(True)
+
+    # If timestamps are provided, format the x-axis
+    if isinstance(time_indices[0], (str, datetime)):
+        fig.autofmt_xdate()  # Rotate and format timestamps for readability
+
+    # Adjust layout to prevent overlap
+    plt.tight_layout()
+
+    plt.show()

@@ -13,7 +13,7 @@ class MarketDataObservationSampler():
         window_sizes: Union[List[int], int] = 10,
         execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute),
         feature_processing_fn: Optional[Callable] = None,
-        features_start_with: str = "features_"
+        features_start_with: str = "features_",
     ):
         required_columns = ["timestamp", "open", "high", "low", "close", "volume"]
         # Check if columns match
