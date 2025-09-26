@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 from warnings import warn
 from zoneinfo import ZoneInfo
+import matplotlib.pyplot as plt
+from datetime import datetime
 
 import numpy as np
 from sampler import MarketDataObservationSampler
@@ -181,6 +183,12 @@ class SeqLongOnlyEnv(EnvBase):
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
+
+        self.portfolio_value_history = []
+        self.action_history = []
+        self.reward_history = []
+        self.base_price_history = []
+
         self.sampler.reset()
         self.balance = self.initial_portfolio_value
         self.position_hold_counter = 0
@@ -315,6 +323,63 @@ class SeqLongOnlyEnv(EnvBase):
     def close(self):
         """Clean up resources."""
 
+    
+    def render_history(self):
+        """Render the history of the environment."""
+        
+        price_history = self.base_price_history
+        time_indices = list(range(len(price_history)))
+        action_history = self.action_history
+        reward_history = self.reward_history
+        portfolio_value_history = self.portfolio_value_history
+
+        # Calculate buy-and-hold balance
+        initial_balance = portfolio_value_history[0]  # Starting balance
+        initial_price = price_history[0]      # Price at time 0
+        units_held = initial_balance / initial_price  # Number of units bought at t=0
+        buy_and_hold_balance = [units_held * price for price in price_history]  # Value of units over time
+
+        # Create subplots: price history on top, balance history on bottom
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True, gridspec_kw={'height_ratios': [3, 2]})
+
+        # Plot price history on the top subplot
+        ax1.plot(time_indices, price_history, label='Price History', color='blue', linewidth=2)
+
+        # Plot buy/sell actions on the price history
+        buy_indices = [i for i, action in enumerate(action_history) if action == 1]
+        buy_prices = [price_history[i] for i in buy_indices]
+        sell_indices = [i for i, action in enumerate(action_history) if action == -1]
+        sell_prices = [price_history[i] for i in sell_indices]
+
+        ax1.scatter(buy_indices, buy_prices, marker='^', color='green', s=100, label='Buy (1)')
+        ax1.scatter(sell_indices, sell_prices, marker='v', color='red', s=100, label='Sell (-1)')
+
+        # Customize price plot
+        ax1.set_ylabel('Price (USD)')
+        ax1.set_title('Price History with Buy/Sell Actions')
+        ax1.legend()
+        ax1.grid(True)
+
+        # Plot balance history and buy-and-hold on the bottom subplot
+        ax2.plot(time_indices, portfolio_value_history, label='Portfolio Value History', color='green', linestyle='-', linewidth=2)
+        ax2.plot(time_indices, buy_and_hold_balance, label='Buy and Hold', color='purple', linestyle='-', linewidth=2)
+
+        # Customize balance plot
+        ax2.set_xlabel('Time (Index)' if not isinstance(time_indices[0], (str, datetime)) else 'Time')
+        ax2.set_ylabel('Portfolio Value (USD)')
+        ax2.set_title('Portfolio Value History vs Buy and Hold')
+        ax2.legend()
+        ax2.grid(True)
+
+        # If timestamps are provided, format the x-axis
+        if isinstance(time_indices[0], (str, datetime)):
+            fig.autofmt_xdate()  # Rotate and format timestamps for readability
+
+        # Adjust layout to prevent overlap
+        plt.tight_layout()
+
+        plt.show()
+
 
 
 
@@ -348,7 +413,7 @@ if __name__ == "__main__":
     td = env.reset()
     for i in range(200):
         #action  =  env.action_spec.sample()
-        action = np.random.choice([0, 1, 2], p=[0.2, 0.3, 0.5])
+        action = np.random.choice([0, 1, 2], p=[0.15, 0.35, 0.5])
         td.set("action", action)
         print(action)
         td = env.step(td)
@@ -357,59 +422,4 @@ if __name__ == "__main__":
         if td["done"]:
             print(td["done"])
             break
-    import matplotlib.pyplot as plt
-    from datetime import datetime
-
-    # Assuming env provides the necessary data
-    price_history = env.base_price_history
-    time_indices = list(range(len(price_history)))
-    action_history = env.action_history
-    reward_history = env.reward_history
-    portfolio_value_history = env.portfolio_value_history
-
-    # Calculate buy-and-hold balance
-    initial_balance = portfolio_value_history[0]  # Starting balance
-    initial_price = price_history[0]      # Price at time 0
-    units_held = initial_balance / initial_price  # Number of units bought at t=0
-    buy_and_hold_balance = [units_held * price for price in price_history]  # Value of units over time
-
-    # Create subplots: price history on top, balance history on bottom
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True, gridspec_kw={'height_ratios': [3, 2]})
-
-    # Plot price history on the top subplot
-    ax1.plot(time_indices, price_history, label='Price History', color='blue', linewidth=2)
-
-    # Plot buy/sell actions on the price history
-    buy_indices = [i for i, action in enumerate(action_history) if action == 1]
-    buy_prices = [price_history[i] for i in buy_indices]
-    sell_indices = [i for i, action in enumerate(action_history) if action == -1]
-    sell_prices = [price_history[i] for i in sell_indices]
-
-    ax1.scatter(buy_indices, buy_prices, marker='^', color='green', s=100, label='Buy (1)')
-    ax1.scatter(sell_indices, sell_prices, marker='v', color='red', s=100, label='Sell (-1)')
-
-    # Customize price plot
-    ax1.set_ylabel('Price (USD)')
-    ax1.set_title('Price History with Buy/Sell Actions')
-    ax1.legend()
-    ax1.grid(True)
-
-    # Plot balance history and buy-and-hold on the bottom subplot
-    ax2.plot(time_indices, portfolio_value_history, label='Portfolio Value History', color='green', linestyle='-', linewidth=2)
-    ax2.plot(time_indices, buy_and_hold_balance, label='Buy and Hold', color='purple', linestyle='-', linewidth=2)
-
-    # Customize balance plot
-    ax2.set_xlabel('Time (Index)' if not isinstance(time_indices[0], (str, datetime)) else 'Time')
-    ax2.set_ylabel('Portfolio Value (USD)')
-    ax2.set_title('Portfolio Value History vs Buy and Hold')
-    ax2.legend()
-    ax2.grid(True)
-
-    # If timestamps are provided, format the x-axis
-    if isinstance(time_indices[0], (str, datetime)):
-        fig.autofmt_xdate()  # Rotate and format timestamps for readability
-
-    # Adjust layout to prevent overlap
-    plt.tight_layout()
-
-    plt.show()
+    env.render_history()
