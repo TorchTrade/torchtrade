@@ -1,2 +1,2 @@
-from trading_envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from trading_envs.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+from envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from envs.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig

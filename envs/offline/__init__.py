@@ -1,1 +1,1 @@
-from trading_envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
