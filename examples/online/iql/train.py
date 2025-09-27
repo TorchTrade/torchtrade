@@ -79,6 +79,7 @@ def main(cfg: DictConfig):  # noqa: F821
         train_num_envs=cfg.env.train_envs,
         eval_num_envs=cfg.env.eval_envs,
     )
+    max_eval_steps = 10000
 
     # Create replay buffer
     replay_buffer = make_replay_buffer(
@@ -92,6 +93,7 @@ def main(cfg: DictConfig):  # noqa: F821
 
     # Create agent
     model = make_discrete_iql_model(cfg, device)
+    eval_env.to(model[0].device)
 
     # Create loss
     loss_module, target_net_updater = make_discrete_loss(cfg.loss, model, device=device)
@@ -147,7 +149,6 @@ def main(cfg: DictConfig):  # noqa: F821
     num_updates = int(cfg.collector.frames_per_batch * cfg.optim.utd_ratio)
     eval_iter = cfg.logger.eval_iter
     frames_per_batch = cfg.collector.frames_per_batch
-    eval_rollout_steps = cfg.collector.max_frames_per_traj
     collector_iter = iter(collector)
     pbar = tqdm.tqdm(range(collector.total_frames))
     total_iter = len(collector)
@@ -189,11 +190,12 @@ def main(cfg: DictConfig):  # noqa: F821
                 ExplorationType.DETERMINISTIC
             ), torch.no_grad(), timeit("evaluating"):
                 eval_rollout = eval_env.rollout(
-                    eval_rollout_steps,
+                    max_eval_steps,
                     model[0],
                     auto_cast_to_device=True,
                     break_when_any_done=True,
                 )
+                eval_rollout.squeeze()
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
                 fig = eval_env.base_env.render_history(return_fig=True)
