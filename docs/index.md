@@ -18,10 +18,16 @@
 
 - How can we sweep over hyperparameters and other elements like market_data elements?
     - what is a good strategy?
-    
+
 - How can we scale? 
 
+- New Platform
+    - Binance env
+    - Oanda env
+    - Bitget env
 
+
+- Create tutorial examples for each env.
 
 
 LLM-Agent-Lab Repo
