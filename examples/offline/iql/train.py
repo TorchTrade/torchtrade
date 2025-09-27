@@ -19,12 +19,10 @@ import torch
 import tqdm
 from tensordict.nn import CudaGraphModule
 from torchrl._utils import timeit
-from torchrl.envs import set_gym_backend
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 from torchrl.objectives import group_optimizers
 from torchrl.record.loggers import generate_exp_name, get_logger
 from utils import (
-    dump_video,
     log_metrics,
     make_environment,
     make_iql_optimizer,

@@ -4,11 +4,10 @@ import functools
 
 import torch.nn
 import torch.optim
-from tensordict.nn import InteractionType, TensorDictModule
-from tensordict.nn.distributions import NormalParamExtractor
+import tensordict
+from tensordict.nn import InteractionType
 from torch.distributions import Categorical
 from torchrl.data import Categorical as CategoricalSpec
-from torchrl.data import Bounded as BoundedSpec
 
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import (
@@ -17,7 +16,6 @@ from torchrl.data import (
     TensorDictPrioritizedReplayBuffer,
     TensorDictReplayBuffer,
 )
-from torchrl.data.datasets.d4rl import D4RLExperienceReplay
 from torchrl.data.replay_buffers import SamplerWithoutReplacement
 from torchrl.envs import (
     CatTensors,
@@ -38,10 +36,8 @@ from torchrl.modules import (
     ProbabilisticActor,
     SafeModule,
     SafeSequential,
-    TanhNormal,
-    ValueOperator,
 )
-from torchrl.objectives import DiscreteIQLLoss, HardUpdate, IQLLoss, SoftUpdate
+from torchrl.objectives import DiscreteIQLLoss, HardUpdate
 from torchrl.record import VideoRecorder
 from torchrl.trainers.helpers.models import ACTIVATIONS
 from trading_nets.architectures.tabl.tabl import BiNMTABLModel
@@ -180,35 +176,14 @@ def make_replay_buffer(
 
 
 def make_offline_replay_buffer(rb_cfg):
-    # data = D4RLExperienceReplay(
-    #     dataset_id=rb_cfg.dataset,
-    #     split_trajs=False,
-    #     batch_size=rb_cfg.batch_size,
-    #     # We use drop_last to avoid recompiles (and dynamic shapes)
-    #     sampler=SamplerWithoutReplacement(drop_last=True),
-    #     prefetch=4,
-    #     direct_download=True,
-    # )
+    td = tensordict.load(rb_cfg.data_path)
+    size = td.shape[0]
     data = TensorDictReplayBuffer(
         pin_memory=False,
         prefetch=4,
         #split_trajs=False,
-        storage=LazyMemmapStorage(rb_cfg.buffer_size),
+        storage=LazyMemmapStorage(size),
         batch_size=rb_cfg.batch_size,
-        #shared=shared,
-        #sampler=SamplerWithoutReplacement(drop_last=True),
-    )
-    data.loads(rb_cfg.path)
-    idx = data.storage._storage["index"].max().item()
-    td = data.storage._storage[:idx]
-    del data
-    data = TensorDictReplayBuffer(
-        pin_memory=False,
-        prefetch=4,
-        #split_trajs=False,
-        storage=LazyMemmapStorage(idx),
-        batch_size=rb_cfg.batch_size,
-        #shared=shared,
         sampler=SamplerWithoutReplacement(drop_last=True),
     )
     data.extend(td)
