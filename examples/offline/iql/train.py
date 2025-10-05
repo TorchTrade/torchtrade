@@ -32,7 +32,8 @@ from utils import (
 )
 
 torch.set_float32_matmul_precision("high")
-
+import wandb
+import pandas as pd
 
 @hydra.main(config_path="", config_name="config")
 def main(cfg: DictConfig):  # noqa: F821
@@ -66,18 +67,25 @@ def main(cfg: DictConfig):  # noqa: F821
     device = torch.device(device)
 
     # Creante env
-    # train_env, eval_env = make_environment(
-    #     cfg,
-    #     cfg.logger.eval_envs,
-    #     logger=logger,
-    # )
+    df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
+    test_df = df[0:(1440 * 14)] # 14 days
+    train_df = df[(1440 * 14):]
 
+    _, eval_env = make_environment(
+        train_df,
+        test_df,
+        cfg,
+        train_num_envs=1,
+        eval_num_envs=1,
+    )
+    max_eval_steps = 10000
     # Create replay buffer
     replay_buffer = make_offline_replay_buffer(cfg.replay_buffer)
 
     # Create agent
     #model = make_iql_model(cfg, train_env, eval_env, device)
     model = make_discrete_iql_model(cfg, device)
+    eval_env.to(device)
 
     # Create loss
     loss_module, target_net_updater = make_discrete_loss(cfg.loss, model, device=device)
@@ -124,7 +132,6 @@ def main(cfg: DictConfig):  # noqa: F821
     pbar = tqdm.tqdm(range(cfg.optim.gradient_steps))
 
     evaluation_interval = cfg.logger.eval_iter
-    eval_steps = cfg.logger.eval_steps
 
     # Training loop
     for i in pbar:
@@ -141,16 +148,29 @@ def main(cfg: DictConfig):  # noqa: F821
 
         # evaluation
         metrics_to_log = loss_info.to_dict()
-        # if i % evaluation_interval == 0:
-        #     with set_exploration_type(
-        #         ExplorationType.DETERMINISTIC
-        #     ), torch.no_grad(), timeit("eval"):
-        #         eval_td = eval_env.rollout(
-        #             max_steps=eval_steps, policy=model[0], auto_cast_to_device=True
-        #         )
-        #         eval_env.apply(dump_video)
-        #     eval_reward = eval_td["next", "reward"].sum(1).mean().item()
-        #     metrics_to_log["evaluation_reward"] = eval_reward
+        if i % evaluation_interval == 0:
+            with set_exploration_type(
+                ExplorationType.DETERMINISTIC
+            ), torch.no_grad(), timeit("evaluating"):
+                eval_rollout = eval_env.rollout(
+                    max_eval_steps,
+                    model[0],
+                    auto_cast_to_device=True,
+                    break_when_any_done=True,
+                )
+                eval_rollout.squeeze()
+                eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
+                metrics_to_log["eval/reward"] = eval_reward
+                fig = eval_env.base_env.render_history(return_fig=True)
+                action_history = eval_env.base_env.action_history[0]
+                hold_action = action_history.count(0)
+                buy_actions = action_history.count(1)
+                sell_actions = action_history.count(-1)
+                metrics_to_log["eval/hold_actions"] = hold_action
+                metrics_to_log["eval/buy_actions"] = buy_actions
+                metrics_to_log["eval/sell_actions"] = sell_actions
+                eval_env.reset()
+                logger.experiment.log({"eval_history": wandb.Image(fig[0])}, step=i)
         if logger is not None:
             metrics_to_log.update(timeit.todict(prefix="time"))
             metrics_to_log["time/speed"] = pbar.format_dict["rate"]
@@ -161,8 +181,7 @@ def main(cfg: DictConfig):  # noqa: F821
     pbar.close()
     if not eval_env.is_closed:
         eval_env.close()
-    if not train_env.is_closed:
-        train_env.close()
+
 
     
 

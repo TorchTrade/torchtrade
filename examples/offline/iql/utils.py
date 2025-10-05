@@ -42,32 +42,105 @@ from torchrl.record import VideoRecorder
 from torchrl.trainers.helpers.models import ACTIVATIONS
 from trading_nets.architectures.tabl.tabl import BiNMTABLModel
 import copy
-
+import pandas as pd
+import numpy as np
+import ta
+from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
 # ====================================================================
 # Environment utils
 # -----------------
 
+def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Preprocess OHLCV dataframe with engineered features for RL trading.
 
-def env_maker(cfg, device="cpu", from_pixels=False):
-    lib = cfg.env.backend
-    if lib in ("gym", "gymnasium"):
-        with set_gym_backend(lib):
-            return GymEnv(
-                cfg.env.name,
-                device=device,
-                from_pixels=from_pixels,
-                pixels_only=False,
-                categorical_action_encoding=True,
-            )
-    elif lib == "dm_control":
-        env = DMControlEnv(
-            cfg.env.name, cfg.env.task, from_pixels=from_pixels, pixels_only=False
-        )
-        return TransformedEnv(
-            env, CatTensors(in_keys=env.observation_spec.keys(), out_key="observation")
-        )
-    else:
-        raise NotImplementedError(f"Unknown lib {lib}.")
+    Expected columns: ["open", "high", "low", "close", "volume"]
+    Index can be datetime or integer.
+    """
+
+    df = df.copy().reset_index(drop=False)
+
+    # --- Basic features ---
+    # Log returns
+    df["features_return_log"] = np.log(df["close"]).diff()
+
+    # Rolling volatility (5-period)
+    df["features_volatility"] = df["features_return_log"].rolling(window=5).std()
+
+    # ATR (14) normalized
+    df["features_atr"] = ta.volatility.AverageTrueRange(
+        high=df["high"], low=df["low"], close=df["close"], window=14
+    ).average_true_range() / df["close"]
+
+    # --- Momentum & trend ---
+    ema_12 = ta.trend.EMAIndicator(close=df["close"], window=12).ema_indicator()
+    ema_24 = ta.trend.EMAIndicator(close=df["close"], window=24).ema_indicator()
+    df["features_ema_12"] = ema_12
+    df["features_ema_24"] = ema_24
+    df["features_ema_slope"] = ema_12.diff()
+
+    macd = ta.trend.MACD(close=df["close"], window_slow=26, window_fast=12, window_sign=9)
+    df["features_macd_hist"] = macd.macd_diff()
+
+    df["features_rsi_14"] = ta.momentum.RSIIndicator(close=df["close"], window=14).rsi()
+
+    # --- Volatility bands ---
+    bb = ta.volatility.BollingerBands(close=df["close"], window=20, window_dev=2)
+    df["features_bb_pct"] = bb.bollinger_pband()
+
+    # --- Volume / flow ---
+    df["features_volume_z"] = (
+        (df["volume"] - df["volume"].rolling(20).mean()) /
+        df["volume"].rolling(20).std()
+    )
+    df["features_vwap_dev"] = df["close"] - (
+        (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
+    )
+
+    # --- Candle structure ---
+    df["features_body_ratio"] = (df["close"] - df["open"]) / (df["high"] - df["low"] + 1e-9)
+    df["features_upper_wick"] = (df["high"] - df[["close", "open"]].max(axis=1)) / (
+        df["high"] - df["low"] + 1e-9
+    )
+    df["features_lower_wick"] = (df[["close", "open"]].min(axis=1) - df["low"]) / (
+        df["high"] - df["low"] + 1e-9
+    )
+
+    # Drop rows with NaN from indicators
+    #df.dropna(inplace=True)
+    df.fillna(0, inplace=True)
+
+
+    return df
+
+
+def env_maker(df, cfg, device="cpu"):
+
+    # TODO: Make this configurable with config
+    time_frames=[
+        TimeFrame(1, TimeFrameUnit.Minute),
+        TimeFrame(5, TimeFrameUnit.Minute),
+        TimeFrame(15, TimeFrameUnit.Minute),
+        TimeFrame(1, TimeFrameUnit.Hour),
+    ]
+    window_sizes=[12, 8, 8, 24]  # ~12m, 40m, 2h, 1d
+    execute_on=TimeFrame(5, TimeFrameUnit.Minute) # Try 15min
+
+    config = SeqLongOnlyEnvConfig(
+        symbol=cfg.env.symbol,
+        time_frames=time_frames,
+        window_sizes=window_sizes,
+        execute_on=execute_on,
+        include_base_features=False,
+        initial_cash=cfg.env.initial_cash,
+        slippage=cfg.env.slippage,
+        transaction_fee=cfg.env.transaction_fee,
+        bankrupt_threshold=cfg.env.bankrupt_threshold,
+        seed=cfg.env.seed,
+    )
+    return SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+
 
 
 def apply_env_transforms(
@@ -84,9 +157,9 @@ def apply_env_transforms(
     return transformed_env
 
 
-def make_environment(cfg, train_num_envs=1, eval_num_envs=1, logger=None):
+def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
     """Make environments for training and evaluation."""
-    maker = functools.partial(env_maker, cfg)
+    maker = functools.partial(env_maker, train_df, cfg)
     parallel_env = ParallelEnv(
         train_num_envs,
         EnvCreator(maker),
@@ -96,7 +169,7 @@ def make_environment(cfg, train_num_envs=1, eval_num_envs=1, logger=None):
 
     train_env = apply_env_transforms(parallel_env)
 
-    maker = functools.partial(env_maker, cfg, from_pixels=cfg.logger.video)
+    maker = functools.partial(env_maker, test_df, cfg)
     eval_env = TransformedEnv(
         ParallelEnv(
             eval_num_envs,
@@ -105,10 +178,6 @@ def make_environment(cfg, train_num_envs=1, eval_num_envs=1, logger=None):
         ),
         train_env.transform.clone(),
     )
-    if cfg.logger.video:
-        eval_env.insert_transform(
-            0, VideoRecorder(logger, tag="rendered", in_keys=["pixels"])
-        )
     return train_env, eval_env
 
 

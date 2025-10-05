@@ -1,9 +1,15 @@
 # env and task
 env:
-  name: HalfCheetah-v4
-  task: ""
+  name: SeqLongOnlyEnv
+  symbol: "BTC/USD"
+  time_frames: [1, 5, 15, 60]
+  window_sizes: [12, 8, 8, 24]
+  execute_on: 5
+  initial_cash: 1000
+  transaction_fee: 0.015
+  slippage: 0.01
+  bankrupt_threshold: 0.1
   exp_name: ${logger.exp_name}
-  n_samples_stats: 1000
   seed: 0
   backend: gym
 
@@ -31,7 +37,7 @@ optim:
   device: null
   lr: 3e-4
   weight_decay: 0.0
-  gradient_steps: 2500
+  gradient_steps: 40000
 
 # network
 model:
