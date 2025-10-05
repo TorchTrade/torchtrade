@@ -55,7 +55,7 @@ class MarketDataObservationSampler():
                 if 'index' in resampled.columns:
                     resampled = resampled.drop(columns=['index'])
 
-            self.resampled_dfs[tf.to_pandas_freq()] = resampled
+            self.resampled_dfs[tf.obs_key_freq()] = resampled
         
         # Get execution timestamps: the points where the agent acts (resampled to execute_on)
         # Use the start of each execute_on period
@@ -106,11 +106,11 @@ class MarketDataObservationSampler():
         """Get an observation from the dataset at the given timestamp."""
         obs = {}
         for tf, ws in zip(self.time_frames, self.window_sizes):
-            resampled = self.resampled_dfs[tf.to_pandas_freq()]
+            resampled = self.resampled_dfs[tf.obs_key_freq()]
             window = resampled.loc[:timestamp].tail(ws).values
             if len(window) < ws:
                 raise ValueError("Not enough data for the largest window")
-            obs[tf.to_pandas_freq()] = window
+            obs[tf.obs_key_freq()] = window
         return obs
 
     def get_max_steps(self)->int:

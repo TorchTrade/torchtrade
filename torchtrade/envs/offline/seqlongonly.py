@@ -77,7 +77,7 @@ class SeqLongOnlyEnv(EnvBase):
         account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(6,), dtype=torch.float)
         self.market_data_keys = []
         for i, market_data_name in enumerate(market_data_keys):
-            market_data_key = "market_data_" + market_data_name
+            market_data_key = "market_data_" + market_data_name + "_" + str(config.window_sizes[i])
             market_data_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(config.window_sizes[i], num_features), dtype=torch.float)
             self.observation_spec.set(market_data_key, market_data_spec)
             self.market_data_keys.append(market_data_key)
