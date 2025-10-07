@@ -300,22 +300,22 @@ def make_discrete_iql_model(cfg, device):
 
     encoder1min12 = SafeModule(
         module=encodernet1min12,
-        in_keys=["market_data_1Min"],
+        in_keys=["market_data_1Minute_12"],
         out_keys=["encoding1min"],
     ).to(device)
     encoder5min8 = SafeModule(
         module=encodernet5min8,
-        in_keys=["market_data_5Min"],
+        in_keys=["market_data_5Minute_8"],
         out_keys=["encoding5min"],
     ).to(device)
     encoder15min8 = SafeModule(
         module=encodernet15min8,
-        in_keys=["market_data_15Min"],
+        in_keys=["market_data_15Minute_8"],
         out_keys=["encoding15min"],
     ).to(device)
     encoder1h24 = SafeModule(
         module=encodernet1h24,
-        in_keys=["market_data_1H"],
+        in_keys=["market_data_1Hour_24"],
         out_keys=["encoding1h"],
 
     ).to(device)
@@ -393,10 +393,10 @@ def make_discrete_iql_model(cfg, device):
 
     example_td = tensordict.TensorDict(
         {
-            "market_data_1Min": torch.randn(1, 12, 14),
-            "market_data_5Min": torch.randn(1, 8, 14),
-            "market_data_15Min": torch.randn(1, 8, 14),
-            "market_data_1H": torch.randn(1, 24, 14),
+            "market_data_1Minute_12": torch.randn(1, 12, 14),
+            "market_data_5Minute_8": torch.randn(1, 8, 14),
+            "market_data_15Minute_8": torch.randn(1, 8, 14),
+            "market_data_1Hour_24": torch.randn(1, 24, 14),
             "account_state": torch.randn(1, 6),
         }
     ).to(device)
