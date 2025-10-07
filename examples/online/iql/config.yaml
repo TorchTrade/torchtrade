@@ -2,6 +2,7 @@
 env:
   name: SeqLongOnlyEnv
   symbol: "BTC/USD"
+  freqs: ["Min", "Min", "Min", "Hour"]
   time_frames: [1, 5, 15, 60]
   window_sizes: [12, 8, 8, 24]
   execute_on: 5
@@ -11,7 +12,7 @@ env:
   bankrupt_threshold: 0.1
   exp_name: ${logger.exp_name}
   seed: 0
-  train_envs: 1
+  train_envs: 5
   eval_envs: 1
 
 # logger
@@ -20,7 +21,7 @@ logger:
   project_name: TorchTrade-Online
   exp_name: iql
   group_name: null
-  eval_iter: 1000
+  eval_iter: 20000
   mode: online
 
 # replay buffer
@@ -35,10 +36,10 @@ replay_buffer:
 # collector
 collector:
   device: cpu
-  init_random_frames: 1000
-  frames_per_batch: 1000
+  init_random_frames: 10000
+  frames_per_batch: 5000
   max_frames_per_traj: 100000
-  total_frames: 100000
+  total_frames: 2000000
 
 # optimization
 optim:
@@ -57,9 +58,9 @@ model:
 # loss
 loss: 
   loss_function: l2
-  gamma: 0.99
+  gamma: 0.4 # 0.95
   tau: 0.005
-  hard_update_interval: 10
+  hard_update_interval: 1000
 
 
 # IQL specific hyperparameter

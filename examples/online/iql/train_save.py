@@ -20,6 +20,7 @@ import torch
 import tqdm
 from tensordict.nn import CudaGraphModule
 from torchrl._utils import timeit
+from torchrl.envs import set_gym_backend
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 from torchrl.objectives import group_optimizers
 from torchrl.record.loggers import generate_exp_name, get_logger
@@ -89,9 +90,18 @@ def main(cfg: DictConfig):  # noqa: F821
         device=cfg.replay_buffer.device,
         prefetch=cfg.replay_buffer.prefetch,
     )
+    offline_buffer = make_replay_buffer(
+        batch_size=cfg.replay_buffer.batch_size,
+        prb=cfg.replay_buffer.prb,
+        buffer_size=cfg.replay_buffer.buffer_size,
+        scratch_dir=cfg.replay_buffer.scratch_dir,
+        device=cfg.replay_buffer.device,
+        prefetch=cfg.replay_buffer.prefetch,
+    )
+
 
     # Create agent
-    model = make_discrete_iql_model(cfg, train_env, device)
+    model = make_discrete_iql_model(cfg, device)
     eval_env.to(model[0].device)
 
     # Create loss
@@ -151,6 +161,7 @@ def main(cfg: DictConfig):  # noqa: F821
     collector_iter = iter(collector)
     pbar = tqdm.tqdm(range(collector.total_frames))
     total_iter = len(collector)
+    total_collected = 0
     for _ in range(total_iter):
         timeit.printevery(1000, total_iter, erase=True)
 
@@ -165,6 +176,12 @@ def main(cfg: DictConfig):  # noqa: F821
             # add to replay buffer
             tensordict = tensordict.reshape(-1)
             replay_buffer.extend(tensordict.cpu())
+
+            # filter out positive samples
+            idxs = torch.where(tensordict[("next", "reward")] > 0)[0]
+            total_collected += len(idxs)
+            if len(idxs) > 0:
+                offline_buffer.extend(tensordict[idxs].cpu())
         collected_frames += current_frames
 
         # optimization steps
@@ -213,6 +230,7 @@ def main(cfg: DictConfig):  # noqa: F821
             metrics_to_log["train/actor_loss"] = loss_info["loss_actor"]
             metrics_to_log["train/value_loss"] = loss_info["loss_value"]
             metrics_to_log["train/entropy"] = loss_info.get("entropy")
+            metrics_to_log["train/collected_frames"] = total_collected
 
         if logger is not None:
             metrics_to_log.update(timeit.todict(prefix="time"))
@@ -222,6 +240,8 @@ def main(cfg: DictConfig):  # noqa: F821
 
 
     collector.shutdown()
+
+    offline_buffer.dumps("offline_buffer.pt")
 
     if not eval_env.is_closed:
         eval_env.close()
