@@ -171,7 +171,6 @@ def main(cfg: DictConfig):  # noqa: F821
                 metrics_to_log["eval/sell_actions"] = sell_actions
                 eval_env.reset()
                 metrics_to_log["eval/history"] = wandb.Image(fig[0])
-                #logger.experiment.log({"eval_history": wandb.Image(fig[0])}, step=i)
                 torch.save(model[0].state_dict(), f"iql_policy_{i}.pth")
         if logger is not None:
             metrics_to_log.update(timeit.todict(prefix="time"))
