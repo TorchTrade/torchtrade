@@ -9,7 +9,8 @@
 
 **Smaller things:**
 
-- [ ] add eval env to offline example
+- [X] add eval env to offline example
+- [ ] add dSAC for the online example and test online positive transaction selection
 - [ ] add example notebooks for alpaca envs and elements
 
 ## Binance Env
