@@ -4,11 +4,9 @@ import functools
 
 import torch.nn
 import torch.optim
-from tensordict.nn import InteractionType, TensorDictModule
-from tensordict.nn.distributions import NormalParamExtractor
+from tensordict.nn import InteractionType
 from torch.distributions import Categorical
-from torchrl.data import Categorical as CategoricalSpec
-from torchrl.data import Bounded as BoundedSpec
+
 
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import (
@@ -35,7 +33,6 @@ from torchrl.modules import (
     SafeModule,
     SafeSequential,
 )
-import tensordict
 
 from torchrl.objectives import DiscreteIQLLoss, HardUpdate
 from torchrl.trainers.helpers.models import ACTIVATIONS
@@ -271,7 +268,7 @@ def make_discrete_iql_model(cfg, env, device):
     # Build the encoder
     for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
     
-        model = BiNMTABLModel(input_shape=(1, w, 14),
+        model = BiNMTABLModel(input_shape=(w, 14),
                             output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
                             hidden_seq_size=w,
                             hidden_feature_size=14,

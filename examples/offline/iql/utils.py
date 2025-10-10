@@ -283,7 +283,7 @@ def make_discrete_iql_model(cfg, device):
     action_spec = CategoricalSpec(3)
     # Define Actor Network
     import tensordict
-    encodernet1min12 = BiNMTABLModel(input_shape=(1, 12, 14),
+    encodernet1min12 = BiNMTABLModel(input_shape=(12, 14),
                         output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
                         hidden_seq_size=12,
                         hidden_feature_size=14,
@@ -292,7 +292,7 @@ def make_discrete_iql_model(cfg, device):
                         final_activation="relu",
                         dropout=0.1,
                         initializer="kaiming_uniform")
-    encodernet5min8 = BiNMTABLModel(input_shape=(1, 8, 14),
+    encodernet5min8 = BiNMTABLModel(input_shape=(8, 14),
                         output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
                         hidden_seq_size=8,
                         hidden_feature_size=14,
@@ -302,7 +302,7 @@ def make_discrete_iql_model(cfg, device):
                         dropout=0.1,
                         initializer="kaiming_uniform")
 
-    encodernet15min8 = BiNMTABLModel(input_shape=(1, 8, 14),
+    encodernet15min8 = BiNMTABLModel(input_shape=(8, 14),
                         output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
                         hidden_seq_size=8,
                         hidden_feature_size=14,
@@ -312,7 +312,7 @@ def make_discrete_iql_model(cfg, device):
                         dropout=0.1,
                         initializer="kaiming_uniform")
 
-    encodernet1h24 = BiNMTABLModel(input_shape=(1, 24, 14),
+    encodernet1h24 = BiNMTABLModel(input_shape=(24, 14),
                         output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
                         hidden_seq_size=24,
                         hidden_feature_size=14,

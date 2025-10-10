@@ -273,7 +273,7 @@ def make_sac_agent(cfg, env, device):
     # Build the encoder
     for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
     
-        model = BiNMTABLModel(input_shape=(1, w, 14),
+        model = BiNMTABLModel(input_shape=(w, 14),
                             output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
                             hidden_seq_size=w,
                             hidden_feature_size=14,
