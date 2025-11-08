@@ -69,6 +69,7 @@ class AlpacaTorchTradingEnv(EnvBase):
         self.action_levels = config.action_levels
         # Define action and observation spaces
         self.action_spec = Categorical(len(self.action_levels))
+        # action levels [-1, 0, 1], categorical actions [0, 1, 2] -> 0: sell, 1: hold, 2: buy
         # self.hold_action = self.action_levels[1]
         # assert self.hold_action == 0.0, "Hold action should be 0.0, possibly action levels are not [-1, 0, 1]!"
 
