@@ -160,3 +160,5 @@ Given no position and short-term downside momentum without a confirmed entry sig
 
 
 **NOTE:** Outouts could get stored and used to fine tune a local LLM.
+
+**NOTE:** ADD Transform to fetch news from X or other platform to extend the observation space!

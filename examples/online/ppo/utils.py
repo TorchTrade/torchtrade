@@ -16,6 +16,7 @@ from torchrl.envs import (
     InitTracker,
     Compose,
     TransformedEnv,
+    StepCounter,
 )
 from torchrl.collectors import SyncDataCollector
 
@@ -135,6 +136,7 @@ def env_maker(df, cfg, device="cpu"):
 
 def apply_env_transforms(
     env,
+    max_steps,
 ):
     transformed_env = TransformedEnv(
         env,
@@ -142,6 +144,7 @@ def apply_env_transforms(
             InitTracker(),
             DoubleToFloat(),
             RewardSum(),
+            StepCounter(max_steps=max_steps),
         ),
     )
     return transformed_env
@@ -150,6 +153,7 @@ def apply_env_transforms(
 def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
     """Make environments for training and evaluation."""
     maker = functools.partial(env_maker, train_df, cfg)
+    max_train_steps = train_df.shape[0]
     parallel_env = ParallelEnv(
         train_num_envs,
         EnvCreator(maker),
@@ -157,7 +161,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
     )
     parallel_env.set_seed(cfg.env.seed)
 
-    train_env = apply_env_transforms(parallel_env)
+    train_env = apply_env_transforms(parallel_env, max_train_steps)
 
     maker = functools.partial(env_maker, test_df, cfg)
     eval_env = TransformedEnv(

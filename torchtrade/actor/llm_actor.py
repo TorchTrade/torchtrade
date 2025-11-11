@@ -136,4 +136,10 @@ You must choose exactly one action: buy, sell, or hold.
         action = self.extract_action(response)
         float_action = self.action_dict[action]
         tensordict.set("action", float_action)
+        # Add thinking
+        thinking_pattern = "<think>(.*?)</think>"
+        match = re.search(thinking_pattern, response)
+        if match:
+            thinking = match.group(1)
+            tensordict.set("thinking", thinking)
         return tensordict
