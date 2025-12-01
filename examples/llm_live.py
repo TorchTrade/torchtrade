@@ -71,6 +71,7 @@ def make_collector(train_env, frames_per_batch=1, total_frames=10000, policy=Non
         frames_per_batch=frames_per_batch,
         total_frames=total_frames,
         device=device,
+        trust_policy=True,
     )
     collector.set_seed(42)
     return collector
@@ -142,6 +143,7 @@ def main():
             shared=False,
         )
     policy = LLMActor(model="gpt-5-mini", debug=True)
+    policy_type="gpt5mini"
     collector = make_collector(env, policy=policy, frames_per_batch=1, total_frames=total_farming_steps)
 
     squeezer = SqueezeTransform(dim=-3, in_keys=["market_data_1Minute_12",
