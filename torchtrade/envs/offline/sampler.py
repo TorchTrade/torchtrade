@@ -62,7 +62,7 @@ class MarketDataObservationSampler():
         # Get execution timestamps: the points where the agent acts (resampled to execute_on)
         # Use the start of each execute_on period
         self.exec_times = self.df.resample(execute_on.to_pandas_freq()).first().index
-        self.execute_base_features = self.df.resample(execute_on.to_pandas_freq()).first()
+        self.execute_base_features = self.df.resample(execute_on.to_pandas_freq()).last()
         
         # Maximum lookback window
         window_durations = [tf_to_timedelta(tf) * ws for tf, ws in zip(time_frames, window_sizes)]

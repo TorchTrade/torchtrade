@@ -67,10 +67,8 @@ class SeqLongOnlyEnv(EnvBase):
         self.action_spec = Categorical(len(self.action_levels))
 
         # Get the number of features from the observer
-        obs, _, _ = self.sampler.get_random_observation()
         market_data_keys = self.sampler.get_observation_keys()
-
-        num_features = obs[market_data_keys[0]].shape[1]
+        num_features = len(self.sampler.get_feature_keys())
 
         # Observation space includes market data features and current position info
         self.observation_spec = CompositeSpec(shape=())
@@ -79,7 +77,7 @@ class SeqLongOnlyEnv(EnvBase):
         self.account_state_key = "account_state"
 
         # Account state spec: [cash, portfolio_value, position_size, entry_price, unrealized_pnlpct, holding_time]
-        account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(6,), dtype=torch.float)
+        account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(7,), dtype=torch.float)
         self.market_data_keys = []
         for i, market_data_name in enumerate(market_data_keys):
             market_data_key = "market_data_" + market_data_name + "_" + str(config.window_sizes[i])
@@ -104,12 +102,20 @@ class SeqLongOnlyEnv(EnvBase):
         # Get market data
         obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
 
+        current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+        self.position_value = round(self.position_size * current_price, 3)
+        if self.position_size > 0:
+            self.unrealized_pnlpc = round((current_price - self.entry_price) / self.entry_price, 4)
+        else:
+            self.unrealized_pnlpc = 0.0
+
         # Get account state
         account_state = [
             self.balance,
             self.position_size,
             self.position_value,
             self.entry_price,
+            current_price,
             self.unrealized_pnlpc,
             self.position_hold_counter
         ]
@@ -213,7 +219,7 @@ class SeqLongOnlyEnv(EnvBase):
         time_penalty = 0.0
         if self.position_hold_counter > 50:
              # Very small constant penalty to prevent excessively passive behavior
-            time_penalty = -0.001 * self.position_hold_counter
+            time_penalty = -0.0005 * self.position_hold_counter
         
         # --- 4. Invalid Action Penalty (Keep existing logic) ---
         # A small, fixed penalty for trying to Sell when Flat, or Buy when Long,
@@ -321,13 +327,7 @@ class SeqLongOnlyEnv(EnvBase):
         if desired_position == 0 or desired_position == self.current_position or (self.current_position == 1 and desired_position == 1) or (self.current_position == 0 and desired_position == -1):
             # Compute unrealized PnL, add hold counter update last_portfolio_value
             self.position_hold_counter += 1
-            current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
-            if self.position_size > 0:
-                self.unrealized_pnlpc = round((current_price - self.entry_price) / self.entry_price, 3)
-            else:
-                self.unrealized_pnlpc = 0.0
-            self.position_value = round(self.position_size * current_price, 3)
-            
+
             return trade_info
         
         # Determine trade details
