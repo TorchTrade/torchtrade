@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings
 
 import hydra
+from sympy.logic.boolalg import true
 from torchrl._utils import compile_with_warmup
 import pandas as pd
 
@@ -34,28 +35,32 @@ def main(cfg: DictConfig):  # noqa: F821
         else:
             device = "cpu"
     device = torch.device(device)
+    print("USING DEVICE: ", device)
 
     # Creante env
     df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
     test_df = df[0:(1440 *21)] # 14 days
     train_df = df[(1440 * 21):]
 
+
+    max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
+    max_eval_traj_length = len(test_df)
     train_env, eval_env = make_environment(
         train_df,
         test_df,
         cfg,
         train_num_envs=cfg.env.train_envs,
         eval_num_envs=cfg.env.eval_envs,
+        max_train_traj_length=max_train_traj_length,
+        max_eval_traj_length=max_eval_traj_length
     )
-    max_eval_steps = 100000
     eval_env.to(device)
 
-    # Correct for frame_skip
-    frame_skip = 1
-    total_frames = cfg.collector.total_frames // frame_skip
-    frames_per_batch = cfg.collector.frames_per_batch // frame_skip
-    mini_batch_size = cfg.loss.mini_batch_size // frame_skip
-    test_interval = cfg.logger.test_interval // frame_skip
+    # Correct
+    total_frames = cfg.collector.total_frames 
+    frames_per_batch = cfg.collector.frames_per_batch 
+    mini_batch_size = cfg.loss.mini_batch_size 
+    test_interval = cfg.logger.test_interval 
 
     compile_mode = None
     if cfg.compile.compile:
@@ -81,7 +86,7 @@ def main(cfg: DictConfig):  # noqa: F821
         compile_mode,
     )
     # Create data buffer
-    sampler = SamplerWithoutReplacement()
+    sampler = SamplerWithoutReplacement(drop_last=true)
     data_buffer = TensorDictReplayBuffer(
         storage=LazyTensorStorage(
             frames_per_batch, compilable=cfg.compile.compile, device=device
@@ -209,7 +214,8 @@ def main(cfg: DictConfig):  # noqa: F821
 
         metrics_to_log = {}
         frames_in_batch = data.numel()
-        collected_frames += frames_in_batch * frame_skip
+        metrics_to_log["train/action_std"] = data["action"].float().std().item()
+        collected_frames += frames_in_batch
         pbar.update(frames_in_batch)
 
         # Get training rewards and episode lengths
@@ -265,12 +271,12 @@ def main(cfg: DictConfig):  # noqa: F821
         with torch.no_grad(), set_exploration_type(
             ExplorationType.DETERMINISTIC
         ), timeit("eval"):
-            if ((i - 1) * frames_in_batch * frame_skip) // test_interval < (
-                i * frames_in_batch * frame_skip
+            if ((i - 1) * frames_in_batch) // test_interval < (
+                i * frames_in_batch
             ) // test_interval:
                 actor.eval()
                 eval_rollout = eval_env.rollout(
-                    max_eval_steps,
+                    max_eval_traj_length,
                     actor,
                     auto_cast_to_device=True,
                     break_when_any_done=True,
@@ -283,8 +289,11 @@ def main(cfg: DictConfig):  # noqa: F821
                 metrics_to_log["eval/history"] = wandb.Image(fig[0])
                 actor.train()
         if logger is not None:
+            time_dict = timeit.todict(prefix="time")
             metrics_to_log.update(timeit.todict(prefix="time"))
             metrics_to_log["time/speed"] = pbar.format_dict["rate"]
+            metrics_to_log["time/SPS-collecting"] = frames_in_batch / time_dict["time/collecting"]
+            metrics_to_log["time/SPS-total"] = frames_in_batch / sum(time_dict.values())
             log_metrics(logger, metrics_to_log, collected_frames)
 
         collector.update_policy_weights_()

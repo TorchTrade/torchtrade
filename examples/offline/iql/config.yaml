@@ -2,8 +2,9 @@
 env:
   name: SeqLongOnlyEnv
   symbol: "BTC/USD"
-  time_frames: [1, 5, 15, 60]
+  time_frames: [1, 5, 15, 1]
   window_sizes: [12, 8, 8, 24]
+  freqs: ["Min", "Min", "Min", "H"]
   execute_on: 5
   initial_cash: 1000
   transaction_fee: 0.015
@@ -19,7 +20,7 @@ logger:
   project_name: TorchTrade-Offline
   exp_name: iql
   group_name: null
-  eval_iter: 1000
+  eval_iter: 200
   eval_steps: 1000
   mode: online
   eval_envs: 5
@@ -28,7 +29,7 @@ logger:
 # replay buffer
 replay_buffer:
   batch_size: 256
-  data_path: "/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/real_live_data/td_iter3.pt"
+  data_path: "/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/real_live_data/td_new4.pt"
   buffer_size: 10000
   r2g_gamma: 0.99
 

@@ -29,6 +29,8 @@ from torchrl.modules import (
     SafeSequential,
 )
 from trading_nets.architectures.tabl.tabl import BiNMTABLModel
+from trading_nets.architectures.wavenet.simple_1d_wave import Simple1DWaveEncoder
+
 from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
 import ta
@@ -106,7 +108,7 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def env_maker(df, cfg, device="cpu"):
+def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
 
     # TODO: Make this configurable with config
     time_frames=[
@@ -129,6 +131,8 @@ def env_maker(df, cfg, device="cpu"):
         transaction_fee=cfg.env.transaction_fee,
         bankrupt_threshold=cfg.env.bankrupt_threshold,
         seed=cfg.env.seed,
+        max_traj_length=max_traj_length,
+        random_start=random_start
     )
     return SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
 
@@ -150,9 +154,11 @@ def apply_env_transforms(
     return transformed_env
 
 
-def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
+def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1, 
+                     max_train_traj_length=1,
+                     max_eval_traj_length=1):
     """Make environments for training and evaluation."""
-    maker = functools.partial(env_maker, train_df, cfg)
+    maker = functools.partial(env_maker, train_df, cfg, max_traj_length=max_train_traj_length, random_start=True)
     max_train_steps = train_df.shape[0]
     parallel_env = ParallelEnv(
         train_num_envs,
@@ -163,7 +169,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
 
     train_env = apply_env_transforms(parallel_env, max_train_steps)
 
-    maker = functools.partial(env_maker, test_df, cfg)
+    maker = functools.partial(env_maker, test_df, cfg, max_traj_length=max_eval_traj_length)
     eval_env = TransformedEnv(
         ParallelEnv(
             eval_num_envs,
@@ -181,7 +187,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
 # --------------------------------------------------------------------
 
 
-def make_discrete_ppo_model(cfg, env, device):
+def make_discrete_ppo_binmtabl_model(cfg, env, device):
     """Make discrete PPO agent."""
     # Define Actor Network
     action_spec = env.action_spec
@@ -282,9 +288,101 @@ def make_discrete_ppo_model(cfg, env, device):
 
     return common_module, policy_module, value_module
 
+def make_discrete_ppo_wavenet_model(cfg, env, device):
+    """Make discrete PPO agent."""
+    action_spec = env.action_spec
+
+    market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
+    assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"
+    # Define Actor Network
+    time_frames = cfg.env.time_frames
+    assert len(time_frames) == len(market_data_keys), f"Amount of time frames {len(time_frames)} and env market data keys do not match! Keys: {market_data_keys}"
+    encoders = []
+    
+    # Build the encoder
+    for key, freq, t, w in zip(market_data_keys, cfg.env.freqs, cfg.env.time_frames, cfg.env.window_sizes):
+        net = Simple1DWaveEncoder(feature_dim=14,
+                                base_channels=32,
+                                num_layers=4,
+                                out_channels=14,
+                                squeeze_output=True,
+                                dil_norm_type='layernorm'
+                                )
+        encoders.append(SafeModule(net, in_keys=key, out_keys=[f"encoding_{t}_{freq}_{w}"]))
+
+    account_state_encoder = SafeModule(
+        module=MLP(
+            num_cells=[32],
+            out_features=14,
+            activation_class=ACTIVATIONS["relu"],
+            device=device,
+        ),
+        in_keys=["account_state"],
+        out_keys=["encoding_account_state"],
+    )
+
+
+    
+    common = MLP(
+        num_cells=[128, 128],
+        out_features=128,
+        activation_class=ACTIVATIONS["relu"],
+        device=device,
+    )
+
+    common_module = SafeModule(
+        module=common,
+        in_keys=[f"encoding_{t}_{fre}_{w}" for t, w, fre in zip(time_frames, cfg.env.window_sizes, cfg.env.freqs)] + ["encoding_account_state"],
+        out_keys=["common_features"],
+    )
+    common_module = SafeSequential(*encoders, account_state_encoder, common_module)
+
+    # Define on head for the policy
+    policy_net = MLP(
+        in_features=128,
+        out_features=action_spec.n,
+        activation_class=ACTIVATIONS["relu"],
+        num_cells=[],
+        device=device,
+    )
+    policy_module = TensorDictModule(
+        module=policy_net,
+        in_keys=["common_features"],
+        out_keys=["logits"],
+    )
+
+    # Add probabilistic sampling of the actions
+    distribution_class = torch.distributions.Categorical
+    distribution_kwargs = {}
+
+    policy_module = ProbabilisticActor(
+        policy_module,
+        in_keys=["logits"],
+        spec=env.full_action_spec_unbatched.to(device),
+        distribution_class=distribution_class,
+        distribution_kwargs=distribution_kwargs,
+        return_log_prob=True,
+        default_interaction_type=ExplorationType.RANDOM,
+    )
+
+    # Define another head for the value
+    value_net = MLP(
+        activation_class=torch.nn.ReLU,
+        in_features=128,
+        out_features=1,
+        num_cells=[],
+        device=device,
+    )
+    value_module = ValueOperator(
+        value_net,
+        in_keys=["common_features"],
+    )
+
+    return common_module, policy_module, value_module
+
 
 def make_ppo_models(env, device, cfg):
-    common_module, policy_module, value_module = make_discrete_ppo_model(
+    common_module, policy_module, value_module = make_discrete_ppo_binmtabl_model(
         cfg,
         env,
         device=device,
@@ -295,7 +393,7 @@ def make_ppo_models(env, device, cfg):
         common_operator=common_module,
         policy_operator=policy_module,
         value_operator=value_module,
-    )
+    ).to(device)
 
     with torch.no_grad():
         td = env.fake_tensordict().unsqueeze(0).expand(3, 2).to(actor_critic.device)

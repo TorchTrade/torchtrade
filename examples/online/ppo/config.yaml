@@ -5,19 +5,19 @@ env:
   time_frames: [1, 5, 15, 60]
   window_sizes: [12, 8, 8, 24]
   execute_on: 5
-  initial_cash: 1000
+  initial_cash: [1000, 5000]
   transaction_fee: 0.015
   slippage: 0.01
   bankrupt_threshold: 0.1
   exp_name: ${logger.exp_name}
   seed: 0
-  train_envs: 5
+  train_envs: 10
   eval_envs: 2
 
   # collector
 collector:
   device: 
-  frames_per_batch: 4096
+  frames_per_batch: 10000 # 5 envs -> 1000 steps per rollout execute on 5 min -> ~ 3.5 days per rollout
   total_frames: 100_000_000
 
 # logger
@@ -42,7 +42,7 @@ optim:
 # loss
 loss:
   gamma: 0.9
-  mini_batch_size: 1024
+  mini_batch_size: 3333
   ppo_epochs: 3
   gae_lambda: 0.95
   clip_epsilon: 0.1

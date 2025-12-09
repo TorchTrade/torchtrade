@@ -18,9 +18,7 @@ from torchrl.data import (
 )
 from torchrl.data.replay_buffers import SamplerWithoutReplacement
 from torchrl.envs import (
-    CatTensors,
     Compose,
-    DMControlEnv,
     DoubleToFloat,
     EnvCreator,
     InitTracker,
@@ -29,7 +27,6 @@ from torchrl.envs import (
     TransformedEnv,
 )
 
-from torchrl.envs.libs.gym import GymEnv, set_gym_backend
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 from torchrl.modules import (
     MLP,
@@ -41,6 +38,8 @@ from torchrl.objectives import DiscreteIQLLoss, HardUpdate
 from torchrl.record import VideoRecorder
 from torchrl.trainers.helpers.models import ACTIVATIONS
 from trading_nets.architectures.tabl.tabl import BiNMTABLModel
+from trading_nets.architectures.wavenet.simple_1d_wave import Simple1DWaveEncoder
+
 import copy
 import pandas as pd
 import numpy as np
@@ -275,9 +274,123 @@ def make_offline_replay_buffer(rb_cfg):
 # these models is unchanged, regardless of the modality.
 #
 
+def make_discrete_iql_wavenet_model(cfg, env, device):
+    """Make discrete IQL agent."""
+    # Define Actor Network
+    market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
+    assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"
+    account_state_key = "account_state"
+    # Define Actor Network
+    time_frames = cfg.env.time_frames
+    assert len(time_frames) == len(market_data_keys), f"Amount of time frames {len(time_frames)} and env market data keys do not match! Keys: {market_data_keys}"
+    encoders = []
+    
+    # Build the encoder
+    for key, freq, t in zip(market_data_keys, cfg.env.freqs, cfg.env.time_frames):
+        net = Simple1DWaveEncoder(feature_dim=14,
+                                base_channels=32,
+                                num_layers=4,
+                                out_channels=14,
+                                squeeze_output=True,
+                                dil_norm_type='layernorm'
+                                )
+        encoders.append(SafeModule(net, in_keys=key, out_keys=[f"encoding{t}{freq.lower()}"]))
+
+    account_state_encoder = SafeModule(
+        module=MLP(
+            num_cells=[32],
+            out_features=14,
+            activation_class=ACTIVATIONS[cfg.model.activation],
+            device=device,
+        ),
+        in_keys=["account_state"],
+        out_keys=["encoding_account_state"],
+    )
 
 
-def make_discrete_iql_model(cfg, device):
+    encoder = SafeSequential(*encoders, account_state_encoder).to(device)
+    
+    actor_net = MLP(
+        num_cells=cfg.model.hidden_sizes,
+        out_features=3,
+        activation_class=ACTIVATIONS[cfg.model.activation],
+        device=device,
+    )
+
+    actor_module = SafeModule(
+        module=actor_net,
+        in_keys=["encoding1min", "encoding5min", "encoding15min", "encoding1h", "encoding_account_state"],
+        out_keys=["logits"],
+    )
+    full_actor = SafeSequential(encoder, actor_module)
+    
+    actor = ProbabilisticActor(
+        spec=Composite(action=env.full_action_spec_unbatched).to(device),
+        module=full_actor,
+        in_keys=["logits"],
+        out_keys=["action"],
+        distribution_class=Categorical,
+        distribution_kwargs={},
+        default_interaction_type=InteractionType.RANDOM,
+        return_log_prob=False,
+    )
+
+    # Define Critic Network
+    qvalue_net = MLP(
+        num_cells=cfg.model.hidden_sizes,
+        out_features=3,
+        activation_class=ACTIVATIONS[cfg.model.activation],
+        device=device,
+    )
+    
+    qvalue = SafeModule(
+        module=qvalue_net,
+        in_keys=["encoding1min", "encoding5min", "encoding15min", "encoding1h", "encoding_account_state"],
+        out_keys=["state_action_value"],
+    )
+    full_qvalue = SafeSequential(copy.deepcopy(encoder), qvalue)
+
+    # Define Value Network
+    value_net = MLP(
+        num_cells=cfg.model.hidden_sizes,
+        out_features=1,
+        activation_class=ACTIVATIONS[cfg.model.activation],
+        device=device,
+    )
+    value_net = SafeModule(
+        module=value_net,
+        in_keys=["encoding1min", "encoding5min", "encoding15min", "encoding1h", "encoding_account_state"],
+        out_keys=["state_value"],
+    )   
+    full_value = SafeSequential(copy.deepcopy(encoder), value_net)
+
+    model = torch.nn.ModuleList([actor, full_qvalue, full_value])
+
+
+    # init nets
+
+    example_td = tensordict.TensorDict(
+        {
+            "market_data_1Minute_12": torch.randn(1, 12, 14),
+            "market_data_5Minute_8": torch.randn(1, 8, 14),
+            "market_data_15Minute_8": torch.randn(1, 8, 14),
+            "market_data_1Hour_24": torch.randn(1, 24, 14),
+            "account_state": torch.randn(1, 6),
+        }
+    ).to(device)
+    with torch.no_grad(), set_exploration_type(ExplorationType.RANDOM):
+        td = example_td
+        for net in model:
+            net(td)
+
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Total number of parameters: {total_params}")
+
+    return model
+
+
+
+def make_discrete_iql_binmtabl_model(cfg, device):
     """Make discrete IQL agent."""
     # Define Actor Network
     action_spec = CategoricalSpec(3)
