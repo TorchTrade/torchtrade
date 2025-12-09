@@ -14,6 +14,7 @@ class MarketDataObservationSampler():
         execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute),
         feature_processing_fn: Optional[Callable] = None,
         features_start_with: str = "features_",
+        max_traj_length: Optional[int] = None,
     ):
         required_columns = ["timestamp", "open", "high", "low", "close", "volume"]
         # Check if columns match
@@ -31,6 +32,7 @@ class MarketDataObservationSampler():
         
         self.time_frames = time_frames
         self.window_sizes = window_sizes
+        self.max_traj_length = max_traj_length
         self.execute_on = execute_on
         self.feature_processing_fn = feature_processing_fn
         
@@ -75,7 +77,7 @@ class MarketDataObservationSampler():
         if len(self.exec_times) == 0:
             raise ValueError("Window duration is too large for the given dataset, no execution times found")
         
-        self.max_steps = len(self.exec_times) -1
+        self.max_steps = len(self.exec_times) -1 if self.max_traj_length is None else min(len(self.exec_times) -1, self.max_traj_length)
 
     def get_random_timestamp(self, without_replacement: bool = False)->pd.Timestamp:
         """Get a random timestamp from the dataset.
@@ -93,14 +95,18 @@ class MarketDataObservationSampler():
         If without_replacement is True, the timestamp is removed from the list of unseen timestamps.
         """
         timestamp = self.get_random_timestamp(without_replacement)
-        return self.get_observation(timestamp), timestamp
+        return self.get_observation(timestamp), timestamp, False
 
     def get_sequential_observation(self)->Tuple[np.ndarray, pd.Timestamp]:
         """Get the next observation in the dataset.
         The timestamp is removed from the list of unseen timestamps.
         """
         timestamp = self.unseen_timestamps.pop(0)
-        return self.get_observation(timestamp), timestamp
+        if timestamp == self.exec_times[-1]:
+            truncated = True
+        else:
+            truncated = False
+        return self.get_observation(timestamp), timestamp, truncated
 
     def get_observation(self, timestamp: pd.Timestamp)->np.ndarray:
         """Get an observation from the dataset at the given timestamp."""
@@ -119,9 +125,16 @@ class MarketDataObservationSampler():
     def get_observation_keys(self)->List[str]:
         return list(self.resampled_dfs.keys())
 
-    def reset(self)->None:
+    def reset(self, random_start: bool = False)->None:
         """Reset the observation sampler."""
-        self.unseen_timestamps = list(self.exec_times)
+        if random_start:
+            exec_times_list = list(self.exec_times)
+            max_start_index = max(0, len(exec_times_list) - self.max_traj_length)
+            start_index = np.random.randint(0, max_start_index + 1)  # +1 because randint is exclusive at the top
+            self.unseen_timestamps = exec_times_list[start_index:]
+        else:
+            self.unseen_timestamps = list(self.exec_times)
+        return len(self.unseen_timestamps)
 
     def get_base_features(self, timestamp: pd.Timestamp)->pd.DataFrame:
         """Get the base features from the dataset at the given timestamp."""

@@ -16,6 +16,7 @@ import torch
 from torchrl.data import Categorical, Bounded
 import pandas as pd
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
+import random
 
 @dataclass
 class SeqLongOnlyEnvConfig:
@@ -23,12 +24,14 @@ class SeqLongOnlyEnvConfig:
     time_frames: Union[List[TimeFrame], TimeFrame] = TimeFrame(1, TimeFrameUnit.Minute)
     window_sizes: Union[List[int], int] = 10
     execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute) # On which timeframe to execute trades
-    initial_cash: float = 1000
+    initial_cash: Union[List[int], int] = (1000, 5000)
     transaction_fee: float = 0.025 
     bankrupt_threshold: float = 0.1  # 10% of initial balance
     slippage: float = 0.01
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
+    max_traj_length: Optional[int] = None
+    random_start: bool = True
 
 class SeqLongOnlyEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: SeqLongOnlyEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
@@ -47,22 +50,24 @@ class SeqLongOnlyEnv(EnvBase):
             window_sizes=config.window_sizes,
             execute_on=config.execute_on,
             feature_processing_fn=feature_preprocessing_fn,
-            features_start_with="features_"
+            features_start_with="features_",
+            max_traj_length=config.max_traj_length,
         )
-
+        self.random_start = config.random_start
+        self.max_traj_length = config.max_traj_length
         # Execute trades on the specified time frame
         self.execute_on_value = config.execute_on.value
         self.execute_on_unit = config.execute_on.unit.value
 
         # reset settings 
-        self.initial_portfolio_value = config.initial_cash
+        self.initial_cash = config.initial_cash
         self.position_hold_counter = 0
 
         # Define action and observation spaces sell, hold (do nothing), buy
         self.action_spec = Categorical(len(self.action_levels))
 
         # Get the number of features from the observer
-        obs, _ = self.sampler.get_random_observation()
+        obs, _, _ = self.sampler.get_random_observation()
         market_data_keys = self.sampler.get_observation_keys()
 
         num_features = obs[market_data_keys[0]].shape[1]
@@ -97,7 +102,7 @@ class SeqLongOnlyEnv(EnvBase):
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
         # Get market data
-        obs_dict, self.current_timestamp = self.sampler.get_sequential_observation()
+        obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
 
         # Get account state
         account_state = [
@@ -116,7 +121,7 @@ class SeqLongOnlyEnv(EnvBase):
 
         return out_td
 
-    def _calculate_reward(
+    def _calculate_reward_(
         self,
         old_portfolio_value: float,
         new_portfolio_value: float,
@@ -166,6 +171,70 @@ class SeqLongOnlyEnv(EnvBase):
 
         return reward
 
+    def _calculate_reward(
+        self,
+        old_portfolio_value: float,
+        new_portfolio_value: float,
+        action: float,
+        trade_info: Dict,
+    ) -> float:
+        """
+        Calculate the step reward using a DENSE signal based on portfolio return.
+
+        Reward = (Portfolio_Return) + (Loss_Aversion_Penalty) + (Invalid_Action_Penalty)
+        """
+        # --- 1. Base Reward: Portfolio Return (Dense Signal) ---
+        # This is the most important component. It rewards positive change in
+        # portfolio value (unrealized or realized) and penalizes negative change.
+        # Note: Transaction fees and slippage are naturally penalized here as they
+        # cause an immediate drop in PV upon execution.
+        if old_portfolio_value == 0:
+            # Should only happen on reset, or bankruptcy. Return 0 for safety.
+            portfolio_return = 0.0
+        else:
+            # Portfolio Return (normalized by old value for stability)
+            portfolio_return = (new_portfolio_value - old_portfolio_value) / old_portfolio_value
+
+        # --- 2. Loss Aversion / Drawdown Penalty (Refined Hold Penalty) ---
+        # Penalize holding a position that is currently in a severe drawdown
+        # relative to the entry price. This encourages cutting losses.
+        drawdown_penalty = 0.0
+        # Check if we are currently holding a position (self.position_size > 0)
+        # and if the unrealized PnL is negative (loss)
+        if self.position_size > 0 and self.unrealized_pnlpc < 0:
+            # Penalize proportional to the magnitude of the unrealized loss percentage
+            # The penalty magnitude (e.g., -0.05) is a hyperparameter to tune.
+            # Using self.unrealized_pnlpc (which is negative) directly adds a penalty.
+            drawdown_penalty = self.unrealized_pnlpc * 0.05 
+
+        # --- 3. Time-Based Penalty (Optional, to encourage trading) ---
+        # Keep a small linear penalty for long holds, but make it much smaller
+        # than the PnL-based reward/penalty.
+        time_penalty = 0.0
+        if self.position_hold_counter > 50:
+             # Very small constant penalty to prevent excessively passive behavior
+            time_penalty = -0.001 * self.position_hold_counter
+        
+        # --- 4. Invalid Action Penalty (Keep existing logic) ---
+        # A small, fixed penalty for trying to Sell when Flat, or Buy when Long,
+        # ensuring the agent learns the environment's rules quickly.
+        invalid_action_penalty = 0.0
+        if not trade_info["executed"] and action != 0:
+            invalid_action_penalty = - 0.001
+
+        # --- Total Reward ---
+        reward = (
+            portfolio_return + 
+            drawdown_penalty + 
+            time_penalty + 
+            invalid_action_penalty
+        )
+        
+        # Scale the reward if needed (can be helpful if the returns are very small)
+        # reward = reward * self.config.reward_scaling # (If you add a scaling factor to config)
+
+        return float(reward)
+
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value."""
         current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
@@ -189,8 +258,11 @@ class SeqLongOnlyEnv(EnvBase):
         self.reward_history = []
         self.base_price_history = []
 
-        self.sampler.reset()
-        self.balance = self.initial_portfolio_value
+        max_episode_steps = self.sampler.reset(random_start=self.random_start)
+        self.max_traj_length = max_episode_steps # overwrite as we might execute on different time frame so actual step might differ
+        initial_portfolio_value = self.initial_cash if self.initial_cash is int else random.randint(self.initial_cash[0], self.initial_cash[1])
+        self.balance = initial_portfolio_value
+        self.initial_portfolio_value = initial_portfolio_value
         self.position_hold_counter = 0
         self.current_position = 0.0
         self.position_value = 0.0
@@ -232,7 +304,7 @@ class SeqLongOnlyEnv(EnvBase):
 
         next_tensordict.set("reward", reward)
         next_tensordict.set("done", done)
-        next_tensordict.set("truncated", False)
+        next_tensordict.set("truncated", self.truncated)
         next_tensordict.set("terminated", done)
         
         # TODO: Make a dashboard that shows the portfolio value and action history etc
