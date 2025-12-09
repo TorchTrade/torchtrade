@@ -36,7 +36,7 @@ class MarketDataObservationSampler():
         self.execute_on = execute_on
         self.feature_processing_fn = feature_processing_fn
         
-        # Precompute resampled OHLCV DataFrames for each timeframe (high performance)
+        # Precompute resampled OHLCV DataFrames for each timeframe
         self.resampled_dfs = {}
         for tf in time_frames:
             resampled = self.df.resample(tf.to_pandas_freq()).agg({
@@ -124,6 +124,16 @@ class MarketDataObservationSampler():
 
     def get_observation_keys(self)->List[str]:
         return list(self.resampled_dfs.keys())
+
+    def get_feature_keys(self)->List[str]:
+        # check first if all features are the same across timeframes
+        time_frame_keys = self.get_observation_keys()
+
+        columns = [list(self.resampled_dfs[tf].columns) for tf in time_frame_keys]
+        assert all(lst == columns[0] for lst in columns), "Not all features are similar across timeframes"
+
+        return columns[0]
+
 
     def reset(self, random_start: bool = False)->None:
         """Reset the observation sampler."""
