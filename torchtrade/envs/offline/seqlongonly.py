@@ -102,7 +102,7 @@ class SeqLongOnlyEnv(EnvBase):
         # Get market data
         obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
 
-        current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+        current_price = self.sampler.get_base_features(self.current_timestamp)
         self.position_value = round(self.position_size * current_price, 3)
         if self.position_size > 0:
             self.unrealized_pnlpc = round((current_price - self.entry_price) / self.entry_price, 4)
@@ -127,7 +127,7 @@ class SeqLongOnlyEnv(EnvBase):
 
         return out_td
 
-    def _calculate_reward_(
+    def _calculate_reward(
         self,
         old_portfolio_value: float,
         new_portfolio_value: float,
@@ -164,20 +164,23 @@ class SeqLongOnlyEnv(EnvBase):
         elif not trade_info["executed"] and action != 0:
             # small penalty if agent tries an invalid action
             portfolio_return = - 0.001
+        elif trade_info["executed"] and action == 1:
+            # encourage buying
+            portfolio_return = 0.001
         else:
-            portfolio_return = 0.0
+            portfolio_return = -0.00001
 
-        if self.position_hold_counter > 50:  # Penalize long holds
-            hold_reward = - 0.0001 * self.position_hold_counter
-        else:
-            hold_reward = 0.0
+        # if self.position_hold_counter > 50:  # Penalize long holds
+        #     hold_reward = - 0.0001 * self.position_hold_counter
+        # else:
+        #     hold_reward = 0.0
 
         # Scale the reward
-        reward = portfolio_return + hold_reward
+        reward = portfolio_return # + hold_reward
 
         return reward
 
-    def _calculate_reward(
+    def _calculate_reward_(
         self,
         old_portfolio_value: float,
         new_portfolio_value: float,
@@ -243,7 +246,7 @@ class SeqLongOnlyEnv(EnvBase):
 
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value."""
-        current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+        current_price = self.sampler.get_base_features(self.current_timestamp)
         return self.balance + self.position_size * current_price
 
 
@@ -292,7 +295,7 @@ class SeqLongOnlyEnv(EnvBase):
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
         self.action_history.append(desired_action if trade_info["executed"] else 0)
-        self.base_price_history.append(self.sampler.get_base_features(self.current_timestamp)["close"])
+        self.base_price_history.append(self.sampler.get_base_features(self.current_timestamp))
         self.portfolio_value_history.append(old_portfolio_value)
 
         if trade_info["executed"]:
@@ -307,11 +310,10 @@ class SeqLongOnlyEnv(EnvBase):
         self.reward_history.append(reward)
 
         done = self._check_termination(new_portfolio_value)
-
         next_tensordict.set("reward", reward)
-        next_tensordict.set("done", done)
+        next_tensordict.set("done", self.truncated or done)
         next_tensordict.set("truncated", self.truncated)
-        next_tensordict.set("terminated", done)
+        next_tensordict.set("terminated", self.truncated or done)
         
         # TODO: Make a dashboard that shows the portfolio value and action history etc
        # _ = self._create_info_dict(new_portfolio_value, trade_info, desired_action)
@@ -326,7 +328,8 @@ class SeqLongOnlyEnv(EnvBase):
         # If holding position or no change in position, do nothing
         if desired_position == 0 or desired_position == self.current_position or (self.current_position == 1 and desired_position == 1) or (self.current_position == 0 and desired_position == -1):
             # Compute unrealized PnL, add hold counter update last_portfolio_value
-            self.position_hold_counter += 1
+            if self.position_size > 0:
+                self.position_hold_counter += 1
 
             return trade_info
         
@@ -335,7 +338,7 @@ class SeqLongOnlyEnv(EnvBase):
         amount = self._calculate_trade_amount(side)
 
         # Get base price and apply noise to simulate slippage
-        base_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+        base_price = self.sampler.get_base_features(self.current_timestamp)
         # Apply ±5% noise to the price to simulate market slippage
         price_noise_factor = np.random.uniform(1 - self.slippage, 1 + self.slippage)
         execution_price = base_price * price_noise_factor
