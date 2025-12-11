@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools
-
+import torch
 from torchrl.envs import (
     DoubleToFloat,
     EnvCreator,
