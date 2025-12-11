@@ -7,3 +7,4 @@ mkdocs-material
 hydra-core
 matplotlib
 ta
+datasets

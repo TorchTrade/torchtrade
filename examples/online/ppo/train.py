@@ -5,7 +5,7 @@ import warnings
 import hydra
 from sympy.logic.boolalg import true
 from torchrl._utils import compile_with_warmup
-import pandas as pd
+import datasets
 
 
 @hydra.main(config_path="", config_name="config", version_base="1.1")
@@ -38,7 +38,9 @@ def main(cfg: DictConfig):  # noqa: F821
     print("USING DEVICE: ", device)
 
     # Creante env
-    df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
+    #df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
+    df = datasets.load_dataset("Sebasdi/TorchTrade_btcusd_spot_1m_12_2024_to_09_2025")
+    df = df["train"].to_pandas()
     test_df = df[0:(1440 *21)] # 14 days
     train_df = df[(1440 * 21):]
 
