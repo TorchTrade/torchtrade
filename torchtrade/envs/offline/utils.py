@@ -2,6 +2,16 @@ from enum import Enum
 from typing import List
 import pandas as pd
 
+def get_timeframe_unit(tf_str: "Min"):
+    if tf_str == "Min" or tf_str == "min" or tf_str == "Minute":
+        return TimeFrameUnit.Minute
+    elif tf_str == "Hour" or tf_str == "h" or tf_str == "H" or tf_str == "hour":
+        return TimeFrameUnit.Hour
+    elif tf_str == "Day" or tf_str == "D" or tf_str == "day" or tf_str == "day":
+        return TimeFrameUnit.Day
+    else:
+        raise ValueError(f"Unknown TimeFrameUnit {tf_str}")
+
 class TimeFrameUnit(Enum):
     Minute = 'Min'  # Pandas freq for minutes
     Hour = 'H'    # Pandas freq for hours

@@ -5,6 +5,7 @@
 from __future__ import annotations
 import functools
 
+from pandas.tseries import frequencies
 import torch.nn
 from tensordict.nn import TensorDictModule
 from torchrl.envs import (
@@ -32,7 +33,7 @@ from trading_nets.architectures.tabl.tabl import BiNMTABLModel
 from trading_nets.architectures.wavenet.simple_1d_wave import Simple1DWaveEncoder
 
 from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, get_timeframe_unit
 import ta
 import numpy as np
 import pandas as pd
@@ -108,18 +109,13 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
 
-    # TODO: Make this configurable with config
-    time_frames=[
-        TimeFrame(1, TimeFrameUnit.Minute),
-        TimeFrame(5, TimeFrameUnit.Minute),
-        TimeFrame(15, TimeFrameUnit.Minute),
-        TimeFrame(1, TimeFrameUnit.Hour),
-    ]
-    window_sizes=[12, 8, 8, 24]  # ~12m, 40m, 2h, 1d
-    execute_on=TimeFrame(5, TimeFrameUnit.Minute) # Try 15min
+    window_sizes = cfg.env.window_sizes
+    execute_on = cfg.env.execute_on
+
+    time_frames = [TimeFrame(t, get_timeframe_unit(f)) for t, f in zip(cfg.env.time_frames, cfg.env.freqs)]
+    execute_on=TimeFrame(execute_on[0], get_timeframe_unit(execute_on[1]))
 
     config = SeqLongOnlyEnvConfig(
         symbol=cfg.env.symbol,
@@ -136,7 +132,6 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
         random_start=random_start
     )
     return SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
-
 
 
 def apply_env_transforms(
