@@ -121,9 +121,9 @@ class SeqLongOnlyEnv(EnvBase):
         ]
         account_state = torch.tensor(account_state, dtype=torch.float)
 
-        out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
-        for market_data_name, data in zip(self.market_data_keys, obs_dict.values()):
-            out_td.set(market_data_name, torch.from_numpy(data))
+        obs_data = {self.account_state_key: account_state}
+        obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
+        out_td = TensorDict(obs_data, batch_size=())
 
         return out_td
 
@@ -155,94 +155,12 @@ class SeqLongOnlyEnv(EnvBase):
                 Positive if realized profit was made, small negative for invalid actions,
                 or 0 otherwise.
         """
-
-        if action == -1 and trade_info["executed"]:
-            # Calculate portfolio return on realized profit
-            portfolio_return = (
-                new_portfolio_value - old_portfolio_value
-            ) / old_portfolio_value
-        elif not trade_info["executed"] and action != 0:
-            # small penalty if agent tries an invalid action
-            portfolio_return = - 0.001
-        elif trade_info["executed"] and action == 1:
-            # encourage buying
-            portfolio_return = 0.001
-        else:
-            portfolio_return = -0.00001
-
-        # if self.position_hold_counter > 50:  # Penalize long holds
-        #     hold_reward = - 0.0001 * self.position_hold_counter
-        # else:
-        #     hold_reward = 0.0
-
-        # Scale the reward
-        reward = portfolio_return # + hold_reward
+        portfolio_return = (
+            new_portfolio_value - old_portfolio_value
+        ) / old_portfolio_value
+        reward = portfolio_return
 
         return reward
-
-    def _calculate_reward_(
-        self,
-        old_portfolio_value: float,
-        new_portfolio_value: float,
-        action: float,
-        trade_info: Dict,
-    ) -> float:
-        """
-        Calculate the step reward using a DENSE signal based on portfolio return.
-
-        Reward = (Portfolio_Return) + (Loss_Aversion_Penalty) + (Invalid_Action_Penalty)
-        """
-        # --- 1. Base Reward: Portfolio Return (Dense Signal) ---
-        # This is the most important component. It rewards positive change in
-        # portfolio value (unrealized or realized) and penalizes negative change.
-        # Note: Transaction fees and slippage are naturally penalized here as they
-        # cause an immediate drop in PV upon execution.
-        if old_portfolio_value == 0:
-            # Should only happen on reset, or bankruptcy. Return 0 for safety.
-            portfolio_return = 0.0
-        else:
-            # Portfolio Return (normalized by old value for stability)
-            portfolio_return = (new_portfolio_value - old_portfolio_value) / old_portfolio_value
-
-        # --- 2. Loss Aversion / Drawdown Penalty (Refined Hold Penalty) ---
-        # Penalize holding a position that is currently in a severe drawdown
-        # relative to the entry price. This encourages cutting losses.
-        drawdown_penalty = 0.0
-        # Check if we are currently holding a position (self.position_size > 0)
-        # and if the unrealized PnL is negative (loss)
-        if self.position_size > 0 and self.unrealized_pnlpc < 0:
-            # Penalize proportional to the magnitude of the unrealized loss percentage
-            # The penalty magnitude (e.g., -0.05) is a hyperparameter to tune.
-            # Using self.unrealized_pnlpc (which is negative) directly adds a penalty.
-            drawdown_penalty = self.unrealized_pnlpc * 0.05 
-
-        # --- 3. Time-Based Penalty (Optional, to encourage trading) ---
-        # Keep a small linear penalty for long holds, but make it much smaller
-        # than the PnL-based reward/penalty.
-        time_penalty = 0.0
-        if self.position_hold_counter > 50:
-             # Very small constant penalty to prevent excessively passive behavior
-            time_penalty = -0.0005 * self.position_hold_counter
-        
-        # --- 4. Invalid Action Penalty (Keep existing logic) ---
-        # A small, fixed penalty for trying to Sell when Flat, or Buy when Long,
-        # ensuring the agent learns the environment's rules quickly.
-        invalid_action_penalty = 0.0
-        if not trade_info["executed"] and action != 0:
-            invalid_action_penalty = - 0.001
-
-        # --- Total Reward ---
-        reward = (
-            portfolio_return + 
-            drawdown_penalty + 
-            time_penalty + 
-            invalid_action_penalty
-        )
-        
-        # Scale the reward if needed (can be helpful if the returns are very small)
-        # reward = reward * self.config.reward_scaling # (If you add a scaling factor to config)
-
-        return float(reward)
 
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value."""
@@ -262,10 +180,10 @@ class SeqLongOnlyEnv(EnvBase):
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
 
-        self.portfolio_value_history = []
+        self.base_price_history = []
         self.action_history = []
         self.reward_history = []
-        self.base_price_history = []
+        self.portfolio_value_history = []
 
         max_episode_steps = self.sampler.reset(random_start=self.random_start)
         self.max_traj_length = max_episode_steps # overwrite as we might execute on different time frame so actual step might differ
@@ -340,7 +258,7 @@ class SeqLongOnlyEnv(EnvBase):
         # Get base price and apply noise to simulate slippage
         base_price = self.sampler.get_base_features(self.current_timestamp)
         # Apply ±5% noise to the price to simulate market slippage
-        price_noise_factor = np.random.uniform(1 - self.slippage, 1 + self.slippage)
+        price_noise_factor = torch.empty(1,).uniform_(1 - self.slippage, 1 + self.slippage).item()
         execution_price = base_price * price_noise_factor
 
         if side == "buy":
