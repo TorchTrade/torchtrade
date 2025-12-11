@@ -5,3 +5,5 @@ wandb
 tqdm
 mkdocs-material
 hydra-core
+matplotlib
+ta
