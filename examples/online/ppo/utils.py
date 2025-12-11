@@ -56,49 +56,50 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
     # --- Basic features ---
     # Log returns
-    df["features_return_log"] = np.log(df["close"]).diff()
+    # df["features_return_log"] = np.log(df["close"]).diff()
+    df["features_close"] = df["close"]
 
-    # Rolling volatility (5-period)
-    df["features_volatility"] = df["features_return_log"].rolling(window=5).std()
+    # # Rolling volatility (5-period)
+    # df["features_volatility"] = df["features_return_log"].rolling(window=5).std()
 
-    # ATR (14) normalized
-    df["features_atr"] = ta.volatility.AverageTrueRange(
-        high=df["high"], low=df["low"], close=df["close"], window=14
-    ).average_true_range() / df["close"]
+    # # ATR (14) normalized
+    # df["features_atr"] = ta.volatility.AverageTrueRange(
+    #     high=df["high"], low=df["low"], close=df["close"], window=14
+    # ).average_true_range() / df["close"]
 
     # --- Momentum & trend ---
     ema_12 = ta.trend.EMAIndicator(close=df["close"], window=12).ema_indicator()
     ema_24 = ta.trend.EMAIndicator(close=df["close"], window=24).ema_indicator()
     df["features_ema_12"] = ema_12
     df["features_ema_24"] = ema_24
-    df["features_ema_slope"] = ema_12.diff()
+    #df["features_ema_slope"] = ema_12.diff()
 
-    macd = ta.trend.MACD(close=df["close"], window_slow=26, window_fast=12, window_sign=9)
-    df["features_macd_hist"] = macd.macd_diff()
+    # macd = ta.trend.MACD(close=df["close"], window_slow=26, window_fast=12, window_sign=9)
+    # df["features_macd_hist"] = macd.macd_diff()
 
-    df["features_rsi_14"] = ta.momentum.RSIIndicator(close=df["close"], window=14).rsi()
+    # df["features_rsi_14"] = ta.momentum.RSIIndicator(close=df["close"], window=14).rsi()
 
-    # --- Volatility bands ---
-    bb = ta.volatility.BollingerBands(close=df["close"], window=20, window_dev=2)
-    df["features_bb_pct"] = bb.bollinger_pband()
+    # # --- Volatility bands ---
+    # bb = ta.volatility.BollingerBands(close=df["close"], window=20, window_dev=2)
+    # df["features_bb_pct"] = bb.bollinger_pband()
 
     # --- Volume / flow ---
     df["features_volume_z"] = (
         (df["volume"] - df["volume"].rolling(20).mean()) /
         df["volume"].rolling(20).std()
     )
-    df["features_vwap_dev"] = df["close"] - (
-        (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
-    )
+    # df["features_vwap_dev"] = df["close"] - (
+    #     (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
+    # )
 
-    # --- Candle structure ---
-    df["features_body_ratio"] = (df["close"] - df["open"]) / (df["high"] - df["low"] + 1e-9)
-    df["features_upper_wick"] = (df["high"] - df[["close", "open"]].max(axis=1)) / (
-        df["high"] - df["low"] + 1e-9
-    )
-    df["features_lower_wick"] = (df[["close", "open"]].min(axis=1) - df["low"]) / (
-        df["high"] - df["low"] + 1e-9
-    )
+    # # --- Candle structure ---
+    # df["features_body_ratio"] = (df["close"] - df["open"]) / (df["high"] - df["low"] + 1e-9)
+    # df["features_upper_wick"] = (df["high"] - df[["close", "open"]].max(axis=1)) / (
+    #     df["high"] - df["low"] + 1e-9
+    # )
+    # df["features_lower_wick"] = (df[["close", "open"]].min(axis=1) - df["low"]) / (
+    #     df["high"] - df["low"] + 1e-9
+    #)
 
     # Drop rows with NaN from indicators
     #df.dropna(inplace=True)
@@ -190,6 +191,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1,
 def make_discrete_ppo_binmtabl_model(cfg, env, device):
     """Make discrete PPO agent."""
     # Define Actor Network
+    activation = "tanh"
     action_spec = env.action_spec
     market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
     assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"
@@ -200,17 +202,19 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
     freqs = cfg.env.freqs
     assert len(time_frames) == len(market_data_keys), f"Amount of time frames {len(time_frames)} and env market data keys do not match! Keys: {market_data_keys}"
     encoders = []
+
+    #num_features = len(env.sampler[0].get_features())
     
     # Build the encoder
     for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
     
-        model = BiNMTABLModel(input_shape=(w, 14),
+        model = BiNMTABLModel(input_shape=(w, 4),
                             output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
                             hidden_seq_size=w,
                             hidden_feature_size=14,
                             num_heads=3,
-                            activation="relu",
-                            final_activation="relu",
+                            activation=activation,
+                            final_activation=activation,
                             dropout=0.1,
                             initializer="kaiming_uniform")
         encoders.append(SafeModule(
@@ -221,9 +225,9 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
 
     account_state_encoder = SafeModule(
         module=MLP(
-            num_cells=[32],
+            num_cells=[32, 32],
             out_features=14,
-            activation_class=ACTIVATIONS["relu"],
+            activation_class=ACTIVATIONS[activation],
             device=device,
         ),
         in_keys=[account_state_key],
@@ -234,7 +238,7 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
     common = MLP(
         num_cells=[128, 128],
         out_features=128,
-        activation_class=ACTIVATIONS["relu"],
+        activation_class=ACTIVATIONS[activation],
         device=device,
     )
 
@@ -249,7 +253,7 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
     policy_net = MLP(
         in_features=128,
         out_features=action_spec.n,
-        activation_class=ACTIVATIONS["relu"],
+        activation_class=ACTIVATIONS[activation],
         num_cells=[],
         device=device,
     )

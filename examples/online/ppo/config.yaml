@@ -6,8 +6,8 @@ env:
   window_sizes: [12, 8, 8, 24]
   execute_on: 5
   initial_cash: [1000, 5000]
-  transaction_fee: 0.015
-  slippage: 0.01
+  transaction_fee: 0.000015
+  slippage: 0.001
   bankrupt_threshold: 0.1
   exp_name: ${logger.exp_name}
   seed: 0
@@ -17,7 +17,7 @@ env:
   # collector
 collector:
   device: 
-  frames_per_batch: 10000 # 5 envs -> 1000 steps per rollout execute on 5 min -> ~ 3.5 days per rollout
+  frames_per_batch: 100000 # 5 envs -> 1000 steps per rollout execute on 5 min -> ~ 3.5 days per rollout
   total_frames: 100_000_000
 
 # logger
@@ -27,7 +27,7 @@ logger:
   project_name: TorchTrade-Online
   group_name: null
   exp_name: ppo
-  test_interval: 100_000
+  test_interval: 1_000_000
   num_test_episodes: 1
 
 # Optim
@@ -42,7 +42,7 @@ optim:
 # loss
 loss:
   gamma: 0.9
-  mini_batch_size: 3333
+  mini_batch_size: 33333
   ppo_epochs: 3
   gae_lambda: 0.95
   clip_epsilon: 0.1
@@ -52,6 +52,6 @@ loss:
   loss_critic_type: l2
 
 compile:
-  compile: False
+  compile: True
   compile_mode:
   cudagraphs: False

@@ -116,10 +116,6 @@ def main(cfg: DictConfig):  # noqa: F821
         normalize_advantage=True,
     )
 
-    # use end-of-life as done key
-    #adv_module.set_keys(done="end-of-life", terminated="end-of-life")
-    #loss_module.set_keys(done="end-of-life", terminated="end-of-life")
-
     # Create optimizer
     optim = torch.optim.Adam(
         loss_module.parameters(),
@@ -156,7 +152,7 @@ def main(cfg: DictConfig):  # noqa: F821
 
     def update(batch, num_network_updates):
         optim.zero_grad(set_to_none=True)
-
+        #num_network_updates = batch.get("updates")
         # Linearly decrease the learning rate and clip epsilon
         alpha = torch.ones((), device=device)
         if cfg_optim_anneal_lr:
@@ -165,7 +161,7 @@ def main(cfg: DictConfig):  # noqa: F821
                 group["lr"] = cfg_optim_lr * alpha
         if cfg_loss_anneal_clip_eps:
             loss_module.clip_epsilon.copy_(cfg_loss_clip_epsilon * alpha)
-        num_network_updates = num_network_updates + 1
+        #num_network_updates = num_network_updates + 1
         # Get a data batch
         batch = batch.to(device, non_blocking=True)
 
@@ -210,7 +206,7 @@ def main(cfg: DictConfig):  # noqa: F821
         timeit.printevery(1000, total_iter, erase=True)
 
         with timeit("collecting"):
-            data = next(collector_iter)
+            data = next(collector_iter).to(device)
 
         metrics_to_log = {}
         frames_in_batch = data.numel()
@@ -245,11 +241,13 @@ def main(cfg: DictConfig):  # noqa: F821
                     data_buffer.extend(data_reshape)
 
                 for k, batch in enumerate(data_buffer):
+                    #batch["updates"] = torch.tensor([num_network_updates]).unsqueeze(0).repeat(batch.shape[0], 1)
                     with timeit("update"):
                         torch.compiler.cudagraph_mark_step_begin()
                         loss, num_network_updates = update(
                             batch, num_network_updates=num_network_updates
                         )
+                    #num_network_updates += 1
                     loss = loss.clone()
                     num_network_updates = num_network_updates.clone()
                     losses[j, k] = loss.select(
