@@ -15,7 +15,7 @@ You must choose exactly one action: buy, sell, or hold.
 - Think step-by-step inside <think></think>.
 - Output your final action in exact format: <answer>buy</answer>, <answer>sell</answer>, or <answer>hold</answer>.
         """
-        self.account_state = ["cash", "portfolio_value", "position_size", "entry_price", "unrealized_pnlpct", "holding_time"]
+        self.account_state = ["cash", "position_size", "position_value", "entry_price", "current_price", "unrealized_pnlpct", "holding_time"]
         self.market_data_keys = ["market_data_1Minute_12", "market_data_5Minute_8", "market_data_15Minute_8", "market_data_1Hour_24"]
         self.features_keys = ["close", "open", "high", "low", "volume"]
         self.execute_on = "5Minute"

@@ -14,18 +14,18 @@ class HumanActor():
             self.features = [feat.split("features_")[1] for feat in self.features]
         self.market_data_keys = market_data_keys
         self.account_state_key = account_state_key
-        self.account_state = ["cash", "portfolio_value", "position_size", "entry_price", "unrealized_pnlpct", "holding_time"]
+        self.account_state = ["cash", "position_size", "position_value", "entry_price", "current_price", "unrealized_pnlpct", "holding_time"]
 
         self.action_spec = action_spec
-        self.action_dict = {"buy": 2, "sell": 0, "hold": 1}
+        self.action_dict = {"buy": 2, "sell": 0, "hold": 1, "b": 2, "s": 0, "h": 1}
 
 
     def construct_account_state(self, tensordict):
         account_state = tensordict.get(self.account_state_key)
-        assert account_state.shape == (1, 6), f"Expected account state shape (1, 6), got {account_state.shape}"
+        assert account_state.shape == (1, 7), f"Expected account state shape (1, 7), got {account_state.shape}"
         out = """Current account state: \n"""
         for idx, state in enumerate(self.account_state):
-            out += f"{state}: {round(account_state[0, idx].item(), 2)}\n"
+            out += f"{state}: {round(account_state[0, idx].item(), 4)}\n"
         out += "\n---\n"
         return out
 
@@ -42,7 +42,7 @@ class HumanActor():
         account_state = self.construct_account_state(tensordict)
         print(account_state)
 
-        print("\nWhat action do you want to take? (buy, sell, hold)")
+        print("\nWhat action do you want to take? (buy:b, sell:s, hold:h)")
         action = input()
         float_action = self.action_dict[action]
         tensordict.set("action", [float_action])
