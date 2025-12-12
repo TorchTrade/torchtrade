@@ -1,12 +1,12 @@
 env:
   name: SeqLongOnlyEnv
   symbol: "BTC/USD"
-  freqs: ["Min", "Min", "Min", "Hour"]
-  time_frames: [1, 5, 15, 60]
-  window_sizes: [12, 8, 8, 24]
-  execute_on: [5, "Min"]
+  freqs: ["Min"] #, "Min", "Min", "Hour"]
+  time_frames: [15] #, 5, 15, 1]
+  window_sizes: [30] #, 24, 24, 24]
+  execute_on: [15, "Min"]
   initial_cash: [1000, 5000]
-  transaction_fee: 0.000015
+  transaction_fee: 0.0025 
   slippage: 0.001
   bankrupt_threshold: 0.1
   exp_name: ${logger.exp_name}
@@ -30,6 +30,9 @@ logger:
   exp_name: ppo
   test_interval: 1_000_000
   num_test_episodes: 1
+
+eval:
+  model_path: "outputs/2025-12-12/16-06-44/ppo_policy_360.pth"
 
 # Optim
 optim:
