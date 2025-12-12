@@ -59,6 +59,10 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     # Log returns
     # df["features_return_log"] = np.log(df["close"]).diff()
     df["features_close"] = df["close"]
+    df["features_open"] = df["open"]
+    df["features_high"] = df["high"]
+    df["features_low"] = df["low"]
+    df["features_volume"] = df["volume"]
 
     # # Rolling volatility (5-period)
     # df["features_volatility"] = df["features_return_log"].rolling(window=5).std()
@@ -69,10 +73,10 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     # ).average_true_range() / df["close"]
 
     # --- Momentum & trend ---
-    ema_12 = ta.trend.EMAIndicator(close=df["close"], window=12).ema_indicator()
-    ema_24 = ta.trend.EMAIndicator(close=df["close"], window=24).ema_indicator()
-    df["features_ema_12"] = ema_12
-    df["features_ema_24"] = ema_24
+    # ema_12 = ta.trend.EMAIndicator(close=df["close"], window=12).ema_indicator()
+    # ema_24 = ta.trend.EMAIndicator(close=df["close"], window=24).ema_indicator()
+    # df["features_ema_12"] = ema_12
+    # df["features_ema_24"] = ema_24
     #df["features_ema_slope"] = ema_12.diff()
 
     # macd = ta.trend.MACD(close=df["close"], window_slow=26, window_fast=12, window_sign=9)
@@ -85,10 +89,10 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     # df["features_bb_pct"] = bb.bollinger_pband()
 
     # --- Volume / flow ---
-    df["features_volume_z"] = (
-        (df["volume"] - df["volume"].rolling(20).mean()) /
-        df["volume"].rolling(20).std()
-    )
+    # df["features_volume_z"] = (
+    #     (df["volume"] - df["volume"].rolling(20).mean()) /
+    #     df["volume"].rolling(20).std()
+    # )
     # df["features_vwap_dev"] = df["close"] - (
     #     (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
     # )
@@ -198,12 +202,12 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
     assert len(time_frames) == len(market_data_keys), f"Amount of time frames {len(time_frames)} and env market data keys do not match! Keys: {market_data_keys}"
     encoders = []
 
-    #num_features = len(env.sampler[0].get_features())
+    num_features = env.observation_spec[market_data_keys[0]].shape[-1]
     
     # Build the encoder
     for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
     
-        model = BiNMTABLModel(input_shape=(w, 4),
+        model = BiNMTABLModel(input_shape=(w, num_features),
                             output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
                             hidden_seq_size=w,
                             hidden_feature_size=14,
