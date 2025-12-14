@@ -1,0 +1,64 @@
+env:
+  name: LongOnlyOneStepEnv
+  # only used in SeqLongOnlySLTPEnv
+  stoploss_levels: [-0.01, -0.02, -0.03, -0.04]
+  takeprofit_levels: [0.02, 0.04, 0.06, 0.08, 0.1]
+  symbol: "BTC/USD"
+  freqs: ["Min"] #, "Min", "Min", "Hour"]
+  time_frames: [15] #, 5, 15, 1]
+  window_sizes: [32] #, 24, 24, 24]
+  execute_on: [15, "Min"]
+  initial_cash: [1000, 5000]
+  transaction_fee: 0.0025 
+  slippage: 0.001
+  bankrupt_threshold: 0.1
+  exp_name: ${logger.exp_name}
+  seed: 0
+  train_envs: 10
+  eval_envs: 2
+  data_path: Sebasdi/TorchTrade_btcusd_spot_1m_12_2024_to_09_2025
+
+  # collector
+collector:
+  device: 
+  frames_per_batch: 10000 # 5 envs -> 1000 steps per rollout execute on 5 min -> ~ 3.5 days per rollout
+  total_frames: 100_000_000
+
+# logger
+logger:
+  mode: online
+  backend: wandb
+  project_name: TorchTrade-Online
+  group_name: ${env.name}
+  exp_name: ppo
+  test_interval: 50_000
+  num_test_episodes: 1
+
+eval:
+  model_path: "outputs/2025-12-12/16-06-44/ppo_policy_360.pth"
+
+# Optim
+optim:
+  lr: 2.5e-4
+  eps: 1.0e-6
+  weight_decay: 0.0
+  max_grad_norm: 0.5
+  anneal_lr: True
+  device:
+
+# loss
+loss:
+  gamma: 0.9
+  mini_batch_size: 3333
+  ppo_epochs: 3
+  gae_lambda: 0.95
+  clip_epsilon: 0.1
+  anneal_clip_epsilon: True
+  critic_coef: 1.0
+  entropy_coef: 0.01
+  loss_critic_type: l2
+
+compile:
+  compile: False
+  compile_mode:
+  cudagraphs: False
