@@ -58,7 +58,7 @@ def main(cfg: DictConfig):  # noqa: F821
         cfg=cfg,
     )
 
-    actor.load_state_dict(torch.load("../../../"+cfg.eval.model_path))
+    #actor.load_state_dict(torch.load("../../../"+cfg.eval.model_path))
 
     # Get test rewards
     with torch.no_grad(), set_exploration_type(
@@ -71,6 +71,7 @@ def main(cfg: DictConfig):  # noqa: F821
             actor,
             auto_cast_to_device=True,
             break_when_any_done=True,
+            trust_policy=True
         )
         eval_rollout.squeeze()
         eval_reward = eval_rollout["next", "reward"].sum(-2)
