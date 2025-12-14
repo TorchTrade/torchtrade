@@ -223,7 +223,7 @@ class MarketDataObservationSampler:
 
         row = self.execute_base_tensor[idx_pos]  # tensor of feature floats in same column order as DataFrame
 
-        return row[3].item()
+        return {"open": row[0].item(), "high": row[1].item(), "low": row[2].item(), "close": row[3].item(), "volume": row[4].item()}
 
 
 class MarketDataObservationSampler_old:

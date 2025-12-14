@@ -1,1 +1,2 @@
 from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline.seqlongonlysltp import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
