@@ -150,79 +150,22 @@ class SeqLongOnlySLTPEnv(EnvBase):
         action: float,
         trade_info: Dict,
     ) -> float:
-        """GROK REWARD FUNCTION
-        Hybrid reward:
-        - Dense per-step: shaped to encourage smart entry and patient holding
-        - Sparse terminal: your strong baseline (beat max of cash or buy-and-hold)
-        """
-
-        # --- Initialize running stats on first call ---
-        if not hasattr(self, "returns_history"):
-            self.returns_history = []      # for potential future use
-            self.A = 0.0                   # DSR running mean
-            self.B = 0.0001                # DSR running variance proxy (small init to avoid div0)
-            self.t = 0
-            self.hold_start_value = old_portfolio_value  # track entry value for unrealized
-
-        # Daily portfolio return
-        daily_return = (new_portfolio_value - old_portfolio_value) / old_portfolio_value
-        self.returns_history.append(daily_return)
-
-        # Transaction fee (normalized)
-        tc = trade_info.get("fee_paid", 0.0) / old_portfolio_value if old_portfolio_value > 0 else 0.0
-        # Or if you track it directly: tc = self.transaction_fee * abs(action) or similar
-
-        # --- Dense per-step reward ---
-        dense_reward = daily_return - tc  # core: profit minus cost of trading
-
-        # Position tracking
-        position_size = getattr(self, "position_size", 0.0)  # assume you have this
-
-        if position_size > 0:
-            # Unrealized PnL since entry (approximate)
-            unrealized_pnl = (new_portfolio_value - self.hold_start_value) / self.hold_start_value
-            if unrealized_pnl > 0:
-                dense_reward += 0.0008 * unrealized_pnl  # bonus for letting winners run
-
-            # Reset hold_start_value on new buy (if you detect entry)
-            if trade_info.get("executed") and trade_info.get("side") == "buy":
-                self.hold_start_value = new_portfolio_value
-
-        # Differential Sharpe Ratio - incremental, online Sharpe update
-        self.t += 1
-        eta = 0.015  # adaptation rate (higher = reacts faster; good for intraday)
-        old_A = self.A
-        self.A += eta * (daily_return - old_A)
-        self.B = (1 - eta) * self.B + eta * (daily_return - old_A) * (daily_return - self.A)
-
-        if self.B > 1e-8:
-            dsr = (self.A - old_A) / np.sqrt(self.B) if self.B > 0 else 0.0
-            dense_reward += 3.0 * dsr  # scale so it matters but doesn't dominate
-
-        # Small bonus for entering a position (overcomes fee fear slightly)
-        if trade_info.get("executed") and trade_info.get("side") == "buy":
-            dense_reward += 0.0005
-
-        # Clip dense to prevent any single step from dominating
-        dense_reward = np.clip(dense_reward, -0.05, 0.05)
-
-        # --- Non-terminal: return dense guidance ---
-        if self.step_counter < self.max_traj_length - 1:
-            return dense_reward
-
-        # --- Terminal: your original strong sparse reward ---
+        # --- Terminal: sparse reward ---
         buy_and_hold_value = (
             self.initial_portfolio_value / self.base_price_history[0]
         ) * self.base_price_history[-1]
 
         compare_value = max(self.initial_portfolio_value, buy_and_hold_value)
-        if compare_value <= 0:
-            terminal_reward = 0.0
+        if self.step_counter < self.max_traj_length - 1:
+            reward = 0.0
         else:
             terminal_reward = 100 * (new_portfolio_value - compare_value) / compare_value
-
-        # Optional: add small dense carryover, or keep pure sparse
-        return terminal_reward  # or: terminal_reward + dense_reward
+            if 1 in self.action_history and -1 in self.action_history:
+                # we need to have at least one trade
+                reward = terminal_reward
+            else:
+                reward = -10.0
+        return reward
 
 
 
@@ -379,7 +322,6 @@ class SeqLongOnlySLTPEnv(EnvBase):
             self.stop_loss = execution_price * (1 + stop_loss_pct)
             self.take_profit = execution_price * (1 + take_profit_pct)
                 
-            
             trade_info.update({
                 "executed": True,
                 "amount": amount,
