@@ -1,11 +1,7 @@
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple, Union, Callable
+from typing import Any, Dict, List, Optional, Union, Callable
 from warnings import warn
-from zoneinfo import ZoneInfo
-import matplotlib.pyplot as plt
-from datetime import datetime
 from itertools import product
 
 import numpy as np
@@ -14,10 +10,27 @@ from tensordict import TensorDict, TensorDictBase
 from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 import torch
-from torchrl.data import Bounded, MultiCategorical, Categorical
+from torchrl.data import Bounded, Categorical
 import pandas as pd
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
 import random
+import logging
+import sys
+
+log_level = logging.INFO
+
+# Read log level from command line (e.g. DEBUG)
+if len(sys.argv) > 1:
+    log_level_name = sys.argv[1].upper()
+    log_level = getattr(logging, log_level_name, logging.INFO)
+
+logging.basicConfig(
+    level=log_level,
+    format="%(levelname)s:%(name)s:%(message)s"
+)
+
+logger = logging.getLogger(__name__)
+
 
 def combinatory_action_map(stoploss_levels: List[float], takeprofit_levels: List[float]) -> Dict:
     action_map = {}
@@ -28,6 +41,18 @@ def combinatory_action_map(stoploss_levels: List[float], takeprofit_levels: List
         action_map[idx] = (sl, tp)
         idx += 1
     return action_map
+
+class InitialBalanceSampler:
+    def __init__(self, initial_cash: Union[List[int], int], seed: Optional[int] = None):
+        self.initial_cash = initial_cash
+        if seed is not None:
+            np.random.seed(seed)
+
+    def sample(self) -> float:
+        if isinstance(self.initial_cash, int):
+            return float(self.initial_cash)
+        else:
+            return float(np.random.randint(self.initial_cash[0], self.initial_cash[1]))
 
 @dataclass
 class LongOnlyOneStepEnvConfig:
@@ -54,7 +79,8 @@ class LongOnlyOneStepEnv(EnvBase):
             raise ValueError("Transaction fee must be between 0 and 1 (e.g., 0.025 for 2.5%).")
         if not (0 <= config.slippage <= 1):
             raise ValueError("Slippage must be between 0 and 1 (e.g., 0.05 for 5%).")
-
+        self.initial_cash_sampler = InitialBalanceSampler(config.initial_cash, config.seed)
+        self.episode_idx = 0
         self.sampler = MarketDataObservationSampler(
             df,
             time_frames=config.time_frames,
@@ -63,6 +89,7 @@ class LongOnlyOneStepEnv(EnvBase):
             feature_processing_fn=feature_preprocessing_fn,
             features_start_with="features_",
             max_traj_length=config.max_traj_length,
+            seed=self.config.seed
         )
         self.random_start = True
         self.max_traj_length = config.max_traj_length
@@ -165,12 +192,14 @@ class LongOnlyOneStepEnv(EnvBase):
 
     def _set_seed(self, seed: int):
         """Set the seed for the environment."""
-        if seed is not None:
-            np.random.seed(seed)
-            torch.manual_seed(seed)
-        else:
-            np.random.seed(self.config.seed)
-            torch.manual_seed(self.config.seed)
+
+        self.seed = seed
+        # somehow they receive different seeds 
+        #print(seed)
+        # Python
+        # np.random.seed(seed)
+        # random.seed(seed)
+        # torch.manual_seed(seed)
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
@@ -182,7 +211,7 @@ class LongOnlyOneStepEnv(EnvBase):
 
         max_episode_steps = self.sampler.reset(random_start=self.random_start)
         self.max_traj_length = max_episode_steps # overwrite as we might execute on different time frame so actual step might differ
-        initial_portfolio_value = self.initial_cash if self.initial_cash is int else random.randint(self.initial_cash[0], self.initial_cash[1])
+        initial_portfolio_value = self.initial_cash_sampler.sample()
         self.balance = initial_portfolio_value
         self.initial_portfolio_value = initial_portfolio_value
         self.position_hold_counter = 0
@@ -224,6 +253,11 @@ class LongOnlyOneStepEnv(EnvBase):
         
         # Calculate reward and check termination
         reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, action_tuple, trade_info)
+
+        if self.truncated:
+            logger.debug(f"Episode truncated after {self.step_counter} steps")
+            reward = 0 # set to 0 as we do not want to reward the agent for not selling
+
         self.reward_history.append(reward)
 
         next_tensordict.set("reward", reward)
@@ -258,7 +292,7 @@ class LongOnlyOneStepEnv(EnvBase):
 
     def _rollout(self, ):
         trade_info = {"executed": False, "amount": 0, "side": None, "success": None, "price_noise": 0.0, "fee_paid": 0.0}
-        future_rollout_steps = 0
+        future_rollout_steps = 1
         while not self.truncated:
             # Get next time step
             obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
@@ -270,24 +304,24 @@ class LongOnlyOneStepEnv(EnvBase):
             low_price = ohlcv_base_values["low"]
 
             if open_price < self.stop_loss:
-                #print(f"Sell (sl) triggered after: {future_rollout_steps} rollout steps")
+                logger.debug(f"Sell (sl) triggered after: {future_rollout_steps} rollout steps")
                 return self.trigger_sell(trade_info, open_price), obs_dict
             elif low_price < self.stop_loss:
-                #print(f"Sell (sl) triggered after: {future_rollout_steps} rollout steps")
+                logger.debug(f"Sell (sl) triggered after: {future_rollout_steps} rollout steps")
                 return self.trigger_sell(trade_info, low_price), obs_dict
             elif high_price > self.take_profit:
-                #print(f"Sell (tp) triggered after: {future_rollout_steps} rollout steps")
+                logger.debug(f"Sell (tp) triggered after: {future_rollout_steps} rollout steps")
                 return self.trigger_sell(trade_info, high_price), obs_dict
             elif close_price < self.stop_loss:
-                #print(f"Sell (sl) triggered after: {future_rollout_steps} rollout steps")
+                logger.debug(f"Sell (sl) triggered after: {future_rollout_steps} rollout steps")
                 return self.trigger_sell(trade_info, close_price), obs_dict
             elif close_price > self.take_profit:
-                #print(f"Sell (tp) triggered after: {future_rollout_steps} rollout steps")
+                logger.debug(f"Sell (tp) triggered after: {future_rollout_steps} rollout steps")
                 return self.trigger_sell(trade_info, close_price), obs_dict
             future_rollout_steps += 1
 
         if self.truncated:
-            #print(f"No sell triggered after: {future_rollout_steps} rollout steps")
+            logger.debug(f"No sell triggered after: {future_rollout_steps} rollout steps")
             return trade_info, obs_dict
 
     def _execute_trade_if_needed(self, action_tuple) -> Dict:
@@ -305,7 +339,7 @@ class LongOnlyOneStepEnv(EnvBase):
 
             # Get base price and apply noise to simulate slippage
             # Apply ±5% noise to the price to simulate market slippage
-            price_noise_factor = torch.empty(1,).uniform_(1 - self.slippage, 1 + self.slippage).item()
+            price_noise_factor = 1.0 #self.np_rng.uniform(1 - self.slippage, 1 + self.slippage)
             execution_price = self.sampler.get_base_features(self.current_timestamp)["close"] * price_noise_factor
 
             fee_paid = amount * self.transaction_fee
@@ -337,7 +371,7 @@ class LongOnlyOneStepEnv(EnvBase):
         
         if side == "buy":
             # add some noise as we probably wont buy to the exact price
-            amount = self.balance - np.random.uniform(0, self.balance * 0.015)
+            amount = self.balance # - np.random.uniform(0, self.balance * 0.015)
             return amount
         else:
             # sell all available

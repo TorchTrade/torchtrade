@@ -24,7 +24,13 @@ class MarketDataObservationSampler:
         feature_processing_fn: Optional[Callable] = None,
         features_start_with: str = "features_",
         max_traj_length: Optional[int] = None,
+        seed: Optional[int] = None,
     ):
+        self.seed = seed
+        self.np_rng = np.random.default_rng(seed)
+
+        if seed is not None:
+            torch.manual_seed(seed)
         required_columns = ["timestamp", "open", "high", "low", "close", "volume"]
         # Ensure df has expected columns
         if list(df.columns) != required_columns:
@@ -53,7 +59,6 @@ class MarketDataObservationSampler:
         self.execute_on = execute_on
         self.feature_processing_fn = feature_processing_fn
         self.features_start_with = features_start_with
-
         # Precompute resampled OHLCV DataFrames for each timeframe
         self.resampled_dfs: Dict[str, pd.DataFrame] = {}
         first_time_stamps = []
@@ -122,10 +127,10 @@ class MarketDataObservationSampler:
 
     def get_random_timestamp(self, without_replacement: bool = False) -> pd.Timestamp:
         if without_replacement:
-            idx = np.random.choice(len(self.unseen_timestamps), size=1, replace=False)
+            idx = self.np_rng.choice(len(self.unseen_timestamps), size=1, replace=False)
             return self.unseen_timestamps.pop(int(idx))
         else:
-            idx = np.random.randint(0, len(self.exec_times))
+            idx = self.np_rng.integers(0, len(self.exec_times))
             return self.exec_times[idx]
 
     def get_random_observation(self, without_replacement: bool = False) -> Tuple[Dict[str, torch.Tensor], pd.Timestamp, bool]:
@@ -191,11 +196,11 @@ class MarketDataObservationSampler:
         if random_start:
             exec_list = list(self.exec_times)
             if self.max_traj_length is None:
-                start_idx = np.random.randint(0, max(1, len(exec_list)))
+                start_idx = self.np_rng.integers(0, max(1, len(exec_list)))
                 self.unseen_timestamps = exec_list[start_idx:]
             else:
                 max_start_index = max(0, len(exec_list) - self.max_traj_length)
-                start_index = np.random.randint(0, max_start_index + 1)
+                start_index = self.np_rng.integers(0, max_start_index + 1)
                 self.unseen_timestamps = exec_list[start_index : start_index + self.max_traj_length]
         else:
             if self.max_traj_length is None:
