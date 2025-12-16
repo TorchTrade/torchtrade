@@ -21,7 +21,6 @@ from torchrl.envs import (
     VecNorm,
 )
 from torchrl.collectors import SyncDataCollector
-from torchrl.data import MultiCategorical, Categorical
 
 from torchrl.modules import (
     ActorValueOperator,
@@ -181,7 +180,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1,
         EnvCreator(maker),
         serial_for_single=True,
     )
-    parallel_env.set_seed(cfg.env.seed, static_seed=True) # needs to be static for GRPO style training
+    parallel_env.set_seed(cfg.env.seed)
 
     train_env = apply_env_transforms(parallel_env, max_train_steps)
 
@@ -203,7 +202,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1,
 # --------------------------------------------------------------------
 
 
-def make_discrete_grpo_binmtabl_model(cfg, env, device):
+def make_discrete_ppo_binmtabl_model(cfg, env, device):
     """Make discrete PPO agent."""
     # Define Actor Network
     activation = "tanh"
@@ -248,6 +247,12 @@ def make_discrete_grpo_binmtabl_model(cfg, env, device):
     )
 
     account_state_encoder = SafeModule(
+        # module=MLP(
+        #     num_cells=[32, 32],
+        #     out_features=14,
+        #     activation_class=ACTIVATIONS[activation],
+        #     device=device,
+        # ),
         module=account_encoder_model,
         in_keys=[account_state_key],
         out_keys=["encoding_account_state"],
@@ -266,6 +271,8 @@ def make_discrete_grpo_binmtabl_model(cfg, env, device):
         in_keys=[f"encoding_{t}_{fre}_{w}" for t, w, fre in zip(time_frames, window_sizes, freqs)] + ["encoding_account_state"],
         out_keys=["common_features"],
     )
+    common_module = SafeSequential(*encoders, account_state_encoder, common_module)
+
     action_out_features = action_spec.n
     distribution_class = torch.distributions.Categorical
     distribution_kwargs = {}
@@ -284,10 +291,7 @@ def make_discrete_grpo_binmtabl_model(cfg, env, device):
         out_keys=["logits"],
     )
 
-    policy_module = SafeSequential(*encoders, account_state_encoder, common_module, policy_module)
-
-
-    policy = ProbabilisticActor(
+    policy_module = ProbabilisticActor(
         policy_module,
         in_keys=["logits"],
         spec=env.full_action_spec_unbatched.to(device), 
@@ -297,26 +301,47 @@ def make_discrete_grpo_binmtabl_model(cfg, env, device):
         default_interaction_type=ExplorationType.RANDOM,
     )
 
-    return policy
+    # Define another head for the value
+    value_net = MLP(
+        activation_class=torch.nn.ReLU, #ACTIVATIONS[activation], #
+        in_features=128,
+        out_features=1,
+        num_cells=[],
+        device=device,
+    )
+    value_module = ValueOperator(
+        value_net,
+        in_keys=["common_features"],
+    )
 
-def make_grpo_policy(env, device, cfg):
-    policy = make_discrete_grpo_binmtabl_model(
+    return common_module, policy_module, value_module
+
+def make_ppo_models(env, device, cfg):
+    common_module, policy_module, value_module = make_discrete_ppo_binmtabl_model(
         cfg,
         env,
         device=device,
     )
 
-    policy.to(device)
+    # Wrap modules in a single ActorCritic operator
+    actor_critic = ActorValueOperator(
+        common_operator=common_module,
+        policy_operator=policy_module,
+        value_operator=value_module,
+    ).to(device)
 
     with torch.no_grad():
-        td = env.fake_tensordict().unsqueeze(0).expand(3, 2).to(policy.device)
-        policy(td)
+        td = env.fake_tensordict().unsqueeze(0).expand(3, 2).to(actor_critic.device)
+        actor_critic(td)
         del td
 
-    total_params = sum(p.numel() for p in policy.parameters())
+    total_params = sum(p.numel() for p in actor_critic.parameters())
     print(f"Total number of parameters: {total_params}")
 
-    return policy
+    actor = actor_critic.get_policy_operator()
+    critic = actor_critic.get_value_operator()
+
+    return actor, critic
 
 
 # ====================================================================
