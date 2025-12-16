@@ -18,3 +18,4 @@
 **Possible things:**
 
 - VLM Actor with human actor dashboard
+- Contrastive RL 
