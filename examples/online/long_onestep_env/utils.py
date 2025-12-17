@@ -134,6 +134,8 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             transaction_fee=cfg.env.transaction_fee,
             bankrupt_threshold=cfg.env.bankrupt_threshold,
             seed=cfg.env.seed,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
             max_traj_length=max_traj_length,
         )
         return LongOnlyOneStepEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
@@ -148,6 +150,8 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             slippage=cfg.env.slippage,
             transaction_fee=cfg.env.transaction_fee,
             bankrupt_threshold=cfg.env.bankrupt_threshold,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
             seed=cfg.env.seed,
             max_traj_length=max_traj_length,
             random_start=False
