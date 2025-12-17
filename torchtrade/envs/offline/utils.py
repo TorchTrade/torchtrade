@@ -12,6 +12,29 @@ def get_timeframe_unit(tf_str: "Min"):
     else:
         raise ValueError(f"Unknown TimeFrameUnit {tf_str}")
 
+
+def compute_periods_per_year_crypto(execute_on_unit: str, execute_on_value: float):
+    """
+    Compute periods per year for crypto trading (24/7).
+    
+    execute_on_unit: 'S', 'Min', 'H', 'D'
+    execute_on_value: number of units per trade
+    """
+    minutes_per_year = 365 * 24 * 60  # total minutes in a year
+
+    if execute_on_unit == 'S':
+        periods_per_year = minutes_per_year * 60 / execute_on_value
+    elif execute_on_unit == 'Min':
+        periods_per_year = minutes_per_year / execute_on_value
+    elif execute_on_unit == 'H':
+        periods_per_year = 365 * 24 / execute_on_value
+    elif execute_on_unit == 'D':
+        periods_per_year = 365 / execute_on_value
+    else:
+        raise ValueError(f"Unknown execute_on_unit: {execute_on_unit}")
+
+    return periods_per_year
+
 class TimeFrameUnit(Enum):
     Minute = 'Min'  # Pandas freq for minutes
     Hour = 'H'    # Pandas freq for hours

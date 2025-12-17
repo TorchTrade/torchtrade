@@ -12,7 +12,8 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto
+from torchtrade.envs.utils import compute_sharpe_torch
 import random
 import logging
 import sys
@@ -96,6 +97,7 @@ class LongOnlyOneStepEnv(EnvBase):
         # Execute trades on the specified time frame
         self.execute_on_value = config.execute_on.value
         self.execute_on_unit = config.execute_on.unit.value
+        self.periods_per_year = compute_periods_per_year_crypto(self.execute_on_unit, self.execute_on_value)
 
         # reset settings 
         self.initial_cash = config.initial_cash
@@ -179,16 +181,18 @@ class LongOnlyOneStepEnv(EnvBase):
         trade_info: Dict,
     ) -> float:
         # --- Terminal: sparse reward ---
-        reward = (new_portfolio_value - old_portfolio_value) / old_portfolio_value
+        #reward = (new_portfolio_value - old_portfolio_value) / old_portfolio_value
+        reward = torch.log(torch.tensor(new_portfolio_value, dtype=torch.float) / torch.tensor(old_portfolio_value, dtype=torch.float))
+        # compute sharp ratio as return
+        #timeframe_return_history = torch.stack(self.rollout_returns)
+        #sharp_ratio = compute_sharpe_torch(timeframe_return_history, self.periods_per_year)
+        
         return reward
-
-
 
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value."""
         current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
         return self.balance + self.position_size * current_price
-
 
     def _set_seed(self, seed: int):
         """Set the seed for the environment."""
@@ -223,6 +227,9 @@ class LongOnlyOneStepEnv(EnvBase):
         self.step_counter = 0
         self.stop_loss = 0.0
         self.take_profit = 0.0
+        self.previous_portfolio_value = 0.0
+
+        logger.debug(f"Reset environment with initial portfolio value: {initial_portfolio_value}")
 
         return self._get_observation(initial=True)
 
@@ -236,13 +243,14 @@ class LongOnlyOneStepEnv(EnvBase):
         # Get desired action and current position
         action = tensordict["action"]
         action_tuple = self.action_map[action.item()]
+        logger.debug(f"Action: {action_tuple}")
         
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(action_tuple)
-        trade_action = 0
         if trade_info["executed"]:
             trade_action = 1 if trade_info["side"] == "buy" else -1
             self.current_position = 1 if trade_info["side"] == "buy" else 0
+            logger.debug(f"Trade executed: {trade_info}")
         # self.action_history.append(trade_action)
         # self.base_price_history.append(self.sampler.get_base_features(self.current_timestamp)["close"])
         # self.portfolio_value_history.append(old_portfolio_value)
@@ -267,7 +275,7 @@ class LongOnlyOneStepEnv(EnvBase):
         return next_tensordict
 
     def trigger_sell(self, trade_info, execution_price):
-
+        logging.debug(f"Triggering sell at price: {execution_price}")
         # Sell all available position
         sell_amount = self.position_size
         # Calculate proceeds and fee based on noisy execution price
@@ -290,8 +298,16 @@ class LongOnlyOneStepEnv(EnvBase):
         })
         return trade_info
 
+    def compute_return(self, close_price):
+        current_value = self.balance + self.position_size * close_price
+        current_return = torch.log(torch.tensor(current_value, dtype=torch.float) / torch.tensor(self.previous_portfolio_value, dtype=torch.float))
+        self.previous_portfolio_value = current_value
+        return current_return
+
     def _rollout(self, ):
         trade_info = {"executed": False, "amount": 0, "side": None, "success": None, "price_noise": 0.0, "fee_paid": 0.0}
+        self.rollout_returns = []
+        
         future_rollout_steps = 1
         while not self.truncated:
             # Get next time step
@@ -303,21 +319,43 @@ class LongOnlyOneStepEnv(EnvBase):
             high_price = ohlcv_base_values["high"]
             low_price = ohlcv_base_values["low"]
 
+            self.rollout_returns.append(self.compute_return(close_price))
+
             if open_price < self.stop_loss:
-                logger.debug(f"Sell (sl) triggered after: {future_rollout_steps} rollout steps")
-                return self.trigger_sell(trade_info, open_price), obs_dict
+                logger.debug(f"Sell (sl) triggered after - on open price: {future_rollout_steps} rollout steps")
+                logger.debug(f"Open price: {open_price}")
+                logger.debug(f"Close price: {close_price}")
+                logger.debug(f"High price: {high_price}")
+                logger.debug(f"Low price: {low_price}")
+                return self.trigger_sell(trade_info, self.stop_loss), obs_dict
             elif low_price < self.stop_loss:
-                logger.debug(f"Sell (sl) triggered after: {future_rollout_steps} rollout steps")
-                return self.trigger_sell(trade_info, low_price), obs_dict
+                logger.debug(f"Sell (sl) triggered after - on low price: {future_rollout_steps} rollout steps")
+                logger.debug(f"Open price: {open_price}")
+                logger.debug(f"Close price: {close_price}")
+                logger.debug(f"High price: {high_price}")
+                logger.debug(f"Low price: {low_price}")
+                return self.trigger_sell(trade_info, self.stop_loss), obs_dict
             elif high_price > self.take_profit:
-                logger.debug(f"Sell (tp) triggered after: {future_rollout_steps} rollout steps")
-                return self.trigger_sell(trade_info, high_price), obs_dict
+                logger.debug(f"Sell (tp) triggered after - on high price: {future_rollout_steps} rollout steps")
+                logger.debug(f"Open price: {open_price}")
+                logger.debug(f"Close price: {close_price}")
+                logger.debug(f"High price: {high_price}")
+                logger.debug(f"Low price: {low_price}")
+                return self.trigger_sell(trade_info, self.take_profit), obs_dict
             elif close_price < self.stop_loss:
-                logger.debug(f"Sell (sl) triggered after: {future_rollout_steps} rollout steps")
-                return self.trigger_sell(trade_info, close_price), obs_dict
+                logger.debug(f"Sell (sl) triggered after - on close price: {future_rollout_steps} rollout steps")
+                logger.debug(f"Open price: {open_price}")
+                logger.debug(f"Close price: {close_price}")
+                logger.debug(f"High price: {high_price}")
+                logger.debug(f"Low price: {low_price}")
+                return self.trigger_sell(trade_info, self.stop_loss), obs_dict
             elif close_price > self.take_profit:
-                logger.debug(f"Sell (tp) triggered after: {future_rollout_steps} rollout steps")
-                return self.trigger_sell(trade_info, close_price), obs_dict
+                logger.debug(f"Sell (tp) triggered after - on close price: {future_rollout_steps} rollout steps")
+                logger.debug(f"Open price: {open_price}")
+                logger.debug(f"Close price: {close_price}")
+                logger.debug(f"High price: {high_price}")
+                logger.debug(f"Low price: {low_price}")
+                return self.trigger_sell(trade_info, self.take_profit), obs_dict
             future_rollout_steps += 1
 
         if self.truncated:
@@ -327,7 +365,7 @@ class LongOnlyOneStepEnv(EnvBase):
     def _execute_trade_if_needed(self, action_tuple) -> Dict:
         """Execute trade if position change is needed."""
         trade_info = {"executed": False, "amount": 0, "side": None, "success": None, "price_noise": 0.0, "fee_paid": 0.0}
-        
+        logger.debug(f"Position: {self.position_size}")
         # If holding position or no change in position, do nothing
         if action_tuple == (None, None):
             # No action
@@ -335,14 +373,16 @@ class LongOnlyOneStepEnv(EnvBase):
         else:
             # execute buy
             side = "buy"
-            amount = self._calculate_trade_amount(side)
+            amount = self.balance
 
             # Get base price and apply noise to simulate slippage
             # Apply ±5% noise to the price to simulate market slippage
             price_noise_factor = 1.0 #self.np_rng.uniform(1 - self.slippage, 1 + self.slippage)
             execution_price = self.sampler.get_base_features(self.current_timestamp)["close"] * price_noise_factor
-
+            logger.debug(f"Execution price: {execution_price}")
+            
             fee_paid = amount * self.transaction_fee
+            logger.debug(f"Fee paid: {fee_paid}")
             effective_amount = amount - fee_paid
             self.balance -= amount
             self.position_size = round(effective_amount / execution_price, 3)
@@ -354,6 +394,10 @@ class LongOnlyOneStepEnv(EnvBase):
             stop_loss_pct, take_profit_pct = action_tuple
             self.stop_loss = execution_price * (1 + stop_loss_pct)
             self.take_profit = execution_price * (1 + take_profit_pct)
+            self.previous_portfolio_value = self.balance + self.position_size * execution_price
+
+            logger.debug(f"Stop loss: {self.stop_loss}")
+            logger.debug(f"Take profit: {self.take_profit}")
                 
             trade_info.update({
                 "executed": True,
@@ -366,16 +410,6 @@ class LongOnlyOneStepEnv(EnvBase):
             
             return trade_info
 
-    def _calculate_trade_amount(self, side: str) -> float:
-        """Calculate the dollar amount to trade."""
-        
-        if side == "buy":
-            # add some noise as we probably wont buy to the exact price
-            amount = self.balance # - np.random.uniform(0, self.balance * 0.015)
-            return amount
-        else:
-            # sell all available
-            return -1
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""
@@ -413,7 +447,7 @@ if __name__ == "__main__":
     )
     env = LongOnlyOneStepEnv(df, config)
 
-    for i in range(10):
+    for i in range(5):
         td = env.reset()
         print("Episode: ", i)
         for j in range(env.max_steps):
