@@ -145,7 +145,7 @@ class LongOnlyOneStepEnv(EnvBase):
     def _get_observation(self, initial: bool = False) -> TensorDictBase:
         """Get the current observation state."""
         # Get market
-        if initial:
+        if initial or self.current_position == 0:
             obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
         else:
             trade_info, obs_dict = self._rollout()
@@ -185,7 +185,10 @@ class LongOnlyOneStepEnv(EnvBase):
         reward = torch.log(torch.tensor(new_portfolio_value, dtype=torch.float) / torch.tensor(old_portfolio_value, dtype=torch.float))
         # compute sharp ratio as return
         #timeframe_return_history = torch.stack(self.rollout_returns)
-        #sharp_ratio = compute_sharpe_torch(timeframe_return_history, self.periods_per_year)
+        #reward = compute_sharpe_torch(timeframe_return_history, self.periods_per_year)
+        
+        if action == (None, None):
+            reward = 0.0
         
         return reward
 
@@ -369,6 +372,7 @@ class LongOnlyOneStepEnv(EnvBase):
         # If holding position or no change in position, do nothing
         if action_tuple == (None, None):
             # No action
+            logging.debug("No action")
             return trade_info
         else:
             # execute buy
@@ -447,7 +451,7 @@ if __name__ == "__main__":
     )
     env = LongOnlyOneStepEnv(df, config)
 
-    for i in range(5):
+    for i in range(10):
         td = env.reset()
         print("Episode: ", i)
         for j in range(env.max_steps):
