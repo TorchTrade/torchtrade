@@ -13,7 +13,7 @@ import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto
-from torchtrade.envs.utils import compute_sharpe_torch
+from torchtrade.envs.utils import sharpe_rollout, daily_sharpe_from_rollout
 import random
 import logging
 import sys
@@ -147,6 +147,7 @@ class LongOnlyOneStepEnv(EnvBase):
         # Get market
         if initial or self.current_position == 0:
             obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
+            self.rollout_returns = []
         else:
             trade_info, obs_dict = self._rollout()
 
@@ -182,15 +183,27 @@ class LongOnlyOneStepEnv(EnvBase):
     ) -> float:
         # --- Terminal: sparse reward ---
         #reward = (new_portfolio_value - old_portfolio_value) / old_portfolio_value
-        reward = torch.log(torch.tensor(new_portfolio_value, dtype=torch.float) / torch.tensor(old_portfolio_value, dtype=torch.float))
+#        reward = torch.log(torch.tensor(new_portfolio_value, dtype=torch.float) / torch.tensor(old_portfolio_value, dtype=torch.float))
         # compute sharp ratio as return
-        #timeframe_return_history = torch.stack(self.rollout_returns)
-        #reward = compute_sharpe_torch(timeframe_return_history, self.periods_per_year)
+        if len(self.rollout_returns) == 0 or action == (None, None):
+            return 0.0
+
+        # Convert list to tensor
+        returns = torch.stack(self.rollout_returns)
         
-        if action == (None, None):
-            reward = 0.0
+        # Need at least 2 points for a valid standard deviation
+        if returns.numel() < 2:
+            return float(returns.sum()) # Return raw sum if we can't compute volatility
+
+        mean_return = returns.mean()
+        std_return = returns.std()
         
-        return reward
+        # 1. Epsilon prevents NaN if std is 0
+        # 2. Multiply by sqrt(N) to annualize based on the execution timeframe
+        sharpe = (mean_return / (std_return + 1e-9)) * np.sqrt(self.periods_per_year)
+        
+        # Clip to avoid extreme gradients in RL
+        return torch.clamp(sharpe, -10.0, 10.0).item()
 
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value."""
@@ -451,7 +464,7 @@ if __name__ == "__main__":
     )
     env = LongOnlyOneStepEnv(df, config)
 
-    for i in range(10):
+    for i in range(50):
         td = env.reset()
         print("Episode: ", i)
         for j in range(env.max_steps):
@@ -460,6 +473,7 @@ if __name__ == "__main__":
             td = env.step(td)
             td = td["next"]
             print("Step: ", j, "Reward:", td["reward"])
+            assert not torch.isnan(td["reward"])
             if td["done"]:
                 print("Done:", td["done"])
                 break
