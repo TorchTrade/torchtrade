@@ -2,18 +2,19 @@
 
 **Big Picture:**
 
-- [ ] Human Actor
+- [X] Human Actor
     - [X] Initial integration
-    - [ ] First updates on general setup after testing
+    - [X] First updates on general setup after testing
 - [ ] Add Binance env
-- [ ] Finish OneStepEnv with offline data
-
+- [X] Finish OneStepEnv with offline data
+- [X] Add GRPO for OneStepEnv
+- [ ] Add SPO
+- [X] TorchTrade Account at Huggingface and further organization for emails/support
 
 
 **Smaller things:**
 
-- [ ] PPO Experiments with minimal setup after human actor updates
-
+- [X] PPO Experiments with minimal setup after human actor updates
 
 **Possible things:**
 
