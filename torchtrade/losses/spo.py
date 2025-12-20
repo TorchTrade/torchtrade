@@ -1,10 +1,12 @@
 # TODO: Implement Simple Policy Optimization paper: https://arxiv.org/pdf/2401.16025
 
 import torch
+import torchrl
 from tensordict import TensorDictBase, TensorDict
 from torchrl.objectives.ppo import PPOLoss
 from torchrl._utils import _standardize
 from torchrl.objectives.utils import _reduce
+from tensordict.nn import dispatch
 
 class SPOLoss(PPOLoss):
     """Simple Policy Optimization (SPO) Loss.
@@ -25,13 +27,14 @@ class SPOLoss(PPOLoss):
         actor_network,
         critic_network=None,
         *,
-        eps_clip: float = 0.2,
+        epsilon: float = 0.2,
         **kwargs,
     ):
         # We use the existing clip_epsilon from PPOLoss to keep compatibility
-        super().__init__(actor_network, critic_network, clip_epsilon=eps_clip, **kwargs)
+        super().__init__(actor_network, critic_network, **kwargs)
+        self.epsilon = epsilon
 
-    @torchrl.objectives.common.dispatch
+    @dispatch
     def forward(self, tensordict: TensorDictBase) -> TensorDictBase:
         tensordict = tensordict.clone(False)
         advantage = tensordict.get(self.tensor_keys.advantage, None)
@@ -56,7 +59,7 @@ class SPOLoss(PPOLoss):
 
         # 3. SPO Objective calculation:
         # Penalty coefficient is |A| / (2 * epsilon)
-        penalty_coeff = advantage.abs() / (2 * self.clip_epsilon)
+        penalty_coeff = advantage.abs() / (2 * self.epsilon)
         penalty = penalty_coeff * torch.square(rho - 1)
         
         # L = rho * A - penalty
