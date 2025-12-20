@@ -214,12 +214,6 @@ class LongOnlyOneStepEnv(EnvBase):
         """Set the seed for the environment."""
 
         self.seed = seed
-        # somehow they receive different seeds 
-        #print(seed)
-        # Python
-        # np.random.seed(seed)
-        # random.seed(seed)
-        # torch.manual_seed(seed)
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""

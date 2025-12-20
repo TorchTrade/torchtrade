@@ -1,7 +1,7 @@
 env:
   name: LongOnlyOneStepEnv
   # only used in SeqLongOnlySLTPEnv
-  stoploss_levels: [-0.01, -0.02, -0.03, -0.04]
+  stoploss_levels: [-0.02, -0.04]
   takeprofit_levels: [0.02, 0.04, 0.06, 0.08, 0.1]
   symbol: "BTC/USD"
   freqs: ["Min"] #, "Min", "Min", "Hour"]
@@ -16,7 +16,7 @@ env:
   seed: 0
   train_envs: 10
   eval_envs: 2
-  data_path: Sebasdi/TorchTrade_btcusd_spot_1m_12_2024_to_09_2025
+  data_path: Torch-Trade/BTCUSD_sport_1m_12_2024_to_09_2025
 
   # collector
 collector:
@@ -31,7 +31,7 @@ logger:
   project_name: TorchTrade-Online
   group_name: ${env.name}
   exp_name: ppo
-  test_interval: 50_000
+  test_interval: 30_000
   num_test_episodes: 1
 
 eval:
@@ -48,11 +48,12 @@ optim:
 
 # loss
 loss:
+  spo: True # False
   gamma: 0.9
   mini_batch_size: 333
   ppo_epochs: 3
   gae_lambda: 0.95
-  clip_epsilon: 0.1
+  clip_epsilon: 0.1 # spo uses 0.2
   anneal_clip_epsilon: True
   critic_coef: 1.0
   entropy_coef: 0.01

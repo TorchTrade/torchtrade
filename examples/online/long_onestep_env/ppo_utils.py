@@ -132,6 +132,8 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             slippage=cfg.env.slippage,
             transaction_fee=cfg.env.transaction_fee,
             bankrupt_threshold=cfg.env.bankrupt_threshold,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
             seed=cfg.env.seed,
             max_traj_length=max_traj_length,
         )
@@ -147,6 +149,8 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             slippage=cfg.env.slippage,
             transaction_fee=cfg.env.transaction_fee,
             bankrupt_threshold=cfg.env.bankrupt_threshold,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
             seed=cfg.env.seed,
             max_traj_length=max_traj_length,
             random_start=False

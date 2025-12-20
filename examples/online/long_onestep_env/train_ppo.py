@@ -22,9 +22,10 @@ def main(cfg: DictConfig):  # noqa: F821
     from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
     from torchrl.envs import ExplorationType, set_exploration_type
     from torchrl.objectives import ClipPPOLoss
+    from torchtrade.losses import SPOLoss
     from torchrl.objectives.value.advantages import GAE
     from torchrl.record.loggers import generate_exp_name, get_logger
-    from utils import make_environment, make_ppo_models, make_collector, log_metrics
+    from ppo_utils import make_environment, make_ppo_models, make_collector, log_metrics
 
     torch.set_float32_matmul_precision("high")
 
@@ -108,16 +109,26 @@ def main(cfg: DictConfig):  # noqa: F821
         time_dim=-3,
         vectorized=not cfg.compile.compile,
     )
-    loss_module = ClipPPOLoss(
-        actor_network=actor,
-        critic_network=critic,
-        clip_epsilon=cfg.loss.clip_epsilon,
-        loss_critic_type=cfg.loss.loss_critic_type,
-        entropy_coef=cfg.loss.entropy_coef,
-        critic_coef=cfg.loss.critic_coef,
-        normalize_advantage=True,
-    )
-
+    if not cfg.loss.spo:
+        loss_module = ClipPPOLoss(
+            actor_network=actor,
+            critic_network=critic,
+            clip_epsilon=cfg.loss.clip_epsilon,
+            loss_critic_type=cfg.loss.loss_critic_type,
+            entropy_coef=cfg.loss.entropy_coef,
+            critic_coef=cfg.loss.critic_coef,
+            normalize_advantage=True,
+        )
+    else:
+        loss_module = SPOLoss(
+            actor_network=actor,
+            critic_network=critic,
+            clip_epsilon=cfg.loss.clip_epsilon,
+            loss_critic_type=cfg.loss.loss_critic_type,
+            entropy_coef=cfg.loss.entropy_coef,
+            critic_coef=cfg.loss.critic_coef,
+            normalize_advantage=True,
+        )
     # Create optimizer
     optim = torch.optim.Adam(
         loss_module.parameters(),
@@ -161,7 +172,7 @@ def main(cfg: DictConfig):  # noqa: F821
             alpha = 1 - (num_network_updates / total_network_updates)
             for group in optim.param_groups:
                 group["lr"] = cfg_optim_lr * alpha
-        if cfg_loss_anneal_clip_eps:
+        if cfg_loss_anneal_clip_eps and not spo:
             loss_module.clip_epsilon.copy_(cfg_loss_clip_epsilon * alpha)
         #num_network_updates = num_network_updates + 1
         # Get a data batch
@@ -197,6 +208,7 @@ def main(cfg: DictConfig):  # noqa: F821
     cfg_optim_anneal_lr = cfg.optim.anneal_lr
     cfg_optim_lr = cfg.optim.lr
     cfg_loss_anneal_clip_eps = cfg.loss.anneal_clip_epsilon
+    spo = cfg.loss.spo
     cfg_loss_clip_epsilon = cfg.loss.clip_epsilon
     cfg_optim_max_grad_norm = cfg.optim.max_grad_norm
     cfg.loss.clip_epsilon = cfg_loss_clip_epsilon
