@@ -8,7 +8,7 @@
 - [ ] Add Binance env
 - [X] Finish OneStepEnv with offline data
 - [X] Add GRPO for OneStepEnv
-- [ ] Add SPO
+- [X] Add SPO
 - [X] TorchTrade Account at Huggingface and further organization for emails/support
 
 
