@@ -55,5 +55,5 @@ If you find this project useful, consider donating: [Donate via PayPal](https://
 
 ## Contact
 
-For help or questions, please contact: [yourname@example.com](mailto:yourname@example.com).
+For help or questions, please contact: [torchtradecontact@gmail.com](torchtradecontact@gmail.com).
 
