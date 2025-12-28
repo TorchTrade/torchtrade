@@ -298,7 +298,7 @@ class SeqLongOnlyEnv(EnvBase):
 
         max_episode_steps = self.sampler.reset(random_start=self.random_start)
         self.max_traj_length = max_episode_steps # overwrite as we might execute on different time frame so actual step might differ
-        initial_portfolio_value = self.initial_cash if self.initial_cash is int else random.randint(self.initial_cash[0], self.initial_cash[1])
+        initial_portfolio_value = self.initial_cash if isinstance(self.initial_cash, int) else random.randint(self.initial_cash[0], self.initial_cash[1])
         self.balance = initial_portfolio_value
         self.initial_portfolio_value = initial_portfolio_value
         self.position_hold_counter = 0
