@@ -18,8 +18,10 @@ from torchrl.envs import (
     Compose,
     TransformedEnv,
     StepCounter,
+    VecNorm,
 )
 from torchrl.collectors import SyncDataCollector
+from torchrl.data import MultiCategorical, Categorical
 
 from torchrl.modules import (
     ActorValueOperator,
@@ -29,16 +31,15 @@ from torchrl.modules import (
     SafeModule,
     SafeSequential,
 )
-from trading_nets.architectures.tabl.tabl import BiNMTABLModel
+from trading_nets.architectures.tabl.tabl import BiNMTABLModel, BiNTabularEncoder
 from trading_nets.architectures.wavenet.simple_1d_wave import Simple1DWaveEncoder
 
-from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig, SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, get_timeframe_unit
 import ta
 import numpy as np
 import pandas as pd
 from torchrl.trainers.helpers.models import ACTIVATIONS
-
 
 # ====================================================================
 # Environment utils
@@ -121,22 +122,41 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
     time_frames = [TimeFrame(t, get_timeframe_unit(f)) for t, f in zip(cfg.env.time_frames, cfg.env.freqs)]
     execute_on=TimeFrame(execute_on[0], get_timeframe_unit(execute_on[1]))
 
-    config = SeqLongOnlyEnvConfig(
-        symbol=cfg.env.symbol,
-        time_frames=time_frames,
-        window_sizes=window_sizes,
-        execute_on=execute_on,
-        include_base_features=False,
-        initial_cash=cfg.env.initial_cash,
-        slippage=cfg.env.slippage,
-        transaction_fee=cfg.env.transaction_fee,
-        bankrupt_threshold=cfg.env.bankrupt_threshold,
-        seed=cfg.env.seed,
-        max_traj_length=max_traj_length,
-        random_start=random_start
-    )
-    return SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    if cfg.env.name == "SeqLongOnlyEnv":
 
+        config = SeqLongOnlyEnvConfig(
+            symbol=cfg.env.symbol,
+            time_frames=time_frames,
+            window_sizes=window_sizes,
+            execute_on=execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            max_traj_length=max_traj_length,
+            random_start=random_start
+        )
+        return SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    elif cfg.env.name == "SeqLongOnlySLTPEnv":
+        config = SeqLongOnlySLTPEnvConfig(
+            symbol=cfg.env.symbol,
+            time_frames=time_frames,
+            window_sizes=window_sizes,
+            execute_on=execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            max_traj_length=max_traj_length,
+            random_start=random_start
+        )
+        return SeqLongOnlySLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    else:
+        raise ValueError(f"Unknown environment: {cfg.env.name}")
 
 def apply_env_transforms(
     env,
@@ -222,13 +242,17 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
             out_keys=[f"encoding_{t}_{fre}_{w}"],
         ).to(device))
 
+
+    account_encoder_model = BiNTabularEncoder(
+        feature_dim=7,
+        embedding_dim=14,
+        hidden_dims=[32, 32],
+        activation="gelu",
+        dropout=0.1,
+    )
+
     account_state_encoder = SafeModule(
-        module=MLP(
-            num_cells=[32, 32],
-            out_features=14,
-            activation_class=ACTIVATIONS[activation],
-            device=device,
-        ),
+        module=account_encoder_model,
         in_keys=[account_state_key],
         out_keys=["encoding_account_state"],
     )
@@ -248,28 +272,28 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
     )
     common_module = SafeSequential(*encoders, account_state_encoder, common_module)
 
+    action_out_features = action_spec.n
+    distribution_class = torch.distributions.Categorical
+    distribution_kwargs = {}
+
     # Define on head for the policy
     policy_net = MLP(
         in_features=128,
-        out_features=action_spec.n,
+        out_features=action_out_features,
         activation_class=ACTIVATIONS[activation],
         num_cells=[],
         device=device,
     )
-    policy_module = TensorDictModule(
+    policy_module = SafeModule(
         module=policy_net,
         in_keys=["common_features"],
         out_keys=["logits"],
     )
 
-    # Add probabilistic sampling of the actions
-    distribution_class = torch.distributions.Categorical
-    distribution_kwargs = {}
-
     policy_module = ProbabilisticActor(
         policy_module,
         in_keys=["logits"],
-        spec=env.full_action_spec_unbatched.to(device),
+        spec=env.full_action_spec_unbatched.to(device), 
         distribution_class=distribution_class,
         distribution_kwargs=distribution_kwargs,
         return_log_prob=True,
@@ -278,7 +302,7 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
 
     # Define another head for the value
     value_net = MLP(
-        activation_class=torch.nn.ReLU,
+        activation_class=torch.nn.ReLU, #ACTIVATIONS[activation], #
         in_features=128,
         out_features=1,
         num_cells=[],

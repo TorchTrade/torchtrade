@@ -48,7 +48,7 @@ optim:
 
 # loss
 loss:
-  spo: True # False
+  spo: False # False
   gamma: 0.9
   mini_batch_size: 333
   ppo_epochs: 3

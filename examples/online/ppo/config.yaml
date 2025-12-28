@@ -1,9 +1,12 @@
 env:
-  name: SeqLongOnlyEnv
+  name: SeqLongOnlySLTPEnv
+  # only used in SeqLongOnlySLTPEnv
+  stoploss_levels: [-0.01, -0.02, -0.03, -0.04]
+  takeprofit_levels: [0.02, 0.04, 0.06, 0.08, 0.1]
   symbol: "BTC/USD"
   freqs: ["Min"] #, "Min", "Min", "Hour"]
   time_frames: [15] #, 5, 15, 1]
-  window_sizes: [30] #, 24, 24, 24]
+  window_sizes: [32] #, 24, 24, 24]
   execute_on: [15, "Min"]
   initial_cash: [1000, 5000]
   transaction_fee: 0.0025 
@@ -26,7 +29,7 @@ logger:
   mode: online
   backend: wandb
   project_name: TorchTrade-Online
-  group_name: null
+  group_name: ${env.name}
   exp_name: ppo
   test_interval: 1_000_000
   num_test_episodes: 1
@@ -56,6 +59,6 @@ loss:
   loss_critic_type: l2
 
 compile:
-  compile: True
+  compile: False
   compile_mode:
   cudagraphs: False
