@@ -114,3 +114,114 @@ def execute_timeframe():
     return TimeFrame(1, TimeFrameUnit.Minute)
 
 
+@pytest.fixture
+def trending_up_df():
+    """Create synthetic data with clear upward trend for TP testing."""
+    np.random.seed(42)
+    n_minutes = 500
+
+    start_time = pd.Timestamp("2024-01-01 00:00:00")
+    timestamps = pd.date_range(start=start_time, periods=n_minutes, freq="1min")
+
+    # Strong upward trend
+    initial_price = 100.0
+    trend = np.linspace(0, 0.3, n_minutes)  # 30% increase
+    noise = np.random.normal(0, 0.001, n_minutes)
+    close_prices = initial_price * (1 + trend + np.cumsum(noise))
+
+    high_prices = close_prices * 1.002
+    low_prices = close_prices * 0.998
+    open_prices = np.roll(close_prices, 1)
+    open_prices[0] = initial_price
+
+    volume = np.random.lognormal(10, 1, n_minutes)
+
+    return pd.DataFrame({
+        "timestamp": timestamps,
+        "open": open_prices,
+        "high": high_prices,
+        "low": low_prices,
+        "close": close_prices,
+        "volume": volume,
+    })
+
+
+@pytest.fixture
+def trending_down_df():
+    """Create synthetic data with clear downward trend for SL testing."""
+    np.random.seed(42)
+    n_minutes = 500
+
+    start_time = pd.Timestamp("2024-01-01 00:00:00")
+    timestamps = pd.date_range(start=start_time, periods=n_minutes, freq="1min")
+
+    # Strong downward trend
+    initial_price = 100.0
+    trend = np.linspace(0, -0.2, n_minutes)  # 20% decrease
+    noise = np.random.normal(0, 0.001, n_minutes)
+    close_prices = initial_price * (1 + trend + np.cumsum(noise))
+
+    high_prices = close_prices * 1.002
+    low_prices = close_prices * 0.998
+    open_prices = np.roll(close_prices, 1)
+    open_prices[0] = initial_price
+
+    volume = np.random.lognormal(10, 1, n_minutes)
+
+    return pd.DataFrame({
+        "timestamp": timestamps,
+        "open": open_prices,
+        "high": high_prices,
+        "low": low_prices,
+        "close": close_prices,
+        "volume": volume,
+    })
+
+
+@pytest.fixture
+def price_gap_df():
+    """
+    Create synthetic data with price gaps that skip past SL/TP levels.
+
+    Simulates gap-down and gap-up scenarios where the price jumps
+    past the SL/TP threshold in a single candle.
+    """
+    np.random.seed(42)
+    n_minutes = 200
+
+    start_time = pd.Timestamp("2024-01-01 00:00:00")
+    timestamps = pd.date_range(start=start_time, periods=n_minutes, freq="1min")
+
+    initial_price = 100.0
+    close_prices = np.full(n_minutes, initial_price)
+
+    # Create a gap-down at minute 50 (10% drop)
+    close_prices[50:100] = initial_price * 0.90
+
+    # Create a gap-up at minute 150 (15% jump from current level)
+    close_prices[150:] = initial_price * 0.90 * 1.15
+
+    # Add small noise
+    close_prices = close_prices * (1 + np.random.normal(0, 0.001, n_minutes))
+
+    high_prices = close_prices * 1.001
+    low_prices = close_prices * 0.999
+    open_prices = np.roll(close_prices, 1)
+    open_prices[0] = initial_price
+
+    # Make the gap visible in open/close
+    open_prices[50] = initial_price
+    open_prices[150] = initial_price * 0.90
+
+    volume = np.random.lognormal(10, 1, n_minutes)
+
+    return pd.DataFrame({
+        "timestamp": timestamps,
+        "open": open_prices,
+        "high": high_prices,
+        "low": low_prices,
+        "close": close_prices,
+        "volume": volume,
+    })
+
+

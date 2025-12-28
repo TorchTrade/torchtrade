@@ -20,37 +20,7 @@ def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-@pytest.fixture
-def sample_ohlcv_df():
-    """Create synthetic OHLCV data for testing."""
-    np.random.seed(42)
-    n_minutes = 1440  # 1 day
-
-    start_time = pd.Timestamp("2024-01-01 00:00:00")
-    timestamps = pd.date_range(start=start_time, periods=n_minutes, freq="1min")
-
-    initial_price = 100.0
-    returns = np.random.normal(0, 0.001, n_minutes)
-    close_prices = initial_price * np.exp(np.cumsum(returns))
-
-    high_prices = close_prices * (1 + np.abs(np.random.normal(0, 0.002, n_minutes)))
-    low_prices = close_prices * (1 - np.abs(np.random.normal(0, 0.002, n_minutes)))
-    open_prices = np.roll(close_prices, 1)
-    open_prices[0] = initial_price
-
-    low_prices = np.minimum(low_prices, np.minimum(open_prices, close_prices))
-    high_prices = np.maximum(high_prices, np.maximum(open_prices, close_prices))
-
-    volume = np.random.lognormal(10, 1, n_minutes)
-
-    return pd.DataFrame({
-        "timestamp": timestamps,
-        "open": open_prices,
-        "high": high_prices,
-        "low": low_prices,
-        "close": close_prices,
-        "volume": volume,
-    })
+# Note: sample_ohlcv_df fixture is defined in conftest.py
 
 
 @pytest.fixture
