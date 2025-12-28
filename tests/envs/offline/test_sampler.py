@@ -467,6 +467,33 @@ class TestSamplerNoFutureLeakage:
             "volume": volume,
         })
 
+    @pytest.fixture
+    def large_sequential_ohlcv_df(self):
+        """
+        Create larger OHLCV data for testing higher execution timeframes.
+
+        7 days of 1-minute data = 10080 minutes.
+        Close price = minute index for easy leakage detection.
+        """
+        n_minutes = 10080  # 7 days
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+        timestamps = pd.date_range(start=start_time, periods=n_minutes, freq="1min")
+
+        close_prices = np.array([float(i) for i in range(n_minutes)])
+        open_prices = close_prices
+        high_prices = close_prices + 0.5
+        low_prices = close_prices - 0.5
+        volume = np.ones(n_minutes) * 1000
+
+        return pd.DataFrame({
+            "timestamp": timestamps,
+            "open": open_prices,
+            "high": high_prices,
+            "low": low_prices,
+            "close": close_prices,
+            "volume": volume,
+        })
+
     def test_no_future_leakage_single_timeframe(self, sequential_ohlcv_df):
         """
         Observation at time T must not contain any data from time > T.
@@ -680,6 +707,161 @@ class TestSamplerNoFutureLeakage:
                 )
 
             prev_last_close = current_last_close
+
+            if truncated:
+                break
+
+    @pytest.mark.parametrize("exec_value,exec_unit,expected_advance", [
+        (1, TimeFrameUnit.Minute, 1),
+        (5, TimeFrameUnit.Minute, 5),
+        (15, TimeFrameUnit.Minute, 15),
+        (30, TimeFrameUnit.Minute, 30),
+        (1, TimeFrameUnit.Hour, 60),
+        (4, TimeFrameUnit.Hour, 240),
+    ])
+    def test_no_future_leakage_various_execution_timeframes(
+        self, large_sequential_ohlcv_df, exec_value, exec_unit, expected_advance
+    ):
+        """
+        CRITICAL: Test no future leakage across various execution timeframes.
+
+        Tests: 1min, 5min, 15min, 30min, 1hour, 4hour execution intervals.
+
+        For each execution timeframe, the observation at time T must not
+        contain any data from time > T.
+        """
+        execute_on = TimeFrame(exec_value, exec_unit)
+        window_size = 10
+
+        sampler = MarketDataObservationSampler(
+            df=large_sequential_ohlcv_df,
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=window_size,
+            execute_on=execute_on,
+        )
+        sampler.reset(random_start=False)
+
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+        prev_last_close = None
+
+        # Test at least 20 steps
+        for step in range(20):
+            obs, timestamp, truncated = sampler.get_sequential_observation()
+            current_minute_idx = int((timestamp - start_time).total_seconds() / 60)
+
+            # All close prices must be <= current_minute_idx (no future data)
+            close_values = obs["1Minute"][:, 3].numpy()
+
+            for close_val in close_values:
+                assert close_val <= current_minute_idx, (
+                    f"Future leakage detected with {exec_value}{exec_unit.name} execution! "
+                    f"At minute {current_minute_idx}, observation contains close={close_val}"
+                )
+
+            # Verify execution advances by expected amount
+            current_last_close = obs["1Minute"][-1, 3].item()
+            if prev_last_close is not None:
+                diff = current_last_close - prev_last_close
+                assert diff == expected_advance, (
+                    f"{exec_value}{exec_unit.name} execution should advance by {expected_advance}. "
+                    f"Got diff={diff}"
+                )
+
+            prev_last_close = current_last_close
+
+            if truncated:
+                break
+
+    @pytest.mark.parametrize("exec_value,exec_unit", [
+        (1, TimeFrameUnit.Minute),
+        (5, TimeFrameUnit.Minute),
+        (15, TimeFrameUnit.Minute),
+        (30, TimeFrameUnit.Minute),
+        (1, TimeFrameUnit.Hour),
+        (4, TimeFrameUnit.Hour),
+    ])
+    def test_last_observation_at_current_time_various_exec(
+        self, large_sequential_ohlcv_df, exec_value, exec_unit
+    ):
+        """
+        The last bar in observation should be at or before query timestamp.
+
+        Tests across: 1min, 5min, 15min, 30min, 1hour, 4hour execution.
+        """
+        execute_on = TimeFrame(exec_value, exec_unit)
+        window_size = 10
+
+        sampler = MarketDataObservationSampler(
+            df=large_sequential_ohlcv_df,
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=window_size,
+            execute_on=execute_on,
+        )
+        sampler.reset(random_start=False)
+
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+
+        for step in range(15):
+            obs, timestamp, truncated = sampler.get_sequential_observation()
+            current_minute_idx = int((timestamp - start_time).total_seconds() / 60)
+
+            # Last close should equal current minute (since close = minute_index)
+            last_close = obs["1Minute"][-1, 3].item()
+            assert last_close == current_minute_idx, (
+                f"With {exec_value}{exec_unit.name} execution: "
+                f"Last observation should be at current time. "
+                f"Expected close={current_minute_idx}, got {last_close}"
+            )
+
+            if truncated:
+                break
+
+    @pytest.mark.parametrize("exec_value,exec_unit", [
+        (1, TimeFrameUnit.Minute),
+        (5, TimeFrameUnit.Minute),
+        (15, TimeFrameUnit.Minute),
+        (30, TimeFrameUnit.Minute),
+        (1, TimeFrameUnit.Hour),
+        (4, TimeFrameUnit.Hour),
+    ])
+    def test_multi_timeframe_no_leakage_in_execution_tf(
+        self, large_sequential_ohlcv_df, exec_value, exec_unit
+    ):
+        """
+        Multi-timeframe setup: execution timeframe observations must not leak.
+
+        Even with multiple observation timeframes, the data for the execution
+        timeframe itself must not contain future information.
+
+        Tests across: 1min, 5min, 15min, 30min, 1hour, 4hour execution.
+        """
+        execute_on = TimeFrame(exec_value, exec_unit)
+
+        # Use execution timeframe as one of the observation timeframes
+        sampler = MarketDataObservationSampler(
+            df=large_sequential_ohlcv_df,
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                execute_on,  # Include execution timeframe in observations
+            ],
+            window_sizes=[10, 5],
+            execute_on=execute_on,
+        )
+        sampler.reset(random_start=False)
+
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+
+        for step in range(15):
+            obs, timestamp, truncated = sampler.get_sequential_observation()
+            current_minute_idx = int((timestamp - start_time).total_seconds() / 60)
+
+            # 1-minute timeframe must have no leakage
+            close_1min = obs["1Minute"][:, 3].numpy()
+            for close_val in close_1min:
+                assert close_val <= current_minute_idx, (
+                    f"1Minute leakage with {exec_value}{exec_unit.name} execution! "
+                    f"Close={close_val} > current_minute={current_minute_idx}"
+                )
 
             if truncated:
                 break
