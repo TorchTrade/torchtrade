@@ -20,6 +20,18 @@ classifiers = [
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
 [project.urls]
 "Homepage" = "https://github.com/torchtrade/torchrl-alpaca-env"
 "Bug Reports" = "https://github.com/torchtrade/torchrl-alpaca-env/issues"
