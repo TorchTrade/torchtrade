@@ -31,19 +31,35 @@ class AlpacaTradingEnvConfig:
 class AlpacaTradingEnv(gym.Env):
     metadata = {"render.modes": ["human"]}
 
-    def __init__(self, config: AlpacaTradingEnvConfig, api_key: str, api_secret: str):
+    def __init__(
+        self,
+        config: AlpacaTradingEnvConfig,
+        api_key: str = "",
+        api_secret: str = "",
+        observer: Optional[AlpacaObservationClass] = None,
+        trader: Optional[AlpacaOrderClass] = None,
+    ):
+        """
+        Initialize the AlpacaTradingEnv.
+
+        Args:
+            config: Environment configuration
+            api_key: Alpaca API key (not required if observer and trader are provided)
+            api_secret: Alpaca API secret (not required if observer and trader are provided)
+            observer: Optional pre-configured AlpacaObservationClass for dependency injection
+            trader: Optional pre-configured AlpacaOrderClass for dependency injection
+        """
         super().__init__()
         self.config = config
 
-        # Initialize Alpaca clients
-        # TODO adapt such that the observer can handle multiple timeframes in the crypto env
-        self.observer = AlpacaObservationClass(
+        # Initialize Alpaca clients - use injected instances or create new ones
+        self.observer = observer if observer is not None else AlpacaObservationClass(
             symbol=config.symbol,
             timeframes=config.time_frames,
             window_sizes=config.window_sizes,
         )
 
-        self.trader = AlpacaOrderClass(
+        self.trader = trader if trader is not None else AlpacaOrderClass(
             symbol=config.symbol.replace('/', ''),
             trade_mode=config.trade_mode,
             api_key=api_key,

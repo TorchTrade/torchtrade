@@ -14,9 +14,10 @@ class AlpacaObservationClass:
         timeframes: Union[List[TimeFrame], TimeFrame],
         window_sizes: Union[List[int], int] = 1,
         feature_preprocessing_fn: Optional[Callable] = None,
+        client: Optional[CryptoHistoricalDataClient] = None,
     ):
         """
-        Initialize the AlpacaObservationClass. Default observation features are close, open, high, low. 
+        Initialize the AlpacaObservationClass. Default observation features are close, open, high, low.
 
         Args:
             symbol: The cryptocurrency symbol to fetch data for
@@ -25,6 +26,7 @@ class AlpacaObservationClass:
                         If a list is provided, it must have the same length as timeframes.
             feature_preprocessing_fn: Optional custom preprocessing function that takes a DataFrame
                                    and returns a DataFrame with feature columns
+            client: Optional pre-configured CryptoHistoricalDataClient for dependency injection (useful for testing)
         """
         self.symbol = symbol
         self.timeframes = (
@@ -38,11 +40,11 @@ class AlpacaObservationClass:
         if isinstance(timeframes, list) and isinstance(window_sizes, list):
             if len(self.timeframes) != len(self.window_sizes):
                 raise ValueError("If both timeframes and window_sizes are lists, they must have the same length")
-        
+
         self.feature_preprocessing_fn = (
             feature_preprocessing_fn or self._default_preprocessing
         )
-        self.client = CryptoHistoricalDataClient()
+        self.client = client if client is not None else CryptoHistoricalDataClient()
 
     def _default_preprocessing(self, df: pd.DataFrame) -> pd.DataFrame:
         """Default preprocessing function if none is provided."""
