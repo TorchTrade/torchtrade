@@ -13,7 +13,7 @@ from torchtrade.envs.alpaca.order_executor import (
     OrderStatus,
     PositionStatus,
 )
-from tests.envs.alpaca.mocks import MockTradingClient
+from .mocks import MockTradingClient
 
 
 class TestAlpacaOrderClassInitialization:

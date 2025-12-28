@@ -10,7 +10,7 @@ import pandas as pd
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
-from tests.envs.alpaca.mocks import MockCryptoHistoricalDataClient
+from .mocks import MockCryptoHistoricalDataClient
 
 
 class TestAlpacaObservationClassInitialization:
