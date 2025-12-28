@@ -33,19 +33,37 @@ class AlpacaTradingEnvConfig:
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
 
 class AlpacaTorchTradingEnv(EnvBase):
-    def __init__(self, config: AlpacaTradingEnvConfig, api_key: str, api_secret: str, feature_preprocessing_fn: Optional[Callable] = None):
+    def __init__(
+        self,
+        config: AlpacaTradingEnvConfig,
+        api_key: str = "",
+        api_secret: str = "",
+        feature_preprocessing_fn: Optional[Callable] = None,
+        observer: Optional[AlpacaObservationClass] = None,
+        trader: Optional[AlpacaOrderClass] = None,
+    ):
+        """
+        Initialize the AlpacaTorchTradingEnv.
+
+        Args:
+            config: Environment configuration
+            api_key: Alpaca API key (not required if observer and trader are provided)
+            api_secret: Alpaca API secret (not required if observer and trader are provided)
+            feature_preprocessing_fn: Optional custom preprocessing function
+            observer: Optional pre-configured AlpacaObservationClass for dependency injection
+            trader: Optional pre-configured AlpacaOrderClass for dependency injection
+        """
         self.config = config
 
-        # Initialize Alpaca clients
-        # TODO adapt such that the observer can handle multiple timeframes in the crypto env
-        self.observer = AlpacaObservationClass(
+        # Initialize Alpaca clients - use injected instances or create new ones
+        self.observer = observer if observer is not None else AlpacaObservationClass(
             symbol=config.symbol,
             timeframes=config.time_frames,
             window_sizes=config.window_sizes,
             feature_preprocessing_fn=feature_preprocessing_fn,
         )
 
-        self.trader = AlpacaOrderClass(
+        self.trader = trader if trader is not None else AlpacaOrderClass(
             symbol=config.symbol.replace('/', ''),
             trade_mode=config.trade_mode,
             api_key=api_key,

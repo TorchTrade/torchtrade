@@ -72,10 +72,11 @@ class AlpacaOrderClass:
         self,
         symbol: str,
         trade_mode: TradeMode,
-        api_key: str,
-        api_secret: str,
+        api_key: str = "",
+        api_secret: str = "",
         paper: bool = True,
         transaction_fee: float = 0.025,
+        client: Optional[TradingClient] = None,
     ):
         """
         Initialize the AlpacaOrderClass.
@@ -83,9 +84,11 @@ class AlpacaOrderClass:
         Args:
             symbol: The trading symbol (e.g., "BTC/USD")
             trade_mode: TradeMode.NOTIONAL for dollar-based orders or TradeMode.QUANTITY for unit-based orders
-            api_key: Alpaca API key
-            api_secret: Alpaca API secret
+            api_key: Alpaca API key (not required if client is provided)
+            api_secret: Alpaca API secret (not required if client is provided)
             paper: Whether to use paper trading (default: True)
+            transaction_fee: Transaction fee percentage (default: 0.025)
+            client: Optional pre-configured TradingClient for dependency injection (useful for testing)
         """
         if "/" in symbol:
             import warnings
@@ -95,7 +98,7 @@ class AlpacaOrderClass:
             symbol = symbol.replace('/', '')
         self.symbol = symbol.replace('/', '')
         self.trade_mode = trade_mode
-        self.client = TradingClient(api_key, secret_key=api_secret, paper=paper)
+        self.client = client if client is not None else TradingClient(api_key, secret_key=api_secret, paper=paper)
         self.last_order_id = None
 
     def trade(
