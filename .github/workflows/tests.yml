@@ -8,6 +8,7 @@ on:
 
 jobs:
   test:
+    name: Fast Tests
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -29,7 +30,7 @@ jobs:
           pip install pytest pytest-cov
           pip install -e .
 
-      - name: Run tests
+      - name: Run tests (excluding slow tests)
         env:
           WANDB_MODE: disabled
         run: |
@@ -42,3 +43,35 @@ jobs:
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  slow-tests:
+    name: Slow Tests (Examples)
+    runs-on: ubuntu-latest
+    # Only run on push to main, not on PRs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        python-version: ['3.10']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+          pip install -e .
+
+      - name: Run slow tests (examples)
+        env:
+          WANDB_MODE: disabled
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          pytest tests/ -v -m slow --tb=short

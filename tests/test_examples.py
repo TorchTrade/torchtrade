@@ -495,6 +495,7 @@ def run_command(command: str, timeout: int = 300) -> int:
         raise
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(
     len(EXAMPLE_COMMANDS) == 0,
     reason="No example commands configured yet"
@@ -505,7 +506,11 @@ def run_command(command: str, timeout: int = 300) -> int:
 )
 @pytest.mark.parametrize("name,command", list(EXAMPLE_COMMANDS.items()))
 def test_example_commands(name: str, command: str):
-    """Run example training scripts with minimal parameters."""
+    """Run example training scripts with minimal parameters.
+
+    These tests are marked as 'slow' and skipped by default in CI.
+    Run with: pytest -m slow
+    """
     returncode = run_command(command, timeout=300)
     assert returncode == 0, f"Example {name} failed"
 
