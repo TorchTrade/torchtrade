@@ -21,6 +21,9 @@ import numpy as np
 # Get the repository root
 REPO_ROOT = Path(__file__).parent.parent
 
+# HuggingFace dataset path for real market data
+HF_DATASET_PATH = "Torch-Trade/AlpacaLiveData_LongOnly-v0"
+
 
 # =============================================================================
 # Online Example Tests (using mocks)
@@ -231,6 +234,91 @@ class TestOfflineEnvironments:
                 break
 
         assert steps > 0
+
+
+# =============================================================================
+# HuggingFace Dataset Tests
+# =============================================================================
+
+class TestHuggingFaceDataset:
+    """Test loading and using HuggingFace dataset for offline RL."""
+
+    @pytest.fixture
+    def hf_tensordict(self):
+        """Load HuggingFace dataset and convert to TensorDict."""
+        from datasets import load_dataset
+        from torchtrade.utils import dataset_to_td
+
+        ds = load_dataset(HF_DATASET_PATH, split="train")
+        td = dataset_to_td(ds)
+        return td
+
+    def test_load_hf_dataset(self):
+        """Test that HuggingFace dataset can be loaded."""
+        from datasets import load_dataset
+
+        ds = load_dataset(HF_DATASET_PATH, split="train")
+        assert ds is not None
+        assert len(ds) > 0
+
+    def test_convert_dataset_to_tensordict(self, hf_tensordict):
+        """Test conversion from HuggingFace dataset to TensorDict."""
+        td = hf_tensordict
+        assert td is not None
+        assert td.batch_size[0] > 0
+
+    def test_tensordict_has_required_keys(self, hf_tensordict):
+        """Test that converted TensorDict has required RL keys."""
+        td = hf_tensordict
+
+        # Check for observation/action structure
+        all_keys = list(td.keys(include_nested=True, leaves_only=True))
+        key_names = [str(k) for k in all_keys]
+
+        # Should have action
+        assert "action" in td.keys(), f"Missing 'action' key. Available: {key_names}"
+
+        # Should have next dict with reward and done
+        assert "next" in td.keys() or any("next" in str(k) for k in all_keys), \
+            f"Missing 'next' structure. Available: {key_names}"
+
+    def test_tensordict_with_replay_buffer(self, hf_tensordict):
+        """Test that TensorDict can be used with TorchRL replay buffer."""
+        from torchrl.data import TensorDictReplayBuffer, LazyMemmapStorage
+        from torchrl.data.replay_buffers import SamplerWithoutReplacement
+
+        td = hf_tensordict
+        size = td.batch_size[0]
+
+        # Create replay buffer
+        replay_buffer = TensorDictReplayBuffer(
+            storage=LazyMemmapStorage(size),
+            batch_size=min(32, size),
+            sampler=SamplerWithoutReplacement(drop_last=True),
+        )
+
+        # Extend buffer with data
+        replay_buffer.extend(td)
+
+        # Sample from buffer
+        sample = replay_buffer.sample()
+        assert sample is not None
+        assert sample.batch_size[0] == min(32, size)
+
+    def test_tensordict_shapes_valid(self, hf_tensordict):
+        """Test that TensorDict tensor shapes are valid for training."""
+        td = hf_tensordict
+
+        # Check action shape
+        if "action" in td.keys():
+            action = td["action"]
+            assert action.dim() >= 1, "Action should have at least 1 dimension"
+
+        # Check observation shapes (market data keys)
+        for key in td.keys():
+            if "market_data" in str(key):
+                obs = td[key]
+                assert obs.dim() >= 2, f"{key} should have at least 2 dimensions (batch, features)"
 
 
 # =============================================================================
