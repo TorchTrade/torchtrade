@@ -247,9 +247,15 @@ def _check_hf_dataset_available():
     """Check if HuggingFace dataset is accessible."""
     try:
         from datasets import load_dataset
-        load_dataset(HF_DATASET_PATH, split="train")
+        import os
+        # Debug: print if token is available
+        has_token = bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"))
+        ds = load_dataset(HF_DATASET_PATH, split="train")
         return True
-    except Exception:
+    except Exception as e:
+        # Print the error for debugging in CI
+        import sys
+        print(f"HF dataset check failed: {e}", file=sys.stderr)
         return False
 
 
@@ -269,9 +275,12 @@ def _check_hf_market_data_available():
     """Check if HuggingFace market data dataset is accessible."""
     try:
         from datasets import load_dataset
-        load_dataset(HF_MARKET_DATA_PATH, split="train")
+        ds = load_dataset(HF_MARKET_DATA_PATH, split="train")
         return True
-    except Exception:
+    except Exception as e:
+        # Print the error for debugging in CI
+        import sys
+        print(f"HF market data check failed: {e}", file=sys.stderr)
         return False
 
 
