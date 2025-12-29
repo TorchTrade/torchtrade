@@ -3,7 +3,6 @@ from __future__ import annotations
 import warnings
 
 import hydra
-from sympy.logic.boolalg import true
 from torchrl._utils import compile_with_warmup
 import datasets
 
@@ -88,7 +87,7 @@ def main(cfg: DictConfig):  # noqa: F821
         compile_mode,
     )
     # Create data buffer
-    sampler = SamplerWithoutReplacement(drop_last=true)
+    sampler = SamplerWithoutReplacement(drop_last=True)
     data_buffer = TensorDictReplayBuffer(
         storage=LazyTensorStorage(
             frames_per_batch, compilable=cfg.compile.compile, device=device

@@ -5,9 +5,7 @@
 from __future__ import annotations
 import functools
 
-from pandas.tseries import frequencies
 import torch.nn
-from tensordict.nn import TensorDictModule
 from torchrl.envs import (
     DoubleToFloat,
     EnvCreator,
@@ -18,26 +16,19 @@ from torchrl.envs import (
     Compose,
     TransformedEnv,
     StepCounter,
-    VecNorm,
 )
 from torchrl.collectors import SyncDataCollector
-from torchrl.data import MultiCategorical, Categorical
 
 from torchrl.modules import (
-    ActorValueOperator,
     MLP,
     ProbabilisticActor,
-    ValueOperator,
     SafeModule,
     SafeSequential,
 )
 from trading_nets.architectures.tabl.tabl import BiNMTABLModel, BiNTabularEncoder
-from trading_nets.architectures.wavenet.simple_1d_wave import Simple1DWaveEncoder
 
 from torchtrade.envs import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig, SeqLongOnlySLTPEnvConfig, SeqLongOnlySLTPEnv
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, get_timeframe_unit
-import ta
-import numpy as np
 import pandas as pd
 from torchrl.trainers.helpers.models import ACTIVATIONS
 
@@ -321,29 +312,6 @@ def make_grpo_policy(env, device, cfg):
     print(f"Total number of parameters: {total_params}")
 
     return policy
-
-
-# ====================================================================
-# Evaluation utils
-# --------------------------------------------------------------------
-
-
-
-def eval_model(actor, test_env, num_episodes=3):
-    test_rewards = []
-    for _ in range(num_episodes):
-        td_test = test_env.rollout(
-            policy=actor,
-            auto_reset=True,
-            auto_cast_to_device=True,
-            break_when_any_done=True,
-            max_steps=10_000_000,
-        )
-        test_env.apply(dump_video)
-        reward = td_test["next", "episode_reward"][td_test["next", "done"]]
-        test_rewards.append(reward.cpu())
-    del td_test
-    return torch.cat(test_rewards, 0).mean()
 
 
 def make_collector(cfg, train_env, actor_model_explore, compile_mode):

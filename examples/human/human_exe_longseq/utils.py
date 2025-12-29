@@ -15,7 +15,6 @@ from torchrl.collectors import SyncDataCollector
 
 from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
-import ta
 import pandas as pd
 
 # ====================================================================

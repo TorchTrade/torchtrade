@@ -9,7 +9,7 @@ import tempfile
 from contextlib import nullcontext
 
 import torch
-from tensordict.nn import InteractionType, TensorDictModule
+from tensordict.nn import InteractionType
 
 from torch import nn, optim
 from torchrl.collectors import SyncDataCollector
@@ -32,8 +32,6 @@ from torchrl.envs import (
 )
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 from torchrl.modules import MLP, SafeModule, SafeSequential
-
-from torchrl.modules.distributions import OneHotCategorical
 
 from torchrl.modules.tensordict_module.actors import ProbabilisticActor
 from torchrl.objectives import SoftUpdate

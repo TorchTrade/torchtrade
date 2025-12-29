@@ -7,9 +7,6 @@ import torch.optim
 import tensordict
 from tensordict.nn import InteractionType
 from torch.distributions import Categorical
-from torchrl.data import Categorical as CategoricalSpec
-
-from torchrl.collectors import SyncDataCollector
 from torchrl.data import (
     Composite,
     LazyMemmapStorage,
@@ -35,9 +32,7 @@ from torchrl.modules import (
     SafeSequential,
 )
 from torchrl.objectives import DiscreteIQLLoss, HardUpdate
-from torchrl.record import VideoRecorder
 from torchrl.trainers.helpers.models import ACTIVATIONS
-from trading_nets.architectures.tabl.tabl import BiNMTABLModel
 from trading_nets.architectures.wavenet.simple_1d_wave import Simple1DWaveEncoder
 
 import copy
@@ -183,29 +178,6 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
 # ====================================================================
 # Collector and replay buffer
 # ---------------------------
-
-
-def make_collector(cfg, train_env, actor_model_explore, compile_mode):
-    """Make collector."""
-    device = cfg.collector.device
-    if device in ("", None):
-        if torch.cuda.is_available():
-            device = torch.device("cuda:0")
-        else:
-            device = torch.device("cpu")
-    collector = SyncDataCollector(
-        train_env,
-        actor_model_explore,
-        frames_per_batch=cfg.collector.frames_per_batch,
-        init_random_frames=cfg.collector.init_random_frames,
-        max_frames_per_traj=cfg.collector.max_frames_per_traj,
-        total_frames=cfg.collector.total_frames,
-        device=device,
-        compile_policy={"mode": compile_mode} if compile_mode else False,
-        cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
-    )
-    collector.set_seed(cfg.env.seed)
-    return collector
 
 
 def make_replay_buffer(
@@ -416,165 +388,6 @@ def make_discrete_iql_wavenet_model(cfg, env, device):
     return model
 
 
-
-def make_discrete_iql_binmtabl_model(cfg, device):
-    """Make discrete IQL agent."""
-    # Define Actor Network
-    action_spec = CategoricalSpec(3)
-    # Define Actor Network
-    import tensordict
-    encodernet1min12 = BiNMTABLModel(input_shape=(12, 14),
-                        output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
-                        hidden_seq_size=12,
-                        hidden_feature_size=14,
-                        num_heads=3,
-                        activation="relu",
-                        final_activation="relu",
-                        dropout=0.1,
-                        initializer="kaiming_uniform")
-    encodernet5min8 = BiNMTABLModel(input_shape=(8, 14),
-                        output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
-                        hidden_seq_size=8,
-                        hidden_feature_size=14,
-                        num_heads=3,
-                        activation="relu",
-                        final_activation="relu",
-                        dropout=0.1,
-                        initializer="kaiming_uniform")
-
-    encodernet15min8 = BiNMTABLModel(input_shape=(8, 14),
-                        output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
-                        hidden_seq_size=8,
-                        hidden_feature_size=14,
-                        num_heads=3,
-                        activation="relu",
-                        final_activation="relu",
-                        dropout=0.1,
-                        initializer="kaiming_uniform")
-
-    encodernet1h24 = BiNMTABLModel(input_shape=(24, 14),
-                        output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
-                        hidden_seq_size=24,
-                        hidden_feature_size=14,
-                        num_heads=3,
-                        activation="relu",
-                        final_activation="relu",
-                        dropout=0.1,
-                        initializer="kaiming_uniform")
-
-    encoder1min12 = SafeModule(
-        module=encodernet1min12,
-        in_keys=["market_data_1Minute_12"],
-        out_keys=["encoding1min"],
-    ).to(device)
-    encoder5min8 = SafeModule(
-        module=encodernet5min8,
-        in_keys=["market_data_5Minute_8"],
-        out_keys=["encoding5min"],
-    ).to(device)
-    encoder15min8 = SafeModule(
-        module=encodernet15min8,
-        in_keys=["market_data_15Minute_8"],
-        out_keys=["encoding15min"],
-    ).to(device)
-    encoder1h24 = SafeModule(
-        module=encodernet1h24,
-        in_keys=["market_data_1Hour_24"],
-        out_keys=["encoding1h"],
-
-    ).to(device)
-    account_state_encoder = SafeModule(
-        module=MLP(
-            num_cells=[32],
-            out_features=14,
-            activation_class=ACTIVATIONS[cfg.model.activation],
-            device=device,
-        ),
-        in_keys=["account_state"],
-        out_keys=["encoding_account_state"],
-    )
-
-    encoder = SafeSequential(encoder1min12, encoder5min8, encoder15min8, encoder1h24, account_state_encoder)
-
-    actor_net = MLP(
-        num_cells=cfg.model.hidden_sizes,
-        out_features=3,
-        activation_class=ACTIVATIONS[cfg.model.activation],
-        device=device,
-    )
-
-    actor_module = SafeModule(
-        module=actor_net,
-        in_keys=["encoding1min", "encoding5min", "encoding15min", "encoding1h", "encoding_account_state"],
-        out_keys=["logits"],
-    )
-    full_actor = SafeSequential(encoder, actor_module)
-    
-    actor = ProbabilisticActor(
-        spec=Composite(action=action_spec).to(device),
-        module=full_actor,
-        in_keys=["logits"],
-        out_keys=["action"],
-        distribution_class=Categorical,
-        distribution_kwargs={},
-        default_interaction_type=InteractionType.RANDOM,
-        return_log_prob=False,
-    )
-
-    # Define Critic Network
-    qvalue_net = MLP(
-        num_cells=cfg.model.hidden_sizes,
-        out_features=3,
-        activation_class=ACTIVATIONS[cfg.model.activation],
-        device=device,
-    )
-    
-    qvalue = SafeModule(
-        module=qvalue_net,
-        in_keys=["encoding1min", "encoding5min", "encoding15min", "encoding1h", "encoding_account_state"],
-        out_keys=["state_action_value"],
-    )
-    full_qvalue = SafeSequential(copy.deepcopy(encoder), qvalue)
-
-    # Define Value Network
-    value_net = MLP(
-        num_cells=cfg.model.hidden_sizes,
-        out_features=1,
-        activation_class=ACTIVATIONS[cfg.model.activation],
-        device=device,
-    )
-    value_net = SafeModule(
-        module=value_net,
-        in_keys=["encoding1min", "encoding5min", "encoding15min", "encoding1h", "encoding_account_state"],
-        out_keys=["state_value"],
-    )   
-    full_value = SafeSequential(copy.deepcopy(encoder), value_net)
-
-    model = torch.nn.ModuleList([actor, full_qvalue, full_value])
-
-
-    # init nets
-
-    example_td = tensordict.TensorDict(
-        {
-            "market_data_1Minute_12": torch.randn(1, 12, 14),
-            "market_data_5Minute_8": torch.randn(1, 8, 14),
-            "market_data_15Minute_8": torch.randn(1, 8, 14),
-            "market_data_1Hour_24": torch.randn(1, 24, 14),
-            "account_state": torch.randn(1, 6),
-        }
-    ).to(device)
-    with torch.no_grad(), set_exploration_type(ExplorationType.RANDOM):
-        td = example_td
-        for net in model:
-            net(td)
-
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"Total number of parameters: {total_params}")
-
-    return model
-
-
 # ====================================================================
 # IQL Loss
 # ---------
@@ -629,8 +442,3 @@ def log_metrics(logger, metrics, step):
     if logger is not None:
         for metric_name, metric_value in metrics.items():
             logger.log_scalar(metric_name, metric_value, step)
-
-
-def dump_video(module):
-    if isinstance(module, VideoRecorder):
-        module.dump()
