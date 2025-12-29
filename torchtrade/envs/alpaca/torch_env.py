@@ -106,8 +106,8 @@ class AlpacaTorchTradingEnv(EnvBase):
         self.market_data_key = "market_data"
         self.account_state_key = "account_state"
 
-        # Account state spec: [cash, portfolio_value, position_size, entry_price, unrealized_pnlpct, holding_time]
-        account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(6,), dtype=torch.float)
+        # Account state spec: [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpct, holding_time]
+        account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(7,), dtype=torch.float)
         self.market_data_keys = []
         for i, market_data_name in enumerate(market_data_names):
             market_data_key = "market_data_" + market_data_name
@@ -148,6 +148,7 @@ class AlpacaTorchTradingEnv(EnvBase):
             position_size = 0.0
             position_value = 0.0
             entry_price = 0.0
+            current_price = 0.0
             unrealized_pnlpc = 0.0
             holding_time = self.position_hold_counter
 
@@ -156,11 +157,12 @@ class AlpacaTorchTradingEnv(EnvBase):
             position_size = position_status.qty
             position_value = position_status.market_value
             entry_price = position_status.avg_entry_price
+            current_price = position_status.current_price
             unrealized_pnlpc = position_status.unrealized_plpc
             holding_time = self.position_hold_counter
 
         account_state = torch.tensor(
-            [cash, position_size, position_value, entry_price, unrealized_pnlpc, holding_time], dtype=torch.float
+            [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpc, holding_time], dtype=torch.float
         )
 
         out_td = TensorDict({self.account_state_key: account_state}, batch_size=())

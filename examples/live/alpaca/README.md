@@ -18,9 +18,9 @@ Simple 3-action discrete environment:
 - **Action 1**: Hold (do nothing)
 - **Action 2**: Buy all
 
-Account state (6 elements):
+Account state (7 elements):
 ```
-[cash, position_size, position_value, entry_price, unrealized_pnlpc, holding_time]
+[cash, position_size, position_value, entry_price, current_price, unrealized_pnlpc, holding_time]
 ```
 
 ### SL/TP Environment (`AlpacaSLTPTorchTradingEnv`)
@@ -187,7 +187,7 @@ def make_sltp_policy(num_actions: int, device="cpu"):
     """
     # Simple MLP policy (customize architecture as needed)
     actor_net = MLP(
-        in_features=7,  # account_state size for SLTP env
+        in_features=7,  # account_state size (same for both envs)
         num_cells=[128, 128],
         out_features=num_actions,
         activation_class=torch.nn.ReLU,
