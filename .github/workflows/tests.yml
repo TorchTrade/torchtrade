@@ -30,8 +30,10 @@ jobs:
           pip install -e .
 
       - name: Login to HuggingFace
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          hf auth login --token ${{ secrets.HF_TOKEN }} --add-to-git-credential
+          hf auth login --token $HF_TOKEN --add-to-git-credential
 
       - name: Run tests
         env:
