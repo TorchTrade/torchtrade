@@ -13,6 +13,7 @@ env:
   exp_name: ${logger.exp_name}
   seed: 0
   backend: gym
+  data_path: Sebasdi/TorchTrade_btcusd_spot_1m_12_2024_to_09_2025
 
 # logger
 logger:
@@ -29,7 +30,7 @@ logger:
 # replay buffer
 replay_buffer:
   batch_size: 256
-  data_path: "/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/real_live_data/td_new4.pt"
+  data_path: synthetic  # Use "synthetic" to generate synthetic data for testing
   buffer_size: 10000
   r2g_gamma: 0.99
 

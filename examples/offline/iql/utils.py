@@ -244,7 +244,34 @@ def make_replay_buffer(
 
 
 def make_offline_replay_buffer(rb_cfg):
-    td = tensordict.load(rb_cfg.data_path)
+    if rb_cfg.data_path == "synthetic":
+        # Generate synthetic data for testing
+        import torch
+        from tensordict import TensorDict
+        n_transitions = rb_cfg.buffer_size
+        obs_dim = 4
+        window_size = 12
+        n_actions = 3
+
+        td = TensorDict({
+            "observation": torch.randn(n_transitions, window_size, obs_dim),
+            "action": torch.randint(0, n_actions, (n_transitions,)),
+            "next": TensorDict({
+                "observation": torch.randn(n_transitions, window_size, obs_dim),
+                "reward": torch.randn(n_transitions) * 0.01,
+                "done": torch.zeros(n_transitions, dtype=torch.bool),
+                "terminated": torch.zeros(n_transitions, dtype=torch.bool),
+            }, batch_size=[n_transitions]),
+        }, batch_size=[n_transitions])
+    elif "/" in rb_cfg.data_path and not rb_cfg.data_path.startswith("/"):
+        # HuggingFace dataset path (e.g., "Torch-Trade/AlpacaLiveData_LongOnly-v0")
+        from datasets import load_dataset
+        from torchtrade.utils import dataset_to_td
+        ds = load_dataset(rb_cfg.data_path, split="train")
+        td = dataset_to_td(ds)
+    else:
+        td = tensordict.load(rb_cfg.data_path)
+
     size = td.shape[0]
     data = TensorDictReplayBuffer(
         pin_memory=False,

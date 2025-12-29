@@ -14,6 +14,7 @@ env:
   seed: 0
   train_envs: 5
   eval_envs: 1
+  data_path: Sebasdi/TorchTrade_btcusd_spot_1m_12_2024_to_09_2025
 
 # logger
 logger:

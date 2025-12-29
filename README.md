@@ -17,7 +17,7 @@ Run `mkdocs serve` to start the documentation server.
 The objective should be to have a set of environments, including base environments, and a simple way to construct custom environments with TorchRL for trading across different brokers. We should start with Alpaca, for example. 
 Specifics for the broker, such as "get current observation" or "execute trade," should be separate packages, as these are independent functions. Ideally, we just import them and use them in the TorchRL Env. 
 
-  
+
   Example Envs:
   - Start with a simple robust setup, minimal as possible that is working. then we can iterate and improve, add complexity
   - Paper trade single time frame / multi time frame

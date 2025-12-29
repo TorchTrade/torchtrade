@@ -25,7 +25,7 @@ from torchrl._utils import timeit
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 from torchrl.objectives import group_optimizers
 from torchrl.record.loggers import generate_exp_name, get_logger
-import pandas as pd
+import datasets
 from utils import (
     log_metrics,
     make_collector,
@@ -70,8 +70,9 @@ def main(cfg: DictConfig):  # noqa: F821
     np.random.seed(cfg.env.seed)
 
     # Create environments
-    df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
-    test_df = df[0:(1440 * 14)] # 14 days
+    df = datasets.load_dataset(cfg.env.data_path)
+    df = df["train"].to_pandas()
+    test_df = df[0:(1440 * 14)]  # 14 days
     train_df = df[(1440 * 14):]
 
     train_env, eval_env = make_environment(
