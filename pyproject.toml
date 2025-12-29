@@ -30,10 +30,7 @@ dev = [
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short -m 'not slow'"
-markers = [
-    "slow: marks tests as slow (run with pytest -m slow)",
-]
+addopts = "-v --tb=short"
 
 [project.urls]
 "Homepage" = "https://github.com/torchtrade/torchrl-alpaca-env"
