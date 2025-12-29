@@ -245,17 +245,20 @@ class TestOfflineEnvironments:
 
 def _check_hf_dataset_available():
     """Check if HuggingFace dataset is accessible."""
+    import os
+    import warnings
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     try:
         from datasets import load_dataset
-        import os
-        # Get token from environment
-        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
         ds = load_dataset(HF_DATASET_PATH, split="train", token=token)
         return True
     except Exception as e:
-        # Print the error for debugging in CI
-        import sys
-        print(f"HF dataset check failed (token={'set' if token else 'not set'}): {e}", file=sys.stderr)
+        # Use warnings to make debug info visible in pytest output
+        warnings.warn(
+            f"HF dataset '{HF_DATASET_PATH}' check failed "
+            f"(token={'set' if token else 'NOT SET'}): {e}",
+            UserWarning
+        )
         return False
 
 
@@ -273,17 +276,20 @@ def hf_dataset_available():
 
 def _check_hf_market_data_available():
     """Check if HuggingFace market data dataset is accessible."""
+    import os
+    import warnings
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     try:
         from datasets import load_dataset
-        import os
-        # Get token from environment
-        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
         ds = load_dataset(HF_MARKET_DATA_PATH, split="train", token=token)
         return True
     except Exception as e:
-        # Print the error for debugging in CI
-        import sys
-        print(f"HF market data check failed (token={'set' if token else 'not set'}): {e}", file=sys.stderr)
+        # Use warnings to make debug info visible in pytest output
+        warnings.warn(
+            f"HF market data '{HF_MARKET_DATA_PATH}' check failed "
+            f"(token={'set' if token else 'NOT SET'}): {e}",
+            UserWarning
+        )
         return False
 
 
