@@ -8,3 +8,4 @@ hydra-core
 matplotlib
 ta
 datasets
+git+https://github.com/TorchTrade/trading-nets.git@main#egg=trading_nets
