@@ -29,12 +29,19 @@ jobs:
           pip install pytest pytest-cov
           pip install -e .
 
+      - name: Login to HuggingFace
+        run: |
+          huggingface-cli login --token ${{ secrets.HF_TOKEN }} --add-to-git-credential
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
       - name: Run tests
         env:
           WANDB_MODE: disabled
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          pytest tests/ -v -m "" --cov=torchtrade/envs --cov-report=term-missing --cov-report=xml
+          pytest tests/ -v --cov=torchtrade/envs --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage reports
         uses: codecov/codecov-action@v4
