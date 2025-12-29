@@ -21,8 +21,11 @@ import numpy as np
 # Get the repository root
 REPO_ROOT = Path(__file__).parent.parent
 
-# HuggingFace dataset path for real market data
+# HuggingFace dataset path for real market data (replay buffer)
 HF_DATASET_PATH = "Torch-Trade/AlpacaLiveData_LongOnly-v0"
+
+# HuggingFace dataset path for market OHLCV data (used by online examples)
+HF_MARKET_DATA_PATH = "Torch-Trade/BTCUSD_sport_1m_12_2024_to_09_2025"
 
 
 # =============================================================================
@@ -262,6 +265,27 @@ def hf_dataset_available():
     return _HF_DATASET_AVAILABLE
 
 
+def _check_hf_market_data_available():
+    """Check if HuggingFace market data dataset is accessible."""
+    try:
+        from datasets import load_dataset
+        load_dataset(HF_MARKET_DATA_PATH, split="train")
+        return True
+    except Exception:
+        return False
+
+
+_HF_MARKET_DATA_AVAILABLE = None
+
+
+def hf_market_data_available():
+    """Cached check for HuggingFace market data availability."""
+    global _HF_MARKET_DATA_AVAILABLE
+    if _HF_MARKET_DATA_AVAILABLE is None:
+        _HF_MARKET_DATA_AVAILABLE = _check_hf_market_data_available()
+    return _HF_MARKET_DATA_AVAILABLE
+
+
 @pytest.mark.skipif(
     not hf_dataset_available(),
     reason=f"HuggingFace dataset '{HF_DATASET_PATH}' not accessible (may be private or require auth)"
@@ -474,6 +498,10 @@ def run_command(command: str, timeout: int = 300) -> int:
 @pytest.mark.skipif(
     len(EXAMPLE_COMMANDS) == 0,
     reason="No example commands configured yet"
+)
+@pytest.mark.skipif(
+    not hf_market_data_available(),
+    reason=f"HuggingFace market data '{HF_MARKET_DATA_PATH}' not accessible (may require auth)"
 )
 @pytest.mark.parametrize("name,command", list(EXAMPLE_COMMANDS.items()))
 def test_example_commands(name: str, command: str):
