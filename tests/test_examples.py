@@ -352,17 +352,23 @@ class TestHuggingFaceDataset:
 # =============================================================================
 
 # Commands to run examples with minimal parameters
-# All examples now use HuggingFace datasets for market data (updated in this PR)
-#
-# NOTE: All examples are currently disabled due to a batch dimension bug:
-#   RuntimeError: batch dimension mismatch, got self.batch_size=torch.Size([1])
-#   and value.shape=torch.Size([14])
-# The issue is in the encoder networks (likely Simple1DWaveEncoder with
-# squeeze_output=True) that remove the batch dimension. This needs to be fixed
-# in the model architecture before these tests can be enabled.
+# All examples now use HuggingFace datasets for market data
+# NOTE: Must use env.train_envs>=2 to avoid batch dimension squeeze issues
 EXAMPLE_COMMANDS = {
     # ==========================================================================
-    # PPO Examples - Batch dimension issues during eval
+    # GRPO Example
+    # ==========================================================================
+
+    "grpo_longonlyonestep": (
+        "python examples/online/long_onestep_env/train.py "
+        "collector.total_frames=100 "
+        "collector.frames_per_batch=50 "
+        "env.train_envs=2 "
+        "logger.backend= "
+    ),
+
+    # ==========================================================================
+    # PPO Examples
     # ==========================================================================
 
     # "ppo_seqlongonlysltp": (
@@ -370,7 +376,6 @@ EXAMPLE_COMMANDS = {
     #     "collector.total_frames=100 "
     #     "collector.frames_per_batch=50 "
     #     "env.train_envs=2 "
-    #     "env.eval_envs=1 "
     #     "loss.mini_batch_size=25 "
     #     "logger.backend= "
     #     "logger.test_interval=1000000 "
@@ -380,22 +385,7 @@ EXAMPLE_COMMANDS = {
     #     "collector.total_frames=100 "
     #     "collector.frames_per_batch=50 "
     #     "env.train_envs=2 "
-    #     "env.eval_envs=1 "
     #     "loss.mini_batch_size=25 "
-    #     "logger.backend= "
-    #     "logger.test_interval=1000000 "
-    # ),
-
-    # ==========================================================================
-    # GRPO Example - Batch dimension issues during eval
-    # ==========================================================================
-
-    # "grpo_longonlyonestep": (
-    #     "python examples/online/long_onestep_env/train.py "
-    #     "collector.total_frames=100 "
-    #     "collector.frames_per_batch=50 "
-    #     "env.train_envs=2 "
-    #     "env.eval_envs=1 "
     #     "logger.backend= "
     #     "logger.test_interval=1000000 "
     # ),
@@ -410,7 +400,6 @@ EXAMPLE_COMMANDS = {
     #     "collector.frames_per_batch=50 "
     #     "collector.init_random_frames=10 "
     #     "env.train_envs=2 "
-    #     "env.eval_envs=1 "
     #     "replay_buffer.batch_size=16 "
     #     "replay_buffer.buffer_size=100 "
     #     "logger.backend= "
@@ -420,8 +409,6 @@ EXAMPLE_COMMANDS = {
     # IQL Offline - uses HuggingFace dataset for replay buffer
     # NOTE: Currently disabled because evaluation runs on step 0 and fails due
     # to shape mismatch between model's expected dimensions and eval env.
-    # The replay buffer loading from HuggingFace works (tested in TestHuggingFaceDataset),
-    # but the training script's eval path needs fixing separately.
     # "iql_offline": (
     #     "python examples/offline/iql/train.py "
     #     "optim.gradient_steps=5 "
@@ -441,7 +428,6 @@ EXAMPLE_COMMANDS = {
     #     "collector.frames_per_batch=50 "
     #     "collector.init_random_frames=10 "
     #     "env.train_envs=2 "
-    #     "env.eval_envs=1 "
     #     "optim.batch_size=16 "
     #     "replay_buffer.size=100 "
     #     "logger.backend= "
@@ -487,10 +473,6 @@ def run_command(command: str, timeout: int = 300) -> int:
 @pytest.mark.skipif(
     len(EXAMPLE_COMMANDS) == 0,
     reason="No example commands configured yet"
-)
-@pytest.mark.skipif(
-    not hf_dataset_available(),
-    reason=f"HuggingFace dataset '{HF_DATASET_PATH}' not accessible"
 )
 @pytest.mark.parametrize("name,command", list(EXAMPLE_COMMANDS.items()))
 def test_example_commands(name: str, command: str):
