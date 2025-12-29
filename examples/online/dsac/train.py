@@ -149,15 +149,6 @@ def main(cfg: DictConfig):  # noqa: F821
         cfg, train_env, actor_model_explore=model[0], compile_mode=compile_mode
     )
 
-    if cfg.compile.compile:
-        update = torch.compile(update, mode=compile_mode)
-    if cfg.compile.cudagraphs:
-        warnings.warn(
-            "CudaGraphModule is experimental and may lead to silently wrong results. Use with caution.",
-            category=UserWarning,
-        )
-        update = CudaGraphModule(update, warmup=50)
-
     # Main loop
     collected_frames = 0
     pbar = tqdm.tqdm(total=cfg.collector.total_frames)
