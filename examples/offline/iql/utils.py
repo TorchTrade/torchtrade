@@ -263,6 +263,12 @@ def make_offline_replay_buffer(rb_cfg):
                 "terminated": torch.zeros(n_transitions, dtype=torch.bool),
             }, batch_size=[n_transitions]),
         }, batch_size=[n_transitions])
+    elif "/" in rb_cfg.data_path and not rb_cfg.data_path.startswith("/"):
+        # HuggingFace dataset path (e.g., "Torch-Trade/AlpacaLiveData_LongOnly-v0")
+        from datasets import load_dataset
+        from torchtrade.utils import dataset_to_td
+        ds = load_dataset(rb_cfg.data_path, split="train")
+        td = dataset_to_td(ds)
     else:
         td = tensordict.load(rb_cfg.data_path)
 

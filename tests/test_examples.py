@@ -412,12 +412,18 @@ EXAMPLE_COMMANDS = {
     #     "logger.eval_iter=1000000 "
     # ),
 
-    # IQL Offline - requires pre-collected replay buffer
+    # IQL Offline - uses HuggingFace dataset for replay buffer
+    # NOTE: Currently disabled because evaluation runs on step 0 and fails due
+    # to shape mismatch between model's expected dimensions and eval env.
+    # The replay buffer loading from HuggingFace works (tested in TestHuggingFaceDataset),
+    # but the training script's eval path needs fixing separately.
     # "iql_offline": (
     #     "python examples/offline/iql/train.py "
     #     "optim.gradient_steps=5 "
+    #     f"replay_buffer.data_path={HF_DATASET_PATH} "
     #     "replay_buffer.batch_size=16 "
     #     "logger.backend= "
+    #     "logger.eval_iter=1000000 "
     # ),
 
     # ==========================================================================
@@ -476,6 +482,10 @@ def run_command(command: str, timeout: int = 300) -> int:
 @pytest.mark.skipif(
     len(EXAMPLE_COMMANDS) == 0,
     reason="No example commands configured yet"
+)
+@pytest.mark.skipif(
+    not hf_dataset_available(),
+    reason=f"HuggingFace dataset '{HF_DATASET_PATH}' not accessible"
 )
 @pytest.mark.parametrize("name,command", list(EXAMPLE_COMMANDS.items()))
 def test_example_commands(name: str, command: str):
