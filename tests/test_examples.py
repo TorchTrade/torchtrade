@@ -353,8 +353,13 @@ class TestHuggingFaceDataset:
 
 # Commands to run examples with minimal parameters
 # All examples now use HuggingFace datasets for market data (updated in this PR)
-# NOTE: Currently commented out due to runtime issues in training scripts
-# (batch dimension mismatches during evaluation). These should be fixed separately.
+#
+# NOTE: All examples are currently disabled due to a batch dimension bug:
+#   RuntimeError: batch dimension mismatch, got self.batch_size=torch.Size([1])
+#   and value.shape=torch.Size([14])
+# The issue is in the encoder networks (likely Simple1DWaveEncoder with
+# squeeze_output=True) that remove the batch dimension. This needs to be fixed
+# in the model architecture before these tests can be enabled.
 EXAMPLE_COMMANDS = {
     # ==========================================================================
     # PPO Examples - Batch dimension issues during eval
