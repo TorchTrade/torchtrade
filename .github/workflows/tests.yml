@@ -47,10 +47,6 @@ jobs:
   slow-tests:
     name: Slow Tests (Examples)
     runs-on: ubuntu-latest
-    # Run on: push to main, OR PRs with 'run-slow-tests' label
-    if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-slow-tests'))
     strategy:
       matrix:
         python-version: ['3.10']
