@@ -240,6 +240,32 @@ class TestOfflineEnvironments:
 # HuggingFace Dataset Tests
 # =============================================================================
 
+def _check_hf_dataset_available():
+    """Check if HuggingFace dataset is accessible."""
+    try:
+        from datasets import load_dataset
+        load_dataset(HF_DATASET_PATH, split="train")
+        return True
+    except Exception:
+        return False
+
+
+# Check once at module load time to avoid repeated slow checks
+_HF_DATASET_AVAILABLE = None
+
+
+def hf_dataset_available():
+    """Cached check for HuggingFace dataset availability."""
+    global _HF_DATASET_AVAILABLE
+    if _HF_DATASET_AVAILABLE is None:
+        _HF_DATASET_AVAILABLE = _check_hf_dataset_available()
+    return _HF_DATASET_AVAILABLE
+
+
+@pytest.mark.skipif(
+    not hf_dataset_available(),
+    reason=f"HuggingFace dataset '{HF_DATASET_PATH}' not accessible (may be private or require auth)"
+)
 class TestHuggingFaceDataset:
     """Test loading and using HuggingFace dataset for offline RL."""
 
