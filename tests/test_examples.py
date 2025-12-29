@@ -353,7 +353,7 @@ class TestHuggingFaceDataset:
 
 # Commands to run examples with minimal parameters
 # All examples now use HuggingFace datasets for market data
-# NOTE: Must use env.train_envs>=2 to avoid batch dimension squeeze issues
+# NOTE: Must use env.train_envs>=2 and env.eval_envs>=2 to avoid batch dimension squeeze issues
 EXAMPLE_COMMANDS = {
     # ==========================================================================
     # GRPO Example
@@ -371,40 +371,40 @@ EXAMPLE_COMMANDS = {
     # PPO Examples
     # ==========================================================================
 
-    # "ppo_seqlongonlysltp": (
-    #     "python examples/online/ppo/train.py "
-    #     "collector.total_frames=100 "
-    #     "collector.frames_per_batch=50 "
-    #     "env.train_envs=2 "
-    #     "loss.mini_batch_size=25 "
-    #     "logger.backend= "
-    #     "logger.test_interval=1000000 "
-    # ),
-    # "ppo_longonlyonestep": (
-    #     "python examples/online/long_onestep_env/train_ppo.py "
-    #     "collector.total_frames=100 "
-    #     "collector.frames_per_batch=50 "
-    #     "env.train_envs=2 "
-    #     "loss.mini_batch_size=25 "
-    #     "logger.backend= "
-    #     "logger.test_interval=1000000 "
-    # ),
+    "ppo_seqlongonlysltp": (
+        "python examples/online/ppo/train.py "
+        "collector.total_frames=100 "
+        "collector.frames_per_batch=50 "
+        "env.train_envs=2 "
+        "loss.mini_batch_size=25 "
+        "logger.backend= "
+        "logger.test_interval=1000000 "
+    ),
+    "ppo_longonlyonestep": (
+        "python examples/online/long_onestep_env/train_ppo.py "
+        "collector.total_frames=100 "
+        "collector.frames_per_batch=50 "
+        "env.train_envs=2 "
+        "loss.mini_batch_size=25 "
+        "logger.backend= "
+        "logger.test_interval=1000000 "
+    ),
 
     # ==========================================================================
     # IQL Examples
     # ==========================================================================
 
-    # "iql_online": (
-    #     "python examples/online/iql/train.py "
-    #     "collector.total_frames=100 "
-    #     "collector.frames_per_batch=50 "
-    #     "collector.init_random_frames=10 "
-    #     "env.train_envs=2 "
-    #     "replay_buffer.batch_size=16 "
-    #     "replay_buffer.buffer_size=100 "
-    #     "logger.backend= "
-    #     "logger.eval_iter=1000000 "
-    # ),
+    "iql_online": (
+        "python examples/online/iql/train.py "
+        "collector.total_frames=100 "
+        "collector.frames_per_batch=50 "
+        "collector.init_random_frames=10 "
+        "env.train_envs=2 "
+        "replay_buffer.batch_size=16 "
+        "replay_buffer.buffer_size=100 "
+        "logger.backend= "
+        "logger.eval_iter=1000000 "
+    ),
 
     # IQL Offline - uses HuggingFace dataset for replay buffer
     # NOTE: Currently disabled because evaluation runs on step 0 and fails due
@@ -422,17 +422,18 @@ EXAMPLE_COMMANDS = {
     # DSAC Example
     # ==========================================================================
 
-    # "dsac_online": (
-    #     "python examples/online/dsac/train.py "
-    #     "collector.total_frames=100 "
-    #     "collector.frames_per_batch=50 "
-    #     "collector.init_random_frames=10 "
-    #     "env.train_envs=2 "
-    #     "optim.batch_size=16 "
-    #     "replay_buffer.size=100 "
-    #     "logger.backend= "
-    #     "logger.eval_iter=1000000 "
-    # ),
+    "dsac_online": (
+        "python examples/online/dsac/train.py "
+        "collector.total_frames=100 "
+        "collector.frames_per_batch=50 "
+        "collector.init_random_frames=10 "
+        "env.train_envs=2 "
+        "env.eval_envs=2 "
+        "optim.batch_size=16 "
+        "replay_buffer.size=100 "
+        "logger.backend= "
+        "logger.eval_iter=1000000 "
+    ),
 }
 
 
