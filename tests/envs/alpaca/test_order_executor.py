@@ -165,12 +165,7 @@ class TestAlpacaOrderClassTrade:
         assert success is True
 
     def test_order_with_stop_loss(self, order_class):
-        """Test order with stop loss.
-
-        Note: The current implementation passes limit_price to StopLossRequest,
-        but the SDK expects stop_price. This test documents the current behavior.
-        """
-        # This currently fails due to SDK validation mismatch
+        """Test order with stop loss creates OTO order."""
         success = order_class.trade(
             side="buy",
             amount=1000,
@@ -178,8 +173,8 @@ class TestAlpacaOrderClassTrade:
             stop_loss=90000.0,
         )
 
-        # Expected to fail due to SDK validation issue
-        assert success is False
+        # Should succeed with OTO order
+        assert success is True
 
     def test_trade_failure_handling(self):
         """Test handling of trade failures."""

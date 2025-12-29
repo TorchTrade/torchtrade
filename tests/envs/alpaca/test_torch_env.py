@@ -167,7 +167,7 @@ class TestAlpacaTorchTradingEnvReset:
         td = env.reset()
 
         assert env.account_state_key in td.keys()
-        assert td[env.account_state_key].shape == (6,)
+        assert td[env.account_state_key].shape == (7,)
 
     def test_reset_contains_market_data(self, env):
         """Test that reset returns market data."""
@@ -279,7 +279,7 @@ class TestAlpacaTorchTradingEnvStep:
         td_buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
         td_out = env._step(td_buy)
 
-        # Account state: [cash, position_size, position_value, entry_price, unrealized_pnlpc, holding_time]
+        # Account state: [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpc, holding_time]
         account_state = td_out[env.account_state_key]
         assert account_state[1] > 0  # position_size > 0
 
@@ -521,9 +521,9 @@ class TestAlpacaTorchTradingEnvPositionTracking:
         td_hold = TensorDict({"action": torch.tensor(1)}, batch_size=())
         td_out2 = env._step(td_hold)
 
-        # Account state: [cash, position_size, position_value, entry_price, unrealized_pnlpc, holding_time]
-        holding_time_1 = td_out1[env.account_state_key][5].item()
-        holding_time_2 = td_out2[env.account_state_key][5].item()
+        # Account state: [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpc, holding_time]
+        holding_time_1 = td_out1[env.account_state_key][6].item()
+        holding_time_2 = td_out2[env.account_state_key][6].item()
 
         assert holding_time_2 > holding_time_1
 
@@ -545,7 +545,7 @@ class TestAlpacaTorchTradingEnvPositionTracking:
         td_out = env._step(td_sell)
 
         # After selling, holding time should be 0
-        holding_time = td_out[env.account_state_key][5].item()
+        holding_time = td_out[env.account_state_key][6].item()
         assert holding_time == 0
 
 
@@ -707,8 +707,8 @@ class TestAlpacaTorchTradingEnvAccountState:
         td = env.reset()
         account_state = td[env.account_state_key]
 
-        # [cash, position_size, position_value, entry_price, unrealized_pnlpc, holding_time]
-        assert account_state.shape == (6,)
+        # [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpc, holding_time]
+        assert account_state.shape == (7,)
 
     def test_account_state_after_buy(self, env):
         """Test account state is correct after buy."""

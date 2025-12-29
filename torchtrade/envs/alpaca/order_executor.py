@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Union
 
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import OrderSide, OrderType, QueryOrderStatus, TimeInForce
+from alpaca.trading.enums import OrderSide, OrderType, QueryOrderStatus, TimeInForce, OrderClass
 from alpaca.trading.requests import (
     ClosePositionRequest,
     GetOrdersRequest,
@@ -138,13 +138,19 @@ class AlpacaOrderClass:
                 "symbol": self.symbol,
                 "side": order_side,
                 "time_in_force": time_in_force,
-                "take_profit": TakeProfitRequest(
-                    limit_price=take_profit,
-                ) if take_profit is not None else None,
-                "stop_loss": StopLossRequest(
-                    limit_price=stop_loss,
-                ) if stop_loss is not None else None,
             }
+
+            # Add bracket order parameters if both take_profit and stop_loss are specified
+            if take_profit is not None and stop_loss is not None:
+                order_params["order_class"] = OrderClass.BRACKET
+                order_params["take_profit"] = TakeProfitRequest(limit_price=take_profit)
+                order_params["stop_loss"] = StopLossRequest(stop_price=stop_loss)
+            elif take_profit is not None:
+                order_params["order_class"] = OrderClass.OTO
+                order_params["take_profit"] = TakeProfitRequest(limit_price=take_profit)
+            elif stop_loss is not None:
+                order_params["order_class"] = OrderClass.OTO
+                order_params["stop_loss"] = StopLossRequest(stop_price=stop_loss)
 
             # Add amount based on trade mode
             if self.trade_mode == TradeMode.NOTIONAL:
