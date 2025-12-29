@@ -248,14 +248,14 @@ def _check_hf_dataset_available():
     try:
         from datasets import load_dataset
         import os
-        # Debug: print if token is available
-        has_token = bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"))
-        ds = load_dataset(HF_DATASET_PATH, split="train")
+        # Get token from environment
+        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        ds = load_dataset(HF_DATASET_PATH, split="train", token=token)
         return True
     except Exception as e:
         # Print the error for debugging in CI
         import sys
-        print(f"HF dataset check failed: {e}", file=sys.stderr)
+        print(f"HF dataset check failed (token={'set' if token else 'not set'}): {e}", file=sys.stderr)
         return False
 
 
@@ -275,12 +275,15 @@ def _check_hf_market_data_available():
     """Check if HuggingFace market data dataset is accessible."""
     try:
         from datasets import load_dataset
-        ds = load_dataset(HF_MARKET_DATA_PATH, split="train")
+        import os
+        # Get token from environment
+        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        ds = load_dataset(HF_MARKET_DATA_PATH, split="train", token=token)
         return True
     except Exception as e:
         # Print the error for debugging in CI
         import sys
-        print(f"HF market data check failed: {e}", file=sys.stderr)
+        print(f"HF market data check failed (token={'set' if token else 'not set'}): {e}", file=sys.stderr)
         return False
 
 
@@ -307,16 +310,20 @@ class TestHuggingFaceDataset:
         """Load HuggingFace dataset and convert to TensorDict."""
         from datasets import load_dataset
         from torchtrade.utils import dataset_to_td
+        import os
 
-        ds = load_dataset(HF_DATASET_PATH, split="train")
+        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        ds = load_dataset(HF_DATASET_PATH, split="train", token=token)
         td = dataset_to_td(ds)
         return td
 
     def test_load_hf_dataset(self):
         """Test that HuggingFace dataset can be loaded."""
         from datasets import load_dataset
+        import os
 
-        ds = load_dataset(HF_DATASET_PATH, split="train")
+        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        ds = load_dataset(HF_DATASET_PATH, split="train", token=token)
         assert ds is not None
         assert len(ds) > 0
 
