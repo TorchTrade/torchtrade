@@ -31,9 +31,7 @@ jobs:
 
       - name: Login to HuggingFace
         run: |
-          hf auth login --token $HF_TOKEN --add-to-git-credential
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          hf auth login --token ${{ secrets.HF_TOKEN }} --add-to-git-credential
 
       - name: Run tests
         env:
