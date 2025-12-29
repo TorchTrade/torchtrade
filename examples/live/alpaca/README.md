@@ -8,6 +8,7 @@ This directory contains example scripts for live trading with Alpaca using Torch
 |--------|-------------|--------------|-------------|
 | `collect_live.py` | `AlpacaTorchTradingEnv` | 3 actions (sell/hold/buy) | Standard live data collection |
 | `collect_live_sltp.py` | `AlpacaSLTPTorchTradingEnv` | N actions (hold + SL/TP combos) | Live collection with bracket orders |
+| `collect_live_llm.py` | `AlpacaTorchTradingEnv` | 3 actions (sell/hold/buy) | LLM-based trading using OpenAI |
 
 ## Environment Comparison
 
@@ -235,6 +236,79 @@ from examples.live.policies.iql_policy import make_discrete_iql_model
 policy = make_discrete_iql_model(device)
 ```
 
+## Using an LLM for Trading
+
+You can use a Large Language Model (LLM) as the trading policy instead of a trained neural network. The `LLMActor` class wraps OpenAI's API to make trading decisions based on market data.
+
+### Requirements
+
+Add your OpenAI API key to the `.env` file:
+```bash
+API_KEY=your_alpaca_api_key
+SECRET_KEY=your_alpaca_secret_key
+OPENAI_API_KEY=your_openai_api_key
+```
+
+### How LLMActor Works
+
+The `LLMActor` converts the environment's TensorDict into a structured prompt containing:
+- **Account state**: cash, position size, entry price, unrealized P&L, etc.
+- **Market data**: OHLCV data from multiple timeframes formatted as tables
+
+The LLM receives this data with a system prompt instructing it to think step-by-step and output a trading decision (`buy`, `sell`, or `hold`).
+
+### Usage Example
+
+```python
+from torchtrade.actor.llm_actor import LLMActor
+
+# Create LLM actor with OpenAI model
+policy = LLMActor(model="gpt-4o-mini", debug=True)
+
+# Use with collector
+collector = SyncDataCollector(
+    env,
+    policy,
+    frames_per_batch=1,
+    total_frames=1000,
+    device=device,
+    trust_policy=True,
+)
+```
+
+### Custom LLM Configuration
+
+You can customize the `LLMActor` by modifying:
+- `model`: OpenAI model to use (e.g., "gpt-4o-mini", "gpt-4o")
+- `system_prompt`: Trading instructions for the LLM
+- `market_data_keys`: Which timeframe data to include in prompts
+- `features_keys`: Which OHLCV features to show
+
+```python
+from torchtrade.actor.llm_actor import LLMActor
+
+class CustomLLMActor(LLMActor):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.system_prompt = """
+        You are a conservative trading agent. Only buy when RSI < 30.
+        Only sell when RSI > 70. Otherwise hold.
+        Output: <answer>buy</answer>, <answer>sell</answer>, or <answer>hold</answer>
+        """
+```
+
+### LLM Response Format
+
+The LLM is prompted to use a structured response format:
+```
+<think>
+[Step-by-step reasoning about the market conditions]
+</think>
+<answer>buy</answer>
+```
+
+The `LLMActor` extracts the action from the `<answer>` tags and optionally stores the reasoning in the TensorDict.
+
 ## Running the Examples
 
 ### Random Data Collection (Standard Environment)
@@ -247,6 +321,12 @@ python examples/live/alpaca/collect_live.py
 
 ```bash
 python examples/live/alpaca/collect_live_sltp.py
+```
+
+### LLM-Based Trading
+
+```bash
+python examples/live/alpaca/collect_live_llm.py
 ```
 
 ### With Trained Policy
@@ -274,9 +354,10 @@ collector = make_collector(
 
 ## Output
 
-Both scripts save collected data to a replay buffer:
+All scripts save collected data to a replay buffer:
 - `replay_buffer_random.pt` - Standard environment
 - `replay_buffer_random_sltp.pt` - SL/TP environment
+- `replay_buffer_gpt5mini.pt` - LLM-based trading (includes thinking traces)
 
 These can be loaded for offline training:
 
