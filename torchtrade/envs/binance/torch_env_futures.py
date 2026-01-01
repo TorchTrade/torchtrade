@@ -50,6 +50,7 @@ class BinanceFuturesTradingEnvConfig:
     demo: bool = True  # Use demo/testnet for paper trading
     seed: Optional[int] = 42
     include_base_features: bool = False
+    close_position_on_reset: bool = False  # Whether to close positions on env.reset()
 
 
 # Interval to seconds mapping for waiting
@@ -300,9 +301,10 @@ class BinanceFuturesTorchTradingEnv(EnvBase):
         next_step = current_time + timedelta(seconds=seconds)
         next_step = next_step.replace(second=0, microsecond=0)
 
-        # Wait until target time
-        while datetime.now() < next_step:
-            time.sleep(1)
+        # Wait until target time with a single sleep call
+        sleep_seconds = (next_step - datetime.now()).total_seconds()
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
 
     def _set_seed(self, seed: int):
         """Set the seed for the environment."""
@@ -318,8 +320,9 @@ class BinanceFuturesTorchTradingEnv(EnvBase):
         # Cancel all orders
         self.trader.cancel_open_orders()
 
-        # Note: We don't close positions on reset to avoid losing money
-        # User should explicitly close positions if needed
+        # Optionally close positions on reset (configurable)
+        if self.config.close_position_on_reset:
+            self.trader.close_position()
 
         balance = self.trader.get_account_balance()
         self.balance = balance.get("available_balance", 0)

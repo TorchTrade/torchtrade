@@ -1,7 +1,10 @@
+import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Union
 import warnings
+
+logger = logging.getLogger(__name__)
 
 
 class TradeMode(Enum):
@@ -10,12 +13,27 @@ class TradeMode(Enum):
 
 
 class PositionSide(Enum):
-    LONG = "LONG"
-    SHORT = "SHORT"
-    BOTH = "BOTH"  # For one-way mode
+    """
+    Position side for Binance Futures.
+
+    Binance Futures supports two position modes:
+    - One-way mode: Single position per symbol. Use BOTH.
+    - Hedge mode: Separate long/short positions simultaneously. Use LONG/SHORT.
+    """
+    LONG = "LONG"    # Hedge mode: explicit long position
+    SHORT = "SHORT"  # Hedge mode: explicit short position
+    BOTH = "BOTH"    # One-way mode: single net position (default)
 
 
 class MarginType(Enum):
+    """
+    Margin type for Binance Futures positions.
+
+    - ISOLATED: Margin is isolated per position. Losses are limited to
+      that position's margin. Lower risk but requires more capital.
+    - CROSSED: Margin is shared across all positions. Entire account
+      balance can be used to prevent liquidation. Higher risk.
+    """
     ISOLATED = "ISOLATED"
     CROSSED = "CROSSED"
 
@@ -81,7 +99,8 @@ class BinanceFuturesOrderClass:
             api_secret: Binance API secret
             demo: Whether to use demo trading (default: True for safety)
             leverage: Leverage to use (1-125, default: 1)
-            margin_type: ISOLATED or CROSSED margin
+            margin_type: ISOLATED (margin per position, limits loss) or
+                        CROSSED (shared margin, higher liquidation risk)
             client: Optional pre-configured Client for dependency injection
         """
         # Normalize symbol
@@ -133,10 +152,10 @@ class BinanceFuturesOrderClass:
             except Exception as e:
                 # May fail if already set to this margin type
                 if "No need to change margin type" not in str(e):
-                    print(f"Warning: Could not set margin type: {e}")
+                    logger.warning(f"Could not set margin type: {e}")
 
         except Exception as e:
-            print(f"Warning: Could not setup futures account: {e}")
+            logger.warning(f"Could not setup futures account: {e}")
 
     def trade(
         self,
@@ -210,7 +229,7 @@ class BinanceFuturesOrderClass:
             # Submit main order
             response = self.client.futures_create_order(**order_params)
             self.last_order_id = response.get("orderId")
-            print(f"Order response: {response}")
+            logger.info(f"Order executed: {response}")
 
             # Create take profit order if specified
             if take_profit is not None and not reduce_only:
@@ -243,7 +262,7 @@ class BinanceFuturesOrderClass:
             return True
 
         except Exception as e:
-            print(f"Error executing trade: {str(e)}")
+            logger.error(f"Error executing trade: {str(e)}")
             return False
 
     def get_status(self) -> Dict[str, Union[OrderStatus, PositionStatus, None]]:
@@ -306,7 +325,7 @@ class BinanceFuturesOrderClass:
                 status["position_status"] = None
 
         except Exception as e:
-            print(f"Error getting status: {str(e)}")
+            logger.error(f"Error getting status: {str(e)}")
             status["position_status"] = None
 
         return status
@@ -317,6 +336,9 @@ class BinanceFuturesOrderClass:
 
         Returns:
             Dictionary with balance information
+
+        Raises:
+            RuntimeError: If balance cannot be retrieved
         """
         try:
             account = self.client.futures_account()
@@ -327,34 +349,42 @@ class BinanceFuturesOrderClass:
                 "total_margin_balance": float(account["totalMarginBalance"]),
             }
         except Exception as e:
-            print(f"Error getting account balance: {str(e)}")
-            return {}
+            logger.error(f"Error getting account balance: {str(e)}")
+            raise RuntimeError(f"Failed to get account balance: {e}") from e
 
     def get_mark_price(self) -> float:
-        """Get current mark price for the symbol."""
+        """
+        Get current mark price for the symbol.
+
+        Returns:
+            Current mark price
+
+        Raises:
+            RuntimeError: If mark price cannot be retrieved
+        """
         try:
             ticker = self.client.futures_mark_price(symbol=self.symbol)
             return float(ticker["markPrice"])
         except Exception as e:
-            print(f"Error getting mark price: {str(e)}")
-            return 0.0
+            logger.error(f"Error getting mark price: {str(e)}")
+            raise RuntimeError(f"Failed to get mark price: {e}") from e
 
     def get_open_orders(self) -> List[Dict]:
         """Get all open orders for the symbol."""
         try:
             return self.client.futures_get_open_orders(symbol=self.symbol)
         except Exception as e:
-            print(f"Error getting open orders: {str(e)}")
+            logger.error(f"Error getting open orders: {str(e)}")
             return []
 
     def cancel_open_orders(self) -> bool:
         """Cancel all open orders for the symbol."""
         try:
             self.client.futures_cancel_all_open_orders(symbol=self.symbol)
-            print("Open orders cancelled")
+            logger.info("Open orders cancelled")
             return True
         except Exception as e:
-            print(f"Error cancelling open orders: {str(e)}")
+            logger.error(f"Error cancelling open orders: {str(e)}")
             return False
 
     def close_position(self, position_side: str = "BOTH") -> bool:
@@ -372,7 +402,7 @@ class BinanceFuturesOrderClass:
             position = status.get("position_status")
 
             if position is None or position.qty == 0:
-                print("No position to close")
+                logger.debug("No position to close")
                 return True
 
             # Determine side to close
@@ -391,10 +421,11 @@ class BinanceFuturesOrderClass:
                 order_params["positionSide"] = position_side
 
             self.client.futures_create_order(**order_params)
+            logger.info(f"Position closed: {qty} {side}")
             return True
 
         except Exception as e:
-            print(f"Error closing position: {str(e)}")
+            logger.error(f"Error closing position: {str(e)}")
             return False
 
     def close_all_positions(self) -> Dict[str, bool]:
@@ -417,14 +448,15 @@ class BinanceFuturesOrderClass:
                             reduceOnly="true",
                         )
                         results[symbol] = True
+                        logger.info(f"Closed position for {symbol}")
                     except Exception as e:
-                        print(f"Error closing position for {symbol}: {str(e)}")
+                        logger.error(f"Error closing position for {symbol}: {str(e)}")
                         results[symbol] = False
 
             return results
 
         except Exception as e:
-            print(f"Error getting positions: {str(e)}")
+            logger.error(f"Error getting positions: {str(e)}")
             return {}
 
     def set_leverage(self, leverage: int) -> bool:
@@ -443,9 +475,10 @@ class BinanceFuturesOrderClass:
                 leverage=leverage
             )
             self.leverage = leverage
+            logger.info(f"Leverage set to {leverage}x for {self.symbol}")
             return True
         except Exception as e:
-            print(f"Error setting leverage: {str(e)}")
+            logger.error(f"Error setting leverage: {str(e)}")
             return False
 
 
