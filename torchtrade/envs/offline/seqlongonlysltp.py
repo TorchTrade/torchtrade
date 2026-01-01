@@ -120,7 +120,9 @@ class SeqLongOnlySLTPEnv(EnvBase):
         # Get market data
         obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
 
-        current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+        # Cache base features for the new timestamp (avoids redundant calls)
+        self._cached_base_features = self.sampler.get_base_features(self.current_timestamp)
+        current_price = self._cached_base_features["close"]
         self.position_value = round(self.position_size * current_price, 3)
         if self.position_size > 0:
             self.unrealized_pnlpc = round((current_price - self.entry_price) / self.entry_price, 4)
@@ -169,9 +171,10 @@ class SeqLongOnlySLTPEnv(EnvBase):
 
 
 
-    def _get_portfolio_value(self) -> float:
+    def _get_portfolio_value(self, current_price: float = None) -> float:
         """Calculate total portfolio value."""
-        current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+        if current_price is None:
+            current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
         return self.balance + self.position_size * current_price
 
 
@@ -212,28 +215,34 @@ class SeqLongOnlySLTPEnv(EnvBase):
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
         self.step_counter += 1
-        
+
+        # Cache base features once for current timestamp (avoids 4+ redundant get_base_features calls)
+        cached_base = self._cached_base_features
+        cached_price = cached_base["close"]
+
         # Store old portfolio value for reward calculation
-        old_portfolio_value = self._get_portfolio_value()
-        
+        old_portfolio_value = self._get_portfolio_value(cached_price)
+
         # Get desired action and current position
         action = tensordict["action"]
         action_tuple = self.action_map[action.item()]
-        
-        # Calculate and execute trade if needed
-        trade_info = self._execute_trade_if_needed(action_tuple)
+
+        # Calculate and execute trade if needed (pass cached base features)
+        trade_info = self._execute_trade_if_needed(action_tuple, cached_base)
         trade_action = 0
         if trade_info["executed"]:
             trade_action = 1 if trade_info["side"] == "buy" else -1
             self.current_position = 1 if trade_info["side"] == "buy" else 0
         self.action_history.append(trade_action)
-        self.base_price_history.append(self.sampler.get_base_features(self.current_timestamp)["close"])
-        self.portfolio_value_history.append(old_portfolio_value)           
+        self.base_price_history.append(cached_price)
+        self.portfolio_value_history.append(old_portfolio_value)
 
-        # Get updated state
+        # Get updated state (this advances timestamp and caches new base features)
         next_tensordict = self._get_observation()
-        new_portfolio_value = self._get_portfolio_value()
-        
+        # Use newly cached base features for new portfolio value
+        new_price = self._cached_base_features["close"]
+        new_portfolio_value = self._get_portfolio_value(new_price)
+
         # Calculate reward and check termination
         reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, action_tuple, trade_info)
         self.reward_history.append(reward)
@@ -242,7 +251,7 @@ class SeqLongOnlySLTPEnv(EnvBase):
         next_tensordict.set("reward", reward)
         next_tensordict.set("done", self.truncated or done)
         next_tensordict.set("truncated", self.truncated)
-        next_tensordict.set("terminated", self.truncated or done)       
+        next_tensordict.set("terminated", self.truncated or done)
         return next_tensordict
 
     def trigger_sell(self, trade_info, execution_price):
@@ -269,11 +278,12 @@ class SeqLongOnlySLTPEnv(EnvBase):
         })
         return trade_info
 
-    def _execute_trade_if_needed(self, action_tuple) -> Dict:
+    def _execute_trade_if_needed(self, action_tuple, ohlcv_base_values: dict = None) -> Dict:
         """Execute trade if position change is needed."""
         trade_info = {"executed": False, "amount": 0, "side": None, "success": None, "price_noise": 0.0, "fee_paid": 0.0}
-        
-        ohlcv_base_values = self.sampler.get_base_features(self.current_timestamp)
+
+        if ohlcv_base_values is None:
+            ohlcv_base_values = self.sampler.get_base_features(self.current_timestamp)
         # Test if stop loss or take profit are triggered
         if self.position_size > 0 and self.stop_loss > 0 and self.take_profit > 0:
             open_price = ohlcv_base_values["open"]
