@@ -412,6 +412,13 @@ EXAMPLE_COMMANDS = {
         "env.train_envs=2 "
         "logger.backend= "
     ),
+    "grpo_futuresonestep": (
+        "python examples/online/grpo_futures/train.py "
+        "collector.total_frames=100 "
+        "collector.frames_per_batch=50 "
+        "env.train_envs=2 "
+        "logger.backend= "
+    ),
 
     # ==========================================================================
     # PPO Examples
@@ -559,11 +566,14 @@ class TestExampleImports:
             LongOnlyOneStepEnvConfig,
             SeqFuturesEnv,
             SeqFuturesEnvConfig,
+            FuturesOneStepEnv,
+            FuturesOneStepEnvConfig,
         )
         assert SeqLongOnlyEnv is not None
         assert SeqLongOnlySLTPEnv is not None
         assert LongOnlyOneStepEnv is not None
         assert SeqFuturesEnv is not None
+        assert FuturesOneStepEnv is not None
 
     def test_import_alpaca_envs(self):
         """Test importing Alpaca environments."""

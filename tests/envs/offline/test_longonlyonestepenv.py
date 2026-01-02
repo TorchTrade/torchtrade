@@ -369,6 +369,51 @@ class TestLongOnlyOneStepEnvReward:
             assert result["next"]["reward"].item() == 0.0
 
 
+class TestLongOnlyOneStepEnvSLTPPlacement:
+    """Tests for SL/TP price placement."""
+
+    def test_sl_is_below_entry_price(self, env):
+        """Stop loss should be set below entry price for long."""
+        td = env.reset()
+        entry_price = env._cached_base_features["close"]
+
+        # Execute trade directly to check SL/TP before rollout
+        env._execute_trade_if_needed(env.action_map[1], entry_price)
+
+        assert env.stop_loss < entry_price, f"SL {env.stop_loss} should be < entry {entry_price}"
+
+    def test_tp_is_above_entry_price(self, env):
+        """Take profit should be set above entry price for long."""
+        td = env.reset()
+        entry_price = env._cached_base_features["close"]
+
+        env._execute_trade_if_needed(env.action_map[1], entry_price)
+
+        assert env.take_profit > entry_price, f"TP {env.take_profit} should be > entry {entry_price}"
+
+    def test_sl_tp_calculated_correctly(self, sample_ohlcv_df):
+        """SL/TP prices should be calculated from percentages correctly."""
+        config = LongOnlyOneStepEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            initial_cash=1000,
+            stoploss_levels=[-0.05],  # 5% below
+            takeprofit_levels=[0.10],  # 10% above
+            max_traj_length=50,
+        )
+        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        td = env.reset()
+        entry_price = env._cached_base_features["close"]
+        env._execute_trade_if_needed(env.action_map[1], entry_price)
+
+        expected_sl = entry_price * (1 - 0.05)  # 5% below
+        expected_tp = entry_price * (1 + 0.10)  # 10% above
+
+        assert abs(env.stop_loss - expected_sl) < 0.01, f"SL {env.stop_loss} != expected {expected_sl}"
+        assert abs(env.take_profit - expected_tp) < 0.01, f"TP {env.take_profit} != expected {expected_tp}"
+
+
 class TestLongOnlyOneStepEnvTradeExecution:
     """Tests for trade execution."""
 

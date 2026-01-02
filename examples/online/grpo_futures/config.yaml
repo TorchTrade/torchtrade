@@ -1,0 +1,49 @@
+env:
+  name: FuturesOneStepEnv
+  symbol: "BTC/USD"
+  freqs: ["Min"]
+  time_frames: [5]
+  window_sizes: [32]
+  execute_on: [5, "Min"]
+  initial_cash: [1000, 5000]
+  transaction_fee: 0.0004  # 0.04% typical futures fee
+  slippage: 0.001
+  bankrupt_threshold: 0.1
+  leverage: 5  # 5x leverage
+  stoploss_levels: [-0.02, -0.05, -0.1]  # 2%, 5%, 10% stop loss
+  takeprofit_levels: [0.05, 0.1, 0.2]    # 5%, 10%, 20% take profit
+  exp_name: ${logger.exp_name}
+  seed: 0
+  train_envs: 8
+  eval_envs: 2
+  data_path: Torch-Trade/BTCUSD_sport_1m_12_2024_to_09_2025
+
+# collector
+collector:
+  device:
+  frames_per_batch: 800
+  total_frames: 100_000_000
+
+# logger
+logger:
+  mode: online
+  backend: wandb
+  project_name: TorchTrade-FuturesOneStep
+  group_name: ${env.name}
+  exp_name: grpo_futures
+  test_interval: 8000
+  num_test_episodes: 1
+
+# optimization
+optim:
+  lr: 2.5e-4
+  device:
+
+# loss
+loss:
+  entropy_coef: 0.01
+
+compile:
+  compile: False
+  compile_mode:
+  cudagraphs: False
