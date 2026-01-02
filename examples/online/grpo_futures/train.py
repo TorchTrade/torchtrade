@@ -187,10 +187,9 @@ def main(cfg: DictConfig):  # noqa: F821
                 eval_rollout.squeeze()
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
-                fig = eval_env.base_env.render_history(return_fig=True)
+                # Note: render_history is not available for FuturesOneStepEnv
+                # (only SeqFuturesEnv has it, but we use FuturesOneStepEnv for consistency)
                 eval_env.reset()
-                if fig is not None and logger is not None:
-                    metrics_to_log["eval/history"] = wandb.Image(fig[0])
                 actor.train()
 
         if logger is not None:
