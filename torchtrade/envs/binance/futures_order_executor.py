@@ -3,6 +3,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Union
 import warnings
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -311,14 +315,14 @@ class BinanceFuturesOrderClass:
 
                     status["position_status"] = PositionStatus(
                         qty=qty,
-                        notional_value=float(pos["notional"]),
+                        notional_value=float(pos.get("notional", 0)),
                         entry_price=entry_price,
                         unrealized_pnl=unrealized_pnl,
                         unrealized_pnl_pct=unrealized_pnl_pct,
                         mark_price=mark_price,
-                        leverage=int(pos["leverage"]),
-                        margin_type=pos["marginType"],
-                        liquidation_price=float(pos["liquidationPrice"]),
+                        leverage=int(pos.get("leverage", self.leverage)),
+                        margin_type=pos.get("marginType", self.margin_type.value),
+                        liquidation_price=float(pos.get("liquidationPrice", 0)),
                     )
                     break
             else:

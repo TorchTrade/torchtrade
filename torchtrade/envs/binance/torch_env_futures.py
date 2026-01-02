@@ -17,6 +17,10 @@ from torchtrade.envs.binance.futures_order_executor import (
     TradeMode,
     MarginType,
 )
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 
 @dataclass
@@ -481,7 +485,8 @@ if __name__ == "__main__":
         window_sizes=[10, 10],
         execute_on="1m",
         leverage=5,
-        include_base_features=True,
+        quantity_per_trade=0.002,  # ~$190 notional to meet $100 minimum
+        include_base_features=False,
     )
 
     # Create environment
@@ -494,3 +499,11 @@ if __name__ == "__main__":
     td = env.reset()
     print("Reset observation:")
     print(td)
+    for i in range(5):
+        action = env.action_spec.rand()
+        td = TensorDict({"action": action}, batch_size=())
+        next_td = env.step(td)
+        print(f"Step {i+1}: Action={action.item()}, Reward={next_td['next', 'reward'].item():.6f}")
+        if next_td["next", "done"].item():
+            print("Episode terminated")
+            break
