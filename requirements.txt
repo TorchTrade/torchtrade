@@ -1,4 +1,5 @@
 alpaca-py
+python-binance
 python-dotenv
 torchrl
 wandb
