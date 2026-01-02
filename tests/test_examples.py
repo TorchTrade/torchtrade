@@ -451,6 +451,15 @@ EXAMPLE_COMMANDS = {
         "logger.backend= "
         "logger.test_interval=1000000 "
     ),
+    "ppo_seqfuturessltp": (
+        "python examples/online/ppo_futures_sltp/train.py "
+        "collector.total_frames=100 "
+        "collector.frames_per_batch=50 "
+        "env.train_envs=2 "
+        "loss.mini_batch_size=25 "
+        "logger.backend= "
+        "logger.test_interval=1000000 "
+    ),
 
     # ==========================================================================
     # IQL Examples
@@ -568,12 +577,15 @@ class TestExampleImports:
             SeqFuturesEnvConfig,
             FuturesOneStepEnv,
             FuturesOneStepEnvConfig,
+            SeqFuturesSLTPEnv,
+            SeqFuturesSLTPEnvConfig,
         )
         assert SeqLongOnlyEnv is not None
         assert SeqLongOnlySLTPEnv is not None
         assert LongOnlyOneStepEnv is not None
         assert SeqFuturesEnv is not None
         assert FuturesOneStepEnv is not None
+        assert SeqFuturesSLTPEnv is not None
 
     def test_import_alpaca_envs(self):
         """Test importing Alpaca environments."""

@@ -2,4 +2,6 @@ from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvCo
 from torchtrade.envs.offline.seqlongonlysltp import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
 from torchtrade.envs.offline.longonlyonestepenv import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig
 from torchtrade.envs.offline.futuresonestepenv import FuturesOneStepEnv, FuturesOneStepEnvConfig
+from torchtrade.envs.offline.seqfutures import SeqFuturesEnv, SeqFuturesEnvConfig, MarginType
+from torchtrade.envs.offline.seqfuturessltp import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
