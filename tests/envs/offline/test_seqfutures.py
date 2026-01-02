@@ -745,6 +745,98 @@ class TestSeqFuturesEnvEdgeCases:
         assert pytest.approx(position_value, rel=0.01) == expected_value
 
 
+class TestSeqFuturesEnvPositionSizing:
+    """Tests for position sizing edge cases."""
+
+    def test_can_open_position_after_many_trades(self, sample_ohlcv_df):
+        """
+        Regression test for floating-point precision bug.
+
+        After many trades, the balance might settle to a value where
+        margin_required + fee ≈ balance exactly. Due to floating-point
+        precision issues, without the safety margin in _open_position,
+        the check `margin_required + fee > balance` could incorrectly
+        fail, blocking all future trades.
+
+        This test verifies that positions can still be opened even when
+        the balance is at the edge of what's needed for a trade.
+        """
+        config = SeqFuturesEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=1000,
+            leverage=10,
+            transaction_fee=0.0004,
+            slippage=0.0,
+            max_traj_length=200,
+            random_start=False,
+        )
+        env = SeqFuturesEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        td = env.reset()
+
+        # Execute many trades to reduce balance through fees
+        positions_opened = 0
+        for i in range(100):
+            # Open position
+            td.set("action", torch.tensor(2))  # long
+            result = env.step(td)
+            td = result["next"]
+
+            if env.position_size > 0:
+                positions_opened += 1
+
+            if td.get("done", False):
+                break
+
+            # Close position
+            td.set("action", torch.tensor(1))  # close
+            result = env.step(td)
+            td = result["next"]
+
+            if td.get("done", False):
+                break
+
+        # Should have been able to open positions throughout
+        # Without the fix, positions would stop opening after balance gets low
+        assert positions_opened > 50, (
+            f"Only opened {positions_opened} positions. "
+            "Floating-point precision may be blocking trades."
+        )
+
+    def test_position_opens_with_exact_balance_for_margin(self, sample_ohlcv_df):
+        """
+        Test that a position can be opened when balance exactly covers
+        margin requirement plus fees (within floating-point tolerance).
+        """
+        config = SeqFuturesEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=100,  # Small balance
+            leverage=10,
+            transaction_fee=0.0004,
+            slippage=0.0,
+            max_traj_length=50,
+            random_start=False,
+        )
+        env = SeqFuturesEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        td = env.reset()
+        initial_balance = env.balance
+
+        # Open a position
+        td.set("action", torch.tensor(2))  # long
+        env.step(td)
+
+        # Position should have been opened
+        assert env.position_size > 0, "Failed to open position with available balance"
+
+        # Fee should have been deducted
+        assert env.balance < initial_balance
+
+
 class TestSeqFuturesEnvPnLCalculations:
     """Tests for PnL calculations."""
 
