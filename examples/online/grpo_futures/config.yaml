@@ -22,7 +22,7 @@ env:
 collector:
   device:
   frames_per_batch: 800
-  total_frames: 100_000_000
+  total_frames: 1_000_000
 
 # logger
 logger:
