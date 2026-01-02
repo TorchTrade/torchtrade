@@ -26,6 +26,8 @@ from torchrl.modules import (
 from torchtrade.envs import (
     FuturesOneStepEnv,
     FuturesOneStepEnvConfig,
+    SeqFuturesSLTPEnv,
+    SeqFuturesSLTPEnvConfig,
 )
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, get_timeframe_unit
 import pandas as pd
@@ -59,10 +61,15 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
-    """Create a FuturesOneStepEnv instance.
+    """Create a FuturesOneStepEnv or SeqFuturesSLTPEnv instance.
 
-    Note: We use FuturesOneStepEnv for both training and evaluation to ensure
-    consistent action space (19 actions with SL/TP combinations).
+    Both environments share the same 19-action space:
+    - Action 0: Hold/Close
+    - Actions 1-9: Long positions with SL/TP combinations
+    - Actions 10-18: Short positions with SL/TP combinations
+
+    Training uses FuturesOneStepEnv (one-step GRPO-style training).
+    Evaluation uses SeqFuturesSLTPEnv (sequential episodes with render_history).
     """
     # Convert Hydra ListConfig to regular Python lists
     window_sizes = list(cfg.env.window_sizes)
@@ -76,25 +83,46 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
     ]
     execute_on = TimeFrame(execute_on[0], get_timeframe_unit(execute_on[1]))
 
-    # Use FuturesOneStepEnv for both training and eval to maintain
-    # consistent 19-action space (1 hold + 9 long SL/TP + 9 short SL/TP)
-    config = FuturesOneStepEnvConfig(
-        symbol=cfg.env.symbol,
-        time_frames=time_frames,
-        window_sizes=window_sizes,
-        execute_on=execute_on,
-        include_base_features=False,
-        initial_cash=cfg.env.initial_cash,
-        slippage=cfg.env.slippage,
-        transaction_fee=cfg.env.transaction_fee,
-        bankrupt_threshold=cfg.env.bankrupt_threshold,
-        seed=cfg.env.seed,
-        leverage=cfg.env.leverage,
-        stoploss_levels=stoploss_levels,
-        takeprofit_levels=takeprofit_levels,
-        max_traj_length=max_traj_length,
-    )
-    return FuturesOneStepEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    if not eval:
+        # Training: use FuturesOneStepEnv for GRPO-style training
+        config = FuturesOneStepEnvConfig(
+            symbol=cfg.env.symbol,
+            time_frames=time_frames,
+            window_sizes=window_sizes,
+            execute_on=execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            stoploss_levels=stoploss_levels,
+            takeprofit_levels=takeprofit_levels,
+            max_traj_length=max_traj_length,
+        )
+        return FuturesOneStepEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    else:
+        # Evaluation: use SeqFuturesSLTPEnv for sequential evaluation
+        # Both envs have the same 19-action space (1 hold + 9 long + 9 short)
+        config = SeqFuturesSLTPEnvConfig(
+            symbol=cfg.env.symbol,
+            time_frames=time_frames,
+            window_sizes=window_sizes,
+            execute_on=execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            stoploss_levels=stoploss_levels,
+            takeprofit_levels=takeprofit_levels,
+            max_traj_length=max_traj_length,
+            random_start=False,
+        )
+        return SeqFuturesSLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
 
 
 def apply_env_transforms(env, max_steps):

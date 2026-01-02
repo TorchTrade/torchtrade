@@ -423,9 +423,11 @@ def main(cfg: DictConfig):  # noqa: F821
                 metrics_to_log["eval/win_rate"] = eval_reward_stats["win_rate"]
                 metrics_to_log["eval/num_trades"] = eval_reward_stats["num_trades"]
 
-                # Note: render_history is not available for FuturesOneStepEnv
-                # (only SeqFuturesEnv has it, but we use FuturesOneStepEnv for consistency)
+                # Render history (available in SeqFuturesSLTPEnv for eval)
+                fig = eval_env.base_env.render_history(return_fig=True)
                 eval_env.reset()
+                if fig is not None and logger is not None:
+                    metrics_to_log["eval/history"] = wandb.Image(fig[0])
 
                 actor.train()
 
