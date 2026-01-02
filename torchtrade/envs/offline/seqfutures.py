@@ -562,7 +562,8 @@ class SeqFuturesEnv(EnvBase):
         # notional <= usable_balance / (1/leverage + fee_rate)
         usable_balance = self.balance * self.config.max_position_size
         margin_plus_fee_rate = (1.0 / self.leverage) + self.transaction_fee
-        max_notional = usable_balance / margin_plus_fee_rate
+        # Apply 0.1% safety margin to avoid floating-point precision issues
+        max_notional = usable_balance / margin_plus_fee_rate * 0.999
         notional_value = max_notional
         position_qty = notional_value / execution_price
 
