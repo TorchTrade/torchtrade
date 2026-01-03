@@ -127,17 +127,35 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
         return SeqFuturesSLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
 
 
-def apply_env_transforms(env, max_steps):
-    """Apply standard transforms to the environment."""
-    transformed_env = TransformedEnv(
-        env,
-        Compose(
-            InitTracker(),
-            DoubleToFloat(),
-            RewardSum(),
-            StepCounter(max_steps=max_steps),
-        ),
-    )
+def apply_env_transforms(env, max_steps, one_step_env=True):
+    """Apply standard transforms to the environment.
+
+    Args:
+        env: The environment to transform
+        max_steps: Maximum steps per episode
+        one_step_env: If True, skip unnecessary transforms for one-step envs
+    """
+    if one_step_env:
+        # PERF: Minimal transforms for one-step environments
+        # - RewardSum is unnecessary (each step terminates)
+        # - DoubleToFloat skipped (data already float32 from environment)
+        transformed_env = TransformedEnv(
+            env,
+            Compose(
+                InitTracker(),
+                StepCounter(max_steps=max_steps),
+            ),
+        )
+    else:
+        transformed_env = TransformedEnv(
+            env,
+            Compose(
+                InitTracker(),
+                DoubleToFloat(),
+                RewardSum(),
+                StepCounter(max_steps=max_steps),
+            ),
+        )
     return transformed_env
 
 
@@ -162,19 +180,19 @@ def make_environment(
     )
     parallel_env.set_seed(cfg.env.seed, static_seed=True)  # needs to be static for GRPO style training
 
-    train_env = apply_env_transforms(parallel_env, max_train_steps)
+    # PERF: Use minimal transforms for one-step training env
+    train_env = apply_env_transforms(parallel_env, max_train_steps, one_step_env=True)
 
     maker = functools.partial(
         env_maker, test_df, cfg, max_traj_length=max_eval_traj_length, eval=True
     )
-    eval_env = TransformedEnv(
-        ParallelEnv(
-            eval_num_envs,
-            EnvCreator(maker),
-            serial_for_single=True,
-        ),
-        train_env.transform.clone(),
+    # Eval env uses SeqFuturesSLTPEnv which is NOT one-step, so use full transforms
+    eval_parallel_env = ParallelEnv(
+        eval_num_envs,
+        EnvCreator(maker),
+        serial_for_single=True,
     )
+    eval_env = apply_env_transforms(eval_parallel_env, max_eval_traj_length, one_step_env=False)
     return train_env, eval_env
 
 
@@ -344,5 +362,9 @@ def make_collector(cfg, train_env, actor_model_explore, compile_mode):
 
 def log_metrics(logger, metrics, step):
     """Log metrics to the logger."""
+    import torch
     for metric_name, metric_value in metrics.items():
+        # PERF: Convert tensors to Python floats for logging (single sync point)
+        if isinstance(metric_value, torch.Tensor):
+            metric_value = metric_value.item()
         logger.log_scalar(metric_name, metric_value, step)

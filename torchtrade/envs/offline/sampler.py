@@ -146,6 +146,11 @@ class MarketDataObservationSampler:
         self.max_steps = len(self.exec_times) - 1 if self.max_traj_length is None else min(len(self.exec_times) - 1, self.max_traj_length)
         print("Max steps:", self.max_steps)
 
+        # PERF: Track current sequential index to avoid searchsorted in get_base_features
+        self._sequential_idx = 0
+        # Pre-compute base OHLCV column order for fast dict creation
+        self._base_ohlcv_keys = ["open", "high", "low", "close", "volume"]
+
         # Convert resampled dfs to torch tensors for fast slicing.
         # Also convert timestamp indices to int64 (ns) and store as torch.long for searchsorted.
         self.torch_tensors: Dict[str, torch.FloatTensor] = {}
@@ -184,6 +189,29 @@ class MarketDataObservationSampler:
         timestamp = self.unseen_timestamps.popleft()  # O(1) instead of O(n)
         truncated = len(self.unseen_timestamps) == 0
         return self.get_observation(timestamp), timestamp, truncated
+
+    def get_sequential_observation_with_ohlcv(self) -> Tuple[Dict[str, torch.Tensor], pd.Timestamp, bool, Dict[str, float]]:
+        """
+        PERF: Get observation AND base OHLCV in one call, avoiding redundant searchsorted.
+
+        Returns:
+            (observation_dict, timestamp, truncated, ohlcv_dict)
+        """
+        if len(self.unseen_timestamps) == 0:
+            raise ValueError("No more timestamps available. Call reset() before continuing.")
+        timestamp = self.unseen_timestamps.popleft()
+        truncated = len(self.unseen_timestamps) == 0
+
+        # Get observation
+        obs = self.get_observation(timestamp)
+
+        # PERF: Get base features using direct index access (no searchsorted)
+        row = self.execute_base_tensor[self._sequential_idx]
+        vals = row[:5].tolist()
+        ohlcv = {"open": vals[0], "high": vals[1], "low": vals[2], "close": vals[3], "volume": vals[4]}
+        self._sequential_idx += 1
+
+        return obs, timestamp, truncated, ohlcv
 
     def get_observation(self, timestamp: pd.Timestamp) -> Dict[str, torch.Tensor]:
         """Return observation dict: { timeframe_key: tensor(shape=[ws, features]) }"""
@@ -241,15 +269,18 @@ class MarketDataObservationSampler:
             if self.max_traj_length is None:
                 start_idx = self.np_rng.integers(0, max(1, len(exec_list)))
                 self.unseen_timestamps = deque(exec_list[start_idx:])
+                self._sequential_idx = start_idx  # PERF: Track index for fast base feature access
             else:
                 max_start_index = max(0, len(exec_list) - self.max_traj_length)
                 start_index = self.np_rng.integers(0, max_start_index + 1)
                 self.unseen_timestamps = deque(exec_list[start_index : start_index + self.max_traj_length])
+                self._sequential_idx = start_index  # PERF: Track index for fast base feature access
         else:
             if self.max_traj_length is None:
                 self.unseen_timestamps = deque(self.exec_times)
             else:
                 self.unseen_timestamps = deque(list(self.exec_times)[: self.max_traj_length])
+            self._sequential_idx = 0  # PERF: Track index for fast base feature access
 
         # return number of unseen timestamps
         return len(self.unseen_timestamps)

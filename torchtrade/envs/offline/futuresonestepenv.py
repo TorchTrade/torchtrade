@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union, Callable
 from itertools import product
 from enum import Enum
+import math
 
 import numpy as np
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
@@ -263,6 +264,9 @@ class FuturesOneStepEnv(EnvBase):
         self.reward_history = []
         self.portfolio_value_history = []
 
+        # PERF: Pre-allocate account state tensor to avoid allocation each step
+        self._account_state_buffer = torch.zeros(10, dtype=torch.float)
+
         super().__init__()
 
     def _calculate_liquidation_price(self, entry_price: float, position_size: float) -> float:
@@ -336,9 +340,11 @@ class FuturesOneStepEnv(EnvBase):
     def _get_observation(self, initial: bool = False) -> TensorDictBase:
         """Get the current observation state."""
         if initial or self.position_size == 0:
-            obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
+            # PERF: Use combined method to avoid redundant searchsorted
+            obs_dict, self.current_timestamp, self.truncated, self._cached_base_features = (
+                self.sampler.get_sequential_observation_with_ohlcv()
+            )
             self.rollout_returns = []
-            self._cached_base_features = self.sampler.get_base_features(self.current_timestamp)
         else:
             # _rollout() updates _cached_base_features internally
             trade_info, obs_dict = self._rollout()
@@ -365,22 +371,20 @@ class FuturesOneStepEnv(EnvBase):
         total_balance = self.balance + self.unrealized_pnl
         margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
 
-        # Account state (10 elements, matching live futures env)
-        account_state = [
-            self.balance,
-            self.position_size,  # Positive=long, Negative=short
-            self.position_value,
-            self.entry_price,
-            current_price,
-            self.unrealized_pnl_pct,
-            float(self.leverage),
-            margin_ratio,
-            self.liquidation_price,
-            float(self.position_hold_counter),
-        ]
-        account_state = torch.tensor(account_state, dtype=torch.float)
+        # PERF: Update pre-allocated account state buffer in-place
+        self._account_state_buffer[0] = self.balance
+        self._account_state_buffer[1] = self.position_size  # Positive=long, Negative=short
+        self._account_state_buffer[2] = self.position_value
+        self._account_state_buffer[3] = self.entry_price
+        self._account_state_buffer[4] = current_price
+        self._account_state_buffer[5] = self.unrealized_pnl_pct
+        self._account_state_buffer[6] = float(self.leverage)
+        self._account_state_buffer[7] = margin_ratio
+        self._account_state_buffer[8] = self.liquidation_price
+        self._account_state_buffer[9] = float(self.position_hold_counter)
 
-        obs_data = {self.account_state_key: account_state}
+        # Clone to avoid issues with in-place modifications downstream
+        obs_data = {self.account_state_key: self._account_state_buffer.clone()}
         obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
         return TensorDict(obs_data, batch_size=())
 
@@ -512,12 +516,13 @@ class FuturesOneStepEnv(EnvBase):
     def compute_return(self, close_price: float) -> torch.Tensor:
         """Compute log return for current step."""
         current_value = self._get_portfolio_value(close_price)
-        current_return = torch.log(
-            torch.tensor(current_value, dtype=torch.float) /
-            torch.tensor(self.previous_portfolio_value, dtype=torch.float)
-        )
+        # PERF: Use math.log instead of creating tensors for each computation
+        if self.previous_portfolio_value > 0:
+            log_return = math.log(current_value / self.previous_portfolio_value)
+        else:
+            log_return = 0.0
         self.previous_portfolio_value = current_value
-        return current_return
+        return torch.tensor(log_return, dtype=torch.float)
 
     def _trigger_close(self, trade_info: Dict, execution_price: float) -> Dict:
         """Close position at given price."""
@@ -605,9 +610,10 @@ class FuturesOneStepEnv(EnvBase):
 
         future_rollout_steps = 1
         while not self.truncated:
-            # Get next time step
-            obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
-            ohlcv = self.sampler.get_base_features(self.current_timestamp)
+            # PERF: Get observation AND OHLCV in one call (avoids redundant searchsorted)
+            obs_dict, self.current_timestamp, self.truncated, ohlcv = (
+                self.sampler.get_sequential_observation_with_ohlcv()
+            )
             self._cached_base_features = ohlcv
 
             open_price = ohlcv["open"]
@@ -658,8 +664,10 @@ class FuturesOneStepEnv(EnvBase):
 
         # If loop never executed (truncated from start), get an observation
         if obs_dict is None:
-            obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
-            self._cached_base_features = self.sampler.get_base_features(self.current_timestamp)
+            # PERF: Use combined method to avoid redundant searchsorted
+            obs_dict, self.current_timestamp, self.truncated, self._cached_base_features = (
+                self.sampler.get_sequential_observation_with_ohlcv()
+            )
 
         return trade_info, obs_dict
 

@@ -124,8 +124,7 @@ def main(cfg: DictConfig):  # noqa: F821
 
     def update(batch):
         optim.zero_grad(set_to_none=True)
-        # Get a data batch
-        batch = batch.to(device, non_blocking=True)
+        # PERF: batch is already on device from collector, skip redundant transfer
 
         # Forward pass GRPO loss
         loss_td = loss_module(batch)
@@ -153,17 +152,20 @@ def main(cfg: DictConfig):  # noqa: F821
         timeit.printevery(1000, total_iter, erase=True)
 
         with timeit("collecting"):
-            data = next(collector_iter).to(device)
+            # PERF: Use non_blocking=True for async transfer
+            data = next(collector_iter).to(device, non_blocking=True)
 
         metrics_to_log = {}
         frames_in_batch = data.numel()
-        metrics_to_log["train/action_std"] = data["action"].float().std().item()
         collected_frames += frames_in_batch
         pbar.update(frames_in_batch)
 
         # Get training rewards and episode lengths
         batch_reward = data["next", "reward"].mean()
-        metrics_to_log.update({"train/reward": batch_reward.item()})
+        # PERF: Defer .item() calls to reduce GPU sync points
+        # These will be logged later, so we compute them but don't block
+        action_std = data["action"].float().std()
+        metrics_to_log.update({"train/reward": batch_reward, "train/action_std": action_std})
 
         with timeit("training"):
             with timeit("update"):
