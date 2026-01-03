@@ -181,6 +181,8 @@ class SeqFuturesSLTPEnv(EnvBase):
         self.action_map = futures_sltp_action_map(
             self.stoploss_levels, self.takeprofit_levels
         )
+        # PERF: Convert action_map to tuple for O(1) indexed lookup (faster than dict hashing)
+        self._action_tuple = tuple(self.action_map[i] for i in range(len(self.action_map)))
 
         self.sampler = MarketDataObservationSampler(
             df,
@@ -255,6 +257,23 @@ class SeqFuturesSLTPEnv(EnvBase):
         # PERF: Initialize cached OHLCV (will be set on first observation)
         self._cached_ohlcv = None
 
+        # PERF: Cache margin fractions to avoid division per liquidation calculation
+        self._inv_leverage = 1.0 / self.leverage
+        self._long_liq_factor = 1 - self._inv_leverage + self.maintenance_margin_rate
+        self._short_liq_factor = 1 + self._inv_leverage - self.maintenance_margin_rate
+
+        # PERF: Cache leverage as float to avoid float() call per step
+        self._leverage_float = float(self.leverage)
+
+        # PERF: Pre-allocate trade_info template to avoid dict creation per step
+        self._trade_info_template = {
+            "executed": False,
+            "side": None,
+            "fee_paid": 0.0,
+            "liquidated": False,
+            "sltp_triggered": None,
+        }
+
         super().__init__()
 
     def _calculate_liquidation_price(
@@ -270,18 +289,13 @@ class SeqFuturesSLTPEnv(EnvBase):
         if position_size == 0:
             return 0.0
 
-        margin_fraction = 1.0 / self.leverage
-
+        # PERF: Use cached factors instead of computing division per call
         if position_size > 0:
             # Long position - liquidated if price drops
-            liquidation_price = entry_price * (
-                1 - margin_fraction + self.maintenance_margin_rate
-            )
+            liquidation_price = entry_price * self._long_liq_factor
         else:
             # Short position - liquidated if price rises
-            liquidation_price = entry_price * (
-                1 + margin_fraction - self.maintenance_margin_rate
-            )
+            liquidation_price = entry_price * self._short_liq_factor
 
         return max(0, liquidation_price)
 
@@ -436,7 +450,7 @@ class SeqFuturesSLTPEnv(EnvBase):
         buf[3] = self.entry_price
         buf[4] = current_price
         buf[5] = self.unrealized_pnl_pct
-        buf[6] = float(self.leverage)
+        buf[6] = self._leverage_float  # PERF: Use cached float instead of float() call
         buf[7] = margin_ratio
         buf[8] = self.liquidation_price
         buf[9] = float(self.position_hold_counter)
@@ -566,21 +580,16 @@ class SeqFuturesSLTPEnv(EnvBase):
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()
-        action_tuple = self.action_map[action_idx]
+        # PERF: Use tuple for direct indexing instead of dict lookup
+        action_tuple = self._action_tuple[action_idx]
         side, sl_pct, tp_pct = action_tuple
 
         # PERF: Use cached OHLCV from _get_observation() instead of calling get_base_features
         ohlcv = self._cached_ohlcv
         current_price = ohlcv.close
 
-        # Initialize trade info
-        trade_info = {
-            "executed": False,
-            "side": None,
-            "fee_paid": 0.0,
-            "liquidated": False,
-            "sltp_triggered": None,
-        }
+        # PERF: Use pre-allocated template copy instead of dict literal
+        trade_info = self._trade_info_template.copy()
 
         # Priority order: Liquidation > SL/TP > New action
 
@@ -710,10 +719,8 @@ class SeqFuturesSLTPEnv(EnvBase):
         # PERF: Use cached OHLCV instead of calling get_base_features
         current_price = self._cached_ohlcv.close
 
-        # Apply slippage
-        price_noise = torch.empty(1).uniform_(
-            1 - self.slippage, 1 + self.slippage
-        ).item()
+        # PERF: Use Python random instead of torch.empty().uniform_() to avoid tensor allocation
+        price_noise = random.uniform(1 - self.slippage, 1 + self.slippage)
 
         if side is None:
             # Hold or close action
