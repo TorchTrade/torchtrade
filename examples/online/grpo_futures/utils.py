@@ -251,7 +251,7 @@ def make_discrete_grpo_binmtabl_model(cfg, env, device):
         module=account_encoder_model,
         in_keys=[account_state_key],
         out_keys=["encoding_account_state"],
-    )
+    ).to(device)
 
     # Common feature extractor
     common = MLP(
