@@ -205,7 +205,10 @@ class SeqLongOnlyEnv(EnvBase):
         if compare_value <= 0:
             terminal_reward = 0.0
         else:
-            terminal_reward = 100 * (new_portfolio_value - compare_value) / compare_value
+            # Terminal reward as percentage (1.0 = 100% better than benchmark)
+            terminal_reward = (new_portfolio_value - compare_value) / compare_value
+            # Clip to [-5, 5] to prevent extreme values
+            terminal_reward = np.clip(terminal_reward, -5.0, 5.0)
 
         # Optional: add small dense carryover, or keep pure sparse
         return terminal_reward  # or: terminal_reward + dense_reward

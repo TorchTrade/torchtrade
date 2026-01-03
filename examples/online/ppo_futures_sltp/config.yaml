@@ -14,14 +14,14 @@ env:
   takeprofit_levels: [0.05, 0.1, 0.2]    # 5%, 10%, 20% take profit
   exp_name: ${logger.exp_name}
   seed: 0
-  train_envs: 10
-  eval_envs: 2
-  data_path: Sebasdi/TorchTrade_btcusd_spot_1m_12_2024_to_09_2025
+  train_envs: 1
+  eval_envs: 1
+  data_path: Torch-Trade/btcusdt_spot_1m_01_2020_to_12_2025
 
 # collector
 collector:
-  device:
-  frames_per_batch: 100000
+  device: cpu
+  frames_per_batch: 1000
   total_frames: 100_000_000
 
 # logger
@@ -40,21 +40,21 @@ model:
 
 # optimization
 optim:
-  lr: 2.5e-4
-  eps: 1.0e-6
-  weight_decay: 0.0
+  lr: 5.0e-5
+  eps: 1.0e-5
+  weight_decay: 1.0e-5  # Add small weight decay for regularization
   max_grad_norm: 0.5
-  anneal_lr: True
+  anneal_lr: False  # Disable LR annealing
   device:
 
 # loss
 loss:
-  gamma: 0.9
-  mini_batch_size: 33333
+  gamma: 0.5
+  mini_batch_size: 333
   ppo_epochs: 3
   gae_lambda: 0.95
-  clip_epsilon: 0.1
-  anneal_clip_epsilon: True
+  clip_epsilon: 0.2
+  anneal_clip_epsilon: False  # Disable clip annealing
   critic_coef: 1.0
   entropy_coef: 0.01
   loss_critic_type: l2

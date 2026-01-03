@@ -161,12 +161,15 @@ class SeqLongOnlySLTPEnv(EnvBase):
         if self.step_counter < self.max_traj_length - 1:
             reward = 0.0
         else:
-            terminal_reward = 100 * (new_portfolio_value - compare_value) / compare_value
+            # Terminal reward as percentage (1.0 = 100% better than benchmark)
+            terminal_reward = (new_portfolio_value - compare_value) / compare_value
+            # Clip to [-5, 5] to prevent extreme values
+            terminal_reward = np.clip(terminal_reward, -5.0, 5.0)
             if 1 in self.action_history and -1 in self.action_history:
                 # we need to have at least one trade
                 reward = terminal_reward
             else:
-                reward = -10.0
+                reward = -0.1  # Small penalty instead of -10
         return reward
 
 

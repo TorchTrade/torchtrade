@@ -482,10 +482,11 @@ class SeqFuturesSLTPEnv(EnvBase):
 
             compare_value = max(self.initial_portfolio_value, buy_and_hold_value)
             if compare_value > 0:
-                terminal_reward = (
-                    100 * (new_portfolio_value - compare_value) / compare_value
-                )
-                return terminal_reward
+                # Terminal reward as percentage (1.0 = 100% better than benchmark)
+                terminal_reward = (new_portfolio_value - compare_value) / compare_value
+                # Clip to [-5, 5] to prevent extreme values
+                terminal_reward = np.clip(terminal_reward, -5.0, 5.0)
+                return terminal_reward * self.config.reward_scaling
 
         return dense_reward * self.config.reward_scaling
 
