@@ -16,10 +16,10 @@
         - All 303 tests pass
         - Training example runs successfully
 
-- [ ] Add Binance env
-    - [ ] Binance Live
-    - [ ] Short-Long Environment
-    - [ ] One Step Short-Long Env version
+- [X] Add Binance env
+    - [X] Binance Live
+    - [X] Short-Long Environment
+    - [X] One Step Short-Long Env version
 
 - [ ] OANDA Env 
     - [ ] 
@@ -27,7 +27,9 @@
 - [ ] Gather Bigger Dataset
     - [ ] Make it a claude command line tool? 
 
-- [ ] Find ways to utilize Claude skills / commands 
+- [X] Find ways to utilize Claude skills / commands
+    - [X] TorchRL Algorithm Implementation Expert
+    - [ ] Automate experimentation
 
 
 **Smaller things:**

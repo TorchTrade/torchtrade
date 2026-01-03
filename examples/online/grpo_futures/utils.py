@@ -2,6 +2,7 @@
 from __future__ import annotations
 import functools
 
+import numpy as np
 import torch.nn
 from torchrl.envs import (
     DoubleToFloat,
@@ -40,22 +41,92 @@ from torchrl.trainers.helpers.models import ACTIVATIONS
 
 def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Preprocess OHLCV dataframe with features for RL trading.
+    Preprocess OHLCV dataframe with technical indicators for RL trading.
 
     Expected columns: ["open", "high", "low", "close", "volume"]
-    Index can be datetime or integer.
+    Index can be datetime or integer (or timestamp if from sampler).
     """
-    df = df.copy().reset_index(drop=False)
+    df = df.copy()
 
-    # Basic OHLCV features
+    # Handle HuggingFace datasets with numeric column names
+    expected_cols = ["timestamp", "open", "high", "low", "close", "volume"]
+    if "close" not in df.columns and "0" in df.columns:
+        df.columns = expected_cols[:len(df.columns)]
+
+    # Preserve timestamp index if present (from sampler resampling)
+    has_datetime_index = isinstance(df.index, pd.DatetimeIndex)
+    if has_datetime_index:
+        df = df.reset_index()  # Convert timestamp index to column
+        df = df.rename(columns={"index": "timestamp"})  # In case it's named 'index'
+
+    # === Normalized OHLCV (relative to close) ===
     df["features_close"] = df["close"]
-    df["features_open"] = df["open"]
-    df["features_high"] = df["high"]
-    df["features_low"] = df["low"]
-    df["features_volume"] = df["volume"]
+    df["features_open_rel"] = df["open"] / df["close"]
+    df["features_high_rel"] = df["high"] / df["close"]
+    df["features_low_rel"] = df["low"] / df["close"]
+
+    # Log volume (normalized)
+    df["features_log_volume"] = np.log1p(df["volume"])
+    vol_mean = df["features_log_volume"].rolling(20).mean()
+    vol_std = df["features_log_volume"].rolling(20).std()
+    df["features_volume_zscore"] = (df["features_log_volume"] - vol_mean) / (vol_std + 1e-8)
+
+    # === Returns ===
+    df["features_return_1"] = df["close"].pct_change(1)
+    df["features_return_5"] = df["close"].pct_change(5)
+    df["features_return_15"] = df["close"].pct_change(15)
+
+    # === Moving Averages (relative to price) ===
+    for period in [5, 10, 20]:
+        ma = df["close"].rolling(period).mean()
+        df[f"features_ma{period}_rel"] = df["close"] / ma - 1
+
+    # === RSI ===
+    delta = df["close"].diff()
+    gain = delta.where(delta > 0, 0).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / (loss + 1e-8)
+    df["features_rsi"] = (100 - (100 / (1 + rs))) / 100 - 0.5  # Normalize to [-0.5, 0.5]
+
+    # === Bollinger Bands ===
+    bb_ma = df["close"].rolling(20).mean()
+    bb_std = df["close"].rolling(20).std()
+    df["features_bb_upper_dist"] = (df["close"] - (bb_ma + 2 * bb_std)) / df["close"]
+    df["features_bb_lower_dist"] = (df["close"] - (bb_ma - 2 * bb_std)) / df["close"]
+    df["features_bb_width"] = (4 * bb_std) / df["close"]
+
+    # === MACD ===
+    ema12 = df["close"].ewm(span=12).mean()
+    ema26 = df["close"].ewm(span=26).mean()
+    macd = ema12 - ema26
+    signal = macd.ewm(span=9).mean()
+    df["features_macd"] = macd / df["close"]  # Normalize
+    df["features_macd_signal"] = signal / df["close"]
+    df["features_macd_hist"] = (macd - signal) / df["close"]
+
+    # === Volatility ===
+    df["features_volatility_5"] = df["features_return_1"].rolling(5).std()
+    df["features_volatility_20"] = df["features_return_1"].rolling(20).std()
+
+    # === ATR (Average True Range) ===
+    high_low = df["high"] - df["low"]
+    high_close = abs(df["high"] - df["close"].shift())
+    low_close = abs(df["low"] - df["close"].shift())
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df["features_atr"] = tr.rolling(14).mean() / df["close"]
+
+    # === Price momentum ===
+    df["features_momentum_10"] = df["close"] / df["close"].shift(10) - 1
+    df["features_momentum_30"] = df["close"] / df["close"].shift(30) - 1
 
     # Fill NaN values
     df.fillna(0, inplace=True)
+
+    # Clip extreme values
+    feature_cols = [c for c in df.columns if c.startswith("features_")]
+    for col in feature_cols:
+        if col != "features_close":  # Don't clip raw close price
+            df[col] = df[col].clip(-10, 10)
 
     return df
 
