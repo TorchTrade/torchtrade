@@ -181,6 +181,8 @@ class SeqFuturesSLTPEnv(EnvBase):
         self.action_map = futures_sltp_action_map(
             self.stoploss_levels, self.takeprofit_levels
         )
+        # PERF: Convert action_map to tuple for O(1) indexed lookup (faster than dict hashing)
+        self._action_tuple = tuple(self.action_map[i] for i in range(len(self.action_map)))
 
         self.sampler = MarketDataObservationSampler(
             df,
@@ -249,6 +251,29 @@ class SeqFuturesSLTPEnv(EnvBase):
         self.portfolio_value_history = []
         self.position_history = []
 
+        # PERF: Pre-allocate account state buffer to avoid tensor creation per step
+        self._account_state_buffer = torch.zeros(10, dtype=torch.float32)
+
+        # PERF: Initialize cached OHLCV (will be set on first observation)
+        self._cached_ohlcv = None
+
+        # PERF: Cache margin fractions to avoid division per liquidation calculation
+        self._inv_leverage = 1.0 / self.leverage
+        self._long_liq_factor = 1 - self._inv_leverage + self.maintenance_margin_rate
+        self._short_liq_factor = 1 + self._inv_leverage - self.maintenance_margin_rate
+
+        # PERF: Cache leverage as float to avoid float() call per step
+        self._leverage_float = float(self.leverage)
+
+        # PERF: Pre-allocate trade_info template to avoid dict creation per step
+        self._trade_info_template = {
+            "executed": False,
+            "side": None,
+            "fee_paid": 0.0,
+            "liquidated": False,
+            "sltp_triggered": None,
+        }
+
         super().__init__()
 
     def _calculate_liquidation_price(
@@ -264,18 +289,13 @@ class SeqFuturesSLTPEnv(EnvBase):
         if position_size == 0:
             return 0.0
 
-        margin_fraction = 1.0 / self.leverage
-
+        # PERF: Use cached factors instead of computing division per call
         if position_size > 0:
             # Long position - liquidated if price drops
-            liquidation_price = entry_price * (
-                1 - margin_fraction + self.maintenance_margin_rate
-            )
+            liquidation_price = entry_price * self._long_liq_factor
         else:
             # Short position - liquidated if price rises
-            liquidation_price = entry_price * (
-                1 + margin_fraction - self.maintenance_margin_rate
-            )
+            liquidation_price = entry_price * self._short_liq_factor
 
         return max(0, liquidation_price)
 
@@ -329,9 +349,12 @@ class SeqFuturesSLTPEnv(EnvBase):
             # Short position - liquidated if price above liquidation price
             return current_price >= self.liquidation_price
 
-    def _check_sltp_trigger(self, ohlcv: dict) -> Optional[str]:
+    def _check_sltp_trigger(self, ohlcv) -> Optional[str]:
         """
         Check if stop-loss or take-profit should trigger.
+
+        Args:
+            ohlcv: OHLCV namedtuple with open, high, low, close, volume attributes
 
         Returns:
             "sl" if stop-loss triggered
@@ -343,10 +366,11 @@ class SeqFuturesSLTPEnv(EnvBase):
         if self.stop_loss == 0.0 and self.take_profit == 0.0:
             return None
 
-        open_price = ohlcv["open"]
-        high_price = ohlcv["high"]
-        low_price = ohlcv["low"]
-        close_price = ohlcv["close"]
+        # PERF: Use namedtuple attribute access instead of dict lookup
+        open_price = ohlcv.open
+        high_price = ohlcv.high
+        low_price = ohlcv.low
+        close_price = ohlcv.close
 
         if self.position_size > 0:
             # Long position
@@ -391,12 +415,13 @@ class SeqFuturesSLTPEnv(EnvBase):
 
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
-        # Get market data
-        obs_dict, self.current_timestamp, self.truncated = (
-            self.sampler.get_sequential_observation()
+        # PERF: Use combined method to get observation and OHLCV in one call
+        obs_dict, self.current_timestamp, self.truncated, self._cached_ohlcv = (
+            self.sampler.get_sequential_observation_with_ohlcv()
         )
 
-        current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+        # PERF: Use namedtuple attribute access instead of dict lookup
+        current_price = self._cached_ohlcv.close
 
         # Calculate position value (absolute value of notional)
         self.position_value = abs(self.position_size * current_price)
@@ -417,22 +442,20 @@ class SeqFuturesSLTPEnv(EnvBase):
         total_balance = self.balance + self.unrealized_pnl
         margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
 
-        # Account state (10 elements, matching live futures env)
-        account_state = [
-            self.balance,
-            self.position_size,  # Positive=long, Negative=short
-            self.position_value,
-            self.entry_price,
-            current_price,
-            self.unrealized_pnl_pct,
-            float(self.leverage),
-            margin_ratio,
-            self.liquidation_price,
-            float(self.position_hold_counter),
-        ]
-        account_state = torch.tensor(account_state, dtype=torch.float)
+        # PERF: Update pre-allocated account state buffer in-place
+        buf = self._account_state_buffer
+        buf[0] = self.balance
+        buf[1] = self.position_size  # Positive=long, Negative=short
+        buf[2] = self.position_value
+        buf[3] = self.entry_price
+        buf[4] = current_price
+        buf[5] = self.unrealized_pnl_pct
+        buf[6] = self._leverage_float  # PERF: Use cached float instead of float() call
+        buf[7] = margin_ratio
+        buf[8] = self.liquidation_price
+        buf[9] = float(self.position_hold_counter)
 
-        obs_data = {self.account_state_key: account_state}
+        obs_data = {self.account_state_key: buf.clone()}
         obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
         out_td = TensorDict(obs_data, batch_size=())
 
@@ -492,7 +515,8 @@ class SeqFuturesSLTPEnv(EnvBase):
 
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value including unrealized PnL."""
-        current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+        # PERF: Use cached OHLCV instead of calling get_base_features
+        current_price = self._cached_ohlcv.close
         unrealized_pnl = self._calculate_unrealized_pnl(
             self.entry_price, current_price, self.position_size
         )
@@ -556,21 +580,16 @@ class SeqFuturesSLTPEnv(EnvBase):
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()
-        action_tuple = self.action_map[action_idx]
+        # PERF: Use tuple for direct indexing instead of dict lookup
+        action_tuple = self._action_tuple[action_idx]
         side, sl_pct, tp_pct = action_tuple
 
-        # Get current OHLCV for checks
-        ohlcv = self.sampler.get_base_features(self.current_timestamp)
-        current_price = ohlcv["close"]
+        # PERF: Use cached OHLCV from _get_observation() instead of calling get_base_features
+        ohlcv = self._cached_ohlcv
+        current_price = ohlcv.close
 
-        # Initialize trade info
-        trade_info = {
-            "executed": False,
-            "side": None,
-            "fee_paid": 0.0,
-            "liquidated": False,
-            "sltp_triggered": None,
-        }
+        # PERF: Use pre-allocated template copy instead of dict literal
+        trade_info = self._trade_info_template.copy()
 
         # Priority order: Liquidation > SL/TP > New action
 
@@ -697,12 +716,11 @@ class SeqFuturesSLTPEnv(EnvBase):
             "sltp_triggered": None,
         }
 
-        current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+        # PERF: Use cached OHLCV instead of calling get_base_features
+        current_price = self._cached_ohlcv.close
 
-        # Apply slippage
-        price_noise = torch.empty(1).uniform_(
-            1 - self.slippage, 1 + self.slippage
-        ).item()
+        # PERF: Use Python random instead of torch.empty().uniform_() to avoid tensor allocation
+        price_noise = random.uniform(1 - self.slippage, 1 + self.slippage)
 
         if side is None:
             # Hold or close action
