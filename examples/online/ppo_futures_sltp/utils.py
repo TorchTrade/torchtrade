@@ -40,32 +40,22 @@ from torchrl.trainers.helpers.models import ACTIVATIONS
 
 def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Preprocess OHLCV dataframe with normalized features for RL trading.
+    Preprocess OHLCV dataframe with features for RL trading.
 
     Expected columns: ["open", "high", "low", "close", "volume"]
     Index can be datetime or integer.
     """
     df = df.copy().reset_index(drop=False)
 
-    # Normalized price features (relative to close - always near 1.0)
-    df["features_open_rel"] = df["open"] / df["close"]
-    df["features_high_rel"] = df["high"] / df["close"]
-    df["features_low_rel"] = df["low"] / df["close"]
+    # Basic OHLCV features
+    df["features_close"] = df["close"]
+    df["features_open"] = df["open"]
+    df["features_high"] = df["high"]
+    df["features_low"] = df["low"]
+    df["features_volume"] = df["volume"]
 
-    # Log returns (typically small values like -0.01 to 0.01)
-    df["features_return"] = np.log(df["close"] / df["close"].shift(1))
-
-    # Normalized volume (log scale, then z-scored with rolling window)
-    log_volume = np.log1p(df["volume"])
-    vol_mean = log_volume.rolling(100, min_periods=1).mean()
-    vol_std = log_volume.rolling(100, min_periods=1).std().replace(0, 1)
-    df["features_volume"] = (log_volume - vol_mean) / vol_std
-
-    # Fill NaN values and clip extremes
+    # Fill NaN values
     df.fillna(0, inplace=True)
-    feature_cols = [c for c in df.columns if c.startswith("features_")]
-    for col in feature_cols:
-        df[col] = df[col].clip(-10, 10)
 
     return df
 
@@ -158,58 +148,29 @@ def make_environment(
 # ====================================================================
 # Model utils
 # --------------------------------------------------------------------
+# NOTE: Safety wrappers (AccountStateNormalizer, SafeEncoderWrapper, etc.)
+# were removed after confirming BiNMTABL works fine with clean datasets.
+# NaN issues were caused by data gaps, not model architecture.
+# If you see NaN during training, check your dataset for missing periods.
 
 
-class AccountStateNormalizer(torch.nn.Module):
-    """Normalize account state features to reasonable ranges."""
-
-    def __init__(self):
-        super().__init__()
-        # Scales for each of the 10 account state features:
-        # [cash, position_size, position_value, entry_price, current_price,
-        #  unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
-        self.register_buffer("scales", torch.tensor([
-            5000.0,    # cash (~1000-5000) -> ~0.2-1.0
-            1.0,       # position_size (small)
-            5000.0,    # position_value
-            100000.0,  # entry_price (~50k-100k for BTC) -> ~0.5-1.0
-            100000.0,  # current_price
-            1.0,       # unrealized_pnl_pct (already small)
-            10.0,      # leverage (1-10)
-            1.0,       # margin_ratio (small)
-            100000.0,  # liquidation_price
-            100.0,     # holding_time (0-100 steps)
-        ]))
-
-    def forward(self, x):
-        # Replace any NaN/Inf with zeros
-        x = torch.where(torch.isnan(x) | torch.isinf(x), torch.zeros_like(x), x)
-        normalized = x / self.scales
-        # Clamp to prevent extreme values
-        return torch.clamp(normalized, -10.0, 10.0)
-
-
-class SafeEncoderWrapper(torch.nn.Module):
-    """Wrapper to ensure consistent batch dimension and handle NaN/Inf in output."""
+class BatchSafeWrapper(torch.nn.Module):
+    """Wrapper to ensure consistent batch dimension in output."""
     def __init__(self, model, output_features):
         super().__init__()
         self.model = model
         self.output_features = output_features
 
     def forward(self, x):
-        # Clamp input to prevent extreme values
-        x = torch.clamp(x, -100.0, 100.0)
         out = self.model(x)
         # If batch dimension was squeezed (batch_size=1), add it back
         if out.dim() == 1 and out.shape[0] == self.output_features:
             out = out.unsqueeze(0)
-        # Replace NaN/Inf and clamp output
-        out = torch.where(torch.isnan(out) | torch.isinf(out), torch.zeros_like(out), out)
-        return torch.clamp(out, -10.0, 10.0)
+        return out
 
 
 def make_discrete_ppo_binmtabl_model(cfg, env, device):
-    """Make discrete PPO agent with BiNMTABL encoder (same as regular PPO)."""
+    """Make discrete PPO agent with BiNMTABL encoder."""
     activation = "tanh"
     action_spec = env.action_spec
     market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
@@ -224,7 +185,7 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
     encoders = []
     num_features = env.observation_spec[market_data_keys[0]].shape[-1]
 
-    # Build BiNMTABL encoders for market data (same as regular PPO)
+    # Build BiNMTABL encoders for market data
     for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
         base_model = BiNMTABLModel(
             input_shape=(w, num_features),
@@ -237,27 +198,24 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
             dropout=0.1,
             initializer="kaiming_uniform"
         )
-        # Wrap to handle batch_size=1 case and NaN/Inf protection
-        model = SafeEncoderWrapper(base_model, output_features=14)
+        # Wrap to handle batch_size=1 case where BiNMTABLModel squeezes batch dim
+        model = BatchSafeWrapper(base_model, output_features=14)
         encoders.append(SafeModule(
             module=model,
             in_keys=key,
             out_keys=[f"encoding_{t}_{fre}_{w}"],
         ).to(device))
 
-    # Account state encoder with normalization + BiNTabularEncoder
+    # Account state encoder with BiNTabularEncoder
     # IMPORTANT: SeqFuturesSLTPEnv has 10 account state features (not 7 like SeqLongOnly)
     # [cash, position_size, position_value, entry_price, current_price,
     #  unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
-    account_encoder_model = torch.nn.Sequential(
-        AccountStateNormalizer(),  # Normalize large values like prices
-        BiNTabularEncoder(
-            feature_dim=10,  # 10 features for futures (vs 7 for long-only)
-            embedding_dim=14,
-            hidden_dims=[32, 32],
-            activation="gelu",
-            dropout=0.1,
-        ),
+    account_encoder_model = BiNTabularEncoder(
+        feature_dim=10,  # 10 features for futures (vs 7 for long-only)
+        embedding_dim=14,
+        hidden_dims=[32, 32],
+        activation="gelu",
+        dropout=0.1,
     )
 
     account_state_encoder = SafeModule(
@@ -266,28 +224,13 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
         out_keys=["encoding_account_state"],
     ).to(device)
 
-    # Common feature extractor with safety wrapper
-    class SafeCommonWrapper(torch.nn.Module):
-        """Wrapper to ensure safe inputs/outputs for common MLP."""
-        def __init__(self, mlp):
-            super().__init__()
-            self.mlp = mlp
-
-        def forward(self, *inputs):
-            # Concatenate inputs and clamp
-            x = torch.cat(inputs, dim=-1)
-            x = torch.where(torch.isnan(x) | torch.isinf(x), torch.zeros_like(x), x)
-            x = torch.clamp(x, -10.0, 10.0)
-            out = self.mlp(x)
-            out = torch.where(torch.isnan(out) | torch.isinf(out), torch.zeros_like(out), out)
-            return torch.clamp(out, -10.0, 10.0)
-
-    common = SafeCommonWrapper(MLP(
+    # Common feature extractor
+    common = MLP(
         num_cells=[128, 128],
         out_features=128,
         activation_class=ACTIVATIONS[activation],
         device=device,
-    ))
+    )
 
     common_module = SafeModule(
         module=common,
@@ -300,28 +243,14 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
     distribution_class = torch.distributions.Categorical
     distribution_kwargs = {}
 
-    # Policy head with safe logits output
-    class SafeLogitsWrapper(torch.nn.Module):
-        """Wrapper to ensure logits are bounded for Categorical distribution."""
-        def __init__(self, mlp):
-            super().__init__()
-            self.mlp = mlp
-
-        def forward(self, x):
-            # Clamp input features
-            x = torch.clamp(x, -10.0, 10.0)
-            logits = self.mlp(x)
-            # Replace NaN/Inf and clamp logits to prevent distribution issues
-            logits = torch.where(torch.isnan(logits) | torch.isinf(logits), torch.zeros_like(logits), logits)
-            return torch.clamp(logits, -20.0, 20.0)
-
-    policy_net = SafeLogitsWrapper(MLP(
+    # Policy head
+    policy_net = MLP(
         in_features=128,
         out_features=action_out_features,
         activation_class=ACTIVATIONS[activation],
         num_cells=[],
         device=device,
-    ))
+    )
     policy_module = SafeModule(
         module=policy_net,
         in_keys=["common_features"],
