@@ -25,6 +25,7 @@ from torchrl.modules import (
     SafeModule,
     SafeSequential,
 )
+from trading_nets.architectures.tabl.tabl import BiNMTABLModel, BiNTabularEncoder
 
 from torchtrade.envs import SeqFuturesEnv, SeqFuturesEnvConfig
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, get_timeframe_unit
@@ -145,69 +146,78 @@ def make_environment(
 # --------------------------------------------------------------------
 
 
-def make_discrete_ppo_mlp_model(cfg, env, device):
-    """Make discrete PPO agent with MLP encoder."""
-    activation = cfg.model.activation
+class BatchSafeWrapper(torch.nn.Module):
+    """Wrapper to ensure consistent batch dimension in output."""
+    def __init__(self, model, output_features):
+        super().__init__()
+        self.model = model
+        self.output_features = output_features
+
+    def forward(self, x):
+        out = self.model(x)
+        # If batch dimension was squeezed (batch_size=1), add it back
+        if out.dim() == 1 and out.shape[0] == self.output_features:
+            out = out.unsqueeze(0)
+        return out
+
+
+def make_discrete_ppo_binmtabl_model(cfg, env, device):
+    """Make discrete PPO agent with BiNMTABL encoder."""
+    activation = "tanh"
     action_spec = env.action_spec
-    market_data_keys = [
-        k for k in list(env.observation_spec.keys()) if k.startswith("market_data")
-    ]
-    assert (
-        "account_state" in list(env.observation_spec.keys())
-    ), "Account state key not in observation spec"
+    market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
+    assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"
+    account_state_key = "account_state"
 
     time_frames = cfg.env.time_frames
     window_sizes = cfg.env.window_sizes
     freqs = cfg.env.freqs
-    assert len(time_frames) == len(
-        market_data_keys
-    ), f"Amount of time frames {len(time_frames)} and env market data keys do not match! Keys: {market_data_keys}"
+    assert len(time_frames) == len(market_data_keys), f"Amount of time frames {len(time_frames)} and env market data keys do not match! Keys: {market_data_keys}"
 
-    # Build simple MLP encoders for each market data input
     encoders = []
-    for key, t, w, freq in zip(market_data_keys, time_frames, window_sizes, freqs):
-        num_features = env.observation_spec[key].shape[-1]
-        input_dim = w * num_features
+    num_features = env.observation_spec[market_data_keys[0]].shape[-1]
 
-        # Flatten and encode market data
-        encoder = SafeModule(
-            module=torch.nn.Sequential(
-                torch.nn.Flatten(start_dim=-2),
-                MLP(
-                    in_features=input_dim,
-                    out_features=32,
-                    num_cells=[64],
-                    activation_class=ACTIVATIONS[activation],
-                    device=device,
-                ),
-            ),
-            in_keys=[key],
-            out_keys=[f"encoding_{t}_{freq}_{w}"],
-        ).to(device)
-        encoders.append(encoder)
+    # Build BiNMTABL encoders for market data
+    for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
+        base_model = BiNMTABLModel(
+            input_shape=(w, num_features),
+            output_shape=(1, 14),
+            hidden_seq_size=w,
+            hidden_feature_size=14,
+            num_heads=3,
+            activation=activation,
+            final_activation=activation,
+            dropout=0.1,
+            initializer="kaiming_uniform"
+        )
+        # Wrap to handle batch_size=1 case where BiNMTABLModel squeezes batch dim
+        model = BatchSafeWrapper(base_model, output_features=14)
+        encoders.append(SafeModule(
+            module=model,
+            in_keys=key,
+            out_keys=[f"encoding_{t}_{fre}_{w}"],
+        ).to(device))
 
-    # Account state encoder (10 elements for futures)
-    account_encoder = SafeModule(
-        module=MLP(
-            in_features=10,
-            out_features=32,
-            num_cells=[32],
-            activation_class=ACTIVATIONS[activation],
-            device=device,
-        ),
-        in_keys=["account_state"],
+    # Account state encoder with BiNTabularEncoder
+    # IMPORTANT: SeqFuturesEnv has 10 account state features (not 7 like SeqLongOnly)
+    # [cash, position_size, position_value, entry_price, current_price,
+    #  unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
+    account_encoder_model = BiNTabularEncoder(
+        feature_dim=10,  # 10 features for futures (vs 7 for long-only)
+        embedding_dim=14,
+        hidden_dims=[32, 32],
+        activation="gelu",
+        dropout=0.1,
+    )
+
+    account_state_encoder = SafeModule(
+        module=account_encoder_model,
+        in_keys=[account_state_key],
         out_keys=["encoding_account_state"],
-    ).to(device)
+    )
 
     # Common feature extractor
-    encoding_keys = [
-        f"encoding_{t}_{freq}_{w}"
-        for t, w, freq in zip(time_frames, window_sizes, freqs)
-    ] + ["encoding_account_state"]
-    total_encoding_dim = 32 * (len(market_data_keys) + 1)
-
     common = MLP(
-        in_features=total_encoding_dim,
         num_cells=[128, 128],
         out_features=128,
         activation_class=ACTIVATIONS[activation],
@@ -216,16 +226,16 @@ def make_discrete_ppo_mlp_model(cfg, env, device):
 
     common_module = SafeModule(
         module=common,
-        in_keys=encoding_keys,
+        in_keys=[f"encoding_{t}_{fre}_{w}" for t, w, fre in zip(time_frames, window_sizes, freqs)] + ["encoding_account_state"],
         out_keys=["common_features"],
     )
-    common_module = SafeSequential(*encoders, account_encoder, common_module)
+    common_module = SafeSequential(*encoders, account_state_encoder, common_module)
 
-    # Policy head
     action_out_features = action_spec.n
     distribution_class = torch.distributions.Categorical
     distribution_kwargs = {}
 
+    # Policy head
     policy_net = MLP(
         in_features=128,
         out_features=action_out_features,
@@ -267,7 +277,7 @@ def make_discrete_ppo_mlp_model(cfg, env, device):
 
 def make_ppo_models(env, device, cfg):
     """Create PPO actor and critic models."""
-    common_module, policy_module, value_module = make_discrete_ppo_mlp_model(
+    common_module, policy_module, value_module = make_discrete_ppo_binmtabl_model(
         cfg,
         env,
         device=device,
