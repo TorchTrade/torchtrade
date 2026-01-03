@@ -151,8 +151,16 @@ class MarketDataObservationSampler:
 
         # PERF: Track current sequential index to avoid searchsorted in get_base_features
         self._sequential_idx = 0
+        self._end_idx = len(self.exec_times)  # PERF: Track end for bounds check
         # Pre-compute base OHLCV column order for fast dict creation
         self._base_ohlcv_keys = ["open", "high", "low", "close", "volume"]
+        # PERF: Store exec_times as numpy array for fast indexing (avoid pandas overhead)
+        self._exec_times_arr = self.exec_times.to_numpy()
+
+        # PERF: Pre-compute observation indices for each execution timestamp per timeframe
+        # This allows get_observation_sequential() to use direct indexing instead of searchsorted
+        self._obs_indices: Dict[str, np.ndarray] = {}
+        exec_ts_int64 = self.exec_times.asi8  # int64 nanoseconds
 
         # Convert resampled dfs to torch tensors for fast slicing.
         # Also convert timestamp indices to int64 (ns) and store as torch.long for searchsorted.
@@ -167,6 +175,11 @@ class MarketDataObservationSampler:
             # timestamps as int64 nanoseconds: use .asi8 on DatetimeIndex (fast)
             ts_int64 = df_tf.index.asi8  # numpy ndarray (int64)
             self.torch_idx[key] = torch.from_numpy(ts_int64).to(torch.long)  # sorted 1D long tensor
+
+            # PERF: Pre-compute observation indices for sequential access
+            # Use numpy searchsorted once at init instead of torch searchsorted per step
+            obs_idx = np.searchsorted(ts_int64, exec_ts_int64, side='right') - 1
+            self._obs_indices[key] = obs_idx
 
         # Execute-on base features tensor + index
         base_arr = self.execute_base_features_df.to_numpy(dtype=np.float32)
@@ -187,26 +200,58 @@ class MarketDataObservationSampler:
         return self.get_observation(timestamp), timestamp, False
 
     def get_sequential_observation(self) -> Tuple[Dict[str, torch.Tensor], pd.Timestamp, bool]:
-        if len(self.unseen_timestamps) == 0:
+        """Get observation using index-based tracking (PERF: avoids deque overhead)."""
+        if self._sequential_idx >= self._end_idx:
             raise ValueError("No more timestamps available. Call reset() before continuing.")
-        timestamp = self.unseen_timestamps.popleft()  # O(1) instead of O(n)
-        truncated = len(self.unseen_timestamps) == 0
-        return self.get_observation(timestamp), timestamp, truncated
+
+        # PERF: Get timestamp from numpy array
+        timestamp = pd.Timestamp(self._exec_times_arr[self._sequential_idx])
+        truncated = (self._sequential_idx + 1) >= self._end_idx
+
+        # PERF: Use precomputed indices (no searchsorted)
+        obs = self._get_observation_sequential(self._sequential_idx)
+        self._sequential_idx += 1
+
+        return obs, timestamp, truncated
+
+    def _get_observation_sequential(self, exec_idx: int) -> Dict[str, torch.Tensor]:
+        """PERF: Get observation using pre-computed indices (no searchsorted)."""
+        obs: Dict[str, torch.Tensor] = {}
+
+        for tf, ws in zip(self.time_frames, self.window_sizes):
+            key = tf.obs_key_freq()
+            arr = self.torch_tensors[key]
+
+            # Use pre-computed index
+            idx_pos = self._obs_indices[key][exec_idx]
+
+            start = idx_pos - ws + 1
+            if start < 0:
+                start = 0
+
+            window = arr[start: idx_pos + 1]
+            obs[key] = window
+
+        return obs
 
     def get_sequential_observation_with_ohlcv(self) -> Tuple[Dict[str, torch.Tensor], pd.Timestamp, bool, OHLCV]:
         """
-        PERF: Get observation AND base OHLCV in one call, avoiding redundant searchsorted.
+        PERF: Get observation AND base OHLCV in one call using index-based tracking.
 
         Returns:
             (observation_dict, timestamp, truncated, ohlcv_namedtuple)
         """
-        if len(self.unseen_timestamps) == 0:
+        if self._sequential_idx >= self._end_idx:
             raise ValueError("No more timestamps available. Call reset() before continuing.")
-        timestamp = self.unseen_timestamps.popleft()
-        truncated = len(self.unseen_timestamps) == 0
 
-        # Get observation
-        obs = self.get_observation(timestamp)
+        # PERF: Get timestamp from numpy array (faster than pandas DatetimeIndex)
+        timestamp = pd.Timestamp(self._exec_times_arr[self._sequential_idx])
+
+        # Check if this is the last step
+        truncated = (self._sequential_idx + 1) >= self._end_idx
+
+        # PERF: Get observation using pre-computed indices (no searchsorted)
+        obs = self._get_observation_sequential(self._sequential_idx)
 
         # PERF: Get base features using direct index access (no searchsorted)
         # PERF: Return NamedTuple instead of dict (attribute access is faster than dict lookup)
@@ -267,27 +312,31 @@ class MarketDataObservationSampler:
         return columns[0]
 
     def reset(self, random_start: bool = False) -> int:
-        """Reset the unseen timestamps deque and return its length."""
-        if random_start:
-            exec_list = list(self.exec_times)
-            if self.max_traj_length is None:
-                start_idx = self.np_rng.integers(0, max(1, len(exec_list)))
-                self.unseen_timestamps = deque(exec_list[start_idx:])
-                self._sequential_idx = start_idx  # PERF: Track index for fast base feature access
-            else:
-                max_start_index = max(0, len(exec_list) - self.max_traj_length)
-                start_index = self.np_rng.integers(0, max_start_index + 1)
-                self.unseen_timestamps = deque(exec_list[start_index : start_index + self.max_traj_length])
-                self._sequential_idx = start_index  # PERF: Track index for fast base feature access
-        else:
-            if self.max_traj_length is None:
-                self.unseen_timestamps = deque(self.exec_times)
-            else:
-                self.unseen_timestamps = deque(list(self.exec_times)[: self.max_traj_length])
-            self._sequential_idx = 0  # PERF: Track index for fast base feature access
+        """Reset using index-based tracking (PERF: avoids deque/list overhead)."""
+        total_len = len(self._exec_times_arr)
 
-        # return number of unseen timestamps
-        return len(self.unseen_timestamps)
+        if random_start:
+            if self.max_traj_length is None:
+                start_idx = int(self.np_rng.integers(0, max(1, total_len)))
+                self._sequential_idx = start_idx
+                self._end_idx = total_len
+            else:
+                max_start_index = max(0, total_len - self.max_traj_length)
+                start_idx = int(self.np_rng.integers(0, max_start_index + 1))
+                self._sequential_idx = start_idx
+                self._end_idx = min(start_idx + self.max_traj_length, total_len)
+        else:
+            self._sequential_idx = 0
+            if self.max_traj_length is None:
+                self._end_idx = total_len
+            else:
+                self._end_idx = min(self.max_traj_length, total_len)
+
+        # PERF: Keep unseen_timestamps for backward compatibility but as lightweight view
+        # This is only used if someone calls get_sequential_observation() directly
+        self.unseen_timestamps = deque()  # Empty placeholder
+
+        return self._end_idx - self._sequential_idx
 
     def get_base_features(self, timestamp: pd.Timestamp) -> Dict[str, float]:
         """
