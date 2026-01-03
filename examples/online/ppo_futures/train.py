@@ -44,8 +44,8 @@ def main(cfg: DictConfig):  # noqa: F821
     # Load data from HuggingFace
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
-    test_df = df[0 : (1440 * 21)]  # 21 days for test
-    train_df = df[(1440 * 21) :]
+    train_df = df[df['0'] < cfg.env.test_split_start]
+    test_df  = df[df['0'] >= cfg.env.test_split_start]
 
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
     max_eval_traj_length = len(test_df)

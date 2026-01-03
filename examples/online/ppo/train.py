@@ -40,8 +40,8 @@ def main(cfg: DictConfig):  # noqa: F821
     #df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
-    test_df = df[0:(1440 *21)] # 14 days
-    train_df = df[(1440 * 21):]
+    train_df = df[df['0'] < cfg.env.test_split_start]
+    test_df  = df[df['0'] >= cfg.env.test_split_start]
 
 
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
