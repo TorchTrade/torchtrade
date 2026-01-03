@@ -1,5 +1,6 @@
 from collections import deque
 from typing import Dict, List, Optional, Tuple, Union, Callable
+import warnings
 import numpy as np
 import pandas as pd
 import torch
@@ -87,7 +88,54 @@ class MarketDataObservationSampler:
         self.min_start_time = latest_first_step + self.max_lookback
         self.exec_times = exec_times[exec_times >= self.min_start_time]
         # create base features of execution time frame (we'll keep DataFrame for column names but also build tensors)
-        self.execute_base_features_df = self.df.resample(execute_on.to_pandas_freq()).last()[self.min_start_time:]
+        # Use ffill() to handle any NaN values from missing data periods
+        execute_base_raw = self.df.resample(execute_on.to_pandas_freq()).last()
+
+        # Detect and warn about data gaps
+        nan_mask = execute_base_raw["close"].isna()
+        if nan_mask.any():
+            nan_count = nan_mask.sum()
+            total_count = len(execute_base_raw)
+            nan_pct = 100 * nan_count / total_count
+
+            # Find gap regions
+            nan_indices = execute_base_raw.index[nan_mask]
+            if len(nan_indices) > 0:
+                # Group consecutive NaN periods
+                gaps = []
+                gap_start = nan_indices[0]
+                prev_idx = nan_indices[0]
+                expected_delta = pd.Timedelta(execute_on.to_pandas_freq())
+
+                for idx in nan_indices[1:]:
+                    if idx - prev_idx > expected_delta * 2:  # New gap
+                        gaps.append((gap_start, prev_idx, (prev_idx - gap_start).total_seconds() / 60))
+                        gap_start = idx
+                    prev_idx = idx
+                gaps.append((gap_start, prev_idx, (prev_idx - gap_start).total_seconds() / 60))
+
+                # Find largest gap
+                largest_gap = max(gaps, key=lambda x: x[2])
+                largest_gap_days = largest_gap[2] / (60 * 24)
+
+                warning_msg = f"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  ⚠️  WARNING: SIGNIFICANT DATA GAPS DETECTED IN MARKET DATA  ⚠️              ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  Missing data points: {nan_count:,} / {total_count:,} ({nan_pct:.2f}%)
+║  Number of gap regions: {len(gaps)}
+║  Largest gap: {largest_gap_days:.1f} days ({largest_gap[0]} to {largest_gap[1]})
+║
+║  These gaps will be forward-filled with stale prices, which may
+║  negatively impact training quality. Consider:
+║    - Using a cleaner dataset
+║    - Filtering to continuous time periods
+║    - Removing data before/after major gaps
+╚══════════════════════════════════════════════════════════════════════════════╝
+"""
+                warnings.warn(warning_msg, UserWarning, stacklevel=2)
+
+        self.execute_base_features_df = execute_base_raw.ffill()[self.min_start_time:]
         if len(self.execute_base_features_df) == 0:
             raise ValueError("No execute_on base features available after min_start_time")
 
