@@ -236,7 +236,8 @@ def main(cfg: DictConfig):  # noqa: F821
                 metrics_to_log["eval/reward"] = eval_reward
                 fig = eval_env.base_env.render_history(return_fig=True)
                 eval_env.reset()
-                metrics_to_log["eval/history"] = wandb.Image(fig[0])
+                if logger is not None and fig is not None:
+                    metrics_to_log["eval/history"] = wandb.Image(fig[0])
         if logger is not None:
             metrics_to_log.update(timeit.todict(prefix="time"))
             metrics_to_log["time/speed"] = pbar.format_dict["rate"]
