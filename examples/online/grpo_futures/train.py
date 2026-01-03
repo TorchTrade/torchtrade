@@ -41,8 +41,14 @@ def main(cfg: DictConfig):  # noqa: F821
     # Load data from HuggingFace
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
-    test_df = df[0 : (1440 * 21)]  # 21 days for test
-    train_df = df[(1440 * 21) :]
+
+    lookback = 1440 * 180  # 6 months of 1-min data = 259,200
+
+    test_df = df[-lookback:]   # Last 6 months for test
+    train_df = df[:-lookback]  # Everything before for train
+
+    print("len train", len(train_df))
+    print("len test", len(test_df))
 
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
     max_eval_traj_length = len(test_df)

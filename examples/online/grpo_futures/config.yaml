@@ -2,9 +2,9 @@ env:
   name: FuturesOneStepEnv
   symbol: "BTC/USD"
   freqs: ["Min"]
-  time_frames: [5]
+  time_frames: [15]
   window_sizes: [32]
-  execute_on: [5, "Min"]
+  execute_on: [15, "Min"]
   initial_cash: [1000, 5000]
   transaction_fee: 0.0004  # 0.04% typical futures fee
   slippage: 0.001
@@ -16,13 +16,13 @@ env:
   seed: 0
   train_envs: 8
   eval_envs: 2
-  data_path: Torch-Trade/BTCUSD_sport_1m_12_2024_to_09_2025
+  data_path: Torch-Trade/btcusdt_spot_1m_01_2020_to_12_2025
 
 # collector
 collector:
   device:
   frames_per_batch: 800
-  total_frames: 1_000_000
+  total_frames: 10_000_000
 
 # logger
 logger:

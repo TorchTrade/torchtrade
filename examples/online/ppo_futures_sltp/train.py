@@ -124,7 +124,6 @@ def main(cfg: DictConfig):  # noqa: F821
         entropy_coef=cfg.loss.entropy_coef,
         critic_coef=cfg.loss.critic_coef,
         normalize_advantage=True,
-        clip_value=True,  # Prevent value explosion
     )
 
     # Create optimizer
@@ -160,17 +159,9 @@ def main(cfg: DictConfig):  # noqa: F821
         (total_frames // frames_per_batch) * cfg.loss.ppo_epochs * num_mini_batches
     )
 
-    # Extract cfg variables (must be before update function definition)
-    cfg_loss_ppo_epochs = cfg.loss.ppo_epochs
-    cfg_optim_anneal_lr = cfg.optim.anneal_lr
-    cfg_optim_lr = cfg.optim.lr
-    cfg_loss_anneal_clip_eps = cfg.loss.anneal_clip_epsilon
-    cfg_loss_clip_epsilon = cfg.loss.clip_epsilon
-    cfg_optim_max_grad_norm = cfg.optim.max_grad_norm
-    cfg.loss.clip_epsilon = cfg_loss_clip_epsilon
-
     def update(batch, num_network_updates):
         optim.zero_grad(set_to_none=True)
+        # Linearly decrease the learning rate and clip epsilon
         alpha = torch.ones((), device=device)
         if cfg_optim_anneal_lr:
             alpha = 1 - (num_network_updates / total_network_updates)
@@ -178,27 +169,17 @@ def main(cfg: DictConfig):  # noqa: F821
                 group["lr"] = cfg_optim_lr * alpha
         if cfg_loss_anneal_clip_eps:
             loss_module.clip_epsilon.copy_(cfg_loss_clip_epsilon * alpha)
-
+        # Get a data batch
         batch = batch.to(device, non_blocking=True)
 
         # Forward pass PPO loss
         loss = loss_module(batch)
         loss_sum = loss["loss_critic"] + loss["loss_objective"] + loss["loss_entropy"]
-
-        # Check for NaN loss and skip update if detected
-        if torch.isnan(loss_sum) or torch.isinf(loss_sum):
-            return loss.detach().set("alpha", alpha), num_network_updates
-
         # Backward pass
         loss_sum.backward()
-
-        # Clip gradients and check for NaN
-        total_norm = torch.nn.utils.clip_grad_norm_(
+        torch.nn.utils.clip_grad_norm_(
             loss_module.parameters(), max_norm=cfg_optim_max_grad_norm
         )
-        if torch.isnan(total_norm) or torch.isinf(total_norm):
-            optim.zero_grad(set_to_none=True)
-            return loss.detach().set("alpha", alpha), num_network_updates
 
         # Update the networks
         optim.step()
@@ -215,6 +196,15 @@ def main(cfg: DictConfig):  # noqa: F821
         )
         update = CudaGraphModule(update, in_keys=[], out_keys=[], warmup=5)
         adv_module = CudaGraphModule(adv_module)
+
+    # Extract cfg variables
+    cfg_loss_ppo_epochs = cfg.loss.ppo_epochs
+    cfg_optim_anneal_lr = cfg.optim.anneal_lr
+    cfg_optim_lr = cfg.optim.lr
+    cfg_loss_anneal_clip_eps = cfg.loss.anneal_clip_epsilon
+    cfg_loss_clip_epsilon = cfg.loss.clip_epsilon
+    cfg_optim_max_grad_norm = cfg.optim.max_grad_norm
+    cfg.loss.clip_epsilon = cfg_loss_clip_epsilon
     losses = TensorDict(batch_size=[cfg_loss_ppo_epochs, num_mini_batches])
 
     collector_iter = iter(collector)
