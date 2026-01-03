@@ -49,6 +49,7 @@ def main(cfg: DictConfig):  # noqa: F821
     print("len test", len(test_df))
 
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
+    # TODO: possibly wrong as the test_df is in 1min freq
     max_eval_traj_length = len(test_df)
     train_env, eval_env = make_environment(
         train_df,
