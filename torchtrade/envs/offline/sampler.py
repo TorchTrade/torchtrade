@@ -1,4 +1,4 @@
-from collections import deque
+from collections import deque, namedtuple
 from typing import Dict, List, Optional, Tuple, Union, Callable
 import warnings
 import numpy as np
@@ -6,6 +6,9 @@ import pandas as pd
 import torch
 
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
+
+# PERF: NamedTuple is faster than dict for attribute access
+OHLCV = namedtuple('OHLCV', ['open', 'high', 'low', 'close', 'volume'])
 
 
 class MarketDataObservationSampler:
@@ -190,12 +193,12 @@ class MarketDataObservationSampler:
         truncated = len(self.unseen_timestamps) == 0
         return self.get_observation(timestamp), timestamp, truncated
 
-    def get_sequential_observation_with_ohlcv(self) -> Tuple[Dict[str, torch.Tensor], pd.Timestamp, bool, Dict[str, float]]:
+    def get_sequential_observation_with_ohlcv(self) -> Tuple[Dict[str, torch.Tensor], pd.Timestamp, bool, OHLCV]:
         """
         PERF: Get observation AND base OHLCV in one call, avoiding redundant searchsorted.
 
         Returns:
-            (observation_dict, timestamp, truncated, ohlcv_dict)
+            (observation_dict, timestamp, truncated, ohlcv_namedtuple)
         """
         if len(self.unseen_timestamps) == 0:
             raise ValueError("No more timestamps available. Call reset() before continuing.")
@@ -206,9 +209,10 @@ class MarketDataObservationSampler:
         obs = self.get_observation(timestamp)
 
         # PERF: Get base features using direct index access (no searchsorted)
+        # PERF: Return NamedTuple instead of dict (attribute access is faster than dict lookup)
         row = self.execute_base_tensor[self._sequential_idx]
         vals = row[:5].tolist()
-        ohlcv = {"open": vals[0], "high": vals[1], "low": vals[2], "close": vals[3], "volume": vals[4]}
+        ohlcv = OHLCV(vals[0], vals[1], vals[2], vals[3], vals[4])
         self._sequential_idx += 1
 
         return obs, timestamp, truncated, ohlcv

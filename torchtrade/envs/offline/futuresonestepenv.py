@@ -267,6 +267,10 @@ class FuturesOneStepEnv(EnvBase):
         # PERF: Pre-allocate account state tensor to avoid allocation each step
         self._account_state_buffer = torch.zeros(10, dtype=torch.float)
 
+        # PERF: Initialize portfolio value cache
+        self._cached_portfolio_value = 0.0
+        self._cached_portfolio_price = 0.0
+
         super().__init__()
 
     def _calculate_liquidation_price(self, entry_price: float, position_size: float) -> float:
@@ -349,8 +353,8 @@ class FuturesOneStepEnv(EnvBase):
             # _rollout() updates _cached_base_features internally
             trade_info, obs_dict = self._rollout()
 
-        # Use cached base features
-        current_price = self._cached_base_features["close"]
+        # Use cached base features (PERF: attribute access on namedtuple)
+        current_price = self._cached_base_features.close
 
         # Calculate position value (absolute value of notional)
         self.position_value = abs(self.position_size * current_price)
@@ -370,6 +374,10 @@ class FuturesOneStepEnv(EnvBase):
         # Calculate margin ratio
         total_balance = self.balance + self.unrealized_pnl
         margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
+
+        # PERF: Cache portfolio value and price to avoid recalculation in _get_portfolio_value()
+        self._cached_portfolio_value = total_balance
+        self._cached_portfolio_price = current_price
 
         # PERF: Update pre-allocated account state buffer in-place
         self._account_state_buffer[0] = self.balance
@@ -399,12 +407,13 @@ class FuturesOneStepEnv(EnvBase):
         Calculate reward using Sharpe ratio of rollout returns.
 
         Similar to LongOnlyOneStepEnv but accounting for futures positions.
+        PERF: rollout_returns is now a list of floats, converted to tensor once here.
         """
         if len(self.rollout_returns) == 0 or action_tuple[0] is None:
             return 0.0
 
-        # Convert list to tensor
-        returns = torch.stack(self.rollout_returns)
+        # PERF: Convert list of floats to tensor once (instead of per-step tensor creation)
+        returns = torch.tensor(self.rollout_returns, dtype=torch.float)
 
         # Need at least 2 points for a valid standard deviation
         if returns.numel() < 2:
@@ -424,9 +433,17 @@ class FuturesOneStepEnv(EnvBase):
         return torch.clamp(sharpe, -10.0, 10.0).item()
 
     def _get_portfolio_value(self, current_price: float = None) -> float:
-        """Calculate total portfolio value including unrealized PnL."""
+        """Calculate total portfolio value including unrealized PnL.
+
+        PERF: Uses cached value when price matches the last cached price from _get_observation().
+        """
         if current_price is None:
             current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+
+        # PERF: Use cached portfolio value if price matches (avoids recalculating unrealized PnL)
+        if hasattr(self, '_cached_portfolio_price') and current_price == self._cached_portfolio_price:
+            return self._cached_portfolio_value
+
         unrealized_pnl = self._calculate_unrealized_pnl(
             self.entry_price, current_price, self.position_size
         )
@@ -474,8 +491,8 @@ class FuturesOneStepEnv(EnvBase):
         """Execute one environment step."""
         self.step_counter += 1
 
-        # Cache base features
-        cached_price = self._cached_base_features["close"]
+        # Cache base features (PERF: attribute access on namedtuple)
+        cached_price = self._cached_base_features.close
 
         # Store old portfolio value
         old_portfolio_value = self._get_portfolio_value(cached_price)
@@ -493,8 +510,8 @@ class FuturesOneStepEnv(EnvBase):
         # Get updated state (this advances timestamp and caches new base features)
         next_tensordict = self._get_observation()
 
-        # Use newly cached base features for new portfolio value
-        new_price = self._cached_base_features["close"]
+        # Use newly cached base features for new portfolio value (PERF: attribute access)
+        new_price = self._cached_base_features.close
         new_portfolio_value = self._get_portfolio_value(new_price)
 
         # Calculate reward
@@ -513,8 +530,12 @@ class FuturesOneStepEnv(EnvBase):
 
         return next_tensordict
 
-    def compute_return(self, close_price: float) -> torch.Tensor:
-        """Compute log return for current step."""
+    def compute_return(self, close_price: float) -> float:
+        """Compute log return for current step.
+
+        PERF: Returns float instead of tensor. Tensor conversion happens once
+        in _calculate_reward() to eliminate tensor allocation per rollout step.
+        """
         current_value = self._get_portfolio_value(close_price)
         # PERF: Use math.log instead of creating tensors for each computation
         if self.previous_portfolio_value > 0:
@@ -522,7 +543,7 @@ class FuturesOneStepEnv(EnvBase):
         else:
             log_return = 0.0
         self.previous_portfolio_value = current_value
-        return torch.tensor(log_return, dtype=torch.float)
+        return log_return
 
     def _trigger_close(self, trade_info: Dict, execution_price: float) -> Dict:
         """Close position at given price."""
@@ -608,6 +629,13 @@ class FuturesOneStepEnv(EnvBase):
         self.rollout_returns = []
         obs_dict = None
 
+        # PERF: Cache trigger prices and position info as locals (avoid attribute lookup per iteration)
+        liq_price = self.liquidation_price
+        sl_price = self.stop_loss_price
+        tp_price = self.take_profit_price
+        is_long = self.position_size > 0
+        is_short = self.position_size < 0
+
         future_rollout_steps = 1
         while not self.truncated:
             # PERF: Get observation AND OHLCV in one call (avoids redundant searchsorted)
@@ -616,47 +644,38 @@ class FuturesOneStepEnv(EnvBase):
             )
             self._cached_base_features = ohlcv
 
-            open_price = ohlcv["open"]
-            close_price = ohlcv["close"]
-            high_price = ohlcv["high"]
-            low_price = ohlcv["low"]
+            # PERF: Use attribute access (namedtuple) instead of dict lookup
+            open_price = ohlcv.open
+            close_price = ohlcv.close
+            high_price = ohlcv.high
+            low_price = ohlcv.low
 
             self.rollout_returns.append(self.compute_return(close_price))
 
-            # Check for liquidation first
-            if self.position_size > 0:
-                # Long position
-                if low_price <= self.liquidation_price:
+            # PERF: Simplified trigger logic using cached locals
+            # For long: low is min (check SL), high is max (check TP)
+            # For short: high is max (check SL), low is min (check TP)
+            if is_long:
+                # Long position - liquidated if price drops to liquidation
+                if low_price <= liq_price:
                     return self._trigger_liquidation(trade_info), obs_dict
+                # SL: Only need to check low (it's the min in OHLCV bar)
+                if low_price < sl_price:
+                    return self._trigger_close(trade_info, sl_price), obs_dict
+                # TP: Only need to check high (it's the max in OHLCV bar)
+                if high_price > tp_price:
+                    return self._trigger_close(trade_info, tp_price), obs_dict
 
-                # Check stop loss (price drops below SL)
-                if open_price < self.stop_loss_price:
-                    return self._trigger_close(trade_info, self.stop_loss_price), obs_dict
-                elif low_price < self.stop_loss_price:
-                    return self._trigger_close(trade_info, self.stop_loss_price), obs_dict
-
-                # Check take profit (price rises above TP)
-                if high_price > self.take_profit_price:
-                    return self._trigger_close(trade_info, self.take_profit_price), obs_dict
-                elif close_price > self.take_profit_price:
-                    return self._trigger_close(trade_info, self.take_profit_price), obs_dict
-
-            elif self.position_size < 0:
-                # Short position
-                if high_price >= self.liquidation_price:
+            elif is_short:
+                # Short position - liquidated if price rises to liquidation
+                if high_price >= liq_price:
                     return self._trigger_liquidation(trade_info), obs_dict
-
-                # Check stop loss (price rises above SL)
-                if open_price > self.stop_loss_price:
-                    return self._trigger_close(trade_info, self.stop_loss_price), obs_dict
-                elif high_price > self.stop_loss_price:
-                    return self._trigger_close(trade_info, self.stop_loss_price), obs_dict
-
-                # Check take profit (price drops below TP)
-                if low_price < self.take_profit_price:
-                    return self._trigger_close(trade_info, self.take_profit_price), obs_dict
-                elif close_price < self.take_profit_price:
-                    return self._trigger_close(trade_info, self.take_profit_price), obs_dict
+                # SL: Only need to check high (it's the max in OHLCV bar)
+                if high_price > sl_price:
+                    return self._trigger_close(trade_info, sl_price), obs_dict
+                # TP: Only need to check low (it's the min in OHLCV bar)
+                if low_price < tp_price:
+                    return self._trigger_close(trade_info, tp_price), obs_dict
 
             future_rollout_steps += 1
 
