@@ -42,10 +42,8 @@ def main(cfg: DictConfig):  # noqa: F821
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
 
-    lookback = 1440 * 180  # 6 months of 1-min data = 259,200
-
-    test_df = df[-lookback:]   # Last 6 months for test
-    train_df = df[:-lookback]  # Everything before for train
+    train_df = df[df['0'] < cfg.env.test_split_start]
+    test_df  = df[df['0'] >= cfg.env.test_split_start]
 
     print("len train", len(train_df))
     print("len test", len(test_df))
