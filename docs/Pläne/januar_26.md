@@ -24,8 +24,7 @@
 - [ ] OANDA Env 
     - [ ] 
 
-- [ ] Gather Bigger Dataset
-    - [ ] Make it a claude command line tool? 
+- [X] Gather Bigger Dataset
 
 - [X] Find ways to utilize Claude skills / commands
     - [X] TorchRL Algorithm Implementation Expert
