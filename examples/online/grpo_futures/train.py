@@ -202,7 +202,7 @@ def main(cfg: DictConfig):  # noqa: F821
                     env_metrics = eval_env.base_env.get_metrics()[0]
                     metrics_to_log.update({f"eval/{k}": v for k, v in env_metrics.items()})
 
-                except Exception as e:
+                except (KeyError, AttributeError, ValueError, RuntimeError) as e:
                     import traceback
                     print(f"Warning: Could not compute metrics: {e}")
                     print(traceback.format_exc())

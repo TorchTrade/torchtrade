@@ -124,9 +124,8 @@ class TestSortinoRatio:
 
         sortino = compute_sortino_ratio(returns, periods_per_year)
 
-        # With no downside, Sortino should be 0 (no downside deviation)
-        # Actually, with target=0 and all positive returns, downside_std will be 0
-        assert sortino == 0.0
+        # With no downside and positive returns, Sortino should be very high (1000.0)
+        assert sortino == 1000.0
 
     def test_mixed_returns(self):
         """Test Sortino ratio with mixed returns."""
@@ -170,8 +169,8 @@ class TestCalmarRatio:
 
         calmar = compute_calmar_ratio(portfolio, periods_per_year)
 
-        # With no drawdown, Calmar should be 0 (division by zero case)
-        assert calmar == 0.0
+        # With no drawdown and positive returns, Calmar should be very high (1000.0)
+        assert calmar == 1000.0
 
     def test_negative_return(self):
         """Test Calmar ratio with negative return."""

@@ -6,7 +6,7 @@ return measures.
 """
 
 import torch
-from typing import Dict, Tuple
+from typing import Dict
 
 
 def compute_max_drawdown(portfolio_values: torch.Tensor) -> Dict[str, float]:
@@ -142,7 +142,11 @@ def compute_sortino_ratio(
     downside_std = torch.sqrt(torch.mean(downside_returns ** 2))
 
     if downside_std == 0:
-        return 0.0
+        # No downside risk - return a very high value if returns are positive, 0 otherwise
+        if mean_excess > 0:
+            return 1000.0  # Large positive value indicating excellent risk-adjusted returns
+        else:
+            return 0.0
 
     # Annualized Sortino
     sortino = (mean_excess / downside_std) * torch.sqrt(torch.tensor(periods_per_year, dtype=returns.dtype))
@@ -190,7 +194,11 @@ def compute_calmar_ratio(
     max_dd = abs(dd_metrics['max_drawdown'])
 
     if max_dd == 0:
-        return 0.0
+        # No drawdown - return a very high value if returns are positive, 0 otherwise
+        if annualized_return > 0:
+            return 1000.0  # Large positive value indicating excellent risk-adjusted returns
+        else:
+            return 0.0
 
     calmar = annualized_return / max_dd
 
