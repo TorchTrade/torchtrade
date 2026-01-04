@@ -308,12 +308,16 @@ def main(cfg: DictConfig):  # noqa: F821
                 torch.save(actor.state_dict(), f"ppo_futures_sltp_policy_{i}.pth")
                 actor.train()
 
-        # Log coverage metrics (if available and enabled)
+        # Log dual coverage metrics (if available and enabled)
         if coverage_tracker is not None:
             coverage_stats = coverage_tracker.get_coverage_stats()
             if coverage_stats["enabled"]:
-                metrics_to_log["train/coverage"] = coverage_stats["coverage"]
-                metrics_to_log["train/coverage_entropy"] = coverage_stats["coverage_entropy"]
+                # Reset coverage (episode start diversity)
+                metrics_to_log["train/reset_coverage"] = coverage_stats["reset_coverage"]
+                metrics_to_log["train/reset_entropy"] = coverage_stats["reset_entropy"]
+                # State coverage (full trajectory coverage)
+                metrics_to_log["train/state_coverage"] = coverage_stats["state_coverage"]
+                metrics_to_log["train/state_entropy"] = coverage_stats["state_entropy"]
 
         if logger is not None:
             time_dict = timeit.todict(prefix="time")

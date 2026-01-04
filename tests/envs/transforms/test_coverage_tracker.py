@@ -114,8 +114,10 @@ class TestCoverageTrackerInitialization:
     def test_tracker_starts_uninitialized(self, env_random_start):
         """Test that tracker starts uninitialized before first reset."""
         tracker = get_coverage_tracker(env_random_start)
-        assert tracker._coverage_counts is None
+        assert tracker._reset_coverage_counts is None
+        assert tracker._state_coverage_counts is None
         assert tracker._total_resets == 0
+        assert tracker._total_states == 0
         assert tracker._num_positions is None
 
 
@@ -127,15 +129,18 @@ class TestCoverageTrackerRandomStart:
         tracker = get_coverage_tracker(env_random_start)
 
         # Before reset
-        assert tracker._coverage_counts is None
+        assert tracker._reset_coverage_counts is None
+        assert tracker._state_coverage_counts is None
 
         # After reset
         env_random_start.reset()
 
-        assert tracker._coverage_counts is not None
+        assert tracker._reset_coverage_counts is not None
+        assert tracker._state_coverage_counts is not None
         assert tracker._enabled is True
         assert tracker._num_positions > 0
-        assert len(tracker._coverage_counts) == tracker._num_positions
+        assert len(tracker._reset_coverage_counts) == tracker._num_positions
+        assert len(tracker._state_coverage_counts) == tracker._num_positions
 
     def test_tracks_single_reset(self, env_random_start):
         """Test that a single reset is tracked."""
@@ -146,8 +151,9 @@ class TestCoverageTrackerRandomStart:
         stats = tracker.get_coverage_stats()
         assert stats["enabled"] is True
         assert stats["total_resets"] == 1
-        assert stats["visited_positions"] == 1
-        assert stats["unvisited_positions"] == stats["total_positions"] - 1
+        assert stats["reset_visited"] == 1
+        # State coverage should also have 1 visited (the reset state)
+        assert stats["state_visited"] == 1
 
     def test_tracks_multiple_resets(self, env_random_start):
         """Test that multiple resets are tracked."""
@@ -160,8 +166,10 @@ class TestCoverageTrackerRandomStart:
         stats = tracker.get_coverage_stats()
         assert stats["enabled"] is True
         assert stats["total_resets"] == num_resets
-        assert stats["visited_positions"] >= 1
-        assert stats["visited_positions"] <= num_resets
+        assert stats["reset_visited"] >= 1
+        assert stats["reset_visited"] <= num_resets
+        assert 0.0 <= stats["reset_coverage"] <= 1.0
+        assert 0.0 <= stats["state_coverage"] <= 1.0
 
     def test_coverage_percentage_increases(self, env_random_start):
         """Test that coverage percentage increases with more resets."""
@@ -177,8 +185,8 @@ class TestCoverageTrackerRandomStart:
             env_random_start.reset()
         stats_late = tracker.get_coverage_stats()
 
-        assert stats_late["coverage"] >= stats_early["coverage"]
-        assert stats_late["visited_positions"] >= stats_early["visited_positions"]
+        assert stats_late["reset_coverage"] >= stats_early["reset_coverage"]
+        assert stats_late["reset_visited"] >= stats_early["reset_visited"]
 
     def test_mean_visits_calculation(self, env_random_start):
         """Test that mean visits per position is calculated correctly."""
@@ -192,7 +200,7 @@ class TestCoverageTrackerRandomStart:
 
         # Mean should be total_resets / total_positions
         expected_mean = num_resets / stats["total_positions"]
-        assert abs(stats["mean_visits_per_position"] - expected_mean) < 0.01
+        assert abs(stats["reset_mean_visits"] - expected_mean) < 0.01
 
     def test_max_min_visits(self, env_random_start):
         """Test that max/min visit counts are tracked."""
@@ -203,9 +211,9 @@ class TestCoverageTrackerRandomStart:
 
         stats = tracker.get_coverage_stats()
 
-        assert stats["max_visits"] >= stats["min_visits"]
-        assert stats["max_visits"] >= 0
-        assert stats["min_visits"] >= 0
+        assert stats["reset_max_visits"] >= stats["reset_min_visits"]
+        assert stats["reset_max_visits"] >= 0
+        assert stats["reset_min_visits"] >= 0
 
     def test_std_visits_calculation(self, env_random_start):
         """Test that standard deviation of visits is calculated."""
@@ -216,8 +224,8 @@ class TestCoverageTrackerRandomStart:
 
         stats = tracker.get_coverage_stats()
 
-        assert stats["std_visits"] >= 0
-        assert isinstance(stats["std_visits"], float)
+        assert stats["reset_std_visits"] >= 0
+        assert isinstance(stats["reset_std_visits"], float)
 
     def test_entropy_calculation(self, env_random_start):
         """Test that coverage entropy is calculated."""
@@ -229,8 +237,8 @@ class TestCoverageTrackerRandomStart:
         stats = tracker.get_coverage_stats()
 
         # Entropy should be positive for non-uniform distribution
-        assert stats["coverage_entropy"] >= 0
-        assert isinstance(stats["coverage_entropy"], float)
+        assert stats["reset_entropy"] >= 0
+        assert isinstance(stats["reset_entropy"], float)
 
 
 class TestCoverageTrackerSequential:
@@ -255,7 +263,7 @@ class TestCoverageTrackerSequential:
             env_sequential.reset()
 
         # Coverage counts should remain None
-        assert tracker._coverage_counts is None
+        assert tracker._reset_coverage_counts is None
 
 
 class TestCoverageTrackerStats:
@@ -277,9 +285,15 @@ class TestCoverageTrackerStats:
 
         dist = tracker.get_coverage_distribution()
         assert dist is not None
-        assert isinstance(dist, np.ndarray)
-        assert len(dist) == tracker._num_positions
-        assert np.sum(dist) == tracker._total_resets
+        assert isinstance(dist, dict)
+        assert "reset_counts" in dist
+        assert "state_counts" in dist
+        assert isinstance(dist["reset_counts"], np.ndarray)
+        assert isinstance(dist["state_counts"], np.ndarray)
+        assert len(dist["reset_counts"]) == tracker._num_positions
+        assert len(dist["state_counts"]) == tracker._num_positions
+        assert np.sum(dist["reset_counts"]) == tracker._total_resets
+        assert np.sum(dist["state_counts"]) == tracker._total_states
 
     def test_get_distribution_returns_copy(self, env_random_start):
         """Test that get_distribution returns a copy, not reference."""
@@ -290,11 +304,15 @@ class TestCoverageTrackerStats:
         dist1 = tracker.get_coverage_distribution()
         dist2 = tracker.get_coverage_distribution()
 
-        # Modify dist1
-        dist1[0] = 9999
+        # Modify dist1 reset_counts
+        dist1["reset_counts"][0] = 9999
 
         # dist2 should be unchanged
-        assert dist2[0] != 9999
+        assert dist2["reset_counts"][0] != 9999
+
+        # Also test state_counts
+        dist1["state_counts"][0] = 8888
+        assert dist2["state_counts"][0] != 8888
 
     def test_reset_coverage(self, env_random_start):
         """Test resetting coverage statistics."""
@@ -312,8 +330,11 @@ class TestCoverageTrackerStats:
 
         stats_after = tracker.get_coverage_stats()
         assert stats_after["total_resets"] == 0
-        assert stats_after["visited_positions"] == 0
-        assert stats_after["coverage"] == 0.0
+        assert stats_after["total_states"] == 0
+        assert stats_after["reset_visited"] == 0
+        assert stats_after["state_visited"] == 0
+        assert stats_after["reset_coverage"] == 0.0
+        assert stats_after["state_coverage"] == 0.0
 
 
 class TestCoverageTrackerEdgeCases:
@@ -380,8 +401,10 @@ class TestCoverageTrackerEdgeCases:
         stats = tracker.get_coverage_stats()
 
         # Check if we achieved or are close to full coverage
-        assert stats["coverage"] > 0.5  # At least 50% with enough resets
-        assert stats["unvisited_positions"] >= 0
+        assert stats["reset_coverage"] > 0.5  # At least 50% with enough resets
+        # Unvisited positions can be calculated as total - visited
+        unvisited = stats["total_positions"] - stats["reset_visited"]
+        assert unvisited >= 0
 
 
 class TestCoverageTrackerIntegration:
@@ -408,8 +431,8 @@ class TestCoverageTrackerIntegration:
 
         # Should have tracked 5 resets
         assert stats["total_resets"] == 5
-        assert stats["visited_positions"] >= 1
-        assert stats["visited_positions"] <= 5
+        assert stats["reset_visited"] >= 1
+        assert stats["reset_visited"] <= 5
 
     def test_coverage_with_parallel_env_wrapper(self, simple_df):
         """Test coverage tracking through ParallelEnv wrapper."""
@@ -472,7 +495,8 @@ class TestMathematicalValidation:
         stats = tracker.get_coverage_stats()
 
         # Mathematical invariant
-        assert stats["visited_positions"] + stats["unvisited_positions"] == stats["total_positions"]
+        unvisited = stats["total_positions"] - stats["reset_visited"]
+        assert stats["reset_visited"] + unvisited == stats["total_positions"]
 
     def test_coverage_percentage_formula(self, env_random_start):
         """Test that coverage matches the formula."""
@@ -484,8 +508,8 @@ class TestMathematicalValidation:
         stats = tracker.get_coverage_stats()
 
         # coverage = visited / total (range [0, 1])
-        expected_coverage = stats["visited_positions"] / stats["total_positions"]
-        assert abs(stats["coverage"] - expected_coverage) < 0.01
+        expected_coverage = stats["reset_visited"] / stats["total_positions"]
+        assert abs(stats["reset_coverage"] - expected_coverage) < 0.01
 
     def test_mean_visits_formula(self, env_random_start):
         """Test that mean_visits matches total_resets / total_positions."""
@@ -499,7 +523,7 @@ class TestMathematicalValidation:
 
         # mean_visits = total_resets / total_positions
         expected_mean = num_resets / stats["total_positions"]
-        assert abs(stats["mean_visits_per_position"] - expected_mean) < 0.01
+        assert abs(stats["reset_mean_visits"] - expected_mean) < 0.01
 
     def test_distribution_sum_equals_total_resets(self, env_random_start):
         """Test that sum of coverage distribution equals total resets."""
@@ -513,8 +537,8 @@ class TestMathematicalValidation:
         distribution = tracker.get_coverage_distribution()
 
         # Sum of all visit counts should equal total resets
-        assert np.sum(distribution) == stats["total_resets"]
-        assert np.sum(distribution) == num_resets
+        assert np.sum(distribution["reset_counts"]) == stats["total_resets"]
+        assert np.sum(distribution["reset_counts"]) == num_resets
 
     def test_distribution_non_negative(self, env_random_start):
         """Test that all distribution values are non-negative."""
@@ -526,7 +550,7 @@ class TestMathematicalValidation:
         distribution = tracker.get_coverage_distribution()
 
         # All counts should be >= 0
-        assert np.all(distribution >= 0)
+        assert np.all(distribution["reset_counts"] >= 0)
 
     def test_visited_positions_matches_nonzero_counts(self, env_random_start):
         """Test that visited_positions equals number of non-zero entries in distribution."""
@@ -539,8 +563,8 @@ class TestMathematicalValidation:
         distribution = tracker.get_coverage_distribution()
 
         # Count of non-zero entries
-        nonzero_count = np.sum(distribution > 0)
-        assert stats["visited_positions"] == nonzero_count
+        nonzero_count = np.sum(distribution["reset_counts"] > 0)
+        assert stats["reset_visited"] == nonzero_count
 
     def test_max_visits_equals_distribution_max(self, env_random_start):
         """Test that max_visits matches the maximum in distribution."""
@@ -552,7 +576,7 @@ class TestMathematicalValidation:
         stats = tracker.get_coverage_stats()
         distribution = tracker.get_coverage_distribution()
 
-        assert stats["max_visits"] == np.max(distribution)
+        assert stats["reset_max_visits"] == np.max(distribution["reset_counts"])
 
     def test_min_visits_equals_distribution_min(self, env_random_start):
         """Test that min_visits matches the minimum in distribution."""
@@ -564,7 +588,7 @@ class TestMathematicalValidation:
         stats = tracker.get_coverage_stats()
         distribution = tracker.get_coverage_distribution()
 
-        assert stats["min_visits"] == np.min(distribution)
+        assert stats["reset_min_visits"] == np.min(distribution["reset_counts"])
 
     def test_std_visits_matches_numpy_std(self, env_random_start):
         """Test that std_visits matches numpy's std calculation."""
@@ -576,8 +600,8 @@ class TestMathematicalValidation:
         stats = tracker.get_coverage_stats()
         distribution = tracker.get_coverage_distribution()
 
-        expected_std = np.std(distribution)
-        assert abs(stats["std_visits"] - expected_std) < 0.01
+        expected_std = np.std(distribution["reset_counts"])
+        assert abs(stats["reset_std_visits"] - expected_std) < 0.01
 
     def test_entropy_bounds(self, env_random_start):
         """Test that entropy is within valid bounds."""
@@ -589,11 +613,11 @@ class TestMathematicalValidation:
         stats = tracker.get_coverage_stats()
 
         # Entropy should be non-negative
-        assert stats["coverage_entropy"] >= 0
+        assert stats["reset_entropy"] >= 0
 
         # Entropy should be <= log(total_positions) for uniform distribution
         max_entropy = np.log(stats["total_positions"])
-        assert stats["coverage_entropy"] <= max_entropy + 0.1  # Small tolerance
+        assert stats["reset_entropy"] <= max_entropy + 0.1  # Small tolerance
 
 
 class TestDeterministicCoverage:
@@ -640,10 +664,10 @@ class TestDeterministicCoverage:
         assert stats["total_resets"] == 1 + num_additional_resets
 
         # Sum of distribution should equal total resets
-        assert np.sum(distribution) == stats["total_resets"]
+        assert np.sum(distribution["reset_counts"]) == stats["total_resets"]
 
         # At least the first position should have been visited
-        assert distribution[first_reset_idx] >= distribution_after_first[first_reset_idx]
+        assert distribution["reset_counts"][first_reset_idx] >= distribution_after_first["reset_counts"][first_reset_idx]
 
     def test_coverage_increments_monotonically(self, env_random_start):
         """Test that coverage metrics increase or stay same, never decrease."""
@@ -657,8 +681,8 @@ class TestDeterministicCoverage:
             env_random_start.reset()
             stats = tracker.get_coverage_stats()
 
-            visited_history.append(stats["visited_positions"])
-            coverage_pct_history.append(stats["coverage"])
+            visited_history.append(stats["reset_visited"])
+            coverage_pct_history.append(stats["reset_coverage"])
             total_resets_history.append(stats["total_resets"])
 
         # Visited positions should never decrease
@@ -706,10 +730,11 @@ class TestDeterministicCoverage:
 
         # Verify exact consistency
         assert stats["total_resets"] == num_resets
-        assert np.sum(distribution) == num_resets
-        assert stats["visited_positions"] == np.sum(distribution > 0)
-        assert stats["unvisited_positions"] == np.sum(distribution == 0)
-        assert stats["total_positions"] == len(distribution)
+        assert np.sum(distribution["reset_counts"]) == num_resets
+        assert stats["reset_visited"] == np.sum(distribution["reset_counts"] > 0)
+        unvisited = np.sum(distribution["reset_counts"] == 0)
+        assert stats["total_positions"] - stats["reset_visited"] == unvisited
+        assert stats["total_positions"] == len(distribution["reset_counts"])
 
     def test_zero_coverage_initially(self, env_random_start):
         """Test that coverage starts at zero before any resets."""
@@ -732,11 +757,11 @@ class TestDeterministicCoverage:
         assert stats["total_resets"] == 1
 
         # Exactly 1 position visited
-        assert stats["visited_positions"] == 1
+        assert stats["reset_visited"] == 1
 
         # Exactly one entry in distribution should be 1, rest should be 0
-        assert np.sum(distribution == 1) == 1
-        assert np.sum(distribution == 0) == stats["total_positions"] - 1
+        assert np.sum(distribution["reset_counts"] == 1) == 1
+        assert np.sum(distribution["reset_counts"] == 0) == stats["total_positions"] - 1
 
 
 class TestParallelEnvironmentCoverage:
@@ -795,8 +820,10 @@ class TestParallelEnvironmentCoverage:
         # Tracker initializes (detects random_start from test env)
         assert stats["enabled"] is True
         assert stats["total_positions"] > 0
-        # But doesn't track resets (reset_index not in ParallelEnv aggregated tensordict)
-        assert stats["total_resets"] == 0
+        # With dual tracking, resets are now tracked in _reset() if reset_index is present
+        # ParallelEnv with 2 workers means 2 resets
+        assert stats["total_resets"] == num_workers
+        assert stats["total_states"] == num_workers  # Each reset also tracks state
 
     def test_parallel_env_limitation_documented(self):
         """Document how CoverageTracker works with ParallelEnv.
@@ -909,8 +936,8 @@ class TestCollectorPostproc:
         stats = coverage_tracker.get_coverage_stats()
         assert stats["enabled"] is True
         assert stats["total_resets"] > 0, "Coverage tracker should track resets via postproc"
-        assert stats["visited_positions"] > 0
-        assert stats["coverage"] > 0
+        assert stats["reset_visited"] > 0
+        assert stats["reset_coverage"] > 0
 
         collector.shutdown()
         try:
@@ -973,7 +1000,7 @@ class TestCollectorPostproc:
         # Position 1 should have 2 additional visits
         # Position 2 should have 1 additional visit
         # (Plus whatever the initial reset added)
-        total_visits_to_0_1_2 = distribution[0] + distribution[1] + distribution[2]
+        total_visits_to_0_1_2 = distribution["reset_counts"][0] + distribution["reset_counts"][1] + distribution["reset_counts"][2]
         # We know we added exactly 5 visits to these positions
         # But the initial reset might have also used one of these positions
         # So we can only assert that at least 5 visits were added
@@ -1041,13 +1068,13 @@ class TestCollectorPostproc:
         stats = tracker.get_coverage_stats()
         assert stats["enabled"] is True
         assert stats["total_resets"] >= 5, "Should track all resets from batch"
-        assert stats["visited_positions"] > 0
+        assert stats["reset_visited"] > 0
 
         # Verify specific positions were visited
         distribution = tracker.get_coverage_distribution()
-        assert distribution[5] >= 2, "Position 5 appeared twice in batch"
-        assert distribution[12] >= 2, "Position 12 appeared twice in batch"
-        assert distribution[23] >= 1, "Position 23 appeared once in batch"
+        assert distribution["reset_counts"][5] >= 2, "Position 5 appeared twice in batch"
+        assert distribution["reset_counts"][12] >= 2, "Position 12 appeared twice in batch"
+        assert distribution["reset_counts"][23] >= 1, "Position 23 appeared once in batch"
 
         # Cleanup
         try:

@@ -254,11 +254,17 @@ class FuturesOneStepEnv(EnvBase):
             self.market_data_keys.append(market_data_key)
         self.observation_spec.set(self.account_state_key, account_state_spec)
 
-        # Add reset_index to observation spec for coverage tracking (only when random_start=True)
+        # Add coverage tracking indices to observation spec (only when random_start=True)
         if self.random_start:
             from torchrl.data.tensor_specs import Unbounded
+            # reset_index: tracks episode start position diversity
             self.observation_spec.set(
                 "reset_index",
+                Unbounded(shape=(), dtype=torch.long)
+            )
+            # state_index: tracks all timesteps visited during episodes
+            self.observation_spec.set(
+                "state_index",
                 Unbounded(shape=(), dtype=torch.long)
             )
 
@@ -495,9 +501,10 @@ class FuturesOneStepEnv(EnvBase):
 
         obs = self._get_observation(initial=True)
 
-        # Add reset index for coverage tracking (only during training with random_start)
+        # Add coverage tracking indices (only during training with random_start)
         if self.random_start:
             obs.set("reset_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
+            obs.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
 
         return obs
 
@@ -527,6 +534,10 @@ class FuturesOneStepEnv(EnvBase):
         # Use newly cached base features for new portfolio value (PERF: attribute access)
         new_price = self._cached_base_features.close
         new_portfolio_value = self._get_portfolio_value(new_price)
+
+        # Add state_index for coverage tracking (only during training with random_start)
+        if self.random_start:
+            next_tensordict.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
 
         # Calculate reward
         reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, action_tuple, trade_info)
