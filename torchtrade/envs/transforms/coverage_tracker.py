@@ -49,7 +49,7 @@ class CoverageTracker(Transform):
         if coverage_tracker is not None:
             stats = coverage_tracker.get_coverage_stats()
             if stats["enabled"]:
-                print(f"Coverage: {stats['coverage_percentage']:.2f}%")
+                print(f"Coverage: {stats['coverage']:.2%}")
                 print(f"Visited: {stats['visited_positions']} / {stats['total_positions']}")
 
     Attributes:
@@ -211,7 +211,7 @@ class CoverageTracker(Transform):
             - total_positions (int): Total number of starting positions available
             - visited_positions (int): Number of unique positions used as resets
             - unvisited_positions (int): Number of positions never used
-            - coverage_percentage (float): Percentage of positions visited (0-100)
+            - coverage (float): Fraction of positions visited, range [0, 1]
             - total_resets (int): Total number of resets performed
             - mean_visits_per_position (float): Average visits per position
             - max_visits (int): Maximum visits to any single position
@@ -231,14 +231,14 @@ class CoverageTracker(Transform):
 
         total_positions = len(self._coverage_counts)
         visited_positions = np.sum(self._coverage_counts > 0)
-        coverage_pct = 100.0 * visited_positions / total_positions if total_positions > 0 else 0.0
+        coverage_fraction = visited_positions / total_positions if total_positions > 0 else 0.0
 
         return {
             "enabled": True,
             "total_positions": int(total_positions),
             "visited_positions": int(visited_positions),
             "unvisited_positions": int(total_positions - visited_positions),
-            "coverage_percentage": float(coverage_pct),
+            "coverage": float(coverage_fraction),
             "total_resets": int(self._total_resets),
             "mean_visits_per_position": float(self._coverage_counts.mean()),
             "max_visits": int(self._coverage_counts.max()),

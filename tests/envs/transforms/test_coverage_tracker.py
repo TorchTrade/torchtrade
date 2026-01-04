@@ -177,7 +177,7 @@ class TestCoverageTrackerRandomStart:
             env_random_start.reset()
         stats_late = tracker.get_coverage_stats()
 
-        assert stats_late["coverage_percentage"] >= stats_early["coverage_percentage"]
+        assert stats_late["coverage"] >= stats_early["coverage"]
         assert stats_late["visited_positions"] >= stats_early["visited_positions"]
 
     def test_mean_visits_calculation(self, env_random_start):
@@ -313,7 +313,7 @@ class TestCoverageTrackerStats:
         stats_after = tracker.get_coverage_stats()
         assert stats_after["total_resets"] == 0
         assert stats_after["visited_positions"] == 0
-        assert stats_after["coverage_percentage"] == 0.0
+        assert stats_after["coverage"] == 0.0
 
 
 class TestCoverageTrackerEdgeCases:
@@ -380,7 +380,7 @@ class TestCoverageTrackerEdgeCases:
         stats = tracker.get_coverage_stats()
 
         # Check if we achieved or are close to full coverage
-        assert stats["coverage_percentage"] > 50  # At least 50% with enough resets
+        assert stats["coverage"] > 0.5  # At least 50% with enough resets
         assert stats["unvisited_positions"] >= 0
 
 
@@ -475,7 +475,7 @@ class TestMathematicalValidation:
         assert stats["visited_positions"] + stats["unvisited_positions"] == stats["total_positions"]
 
     def test_coverage_percentage_formula(self, env_random_start):
-        """Test that coverage_percentage matches the formula."""
+        """Test that coverage matches the formula."""
         tracker = get_coverage_tracker(env_random_start)
 
         for _ in range(50):
@@ -483,9 +483,9 @@ class TestMathematicalValidation:
 
         stats = tracker.get_coverage_stats()
 
-        # coverage_percentage = 100 * visited / total
-        expected_pct = 100.0 * stats["visited_positions"] / stats["total_positions"]
-        assert abs(stats["coverage_percentage"] - expected_pct) < 0.01
+        # coverage = visited / total (range [0, 1])
+        expected_coverage = stats["visited_positions"] / stats["total_positions"]
+        assert abs(stats["coverage"] - expected_coverage) < 0.01
 
     def test_mean_visits_formula(self, env_random_start):
         """Test that mean_visits matches total_resets / total_positions."""
@@ -658,7 +658,7 @@ class TestDeterministicCoverage:
             stats = tracker.get_coverage_stats()
 
             visited_history.append(stats["visited_positions"])
-            coverage_pct_history.append(stats["coverage_percentage"])
+            coverage_pct_history.append(stats["coverage"])
             total_resets_history.append(stats["total_resets"])
 
         # Visited positions should never decrease

@@ -226,7 +226,7 @@ def main(cfg: DictConfig):  # noqa: F821
         if coverage_tracker is not None:
             coverage_stats = coverage_tracker.get_coverage_stats()
             if coverage_stats["enabled"]:
-                metrics_to_log["coverage/percentage"] = coverage_stats["coverage_percentage"]
+                metrics_to_log["coverage/coverage"] = coverage_stats["coverage"]
                 metrics_to_log["coverage/visited"] = coverage_stats["visited_positions"]
                 metrics_to_log["coverage/unvisited"] = coverage_stats["unvisited_positions"]
                 metrics_to_log["coverage/entropy"] = coverage_stats["coverage_entropy"]
