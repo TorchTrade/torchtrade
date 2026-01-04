@@ -281,58 +281,24 @@ def main(cfg: DictConfig):  # noqa: F821
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
 
-                # Compute and log trading metrics from rollout data
+                # Compute and log trading metrics
                 try:
-                    from torchtrade.metrics import compute_all_metrics
-                    from torchtrade.envs.offline.utils import compute_periods_per_year_crypto
+                    # ParallelEnv delegates get_metrics() to all workers and returns a list
+                    # We take the first environment's metrics
+                    env_metrics = eval_env.base_env.get_metrics()[0]
 
-                    # Extract data from rollout (take first environment if multiple)
-                    account_states = eval_rollout["account_state"]
-                    rewards = eval_rollout["next", "reward"]
-                    actions = eval_rollout["action"]
-
-                    # If multiple envs, take the first one
-                    if account_states.dim() > 2:
-                        account_states = account_states[0]
-                        rewards = rewards[0]
-                        actions = actions[0]
-
-                    # Calculate portfolio values from account state
-                    # Account state: [cash, position_size, position_value, entry_price, current_price, ...]
-                    cash = account_states[:, 0]
-                    position_value = account_states[:, 2]
-                    portfolio_values = cash + position_value
-
-                    # Compute periods per year (from config)
-                    periods_per_year = compute_periods_per_year_crypto(
-                        cfg.env.execute_on[1],  # unit
-                        cfg.env.execute_on[0]   # value
-                    )
-
-                    # Convert actions to list for trade counting
-                    action_list = actions.cpu().numpy().tolist()
-
-                    # Compute all metrics using shared function
-                    if len(portfolio_values) > 1:
-                        env_metrics = compute_all_metrics(
-                            portfolio_values=portfolio_values,
-                            rewards=rewards,
-                            action_history=action_list,
-                            periods_per_year=periods_per_year,
-                        )
-
-                        metrics_to_log["eval/total_return"] = env_metrics["total_return"]
-                        metrics_to_log["eval/sharpe_ratio"] = env_metrics["sharpe_ratio"]
-                        metrics_to_log["eval/sortino_ratio"] = env_metrics["sortino_ratio"]
-                        metrics_to_log["eval/calmar_ratio"] = env_metrics["calmar_ratio"]
-                        metrics_to_log["eval/max_drawdown"] = env_metrics["max_drawdown"]
-                        metrics_to_log["eval/max_dd_duration"] = env_metrics["max_dd_duration"]
-                        metrics_to_log["eval/num_trades"] = env_metrics["num_trades"]
-                        metrics_to_log["eval/win_rate"] = env_metrics["win_rate"]
+                    metrics_to_log["eval/total_return"] = env_metrics["total_return"]
+                    metrics_to_log["eval/sharpe_ratio"] = env_metrics["sharpe_ratio"]
+                    metrics_to_log["eval/sortino_ratio"] = env_metrics["sortino_ratio"]
+                    metrics_to_log["eval/calmar_ratio"] = env_metrics["calmar_ratio"]
+                    metrics_to_log["eval/max_drawdown"] = env_metrics["max_drawdown"]
+                    metrics_to_log["eval/max_dd_duration"] = env_metrics["max_dd_duration"]
+                    metrics_to_log["eval/num_trades"] = env_metrics["num_trades"]
+                    metrics_to_log["eval/win_rate"] = env_metrics["win_rate"]
 
                 except Exception as e:
                     import traceback
-                    print(f"Warning: Could not compute metrics from rollout: {e}")
+                    print(f"Warning: Could not compute metrics: {e}")
                     print(traceback.format_exc())
 
                 # Render history - this works because base_env provides a render_history method
