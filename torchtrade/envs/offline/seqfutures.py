@@ -648,6 +648,80 @@ class SeqFuturesEnv(EnvBase):
         """Clean up resources."""
         pass
 
+    def get_metrics(self) -> Dict[str, float]:
+        """
+        Compute episode metrics from history.
+
+        Returns:
+            Dictionary containing:
+                - total_return: Total portfolio return
+                - sharpe_ratio: Annualized Sharpe ratio
+                - sortino_ratio: Annualized Sortino ratio
+                - calmar_ratio: Calmar ratio (return / max drawdown)
+                - max_drawdown: Maximum drawdown (negative value)
+                - max_dd_duration: Maximum drawdown duration in periods
+                - num_trades: Number of trades executed
+                - win_rate: Percentage of profitable periods
+        """
+        from torchtrade.metrics import (
+            compute_max_drawdown,
+            compute_sharpe_ratio,
+            compute_sortino_ratio,
+            compute_calmar_ratio,
+            compute_win_rate,
+            compute_portfolio_returns,
+        )
+        from torchtrade.envs.offline.utils import compute_periods_per_year_crypto
+
+        # Convert histories to tensors
+        portfolio_values = torch.tensor(self.portfolio_value_history, dtype=torch.float32)
+        rewards = torch.tensor(self.reward_history, dtype=torch.float32)
+
+        # Compute periods per year for annualization
+        periods_per_year = compute_periods_per_year_crypto(
+            self.execute_on_unit,
+            self.execute_on_value
+        )
+
+        # Compute returns
+        returns = compute_portfolio_returns(portfolio_values)
+
+        # Compute drawdown metrics
+        dd_metrics = compute_max_drawdown(portfolio_values)
+
+        # Compute Sharpe ratio
+        sharpe = compute_sharpe_ratio(returns, periods_per_year) if len(returns) > 0 else 0.0
+
+        # Compute Sortino ratio
+        sortino = compute_sortino_ratio(returns, periods_per_year) if len(returns) > 0 else 0.0
+
+        # Compute Calmar ratio
+        calmar = compute_calmar_ratio(portfolio_values, periods_per_year) if len(portfolio_values) > 1 else 0.0
+
+        # Compute win rate
+        win_rate_metrics = compute_win_rate(rewards)
+
+        # Count number of trades (non-zero actions)
+        num_trades = sum(1 for a in self.action_history if a != 0)
+
+        # Calculate total return
+        if len(portfolio_values) > 0:
+            total_return = (portfolio_values[-1] - portfolio_values[0]) / portfolio_values[0]
+            total_return = total_return.item()
+        else:
+            total_return = 0.0
+
+        return {
+            'total_return': total_return,
+            'sharpe_ratio': sharpe,
+            'sortino_ratio': sortino,
+            'calmar_ratio': calmar,
+            'max_drawdown': dd_metrics['max_drawdown'],
+            'max_dd_duration': dd_metrics['max_drawdown_duration'],
+            'num_trades': num_trades,
+            'win_rate': win_rate_metrics['win_rate'],
+        }
+
     def render_history(self, return_fig=False):
         """Render the history of the environment."""
         price_history = self.base_price_history

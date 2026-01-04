@@ -280,11 +280,26 @@ def main(cfg: DictConfig):  # noqa: F821
                 eval_rollout.squeeze()
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
+
+                # Compute and log trading metrics
+                try:
+                    env_metrics = eval_env.base_env.get_metrics()
+                    metrics_to_log["eval/total_return"] = env_metrics["total_return"]
+                    metrics_to_log["eval/sharpe_ratio"] = env_metrics["sharpe_ratio"]
+                    metrics_to_log["eval/sortino_ratio"] = env_metrics["sortino_ratio"]
+                    metrics_to_log["eval/calmar_ratio"] = env_metrics["calmar_ratio"]
+                    metrics_to_log["eval/max_drawdown"] = env_metrics["max_drawdown"]
+                    metrics_to_log["eval/max_dd_duration"] = env_metrics["max_dd_duration"]
+                    metrics_to_log["eval/num_trades"] = env_metrics["num_trades"]
+                    metrics_to_log["eval/win_rate"] = env_metrics["win_rate"]
+                except Exception as e:
+                    print(f"Warning: Could not compute metrics: {e}")
+
                 fig = eval_env.base_env.render_history(return_fig=True)
                 eval_env.reset()
                 if fig is not None and logger is not None:
                     # render_history returns a figure directly for SeqFuturesEnv
-                    metrics_to_log["eval/history"] = wandb.Image(fig)
+                    metrics_to_log["eval/history"] = wandb.Image(fig[0])
                 torch.save(actor.state_dict(), f"ppo_futures_policy_{i}.pth")
                 actor.train()
 
