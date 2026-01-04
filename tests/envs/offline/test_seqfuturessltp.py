@@ -826,3 +826,71 @@ class TestSeqFuturesSLTPEnvEdgeCases:
 
         # Higher leverage should result in larger position
         assert abs(env_high.position_size) > abs(env_low.position_size)
+
+
+class TestSeqFuturesSLTPEnvMetrics:
+    """Tests for get_metrics() method."""
+
+    def test_get_metrics_returns_dict(self, env):
+        """get_metrics should return a dictionary."""
+        td = env.reset()
+
+        # Run a few steps
+        for _ in range(10):
+            action = env.action_spec.sample()
+            td.set("action", action)
+            result = env.step(td)
+            td = result["next"]
+
+        metrics = env.get_metrics()
+        assert isinstance(metrics, dict)
+
+    def test_get_metrics_has_required_keys(self, env):
+        """get_metrics should return all required metric keys."""
+        td = env.reset()
+
+        # Run a few steps to generate history
+        for _ in range(10):
+            action = env.action_spec.sample()
+            td.set("action", action)
+            result = env.step(td)
+            td = result["next"]
+
+        metrics = env.get_metrics()
+
+        required_keys = [
+            'total_return',
+            'sharpe_ratio',
+            'sortino_ratio',
+            'calmar_ratio',
+            'max_drawdown',
+            'max_dd_duration',
+            'num_trades',
+            'win_rate (reward>0)',
+            'avg_win',
+            'avg_loss',
+            'profit_factor',
+        ]
+
+        for key in required_keys:
+            assert key in metrics, f"Missing required metric: {key}"
+
+    def test_get_metrics_values_are_valid(self, env):
+        """get_metrics should return valid (non-NaN, non-Inf) values."""
+        td = env.reset()
+
+        # Run some steps
+        for _ in range(20):
+            action = env.action_spec.sample()
+            td.set("action", action)
+            result = env.step(td)
+            td = result["next"]
+            if td.get("done", False):
+                break
+
+        metrics = env.get_metrics()
+
+        for key, value in metrics.items():
+            assert not np.isnan(value), f"{key} is NaN"
+            assert not np.isinf(value), f"{key} is Inf"
+            assert isinstance(value, (int, float)), f"{key} is not numeric"

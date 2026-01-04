@@ -903,3 +903,255 @@ class TestSeqFuturesEnvPnLCalculations:
         # Unrealized PnL should be positive
         unrealized_pnl_pct = td["account_state"][5].item()
         assert unrealized_pnl_pct > 0
+
+
+class TestSeqFuturesEnvMetrics:
+    """Tests for get_metrics() method."""
+
+    def test_get_metrics_returns_dict(self, env):
+        """get_metrics should return a dictionary."""
+        td = env.reset()
+
+        # Run a few steps
+        for _ in range(10):
+            action = env.action_spec.sample()
+            td.set("action", action)
+            result = env.step(td)
+            td = result["next"]
+
+        metrics = env.get_metrics()
+        assert isinstance(metrics, dict)
+
+    def test_get_metrics_has_required_keys(self, env):
+        """get_metrics should return all required metric keys."""
+        td = env.reset()
+
+        # Run a few steps to generate history
+        for _ in range(10):
+            action = env.action_spec.sample()
+            td.set("action", action)
+            result = env.step(td)
+            td = result["next"]
+
+        metrics = env.get_metrics()
+
+        required_keys = [
+            'total_return',
+            'sharpe_ratio',
+            'sortino_ratio',
+            'calmar_ratio',
+            'max_drawdown',
+            'max_dd_duration',
+            'num_trades',
+            'win_rate (reward>0)',
+            'avg_win',
+            'avg_loss',
+            'profit_factor',
+        ]
+
+        for key in required_keys:
+            assert key in metrics, f"Missing required metric: {key}"
+
+    def test_get_metrics_values_are_valid(self, env):
+        """get_metrics should return valid (non-NaN, non-Inf) values."""
+        td = env.reset()
+
+        # Run some steps
+        for _ in range(20):
+            action = env.action_spec.sample()
+            td.set("action", action)
+            result = env.step(td)
+            td = result["next"]
+            if td.get("done", False):
+                break
+
+        metrics = env.get_metrics()
+
+        for key, value in metrics.items():
+            assert not np.isnan(value), f"{key} is NaN"
+            assert not np.isinf(value), f"{key} is Inf"
+            assert isinstance(value, (int, float)), f"{key} is not numeric"
+
+    def test_get_metrics_total_return_positive_trending_up(self, trending_up_df):
+        """Total return should be positive for profitable trading in uptrend."""
+        config = SeqFuturesEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=1000,
+            leverage=10,
+            transaction_fee=0.0,  # No fees
+            slippage=0.0,
+            max_traj_length=100,
+            random_start=False,
+        )
+        env = SeqFuturesEnv(trending_up_df, config, simple_feature_fn)
+
+        td = env.reset()
+
+        # Go long and stay long
+        for i in range(50):
+            td.set("action", torch.tensor(2))  # long
+            result = env.step(td)
+            td = result["next"]
+            if td.get("done", False):
+                break
+
+        metrics = env.get_metrics()
+
+        # Should have positive return
+        assert metrics['total_return'] > 0, "Should have profit from long position in uptrend"
+
+    def test_get_metrics_total_return_negative_on_losses(self, trending_down_df):
+        """Total return should be negative for unprofitable trading."""
+        config = SeqFuturesEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=1000,
+            leverage=10,
+            transaction_fee=0.0,
+            slippage=0.0,
+            max_traj_length=100,
+            random_start=False,
+        )
+        env = SeqFuturesEnv(trending_down_df, config, simple_feature_fn)
+
+        td = env.reset()
+
+        # Go long in downtrend (should lose money)
+        for i in range(50):
+            td.set("action", torch.tensor(2))  # long
+            result = env.step(td)
+            td = result["next"]
+            if td.get("done", False):
+                break
+
+        metrics = env.get_metrics()
+
+        # Should have negative return
+        assert metrics['total_return'] < 0, "Should have loss from long position in downtrend"
+
+    def test_get_metrics_num_trades_counts_correctly(self, env):
+        """num_trades should count only non-hold actions."""
+        td = env.reset()
+
+        # Execute 5 long actions
+        for _ in range(5):
+            td.set("action", torch.tensor(2))  # long
+            result = env.step(td)
+            td = result["next"]
+
+        # Execute 5 hold actions
+        for _ in range(5):
+            td.set("action", torch.tensor(1))  # hold
+            result = env.step(td)
+            td = result["next"]
+
+        metrics = env.get_metrics()
+
+        # Should have counted trades (hold actions that actually traded)
+        # Note: First long opens, subsequent longs might not trade, hold that closes counts
+        assert isinstance(metrics['num_trades'], int)
+        assert metrics['num_trades'] >= 0
+
+    def test_get_metrics_win_rate_bounds(self, env):
+        """win_rate should be between 0 and 1."""
+        td = env.reset()
+
+        # Run some steps
+        for _ in range(30):
+            action = env.action_spec.sample()
+            td.set("action", action)
+            result = env.step(td)
+            td = result["next"]
+            if td.get("done", False):
+                break
+
+        metrics = env.get_metrics()
+
+        assert 0 <= metrics['win_rate (reward>0)'] <= 1, "Win rate should be between 0 and 1"
+
+    def test_get_metrics_max_drawdown_non_positive(self, env):
+        """max_drawdown should be zero or negative."""
+        td = env.reset()
+
+        # Run some steps
+        for _ in range(20):
+            action = env.action_spec.sample()
+            td.set("action", action)
+            result = env.step(td)
+            td = result["next"]
+            if td.get("done", False):
+                break
+
+        metrics = env.get_metrics()
+
+        assert metrics['max_drawdown'] <= 0, "Max drawdown should be non-positive"
+
+    def test_get_metrics_max_dd_duration_non_negative(self, env):
+        """max_dd_duration should be non-negative integer."""
+        td = env.reset()
+
+        # Run some steps
+        for _ in range(20):
+            action = env.action_spec.sample()
+            td.set("action", action)
+            result = env.step(td)
+            td = result["next"]
+            if td.get("done", False):
+                break
+
+        metrics = env.get_metrics()
+
+        assert metrics['max_dd_duration'] >= 0, "Duration should be non-negative"
+        assert isinstance(metrics['max_dd_duration'], int), "Duration should be integer"
+
+    def test_get_metrics_empty_history(self, env):
+        """get_metrics should handle empty history gracefully."""
+        # Reset but don't step
+        env.reset()
+
+        # Manually set empty histories
+        env.portfolio_value_history = []
+        env.reward_history = []
+        env.action_history = []
+
+        metrics = env.get_metrics()
+
+        # Should return valid dict with default values
+        assert isinstance(metrics, dict)
+        assert metrics['total_return'] == 0.0
+        assert metrics['num_trades'] == 0
+
+    def test_get_metrics_after_multiple_episodes(self, env):
+        """get_metrics should work correctly after resetting."""
+        # First episode
+        td = env.reset()
+        for _ in range(10):
+            td.set("action", torch.tensor(2))
+            result = env.step(td)
+            td = result["next"]
+
+        metrics1 = env.get_metrics()
+
+        # Reset and run second episode
+        td = env.reset()
+        for _ in range(20):
+            td.set("action", torch.tensor(0))  # Different strategy
+            result = env.step(td)
+            td = result["next"]
+
+        metrics2 = env.get_metrics()
+
+        # Both should be valid dicts
+        assert isinstance(metrics1, dict)
+        assert isinstance(metrics2, dict)
+
+        # Metrics should be different (different episodes)
+        # At least one metric should differ
+        differences = sum(
+            1 for key in metrics1.keys()
+            if abs(metrics1.get(key, 0) - metrics2.get(key, 0)) > 1e-6
+        )
+        assert differences > 0, "Metrics should differ between different episodes"

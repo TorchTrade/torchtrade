@@ -13,15 +13,15 @@ env:
   exp_name: ${logger.exp_name}
   seed: 0
   train_envs: 10
-  eval_envs: 2
+  eval_envs: 1
   data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
   test_split_start: "2025-01-01"
 
 # collector
 collector:
   device:
-  frames_per_batch: 100000
-  total_frames: 100_000_000
+  frames_per_batch: 10000
+  total_frames: 1_000_000
 
 # logger
 logger:
@@ -30,7 +30,7 @@ logger:
   project_name: TorchTrade-Futures
   group_name: ${env.name}
   exp_name: ppo_futures
-  test_interval: 1_000_000
+  test_interval: 100_000
   num_test_episodes: 1
 
 # model
@@ -49,7 +49,7 @@ optim:
 # loss
 loss:
   gamma: 0.9
-  mini_batch_size: 33333
+  mini_batch_size: 3333
   ppo_epochs: 3
   gae_lambda: 0.95
   clip_epsilon: 0.1

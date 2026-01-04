@@ -648,6 +648,45 @@ class SeqFuturesEnv(EnvBase):
         """Clean up resources."""
         pass
 
+    def get_metrics(self) -> Dict[str, float]:
+        """
+        Compute episode metrics from history.
+
+        Returns:
+            Dictionary containing:
+                - total_return: Total portfolio return
+                - sharpe_ratio: Annualized Sharpe ratio
+                - sortino_ratio: Annualized Sortino ratio
+                - calmar_ratio: Calmar ratio (return / max drawdown)
+                - max_drawdown: Maximum drawdown (negative value)
+                - max_dd_duration: Maximum drawdown duration in periods
+                - num_trades: Number of trades executed
+                - win_rate (reward>0): Percentage of profitable periods
+                - avg_win: Average win amount
+                - avg_loss: Average loss amount
+                - profit_factor: Ratio of total wins to total losses
+        """
+        from torchtrade.metrics import compute_all_metrics
+        from torchtrade.envs.offline.utils import compute_periods_per_year_crypto
+
+        # Convert histories to tensors
+        portfolio_values = torch.tensor(self.portfolio_value_history, dtype=torch.float32)
+        rewards = torch.tensor(self.reward_history, dtype=torch.float32)
+
+        # Compute periods per year for annualization
+        periods_per_year = compute_periods_per_year_crypto(
+            self.execute_on_unit,
+            self.execute_on_value
+        )
+
+        # Use shared metrics computation function
+        return compute_all_metrics(
+            portfolio_values=portfolio_values,
+            rewards=rewards,
+            action_history=self.action_history,
+            periods_per_year=periods_per_year,
+        )
+
     def render_history(self, return_fig=False):
         """Render the history of the environment."""
         price_history = self.base_price_history

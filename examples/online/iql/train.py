@@ -1,7 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-#
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
 """IQL Example.
 
 This is a self-contained example of an offline IQL training script.
@@ -69,8 +65,8 @@ def main(cfg: DictConfig):  # noqa: F821
     # Create env
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
-    test_df = df[0:(1440 * 14)]  # 14 days
-    train_df = df[(1440 * 14):]
+    train_df = df[df['0'] < cfg.env.test_split_start]
+    test_df  = df[df['0'] >= cfg.env.test_split_start]
 
     train_env, eval_env = make_environment(
         train_df,
