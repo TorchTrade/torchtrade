@@ -283,23 +283,49 @@ def main(cfg: DictConfig):  # noqa: F821
 
                 # Compute and log trading metrics
                 try:
-                    env_metrics = eval_env.base_env.get_metrics()
-                    metrics_to_log["eval/total_return"] = env_metrics["total_return"]
-                    metrics_to_log["eval/sharpe_ratio"] = env_metrics["sharpe_ratio"]
-                    metrics_to_log["eval/sortino_ratio"] = env_metrics["sortino_ratio"]
-                    metrics_to_log["eval/calmar_ratio"] = env_metrics["calmar_ratio"]
-                    metrics_to_log["eval/max_drawdown"] = env_metrics["max_drawdown"]
-                    metrics_to_log["eval/max_dd_duration"] = env_metrics["max_dd_duration"]
-                    metrics_to_log["eval/num_trades"] = env_metrics["num_trades"]
-                    metrics_to_log["eval/win_rate"] = env_metrics["win_rate"]
-                except Exception as e:
-                    print(f"Warning: Could not compute metrics: {e}")
+                    # Access the actual SeqFuturesEnv instance
+                    # eval_env is TransformedEnv -> base_env is ParallelEnv -> need to get actual env
+                    from torchrl.envs import ParallelEnv
 
-                fig = eval_env.base_env.render_history(return_fig=True)
+                    base = eval_env.base_env
+                    if isinstance(base, ParallelEnv):
+                        # Get the first environment from the parallel wrapper
+                        actual_env = base._workers[0]._env if hasattr(base, '_workers') else base
+                    else:
+                        actual_env = base
+
+                    # If it's still wrapped, try to unwrap further
+                    while hasattr(actual_env, 'base_env') and not hasattr(actual_env, 'get_metrics'):
+                        actual_env = actual_env.base_env
+
+                    if hasattr(actual_env, 'get_metrics'):
+                        env_metrics = actual_env.get_metrics()
+                        metrics_to_log["eval/total_return"] = env_metrics["total_return"]
+                        metrics_to_log["eval/sharpe_ratio"] = env_metrics["sharpe_ratio"]
+                        metrics_to_log["eval/sortino_ratio"] = env_metrics["sortino_ratio"]
+                        metrics_to_log["eval/calmar_ratio"] = env_metrics["calmar_ratio"]
+                        metrics_to_log["eval/max_drawdown"] = env_metrics["max_drawdown"]
+                        metrics_to_log["eval/max_dd_duration"] = env_metrics["max_dd_duration"]
+                        metrics_to_log["eval/num_trades"] = env_metrics["num_trades"]
+                        metrics_to_log["eval/win_rate"] = env_metrics["win_rate"]
+                    else:
+                        print(f"Warning: Could not find get_metrics method on environment of type {type(actual_env)}")
+                except Exception as e:
+                    import traceback
+                    print(f"Warning: Could not compute metrics: {e}")
+                    print(traceback.format_exc())
+
+                # Render history from the same actual environment
+                try:
+                    if hasattr(actual_env, 'render_history'):
+                        fig = actual_env.render_history(return_fig=True)
+                        if fig is not None and logger is not None:
+                            # render_history returns a figure directly for SeqFuturesEnv
+                            metrics_to_log["eval/history"] = wandb.Image(fig[0] if isinstance(fig, tuple) else fig)
+                except Exception as e:
+                    print(f"Warning: Could not render history: {e}")
+
                 eval_env.reset()
-                if fig is not None and logger is not None:
-                    # render_history returns a figure directly for SeqFuturesEnv
-                    metrics_to_log["eval/history"] = wandb.Image(fig[0])
                 torch.save(actor.state_dict(), f"ppo_futures_policy_{i}.pth")
                 actor.train()
 

@@ -673,6 +673,14 @@ class SeqFuturesEnv(EnvBase):
         )
         from torchtrade.envs.offline.utils import compute_periods_per_year_crypto
 
+        # Check if histories are valid
+        if not hasattr(self, 'portfolio_value_history'):
+            raise AttributeError("Environment does not have portfolio_value_history")
+        if not hasattr(self, 'reward_history'):
+            raise AttributeError("Environment does not have reward_history")
+        if not hasattr(self, 'action_history'):
+            raise AttributeError("Environment does not have action_history")
+
         # Convert histories to tensors
         portfolio_values = torch.tensor(self.portfolio_value_history, dtype=torch.float32)
         rewards = torch.tensor(self.reward_history, dtype=torch.float32)
