@@ -144,7 +144,35 @@ class CoverageTracker(Transform):
                 # Environment doesn't support coverage tracking
                 self._enabled = False
 
-        # No tracking work here - all coverage aggregation happens in forward()
+        # Track coverage from reset_index (if available in tensordict)
+        # This handles both single-env resets and collector postproc
+        # Note: ParallelEnv doesn't propagate reset_index in direct reset() calls
+        # For ParallelEnv, use CoverageTracker as collector postproc instead
+        if self._enabled and self._coverage_counts is not None and "reset_index" in tensordict_reset.keys():
+            reset_indices = tensordict_reset.get("reset_index")
+
+            # Handle batched (ParallelEnv) vs single reset
+            if isinstance(reset_indices, torch.Tensor):
+                if reset_indices.ndim > 0:
+                    # Batched: multiple workers (ParallelEnv)
+                    for idx in reset_indices.flatten():
+                        idx = int(idx.item())
+                        if 0 <= idx < len(self._coverage_counts):
+                            self._coverage_counts[idx] += 1
+                            self._total_resets += 1
+                else:
+                    # Single env, scalar tensor
+                    reset_idx = int(reset_indices.item())
+                    if 0 <= reset_idx < len(self._coverage_counts):
+                        self._coverage_counts[reset_idx] += 1
+                        self._total_resets += 1
+            else:
+                # Non-tensor (shouldn't happen, but handle it)
+                reset_idx = int(reset_indices)
+                if 0 <= reset_idx < len(self._coverage_counts):
+                    self._coverage_counts[reset_idx] += 1
+                    self._total_resets += 1
+
         return tensordict_reset
 
     def _get_base_env(self):

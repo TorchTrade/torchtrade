@@ -747,10 +747,14 @@ class TestParallelEnvironmentCoverage:
     """
 
     def test_parallel_env_disables_tracking(self, simple_df):
-        """Test that CoverageTracker properly disables for ParallelEnv.
+        """Test ParallelEnv coverage tracking limitation with direct reset() calls.
 
-        ParallelEnv's wrapper structure prevents CoverageTracker from detecting
-        the base environment's random_start setting. This is expected behavior.
+        When using ParallelEnv with CoverageTracker as a transform (not postproc),
+        coverage tracking initializes but doesn't track resets because reset_index
+        is not propagated by ParallelEnv in the aggregated tensordict.
+
+        For ParallelEnv coverage tracking, use CoverageTracker as collector postproc
+        instead of as a transform.
         """
         from torchrl.envs import ParallelEnv, EnvCreator
         import functools
@@ -788,25 +792,31 @@ class TestParallelEnvironmentCoverage:
         transformed_env.reset()
         stats = tracker.get_coverage_stats()
 
-        # CoverageTracker should now work with ParallelEnv via IPC
+        # Tracker initializes (detects random_start from test env)
         assert stats["enabled"] is True
         assert stats["total_positions"] > 0
-        assert stats["total_resets"] == num_workers  # One reset per worker
+        # But doesn't track resets (reset_index not in ParallelEnv aggregated tensordict)
+        assert stats["total_resets"] == 0
 
     def test_parallel_env_limitation_documented(self):
         """Document how CoverageTracker works with ParallelEnv.
 
-        CoverageTracker now supports ParallelEnv via IPC:
-        - Queries each worker for its reset index after each reset
-        - Aggregates coverage across all workers
-        - Uses parent_channels for communication
+        CoverageTracker supports ParallelEnv when used as collector postproc:
+        - Each worker adds reset_index to its tensordict during reset
+        - Collector batches individual worker outputs with reset_index preserved
+        - CoverageTracker.forward() aggregates coverage from the batch
+        - Zero IPC overhead, batch processing for performance
 
-        This test documents the recommended usage pattern.
+        The recommended pattern is shown in examples/online/ppo_futures/:
+        - Create coverage_tracker = CoverageTracker()
+        - Pass as postproc to SyncDataCollector
+        - Do NOT add to environment transforms
+
+        Direct reset() calls on ParallelEnv don't work because ParallelEnv's
+        aggregation strips reset_index (not in observation_spec).
         """
         # This is a documentation test - no actual code to run
-        # The recommended pattern is shown in examples/online/iql/utils.py:
-        #
-        # def apply_env_transforms(env):
+        # The recommended pattern is:
         #     return TransformedEnv(
         #         env,
         #         Compose(
