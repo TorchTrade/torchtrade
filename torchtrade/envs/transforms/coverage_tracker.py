@@ -132,9 +132,7 @@ class CoverageTracker(Transform):
         # Track the reset position
         if self._enabled and self._coverage_counts is not None:
             if self._is_parallel:
-                # For ParallelEnv, we can't easily access individual worker states
-                # because they're in separate processes. Instead, we track total resets
-                # and estimate coverage assuming uniform random sampling.
+                # For ParallelEnv, query each worker for their reset index
                 base_env = self._get_base_env()
 
                 # Get ParallelEnv instance
@@ -145,27 +143,27 @@ class CoverageTracker(Transform):
                 elif hasattr(base_env, 'parallel_env'):
                     parallel_env = base_env.parallel_env
 
-                if parallel_env is not None:
-                    # Each reset() call resets all workers, so we add num_workers to reset count
-                    num_workers = parallel_env.num_workers
-                    self._total_resets += num_workers
+                if parallel_env is not None and hasattr(parallel_env, 'parent_channels'):
+                    # Query each worker for their reset index using IPC
+                    for channel in parallel_env.parent_channels:
+                        try:
+                            # Send command to get sampler._sequential_idx
+                            # Workers respond to custom commands by calling getattr(env, cmd)
+                            channel.send(('sampler', ([], {})))
 
-                    # For uniform random sampling, estimate coverage by simulating draws
-                    # After n draws from N positions with replacement, expected unique = N * (1 - (1-1/N)^n)
-                    # We'll approximate by assuming each reset picks a random position
-                    if self._total_resets > 0:
-                        # Simple approach: mark positions as visited with probability based on total resets
-                        # For small numbers, we can simulate; for large numbers, use the formula
-                        n = self._total_resets
-                        N = self._num_positions
-                        if n < 1000:
-                            # Simulate: randomly increment coverage counts
-                            np.random.seed(int(self._total_resets % 10000))
-                            indices = np.random.randint(0, N, size=n)
-                            self._coverage_counts[indices] += 1
-                        else:
-                            # For large n, just track total resets
-                            # (coverage_stats will estimate from total_resets)
+                            # Wait for response with timeout
+                            if channel.poll(0.5):  # 500ms timeout per worker
+                                msg, sampler = channel.recv()
+                                if msg == 'sampler_done' and sampler is not None:
+                                    if hasattr(sampler, '_sequential_idx'):
+                                        start_idx = sampler._sequential_idx
+                                        # Track this reset
+                                        if 0 <= start_idx < len(self._coverage_counts):
+                                            self._coverage_counts[start_idx] += 1
+                                            self._total_resets += 1
+                        except Exception:
+                            # If IPC fails, just skip this worker
+                            # (Don't break the training loop over coverage tracking)
                             pass
             else:
                 # Single environment case
