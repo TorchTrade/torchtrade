@@ -262,3 +262,72 @@ def compute_portfolio_returns(portfolio_values: torch.Tensor) -> torch.Tensor:
 
     returns = torch.diff(portfolio_values) / portfolio_values[:-1]
     return returns
+
+
+def compute_all_metrics(
+    portfolio_values: torch.Tensor,
+    rewards: torch.Tensor,
+    action_history: list,
+    periods_per_year: float,
+) -> Dict[str, float]:
+    """
+    Compute all trading metrics from episode data.
+
+    This is a convenience function that computes all standard metrics
+    and can be used by both environments and training scripts.
+
+    Args:
+        portfolio_values: 1D torch.Tensor of portfolio values over time
+        rewards: 1D torch.Tensor of per-period rewards
+        action_history: List of actions taken (for counting trades)
+        periods_per_year: Number of periods in a year for annualization
+
+    Returns:
+        Dictionary containing all metrics:
+            - total_return: Total portfolio return
+            - sharpe_ratio: Annualized Sharpe ratio
+            - sortino_ratio: Annualized Sortino ratio
+            - calmar_ratio: Calmar ratio (return / max drawdown)
+            - max_drawdown: Maximum drawdown (negative value)
+            - max_dd_duration: Maximum drawdown duration in periods
+            - num_trades: Number of trades executed
+            - win_rate: Percentage of profitable periods
+    """
+    # Compute returns
+    returns = compute_portfolio_returns(portfolio_values)
+
+    # Compute drawdown metrics
+    dd_metrics = compute_max_drawdown(portfolio_values)
+
+    # Compute Sharpe ratio
+    sharpe = compute_sharpe_ratio(returns, periods_per_year) if len(returns) > 0 else 0.0
+
+    # Compute Sortino ratio
+    sortino = compute_sortino_ratio(returns, periods_per_year) if len(returns) > 0 else 0.0
+
+    # Compute Calmar ratio
+    calmar = compute_calmar_ratio(portfolio_values, periods_per_year) if len(portfolio_values) > 1 else 0.0
+
+    # Compute win rate
+    win_rate_metrics = compute_win_rate(rewards)
+
+    # Count number of trades (non-zero actions)
+    num_trades = sum(1 for a in action_history if a != 0)
+
+    # Calculate total return
+    if len(portfolio_values) > 0:
+        total_return = (portfolio_values[-1] - portfolio_values[0]) / portfolio_values[0]
+        total_return = total_return.item() if isinstance(total_return, torch.Tensor) else total_return
+    else:
+        total_return = 0.0
+
+    return {
+        'total_return': total_return,
+        'sharpe_ratio': sharpe,
+        'sortino_ratio': sortino,
+        'calmar_ratio': calmar,
+        'max_drawdown': dd_metrics['max_drawdown'],
+        'max_dd_duration': dd_metrics['max_dd_duration'],
+        'num_trades': num_trades,
+        'win_rate': win_rate_metrics['win_rate'],
+    }

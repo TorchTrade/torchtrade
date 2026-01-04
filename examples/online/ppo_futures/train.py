@@ -281,25 +281,46 @@ def main(cfg: DictConfig):  # noqa: F821
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
 
-                # Compute and log trading metrics
+                # Compute and log trading metrics from rollout data
                 try:
-                    # Access the actual SeqFuturesEnv instance
-                    # eval_env is TransformedEnv -> base_env is ParallelEnv -> need to get actual env
-                    from torchrl.envs import ParallelEnv
+                    from torchtrade.metrics import compute_all_metrics
+                    from torchtrade.envs.offline.utils import compute_periods_per_year_crypto
 
-                    base = eval_env.base_env
-                    if isinstance(base, ParallelEnv):
-                        # Get the first environment from the parallel wrapper
-                        actual_env = base._workers[0]._env if hasattr(base, '_workers') else base
-                    else:
-                        actual_env = base
+                    # Extract data from rollout (take first environment if multiple)
+                    account_states = eval_rollout["account_state"]
+                    rewards = eval_rollout["next", "reward"]
+                    actions = eval_rollout["action"]
 
-                    # If it's still wrapped, try to unwrap further
-                    while hasattr(actual_env, 'base_env') and not hasattr(actual_env, 'get_metrics'):
-                        actual_env = actual_env.base_env
+                    # If multiple envs, take the first one
+                    if account_states.dim() > 2:
+                        account_states = account_states[0]
+                        rewards = rewards[0]
+                        actions = actions[0]
 
-                    if hasattr(actual_env, 'get_metrics'):
-                        env_metrics = actual_env.get_metrics()
+                    # Calculate portfolio values from account state
+                    # Account state: [cash, position_size, position_value, entry_price, current_price, ...]
+                    cash = account_states[:, 0]
+                    position_value = account_states[:, 2]
+                    portfolio_values = cash + position_value
+
+                    # Compute periods per year (from config)
+                    periods_per_year = compute_periods_per_year_crypto(
+                        cfg.env.execute_on[1],  # unit
+                        cfg.env.execute_on[0]   # value
+                    )
+
+                    # Convert actions to list for trade counting
+                    action_list = actions.cpu().numpy().tolist()
+
+                    # Compute all metrics using shared function
+                    if len(portfolio_values) > 1:
+                        env_metrics = compute_all_metrics(
+                            portfolio_values=portfolio_values,
+                            rewards=rewards,
+                            action_history=action_list,
+                            periods_per_year=periods_per_year,
+                        )
+
                         metrics_to_log["eval/total_return"] = env_metrics["total_return"]
                         metrics_to_log["eval/sharpe_ratio"] = env_metrics["sharpe_ratio"]
                         metrics_to_log["eval/sortino_ratio"] = env_metrics["sortino_ratio"]
@@ -308,24 +329,19 @@ def main(cfg: DictConfig):  # noqa: F821
                         metrics_to_log["eval/max_dd_duration"] = env_metrics["max_dd_duration"]
                         metrics_to_log["eval/num_trades"] = env_metrics["num_trades"]
                         metrics_to_log["eval/win_rate"] = env_metrics["win_rate"]
-                    else:
-                        print(f"Warning: Could not find get_metrics method on environment of type {type(actual_env)}")
+
                 except Exception as e:
                     import traceback
-                    print(f"Warning: Could not compute metrics: {e}")
+                    print(f"Warning: Could not compute metrics from rollout: {e}")
                     print(traceback.format_exc())
 
-                # Render history from the same actual environment
-                try:
-                    if hasattr(actual_env, 'render_history'):
-                        fig = actual_env.render_history(return_fig=True)
-                        if fig is not None and logger is not None:
-                            # render_history returns a figure directly for SeqFuturesEnv
-                            metrics_to_log["eval/history"] = wandb.Image(fig[0] if isinstance(fig, tuple) else fig)
-                except Exception as e:
-                    print(f"Warning: Could not render history: {e}")
-
+                # Render history - this works because base_env provides a render_history method
+                # that delegates to the underlying environment
+                fig = eval_env.base_env.render_history(return_fig=True)
                 eval_env.reset()
+                if fig is not None and logger is not None:
+                    # render_history returns a figure directly for SeqFuturesEnv
+                    metrics_to_log["eval/history"] = wandb.Image(fig[0])
                 torch.save(actor.state_dict(), f"ppo_futures_policy_{i}.pth")
                 actor.train()
 

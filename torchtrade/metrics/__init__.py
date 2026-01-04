@@ -11,6 +11,7 @@ from torchtrade.metrics.trading_metrics import (
     compute_calmar_ratio,
     compute_win_rate,
     compute_portfolio_returns,
+    compute_all_metrics,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "compute_calmar_ratio",
     "compute_win_rate",
     "compute_portfolio_returns",
+    "compute_all_metrics",
 ]
