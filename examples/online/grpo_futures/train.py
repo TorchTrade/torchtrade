@@ -220,12 +220,8 @@ def main(cfg: DictConfig):  # noqa: F821
         if coverage_tracker is not None:
             coverage_stats = coverage_tracker.get_coverage_stats()
             if coverage_stats["enabled"]:
-                metrics_to_log["coverage/coverage"] = coverage_stats["coverage"]
-                metrics_to_log["coverage/visited"] = coverage_stats["visited_positions"]
-                metrics_to_log["coverage/unvisited"] = coverage_stats["unvisited_positions"]
-                metrics_to_log["coverage/entropy"] = coverage_stats["coverage_entropy"]
-                metrics_to_log["coverage/mean_visits"] = coverage_stats["mean_visits_per_position"]
-                metrics_to_log["coverage/std_visits"] = coverage_stats["std_visits"]
+                metrics_to_log["train/coverage"] = coverage_stats["coverage"]
+                metrics_to_log["train/coverage_entropy"] = coverage_stats["coverage_entropy"]
 
         if logger is not None:
             time_dict = timeit.todict(prefix="time")

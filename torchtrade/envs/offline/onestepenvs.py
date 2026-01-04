@@ -101,6 +101,14 @@ class OneStepTradingEnvOn(EnvBase):
             self.market_data_keys.append(market_data_key)
         self.observation_spec.set(self.account_state_key, account_state_spec)
 
+        # Add reset_index to observation spec for coverage tracking (only when random_start=True)
+        if self.random_start:
+            from torchrl.data.tensor_specs import Unbounded
+            self.observation_spec.set(
+                "reset_index",
+                Unbounded(shape=(), dtype=torch.long)
+            )
+
         self.reward_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(1,), dtype=torch.float)
 
         self._reset(TensorDict({}))
@@ -360,6 +368,15 @@ class OneStepTradingEnvOff(EnvBase):
                                 Bounded(low=-torch.inf, high=torch.inf,
                                 shape=(self.replay_buffer.storage._storage[self.account_state_key].shape[1],),
                                 dtype=torch.float))
+
+        # Add reset_index to observation spec for coverage tracking (only when random_start=True)
+        if self.random_start:
+            from torchrl.data.tensor_specs import Unbounded
+            self.observation_spec.set(
+                "reset_index",
+                Unbounded(shape=(), dtype=torch.long)
+            )
+
         self.reward_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(1,), dtype=torch.float)
 
         super().__init__()
