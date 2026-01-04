@@ -788,20 +788,20 @@ class TestParallelEnvironmentCoverage:
         transformed_env.reset()
         stats = tracker.get_coverage_stats()
 
-        # CoverageTracker should gracefully disable for ParallelEnv
-        assert stats["enabled"] is False
-        assert "disabled" in stats["message"].lower()
+        # CoverageTracker should now work with ParallelEnv via IPC
+        assert stats["enabled"] is True
+        assert stats["total_positions"] > 0
+        assert stats["total_resets"] == num_workers  # One reset per worker
 
     def test_parallel_env_limitation_documented(self):
-        """Document the ParallelEnv limitation.
+        """Document how CoverageTracker works with ParallelEnv.
 
-        CoverageTracker works best with single environments. For parallel training:
-        - Apply transforms to individual environments before ParallelEnv
-        - Each worker will have its own CoverageTracker instance
-        - Aggregate coverage stats need to be collected separately if needed
+        CoverageTracker now supports ParallelEnv via IPC:
+        - Queries each worker for its reset index after each reset
+        - Aggregates coverage across all workers
+        - Uses parent_channels for communication
 
-        This test documents that ParallelEnv + CoverageTracker is a known limitation
-        and provides guidance on the recommended approach.
+        This test documents the recommended usage pattern.
         """
         # This is a documentation test - no actual code to run
         # The recommended pattern is shown in examples/online/iql/utils.py:
@@ -810,13 +810,14 @@ class TestParallelEnvironmentCoverage:
         #     return TransformedEnv(
         #         env,
         #         Compose(
-        #             CoverageTracker(),  # Applied before ParallelEnv
+        #             CoverageTracker(),  # Works with ParallelEnv via IPC
         #             InitTracker(),
         #             ...
         #         ),
         #     )
         #
-        # parallel_env = ParallelEnv(num_envs, EnvCreator(lambda: apply_env_transforms(env)))
+        # parallel_env = ParallelEnv(num_envs, EnvCreator(maker))
+        # transformed_env = apply_env_transforms(parallel_env)
         assert True
 
 
