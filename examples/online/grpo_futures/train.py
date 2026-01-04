@@ -52,7 +52,7 @@ def main(cfg: DictConfig):  # noqa: F821
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
     # TODO: possibly wrong as the test_df is in 1min freq
     max_eval_traj_length = len(test_df)
-    train_env, eval_env = make_environment(
+    train_env, eval_env, coverage_tracker = make_environment(
         train_df,
         test_df,
         cfg,
@@ -62,13 +62,6 @@ def main(cfg: DictConfig):  # noqa: F821
         max_eval_traj_length=max_eval_traj_length,
     )
     eval_env.to(device)
-
-    # Extract CoverageTracker for logging (if available)
-    coverage_tracker = None
-    for transform in train_env.transform:
-        if isinstance(transform, CoverageTracker):
-            coverage_tracker = transform
-            break
 
     total_frames = cfg.collector.total_frames
     frames_per_batch = cfg.collector.frames_per_batch
@@ -90,12 +83,13 @@ def main(cfg: DictConfig):  # noqa: F821
         cfg=cfg,
     )
 
-    # Create collector
+    # Create collector with coverage tracker as postproc
     collector = make_collector(
         cfg,
         train_env,
         actor,
         compile_mode,
+        postproc=coverage_tracker,
     )
 
     # Create loss module

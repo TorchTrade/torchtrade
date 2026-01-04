@@ -70,7 +70,7 @@ def main(cfg: DictConfig):  # noqa: F821
     train_df = df[df['0'] < cfg.env.test_split_start]
     test_df  = df[df['0'] >= cfg.env.test_split_start]
 
-    train_env, eval_env = make_environment(
+    train_env, eval_env, coverage_tracker = make_environment(
         train_df,
         test_df,
         cfg,
@@ -78,13 +78,6 @@ def main(cfg: DictConfig):  # noqa: F821
         eval_num_envs=cfg.env.eval_envs,
     )
     max_eval_steps = 10000
-
-    # Extract CoverageTracker for logging (if available)
-    coverage_tracker = None
-    for transform in train_env.transform:
-        if isinstance(transform, CoverageTracker):
-            coverage_tracker = transform
-            break
 
     # Create replay buffer
     replay_buffer = make_replay_buffer(
@@ -133,9 +126,10 @@ def main(cfg: DictConfig):  # noqa: F821
             else:
                 compile_mode = "reduce-overhead"
 
-    # Create collector
+    # Create collector with coverage tracker as postproc
     collector = make_collector(
-        cfg, train_env, actor_model_explore=model[0], compile_mode=compile_mode
+        cfg, train_env, actor_model_explore=model[0], compile_mode=compile_mode,
+        postproc=coverage_tracker,
     )
 
     if cfg.compile.compile:

@@ -407,7 +407,13 @@ class SeqFuturesEnv(EnvBase):
         self.liquidation_price = 0.0
         self.step_counter = 0
 
-        return self._get_observation()
+        obs = self._get_observation()
+
+        # Add reset index for coverage tracking (only during training with random_start)
+        if self.random_start:
+            obs.set("reset_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
+
+        return obs
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""

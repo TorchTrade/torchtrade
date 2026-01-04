@@ -101,7 +101,6 @@ def apply_env_transforms(env, max_steps):
     transformed_env = TransformedEnv(
         env,
         Compose(
-            CoverageTracker(),  # Add coverage tracking (auto-detects random_start)
             InitTracker(),
             DoubleToFloat(),
             RewardSum(),
@@ -145,7 +144,11 @@ def make_environment(
         ),
         train_env.transform.clone(),
     )
-    return train_env, eval_env
+
+    # Create coverage tracker for postproc (used in collector)
+    coverage_tracker = CoverageTracker()
+
+    return train_env, eval_env, coverage_tracker
 
 
 # ====================================================================
@@ -315,7 +318,7 @@ def make_ppo_models(env, device, cfg):
     return actor, critic
 
 
-def make_collector(cfg, train_env, actor_model_explore, compile_mode):
+def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=None):
     """Make data collector."""
     device = cfg.collector.device
     if device in ("", None):
@@ -331,6 +334,7 @@ def make_collector(cfg, train_env, actor_model_explore, compile_mode):
         device=device,
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
+        postproc=postproc,  # Add coverage tracker as postproc
     )
     collector.set_seed(cfg.env.seed)
     return collector

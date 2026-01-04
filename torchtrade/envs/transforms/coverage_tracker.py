@@ -26,28 +26,38 @@ class CoverageTracker(Transform):
     - Detecting overfitting to specific market conditions
 
     Usage:
+        from torchrl.collectors import SyncDataCollector
         from torchrl.envs import TransformedEnv, Compose, InitTracker, DoubleToFloat, RewardSum
         from torchtrade.envs.transforms import CoverageTracker
 
+        # Create environment with standard transforms
         env = TransformedEnv(
             base_env,
             Compose(
-                # Sample every 10 resets, 50ms timeout for worker queries
-                CoverageTracker(track_every_n_resets=10, ipc_timeout=0.05),
                 InitTracker(),
                 DoubleToFloat(),
                 RewardSum(),
             )
         )
 
-        # During training, access coverage stats:
-        coverage_tracker = None
-        for transform in env.transform:
-            if isinstance(transform, CoverageTracker):
-                coverage_tracker = transform
-                break
+        # Create coverage tracker for postproc
+        coverage_tracker = CoverageTracker()
 
-        if coverage_tracker is not None:
+        # Use coverage tracker as postproc in collector
+        collector = SyncDataCollector(
+            env,
+            policy,
+            frames_per_batch=1000,
+            total_frames=100000,
+            device="cuda",
+            postproc=coverage_tracker,  # Process batches after collection
+        )
+
+        # During training, access coverage stats:
+        for batch in collector:
+            # ... train on batch ...
+
+            # Log coverage periodically
             stats = coverage_tracker.get_coverage_stats()
             if stats["enabled"]:
                 print(f"Coverage: {stats['coverage']:.2%}")
@@ -59,30 +69,25 @@ class CoverageTracker(Transform):
         _enabled: Whether tracking is enabled (auto-detected based on random_start)
     """
 
-    def __init__(self, track_every_n_resets: int = 10, ipc_timeout: float = 0.05):
+    def __init__(self):
         """Initialize the CoverageTracker transform.
 
-        Args:
-            track_every_n_resets: Sample coverage every N resets to reduce overhead.
-                For ParallelEnv, only queries workers every N reset calls.
-                Default: 10 (tracks 10% of resets)
-            ipc_timeout: Timeout in seconds for IPC queries to workers (ParallelEnv only).
-                Default: 0.05 (50ms per worker)
+        CoverageTracker should be used as a postproc in SyncDataCollector.
+        It reads reset_index from collected batches and aggregates coverage statistics.
         """
         super().__init__()
         self._coverage_counts: Optional[np.ndarray] = None
         self._total_resets: int = 0
         self._enabled: bool = True
         self._num_positions: Optional[int] = None
-        self._is_parallel: bool = False
-        self._track_every_n_resets: int = max(1, track_every_n_resets)
-        self._ipc_timeout: float = ipc_timeout
-        self._reset_counter: int = 0
 
     def _reset(
         self, tensordict: TensorDictBase, tensordict_reset: TensorDictBase
     ) -> TensorDictBase:
-        """Called during environment reset to track coverage.
+        """Called during environment reset - only initializes coverage tracking.
+
+        Coverage tracking now happens in forward() by reading reset_index from batches.
+        This eliminates IPC overhead and moves work outside the critical reset path.
 
         Args:
             tensordict: Input tensordict (unused)
@@ -95,7 +100,7 @@ class CoverageTracker(Transform):
         if self._coverage_counts is None:
             base_env = self._get_base_env()
 
-            # Check if this is a ParallelEnv (or a dispatch caller wrapper)
+            # Check if this is a ParallelEnv
             from torchrl.envs import ParallelEnv
             parallel_env = None
             if isinstance(base_env, ParallelEnv):
@@ -114,7 +119,6 @@ class CoverageTracker(Transform):
                                 self._num_positions = len(sampler._exec_times_arr)
                                 self._coverage_counts = np.zeros(self._num_positions, dtype=np.int32)
                                 self._enabled = True
-                                self._is_parallel = True
                             else:
                                 self._enabled = False
                         else:
@@ -133,7 +137,6 @@ class CoverageTracker(Transform):
                     self._num_positions = len(sampler._exec_times_arr)
                     self._coverage_counts = np.zeros(self._num_positions, dtype=np.int32)
                     self._enabled = True
-                    self._is_parallel = False
                 else:
                     # Disable tracking for sequential/test environments
                     self._enabled = False
@@ -141,67 +144,7 @@ class CoverageTracker(Transform):
                 # Environment doesn't support coverage tracking
                 self._enabled = False
 
-        # Track the reset position
-        if self._enabled and self._coverage_counts is not None:
-            # Increment reset counter
-            self._reset_counter += 1
-
-            # Only actually track coverage every N resets to reduce overhead
-            should_track = (self._reset_counter % self._track_every_n_resets) == 0
-
-            if self._is_parallel:
-                # For ParallelEnv, query each worker for their reset index
-                base_env = self._get_base_env()
-
-                # Get ParallelEnv instance
-                from torchrl.envs import ParallelEnv
-                parallel_env = None
-                if isinstance(base_env, ParallelEnv):
-                    parallel_env = base_env
-                elif hasattr(base_env, 'parallel_env'):
-                    parallel_env = base_env.parallel_env
-
-                if parallel_env is not None and hasattr(parallel_env, 'parent_channels'):
-                    num_workers = len(parallel_env.parent_channels)
-
-                    # PERF: Always count resets even when not tracking
-                    self._total_resets += num_workers
-
-                    # PERF: Only query workers periodically to reduce IPC overhead
-                    if should_track:
-                        # Query each worker for their reset index using IPC
-                        for channel in parallel_env.parent_channels:
-                            try:
-                                # Send command to get sampler._sequential_idx
-                                # Workers respond to custom commands by calling getattr(env, cmd)
-                                channel.send(('sampler', ([], {})))
-
-                                # Wait for response with configurable timeout
-                                if channel.poll(self._ipc_timeout):
-                                    msg, sampler = channel.recv()
-                                    if msg == 'sampler_done' and sampler is not None:
-                                        if hasattr(sampler, '_sequential_idx'):
-                                            start_idx = sampler._sequential_idx
-                                            # Track this reset
-                                            if 0 <= start_idx < len(self._coverage_counts):
-                                                self._coverage_counts[start_idx] += 1
-                            except Exception:
-                                # If IPC fails, just skip this worker
-                                # (Don't break the training loop over coverage tracking)
-                                pass
-            else:
-                # Single environment case - low overhead, track every reset
-                base_env = self._get_base_env()
-                if hasattr(base_env, 'sampler'):
-                    # Get the current reset index from sampler
-                    # The sampler's _sequential_idx is set during reset() to the starting position
-                    start_idx = base_env.sampler._sequential_idx
-
-                    # Validate index is within bounds
-                    if 0 <= start_idx < len(self._coverage_counts):
-                        self._coverage_counts[start_idx] += 1
-                        self._total_resets += 1
-
+        # No tracking work here - all coverage aggregation happens in forward()
         return tensordict_reset
 
     def _get_base_env(self):
@@ -225,6 +168,47 @@ class CoverageTracker(Transform):
             env = env.base_env
 
         return env
+
+    def forward(self, tensordict: TensorDictBase) -> TensorDictBase:
+        """Process collected batch and aggregate coverage from reset indices.
+
+        This method is called by SyncDataCollector's postproc after data collection.
+        It reads reset_index from the batch and updates coverage statistics.
+
+        Args:
+            tensordict: Collected batch from environment
+
+        Returns:
+            tensordict: Unchanged batch (coverage tracking is side-effect only)
+        """
+        # Only process if tracking is enabled and we have reset indices in batch
+        if self._enabled and self._coverage_counts is not None and "reset_index" in tensordict.keys():
+            # Get all reset indices from the batch
+            # For ParallelEnv, each worker adds its own reset_index to its timesteps
+            reset_indices = tensordict.get("reset_index")
+
+            # Handle both batched (ParallelEnv) and unbatched (single env) cases
+            if reset_indices.ndim > 0:
+                # Flatten to 1D if needed (batch dimension)
+                reset_indices = reset_indices.flatten()
+
+                # Use torch.unique to count occurrences efficiently
+                unique_indices, counts = torch.unique(reset_indices, return_counts=True)
+
+                # Update coverage counts (convert to numpy for indexing)
+                for idx, count in zip(unique_indices.cpu().numpy(), counts.cpu().numpy()):
+                    idx = int(idx)
+                    if 0 <= idx < len(self._coverage_counts):
+                        self._coverage_counts[idx] += int(count)
+                        self._total_resets += int(count)
+            else:
+                # Single reset index (scalar)
+                idx = int(reset_indices.item())
+                if 0 <= idx < len(self._coverage_counts):
+                    self._coverage_counts[idx] += 1
+                    self._total_resets += 1
+
+        return tensordict
 
     def get_coverage_stats(self) -> Dict[str, Any]:
         """Return coverage statistics.
@@ -313,16 +297,3 @@ class CoverageTracker(Transform):
         if self._coverage_counts is not None:
             self._coverage_counts.fill(0)
             self._total_resets = 0
-            self._reset_counter = 0
-
-    def set_tracking_frequency(self, track_every_n_resets: int):
-        """Adjust how often coverage is sampled.
-
-        Args:
-            track_every_n_resets: Sample coverage every N resets.
-                Lower values = more accurate tracking but higher overhead.
-                Higher values = less overhead but coarser coverage data.
-                Use 1 for exact tracking (default for single envs).
-                Use 10-100 for ParallelEnv to reduce IPC overhead.
-        """
-        self._track_every_n_resets = max(1, track_every_n_resets)

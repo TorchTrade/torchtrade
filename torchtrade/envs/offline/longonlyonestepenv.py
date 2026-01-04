@@ -243,7 +243,13 @@ class LongOnlyOneStepEnv(EnvBase):
 
         logger.debug(f"Reset environment with initial portfolio value: {initial_portfolio_value}")
 
-        return self._get_observation(initial=True)
+        obs = self._get_observation(initial=True)
+
+        # Add reset index for coverage tracking (only during training with random_start)
+        if self.random_start:
+            obs.set("reset_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
+
+        return obs
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
