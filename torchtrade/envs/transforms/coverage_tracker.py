@@ -32,7 +32,8 @@ class CoverageTracker(Transform):
         env = TransformedEnv(
             base_env,
             Compose(
-                CoverageTracker(),  # Add before other transforms
+                # Sample every 10 resets, 50ms timeout for worker queries
+                CoverageTracker(track_every_n_resets=10, ipc_timeout=0.05),
                 InitTracker(),
                 DoubleToFloat(),
                 RewardSum(),
@@ -58,14 +59,25 @@ class CoverageTracker(Transform):
         _enabled: Whether tracking is enabled (auto-detected based on random_start)
     """
 
-    def __init__(self):
-        """Initialize the CoverageTracker transform."""
+    def __init__(self, track_every_n_resets: int = 10, ipc_timeout: float = 0.05):
+        """Initialize the CoverageTracker transform.
+
+        Args:
+            track_every_n_resets: Sample coverage every N resets to reduce overhead.
+                For ParallelEnv, only queries workers every N reset calls.
+                Default: 10 (tracks 10% of resets)
+            ipc_timeout: Timeout in seconds for IPC queries to workers (ParallelEnv only).
+                Default: 0.05 (50ms per worker)
+        """
         super().__init__()
         self._coverage_counts: Optional[np.ndarray] = None
         self._total_resets: int = 0
         self._enabled: bool = True
         self._num_positions: Optional[int] = None
         self._is_parallel: bool = False
+        self._track_every_n_resets: int = max(1, track_every_n_resets)
+        self._ipc_timeout: float = ipc_timeout
+        self._reset_counter: int = 0
 
     def _reset(
         self, tensordict: TensorDictBase, tensordict_reset: TensorDictBase
@@ -131,6 +143,12 @@ class CoverageTracker(Transform):
 
         # Track the reset position
         if self._enabled and self._coverage_counts is not None:
+            # Increment reset counter
+            self._reset_counter += 1
+
+            # Only actually track coverage every N resets to reduce overhead
+            should_track = (self._reset_counter % self._track_every_n_resets) == 0
+
             if self._is_parallel:
                 # For ParallelEnv, query each worker for their reset index
                 base_env = self._get_base_env()
@@ -144,29 +162,35 @@ class CoverageTracker(Transform):
                     parallel_env = base_env.parallel_env
 
                 if parallel_env is not None and hasattr(parallel_env, 'parent_channels'):
-                    # Query each worker for their reset index using IPC
-                    for channel in parallel_env.parent_channels:
-                        try:
-                            # Send command to get sampler._sequential_idx
-                            # Workers respond to custom commands by calling getattr(env, cmd)
-                            channel.send(('sampler', ([], {})))
+                    num_workers = len(parallel_env.parent_channels)
 
-                            # Wait for response with timeout
-                            if channel.poll(0.5):  # 500ms timeout per worker
-                                msg, sampler = channel.recv()
-                                if msg == 'sampler_done' and sampler is not None:
-                                    if hasattr(sampler, '_sequential_idx'):
-                                        start_idx = sampler._sequential_idx
-                                        # Track this reset
-                                        if 0 <= start_idx < len(self._coverage_counts):
-                                            self._coverage_counts[start_idx] += 1
-                                            self._total_resets += 1
-                        except Exception:
-                            # If IPC fails, just skip this worker
-                            # (Don't break the training loop over coverage tracking)
-                            pass
+                    # PERF: Always count resets even when not tracking
+                    self._total_resets += num_workers
+
+                    # PERF: Only query workers periodically to reduce IPC overhead
+                    if should_track:
+                        # Query each worker for their reset index using IPC
+                        for channel in parallel_env.parent_channels:
+                            try:
+                                # Send command to get sampler._sequential_idx
+                                # Workers respond to custom commands by calling getattr(env, cmd)
+                                channel.send(('sampler', ([], {})))
+
+                                # Wait for response with configurable timeout
+                                if channel.poll(self._ipc_timeout):
+                                    msg, sampler = channel.recv()
+                                    if msg == 'sampler_done' and sampler is not None:
+                                        if hasattr(sampler, '_sequential_idx'):
+                                            start_idx = sampler._sequential_idx
+                                            # Track this reset
+                                            if 0 <= start_idx < len(self._coverage_counts):
+                                                self._coverage_counts[start_idx] += 1
+                            except Exception:
+                                # If IPC fails, just skip this worker
+                                # (Don't break the training loop over coverage tracking)
+                                pass
             else:
-                # Single environment case
+                # Single environment case - low overhead, track every reset
                 base_env = self._get_base_env()
                 if hasattr(base_env, 'sampler'):
                     # Get the current reset index from sampler
@@ -289,3 +313,16 @@ class CoverageTracker(Transform):
         if self._coverage_counts is not None:
             self._coverage_counts.fill(0)
             self._total_resets = 0
+            self._reset_counter = 0
+
+    def set_tracking_frequency(self, track_every_n_resets: int):
+        """Adjust how often coverage is sampled.
+
+        Args:
+            track_every_n_resets: Sample coverage every N resets.
+                Lower values = more accurate tracking but higher overhead.
+                Higher values = less overhead but coarser coverage data.
+                Use 1 for exact tracking (default for single envs).
+                Use 10-100 for ParallelEnv to reduce IPC overhead.
+        """
+        self._track_every_n_resets = max(1, track_every_n_resets)
