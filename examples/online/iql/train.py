@@ -29,6 +29,8 @@ from utils import (
     make_collector,
 )
 
+from torchtrade.envs.transforms import CoverageTracker
+
 torch.set_float32_matmul_precision("high")
 
 
@@ -76,6 +78,13 @@ def main(cfg: DictConfig):  # noqa: F821
         eval_num_envs=cfg.env.eval_envs,
     )
     max_eval_steps = 10000
+
+    # Extract CoverageTracker for logging (if available)
+    coverage_tracker = None
+    for transform in train_env.transform:
+        if isinstance(transform, CoverageTracker):
+            coverage_tracker = transform
+            break
 
     # Create replay buffer
     replay_buffer = make_replay_buffer(
@@ -211,6 +220,17 @@ def main(cfg: DictConfig):  # noqa: F821
             metrics_to_log["train/actor_loss"] = loss_info["loss_actor"]
             metrics_to_log["train/value_loss"] = loss_info["loss_value"]
             metrics_to_log["train/entropy"] = loss_info.get("entropy")
+
+        # Log coverage metrics (if available and enabled)
+        if coverage_tracker is not None:
+            coverage_stats = coverage_tracker.get_coverage_stats()
+            if coverage_stats["enabled"]:
+                metrics_to_log["coverage/percentage"] = coverage_stats["coverage_percentage"]
+                metrics_to_log["coverage/visited"] = coverage_stats["visited_positions"]
+                metrics_to_log["coverage/unvisited"] = coverage_stats["unvisited_positions"]
+                metrics_to_log["coverage/entropy"] = coverage_stats["coverage_entropy"]
+                metrics_to_log["coverage/mean_visits"] = coverage_stats["mean_visits_per_position"]
+                metrics_to_log["coverage/std_visits"] = coverage_stats["std_visits"]
 
         if logger is not None:
             metrics_to_log.update(timeit.todict(prefix="time"))

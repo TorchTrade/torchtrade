@@ -26,6 +26,8 @@ from torchrl.envs import (
     TransformedEnv,
 )
 
+from torchtrade.envs.transforms import CoverageTracker
+
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 from torchrl.modules import (
     MLP,
@@ -146,6 +148,7 @@ def apply_env_transforms(
     transformed_env = TransformedEnv(
         env,
         Compose(
+            CoverageTracker(),  # Add coverage tracking (auto-detects random_start)
             InitTracker(),
             DoubleToFloat(),
             RewardSum(),
