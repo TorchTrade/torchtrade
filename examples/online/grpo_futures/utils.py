@@ -15,6 +15,8 @@ from torchrl.envs import (
     TransformedEnv,
     StepCounter,
 )
+
+from torchtrade.envs.transforms import CoverageTracker
 from torchrl.collectors import SyncDataCollector
 
 from torchrl.modules import (
@@ -142,6 +144,7 @@ def apply_env_transforms(env, max_steps, one_step_env=True):
         transformed_env = TransformedEnv(
             env,
             Compose(
+                CoverageTracker(),  # Add coverage tracking (auto-detects random_start)
                 InitTracker(),
                 StepCounter(max_steps=max_steps),
             ),
@@ -150,6 +153,7 @@ def apply_env_transforms(env, max_steps, one_step_env=True):
         transformed_env = TransformedEnv(
             env,
             Compose(
+                CoverageTracker(),  # Add coverage tracking (auto-detects random_start)
                 InitTracker(),
                 DoubleToFloat(),
                 RewardSum(),

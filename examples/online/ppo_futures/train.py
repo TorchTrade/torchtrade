@@ -29,6 +29,7 @@ def main(cfg: DictConfig):  # noqa: F821
     from torchrl.objectives.value.advantages import GAE
     from torchrl.record.loggers import generate_exp_name, get_logger
     from utils import make_environment, make_ppo_models, make_collector, log_metrics
+    from torchtrade.envs.transforms import CoverageTracker
 
     torch.set_float32_matmul_precision("high")
 
@@ -59,6 +60,13 @@ def main(cfg: DictConfig):  # noqa: F821
         max_eval_traj_length=max_eval_traj_length,
     )
     eval_env.to(device)
+
+    # Extract CoverageTracker for logging (if available)
+    coverage_tracker = None
+    for transform in train_env.transform:
+        if isinstance(transform, CoverageTracker):
+            coverage_tracker = transform
+            break
 
     total_frames = cfg.collector.total_frames
     frames_per_batch = cfg.collector.frames_per_batch
@@ -302,6 +310,17 @@ def main(cfg: DictConfig):  # noqa: F821
                     metrics_to_log["eval/history"] = wandb.Image(fig[0])
                 torch.save(actor.state_dict(), f"ppo_futures_policy_{i}.pth")
                 actor.train()
+
+        # Log coverage metrics (if available and enabled)
+        if coverage_tracker is not None:
+            coverage_stats = coverage_tracker.get_coverage_stats()
+            if coverage_stats["enabled"]:
+                metrics_to_log["coverage/percentage"] = coverage_stats["coverage_percentage"]
+                metrics_to_log["coverage/visited"] = coverage_stats["visited_positions"]
+                metrics_to_log["coverage/unvisited"] = coverage_stats["unvisited_positions"]
+                metrics_to_log["coverage/entropy"] = coverage_stats["coverage_entropy"]
+                metrics_to_log["coverage/mean_visits"] = coverage_stats["mean_visits_per_position"]
+                metrics_to_log["coverage/std_visits"] = coverage_stats["std_visits"]
 
         if logger is not None:
             time_dict = timeit.todict(prefix="time")
