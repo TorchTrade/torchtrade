@@ -831,5 +831,334 @@ class TestParallelEnvironmentCoverage:
         assert True
 
 
+class TestCollectorPostproc:
+    """Test CoverageTracker as collector postproc (primary use case)."""
+
+    def test_collector_postproc_integration(self, simple_df):
+        """Test CoverageTracker as collector postproc (recommended pattern)."""
+        from torchrl.collectors import SyncDataCollector
+        from torchrl.modules import ProbabilisticActor
+        from torch.distributions import Categorical
+        from tensordict.nn import TensorDictModule
+        import functools
+
+        # Create env with random_start
+        def make_env(df):
+            config = SeqLongOnlyEnvConfig(
+                symbol="TEST/USD",
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(5, TimeFrameUnit.Minute),
+                include_base_features=False,
+                initial_cash=10000,
+                random_start=True,
+                max_traj_length=50,
+                seed=None,
+            )
+            return SeqLongOnlyEnv(df, config)
+
+        env = make_env(simple_df)
+        transformed_env = TransformedEnv(
+            env,
+            Compose(
+                InitTracker(),
+                DoubleToFloat(),
+                RewardSum(),
+            ),
+        )
+
+        # Create simple random policy
+        class RandomPolicy:
+            def __init__(self, action_spec):
+                self.action_spec = action_spec
+
+            def __call__(self, td):
+                # For ParallelEnv, action_spec.rand() already handles batch dimension correctly
+                batch_size = td.batch_size if hasattr(td, 'batch_size') else torch.Size([])
+                td.set("action", self.action_spec.rand(batch_size))
+                return td
+
+        policy = RandomPolicy(transformed_env.action_spec)
+
+        # Create coverage tracker as postproc
+        coverage_tracker = CoverageTracker()
+
+        # Create collector with coverage tracker as postproc
+        # Use large total_frames to avoid auto-close
+        collector = SyncDataCollector(
+            transformed_env,
+            policy,
+            frames_per_batch=100,
+            total_frames=10000,  # Large number to prevent auto-close
+            device="cpu",
+            postproc=coverage_tracker,  # Use as postproc
+        )
+
+        # Collect a few batches
+        collected_frames = 0
+        try:
+            for i, batch in enumerate(collector):
+                if i >= 3:  # Collect 3 batches
+                    break
+                collected_frames += batch.numel()
+        except TypeError:
+            # Ignore close() errors during iteration
+            pass
+
+        # Verify coverage was tracked
+        stats = coverage_tracker.get_coverage_stats()
+        assert stats["enabled"] is True
+        assert stats["total_resets"] > 0, "Coverage tracker should track resets via postproc"
+        assert stats["visited_positions"] > 0
+        assert stats["coverage"] > 0
+
+        collector.shutdown()
+        try:
+            transformed_env.close()
+        except TypeError:
+            pass  # Some TorchRL versions don't support raise_if_closed parameter
+
+    def test_forward_batch_aggregation(self, simple_df):
+        """Test forward() correctly aggregates coverage from batched tensordict."""
+        from tensordict import TensorDict
+
+        # Create environment to initialize tracker
+        config = SeqLongOnlyEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(5, TimeFrameUnit.Minute),
+            include_base_features=False,
+            initial_cash=10000,
+            random_start=True,
+            max_traj_length=50,
+            seed=42,
+        )
+
+        env = SeqLongOnlyEnv(simple_df, config)
+        transformed_env = TransformedEnv(
+            env,
+            Compose(
+                CoverageTracker(),
+                InitTracker(),
+            ),
+        )
+
+        tracker = get_coverage_tracker(transformed_env)
+
+        # Initialize tracker by resetting once
+        transformed_env.reset()
+        initial_stats = tracker.get_coverage_stats()
+        initial_resets = initial_stats["total_resets"]
+
+        # Create a fake batched tensordict with reset indices
+        # Simulate 5 resets: positions [0, 1, 2, 0, 1] (0 appears twice, 1 appears twice, 2 once)
+        reset_indices = torch.tensor([0, 1, 2, 0, 1], dtype=torch.long)
+        fake_batch = TensorDict(
+            {"reset_index": reset_indices},
+            batch_size=[5],
+        )
+
+        # Call forward() directly
+        tracker.forward(fake_batch)
+
+        # Verify aggregation
+        stats = tracker.get_coverage_stats()
+        distribution = tracker.get_coverage_distribution()
+
+        # Should have added 5 resets total
+        assert stats["total_resets"] == initial_resets + 5
+
+        # Position 0 should have 2 additional visits
+        # Position 1 should have 2 additional visits
+        # Position 2 should have 1 additional visit
+        # (Plus whatever the initial reset added)
+        total_visits_to_0_1_2 = distribution[0] + distribution[1] + distribution[2]
+        # We know we added exactly 5 visits to these positions
+        # But the initial reset might have also used one of these positions
+        # So we can only assert that at least 5 visits were added
+        assert total_visits_to_0_1_2 >= 5
+
+        # Cleanup
+        try:
+            transformed_env.close()
+        except TypeError:
+            pass  # Some TorchRL versions don't support raise_if_closed parameter
+
+    def test_parallel_env_with_collector_postproc(self, simple_df):
+        """Test ParallelEnv coverage tracking via collector postproc (recommended pattern).
+
+        This test validates that CoverageTracker can track coverage from ParallelEnv
+        when used as a collector postproc by simulating batched reset_index data.
+        """
+        from tensordict import TensorDict
+
+        # Create a single environment to initialize the tracker
+        config = SeqLongOnlyEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(5, TimeFrameUnit.Minute),
+            include_base_features=False,
+            initial_cash=10000,
+            random_start=True,
+            max_traj_length=50,
+            seed=42,
+        )
+
+        env = SeqLongOnlyEnv(simple_df, config)
+        transformed_env = TransformedEnv(
+            env,
+            Compose(
+                CoverageTracker(),
+                InitTracker(),
+            ),
+        )
+
+        tracker = get_coverage_tracker(transformed_env)
+
+        # Initialize tracker
+        transformed_env.reset()
+
+        # Simulate what a ParallelEnv collector would produce:
+        # Multiple workers, each with their own reset_index in the batch
+        # Batch shape: [num_workers, trajectory_length] but reset_index appears when episodes reset
+
+        # Simulate batch from 3 workers where 2 workers had resets
+        # (In real collection, reset_index appears in timesteps where done=True and env resets)
+        simulated_batch = TensorDict(
+            {
+                "reset_index": torch.tensor([5, 12, 5, 23, 12], dtype=torch.long),  # 5 resets total
+                "done": torch.tensor([True, True, True, True, True]),
+            },
+            batch_size=[5],
+        )
+
+        # Call forward() as collector would
+        tracker.forward(simulated_batch)
+
+        # Verify coverage was tracked from the simulated ParallelEnv batch
+        stats = tracker.get_coverage_stats()
+        assert stats["enabled"] is True
+        assert stats["total_resets"] >= 5, "Should track all resets from batch"
+        assert stats["visited_positions"] > 0
+
+        # Verify specific positions were visited
+        distribution = tracker.get_coverage_distribution()
+        assert distribution[5] >= 2, "Position 5 appeared twice in batch"
+        assert distribution[12] >= 2, "Position 12 appeared twice in batch"
+        assert distribution[23] >= 1, "Position 23 appeared once in batch"
+
+        # Cleanup
+        try:
+            transformed_env.close()
+        except TypeError:
+            pass
+
+    def test_forward_handles_edge_cases(self, simple_df):
+        """Test forward() handles missing reset_index and disabled tracking."""
+        from tensordict import TensorDict
+
+        # Create environment to initialize tracker
+        config = SeqLongOnlyEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(5, TimeFrameUnit.Minute),
+            include_base_features=False,
+            initial_cash=10000,
+            random_start=True,
+            max_traj_length=50,
+            seed=42,
+        )
+
+        env = SeqLongOnlyEnv(simple_df, config)
+        transformed_env = TransformedEnv(
+            env,
+            Compose(
+                CoverageTracker(),
+                InitTracker(),
+            ),
+        )
+
+        tracker = get_coverage_tracker(transformed_env)
+
+        # Initialize tracker
+        transformed_env.reset()
+
+        # Test 1: tensordict without reset_index (should pass through unchanged)
+        fake_batch_no_index = TensorDict(
+            {"observation": torch.randn(5, 10)},
+            batch_size=[5],
+        )
+        stats_before = tracker.get_coverage_stats()
+        result = tracker.forward(fake_batch_no_index)
+
+        # Should return tensordict unchanged
+        assert "reset_index" not in result.keys()
+        assert "observation" in result.keys()
+
+        # Coverage should not change
+        stats_after = tracker.get_coverage_stats()
+        assert stats_after["total_resets"] == stats_before["total_resets"]
+
+        # Test 2: Empty tensordict
+        empty_batch = TensorDict({}, batch_size=[0])
+        result_empty = tracker.forward(empty_batch)
+        # Empty batch should be returned unchanged
+        assert result_empty is not None
+        assert result_empty.batch_size == torch.Size([0])
+
+        # Test 3: Create tracker with disabled tracking (sequential env)
+        config_seq = SeqLongOnlyEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(5, TimeFrameUnit.Minute),
+            include_base_features=False,
+            initial_cash=10000,
+            random_start=False,  # Sequential, tracking disabled
+            max_traj_length=50,
+            seed=42,
+        )
+
+        env_seq = SeqLongOnlyEnv(simple_df, config_seq)
+        transformed_env_seq = TransformedEnv(
+            env_seq,
+            Compose(
+                CoverageTracker(),
+                InitTracker(),
+            ),
+        )
+
+        tracker_disabled = get_coverage_tracker(transformed_env_seq)
+        transformed_env_seq.reset()
+
+        # Create batch with reset_index
+        batch_with_index = TensorDict(
+            {"reset_index": torch.tensor([0, 1, 2], dtype=torch.long)},
+            batch_size=[3],
+        )
+
+        # Should pass through without processing (tracking disabled)
+        stats_disabled_before = tracker_disabled.get_coverage_stats()
+        result_disabled = tracker_disabled.forward(batch_with_index)
+        stats_disabled_after = tracker_disabled.get_coverage_stats()
+
+        assert stats_disabled_before["enabled"] is False
+        assert stats_disabled_after["enabled"] is False
+        assert result_disabled is not None
+
+        # Cleanup
+        try:
+            transformed_env.close()
+        except TypeError:
+            pass  # Some TorchRL versions don't support raise_if_closed parameter
+        try:
+            transformed_env_seq.close()
+        except TypeError:
+            pass  # Some TorchRL versions don't support raise_if_closed parameter
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -209,6 +209,21 @@ class CoverageTracker(Transform):
         Returns:
             tensordict: Unchanged batch (coverage tracking is side-effect only)
         """
+        # Auto-initialize on first forward() call when used as postproc
+        # Only auto-initialize if tracking wasn't explicitly disabled (e.g., by _reset() for sequential envs)
+        if self._enabled and self._coverage_counts is None and "reset_index" in tensordict.keys():
+            # When used as postproc (not in transform chain), we don't have access to
+            # the environment in _reset(). Initialize by detecting max index from batch.
+            reset_indices = tensordict.get("reset_index")
+            if reset_indices.numel() > 0:
+                # Dynamically determine num_positions from the data
+                # We'll grow the array as needed, but start with a reasonable size
+                max_idx = int(reset_indices.max().item()) if reset_indices.ndim > 0 else int(reset_indices.item())
+                # Initialize with buffer room for more positions
+                initial_size = max(max_idx + 100, 1000)
+                self._num_positions = initial_size
+                self._coverage_counts = np.zeros(initial_size, dtype=np.int32)
+
         # Only process if tracking is enabled and we have reset indices in batch
         if self._enabled and self._coverage_counts is not None and "reset_index" in tensordict.keys():
             # Get all reset indices from the batch
@@ -219,6 +234,16 @@ class CoverageTracker(Transform):
             if reset_indices.ndim > 0:
                 # Flatten to 1D if needed (batch dimension)
                 reset_indices = reset_indices.flatten()
+
+                # Check if we need to grow the coverage array
+                max_idx = int(reset_indices.max().item())
+                if max_idx >= len(self._coverage_counts):
+                    # Grow array to accommodate new indices
+                    new_size = max_idx + 100
+                    new_counts = np.zeros(new_size, dtype=np.int32)
+                    new_counts[:len(self._coverage_counts)] = self._coverage_counts
+                    self._coverage_counts = new_counts
+                    self._num_positions = new_size
 
                 # Use torch.unique to count occurrences efficiently
                 unique_indices, counts = torch.unique(reset_indices, return_counts=True)
@@ -232,6 +257,15 @@ class CoverageTracker(Transform):
             else:
                 # Single reset index (scalar)
                 idx = int(reset_indices.item())
+
+                # Check if we need to grow the coverage array
+                if idx >= len(self._coverage_counts):
+                    new_size = idx + 100
+                    new_counts = np.zeros(new_size, dtype=np.int32)
+                    new_counts[:len(self._coverage_counts)] = self._coverage_counts
+                    self._coverage_counts = new_counts
+                    self._num_positions = new_size
+
                 if 0 <= idx < len(self._coverage_counts):
                     self._coverage_counts[idx] += 1
                     self._total_resets += 1
