@@ -228,7 +228,7 @@ def compute_win_rate(returns: torch.Tensor) -> Dict[str, float]:
 
     if len(returns) == 0:
         return {
-            'win_rate': 0.0,
+            'win_rate (reward>0)': 0.0,
             'avg_win': 0.0,
             'avg_loss': 0.0,
             'profit_factor': 0.0,

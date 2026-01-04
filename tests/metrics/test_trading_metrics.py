@@ -200,7 +200,7 @@ class TestWinRate:
         returns = torch.tensor([0.01, 0.02, 0.015, 0.03], dtype=torch.float32)
         result = compute_win_rate(returns)
 
-        assert result['win_rate'] == 1.0
+        assert result['win_rate (reward>0)'] == 1.0
         assert result['avg_win'] > 0
         assert result['avg_loss'] == 0.0
         assert result['profit_factor'] == 0.0  # No losses
@@ -210,7 +210,7 @@ class TestWinRate:
         returns = torch.tensor([-0.01, -0.02, -0.015], dtype=torch.float32)
         result = compute_win_rate(returns)
 
-        assert result['win_rate'] == 0.0
+        assert result['win_rate (reward>0)'] == 0.0
         assert result['avg_win'] == 0.0
         assert result['avg_loss'] < 0
         assert result['profit_factor'] == 0.0  # No wins
@@ -220,7 +220,7 @@ class TestWinRate:
         returns = torch.tensor([0.02, -0.01, 0.03, -0.015, 0.01], dtype=torch.float32)
         result = compute_win_rate(returns)
 
-        assert result['win_rate'] == 0.6  # 3 wins out of 5
+        assert result['win_rate (reward>0)'] == 0.6  # 3 wins out of 5
         assert result['avg_win'] > 0
         assert result['avg_loss'] < 0
         assert result['profit_factor'] > 0
@@ -230,7 +230,7 @@ class TestWinRate:
         returns = torch.tensor([], dtype=torch.float32)
         result = compute_win_rate(returns)
 
-        assert result['win_rate'] == 0.0
+        assert result['win_rate (reward>0)'] == 0.0
         assert result['avg_win'] == 0.0
         assert result['avg_loss'] == 0.0
         assert result['profit_factor'] == 0.0
@@ -301,7 +301,7 @@ class TestMetricsIntegration:
         assert isinstance(sharpe, float)
         assert isinstance(sortino, float)
         assert isinstance(calmar, float)
-        assert 0 <= win_metrics['win_rate'] <= 1
+        assert 0 <= win_metrics['win_rate (reward>0)'] <= 1
         assert win_metrics['profit_factor'] >= 0
 
 
