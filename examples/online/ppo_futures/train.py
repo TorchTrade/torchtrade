@@ -286,15 +286,7 @@ def main(cfg: DictConfig):  # noqa: F821
                     # ParallelEnv delegates get_metrics() to all workers and returns a list
                     # We take the first environment's metrics
                     env_metrics = eval_env.base_env.get_metrics()[0]
-
-                    metrics_to_log["eval/total_return"] = env_metrics["total_return"]
-                    metrics_to_log["eval/sharpe_ratio"] = env_metrics["sharpe_ratio"]
-                    metrics_to_log["eval/sortino_ratio"] = env_metrics["sortino_ratio"]
-                    metrics_to_log["eval/calmar_ratio"] = env_metrics["calmar_ratio"]
-                    metrics_to_log["eval/max_drawdown"] = env_metrics["max_drawdown"]
-                    metrics_to_log["eval/max_dd_duration"] = env_metrics["max_dd_duration"]
-                    metrics_to_log["eval/num_trades"] = env_metrics["num_trades"]
-                    metrics_to_log["eval/win_rate"] = env_metrics["win_rate"]
+                    metrics_to_log.update({f"eval/{k}": v for k, v in env_metrics.items()})
 
                 except Exception as e:
                     import traceback
