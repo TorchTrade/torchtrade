@@ -8,7 +8,11 @@ from typing import Dict, Any, Optional
 import numpy as np
 import torch
 from torchrl.envs.transforms import Transform
+from torchrl.envs import ParallelEnv
 from tensordict import TensorDictBase
+
+# Constants
+_COVERAGE_ARRAY_BUFFER = 100  # Buffer size when growing coverage arrays dynamically
 
 
 class CoverageTracker(Transform):
@@ -129,8 +133,8 @@ class CoverageTracker(Transform):
                                 sampler = test_env.sampler
                                 self._num_positions = len(sampler._exec_times_arr)
                                 # Initialize both reset and state coverage tracking
-                                self._reset_coverage_counts = np.zeros(self._num_positions, dtype=np.int32)
-                                self._state_coverage_counts = np.zeros(self._num_positions, dtype=np.int32)
+                                self._reset_coverage_counts = np.zeros(self._num_positions, dtype=np.int64)
+                                self._state_coverage_counts = np.zeros(self._num_positions, dtype=np.int64)
                                 self._enabled = True
                             else:
                                 self._enabled = False
@@ -149,8 +153,8 @@ class CoverageTracker(Transform):
                     sampler = base_env.sampler
                     self._num_positions = len(sampler._exec_times_arr)
                     # Initialize both reset and state coverage tracking
-                    self._reset_coverage_counts = np.zeros(self._num_positions, dtype=np.int32)
-                    self._state_coverage_counts = np.zeros(self._num_positions, dtype=np.int32)
+                    self._reset_coverage_counts = np.zeros(self._num_positions, dtype=np.int64)
+                    self._state_coverage_counts = np.zeros(self._num_positions, dtype=np.int64)
                     self._enabled = True
                 else:
                     # Disable tracking for sequential/test environments
@@ -248,45 +252,41 @@ class CoverageTracker(Transform):
         Returns:
             tensordict: Unchanged batch (coverage tracking is side-effect only)
         """
-        # Auto-initialize on first forward() call when used as postproc
-        # Only auto-initialize if tracking wasn't explicitly disabled (e.g., by _reset() for sequential envs)
+        # Auto-initialize on first forward() call if used as postproc (not in transform chain)
+        # This happens when CoverageTracker.parent is None (not added to env transforms)
         if self._enabled and self._reset_coverage_counts is None and "reset_index" in tensordict.keys():
-            # When used as postproc (not in transform chain), we don't have access to
-            # the environment in _reset(). Initialize by detecting max index from batch.
             reset_indices = tensordict.get("reset_index")
             if reset_indices.numel() > 0:
-                # Dynamically determine num_positions from the data
-                # We'll grow the array as needed, but start with a reasonable size
+                # Initialize based on max index seen in first batch + buffer
+                # This is a fallback for when _reset() doesn't get called (postproc usage)
                 max_idx = int(reset_indices.max().item()) if reset_indices.ndim > 0 else int(reset_indices.item())
-                # Initialize with buffer room for more positions
-                initial_size = max(max_idx + 100, 1000)
+                # Use buffer to avoid frequent resizing
+                initial_size = max_idx + _COVERAGE_ARRAY_BUFFER
                 self._num_positions = initial_size
-                # Initialize both coverage arrays
-                self._reset_coverage_counts = np.zeros(initial_size, dtype=np.int32)
-                self._state_coverage_counts = np.zeros(initial_size, dtype=np.int32)
+                self._reset_coverage_counts = np.zeros(initial_size, dtype=np.int64)
+                self._state_coverage_counts = np.zeros(initial_size, dtype=np.int64)
+
+                import warnings
+                warnings.warn(
+                    f"CoverageTracker auto-initialized with size {initial_size} from batch data. "
+                    f"For best results, add CoverageTracker to the environment's transform chain so "
+                    f"it can initialize from the environment's sampler.",
+                    UserWarning,
+                    stacklevel=2
+                )
+
+        # Coverage arrays must be initialized before tracking
+        if not self._enabled or self._reset_coverage_counts is None or self._state_coverage_counts is None:
+            return tensordict
 
         # Track reset coverage (episode start positions)
-        if self._enabled and self._reset_coverage_counts is not None and "reset_index" in tensordict.keys():
+        if "reset_index" in tensordict.keys():
             reset_indices = tensordict.get("reset_index")
 
             # Handle both batched (ParallelEnv) and unbatched (single env) cases
             if reset_indices.ndim > 0:
                 # Flatten to 1D if needed (batch dimension)
                 reset_indices = reset_indices.flatten()
-
-                # Check if we need to grow the reset coverage array
-                max_idx = int(reset_indices.max().item())
-                if max_idx >= len(self._reset_coverage_counts):
-                    # Grow array to accommodate new indices
-                    new_size = max_idx + 100
-                    new_counts = np.zeros(new_size, dtype=np.int32)
-                    new_counts[:len(self._reset_coverage_counts)] = self._reset_coverage_counts
-                    self._reset_coverage_counts = new_counts
-                    self._num_positions = new_size
-                    # Also grow state coverage array to match
-                    new_state_counts = np.zeros(new_size, dtype=np.int32)
-                    new_state_counts[:len(self._state_coverage_counts)] = self._state_coverage_counts
-                    self._state_coverage_counts = new_state_counts
 
                 # Use torch.unique to count occurrences efficiently
                 unique_indices, counts = torch.unique(reset_indices, return_counts=True)
@@ -297,48 +297,37 @@ class CoverageTracker(Transform):
                     if 0 <= idx < len(self._reset_coverage_counts):
                         self._reset_coverage_counts[idx] += int(count)
                         self._total_resets += int(count)
+                    else:
+                        # Index out of bounds - this indicates a problem with initialization
+                        # or data corruption. Log warning but continue.
+                        import warnings
+                        warnings.warn(
+                            f"CoverageTracker: reset_index {idx} out of bounds [0, {len(self._reset_coverage_counts)}). "
+                            f"This may indicate incorrect initialization or data corruption.",
+                            RuntimeWarning
+                        )
             else:
                 # Single reset index (scalar)
                 idx = int(reset_indices.item())
-
-                # Check if we need to grow the reset coverage array
-                if idx >= len(self._reset_coverage_counts):
-                    new_size = idx + 100
-                    new_counts = np.zeros(new_size, dtype=np.int32)
-                    new_counts[:len(self._reset_coverage_counts)] = self._reset_coverage_counts
-                    self._reset_coverage_counts = new_counts
-                    self._num_positions = new_size
-                    # Also grow state coverage array to match
-                    new_state_counts = np.zeros(new_size, dtype=np.int32)
-                    new_state_counts[:len(self._state_coverage_counts)] = self._state_coverage_counts
-                    self._state_coverage_counts = new_state_counts
-
                 if 0 <= idx < len(self._reset_coverage_counts):
                     self._reset_coverage_counts[idx] += 1
                     self._total_resets += 1
+                else:
+                    import warnings
+                    warnings.warn(
+                        f"CoverageTracker: reset_index {idx} out of bounds [0, {len(self._reset_coverage_counts)}). "
+                        f"This may indicate incorrect initialization or data corruption.",
+                        RuntimeWarning
+                    )
 
         # Track state coverage (all timesteps visited during episodes)
-        if self._enabled and self._state_coverage_counts is not None and "state_index" in tensordict.keys():
+        if "state_index" in tensordict.keys():
             state_indices = tensordict.get("state_index")
 
             # Handle both batched (ParallelEnv) and unbatched (single env) cases
             if state_indices.ndim > 0:
                 # Flatten to 1D if needed (batch dimension)
                 state_indices = state_indices.flatten()
-
-                # Check if we need to grow the state coverage array
-                max_idx = int(state_indices.max().item())
-                if max_idx >= len(self._state_coverage_counts):
-                    # Grow array to accommodate new indices
-                    new_size = max_idx + 100
-                    new_state_counts = np.zeros(new_size, dtype=np.int32)
-                    new_state_counts[:len(self._state_coverage_counts)] = self._state_coverage_counts
-                    self._state_coverage_counts = new_state_counts
-                    # Also grow reset coverage array to match
-                    new_reset_counts = np.zeros(new_size, dtype=np.int32)
-                    new_reset_counts[:len(self._reset_coverage_counts)] = self._reset_coverage_counts
-                    self._reset_coverage_counts = new_reset_counts
-                    self._num_positions = new_size
 
                 # Use torch.unique to count occurrences efficiently
                 unique_indices, counts = torch.unique(state_indices, return_counts=True)
@@ -349,25 +338,28 @@ class CoverageTracker(Transform):
                     if 0 <= idx < len(self._state_coverage_counts):
                         self._state_coverage_counts[idx] += int(count)
                         self._total_states += int(count)
+                    else:
+                        # Index out of bounds - this indicates a problem with initialization
+                        # or data corruption. Log warning but continue.
+                        import warnings
+                        warnings.warn(
+                            f"CoverageTracker: state_index {idx} out of bounds [0, {len(self._state_coverage_counts)}). "
+                            f"This may indicate incorrect initialization or data corruption.",
+                            RuntimeWarning
+                        )
             else:
                 # Single state index (scalar)
                 idx = int(state_indices.item())
-
-                # Check if we need to grow the state coverage array
-                if idx >= len(self._state_coverage_counts):
-                    new_size = idx + 100
-                    new_state_counts = np.zeros(new_size, dtype=np.int32)
-                    new_state_counts[:len(self._state_coverage_counts)] = self._state_coverage_counts
-                    self._state_coverage_counts = new_state_counts
-                    # Also grow reset coverage array to match
-                    new_reset_counts = np.zeros(new_size, dtype=np.int32)
-                    new_reset_counts[:len(self._reset_coverage_counts)] = self._reset_coverage_counts
-                    self._reset_coverage_counts = new_reset_counts
-                    self._num_positions = new_size
-
                 if 0 <= idx < len(self._state_coverage_counts):
                     self._state_coverage_counts[idx] += 1
                     self._total_states += 1
+                else:
+                    import warnings
+                    warnings.warn(
+                        f"CoverageTracker: state_index {idx} out of bounds [0, {len(self._state_coverage_counts)}). "
+                        f"This may indicate incorrect initialization or data corruption.",
+                        RuntimeWarning
+                    )
 
         return tensordict
 
