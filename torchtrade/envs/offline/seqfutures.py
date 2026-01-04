@@ -661,7 +661,10 @@ class SeqFuturesEnv(EnvBase):
                 - max_drawdown: Maximum drawdown (negative value)
                 - max_dd_duration: Maximum drawdown duration in periods
                 - num_trades: Number of trades executed
-                - win_rate: Percentage of profitable periods
+                - win_rate (reward>0): Percentage of profitable periods
+                - avg_win: Average win amount
+                - avg_loss: Average loss amount
+                - profit_factor: Ratio of total wins to total losses
         """
         from torchtrade.metrics import compute_all_metrics
         from torchtrade.envs.offline.utils import compute_periods_per_year_crypto

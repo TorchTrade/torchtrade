@@ -240,7 +240,7 @@ def compute_win_rate(returns: torch.Tensor) -> Dict[str, float]:
     profit_factor = total_wins / total_losses if total_losses > 0 else 0.0
 
     return {
-        'win_rate': win_rate,
+        'win_rate (reward>0)': win_rate,
         'avg_win': avg_win,
         'avg_loss': avg_loss,
         'profit_factor': profit_factor,
@@ -291,7 +291,10 @@ def compute_all_metrics(
             - max_drawdown: Maximum drawdown (negative value)
             - max_dd_duration: Maximum drawdown duration in periods
             - num_trades: Number of trades executed
-            - win_rate: Percentage of profitable periods
+            - win_rate (reward>0): Percentage of profitable periods
+            - avg_win: Average win amount
+            - avg_loss: Average loss amount
+            - profit_factor: Ratio of total wins to total losses
     """
     # Compute returns
     returns = compute_portfolio_returns(portfolio_values)
@@ -327,7 +330,7 @@ def compute_all_metrics(
         'sortino_ratio': sortino,
         'calmar_ratio': calmar,
         'max_drawdown': dd_metrics['max_drawdown'],
-        'max_dd_duration': dd_metrics['max_dd_duration'],
+        'max_dd_duration': dd_metrics['max_drawdown_duration'],
         'num_trades': num_trades,
-        'win_rate': win_rate_metrics['win_rate'],
+        **win_rate_metrics,
     }

@@ -943,7 +943,10 @@ class TestSeqFuturesEnvMetrics:
             'max_drawdown',
             'max_dd_duration',
             'num_trades',
-            'win_rate',
+            'win_rate (reward>0)',
+            'avg_win',
+            'avg_loss',
+            'profit_factor',
         ]
 
         for key in required_keys:
@@ -1067,7 +1070,7 @@ class TestSeqFuturesEnvMetrics:
 
         metrics = env.get_metrics()
 
-        assert 0 <= metrics['win_rate'] <= 1, "Win rate should be between 0 and 1"
+        assert 0 <= metrics['win_rate (reward>0)'] <= 1, "Win rate should be between 0 and 1"
 
     def test_get_metrics_max_drawdown_non_positive(self, env):
         """max_drawdown should be zero or negative."""
