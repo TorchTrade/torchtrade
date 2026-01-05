@@ -12,6 +12,7 @@ TorchTrade is a modular RL framework built on TorchRL that provides:
 - 📊 **Multi-Timeframe Support** - Train on multiple time scales simultaneously
 - 🔴 **Live Trading** - Direct Alpaca and Binance API integration
 - 🧠 **LLM Integration** - Use GPT-4o-mini as trading agent
+- 📐 **Rule-Based Actors** - Hard-coded strategies for imitation learning and baselines
 - 📈 **Research to Production** - Same code for backtesting and live deployment
 
 ---
@@ -177,6 +178,44 @@ action = policy(tensordict)
 
 # See full example: examples/live/alpaca/collect_live_llm.py
 ```
+
+### Rule-Based Trading Strategies (Expert Actors)
+
+Use hard-coded trading strategies for imitation learning pre-training or as baselines:
+
+```python
+from torchtrade.actor import create_expert_ensemble
+
+# Create ensemble of expert actors
+experts = create_expert_ensemble(
+    market_data_keys=["market_data_5Minute_24"],
+    env_type="spot"  # or "sltp", "futures"
+)
+
+# Available strategies:
+# - MomentumActor: Follow trends (Sharpe: 0.5-1.0)
+# - MeanReversionActor: Fade extremes (Sharpe: 0.3-0.8)
+# - BreakoutActor: Volatility expansion (Sharpe: 0.2-1.5)
+
+# Use for demonstration collection
+obs = env.reset()
+for expert in experts:
+    obs_with_action = expert(obs.clone())
+    print(f"{expert.__class__.__name__}: action={obs_with_action['action'].item()}")
+
+# Collect 1000 episodes of demonstrations from all experts
+# python examples/online/rulebased/collect_demonstrations.py \
+#     --expert all --num_episodes 100 --save_path demos.pt
+
+# Then use for behavioral cloning pre-training before RL fine-tuning
+# See: examples/online/rulebased/README.md and Issue #54
+```
+
+**Why use rule-based actors?**
+- 🚀 **Bootstrap RL training** - Start from reasonable baseline instead of random initialization
+- 📊 **Imitation learning** - Pre-train with behavioral cloning on expert demonstrations
+- 🎯 **Baselines** - Compare learned policies against simple heuristics
+- 🔍 **Interpretable** - Understand what strategies work in different market conditions
 
 ### Custom Feature Engineering
 
@@ -501,6 +540,7 @@ python examples/online/ppo/train.py \
 
 - ✨ **Multi-Timeframe** - Train on 1m, 5m, 15m, 1h bars simultaneously for multi-scale market understanding
 - 🤖 **LLM Integration** - Use GPT-4o-mini or other LLMs as trading policies via OpenAI API
+- 📐 **Rule-Based Actors** - Hard-coded strategies (momentum, mean reversion, breakout) for imitation learning and baselines
 - 📊 **Coverage Tracking** - Measure state space exploration diversity with entropy-based metrics
 - 🎯 **Custom Loss Functions** - GRPO, CTRL (contrastive learning), standard PPO/IQL implementations
 - 📈 **Weights & Biases** - Built-in W&B logging for experiments, metrics, and visualizations
@@ -521,6 +561,7 @@ python examples/online/ppo/train.py \
   - [LongOnlyOneStepEnv](docs/Environments/LongOnlyOneStepEnv.md) - One-step variant
 - 💼 **[Training Examples](examples/)**
   - [Live Trading with Alpaca](examples/live/alpaca/README.md) - Complete live trading guide
+  - [Rule-Based Actors](examples/online/rulebased/README.md) - Hard-coded strategies for imitation learning
   - [PPO Training](examples/online/ppo/) - Proximal Policy Optimization
   - [IQL Training](examples/online/iql/) - Implicit Q-Learning
   - [GRPO Training](examples/online/grpo_futures_onestep/) - Group Relative Policy Optimization
