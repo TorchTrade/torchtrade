@@ -413,7 +413,7 @@ EXAMPLE_COMMANDS = {
         "logger.backend= "
     ),
     "grpo_futuresonestep": (
-        "python examples/online/grpo_futures/train.py "
+        "python examples/online/grpo_futures_onestep/train.py "
         "collector.total_frames=100 "
         "collector.frames_per_batch=50 "
         "env.train_envs=2 "
