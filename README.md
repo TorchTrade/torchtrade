@@ -13,9 +13,6 @@ conda activate alpaca_env
 Run `mkdocs serve` to start the documentation server.
 
 
-- https://www.reddit.com/r/algotrading/comments/1n3zd42/live_algo_results_after_30_days_of_trading_btc_on/ INTERESTING. 1h data 5x leverage on binance. 
-
-
 ## Support
 
 If you find this project useful, consider donating: [Donate via PayPal](https://www.paypal.me/yourname).
