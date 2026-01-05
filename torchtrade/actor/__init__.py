@@ -1,5 +1,4 @@
-from torchtrade.actor.llm_actor import LLMActor
-from torchtrade.actor.human import HumanActor
+# Rule-based actors (no optional dependencies)
 from torchtrade.actor.rulebased import (
     RuleBasedActor,
     MomentumActor,
@@ -17,8 +16,6 @@ from torchtrade.actor.rulebased import (
 )
 
 __all__ = [
-    "LLMActor",
-    "HumanActor",
     "RuleBasedActor",
     "MomentumActor",
     "MeanReversionActor",
@@ -33,3 +30,16 @@ __all__ = [
     "BreakoutFuturesActor",
     "create_expert_ensemble",
 ]
+
+# Optional actors with external dependencies
+try:
+    from torchtrade.actor.llm_actor import LLMActor
+    __all__.append("LLMActor")
+except ImportError:
+    pass
+
+try:
+    from torchtrade.actor.human import HumanActor
+    __all__.append("HumanActor")
+except ImportError:
+    pass
