@@ -503,8 +503,12 @@ class FuturesOneStepEnv(EnvBase):
 
         # Add coverage tracking indices (only during training with random_start)
         if self.random_start:
-            obs.set("reset_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
-            obs.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
+            # Store the reset index to track episode start diversity
+            # Ensure index is within valid range for coverage tracking
+            max_valid_idx = len(self.sampler._exec_times_arr) - 1
+            self._reset_idx = min(self.sampler._sequential_idx, max_valid_idx)
+            obs.set("reset_index", torch.tensor(self._reset_idx, dtype=torch.long))
+            obs.set("state_index", torch.tensor(self._reset_idx, dtype=torch.long))
 
         return obs
 
@@ -537,7 +541,11 @@ class FuturesOneStepEnv(EnvBase):
 
         # Add state_index for coverage tracking (only during training with random_start)
         if self.random_start:
-            next_tensordict.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
+            # Ensure state_index is within valid range for coverage tracking
+            # During rollout, _sequential_idx may exceed the valid training data range
+            max_valid_idx = len(self.sampler._exec_times_arr) - 1
+            state_idx = min(self.sampler._sequential_idx, max_valid_idx)
+            next_tensordict.set("state_index", torch.tensor(state_idx, dtype=torch.long))
 
         # Calculate reward
         reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, action_tuple, trade_info)
