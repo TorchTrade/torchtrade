@@ -1,3 +1,8 @@
+"""PPO training example for SeqFuturesSLTPEnv.
+
+This script demonstrates PPO training on the SeqFuturesSLTPEnv environment
+for futures trading with leverage, stop-loss, and take-profit support.
+"""
 from __future__ import annotations
 
 import warnings
@@ -6,7 +11,7 @@ import hydra
 import pandas as pd
 from torchrl._utils import compile_with_warmup
 import datasets
-
+from torchtrade.losses import CTRLLoss
 
 @hydra.main(config_path="", config_name="config", version_base="1.1")
 def main(cfg: DictConfig):  # noqa: F821
@@ -25,6 +30,7 @@ def main(cfg: DictConfig):  # noqa: F821
     from torchrl.objectives.value.advantages import GAE
     from torchrl.record.loggers import generate_exp_name, get_logger
     from utils import make_environment, make_ppo_models, make_collector, log_metrics
+    from torchtrade.envs.transforms import CoverageTracker
 
     torch.set_float32_matmul_precision("high")
 
@@ -37,7 +43,7 @@ def main(cfg: DictConfig):  # noqa: F821
     device = torch.device(device)
     print("USING DEVICE: ", device)
 
-    # Create env
+    # Load data from HuggingFace
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
 
@@ -60,22 +66,21 @@ def main(cfg: DictConfig):  # noqa: F821
     print(f"Test date range: {test_df['0'].min()} to {test_df['0'].max()}")
     print(f"Max train traj length: {max_train_traj_length}")
     print("="*80)
-    train_env, eval_env = make_environment(
+    train_env, eval_env, coverage_tracker = make_environment(
         train_df,
         test_df,
         cfg,
         train_num_envs=cfg.env.train_envs,
         eval_num_envs=cfg.env.eval_envs,
         max_train_traj_length=max_train_traj_length,
-        max_eval_traj_length=max_eval_traj_length
+        max_eval_traj_length=max_eval_traj_length,
     )
     eval_env.to(device)
 
-    # Correct
-    total_frames = cfg.collector.total_frames 
-    frames_per_batch = cfg.collector.frames_per_batch 
-    mini_batch_size = cfg.loss.mini_batch_size 
-    test_interval = cfg.logger.test_interval 
+    total_frames = cfg.collector.total_frames
+    frames_per_batch = cfg.collector.frames_per_batch
+    mini_batch_size = cfg.loss.mini_batch_size
+    test_interval = cfg.logger.test_interval
 
     compile_mode = None
     if cfg.compile.compile:
@@ -86,20 +91,23 @@ def main(cfg: DictConfig):  # noqa: F821
             else:
                 compile_mode = "reduce-overhead"
 
-    # Create models (check utils_atari.py)
-    actor, critic = make_ppo_models(
+    # Create models
+    encoder, actor, critic = make_ppo_models(
         eval_env,
         device=device,
         cfg=cfg,
     )
 
     # Create collector
+    # Create collector with coverage tracker as postproc
     collector = make_collector(
         cfg,
         train_env,
         actor,
         compile_mode,
+        postproc=coverage_tracker,
     )
+
     # Create data buffer
     sampler = SamplerWithoutReplacement(drop_last=True)
     data_buffer = TensorDictReplayBuffer(
@@ -111,7 +119,7 @@ def main(cfg: DictConfig):  # noqa: F821
         compilable=cfg.compile.compile,
     )
 
-    # Create loss and adv modules
+    # Create loss and advantage modules
     adv_module = GAE(
         gamma=cfg.loss.gamma,
         lmbda=cfg.loss.gae_lambda,
@@ -121,7 +129,9 @@ def main(cfg: DictConfig):  # noqa: F821
         time_dim=-3,
         vectorized=not cfg.compile.compile,
     )
-    loss_module = ClipPPOLoss(
+
+    # Create PPO loss module
+    ppo_loss = ClipPPOLoss(
         actor_network=actor,
         critic_network=critic,
         clip_epsilon=cfg.loss.clip_epsilon,
@@ -131,21 +141,51 @@ def main(cfg: DictConfig):  # noqa: F821
         normalize_advantage=True,
     )
 
-    # Create optimizer
-    optim = torch.optim.Adam(
-        loss_module.parameters(),
+    # Create CTRL loss module (if enabled)
+    ctrl_loss = None
+    if cfg.ctrl.use_ctrl:
+        ctrl_loss = CTRLLoss(
+            encoder_network=encoder.to(actor.device),
+            embedding_dim=cfg.model.embedding_dim,
+            projection_dim=cfg.ctrl.projection_dim,
+            num_prototypes=cfg.ctrl.num_prototypes,
+            sinkhorn_iters=cfg.ctrl.sinkhorn_iters,
+            temperature=cfg.ctrl.temperature,
+            window_len=cfg.ctrl.window_len,
+            myow_k=cfg.ctrl.myow_k,
+            myow_coeff=cfg.ctrl.myow_coeff,
+        )
+        # Set the embedding key to match encoder's output
+        ctrl_loss.set_keys(embedding="common_features")
+        # Move CTRL loss to device (projection_head, prototypes)
+        ctrl_loss.to(device)
+
+    # Create optimizers
+    # PPO optimizer (actor + critic)
+    ppo_optim = torch.optim.Adam(
+        ppo_loss.parameters(),
         lr=cfg.optim.lr,
         weight_decay=cfg.optim.weight_decay,
         eps=cfg.optim.eps,
     )
 
+    # CTRL optimizer (encoder + projection + prototypes) - only if CTRL is enabled
+    ctrl_optim = None
+    if cfg.ctrl.use_ctrl:
+        ctrl_optim = torch.optim.Adam(
+            ctrl_loss.parameters(),
+            lr=cfg.optim.ctrl_lr,
+            weight_decay=cfg.optim.weight_decay,
+            eps=cfg.optim.eps,
+        )
+
     # Create logger
     logger = None
     if cfg.logger.backend:
-        exp_name = generate_exp_name("TorchTrade-online", cfg.logger.exp_name)
+        exp_name = generate_exp_name("TorchTrade-FuturesSLTP-PPO", cfg.logger.exp_name)
         logger = get_logger(
             cfg.logger.backend,
-            logger_name="ppo_logging",
+            logger_name="ppo_futures_sltp_logging",
             experiment_name=exp_name,
             wandb_kwargs={
                 "mode": cfg.logger.mode,
@@ -154,7 +194,6 @@ def main(cfg: DictConfig):  # noqa: F821
                 "group": cfg.logger.group_name,
             },
         )
-
 
     # Main loop
     collected_frames = 0
@@ -166,32 +205,45 @@ def main(cfg: DictConfig):  # noqa: F821
     )
 
     def update(batch, num_network_updates):
-        optim.zero_grad(set_to_none=True)
-        #num_network_updates = batch.get("updates")
         # Linearly decrease the learning rate and clip epsilon
         alpha = torch.ones((), device=device)
         if cfg_optim_anneal_lr:
             alpha = 1 - (num_network_updates / total_network_updates)
-            for group in optim.param_groups:
+            for group in ppo_optim.param_groups:
                 group["lr"] = cfg_optim_lr * alpha
+            if cfg_ctrl_use_ctrl:
+                for group in ctrl_optim.param_groups:
+                    group["lr"] = cfg_optim_ctrl_lr * alpha
         if cfg_loss_anneal_clip_eps:
-            loss_module.clip_epsilon.copy_(cfg_loss_clip_epsilon * alpha)
-        #num_network_updates = num_network_updates + 1
+            ppo_loss.clip_epsilon.copy_(cfg_loss_clip_epsilon * alpha)
+
         # Get a data batch
         batch = batch.to(device, non_blocking=True)
 
-        # Forward pass PPO loss
-        loss = loss_module(batch)
-        loss_sum = loss["loss_critic"] + loss["loss_objective"] + loss["loss_entropy"]
-        # Backward pass
-        loss_sum.backward()
+        # PPO forward and backward
+        ppo_optim.zero_grad(set_to_none=True)
+        loss_td = ppo_loss(batch)
+        loss_ppo = loss_td["loss_critic"] + loss_td["loss_objective"] + loss_td["loss_entropy"]
+        loss_ppo.backward()
         torch.nn.utils.clip_grad_norm_(
-            loss_module.parameters(), max_norm=cfg_optim_max_grad_norm
+            ppo_loss.parameters(), max_norm=cfg_optim_max_grad_norm
         )
+        ppo_optim.step()
 
-        # Update the networks
-        optim.step()
-        return loss.detach().set("alpha", alpha), num_network_updates
+        # CTRL forward and backward (if enabled)
+        if cfg_ctrl_use_ctrl:
+            ctrl_optim.zero_grad(set_to_none=True)
+            ctrl_td = ctrl_loss(batch)
+            loss_ctrl_total = ctrl_td["loss_ctrl"] * cfg_ctrl_ctrl_coeff
+            loss_ctrl_total.backward()
+            torch.nn.utils.clip_grad_norm_(
+                ctrl_loss.parameters(), max_norm=cfg_optim_max_grad_norm
+            )
+            ctrl_optim.step()
+            # Merge CTRL losses into output
+            loss_td.update(ctrl_td)
+
+        return loss_td.detach().set("alpha", alpha), num_network_updates
 
     if cfg.compile.compile:
         update = compile_with_warmup(update, mode=compile_mode, warmup=1)
@@ -205,13 +257,16 @@ def main(cfg: DictConfig):  # noqa: F821
         update = CudaGraphModule(update, in_keys=[], out_keys=[], warmup=5)
         adv_module = CudaGraphModule(adv_module)
 
-    # extract cfg variables
+    # Extract cfg variables
     cfg_loss_ppo_epochs = cfg.loss.ppo_epochs
     cfg_optim_anneal_lr = cfg.optim.anneal_lr
     cfg_optim_lr = cfg.optim.lr
+    cfg_optim_ctrl_lr = cfg.optim.ctrl_lr
     cfg_loss_anneal_clip_eps = cfg.loss.anneal_clip_epsilon
     cfg_loss_clip_epsilon = cfg.loss.clip_epsilon
     cfg_optim_max_grad_norm = cfg.optim.max_grad_norm
+    cfg_ctrl_use_ctrl = cfg.ctrl.use_ctrl
+    cfg_ctrl_ctrl_coeff = cfg.ctrl.ctrl_coeff
     cfg.loss.clip_epsilon = cfg_loss_clip_epsilon
     losses = TensorDict(batch_size=[cfg_loss_ppo_epochs, num_mini_batches])
 
@@ -230,20 +285,14 @@ def main(cfg: DictConfig):  # noqa: F821
         pbar.update(frames_in_batch)
 
         # Get training rewards and episode lengths
-        episode_rewards = data["next", "episode_reward"][data["next", "terminated"]]
-        if len(episode_rewards) > 0:
-            episode_length = data["next", "step_count"][data["next", "terminated"]]
-            metrics_to_log.update(
-                {
-                    "train/reward": episode_rewards.mean().item(),
-                    "train/episode_length": episode_length.sum().item()
-                    / len(episode_length),
-                }
-            )
+        batch_reward = data["next", "reward"].mean()
+        # PERF: Defer .item() calls to reduce GPU sync points
+        # These will be logged later, so we compute them but don't block
+        action_std = data["action"].float().std()
+        metrics_to_log.update({"train/reward": batch_reward, "train/action_std": action_std})
 
         with timeit("training"):
             for j in range(cfg_loss_ppo_epochs):
-
                 # Compute GAE
                 with torch.no_grad(), timeit("adv"):
                     torch.compiler.cudagraph_mark_step_begin()
@@ -256,18 +305,18 @@ def main(cfg: DictConfig):  # noqa: F821
                     data_buffer.extend(data_reshape)
 
                 for k, batch in enumerate(data_buffer):
-                    #batch["updates"] = torch.tensor([num_network_updates]).unsqueeze(0).repeat(batch.shape[0], 1)
                     with timeit("update"):
                         torch.compiler.cudagraph_mark_step_begin()
                         loss, num_network_updates = update(
                             batch, num_network_updates=num_network_updates
                         )
-                    #num_network_updates += 1
                     loss = loss.clone()
                     num_network_updates = num_network_updates.clone()
-                    losses[j, k] = loss.select(
-                        "loss_critic", "loss_entropy", "loss_objective"
-                    )
+                    # Select losses to log
+                    loss_keys = ["loss_critic", "loss_entropy", "loss_objective"]
+                    if cfg_ctrl_use_ctrl:
+                        loss_keys.extend(["loss_ctrl", "loss_proto", "loss_myow"])
+                    losses[j, k] = loss.select(*loss_keys)
 
         # Get training losses and times
         losses_mean = losses.apply(lambda x: x.float().mean(), batch_size=[])
@@ -279,8 +328,10 @@ def main(cfg: DictConfig):  # noqa: F821
                 "train/clip_epsilon": loss["alpha"] * cfg_loss_clip_epsilon,
             }
         )
+        if cfg_ctrl_use_ctrl:
+            metrics_to_log["train/ctrl_lr"] = loss["alpha"] * cfg_optim_ctrl_lr
 
-        # Get test rewards
+        # Evaluation
         with torch.no_grad(), set_exploration_type(
             ExplorationType.DETERMINISTIC
         ), timeit("eval"):
@@ -297,19 +348,45 @@ def main(cfg: DictConfig):  # noqa: F821
                 eval_rollout.squeeze()
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
+
+                # Compute and log trading metrics
+                try:
+                    # ParallelEnv delegates get_metrics() to all workers and returns a list
+                    # We take the first environment's metrics
+                    env_metrics = eval_env.base_env.get_metrics()[0]
+                    metrics_to_log.update({f"eval/{k}": v for k, v in env_metrics.items()})
+
+                except (KeyError, AttributeError, ValueError, RuntimeError) as e:
+                    import traceback
+                    print(f"Warning: Could not compute metrics: {e}")
+                    print(traceback.format_exc())
+
                 fig = eval_env.base_env.render_history(return_fig=True)
                 eval_env.reset()
-                if logger is not None and fig is not None:
+                if fig is not None and logger is not None:
+                    # render_history returns a figure directly for SeqFuturesSLTPEnv
                     metrics_to_log["eval/history"] = wandb.Image(fig[0])
-                # TODO: add metric like daily profit %
-                # metrics_to_log["eval/daily_profit_pct"] =
-                torch.save(actor.state_dict(), f"ppo_policy_{i}.pth")
+                torch.save(actor.state_dict(), f"ppo_futures_sltp_policy_{i}.pth")
                 actor.train()
+
+        # Log dual coverage metrics (if available and enabled)
+        if coverage_tracker is not None:
+            coverage_stats = coverage_tracker.get_coverage_stats()
+            if coverage_stats["enabled"]:
+                # Reset coverage (episode start diversity)
+                metrics_to_log["train/reset_coverage"] = coverage_stats["reset_coverage"]
+                metrics_to_log["train/reset_entropy"] = coverage_stats["reset_entropy"]
+                # State coverage (full trajectory coverage)
+                metrics_to_log["train/state_coverage"] = coverage_stats["state_coverage"]
+                metrics_to_log["train/state_entropy"] = coverage_stats["state_entropy"]
+
         if logger is not None:
             time_dict = timeit.todict(prefix="time")
             metrics_to_log.update(timeit.todict(prefix="time"))
             metrics_to_log["time/speed"] = pbar.format_dict["rate"]
-            metrics_to_log["time/SPS-collecting"] = frames_in_batch / time_dict["time/collecting"]
+            metrics_to_log["time/SPS-collecting"] = (
+                frames_in_batch / time_dict["time/collecting"]
+            )
             metrics_to_log["time/SPS-total"] = frames_in_batch / sum(time_dict.values())
             log_metrics(logger, metrics_to_log, collected_frames)
 

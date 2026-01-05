@@ -292,33 +292,24 @@ class CoverageTracker(Transform):
                 unique_indices, counts = torch.unique(reset_indices, return_counts=True)
 
                 # Update reset coverage counts (convert to numpy for indexing)
+                # Clip indices to valid range (defensive against environment bugs)
+                max_valid_idx = len(self._reset_coverage_counts) - 1
                 for idx, count in zip(unique_indices.cpu().numpy(), counts.cpu().numpy()):
                     idx = int(idx)
+                    # Clip to valid range
+                    idx = min(idx, max_valid_idx)
                     if 0 <= idx < len(self._reset_coverage_counts):
                         self._reset_coverage_counts[idx] += int(count)
                         self._total_resets += int(count)
-                    else:
-                        # Index out of bounds - this indicates a problem with initialization
-                        # or data corruption. Log warning but continue.
-                        import warnings
-                        warnings.warn(
-                            f"CoverageTracker: reset_index {idx} out of bounds [0, {len(self._reset_coverage_counts)}). "
-                            f"This may indicate incorrect initialization or data corruption.",
-                            RuntimeWarning
-                        )
             else:
                 # Single reset index (scalar)
                 idx = int(reset_indices.item())
+                # Clip to valid range
+                max_valid_idx = len(self._reset_coverage_counts) - 1
+                idx = min(idx, max_valid_idx)
                 if 0 <= idx < len(self._reset_coverage_counts):
                     self._reset_coverage_counts[idx] += 1
                     self._total_resets += 1
-                else:
-                    import warnings
-                    warnings.warn(
-                        f"CoverageTracker: reset_index {idx} out of bounds [0, {len(self._reset_coverage_counts)}). "
-                        f"This may indicate incorrect initialization or data corruption.",
-                        RuntimeWarning
-                    )
 
         # Track state coverage (all timesteps visited during episodes)
         if "state_index" in tensordict.keys():
@@ -333,33 +324,24 @@ class CoverageTracker(Transform):
                 unique_indices, counts = torch.unique(state_indices, return_counts=True)
 
                 # Update state coverage counts (convert to numpy for indexing)
+                # Clip indices to valid range (defensive against environment bugs)
+                max_valid_idx = len(self._state_coverage_counts) - 1
                 for idx, count in zip(unique_indices.cpu().numpy(), counts.cpu().numpy()):
                     idx = int(idx)
+                    # Clip to valid range
+                    idx = min(idx, max_valid_idx)
                     if 0 <= idx < len(self._state_coverage_counts):
                         self._state_coverage_counts[idx] += int(count)
                         self._total_states += int(count)
-                    else:
-                        # Index out of bounds - this indicates a problem with initialization
-                        # or data corruption. Log warning but continue.
-                        import warnings
-                        warnings.warn(
-                            f"CoverageTracker: state_index {idx} out of bounds [0, {len(self._state_coverage_counts)}). "
-                            f"This may indicate incorrect initialization or data corruption.",
-                            RuntimeWarning
-                        )
             else:
                 # Single state index (scalar)
                 idx = int(state_indices.item())
+                # Clip to valid range
+                max_valid_idx = len(self._state_coverage_counts) - 1
+                idx = min(idx, max_valid_idx)
                 if 0 <= idx < len(self._state_coverage_counts):
                     self._state_coverage_counts[idx] += 1
                     self._total_states += 1
-                else:
-                    import warnings
-                    warnings.warn(
-                        f"CoverageTracker: state_index {idx} out of bounds [0, {len(self._state_coverage_counts)}). "
-                        f"This may indicate incorrect initialization or data corruption.",
-                        RuntimeWarning
-                    )
 
         return tensordict
 

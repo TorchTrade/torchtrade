@@ -413,7 +413,7 @@ EXAMPLE_COMMANDS = {
         "logger.backend= "
     ),
     "grpo_futuresonestep": (
-        "python examples/online/grpo_futures/train.py "
+        "python examples/online/grpo_futures_onestep/train.py "
         "collector.total_frames=100 "
         "collector.frames_per_batch=50 "
         "env.train_envs=2 "
@@ -435,6 +435,15 @@ EXAMPLE_COMMANDS = {
     ),
     "ppo_longonlyonestep": (
         "python examples/online/long_onestep_env/train_ppo.py "
+        "collector.total_frames=100 "
+        "collector.frames_per_batch=50 "
+        "env.train_envs=2 "
+        "loss.mini_batch_size=25 "
+        "logger.backend= "
+        "logger.test_interval=1000000 "
+    ),
+    "ppo_futuresonestep": (
+        "python examples/online/ppo_futures_onestep/train.py "
         "collector.total_frames=100 "
         "collector.frames_per_batch=50 "
         "env.train_envs=2 "

@@ -46,6 +46,8 @@ class MarketDataObservationSampler:
         if len(window_sizes) != len(time_frames):
             raise ValueError("window_sizes must be an int or list with same length as time_frames")
 
+        # Make explicit copy to avoid SettingWithCopyWarning when df is a slice
+        df = df.copy()
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
         df = df.set_index("timestamp").sort_index()
         self.df = df
