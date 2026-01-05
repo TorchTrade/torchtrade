@@ -34,6 +34,30 @@ See [Issue #54](https://github.com/TorchTrade/torchtrade_envs/issues/54) for the
 
 ## Quick Start
 
+### Tune Expert Hyperparameters
+
+Find optimal hyperparameters for an expert on your data:
+
+```bash
+# Tune MomentumActor parameters
+python tune_expert_hyperparameters.py \
+    --expert momentum \
+    --train_episodes 20 \
+    --test_episodes 50
+
+# Save best configuration and trading plot
+python tune_expert_hyperparameters.py \
+    --expert mean_reversion \
+    --save_config best_config.json \
+    --save_plot trading_history.png
+
+# Use custom data and test split
+python tune_expert_hyperparameters.py \
+    --expert breakout \
+    --data_path Torch-Trade/btcusdt_spot_1m_01_2020_to_12_2025 \
+    --test_split_start "2025-01-01"
+```
+
 ### Collect Demonstrations from All Experts
 
 ```bash
@@ -209,6 +233,125 @@ print(f"Selected action: {obs['action'].item()}")
 - Works in: Volatile markets with breakouts
 - Fails in: Many false breakouts
 
+## Hyperparameter Tuning
+
+The `tune_expert_hyperparameters.py` script helps you find optimal parameters for each expert strategy on your specific market data.
+
+### How It Works
+
+1. **Load Data**: Loads historical OHLCV data from HuggingFace
+2. **Train/Test Split**: Splits data by date (e.g., 2025-01-01)
+3. **Grid Search**: Tests all hyperparameter combinations on train data
+4. **Evaluation**: Evaluates best config on test data with visualization
+
+### Hyperparameter Search Spaces
+
+**MomentumActor:**
+```python
+{
+    "momentum_window": [5, 10, 15, 20],
+    "volatility_window": [10, 20, 30],
+    "momentum_threshold": [0.005, 0.01, 0.015, 0.02],
+    "volatility_threshold": [0.015, 0.02, 0.025, 0.03],
+}
+```
+
+**MeanReversionActor:**
+```python
+{
+    "ma_window": [10, 15, 20, 25, 30],
+    "deviation_threshold": [0.01, 0.015, 0.02, 0.025, 0.03],
+}
+```
+
+**BreakoutActor:**
+```python
+{
+    "bb_window": [15, 20, 25, 30],
+    "bb_std": [1.5, 2.0, 2.5, 3.0],
+}
+```
+
+### Example Output
+
+```
+============================================================
+TUNING RESULTS: MOMENTUM EXPERT
+============================================================
+
+Best Hyperparameters (Train Set):
+  momentum_window: 10
+  volatility_window: 20
+  momentum_threshold: 0.01
+  volatility_threshold: 0.02
+
+Train Set Performance:
+  Mean Return:        45.23
+  Std Return:         12.34
+  Sharpe Ratio:        3.667
+  Win Rate:           65.0%
+  Max Return:         78.90
+  Min Return:         12.34
+  Avg Length:        234.5
+
+Test Set Performance:
+  Mean Return:        42.10
+  Std Return:         14.20
+  Sharpe Ratio:        2.965
+  Win Rate:           60.0%
+  Max Return:         71.23
+  Min Return:          8.91
+  Avg Length:        245.2
+
+Generalization (Test vs Train):
+  Sharpe Difference: -0.702
+  ✓ Similar performance on test set
+```
+
+The script also generates a **trading history plot** showing portfolio value over time on the test set.
+
+### Custom Hyperparameter Grid
+
+You can provide a custom grid via JSON file:
+
+```bash
+# Create custom_grid.json
+cat > custom_grid.json << EOF
+{
+  "momentum_window": [8, 12, 16],
+  "volatility_window": [15, 25],
+  "momentum_threshold": [0.008, 0.012],
+  "volatility_threshold": [0.018, 0.022]
+}
+EOF
+
+# Use custom grid
+python tune_expert_hyperparameters.py \
+    --expert momentum \
+    --custom_grid custom_grid.json
+```
+
+### Loading Best Configuration
+
+After tuning, you can load and use the best configuration:
+
+```python
+import json
+from torchtrade.actor import MomentumActor
+
+# Load best config
+with open("best_config.json", 'r') as f:
+    config = json.load(f)
+
+# Create actor with best hyperparameters
+actor = MomentumActor(
+    market_data_keys=["market_data_5Minute_24"],
+    **config["best_hyperparams"]
+)
+
+# Now use actor for demonstration collection or evaluation
+```
+
 ## Next Steps: Behavioral Cloning
 
 Once you've collected demonstrations, you can use them for behavioral cloning:
@@ -242,6 +385,20 @@ for epoch in range(50):
 Then fine-tune with PPO for better performance!
 
 ## Command Line Arguments
+
+### `tune_expert_hyperparameters.py`
+
+```
+--expert               Which expert to tune (momentum|mean_reversion|breakout)
+--data_path           HuggingFace dataset path (default: Torch-Trade/btcusdt_spot_1m_01_2020_to_12_2025)
+--test_split_start    Test split start date (default: 2025-01-01)
+--train_episodes      Number of episodes for training evaluation (default: 20)
+--test_episodes       Number of episodes for test evaluation (default: 50)
+--save_config         Path to save best configuration JSON (optional)
+--save_plot          Path to save trading history plot (optional)
+--custom_grid        Path to custom hyperparameter grid JSON (optional)
+--seed               Random seed (default: 42)
+```
 
 ### `collect_demonstrations.py`
 
