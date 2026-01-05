@@ -7,17 +7,18 @@ This script demonstrates how to:
 3. Perform grid search for optimal hyperparameters on train data
 4. Evaluate best configuration on test data with visualization
 
-Usage:
-    # Tune MomentumActor parameters
-    python tune_expert_hyperparameters.py --expert momentum --episodes 50
+Since the strategies are deterministic, each configuration is evaluated once per dataset.
 
-    # Tune with custom data
+Usage:
+    # Tune MomentumActor parameters on full dataset
+    python tune_expert_hyperparameters.py --expert momentum
+
+    # Tune with custom data and save results
     python tune_expert_hyperparameters.py --expert mean_reversion \
         --data_path Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025 \
-        --test_split_start "2025-01-01"
-
-    # Save best configuration
-    python tune_expert_hyperparameters.py --expert breakout --save_config best_config.json
+        --test_split_start "2025-01-01" \
+        --save_config best_config.json \
+        --save_plot trading_history.png
 """
 
 import argparse
@@ -65,13 +66,14 @@ HYPERPARAMETER_GRIDS = {
 # ============================================================================
 
 
-def create_env(df: pd.DataFrame, seed: int = 42, max_steps: int = 5000) -> SeqLongOnlyEnv:
+def create_env(df: pd.DataFrame, seed: int = 42) -> SeqLongOnlyEnv:
     """Create a SeqLongOnlyEnv for evaluation.
+
+    For deterministic strategies, we run ONE full episode through the entire dataset.
 
     Args:
         df: DataFrame with OHLCV data
         seed: Random seed
-        max_steps: Maximum steps per episode (default: 5000 = ~17 hours of trading on 5min execution)
     """
     config = SeqLongOnlyEnvConfig(
         symbol="BTC/USD",
@@ -86,8 +88,6 @@ def create_env(df: pd.DataFrame, seed: int = 42, max_steps: int = 5000) -> SeqLo
         transaction_fee=0.0025,
         slippage=0.001,
         seed=seed,
-        random_start=True,  # Randomize start for diversity
-        max_traj_length=max_steps,  # Limit episode length
     )
     return SeqLongOnlyEnv(df, config)
 
@@ -112,11 +112,14 @@ def create_expert(expert_name: str, hyperparams: Dict, market_data_keys: List[st
 def evaluate_expert(
     env: SeqLongOnlyEnv,
     expert,
-    num_episodes: int = 10,
+    num_episodes: int = 1,
     render_history: bool = False,
 ) -> Dict[str, float]:
     """
     Evaluate expert performance on the environment.
+
+    Since strategies are deterministic, num_episodes=1 is sufficient for a single evaluation.
+    Multiple episodes only make sense if you want to test across different time periods.
 
     Returns:
         Dictionary with performance metrics:
@@ -197,11 +200,13 @@ def grid_search(
     expert_name: str,
     hyperparameter_grid: Dict[str, List],
     market_data_keys: List[str],
-    num_episodes: int = 10,
+    num_episodes: int = 1,
     verbose: bool = True,
 ) -> Tuple[Dict, Dict, List[Dict]]:
     """
     Perform grid search over hyperparameters.
+
+    Since strategies are deterministic, num_episodes=1 evaluates each config once.
 
     Returns:
         - best_hyperparams: Best hyperparameter configuration
@@ -389,14 +394,14 @@ def main():
     parser.add_argument(
         "--train_episodes",
         type=int,
-        default=20,
-        help="Number of episodes for training evaluation (default: 20)",
+        default=1,
+        help="Number of episodes for training evaluation (default: 1, since strategies are deterministic)",
     )
     parser.add_argument(
         "--test_episodes",
         type=int,
-        default=50,
-        help="Number of episodes for test evaluation (default: 50)",
+        default=1,
+        help="Number of episodes for test evaluation (default: 1, since strategies are deterministic)",
     )
     parser.add_argument(
         "--save_config",
