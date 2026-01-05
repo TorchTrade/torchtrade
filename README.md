@@ -630,7 +630,7 @@ If you use TorchTrade in your research, please cite:
   title={TorchTrade: Reinforcement Learning Environments for Algorithmic Trading},
   author={Dittert, Sebastian},
   year={2025},
-  url={https://github.com/TorchTrade/torchrl_alpaca_env}
+  url={https://github.com/TorchTrade/torchtrade_envs}
 }
 ```
 
@@ -638,8 +638,8 @@ If you use TorchTrade in your research, please cite:
 
 ## Support
 
-- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchrl_alpaca_env/discussions)
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchrl_alpaca_env/issues)
+- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchtrade_envs/discussions)
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade_envs/issues)
 - 📧 **Email**: torchtradecontact@gmail.com
 - 💰 **Donate**: [PayPal](https://www.paypal.me/yourname)
 
