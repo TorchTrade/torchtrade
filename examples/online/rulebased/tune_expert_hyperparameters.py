@@ -65,8 +65,14 @@ HYPERPARAMETER_GRIDS = {
 # ============================================================================
 
 
-def create_env(df: pd.DataFrame, seed: int = 42) -> SeqLongOnlyEnv:
-    """Create a SeqLongOnlyEnv for evaluation."""
+def create_env(df: pd.DataFrame, seed: int = 42, max_steps: int = 5000) -> SeqLongOnlyEnv:
+    """Create a SeqLongOnlyEnv for evaluation.
+
+    Args:
+        df: DataFrame with OHLCV data
+        seed: Random seed
+        max_steps: Maximum steps per episode (default: 5000 = ~17 hours of trading on 5min execution)
+    """
     config = SeqLongOnlyEnvConfig(
         symbol="BTC/USD",
         time_frames=[
@@ -80,7 +86,8 @@ def create_env(df: pd.DataFrame, seed: int = 42) -> SeqLongOnlyEnv:
         transaction_fee=0.0025,
         slippage=0.001,
         seed=seed,
-        random_start=False,  # Deterministic for evaluation
+        random_start=True,  # Randomize start for diversity
+        max_traj_length=max_steps,  # Limit episode length
     )
     return SeqLongOnlyEnv(df, config)
 
@@ -135,7 +142,17 @@ def evaluate_expert(
 
         while not (done or truncated):
             obs_with_action = expert(obs.clone())
-            obs = env.step(obs_with_action)
+
+            # Step environment and handle running out of data
+            try:
+                obs = env.step(obs_with_action)
+            except ValueError as e:
+                if "No more timestamps available" in str(e):
+                    # Environment ran out of data - episode is truncated
+                    truncated = True
+                    break
+                else:
+                    raise
 
             reward = obs.get("reward", torch.tensor([0.0])).item()
             done = obs.get("done", torch.tensor([False])).item()
