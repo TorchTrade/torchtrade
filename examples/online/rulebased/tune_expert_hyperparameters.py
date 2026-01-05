@@ -13,7 +13,7 @@ Usage:
 
     # Tune with custom data
     python tune_expert_hyperparameters.py --expert mean_reversion \
-        --data_path Torch-Trade/btcusdt_spot_1m_01_2020_to_12_2025 \
+        --data_path Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025 \
         --test_split_start "2025-01-01"
 
     # Save best configuration
@@ -128,16 +128,18 @@ def evaluate_expert(
     for episode in range(num_episodes):
         obs = env.reset()
         done = False
+        truncated = False
         episode_return = 0.0
         episode_length = 0
         portfolio_values = []
 
-        while not done:
+        while not (done or truncated):
             obs_with_action = expert(obs.clone())
             obs = env.step(obs_with_action)
 
             reward = obs.get("reward", torch.tensor([0.0])).item()
             done = obs.get("done", torch.tensor([False])).item()
+            truncated = obs.get("truncated", torch.tensor([False])).item()
 
             episode_return += reward
             episode_length += 1
@@ -358,7 +360,7 @@ def main():
     parser.add_argument(
         "--data_path",
         type=str,
-        default="Torch-Trade/btcusdt_spot_1m_01_2020_to_12_2025",
+        default="Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025",
         help="HuggingFace dataset path",
     )
     parser.add_argument(
