@@ -11,7 +11,7 @@ env:
   bankrupt_threshold: 0.1
   leverage: 5  # 5x leverage
   stoploss_levels: [-0.02]  # 2%, 5%, 10% stop loss
-  takeprofit_levels: [0.04, 0.06]    # 5%, 10%, 20% take profit
+  takeprofit_levels: [0.04, 0.06, 0.08]    # 5%, 10%, 20% take profit
   exp_name: ${logger.exp_name}
   seed: 0
   train_envs: 10

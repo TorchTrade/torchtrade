@@ -145,7 +145,7 @@ def main(cfg: DictConfig):  # noqa: F821
     ctrl_loss = None
     if cfg.ctrl.use_ctrl:
         ctrl_loss = CTRLLoss(
-            encoder_network=encoder,
+            encoder_network=encoder.to(actor.device),
             embedding_dim=cfg.model.embedding_dim,
             projection_dim=cfg.ctrl.projection_dim,
             num_prototypes=cfg.ctrl.num_prototypes,
@@ -157,6 +157,8 @@ def main(cfg: DictConfig):  # noqa: F821
         )
         # Set the embedding key to match encoder's output
         ctrl_loss.set_keys(embedding="common_features")
+        # Move CTRL loss to device (projection_head, prototypes)
+        ctrl_loss.to(device)
 
     # Create optimizers
     # PPO optimizer (actor + critic)
