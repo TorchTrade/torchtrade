@@ -26,6 +26,7 @@ def main(cfg: DictConfig):  # noqa: F821
     from torchrl.envs import ExplorationType, set_exploration_type
     from torchrl.record.loggers import generate_exp_name, get_logger
     from utils import make_environment, make_grpo_policy, make_collector, log_metrics
+    from torchtrade.envs.transforms import CoverageTracker
 
     torch.set_float32_matmul_precision("high")
 
@@ -51,7 +52,7 @@ def main(cfg: DictConfig):  # noqa: F821
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
     # TODO: possibly wrong as the test_df is in 1min freq
     max_eval_traj_length = len(test_df)
-    train_env, eval_env = make_environment(
+    train_env, eval_env, coverage_tracker = make_environment(
         train_df,
         test_df,
         cfg,
@@ -82,12 +83,13 @@ def main(cfg: DictConfig):  # noqa: F821
         cfg=cfg,
     )
 
-    # Create collector
+    # Create collector with coverage tracker as postproc
     collector = make_collector(
         cfg,
         train_env,
         actor,
         compile_mode,
+        postproc=coverage_tracker,
     )
 
     # Create loss module
@@ -213,6 +215,17 @@ def main(cfg: DictConfig):  # noqa: F821
                 if fig is not None and logger is not None:
                     metrics_to_log["eval/history"] = wandb.Image(fig[0])
                 actor.train()
+
+        # Log dual coverage metrics (if available and enabled)
+        if coverage_tracker is not None:
+            coverage_stats = coverage_tracker.get_coverage_stats()
+            if coverage_stats["enabled"]:
+                # Reset coverage (episode start diversity)
+                metrics_to_log["train/reset_coverage"] = coverage_stats["reset_coverage"]
+                metrics_to_log["train/reset_entropy"] = coverage_stats["reset_entropy"]
+                # State coverage (full trajectory coverage)
+                metrics_to_log["train/state_coverage"] = coverage_stats["state_coverage"]
+                metrics_to_log["train/state_entropy"] = coverage_stats["state_entropy"]
 
         if logger is not None:
             time_dict = timeit.todict(prefix="time")

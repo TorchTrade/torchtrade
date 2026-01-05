@@ -15,6 +15,8 @@ from torchrl.envs import (
     TransformedEnv,
     StepCounter,
 )
+
+from torchtrade.envs.transforms import CoverageTracker
 from torchrl.collectors import SyncDataCollector
 
 from torchrl.modules import (
@@ -193,7 +195,11 @@ def make_environment(
         serial_for_single=True,
     )
     eval_env = apply_env_transforms(eval_parallel_env, max_eval_traj_length, one_step_env=False)
-    return train_env, eval_env
+
+    # Create coverage tracker for postproc (used in collector)
+    coverage_tracker = CoverageTracker()
+
+    return train_env, eval_env, coverage_tracker
 
 
 # ====================================================================
@@ -340,7 +346,7 @@ def make_grpo_policy(env, device, cfg):
     return policy
 
 
-def make_collector(cfg, train_env, actor_model_explore, compile_mode):
+def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=None):
     """Make data collector."""
     device = cfg.collector.device
     if device in ("", None):
@@ -356,6 +362,7 @@ def make_collector(cfg, train_env, actor_model_explore, compile_mode):
         device=device,
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
+        postproc=postproc,  # Add coverage tracker as postproc
     )
     return collector
 

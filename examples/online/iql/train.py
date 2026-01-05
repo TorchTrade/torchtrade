@@ -29,6 +29,8 @@ from utils import (
     make_collector,
 )
 
+from torchtrade.envs.transforms import CoverageTracker
+
 torch.set_float32_matmul_precision("high")
 
 
@@ -68,7 +70,7 @@ def main(cfg: DictConfig):  # noqa: F821
     train_df = df[df['0'] < cfg.env.test_split_start]
     test_df  = df[df['0'] >= cfg.env.test_split_start]
 
-    train_env, eval_env = make_environment(
+    train_env, eval_env, coverage_tracker = make_environment(
         train_df,
         test_df,
         cfg,
@@ -124,9 +126,10 @@ def main(cfg: DictConfig):  # noqa: F821
             else:
                 compile_mode = "reduce-overhead"
 
-    # Create collector
+    # Create collector with coverage tracker as postproc
     collector = make_collector(
-        cfg, train_env, actor_model_explore=model[0], compile_mode=compile_mode
+        cfg, train_env, actor_model_explore=model[0], compile_mode=compile_mode,
+        postproc=coverage_tracker,
     )
 
     if cfg.compile.compile:
@@ -211,6 +214,17 @@ def main(cfg: DictConfig):  # noqa: F821
             metrics_to_log["train/actor_loss"] = loss_info["loss_actor"]
             metrics_to_log["train/value_loss"] = loss_info["loss_value"]
             metrics_to_log["train/entropy"] = loss_info.get("entropy")
+
+        # Log dual coverage metrics (if available and enabled)
+        if coverage_tracker is not None:
+            coverage_stats = coverage_tracker.get_coverage_stats()
+            if coverage_stats["enabled"]:
+                # Reset coverage (episode start diversity)
+                metrics_to_log["train/reset_coverage"] = coverage_stats["reset_coverage"]
+                metrics_to_log["train/reset_entropy"] = coverage_stats["reset_entropy"]
+                # State coverage (full trajectory coverage)
+                metrics_to_log["train/state_coverage"] = coverage_stats["state_coverage"]
+                metrics_to_log["train/state_entropy"] = coverage_stats["state_entropy"]
 
         if logger is not None:
             metrics_to_log.update(timeit.todict(prefix="time"))

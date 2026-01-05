@@ -26,6 +26,8 @@ from torchrl.envs import (
     TransformedEnv,
 )
 
+from torchtrade.envs.transforms import CoverageTracker
+
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 from torchrl.modules import (
     MLP,
@@ -175,7 +177,11 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
         ),
         train_env.transform.clone(),
     )
-    return train_env, eval_env
+
+    # Create coverage tracker for postproc (used in collector)
+    coverage_tracker = CoverageTracker()
+
+    return train_env, eval_env, coverage_tracker
 
 
 # ====================================================================
@@ -183,7 +189,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
 # ---------------------------
 
 
-def make_collector(cfg, train_env, actor_model_explore, compile_mode):
+def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=None):
     """Make collector."""
     device = cfg.collector.device
     if device in ("", None):
@@ -201,6 +207,7 @@ def make_collector(cfg, train_env, actor_model_explore, compile_mode):
         device=device,
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
+        postproc=postproc,  # Add coverage tracker as postproc
     )
     collector.set_seed(cfg.env.seed)
     return collector

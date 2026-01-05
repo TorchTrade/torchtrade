@@ -29,6 +29,7 @@ def main(cfg: DictConfig):  # noqa: F821
     from torchrl.objectives.value.advantages import GAE
     from torchrl.record.loggers import generate_exp_name, get_logger
     from utils import make_environment, make_ppo_models, make_collector, log_metrics
+    from torchtrade.envs.transforms import CoverageTracker
 
     torch.set_float32_matmul_precision("high")
 
@@ -53,7 +54,7 @@ def main(cfg: DictConfig):  # noqa: F821
 
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
     max_eval_traj_length = len(test_df)
-    train_env, eval_env = make_environment(
+    train_env, eval_env, coverage_tracker = make_environment(
         train_df,
         test_df,
         cfg,
@@ -86,11 +87,13 @@ def main(cfg: DictConfig):  # noqa: F821
     )
 
     # Create collector
+    # Create collector with coverage tracker as postproc
     collector = make_collector(
         cfg,
         train_env,
         actor,
         compile_mode,
+        postproc=coverage_tracker,
     )
 
     # Create data buffer
@@ -304,6 +307,17 @@ def main(cfg: DictConfig):  # noqa: F821
                     metrics_to_log["eval/history"] = wandb.Image(fig[0])
                 torch.save(actor.state_dict(), f"ppo_futures_sltp_policy_{i}.pth")
                 actor.train()
+
+        # Log dual coverage metrics (if available and enabled)
+        if coverage_tracker is not None:
+            coverage_stats = coverage_tracker.get_coverage_stats()
+            if coverage_stats["enabled"]:
+                # Reset coverage (episode start diversity)
+                metrics_to_log["train/reset_coverage"] = coverage_stats["reset_coverage"]
+                metrics_to_log["train/reset_entropy"] = coverage_stats["reset_entropy"]
+                # State coverage (full trajectory coverage)
+                metrics_to_log["train/state_coverage"] = coverage_stats["state_coverage"]
+                metrics_to_log["train/state_entropy"] = coverage_stats["state_entropy"]
 
         if logger is not None:
             time_dict = timeit.todict(prefix="time")
