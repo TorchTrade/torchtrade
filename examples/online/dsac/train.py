@@ -72,8 +72,15 @@ def main(cfg: DictConfig):  # noqa: F821
     # Create environments
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
-    test_df = df[0:(1440 * 14)]  # 14 days
-    train_df = df[(1440 * 14):]
+    test_df = df[0:(1440 * 14)]  # First 14 days for testing
+    train_df = df[(1440 * 14):]  # Remaining data for training
+
+    print("="*80)
+    print("DATA SPLIT INFO:")
+    print(f"Total rows: {len(df)}")
+    print(f"Train rows (1min): {len(train_df)}")
+    print(f"Test rows (1min): {len(test_df)}")
+    print("="*80)
 
     train_env, eval_env = make_environment(
         train_df,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings
 
 import hydra
+import pandas as pd
 from torchrl._utils import compile_with_warmup
 import datasets
 
@@ -36,16 +37,29 @@ def main(cfg: DictConfig):  # noqa: F821
     device = torch.device(device)
     print("USING DEVICE: ", device)
 
-    # Creante env
-    #df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
+    # Create env
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
-    train_df = df[df['0'] < cfg.env.test_split_start]
-    test_df  = df[df['0'] >= cfg.env.test_split_start]
 
+    # Convert timestamp column to datetime for proper filtering
+    df['0'] = pd.to_datetime(df['0'])
+    test_split_date = pd.to_datetime(cfg.env.test_split_start)
+
+    train_df = df[df['0'] < test_split_date]
+    test_df  = df[df['0'] >= test_split_date]
 
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
     max_eval_traj_length = len(test_df)
+
+    print("="*80)
+    print("DATA SPLIT INFO:")
+    print(f"Total rows: {len(df)}")
+    print(f"Train rows (1min): {len(train_df)}")
+    print(f"Test rows (1min): {len(test_df)}")
+    print(f"Train date range: {train_df['0'].min()} to {train_df['0'].max()}")
+    print(f"Test date range: {test_df['0'].min()} to {test_df['0'].max()}")
+    print(f"Max train traj length: {max_train_traj_length}")
+    print("="*80)
     train_env, eval_env = make_environment(
         train_df,
         test_df,

@@ -33,16 +33,22 @@ def main(cfg: DictConfig):  # noqa: F821
     device = torch.device(device)
     print("USING DEVICE: ", device)
 
-    # Creante env
-    #df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
+    # Create env
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
-    test_df = df[0:(1440 *21)] # 14 days
-    train_df = df[(1440 * 21):]
-
+    test_df = df[0:(1440 * 21)]  # First 21 days for testing
+    train_df = df[(1440 * 21):]  # Remaining data for training
 
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
     max_eval_traj_length = len(test_df)
+
+    print("="*80)
+    print("DATA SPLIT INFO:")
+    print(f"Total rows: {len(df)}")
+    print(f"Train rows (1min): {len(train_df)}")
+    print(f"Test rows (1min): {len(test_df)}")
+    print(f"Max train traj length: {max_train_traj_length}")
+    print("="*80)
     train_env, eval_env = make_environment(
         train_df,
         test_df,
