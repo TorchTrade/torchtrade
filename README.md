@@ -528,6 +528,40 @@ python examples/online/ppo/train.py \
 
 ---
 
+## Trading Platforms
+
+Start live trading with these supported platforms:
+
+### 🪙 Cryptocurrency Trading
+
+**[Binance](https://www.binance.com/en/activity/referral-entry/CPA)** - Leading cryptocurrency exchange
+- **Supported by:** `BinanceFuturesTorchTradingEnv`
+- **Features:** Spot & futures trading, up to 125x leverage, testnet available
+- **Commission:** Maker 0.02% / Taker 0.04% (with BNB discount)
+- **Get Started:** [Sign up for Binance](https://www.binance.com/en/activity/referral-entry/CPA) <!-- Replace with your affiliate link -->
+
+### 📈 Stock & Crypto API
+
+**[Alpaca](https://alpaca.markets/)** - Commission-free trading API
+- **Supported by:** `AlpacaTorchTradingEnv`, `AlpacaSLTPTorchTradingEnv`
+- **Features:** Commission-free stocks & crypto, paper trading, real-time data
+- **Best for:** US markets, algorithmic trading
+- **Get Started:** [Sign up for Alpaca](https://alpaca.markets/signup)
+
+### 💱 Forex & CFD Trading
+
+**[OANDA](https://www.oanda.com/)** - Forex and CFD trading platform
+- **Status:** Future integration planned
+- **Features:** 68+ currency pairs, CFDs, competitive spreads
+- **Regulation:** FCA, ASIC, CFTC, NFA regulated
+- **Get Started:** [Sign up for OANDA](https://www.oanda.com/) <!-- Replace with your affiliate link -->
+
+---
+
+**Note:** Binance and OANDA links are affiliate links. Using them helps support TorchTrade development at no extra cost to you. Alpaca does not offer an affiliate program.
+
+---
+
 ## Testing
 
 Run the test suite to verify your installation:
