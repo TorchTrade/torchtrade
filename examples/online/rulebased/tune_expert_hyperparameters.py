@@ -182,7 +182,7 @@ def evaluate_expert(
     metrics = {
         "mean_return": float(returns.mean()),
         "std_return": float(returns.std()),
-        "sharpe_ratio": float(returns.mean() / returns.std()) if returns.std() > 0 else 0.0,
+        "sharpe_ratio": float(returns.mean() / returns.std()) if returns.std() > 0 else float(returns.mean()),
         "max_return": float(returns.max()),
         "min_return": float(returns.min()),
         "win_rate": float((returns > 0).sum() / len(returns)),
