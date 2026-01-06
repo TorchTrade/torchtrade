@@ -22,14 +22,20 @@ TorchTrade is a modular RL framework built on TorchRL that provides:
 ### 1. Installation
 
 ```bash
-# Create conda environment
-conda create --name torchtrade python=3.9
-conda activate torchtrade
+# Install UV (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Clone and install
+# Clone repository
 git clone https://github.com/TorchTrade/torchtrade_envs.git
 cd torchtrade_envs
-pip install -e .
+
+# Install TorchTrade and all dependencies
+uv sync
+
+# Activate the virtual environment
+source .venv/bin/activate  # On Unix/macOS
+# or
+.venv\Scripts\activate  # On Windows
 ```
 
 ### 2. Your First Environment
@@ -61,10 +67,10 @@ print(f"Reward: {tensordict['reward'].item()}")
 
 ```bash
 # Train PPO on long-only environment
-python examples/online/ppo/train.py
+uv run python examples/online/ppo/train.py
 
 # Customize with Hydra overrides
-python examples/online/ppo/train.py env.symbol="ETH/USD" optim.lr=1e-4
+uv run python examples/online/ppo/train.py env.symbol="ETH/USD" optim.lr=1e-4
 ```
 
 ---
@@ -300,16 +306,16 @@ TorchTrade includes implementations of multiple RL algorithms:
 
 ```bash
 # PPO on long-only environment
-python examples/online/ppo/train.py
+uv run python examples/online/ppo/train.py
 
 # GRPO on futures one-step
-python examples/online/grpo_futures_onestep/train.py
+uv run python examples/online/grpo_futures_onestep/train.py
 
 # IQL offline training
-python examples/online/iql/train.py
+uv run python examples/online/iql/train.py
 
 # Customize with Hydra overrides
-python examples/online/ppo/train.py \
+uv run python examples/online/ppo/train.py \
     env.symbol="ETH/USD" \
     optim.lr=1e-4 \
     loss.gamma=0.95
@@ -323,32 +329,41 @@ python examples/online/ppo/train.py \
 
 - Python 3.8+
 - CUDA (optional, for GPU acceleration)
+- [UV](https://docs.astral.sh/uv/) - Fast Python package installer
 
 ### Full Installation
 
 ```bash
-# 1. Create conda environment
-conda create --name torchtrade python=3.9
-conda activate torchtrade
+# 1. Install UV (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# On Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 # 2. Clone repository
 git clone https://github.com/TorchTrade/torchrl_alpaca_env.git
 cd torchrl_alpaca_env
 
-# 3. Install TorchTrade
-pip install -e .
+# 3. Install TorchTrade and all dependencies
+uv sync
 
 # 4. Install development dependencies (optional)
-pip install -e .[dev]
+uv sync --extra dev
 
-# 5. For live trading, create .env file
+# 5. Install documentation dependencies (optional)
+uv sync --extra docs
+
+# 6. Activate the virtual environment
+source .venv/bin/activate  # On Unix/macOS
+# or
+.venv\Scripts\activate  # On Windows
+
+# 7. For live trading, create .env file
 cat > .env << EOF
 API_KEY=your_alpaca_api_key
 SECRET_KEY=your_alpaca_secret_key
 EOF
 
-# 6. Run tests to verify installation
-pytest tests/ -v --cov=torchtrade
+# 8. Run tests to verify installation
+uv run pytest tests/ -v --cov=torchtrade
 ```
 
 ---
@@ -527,7 +542,7 @@ loss:
 Override parameters from command line:
 
 ```bash
-python examples/online/ppo/train.py \
+uv run python examples/online/ppo/train.py \
     env.symbol="ETH/USD" \
     env.initial_cash=[5000,10000] \
     optim.lr=1e-4 \
@@ -609,16 +624,16 @@ Run the test suite to verify your installation:
 
 ```bash
 # Run all tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Run with coverage report
-pytest tests/ -v --cov=torchtrade --cov-report=term-missing
+uv run pytest tests/ -v --cov=torchtrade --cov-report=term-missing
 
 # Run specific test file
-pytest tests/envs/offline/test_seqlongonly.py -v
+uv run pytest tests/envs/offline/test_seqlongonly.py -v
 
 # Run specific test
-pytest tests/envs/offline/test_seqlongonly.py::test_step_buy_action -v
+uv run pytest tests/envs/offline/test_seqlongonly.py::test_step_buy_action -v
 ```
 
 ---
@@ -639,13 +654,13 @@ We welcome contributions! To contribute:
 
 ```bash
 # Install with development dependencies
-pip install -e .[dev]
+uv sync --extra dev
 
 # Run tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Run tests with coverage
-pytest tests/ -v --cov=torchtrade --cov-report=html
+uv run pytest tests/ -v --cov=torchtrade --cov-report=html
 ```
 
 ### Reporting Issues

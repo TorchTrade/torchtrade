@@ -24,7 +24,7 @@ Usage:
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Callable
 from itertools import product
 
 import datasets
@@ -35,7 +35,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 from torchtrade.actor import MomentumActor, MeanReversionActor, BreakoutActor
-from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs import SeqFuturesEnv, SeqFuturesEnvConfig
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
 
 
@@ -51,8 +51,11 @@ HYPERPARAMETER_GRIDS = {
         "volatility_threshold": [0.015, 0.02, 0.025, 0.03],
     },
     "mean_reversion": {
-        "ma_window": [10, 15, 20, 25, 30],
-        "deviation_threshold": [0.01, 0.015, 0.02, 0.025, 0.03],
+        "bb_window": [15, 20, 25],
+        "bb_std": [1.5, 2.0, 2.5],
+        "stoch_rsi_window": [12, 14, 16],
+        "oversold_threshold": [15, 20, 25],
+        "overbought_threshold": [75, 80, 85],
     },
     "breakout": {
         "bb_window": [15, 20, 25, 30],
@@ -66,30 +69,30 @@ HYPERPARAMETER_GRIDS = {
 # ============================================================================
 
 
-def create_env(df: pd.DataFrame, seed: int = 42) -> SeqLongOnlyEnv:
-    """Create a SeqLongOnlyEnv for evaluation.
+def create_env(df: pd.DataFrame, preprocessing_fn: Callable = None, seed: int = 42) -> SeqFuturesEnv:
+    """Create a SeqFuturesEnv for evaluation.
 
     For deterministic strategies, we run ONE full episode through the entire dataset.
 
     Args:
         df: DataFrame with OHLCV data
+        preprocessing_fn: Optional preprocessing function from actor
         seed: Random seed
     """
-    config = SeqLongOnlyEnvConfig(
+    config = SeqFuturesEnvConfig(
         symbol="BTC/USD",
         time_frames=[
-            TimeFrame(1, TimeFrameUnit.Minute),
             TimeFrame(5, TimeFrameUnit.Minute),
             TimeFrame(15, TimeFrameUnit.Minute),
         ],
-        window_sizes=[12, 8, 8],
-        execute_on=TimeFrame(5, TimeFrameUnit.Minute),
+        window_sizes=[1, 1],  # Small windows OK - features computed on full dataset
+        execute_on=TimeFrame(15, TimeFrameUnit.Minute),
         initial_cash=1000,
         transaction_fee=0.0025,
         slippage=0.001,
         seed=seed,
     )
-    return SeqLongOnlyEnv(df, config)
+    return SeqFuturesEnv(df, config, feature_preprocessing_fn=preprocessing_fn)
 
 
 def create_expert(expert_name: str, hyperparams: Dict, market_data_keys: List[str]):
@@ -102,7 +105,14 @@ def create_expert(expert_name: str, hyperparams: Dict, market_data_keys: List[st
     if expert_name == "momentum":
         return MomentumActor(**base_kwargs, **hyperparams)
     elif expert_name == "mean_reversion":
-        return MeanReversionActor(**base_kwargs, **hyperparams)
+        # MeanReversionActor uses preprocessed features
+        features_order = [
+            "open", "high", "low", "close", "volume",
+            "features_bb_middle", "features_bb_std", "features_bb_upper",
+            "features_bb_lower", "features_bb_position",
+            "features_stoch_rsi_k", "features_stoch_rsi_d"
+        ]
+        return MeanReversionActor(**base_kwargs, features_order=features_order, **hyperparams)
     elif expert_name == "breakout":
         return BreakoutActor(**base_kwargs, **hyperparams)
     else:
@@ -110,7 +120,7 @@ def create_expert(expert_name: str, hyperparams: Dict, market_data_keys: List[st
 
 
 def evaluate_expert(
-    env: SeqLongOnlyEnv,
+    env: SeqFuturesEnv,
     expert,
     num_episodes: int = 1,
     render_history: bool = False,
@@ -196,7 +206,7 @@ def evaluate_expert(
 
 
 def grid_search(
-    env: SeqLongOnlyEnv,
+    env: SeqFuturesEnv,
     expert_name: str,
     hyperparameter_grid: Dict[str, List],
     market_data_keys: List[str],
@@ -375,9 +385,9 @@ def main():
     parser.add_argument(
         "--expert",
         type=str,
-        default="momentum",
+        default="mean_reversion",
         choices=["momentum", "mean_reversion", "breakout"],
-        help="Which expert to tune (default: momentum)",
+        help="Which expert to tune (default: mean_reversion)",
     )
     parser.add_argument(
         "--data_path",
@@ -444,17 +454,32 @@ def main():
     print(f"  Train: {len(train_df):,} rows ({train_df['0'].min()} to {train_df['0'].max()})")
     print(f"  Test:  {len(test_df):,} rows ({test_df['0'].min()} to {test_df['0'].max()})")
 
-    # Create environments
-    print("\nCreating environments...")
-    train_env = create_env(train_df, seed=args.seed)
-    test_env = create_env(test_df, seed=args.seed)
-
-    # Get market data keys
+    # Create temporary environment to get market data keys
+    print("\nCreating temporary environment to infer structure...")
+    temp_env = create_env(train_df.head(1000), seed=args.seed)
     market_data_keys = [
-        key for key in train_env.observation_spec.keys()
+        key for key in temp_env.observation_spec.keys()
         if key.startswith("market_data_")
     ]
     print(f"Market data keys: {market_data_keys}")
+
+    # Create temporary expert to get preprocessing function
+    temp_hyperparams = {k: v[0] for k, v in (
+        HYPERPARAMETER_GRIDS.get(args.expert, {}) if not args.custom_grid
+        else json.load(open(args.custom_grid))
+    ).items()}
+    temp_expert = create_expert(args.expert, temp_hyperparams, market_data_keys)
+    preprocessing_fn = temp_expert.get_preprocessing_fn()
+
+    if preprocessing_fn is not None:
+        print(f"Using preprocessing function from {args.expert} actor")
+    else:
+        print(f"No preprocessing needed for {args.expert} actor")
+
+    # Create environments with preprocessing
+    print("\nCreating full environments with preprocessing...")
+    train_env = create_env(train_df, preprocessing_fn=preprocessing_fn, seed=args.seed)
+    test_env = create_env(test_df, preprocessing_fn=preprocessing_fn, seed=args.seed)
 
     # Load hyperparameter grid
     if args.custom_grid:

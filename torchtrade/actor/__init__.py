@@ -1,34 +1,12 @@
 # Rule-based actors (no optional dependencies)
 from torchtrade.actor.rulebased import (
     RuleBasedActor,
-    MomentumActor,
     MeanReversionActor,
-    BreakoutActor,
-    SLTPRuleBasedActor,
-    MomentumSLTPActor,
-    MeanReversionSLTPActor,
-    BreakoutSLTPActor,
-    FuturesRuleBasedActor,
-    MomentumFuturesActor,
-    MeanReversionFuturesActor,
-    BreakoutFuturesActor,
-    create_expert_ensemble,
 )
 
 __all__ = [
     "RuleBasedActor",
-    "MomentumActor",
     "MeanReversionActor",
-    "BreakoutActor",
-    "SLTPRuleBasedActor",
-    "MomentumSLTPActor",
-    "MeanReversionSLTPActor",
-    "BreakoutSLTPActor",
-    "FuturesRuleBasedActor",
-    "MomentumFuturesActor",
-    "MeanReversionFuturesActor",
-    "BreakoutFuturesActor",
-    "create_expert_ensemble",
 ]
 
 # Optional actors with external dependencies
