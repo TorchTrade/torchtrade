@@ -13,7 +13,7 @@ from enum import Enum
 import numpy as np
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
 from tensordict import TensorDict, TensorDictBase
-from torchrl.data.tensor_specs import CompositeSpec
+from torchrl.data.tensor_specs import Composite
 from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
@@ -152,7 +152,7 @@ class SeqFuturesEnv(EnvBase):
         num_features = len(self.sampler.get_feature_keys())
 
         # Observation space
-        self.observation_spec = CompositeSpec(shape=())
+        self.observation_spec = Composite(shape=())
 
         self.market_data_key = "market_data"
         self.account_state_key = "account_state"

@@ -12,6 +12,7 @@ TorchTrade is a modular RL framework built on TorchRL that provides:
 - 📊 **Multi-Timeframe Support** - Train on multiple time scales simultaneously
 - 🔴 **Live Trading** - Direct Alpaca and Binance API integration
 - 🧠 **LLM Integration** - Use GPT-4o-mini as trading agent
+- 📐 **Rule-Based Actors** - Hard-coded strategies for imitation learning and baselines
 - 📈 **Research to Production** - Same code for backtesting and live deployment
 
 ---
@@ -21,14 +22,20 @@ TorchTrade is a modular RL framework built on TorchRL that provides:
 ### 1. Installation
 
 ```bash
-# Create conda environment
-conda create --name torchtrade python=3.9
-conda activate torchtrade
+# Install UV (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Clone and install
+# Clone repository
 git clone https://github.com/TorchTrade/torchtrade_envs.git
 cd torchtrade_envs
-pip install -e .
+
+# Install TorchTrade and all dependencies
+uv sync
+
+# Activate the virtual environment
+source .venv/bin/activate  # On Unix/macOS
+# or
+.venv\Scripts\activate  # On Windows
 ```
 
 ### 2. Your First Environment
@@ -60,10 +67,10 @@ print(f"Reward: {tensordict['reward'].item()}")
 
 ```bash
 # Train PPO on long-only environment
-python examples/online/ppo/train.py
+uv run python examples/online/ppo/train.py
 
 # Customize with Hydra overrides
-python examples/online/ppo/train.py env.symbol="ETH/USD" optim.lr=1e-4
+uv run python examples/online/ppo/train.py env.symbol="ETH/USD" optim.lr=1e-4
 ```
 
 ---
@@ -178,6 +185,44 @@ action = policy(tensordict)
 # See full example: examples/live/alpaca/collect_live_llm.py
 ```
 
+### Rule-Based Trading Strategies (Expert Actors)
+
+Use hard-coded trading strategies for imitation learning pre-training or as baselines:
+
+```python
+from torchtrade.actor import create_expert_ensemble
+
+# Create ensemble of expert actors
+experts = create_expert_ensemble(
+    market_data_keys=["market_data_5Minute_24"],
+    env_type="spot"  # or "sltp", "futures"
+)
+
+# Available strategies:
+# - MomentumActor: Follow trends (Sharpe: 0.5-1.0)
+# - MeanReversionActor: Fade extremes (Sharpe: 0.3-0.8)
+# - BreakoutActor: Volatility expansion (Sharpe: 0.2-1.5)
+
+# Use for demonstration collection
+obs = env.reset()
+for expert in experts:
+    obs_with_action = expert(obs.clone())
+    print(f"{expert.__class__.__name__}: action={obs_with_action['action'].item()}")
+
+# Collect 1000 episodes of demonstrations from all experts
+# python examples/online/rulebased/collect_demonstrations.py \
+#     --expert all --num_episodes 100 --save_path demos.pt
+
+# Then use for behavioral cloning pre-training before RL fine-tuning
+# See: examples/online/rulebased/README.md and Issue #54
+```
+
+**Why use rule-based actors?**
+- 🚀 **Bootstrap RL training** - Start from reasonable baseline instead of random initialization
+- 📊 **Imitation learning** - Pre-train with behavioral cloning on expert demonstrations
+- 🎯 **Baselines** - Compare learned policies against simple heuristics
+- 🔍 **Interpretable** - Understand what strategies work in different market conditions
+
 ### Custom Feature Engineering
 
 ```python
@@ -261,16 +306,16 @@ TorchTrade includes implementations of multiple RL algorithms:
 
 ```bash
 # PPO on long-only environment
-python examples/online/ppo/train.py
+uv run python examples/online/ppo/train.py
 
 # GRPO on futures one-step
-python examples/online/grpo_futures_onestep/train.py
+uv run python examples/online/grpo_futures_onestep/train.py
 
 # IQL offline training
-python examples/online/iql/train.py
+uv run python examples/online/iql/train.py
 
 # Customize with Hydra overrides
-python examples/online/ppo/train.py \
+uv run python examples/online/ppo/train.py \
     env.symbol="ETH/USD" \
     optim.lr=1e-4 \
     loss.gamma=0.95
@@ -284,32 +329,41 @@ python examples/online/ppo/train.py \
 
 - Python 3.8+
 - CUDA (optional, for GPU acceleration)
+- [UV](https://docs.astral.sh/uv/) - Fast Python package installer
 
 ### Full Installation
 
 ```bash
-# 1. Create conda environment
-conda create --name torchtrade python=3.9
-conda activate torchtrade
+# 1. Install UV (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# On Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 # 2. Clone repository
 git clone https://github.com/TorchTrade/torchrl_alpaca_env.git
 cd torchrl_alpaca_env
 
-# 3. Install TorchTrade
-pip install -e .
+# 3. Install TorchTrade and all dependencies
+uv sync
 
 # 4. Install development dependencies (optional)
-pip install -e .[dev]
+uv sync --extra dev
 
-# 5. For live trading, create .env file
+# 5. Install documentation dependencies (optional)
+uv sync --extra docs
+
+# 6. Activate the virtual environment
+source .venv/bin/activate  # On Unix/macOS
+# or
+.venv\Scripts\activate  # On Windows
+
+# 7. For live trading, create .env file
 cat > .env << EOF
 API_KEY=your_alpaca_api_key
 SECRET_KEY=your_alpaca_secret_key
 EOF
 
-# 6. Run tests to verify installation
-pytest tests/ -v --cov=torchtrade
+# 8. Run tests to verify installation
+uv run pytest tests/ -v --cov=torchtrade
 ```
 
 ---
@@ -488,7 +542,7 @@ loss:
 Override parameters from command line:
 
 ```bash
-python examples/online/ppo/train.py \
+uv run python examples/online/ppo/train.py \
     env.symbol="ETH/USD" \
     env.initial_cash=[5000,10000] \
     optim.lr=1e-4 \
@@ -501,6 +555,7 @@ python examples/online/ppo/train.py \
 
 - ✨ **Multi-Timeframe** - Train on 1m, 5m, 15m, 1h bars simultaneously for multi-scale market understanding
 - 🤖 **LLM Integration** - Use GPT-4o-mini or other LLMs as trading policies via OpenAI API
+- 📐 **Rule-Based Actors** - Hard-coded strategies (momentum, mean reversion, breakout) for imitation learning and baselines
 - 📊 **Coverage Tracking** - Measure state space exploration diversity with entropy-based metrics
 - 🎯 **Custom Loss Functions** - GRPO, CTRL (contrastive learning), standard PPO/IQL implementations
 - 📈 **Weights & Biases** - Built-in W&B logging for experiments, metrics, and visualizations
@@ -521,6 +576,7 @@ python examples/online/ppo/train.py \
   - [LongOnlyOneStepEnv](docs/Environments/LongOnlyOneStepEnv.md) - One-step variant
 - 💼 **[Training Examples](examples/)**
   - [Live Trading with Alpaca](examples/live/alpaca/README.md) - Complete live trading guide
+  - [Rule-Based Actors](examples/online/rulebased/README.md) - Hard-coded strategies for imitation learning
   - [PPO Training](examples/online/ppo/) - Proximal Policy Optimization
   - [IQL Training](examples/online/iql/) - Implicit Q-Learning
   - [GRPO Training](examples/online/grpo_futures_onestep/) - Group Relative Policy Optimization
@@ -568,16 +624,16 @@ Run the test suite to verify your installation:
 
 ```bash
 # Run all tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Run with coverage report
-pytest tests/ -v --cov=torchtrade --cov-report=term-missing
+uv run pytest tests/ -v --cov=torchtrade --cov-report=term-missing
 
 # Run specific test file
-pytest tests/envs/offline/test_seqlongonly.py -v
+uv run pytest tests/envs/offline/test_seqlongonly.py -v
 
 # Run specific test
-pytest tests/envs/offline/test_seqlongonly.py::test_step_buy_action -v
+uv run pytest tests/envs/offline/test_seqlongonly.py::test_step_buy_action -v
 ```
 
 ---
@@ -598,13 +654,13 @@ We welcome contributions! To contribute:
 
 ```bash
 # Install with development dependencies
-pip install -e .[dev]
+uv sync --extra dev
 
 # Run tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Run tests with coverage
-pytest tests/ -v --cov=torchtrade --cov-report=html
+uv run pytest tests/ -v --cov=torchtrade --cov-report=html
 ```
 
 ### Reporting Issues

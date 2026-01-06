@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "torchtrade"
@@ -17,13 +17,27 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+dependencies = [
+    "alpaca-py",
+    "python-binance",
+    "python-dotenv",
+    "torchrl",
+    "wandb",
+    "tqdm",
+    "hydra-core",
+    "matplotlib",
+    "ta",
+    "datasets",
+    "trading-nets @ git+https://github.com/TorchTrade/trading-nets.git@main",
+]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+]
+docs = [
+    "mkdocs-material",
 ]
 
 [tool.pytest.ini_options]
@@ -37,7 +51,8 @@ addopts = "-v --tb=short"
 "Bug Reports" = "https://github.com/torchtrade/torchrl-alpaca-env/issues"
 "Source" = "https://github.com/torchtrade/torchrl-alpaca-env"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["torchtrade*"]
-exclude = ["tests*"]
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["torchtrade"]
