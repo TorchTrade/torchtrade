@@ -51,5 +51,8 @@ addopts = "-v --tb=short"
 "Bug Reports" = "https://github.com/torchtrade/torchrl-alpaca-env/issues"
 "Source" = "https://github.com/torchtrade/torchrl-alpaca-env"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["torchtrade"]
