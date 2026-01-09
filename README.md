@@ -77,19 +77,37 @@ uv run python examples/online/ppo/train.py env.symbol="ETH/USD" optim.lr=1e-4
 
 ## Environment Overview
 
-Choose the right environment for your trading strategy:
+### Offline Environments
 
-| Environment | Category | Trading Type | Action Space | Key Features | Best For |
-|-------------|----------|--------------|--------------|--------------|----------|
-| **SeqLongOnlyEnv** | Offline | Long-only | 3-action discrete | Sequential trading, simple | Beginners, simple strategies |
-| **SeqLongOnlySLTPEnv** | Offline | Long-only + Brackets | Combinatorial (1+N×M) | Stop-loss/take-profit | Risk management research |
-| **LongOnlyOneStepEnv** | Offline | One-step long | Discrete SL/TP | GRPO-optimized rollouts | Contextual bandits |
-| **SeqFuturesEnv** | Offline | Futures | 3-action (short/hold/long) | Leverage (1-125x), margin | Advanced backtesting |
-| **SeqFuturesSLTPEnv** | Offline | Futures + Brackets | Combinatorial | Full bracket orders | Risk-managed futures |
-| **FuturesOneStepEnv** | Offline | One-step futures | Discrete | GRPO, leverage, liquidation | Fast iteration |
-| **AlpacaTorchTradingEnv** | Live | Live spot | 3-action | Real-time Alpaca API | Paper/live trading |
-| **AlpacaSLTPTorchTradingEnv** | Live | Live + Brackets | Combinatorial | Alpaca bracket orders | Live risk management |
-| **BinanceFuturesTorchTradingEnv** | Live | Live futures | 3-action | Binance futures, leverage | Binance live trading |
+Offline environments are designed for **training on historical data** (backtesting). These are not "offline RL" methods, but rather environments that use pre-collected market data instead of live APIs.
+
+| Environment | Asset Type | Futures | Leverage | Bracket Orders | One-Step | Best For |
+|-------------|------------|---------|----------|----------------|----------|----------|
+| **SeqLongOnlyEnv** | Crypto/Stocks | ❌ | ❌ | ❌ | ❌ | Beginners, simple strategies |
+| **SeqLongOnlySLTPEnv** | Crypto/Stocks | ❌ | ❌ | ✅ | ❌ | Risk management research |
+| **LongOnlyOneStepEnv** | Crypto/Stocks | ❌ | ❌ | ✅ | ✅ | Contextual bandits, GRPO |
+| **SeqFuturesEnv** | Crypto | ✅ | ✅ (1-125x) | ❌ | ❌ | Advanced futures backtesting |
+| **SeqFuturesSLTPEnv** | Crypto | ✅ | ✅ (1-125x) | ✅ | ❌ | Risk-managed futures |
+| **FuturesOneStepEnv** | Crypto | ✅ | ✅ (1-125x) | ✅ | ✅ | Fast futures iteration, GRPO |
+
+**Key Differences:**
+- **Futures vs Spot**: Futures environments support leverage (1-125x), margin tracking, and liquidation mechanics. Spot environments are long-only.
+- **Bracket Orders (SL/TP)**: SLTP variants support stop-loss and take-profit levels with combinatorial action spaces.
+- **One-Step**: Optimized for GRPO training with episodic rollouts instead of sequential step-by-step trading.
+
+### Live Environments
+
+Live environments connect to real trading APIs for paper trading or live execution.
+
+| Environment | API | Asset Type | Futures | Leverage | Bracket Orders | Best For |
+|-------------|-----|------------|---------|----------|----------------|----------|
+| **AlpacaTorchTradingEnv** | Alpaca | Crypto/Stocks | ❌ | ❌ | ❌ | Paper/live spot trading |
+| **AlpacaSLTPTorchTradingEnv** | Alpaca | Crypto/Stocks | ❌ | ❌ | ✅ | Live risk management |
+| **BinanceFuturesTorchTradingEnv** | Binance | Crypto | ✅ | ✅ (1-125x) | ❌ | Binance futures trading |
+
+**Key Differences:**
+- **Alpaca**: Commission-free stocks and crypto trading with paper trading mode. Best for US markets.
+- **Binance**: Cryptocurrency futures with high leverage. Supports testnet for safe testing.
 
 ---
 
