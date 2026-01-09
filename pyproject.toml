@@ -28,7 +28,6 @@ dependencies = [
     "matplotlib",
     "ta",
     "datasets",
-    "trading-nets @ git+ssh://git@github.com/TorchTrade/trading-nets.git@1f3b602c73e32f329a45bfebb4b2842cf3584ce2",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +43,9 @@ llm_local = [
     "transformers>=4.30.0",
     "accelerate>=0.20.0",
     "bitsandbytes>=0.41.0",
+]
+trading_nets = [
+    "trading-nets @ git+ssh://git@github.com/TorchTrade/trading-nets.git@1f3b602c73e32f329a45bfebb4b2842cf3584ce2",
 ]
 
 [tool.pytest.ini_options]
