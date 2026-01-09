@@ -82,11 +82,17 @@ class SimpleMLPEncoder(nn.Module):
         Forward pass.
 
         Args:
-            x: Input tensor of shape (batch, seq_len, features)
+            x: Input tensor of shape (batch, seq_len, features) or (*batch_dims, seq_len, features)
 
         Returns:
-            Output tensor of shape (batch, out_seq_len, out_features)
+            Output tensor of shape (batch, out_seq_len, out_features) or (*batch_dims, out_seq_len, out_features)
         """
+        # Handle extra batch dimensions (e.g., from parallel envs)
+        original_shape = x.shape
+        if x.ndim > 3:
+            # Flatten all batch dimensions except last two (seq_len, features)
+            x = x.reshape(-1, *x.shape[-2:])
+
         batch_size = x.shape[0]
 
         # Flatten sequence
@@ -97,6 +103,14 @@ class SimpleMLPEncoder(nn.Module):
 
         # Reshape to output shape
         out = out.reshape(batch_size, *self.output_shape)
+
+        # Restore original batch dimensions if needed
+        if len(original_shape) > 3:
+            out = out.reshape(*original_shape[:-2], *out.shape[-2:])
+
+        # Squeeze sequence dimension if output is single timestep
+        if self.output_shape[0] == 1:
+            out = out.squeeze(-2)
 
         return out
 
@@ -181,11 +195,17 @@ class SimpleCNNEncoder(nn.Module):
         Forward pass.
 
         Args:
-            x: Input tensor of shape (batch, seq_len, features)
+            x: Input tensor of shape (batch, seq_len, features) or (*batch_dims, seq_len, features)
 
         Returns:
-            Output tensor of shape (batch, out_seq_len, out_features)
+            Output tensor of shape (batch, out_seq_len, out_features) or (*batch_dims, out_seq_len, out_features)
         """
+        # Handle extra batch dimensions (e.g., from parallel envs)
+        original_shape = x.shape
+        if x.ndim > 3:
+            # Flatten all batch dimensions except last two (seq_len, features)
+            x = x.reshape(-1, *x.shape[-2:])
+
         # Transpose to (batch, features, seq_len) for Conv1d
         x = x.transpose(1, 2)
 
@@ -208,6 +228,14 @@ class SimpleCNNEncoder(nn.Module):
 
         if self.final_activation:
             x = self.final_activation(x)
+
+        # Restore original batch dimensions if needed
+        if len(original_shape) > 3:
+            x = x.reshape(*original_shape[:-2], *x.shape[-2:])
+
+        # Squeeze sequence dimension if output is single timestep
+        if self.output_shape[0] == 1:
+            x = x.squeeze(-2)
 
         return x
 
@@ -294,11 +322,17 @@ class SimpleTransformerEncoder(nn.Module):
         Forward pass.
 
         Args:
-            x: Input tensor of shape (batch, seq_len, features)
+            x: Input tensor of shape (batch, seq_len, features) or (*batch_dims, seq_len, features)
 
         Returns:
-            Output tensor of shape (batch, out_seq_len, out_features)
+            Output tensor of shape (batch, out_seq_len, out_features) or (*batch_dims, out_seq_len, out_features)
         """
+        # Handle extra batch dimensions (e.g., from parallel envs)
+        original_shape = x.shape
+        if x.ndim > 3:
+            # Flatten all batch dimensions except last two (seq_len, features)
+            x = x.reshape(-1, *x.shape[-2:])
+
         # Project input to hidden size
         x = self.input_proj(x)
 
@@ -317,5 +351,13 @@ class SimpleTransformerEncoder(nn.Module):
 
         if self.final_activation:
             x = self.final_activation(x)
+
+        # Restore original batch dimensions if needed
+        if len(original_shape) > 3:
+            x = x.reshape(*original_shape[:-2], *x.shape[-2:])
+
+        # Squeeze sequence dimension if output is single timestep
+        if self.output_shape[0] == 1:
+            x = x.squeeze(-2)
 
         return x
