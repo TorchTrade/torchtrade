@@ -86,7 +86,6 @@ def main(cfg: DictConfig):  # noqa: F821
     # Create agent
     #model = make_iql_model(cfg, train_env, eval_env, device)
     model = make_discrete_iql_wavenet_model(cfg, eval_env, device)
-    eval_env.to(device)
 
     # Create loss
     loss_module, target_net_updater = make_discrete_loss(cfg.loss, model, device=device)

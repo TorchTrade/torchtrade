@@ -186,7 +186,6 @@ def main(cfg: DictConfig):  # noqa: F821
         max_train_traj_length=max_train_traj_length,
         max_eval_traj_length=max_eval_traj_length,
     )
-    eval_env.to(device)
 
     total_frames = cfg.collector.total_frames
     frames_per_batch = cfg.collector.frames_per_batch

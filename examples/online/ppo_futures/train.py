@@ -75,7 +75,6 @@ def main(cfg: DictConfig):  # noqa: F821
         max_train_traj_length=max_train_traj_length,
         max_eval_traj_length=max_eval_traj_length,
     )
-    eval_env.to(device)
 
     total_frames = cfg.collector.total_frames
     frames_per_batch = cfg.collector.frames_per_batch
@@ -289,12 +288,16 @@ def main(cfg: DictConfig):  # noqa: F821
                 i * frames_in_batch
             ) // test_interval:
                 actor.eval()
+                # Don't move eval_env - keep it on CPU
+                # Use auto_cast_to_device=False to avoid device mismatch with VecNormV2
                 eval_rollout = eval_env.rollout(
                     max_eval_traj_length,
-                    actor,
-                    auto_cast_to_device=True,
+                    actor.to("cpu"),  # Move actor to CPU temporarily for eval
+                    auto_cast_to_device=False,
                     break_when_any_done=True,
                 )
+                # Move actor back to device for training
+                actor.to(device)
                 eval_rollout.squeeze()
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward

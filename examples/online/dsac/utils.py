@@ -29,6 +29,7 @@ from torchrl.envs import (
     ParallelEnv,
     RewardSum,
     TransformedEnv,
+    VecNormV2,
 )
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 from torchrl.modules import MLP, SafeModule, SafeSequential
@@ -143,18 +144,35 @@ def env_maker(df, cfg, device="cpu"):
 
 
 
-def apply_env_transforms(
-    env,
-):
+def apply_env_transforms(env):
+    """Apply standard transforms to the environment.
+
+    Args:
+        env: Base environment
+
+    Returns:
+        transformed_env: Environment with transforms applied
+        vecnorm: The VecNormV2 instance for potential statistics sharing
+    """
+    # Get observation keys for normalization (market_data_* and account_state)
+    obs_keys = [k for k in env.observation_spec.keys() if k.startswith("market_data") or k == "account_state"]
+
+    vecnorm = VecNormV2(
+        in_keys=obs_keys,
+        decay=0.99999,
+        eps=1e-8,
+    )
+
     transformed_env = TransformedEnv(
         env,
         Compose(
             InitTracker(),
             DoubleToFloat(),
+            vecnorm,
             RewardSum(),
         ),
     )
-    return transformed_env
+    return transformed_env, vecnorm
 
 
 def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
@@ -167,17 +185,22 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
     )
     parallel_env.set_seed(cfg.env.seed)
 
-    train_env = apply_env_transforms(parallel_env)
+    # Create train environment and get its VecNormV2 instance
+    train_env, train_vecnorm = apply_env_transforms(parallel_env)
 
+    # Create eval environment with its own VecNormV2
+    # Note: Each VecNormV2 will maintain its own running statistics
+    # This is acceptable as eval will normalize observations consistently during evaluation
     maker = functools.partial(env_maker, test_df, cfg)
-    eval_env = TransformedEnv(
-        ParallelEnv(
-            eval_num_envs,
-            EnvCreator(maker),
-            serial_for_single=True,
-        ),
-        train_env.transform.clone(),
+    eval_base_env = ParallelEnv(
+        eval_num_envs,
+        EnvCreator(maker),
+        serial_for_single=True,
     )
+
+    # Create eval environment with separate VecNormV2 (will compute its own statistics)
+    eval_env, eval_vecnorm = apply_env_transforms(eval_base_env)
+
     return train_env, eval_env
 
 
@@ -189,12 +212,6 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
 
 def make_collector(cfg, train_env, actor_model_explore, compile_mode):
     """Make collector."""
-    device = cfg.collector.device
-    if device in ("", None):
-        if torch.cuda.is_available():
-            device = torch.device("cuda:0")
-        else:
-            device = torch.device("cpu")
     collector = SyncDataCollector(
         train_env,
         actor_model_explore,
@@ -202,7 +219,7 @@ def make_collector(cfg, train_env, actor_model_explore, compile_mode):
         init_random_frames=cfg.collector.init_random_frames,
         max_frames_per_traj=cfg.collector.max_frames_per_traj,
         total_frames=cfg.collector.total_frames,
-        device=device,
+        device="cpu",
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
     )

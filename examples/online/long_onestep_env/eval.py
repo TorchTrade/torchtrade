@@ -47,9 +47,7 @@ def main(cfg: DictConfig):  # noqa: F821
         max_train_traj_length=rollout_length,
         max_eval_traj_length=rollout_length
     )
-    eval_env.to(device)
-    train_env.to(device)
-    
+
     test_env = eval_env
 
     actor, _ = make_ppo_models(
@@ -66,13 +64,15 @@ def main(cfg: DictConfig):  # noqa: F821
     ), timeit("eval"):
 
         actor.eval()
+        # Keep test_env on CPU, move actor to CPU temporarily for eval
         eval_rollout = test_env.rollout(
             rollout_length,
-            actor,
-            auto_cast_to_device=True,
+            actor.to("cpu"),
+            auto_cast_to_device=False,
             break_when_any_done=True,
             trust_policy=True
         )
+        actor.to(device)  # Move actor back to device
         eval_rollout.squeeze()
         eval_reward = eval_rollout["next", "reward"].sum(-2)
         # for i, r in enumerate(eval_reward):

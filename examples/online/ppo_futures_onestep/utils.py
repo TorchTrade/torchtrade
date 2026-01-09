@@ -14,6 +14,7 @@ from torchrl.envs import (
     Compose,
     TransformedEnv,
     StepCounter,
+    VecNormV2,
 )
 
 from torchtrade.envs.transforms import CoverageTracker
@@ -134,12 +135,26 @@ def apply_env_transforms(env, max_steps, one_step_env=True):
         env: The environment to transform
         max_steps: Maximum steps per episode
         one_step_env: If True, skip unnecessary transforms for one-step envs
+
+    Returns:
+        transformed_env: Environment with transforms applied
+        vecnorm: The VecNormV2 instance for potential statistics sharing
     """
+    # Get observation keys for normalization (market_data_* and account_state)
+    obs_keys = [k for k in env.observation_spec.keys() if k.startswith("market_data") or k == "account_state"]
+
+    vecnorm = VecNormV2(
+        in_keys=obs_keys,
+        decay=0.99999,
+        eps=1e-8,
+    )
+
     if one_step_env:
         transformed_env = TransformedEnv(
             env,
             Compose(
                 InitTracker(),
+                vecnorm,
                 StepCounter(max_steps=max_steps),
             ),
         )
@@ -149,11 +164,12 @@ def apply_env_transforms(env, max_steps, one_step_env=True):
             Compose(
                 InitTracker(),
                 DoubleToFloat(),
+                vecnorm,
                 RewardSum(),
                 StepCounter(max_steps=max_steps),
             ),
         )
-    return transformed_env
+    return transformed_env, vecnorm
 
 
 def make_environment(
@@ -178,7 +194,7 @@ def make_environment(
     parallel_env.set_seed(cfg.env.seed, static_seed=True)  # needs to be static for GRPO style training
 
     # PERF: Use minimal transforms for one-step training env
-    train_env = apply_env_transforms(parallel_env, max_train_steps, one_step_env=True)
+    train_env, train_vecnorm = apply_env_transforms(parallel_env, max_train_steps, one_step_env=True)
 
     maker = functools.partial(
         env_maker, test_df, cfg, max_traj_length=max_eval_traj_length, eval=True
@@ -189,7 +205,7 @@ def make_environment(
         EnvCreator(maker),
         serial_for_single=True,
     )
-    eval_env = apply_env_transforms(eval_parallel_env, max_eval_traj_length, one_step_env=False)
+    eval_env, eval_vecnorm = apply_env_transforms(eval_parallel_env, max_eval_traj_length, one_step_env=False)
 
     # Create coverage tracker for postproc (used in collector)
     # Initialize it properly by setting the parent to access base env
@@ -383,18 +399,12 @@ def make_ppo_models(env, device, cfg):
 
 def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=None):
     """Make data collector."""
-    device = cfg.collector.device
-    if device in ("", None):
-        if torch.cuda.is_available():
-            device = torch.device("cuda:0")
-        else:
-            device = torch.device("cpu")
     collector = SyncDataCollector(
         train_env,
         actor_model_explore,
         frames_per_batch=cfg.collector.frames_per_batch,
         total_frames=cfg.collector.total_frames,
-        device=device,
+        device="cpu",
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
         postproc=postproc,  # Add coverage tracker as postproc
