@@ -28,7 +28,7 @@ dependencies = [
     "matplotlib",
     "ta",
     "datasets",
-    "trading-nets @ git+https://github.com/TorchTrade/trading-nets.git@main",
+    "trading-nets @ git+ssh://git@github.com/TorchTrade/trading-nets.git@1f3b602c73e32f329a45bfebb4b2842cf3584ce2",
 ]
 
 [project.optional-dependencies]
