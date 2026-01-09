@@ -99,15 +99,34 @@ Offline environments are designed for **training on historical data** (backtesti
 
 Live environments connect to real trading APIs for paper trading or live execution.
 
-| Environment | API | Asset Type | Futures | Leverage | Bracket Orders | Best For |
-|-------------|-----|------------|---------|----------|----------------|----------|
-| **AlpacaTorchTradingEnv** | Alpaca | Crypto/Stocks | ❌ | ❌ | ❌ | Paper/live spot trading |
-| **AlpacaSLTPTorchTradingEnv** | Alpaca | Crypto/Stocks | ❌ | ❌ | ✅ | Live risk management |
-| **BinanceFuturesTorchTradingEnv** | Binance | Crypto | ✅ | ✅ (1-125x) | ❌ | Binance futures trading |
+| Environment | API | Asset Type | Futures | Leverage | Bracket Orders | Paper Trading | Best For |
+|-------------|-----|------------|---------|----------|----------------|---------------|----------|
+| **AlpacaTorchTradingEnv** | Alpaca | Crypto/Stocks | ❌ | ❌ | ❌ | ✅ | Paper/live spot trading |
+| **AlpacaSLTPTorchTradingEnv** | Alpaca | Crypto/Stocks | ❌ | ❌ | ✅ | ✅ | Live risk management |
+| **BinanceFuturesTorchTradingEnv** | Binance | Crypto | ✅ | ✅ (1-125x) | ❌ | ✅ (Testnet) | Crypto futures trading |
+| **IBTorchTradingEnv** 🚧 | Interactive Brokers | Stocks/Crypto/Forex | ✅ | ✅ | ✅ | ✅ | Professional multi-asset |
+
+**Live Environment Comparison:**
+
+| Feature | Alpaca | Binance | Interactive Brokers 🚧 |
+|---------|--------|---------|----------------------|
+| **Stocks** | ✅ US markets | ❌ | ✅ Global exchanges |
+| **Crypto** | ✅ Limited pairs | ✅ 100+ pairs | ✅ Limited pairs (via Paxos) |
+| **Futures** | ❌ | ✅ Crypto only | ✅ Commodities, indices, currencies |
+| **Forex** | ❌ | ❌ | ✅ 100+ currency pairs |
+| **Options** | ❌ | ❌ | ✅ Equity and index options |
+| **Commission** | Free | 0.02-0.04% | Varies by asset |
+| **Paper Trading** | ✅ Free | ✅ Testnet | ✅ Free paper account |
+| **Leverage (Max)** | 1x | 125x | Varies (up to 4x stocks, higher for futures) |
+| **API Complexity** | Low | Medium | High |
+| **Best For** | US stocks/crypto, beginners | Crypto futures, high leverage | Professional traders, multi-asset portfolios |
+
+🚧 = Planned integration ([Issue #59](https://github.com/TorchTrade/torchtrade_envs/issues/59))
 
 **Key Differences:**
-- **Alpaca**: Commission-free stocks and crypto trading with paper trading mode. Best for US markets.
-- **Binance**: Cryptocurrency futures with high leverage. Supports testnet for safe testing.
+- **Alpaca**: Commission-free stocks and crypto trading with paper trading mode. Best for US markets and beginners.
+- **Binance**: Cryptocurrency futures with high leverage (1-125x). Supports testnet for safe testing.
+- **Interactive Brokers** (Planned): Professional-grade platform supporting stocks, futures, forex, and options across global exchanges. Ideal for multi-asset algorithmic trading strategies.
 
 ---
 
