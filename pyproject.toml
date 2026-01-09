@@ -39,6 +39,12 @@ dev = [
 docs = [
     "mkdocs-material",
 ]
+llm_local = [
+    "vllm>=0.6.0",
+    "transformers>=4.30.0",
+    "accelerate>=0.20.0",
+    "bitsandbytes>=0.41.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
