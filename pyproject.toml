@@ -7,7 +7,7 @@ name = "torchtrade"
 version = "0.0.1"
 description = "Reinforcement learning environments for trading applications"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 authors = [
     {name = "Sebastian Dittert", email = "your-email@example.com"}
 ]
@@ -28,7 +28,6 @@ dependencies = [
     "matplotlib",
     "ta",
     "datasets",
-    "trading-nets @ git+ssh://git@github.com/TorchTrade/trading-nets.git@1f3b602c73e32f329a45bfebb4b2842cf3584ce2",
 ]
 
 [project.optional-dependencies]
