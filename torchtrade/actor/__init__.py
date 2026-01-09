@@ -21,3 +21,9 @@ try:
     __all__.append("HumanActor")
 except ImportError:
     pass
+
+try:
+    from torchtrade.actor.local_llm_actor import LocalLLMActor
+    __all__.append("LocalLLMActor")
+except ImportError:
+    pass
