@@ -28,7 +28,7 @@ from torchrl.modules import (
     SafeModule,
     SafeSequential,
 )
-from trading_nets.architectures.tabl.tabl import BiNMTABLModel, BiNTabularEncoder
+from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
 from torchtrade.envs import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, get_timeframe_unit
@@ -216,37 +216,34 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
     encoders = []
     num_features = env.observation_spec[market_data_keys[0]].shape[-1]
 
-    # Build BiNMTABL encoders for market data
+    # Build CNN encoders for market data
     for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
-        base_model = BiNMTABLModel(
+        model = SimpleCNNEncoder(
             input_shape=(w, num_features),
             output_shape=(1, 14),
-            hidden_seq_size=w,
-            hidden_feature_size=14,
-            num_heads=3,
+            hidden_channels=64,
+            kernel_size=3,
             activation=activation,
             final_activation=activation,
-            dropout=0.1,
-            initializer="kaiming_uniform"
+            dropout=0.1
         )
-        # Wrap to handle batch_size=1 case where BiNMTABLModel squeezes batch dim
-        model = BatchSafeWrapper(base_model, output_features=14)
         encoders.append(SafeModule(
             module=model,
             in_keys=key,
             out_keys=[f"encoding_{t}_{fre}_{w}"],
         ).to(device))
 
-    # Account state encoder with BiNTabularEncoder
+    # Account state encoder with SimpleMLPEncoder
     # IMPORTANT: SeqFuturesSLTPEnv has 10 account state features (not 7 like SeqLongOnly)
     # [cash, position_size, position_value, entry_price, current_price,
     #  unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
-    account_encoder_model = BiNTabularEncoder(
-        feature_dim=10,  # 10 features for futures (vs 7 for long-only)
-        embedding_dim=14,
-        hidden_dims=[32, 32],
+    account_encoder_model = SimpleMLPEncoder(
+        input_shape=(1, 10),  # 10 features for futures (vs 7 for long-only)
+        output_shape=(1, 14),  # Match embedding_dim output
+        hidden_sizes=(32, 32),
         activation="gelu",
         dropout=0.1,
+        final_activation="gelu",
     )
 
     account_state_encoder = SafeModule(

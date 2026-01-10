@@ -82,13 +82,37 @@ class SimpleMLPEncoder(nn.Module):
         Forward pass.
 
         Args:
-            x: Input tensor of shape (batch, seq_len, features) or (*batch_dims, seq_len, features)
+            x: Input tensor of shape (batch, features) for 2D, (batch, seq_len, features) for 3D,
+               or (*batch_dims, seq_len, features) or (*batch_dims, features) for higher dims
 
         Returns:
-            Output tensor of shape (batch, out_seq_len, out_features) or (*batch_dims, out_seq_len, out_features)
+            Output tensor matching the input structure with output_shape features
         """
-        # Handle extra batch dimensions (e.g., from parallel envs)
         original_shape = x.shape
+        original_ndim = x.ndim
+
+        # Case 1: 2D input (batch, features) - add sequence dimension
+        if x.ndim == 2:
+            x = x.unsqueeze(1)  # (batch, 1, features)
+            was_2d = True
+        else:
+            was_2d = False
+
+        # Case 2: 3D input where middle dim doesn't match expected seq_len
+        # This happens with parallel envs: (batch, num_envs, features) instead of (batch, seq_len, features)
+        # We treat this as (batch*num_envs, 1, features) by reshaping
+        if x.ndim == 3 and x.shape[1] != self.input_shape[0]:
+            # Check if last dim matches expected features (likely from parallel envs)
+            if x.shape[2] == self.input_shape[1]:
+                # Reshape from (batch, num_envs, features) to (batch*num_envs, 1, features)
+                x = x.reshape(-1, 1, x.shape[2])
+                was_parallel_env = True
+            else:
+                was_parallel_env = False
+        else:
+            was_parallel_env = False
+
+        # Handle extra batch dimensions (e.g., from parallel envs with seq data)
         if x.ndim > 3:
             # Flatten all batch dimensions except last two (seq_len, features)
             x = x.reshape(-1, *x.shape[-2:])
@@ -104,12 +128,16 @@ class SimpleMLPEncoder(nn.Module):
         # Reshape to output shape
         out = out.reshape(batch_size, *self.output_shape)
 
-        # Restore original batch dimensions if needed
-        if len(original_shape) > 3:
+        # Restore original dimensions
+        if was_parallel_env:
+            # Restore (batch, num_envs, out_features) structure
+            out = out.reshape(original_shape[0], original_shape[1], -1)
+        elif original_ndim > 3:
+            # Restore original batch dimensions
             out = out.reshape(*original_shape[:-2], *out.shape[-2:])
 
-        # Squeeze sequence dimension if output is single timestep
-        if self.output_shape[0] == 1:
+        # Squeeze sequence dimension if output is single timestep and input was originally 2D
+        if self.output_shape[0] == 1 and (was_2d or was_parallel_env):
             out = out.squeeze(-2)
 
         return out

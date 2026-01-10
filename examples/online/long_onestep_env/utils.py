@@ -26,7 +26,7 @@ from torchrl.modules import (
     SafeModule,
     SafeSequential,
 )
-from trading_nets.architectures.tabl.tabl import BiNMTABLModel, BiNTabularEncoder
+from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
 from torchtrade.envs import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig, SeqLongOnlySLTPEnvConfig, SeqLongOnlySLTPEnv
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, get_timeframe_unit
@@ -245,15 +245,13 @@ def make_discrete_grpo_binmtabl_model(cfg, env, device):
     # Build the encoder
     for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
     
-        model = BiNMTABLModel(input_shape=(w, num_features),
+        model = SimpleCNNEncoder(input_shape=(w, num_features),
                             output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
-                            hidden_seq_size=w,
-                            hidden_feature_size=14,
-                            num_heads=3,
+                            hidden_channels=64,
+                            kernel_size=3,
                             activation=activation,
                             final_activation=activation,
-                            dropout=0.1,
-                            initializer="kaiming_uniform")
+                            dropout=0.1)
         encoders.append(SafeModule(
             module=model,
             in_keys=key,
@@ -261,12 +259,13 @@ def make_discrete_grpo_binmtabl_model(cfg, env, device):
         ).to(device))
 
 
-    account_encoder_model = BiNTabularEncoder(
-        feature_dim=7,
-        embedding_dim=14,
-        hidden_dims=[32, 32],
+    account_encoder_model = SimpleMLPEncoder(
+        input_shape=(1, 7),  # 7 account state features, single timestep
+        output_shape=(1, 14),  # Match embedding_dim output
+        hidden_sizes=(32, 32),
         activation="gelu",
         dropout=0.1,
+        final_activation="gelu",
     )
 
     account_state_encoder = SafeModule(

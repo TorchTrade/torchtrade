@@ -40,7 +40,7 @@ from torchrl.objectives.sac import DiscreteSACLoss
 from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
 from torchrl.trainers.helpers.models import ACTIVATIONS
-from trading_nets.architectures.tabl.tabl import BiNMTABLModel
+from torchtrade.models.simple_encoders import SimpleCNNEncoder
 import copy
 import ta
 import numpy as np
@@ -288,15 +288,13 @@ def make_sac_agent(cfg, env, device):
     # Build the encoder
     for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
     
-        model = BiNMTABLModel(input_shape=(w, 14),
+        model = SimpleCNNEncoder(input_shape=(w, 14),
                             output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
-                            hidden_seq_size=w,
-                            hidden_feature_size=14,
-                            num_heads=3,
+                            hidden_channels=64,
+                            kernel_size=3,
                             activation="relu",
                             final_activation="relu",
-                            dropout=0.1,
-                            initializer="kaiming_uniform")
+                            dropout=0.1)
         encoders.append(SafeModule(
             module=model,
             in_keys=key,
