@@ -1,7 +1,10 @@
 """Local LLM Actor for trading using vllm or transformers backends."""
+import logging
 import re
 from typing import Dict, Optional, Tuple, Union
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 class LocalLLMActor:
@@ -18,6 +21,7 @@ class LocalLLMActor:
         quantization: Quantization mode (None, "4bit", "8bit")
         max_tokens: Maximum tokens to generate
         temperature: Sampling temperature
+        gpu_memory_utilization: Fraction of GPU memory to use for vLLM (0.0-1.0, default: 0.9)
         debug: Enable debug output
         action_space_type: Type of action space ("standard", "sltp", "futures_sltp")
         action_map: Action map for SLTP environments (dict[int, tuple])
@@ -31,6 +35,7 @@ class LocalLLMActor:
         quantization: Optional[str] = None,
         max_tokens: int = 512,
         temperature: float = 0.7,
+        gpu_memory_utilization: float = 0.9,
         debug: bool = False,
         action_space_type: str = "standard",
         action_map: Optional[Dict[int, Tuple[Optional[str], Optional[float], Optional[float]]]] = None,
@@ -41,6 +46,7 @@ class LocalLLMActor:
         self.quantization = quantization
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.gpu_memory_utilization = gpu_memory_utilization
         self.debug = debug
         self.action_space_type = action_space_type
         self.action_map = action_map
@@ -130,10 +136,10 @@ At each step, you receive account state (including margin and liquidation info) 
             self.llm = LLM(**kwargs)
 
             if self.debug:
-                print(f"[LocalLLMActor] Initialized vllm with model: {self.model_name}")
+                logger.info(f"Initialized vllm with model: {self.model_name}")
 
         except ImportError:
-            print("[LocalLLMActor] vllm not available, falling back to transformers")
+            logger.warning("vllm not available, falling back to transformers")
             self.backend = "transformers"
             self._initialize_transformers()
 
@@ -163,7 +169,7 @@ At each step, you receive account state (including margin and liquidation info) 
             )
 
             if self.debug:
-                print(f"[LocalLLMActor] Initialized transformers with model: {self.model_name}")
+                logger.info(f"Initialized transformers with model: {self.model_name}")
 
         except ImportError as e:
             raise ImportError(
@@ -176,7 +182,7 @@ At each step, you receive account state (including margin and liquidation info) 
         kwargs = {
             "model": self.model_name,
             "trust_remote_code": True,
-            "gpu_memory_utilization": 0.9,
+            "gpu_memory_utilization": self.gpu_memory_utilization,
         }
 
         if self.quantization == "4bit":
@@ -374,7 +380,7 @@ At each step, you receive account state (including margin and liquidation info) 
             return match.group(1).strip()
 
         if self.debug:
-            print("[Warning] No <answer> tag found in response, using default action")
+            logger.warning("No <answer> tag found in response, using default action")
         return self._get_default_action()
 
     def extract_thinking(self, response: str) -> Optional[str]:

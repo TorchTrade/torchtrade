@@ -668,3 +668,116 @@ class TestLocalLLMActorEdgeCases:
         # Should not crash, just return empty market data section
         result = actor.construct_market_data(td)
         assert "Current market data:" in result
+
+
+# ============================================================================
+# Integration Tests (with real models)
+# ============================================================================
+
+
+@pytest.mark.slow
+class TestLocalLLMActorIntegration:
+    """Integration tests with real small models.
+
+    These tests actually load models and generate text, so they are:
+    - Marked with @pytest.mark.slow (skip by default)
+    - Skip if vllm/transformers not installed
+    - Use smallest available model to minimize resource usage
+    """
+
+    @pytest.mark.skipif(
+        not any([
+            __import__("importlib.util").util.find_spec("vllm"),
+            __import__("importlib.util").util.find_spec("transformers")
+        ]),
+        reason="Neither vllm nor transformers available"
+    )
+    def test_integration_real_model_generate(self):
+        """Test LocalLLMActor with real small model end-to-end.
+
+        This test:
+        1. Loads a real small model (Qwen/Qwen2.5-0.5B-Instruct)
+        2. Creates a sample TensorDict
+        3. Generates a real trading decision
+        4. Validates the output format
+
+        Note: This test takes ~30s-60s depending on hardware and downloads the model (~500MB).
+        """
+        from torchtrade.actor import LocalLLMActor
+
+        # Use smallest available model
+        model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+
+        # Try vllm first, fall back to transformers
+        try:
+            actor = LocalLLMActor(
+                model=model_name,
+                backend="vllm",
+                device="cuda" if torch.cuda.is_available() else "cpu",
+                debug=False,
+                temperature=0.1,  # Low temperature for deterministic output
+                max_tokens=128,
+            )
+        except ImportError:
+            # Fall back to transformers
+            actor = LocalLLMActor(
+                model=model_name,
+                backend="transformers",
+                device="cuda" if torch.cuda.is_available() else "cpu",
+                debug=False,
+                temperature=0.1,
+                max_tokens=128,
+            )
+
+        # Create sample tensordict
+        td = TensorDict({
+            "market_data_1Minute_12": torch.randn(1, 12, 5),
+            "market_data_5Minute_8": torch.randn(1, 8, 5),
+            "account_state": torch.tensor([[1000.0, 0.5, 50.0, 100.0, 102.0, 0.02, 5.0]]),
+        }, batch_size=[])
+
+        # Generate action (this actually runs inference)
+        result = actor(td)
+
+        # Validate output
+        assert "action" in result.keys(), "Result should contain 'action' key"
+        assert result["action"].dtype == torch.long, "Action should be long tensor"
+        assert result["action"].item() in [0, 1, 2], "Action should be valid index (0=sell, 1=hold, 2=buy)"
+
+        # If model generated thinking, it should be a string
+        if "thinking" in result.keys():
+            assert isinstance(result["thinking"], str), "Thinking should be a string"
+            assert len(result["thinking"]) > 0, "Thinking should not be empty"
+
+    @pytest.mark.skipif(
+        not __import__("importlib.util").util.find_spec("transformers"),
+        reason="transformers not available"
+    )
+    def test_integration_transformers_backend(self):
+        """Test LocalLLMActor with real transformers backend.
+
+        This specifically tests the transformers pipeline path with a real model.
+        """
+        from torchtrade.actor import LocalLLMActor
+
+        actor = LocalLLMActor(
+            model="Qwen/Qwen2.5-0.5B-Instruct",
+            backend="transformers",
+            device="cpu",  # CPU only to avoid CUDA issues in CI
+            debug=False,
+            temperature=0.1,
+            max_tokens=64,
+        )
+
+        assert actor.backend == "transformers"
+        assert actor.llm is not None
+
+        # Test generation
+        td = TensorDict({
+            "market_data_1Minute_12": torch.randn(1, 12, 5),
+            "account_state": torch.tensor([[1000.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0]]),
+        }, batch_size=[])
+
+        result = actor(td)
+        assert "action" in result.keys()
+        assert result["action"].item() in [0, 1, 2]
