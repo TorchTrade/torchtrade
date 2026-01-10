@@ -52,7 +52,13 @@ def main():
 
     # Load data
     print("\n[1/6] Loading data...")
-    df = pd.read_csv("btcusdt_spot_1m_01_2020_to_12_2025.csv")
+    # Option 1: Use local CSV file (download from your data source)
+    # df = pd.read_csv("btcusdt_spot_1m_01_2020_to_12_2025.csv")
+
+    # Option 2: Use HuggingFace dataset (recommended)
+    import datasets
+    dataset = datasets.load_dataset("Torch-Trade/BTCUSD_sport_1m_12_2024_to_09_2025")
+    df = dataset["train"].to_pandas()
 
     # Use more data for futures trading (5000 rows ~ 3.5 days)
     df = df.head(5000)

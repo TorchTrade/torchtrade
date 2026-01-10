@@ -97,6 +97,10 @@ At each step, you receive account state (including margin and liquidation info) 
                 raise ValueError("action_map required for SLTP action spaces")
             self.action_dict = None  # Will extract numeric action directly
 
+        # Pre-compile regex patterns for performance
+        self._answer_pattern = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
+        self._think_pattern = re.compile(r"<think>(.*?)</think>", re.IGNORECASE | re.DOTALL)
+
         # Initialize LLM backend
         self.llm = None
         self.tokenizer = None
@@ -193,11 +197,15 @@ At each step, you receive account state (including margin and liquidation info) 
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=torch.float16,
             )
+            # When using quantization, device_map="auto" is required
+            kwargs["device_map"] = "auto"
         elif self.quantization == "8bit":
             from transformers import BitsAndBytesConfig
             kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_8bit=True,
             )
+            # When using quantization, device_map="auto" is required
+            kwargs["device_map"] = "auto"
         else:
             if self.device == "cuda" and torch.cuda.is_available():
                 kwargs["device_map"] = "auto"
@@ -360,8 +368,7 @@ At each step, you receive account state (including margin and liquidation info) 
 
     def extract_action(self, response: str) -> str:
         """Extract action from <answer> tags."""
-        answer_pattern = r"<answer>(.*?)</answer>"
-        match = re.search(answer_pattern, response, re.IGNORECASE | re.DOTALL)
+        match = self._answer_pattern.search(response)
 
         if match:
             return match.group(1).strip()
@@ -372,8 +379,7 @@ At each step, you receive account state (including margin and liquidation info) 
 
     def extract_thinking(self, response: str) -> Optional[str]:
         """Extract thinking from <think> tags."""
-        thinking_pattern = r"<think>(.*?)</think>"
-        match = re.search(thinking_pattern, response, re.IGNORECASE | re.DOTALL)
+        match = self._think_pattern.search(response)
         if match:
             return match.group(1).strip()
         return None
