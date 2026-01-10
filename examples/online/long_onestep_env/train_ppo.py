@@ -48,16 +48,16 @@ def main(cfg: DictConfig):  # noqa: F821
 
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
     max_eval_traj_length = len(test_df)
-    train_env, eval_env = make_environment(
+    train_env, eval_env, train_vecnorm, eval_vecnorm = make_environment(
         train_df,
         test_df,
         cfg,
         train_num_envs=cfg.env.train_envs,
         eval_num_envs=cfg.env.eval_envs,
         max_train_traj_length=max_train_traj_length,
-        max_eval_traj_length=max_eval_traj_length
+        max_eval_traj_length=max_eval_traj_length,
+        device=device,
     )
-    eval_env.to(device)
 
     # Correct
     total_frames = cfg.collector.total_frames 

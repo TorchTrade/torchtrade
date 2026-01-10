@@ -189,9 +189,10 @@ def apply_env_transforms(env, max_steps):
     return transformed_env, vecnorm
 
 
-def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1, 
+def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1,
                      max_train_traj_length=1,
-                     max_eval_traj_length=1):
+                     max_eval_traj_length=1,
+                     device="cpu"):
     """Make environments for training and evaluation."""
     maker = functools.partial(env_maker, train_df, cfg, max_traj_length=max_train_traj_length)
     max_train_steps = train_df.shape[0]
@@ -216,10 +217,25 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1,
     )
     max_eval_steps = test_df.shape[0]
 
-    # Create eval environment with separate VecNormV2 (will compute its own statistics)
+    # Create eval environment with separate VecNormV2
     eval_env, eval_vecnorm = apply_env_transforms(eval_base_env, max_eval_steps)
 
-    return train_env, eval_env
+    # Move eval environment to device
+    eval_env.to(device)
+
+    # Explicitly move VecNormV2 internal statistics to device
+    # This is needed because env.to(device) doesn't properly move transform statistics
+    if hasattr(eval_vecnorm, '_loc') and eval_vecnorm._loc is not None:
+        eval_vecnorm._loc = eval_vecnorm._loc.to(device)
+    if hasattr(eval_vecnorm, '_var') and eval_vecnorm._var is not None:
+        eval_vecnorm._var = eval_vecnorm._var.to(device)
+    if hasattr(eval_vecnorm, '_count') and eval_vecnorm._count is not None:
+        eval_vecnorm._count = eval_vecnorm._count.to(device)
+
+    # Freeze eval VecNormV2 so it doesn't update statistics during evaluation
+    eval_vecnorm.freeze()
+
+    return train_env, eval_env, train_vecnorm, eval_vecnorm
 
 
 
@@ -281,7 +297,7 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
         module=account_encoder_model,
         in_keys=[account_state_key],
         out_keys=["encoding_account_state"],
-    )
+    ).to(device)
 
     # Define the actor
     common = MLP(

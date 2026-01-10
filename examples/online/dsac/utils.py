@@ -310,7 +310,7 @@ def make_sac_agent(cfg, env, device):
         ),
         in_keys=[account_state_key],
         out_keys=["encoding_account_state"],
-    )
+    ).to(device)
 
     encoder = SafeSequential(*encoders, account_state_encoder)
 
