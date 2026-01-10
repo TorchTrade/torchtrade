@@ -6,6 +6,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TorchTrade is a reinforcement learning framework for algorithmic trading built on TorchRL. It provides modular environments for both live trading (via Alpaca API) and offline backtesting, with support for multiple timeframes, custom feature engineering, and various RL algorithms.
 
+## Agent Usage
+
+**IMPORTANT**: When working with TorchRL-specific implementations, debugging, or architectural decisions, use the `torchrl-engineer` agent. This includes:
+- Implementing RL algorithms (PPO, SAC, DQN, IQL, GRPO, etc.)
+- Creating or modifying replay buffers
+- Designing environment transforms
+- Working with TensorDict operations
+- Troubleshooting TorchRL environments
+- Optimizing training loops
+- Understanding TorchRL's internal mechanisms
+
+To invoke the agent, use the Task tool with `subagent_type="torchrl-engineer"`.
+
+**IMPORTANT**: After creating each pull request, use the `pr-review-toolkit:code-simplifier` agent to analyze the changes and identify opportunities for simplification. This agent will:
+- Identify overly complex code patterns
+- Suggest simpler alternatives
+- Find unnecessary abstractions
+- Recommend ways to reduce cognitive load
+
+To invoke the agent, use the Task tool with `subagent_type="pr-review-toolkit:code-simplifier"`.
+
 ## Build & Development Commands
 
 ```bash

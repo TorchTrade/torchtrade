@@ -18,7 +18,7 @@ from torchrl.envs import (
     Compose,
     TransformedEnv,
     StepCounter,
-    VecNorm,
+    VecNormV2,
 )
 from torchrl.collectors import SyncDataCollector
 
@@ -30,8 +30,7 @@ from torchrl.modules import (
     SafeModule,
     SafeSequential,
 )
-from trading_nets.architectures.tabl.tabl import BiNMTABLModel, BiNTabularEncoder
-from trading_nets.architectures.wavenet.simple_1d_wave import Simple1DWaveEncoder
+from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
 from torchtrade.envs import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig, SeqLongOnlySLTPEnvConfig, SeqLongOnlySLTPEnv
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, get_timeframe_unit
@@ -157,25 +156,43 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
         )
         return SeqLongOnlySLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
 
-def apply_env_transforms(
-    env,
-    max_steps,
-):
+def apply_env_transforms(env, max_steps):
+    """Apply standard transforms to the environment.
+
+    Args:
+        env: Base environment
+        max_steps: Maximum steps for StepCounter
+
+    Returns:
+        transformed_env: Environment with transforms applied
+        vecnorm: The VecNormV2 instance for potential statistics sharing
+    """
+    # Get observation keys for normalization (market_data_* and account_state)
+    obs_keys = [k for k in env.observation_spec.keys() if k.startswith("market_data") or k == "account_state"]
+
+    vecnorm = VecNormV2(
+        in_keys=obs_keys,
+        decay=0.99999,
+        eps=1e-8,
+    )
+
     transformed_env = TransformedEnv(
         env,
         Compose(
             InitTracker(),
             DoubleToFloat(),
+            vecnorm,
             RewardSum(),
             StepCounter(max_steps=max_steps),
         ),
     )
-    return transformed_env
+    return transformed_env, vecnorm
 
 
-def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1, 
+def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1,
                      max_train_traj_length=1,
-                     max_eval_traj_length=1):
+                     max_eval_traj_length=1,
+                     device="cpu"):
     """Make environments for training and evaluation."""
     maker = functools.partial(env_maker, train_df, cfg, max_traj_length=max_train_traj_length)
     max_train_steps = train_df.shape[0]
@@ -186,18 +203,39 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1,
     )
     parallel_env.set_seed(cfg.env.seed)
 
-    train_env = apply_env_transforms(parallel_env, max_train_steps)
+    # Create train environment and get its VecNormV2 instance
+    train_env, train_vecnorm = apply_env_transforms(parallel_env, max_train_steps)
 
+    # Create eval environment with its own VecNormV2
+    # Note: Each VecNormV2 will maintain its own running statistics
+    # This is acceptable as eval will normalize observations consistently during evaluation
     maker = functools.partial(env_maker, test_df, cfg, max_traj_length=max_eval_traj_length, eval=True)
-    eval_env = TransformedEnv(
-        ParallelEnv(
-            eval_num_envs,
-            EnvCreator(maker),
-            serial_for_single=True,
-        ),
-        train_env.transform.clone(),
+    eval_base_env = ParallelEnv(
+        eval_num_envs,
+        EnvCreator(maker),
+        serial_for_single=True,
     )
-    return train_env, eval_env
+    max_eval_steps = test_df.shape[0]
+
+    # Create eval environment with separate VecNormV2
+    eval_env, eval_vecnorm = apply_env_transforms(eval_base_env, max_eval_steps)
+
+    # Move eval environment to device
+    eval_env.to(device)
+
+    # Explicitly move VecNormV2 internal statistics to device
+    # This is needed because env.to(device) doesn't properly move transform statistics
+    if hasattr(eval_vecnorm, '_loc') and eval_vecnorm._loc is not None:
+        eval_vecnorm._loc = eval_vecnorm._loc.to(device)
+    if hasattr(eval_vecnorm, '_var') and eval_vecnorm._var is not None:
+        eval_vecnorm._var = eval_vecnorm._var.to(device)
+    if hasattr(eval_vecnorm, '_count') and eval_vecnorm._count is not None:
+        eval_vecnorm._count = eval_vecnorm._count.to(device)
+
+    # Freeze eval VecNormV2 so it doesn't update statistics during evaluation
+    eval_vecnorm.freeze()
+
+    return train_env, eval_env, train_vecnorm, eval_vecnorm
 
 
 
@@ -226,15 +264,13 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
     # Build the encoder
     for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
     
-        model = BiNMTABLModel(input_shape=(w, num_features),
+        model = SimpleCNNEncoder(input_shape=(w, num_features),
                             output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
-                            hidden_seq_size=w,
-                            hidden_feature_size=14,
-                            num_heads=3,
+                            hidden_channels=64,
+                            kernel_size=3,
                             activation=activation,
                             final_activation=activation,
-                            dropout=0.1,
-                            initializer="kaiming_uniform")
+                            dropout=0.1)
         encoders.append(SafeModule(
             module=model,
             in_keys=key,
@@ -242,12 +278,13 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
         ).to(device))
 
 
-    account_encoder_model = BiNTabularEncoder(
-        feature_dim=7,
-        embedding_dim=14,
-        hidden_dims=[32, 32],
+    account_encoder_model = SimpleMLPEncoder(
+        input_shape=(1, 7),  # 7 account state features, single timestep
+        output_shape=(1, 14),  # Match embedding_dim output
+        hidden_sizes=(32, 32),
         activation="gelu",
         dropout=0.1,
+        final_activation="gelu",
     )
 
     account_state_encoder = SafeModule(
@@ -260,7 +297,7 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
         module=account_encoder_model,
         in_keys=[account_state_key],
         out_keys=["encoding_account_state"],
-    )
+    ).to(device)
 
     # Define the actor
     common = MLP(
@@ -373,18 +410,12 @@ def eval_model(actor, test_env, num_episodes=3):
 
 def make_collector(cfg, train_env, actor_model_explore, compile_mode):
     """Make collector."""
-    device = cfg.collector.device
-    if device in ("", None):
-        if torch.cuda.is_available():
-            device = torch.device("cuda:0")
-        else:
-            device = torch.device("cpu")
     collector = SyncDataCollector(
         train_env,
         actor_model_explore,
         frames_per_batch=cfg.collector.frames_per_batch,
         total_frames=cfg.collector.total_frames,
-        device=device,
+        device="cpu",
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
     )

@@ -38,7 +38,7 @@ from torchrl.modules import (
 
 from torchrl.objectives import DiscreteIQLLoss, HardUpdate
 from torchrl.trainers.helpers.models import ACTIVATIONS
-from trading_nets.architectures.tabl.tabl import BiNMTABLModel
+from torchtrade.models.simple_encoders import SimpleCNNEncoder
 import copy
 from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
@@ -191,12 +191,6 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
 
 def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=None):
     """Make collector."""
-    device = cfg.collector.device
-    if device in ("", None):
-        if torch.cuda.is_available():
-            device = torch.device("cuda:0")
-        else:
-            device = torch.device("cpu")
     collector = SyncDataCollector(
         train_env,
         actor_model_explore,
@@ -204,7 +198,7 @@ def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=N
         init_random_frames=cfg.collector.init_random_frames,
         max_frames_per_traj=cfg.collector.max_frames_per_traj,
         total_frames=cfg.collector.total_frames,
-        device=device,
+        device="cpu",
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
         postproc=postproc,  # Add coverage tracker as postproc
@@ -275,15 +269,13 @@ def make_discrete_iql_model(cfg, env, device):
     # Build the encoder
     for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
     
-        model = BiNMTABLModel(input_shape=(w, 14),
+        model = SimpleCNNEncoder(input_shape=(w, 14),
                             output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
-                            hidden_seq_size=w,
-                            hidden_feature_size=14,
-                            num_heads=3,
+                            hidden_channels=64,
+                            kernel_size=3,
                             activation="relu",
                             final_activation="relu",
-                            dropout=0.1,
-                            initializer="kaiming_uniform")
+                            dropout=0.1)
         encoders.append(SafeModule(
             module=model,
             in_keys=key,
@@ -299,7 +291,7 @@ def make_discrete_iql_model(cfg, env, device):
         ),
         in_keys=[account_state_key],
         out_keys=["encoding_account_state"],
-    )
+    ).to(device)
 
     encoder = SafeSequential(*encoders, account_state_encoder)
 

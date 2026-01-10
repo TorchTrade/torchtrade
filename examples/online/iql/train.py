@@ -106,7 +106,6 @@ def main(cfg: DictConfig):  # noqa: F821
 
     # Create agent
     model = make_discrete_iql_model(cfg, train_env, device)
-    eval_env.to(model[0].device)
 
     # Create loss
     loss_module, target_net_updater = make_discrete_loss(cfg.loss, model, device=device)
@@ -203,12 +202,14 @@ def main(cfg: DictConfig):  # noqa: F821
             with set_exploration_type(
                 ExplorationType.DETERMINISTIC
             ), torch.no_grad(), timeit("evaluating"):
+                # Keep eval_env on CPU, move actor to CPU temporarily for eval
                 eval_rollout = eval_env.rollout(
                     max_eval_steps,
-                    model[0],
-                    auto_cast_to_device=True,
+                    model[0].to("cpu"),
+                    auto_cast_to_device=False,
                     break_when_any_done=True,
                 )
+                model[0].to(device)  # Move actor back to device for training
                 eval_rollout.squeeze()
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward

@@ -75,7 +75,6 @@ def main(cfg: DictConfig):  # noqa: F821
         max_train_traj_length=max_train_traj_length,
         max_eval_traj_length=max_eval_traj_length,
     )
-    eval_env.to(device)
 
     total_frames = cfg.collector.total_frames
     frames_per_batch = cfg.collector.frames_per_batch
@@ -290,12 +289,14 @@ def main(cfg: DictConfig):  # noqa: F821
                 i * frames_in_batch
             ) // test_interval:
                 actor.eval()
+                # Keep eval_env on CPU, move actor to CPU temporarily for eval
                 eval_rollout = eval_env.rollout(
                     max_eval_traj_length,
-                    actor,
-                    auto_cast_to_device=True,
+                    actor.to("cpu"),
+                    auto_cast_to_device=False,
                     break_when_any_done=True,
                 )
+                actor.to(device)  # Move actor back to device for training
                 eval_rollout.squeeze()
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward

@@ -18,7 +18,7 @@ from torchrl.envs.utils import ExplorationType, set_exploration_type
 import torch
 
 from torchrl.trainers.helpers.models import ACTIVATIONS
-from trading_nets.architectures.tabl.tabl import BiNMTABLModel
+from torchtrade.models import SimpleCNNEncoder
 import tensordict
 
 def make_discrete_iql_model(device="cpu"):
@@ -26,44 +26,44 @@ def make_discrete_iql_model(device="cpu"):
     # Define Actor Network
     action_spec = CategoricalSpec(3)
     # Define Actor Network
-    encodernet1min12 = BiNMTABLModel(input_shape=(1, 12, 14),
-                        output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
-                        hidden_seq_size=12,
-                        hidden_feature_size=14,
-                        num_heads=3,
-                        activation="relu",
-                        final_activation="relu",
-                        dropout=0.1,
-                        initializer="kaiming_uniform")
-    encodernet5min8 = BiNMTABLModel(input_shape=(1, 8, 14),
-                        output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
-                        hidden_seq_size=8,
-                        hidden_feature_size=14,
-                        num_heads=3,
-                        activation="relu",
-                        final_activation="relu",
-                        dropout=0.1,
-                        initializer="kaiming_uniform")
+    encodernet1min12 = SimpleCNNEncoder(
+        input_shape=(12, 14),
+        output_shape=(1, 14),
+        hidden_channels=64,
+        kernel_size=3,
+        activation="relu",
+        final_activation="relu",
+        dropout=0.1,
+    )
+    encodernet5min8 = SimpleCNNEncoder(
+        input_shape=(8, 14),
+        output_shape=(1, 14),
+        hidden_channels=64,
+        kernel_size=3,
+        activation="relu",
+        final_activation="relu",
+        dropout=0.1,
+    )
 
-    encodernet15min8 = BiNMTABLModel(input_shape=(1, 8, 14),
-                        output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
-                        hidden_seq_size=8,
-                        hidden_feature_size=14,
-                        num_heads=3,
-                        activation="relu",
-                        final_activation="relu",
-                        dropout=0.1,
-                        initializer="kaiming_uniform")
+    encodernet15min8 = SimpleCNNEncoder(
+        input_shape=(8, 14),
+        output_shape=(1, 14),
+        hidden_channels=64,
+        kernel_size=3,
+        activation="relu",
+        final_activation="relu",
+        dropout=0.1,
+    )
 
-    encodernet1h24 = BiNMTABLModel(input_shape=(1, 24, 14),
-                        output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
-                        hidden_seq_size=24,
-                        hidden_feature_size=14,
-                        num_heads=3,
-                        activation="relu",
-                        final_activation="relu",
-                        dropout=0.1,
-                        initializer="kaiming_uniform")
+    encodernet1h24 = SimpleCNNEncoder(
+        input_shape=(24, 14),
+        output_shape=(1, 14),
+        hidden_channels=64,
+        kernel_size=3,
+        activation="relu",
+        final_activation="relu",
+        dropout=0.1,
+    )
 
     encoder1min12 = SafeModule(
         module=encodernet1min12,

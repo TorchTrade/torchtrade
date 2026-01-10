@@ -12,7 +12,7 @@ env:
   leverage: 5  # 5x leverage
   exp_name: ${logger.exp_name}
   seed: 0
-  train_envs: 10
+  train_envs: 5
   eval_envs: 1
   data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
   test_split_start: "2025-01-01"
