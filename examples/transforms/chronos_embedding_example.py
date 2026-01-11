@@ -25,7 +25,7 @@ Usage:
 import torch
 import pandas as pd
 from torchrl.envs import TransformedEnv, Compose, InitTracker, RewardSum
-from torchrl.modules import TensorDictModule
+from tensordict.nn import TensorDictModule
 import torch.nn as nn
 
 from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
