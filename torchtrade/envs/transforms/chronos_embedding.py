@@ -212,52 +212,48 @@ class ChronosEmbeddingTransform(Transform):
         # Return placeholder embedding
         return torch.zeros(self.embedding_dim, device=self.device, dtype=self.torch_dtype)
 
+    def _aggregate_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
+        """Aggregate feature embeddings using configured strategy.
+
+        Args:
+            embeddings: Stacked embeddings of shape (num_features, embedding_dim)
+
+        Returns:
+            Aggregated embedding of shape (embedding_dim,) or (num_features * embedding_dim,)
+        """
+        if self.aggregation == "mean":
+            return embeddings.mean(dim=0)
+        if self.aggregation == "max":
+            return embeddings.max(dim=0)[0]
+        return embeddings.flatten()  # concat
+
     def _apply_transform(self, obs: torch.Tensor) -> torch.Tensor:
         """Transform market data observation into embedding.
 
         Args:
-            obs: Market data tensor of shape (window_size, num_features)
-                 Each feature column is a separate time series
+            obs: Market data tensor of shape (window_size,) or (window_size, num_features)
 
         Returns:
             Embedding tensor of shape (embedding_dim,) or (num_features * embedding_dim,)
-            depending on aggregation strategy
         """
         # Lazy initialize on first use
         if not self._initialized:
             self._init()
 
-        # Handle different input shapes
+        # Convert 1D to 2D for uniform handling
         if obs.ndim == 1:
-            # Single time series: (window_size,)
-            return self._extract_embedding(obs)
+            obs = obs.unsqueeze(-1)  # (window_size,) -> (window_size, 1)
 
-        elif obs.ndim == 2:
-            # Multi-feature time series: (window_size, num_features)
-            window_size, num_features = obs.shape
+        if obs.ndim != 2:
+            raise ValueError(f"Expected 1D or 2D tensor, got shape {obs.shape}")
 
-            # Extract embedding for each feature
-            embeddings = []
-            for feature_idx in range(num_features):
-                series = obs[:, feature_idx]  # (window_size,)
-                emb = self._extract_embedding(series)
-                embeddings.append(emb)
+        # Extract embeddings for all features
+        window_size, num_features = obs.shape
+        embeddings = torch.stack([
+            self._extract_embedding(obs[:, i]) for i in range(num_features)
+        ])  # (num_features, embedding_dim)
 
-            # Stack embeddings: (num_features, embedding_dim)
-            embeddings = torch.stack(embeddings, dim=0)
-
-            # Aggregate across features
-            if self.aggregation == "mean":
-                return embeddings.mean(dim=0)  # (embedding_dim,)
-            elif self.aggregation == "max":
-                return embeddings.max(dim=0)[0]  # (embedding_dim,)
-            elif self.aggregation == "concat":
-                return embeddings.flatten()  # (num_features * embedding_dim,)
-
-        else:
-            raise ValueError(
-                f"Expected obs to be 1D or 2D tensor, got shape {obs.shape}"
-            )
+        return self._aggregate_embeddings(embeddings)
 
     def _call(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Process tensordict and transform specified keys.
@@ -283,26 +279,14 @@ class ChronosEmbeddingTransform(Transform):
             obs = tensordict.get(in_key)
 
             # Handle batched observations
-            # obs shape: (batch, window_size, num_features) or variants
-            original_shape = obs.shape
-
             if obs.ndim > 2:
-                # Batched: flatten batch dimensions
-                batch_shape = original_shape[:-2]
-                batch_size = int(torch.prod(torch.tensor(batch_shape)))
+                # Batched: flatten all batch dimensions
+                batch_shape = obs.shape[:-2]
+                obs_flat = obs.flatten(end_dim=-3)  # Flatten to (batch_size, window, features)
 
-                # Reshape to (batch_size, window_size, num_features)
-                obs_flat = obs.reshape(batch_size, *original_shape[-2:])
-
-                # Apply transform to each item in batch
-                embeddings = []
-                for i in range(batch_size):
-                    emb = self._apply_transform(obs_flat[i])
-                    embeddings.append(emb)
-
-                # Stack and reshape back to original batch dimensions
-                embeddings = torch.stack(embeddings, dim=0)  # (batch_size, embedding_dim)
-                embeddings = embeddings.reshape(*batch_shape, -1)  # (*batch, embedding_dim)
+                # Process batch with list comprehension
+                embeddings = torch.stack([self._apply_transform(o) for o in obs_flat])
+                embeddings = embeddings.view(*batch_shape, -1)
             else:
                 # Unbatched: single observation
                 embeddings = self._apply_transform(obs)
