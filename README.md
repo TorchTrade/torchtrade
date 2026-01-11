@@ -466,20 +466,130 @@ Actions 1..N: LONG with (SL, TP) combinations
 Actions N+1..2N: SHORT with (SL, TP) combinations
 ```
 
-### Reward Functions
+### Custom Reward Functions
 
-**Sequential Environments (SeqLongOnlyEnv, SeqFuturesEnv):**
-- Dense per-step rewards based on portfolio returns
-- Sparse terminal reward comparing to buy-and-hold baseline
-- Differential Sharpe Ratio bonus for risk-adjusted returns
+TorchTrade provides a flexible reward function system that allows you to customize how your agent is rewarded during training.
 
-**One-Step Environments (LongOnlyOneStepEnv, FuturesOneStepEnv):**
-- Sharpe ratio of log-returns during the rollout period
-- Annualized based on execution timeframe
-- Liquidation penalty (-2.0) for futures environments
+**Default Behavior:**
+All environments use simple log returns by default: `log(portfolio_value_t / portfolio_value_t-1)`
 
-**Customization:**
-All reward functions can be customized by overriding the `_calculate_reward()` method.
+**Pre-Built Reward Functions:**
+
+```python
+from torchtrade.envs.reward import (
+    sharpe_ratio_reward,           # Risk-adjusted returns
+    drawdown_penalty_reward,        # Log return with drawdown penalty
+    terminal_comparison_reward,     # Sparse terminal vs buy & hold
+    hybrid_dense_sparse_reward,     # Combination of step-wise + terminal
+    realized_pnl_reward            # Only reward realized profits
+)
+```
+
+**Example 1: Using Pre-Built Reward Functions**
+
+```python
+from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.reward import drawdown_penalty_reward
+
+# Configure environment with custom reward
+config = SeqLongOnlyEnvConfig(
+    symbol="BTC/USD",
+    time_frames=[1, 5, 15],
+    window_sizes=[12, 8, 8],
+    execute_on=(5, "Minute"),
+    initial_cash=1000,
+    reward_function=drawdown_penalty_reward  # Penalize large drawdowns
+)
+
+env = SeqLongOnlyEnv(df, config)
+```
+
+**Example 2: Creating Custom Reward Functions**
+
+```python
+from torchtrade.envs.reward import RewardContext
+import numpy as np
+
+def risk_adjusted_profit(ctx: RewardContext) -> float:
+    """
+    Custom reward that penalizes frequent trading and rewards consistent returns.
+    """
+    # Base reward: log return
+    if ctx.old_portfolio_value <= 0:
+        return 0.0
+    log_return = np.log(ctx.new_portfolio_value / ctx.old_portfolio_value)
+
+    # Penalty for transaction costs
+    fee_penalty = -ctx.fee_paid / ctx.old_portfolio_value
+
+    # Penalty for excessive trading
+    trade_penalty = -0.001 if ctx.trade_executed else 0.0
+
+    # Terminal bonus for beating buy & hold
+    terminal_bonus = 0.0
+    if ctx.current_step >= ctx.max_steps - 1:
+        buy_hold = ctx.metadata.get('buy_and_hold_value', ctx.old_portfolio_value)
+        if ctx.new_portfolio_value > buy_hold:
+            terminal_bonus = 0.5  # Bonus for outperformance
+
+    return log_return + fee_penalty + trade_penalty + terminal_bonus
+
+# Use custom reward
+config = SeqLongOnlyEnvConfig(
+    symbol="BTC/USD",
+    reward_function=risk_adjusted_profit
+)
+```
+
+**Example 3: Accessing Environment History**
+
+```python
+def sharpe_based_reward(ctx: RewardContext) -> float:
+    """
+    Reward based on running Sharpe ratio of portfolio returns.
+    """
+    # Access portfolio history from metadata
+    history = ctx.metadata.get('portfolio_value_history', [])
+
+    if len(history) < 2:
+        return 0.0
+
+    # Compute returns
+    returns = [
+        np.log(history[i] / history[i-1])
+        for i in range(1, len(history))
+    ]
+
+    # Compute Sharpe ratio
+    mean_return = np.mean(returns)
+    std_return = np.std(returns) + 1e-9
+    sharpe = mean_return / std_return
+
+    return np.clip(sharpe, -10.0, 10.0)
+```
+
+**Available Context Fields:**
+
+The `RewardContext` provides access to:
+- `old_portfolio_value`, `new_portfolio_value` - Portfolio values before/after action
+- `action` - Action taken (0, 1, 2, etc.)
+- `current_step`, `max_steps` - Episode progress
+- `trade_executed` - Whether a trade occurred
+- `fee_paid`, `slippage_amount` - Transaction costs
+- `metadata` - Environment-specific data:
+  - `portfolio_value_history` - Historical portfolio values (offline envs)
+  - `action_history`, `reward_history` - Historical actions/rewards (offline envs)
+  - `buy_and_hold_value` - Buy & hold benchmark (terminal step only)
+  - `leverage`, `margin_ratio`, `liquidation_price` - Futures-specific (futures envs)
+  - `rollout_returns` - Returns during rollout (one-step envs)
+
+**Reward Function Best Practices:**
+
+1. **Keep rewards bounded** - Use `np.clip()` to prevent extreme values
+2. **Consider scale** - Rewards in range [-10, 10] work well with most algorithms
+3. **Balance dense vs sparse** - Dense rewards (every step) help learning, sparse rewards (terminal only) reduce noise
+4. **Penalize bad behavior** - Add penalties for excessive trading, large drawdowns, liquidations
+5. **Test extensively** - Verify your reward function produces expected values across different market conditions
 
 ---
 
