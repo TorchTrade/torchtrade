@@ -9,7 +9,7 @@ description = "Reinforcement learning environments for trading applications"
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [
-    {name = "Sebastian Dittert", email = "your-email@example.com"}
+    {name = "Sebastian Dittert", email = "torchtradecontact@gmail.com"}
 ]
 license = {text = "MIT"}
 classifiers = [
@@ -45,7 +45,7 @@ llm_local = [
     "bitsandbytes>=0.41.0",
 ]
 chronos = [
-    "chronos-forecasting @ git+https://github.com/amazon-science/chronos-forecasting.git",
+    "chronos-forecasting",
 ]
 
 [tool.pytest.ini_options]
