@@ -149,13 +149,9 @@ class ChronosEmbeddingTransform(Transform):
                 torch_dtype=self.torch_dtype,
             )
 
-            # Access encoder and tokenizer directly for embedding extraction
-            # Chronos uses T5 architecture, so we access the encoder part
-            self.model = self.pipeline.model
 
-            self.embedding_dim = self.pipeline.model.encode(torch.zeros((1, 10), dtype=torch.long, device=self.device),
-                                                            torch.ones((1, 10), dtype=torch.long, device=self.device))[:, -1, :].shape[-1]
-
+            embedding_dim, _ = self.pipeline.embed(torch.zeros((1, 10)))
+            self.embedding_dim = embedding_dim[:, -1, :].shape[-1]
             self._initialized = True
 
         except Exception as e:
@@ -175,10 +171,8 @@ class ChronosEmbeddingTransform(Transform):
         Returns:
             Embedding tensor of shape (embedding_dim,)
         """
-        # Ensure series is on correct device
-        series = series.to(self.device)
-
-        return self.model.encode(series, torch.ones_like(series).to(self.device))[:, -1, :]
+        embeddings, _ = self.pipeline.embed(series.cpu()) # chronos error when we keep it on GPU! BAD
+        return embeddings[:, -1, :]
 
     def _aggregate_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
         """Aggregate feature embeddings using configured strategy.
@@ -269,6 +263,10 @@ class ChronosEmbeddingTransform(Transform):
         return tensordict
 
     forward = _call  # Alias for compatibility
+
+    def _reset(self, tensordict: TensorDictBase, tensordict_reset: TensorDictBase) -> TensorDictBase:                        
+        """Apply transform to reset observations."""                                                                         
+        return self._call(tensordict_reset) 
 
     def transform_observation_spec(self, observation_spec: CompositeSpec) -> CompositeSpec:
         """Update observation spec with embedding dimensions.
