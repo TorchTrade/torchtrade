@@ -15,6 +15,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
+from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 
 
 def combinatory_action_map(stoploss_levels: List[float], takeprofit_levels: List[float]) -> Dict:
@@ -59,6 +60,7 @@ class AlpacaSLTPTradingEnvConfig:
     trade_mode: TradeMode = TradeMode.NOTIONAL
     seed: Optional[int] = 42
     include_base_features: bool = False
+    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
 
 class AlpacaSLTPTorchTradingEnv(EnvBase):
@@ -96,6 +98,10 @@ class AlpacaSLTPTorchTradingEnv(EnvBase):
             trader: Optional pre-configured AlpacaOrderClass for dependency injection
         """
         self.config = config
+
+        # Validate custom reward function signature if provided
+        if config.reward_function is not None:
+            validate_reward_function(config.reward_function)
 
         # Initialize Alpaca clients - use injected instances or create new ones
         self.observer = observer if observer is not None else AlpacaObservationClass(
@@ -225,32 +231,35 @@ class AlpacaSLTPTorchTradingEnv(EnvBase):
         action_tuple: Tuple[Optional[float], Optional[float]],
         trade_info: Dict,
     ) -> float:
-        """Calculate the step reward.
+        """
+        Calculate reward using custom or default function.
 
-        Reward is based on realized profit when position is closed (by SL/TP trigger
-        or manual sell). A small penalty is applied for invalid actions.
+        If config.reward_function is provided, uses that custom function.
+        Otherwise, uses the default log return reward.
 
         Args:
-            old_portfolio_value: Portfolio value before the action.
-            new_portfolio_value: Portfolio value after the action.
-            action_tuple: The (stop_loss, take_profit) tuple for this action.
-            trade_info: Trade information dict.
+            old_portfolio_value: Portfolio value before action
+            new_portfolio_value: Portfolio value after action
+            action_tuple: (stop_loss, take_profit) tuple for bracket order
+            trade_info: Dictionary with trade execution details
 
         Returns:
-            float: The reward for this step.
+            Reward value (float), scaled by config.reward_scaling
         """
-        # Check if position was closed (SL/TP triggered or sold)
-        if trade_info.get("position_closed", False):
-            portfolio_return = (
-                new_portfolio_value - old_portfolio_value
-            ) / old_portfolio_value
-        elif not trade_info["executed"] and action_tuple != (None, None):
-            # Penalty for trying to open position when already holding
-            portfolio_return = -0.001
-        else:
-            portfolio_return = 0.0
+        # Use custom reward function if provided
+        if self.config.reward_function is not None:
+            # Note: Live environments don't track history for performance
+            ctx = build_reward_context(
+                self,
+                old_portfolio_value,
+                new_portfolio_value,
+                action_tuple,
+                trade_info,
+            )
+            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
 
-        return portfolio_return * self.config.reward_scaling
+        # Otherwise use default log return (no context needed)
+        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value."""

@@ -17,6 +17,7 @@ from torchtrade.envs.binance.futures_order_executor import (
     TradeMode,
     MarginType,
 )
+from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -55,6 +56,7 @@ class BinanceFuturesTradingEnvConfig:
     seed: Optional[int] = 42
     include_base_features: bool = False
     close_position_on_reset: bool = False  # Whether to close positions on env.reset()
+    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
 
 # Interval to seconds mapping for waiting
@@ -115,6 +117,10 @@ class BinanceFuturesTorchTradingEnv(EnvBase):
             trader: Optional pre-configured BinanceFuturesOrderClass
         """
         self.config = config
+
+        # Validate custom reward function signature if provided
+        if config.reward_function is not None:
+            validate_reward_function(config.reward_function)
 
         # Normalize intervals to list
         intervals = config.intervals if isinstance(config.intervals, list) else [config.intervals]
@@ -272,24 +278,48 @@ class BinanceFuturesTorchTradingEnv(EnvBase):
         trade_info: Dict,
     ) -> float:
         """
-        Calculate the step reward.
+        Calculate reward using custom or default function.
 
-        Reward is based on portfolio value change when closing positions.
-        Small penalty for invalid actions.
+        If config.reward_function is provided, uses that custom function.
+        Otherwise, uses the default log return reward.
+
+        Args:
+            old_portfolio_value: Portfolio value before action
+            new_portfolio_value: Portfolio value after action
+            action: Action taken (-1=short, 0=close, 1=long)
+            trade_info: Dictionary with trade execution details
+
+        Returns:
+            Reward value (float), scaled by config.reward_scaling
         """
-        # Reward based on realized PnL when closing position
-        if action == 0 and trade_info["executed"] and trade_info["closed_position"]:
-            # Closed a position - reward based on PnL
-            portfolio_return = (
-                new_portfolio_value - old_portfolio_value
-            ) / old_portfolio_value if old_portfolio_value > 0 else 0
-        elif not trade_info["executed"] and action != 0:
-            # Invalid action penalty
-            portfolio_return = -0.001
-        else:
-            portfolio_return = 0.0
+        # Use custom reward function if provided
+        if self.config.reward_function is not None:
+            # Get current position state for metadata
+            position_status = self.trader.get_position_status()
+            metadata = {}
+            if position_status is not None:
+                balance = self.trader.get_account_balance()
+                position_value = abs(position_status.position_amount * position_status.entry_price)
+                total_balance = balance.get("total_margin_balance", 0)
+                metadata = {
+                    "leverage": float(position_status.leverage),
+                    "margin_ratio": position_value / total_balance if total_balance > 0 else 0.0,
+                    "liquidation_price": position_status.liquidation_price,
+                }
 
-        return portfolio_return * self.config.reward_scaling
+            # Note: Live environments don't track history for performance
+            ctx = build_reward_context(
+                self,
+                old_portfolio_value,
+                new_portfolio_value,
+                action,
+                trade_info,
+                **metadata
+            )
+            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
+
+        # Otherwise use default log return (no context needed)
+        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value."""

@@ -10,10 +10,18 @@ import torch
 from torchtrade.envs.offline.longonlyonestepenv import (
     LongOnlyOneStepEnv,
     LongOnlyOneStepEnvConfig,
-    InitialBalanceSampler,
-    combinatory_action_map,
 )
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.utils import (
+    TimeFrame,
+    TimeFrameUnit,
+    InitialBalanceSampler,
+    build_sltp_action_map,
+)
+
+
+def combinatory_action_map(stoploss_levels, takeprofit_levels):
+    """Wrapper for backward compatibility in tests."""
+    return build_sltp_action_map(stoploss_levels, takeprofit_levels, include_short_positions=False)
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:

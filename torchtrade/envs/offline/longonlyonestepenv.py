@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Callable
 from warnings import warn
-from itertools import product
 
 import numpy as np
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
@@ -11,7 +10,8 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map
+from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 import logging
 import sys
 
@@ -30,28 +30,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def combinatory_action_map(stoploss_levels: List[float], takeprofit_levels: List[float]) -> Dict:
-    action_map = {}
-    # 0 = HOLD
-    action_map[0] = (None, None)
-    idx = 1
-    for sl, tp in product(stoploss_levels, takeprofit_levels):
-        action_map[idx] = (sl, tp)
-        idx += 1
-    return action_map
-
-class InitialBalanceSampler:
-    def __init__(self, initial_cash: Union[List[int], int], seed: Optional[int] = None):
-        self.initial_cash = initial_cash
-        if seed is not None:
-            np.random.seed(seed)
-
-    def sample(self) -> float:
-        if isinstance(self.initial_cash, int):
-            return float(self.initial_cash)
-        else:
-            return float(np.random.randint(self.initial_cash[0], self.initial_cash[1]))
-
 @dataclass
 class LongOnlyOneStepEnvConfig:
     symbol: str = "BTC/USD"
@@ -67,10 +45,18 @@ class LongOnlyOneStepEnvConfig:
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
     max_traj_length: Optional[int] = None
+    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
+    reward_scaling: float = 1.0
+    include_hold_action: bool = True  # Include HOLD action (index 0) in action space
 
 class LongOnlyOneStepEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: LongOnlyOneStepEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
         self.config = config
+
+        # Validate custom reward function signature if provided
+        if config.reward_function is not None:
+            validate_reward_function(config.reward_function)
+
         self.transaction_fee = config.transaction_fee
         self.slippage = config.slippage
         if not (0 <= config.transaction_fee <= 1):
@@ -105,7 +91,12 @@ class LongOnlyOneStepEnv(EnvBase):
         self.takeprofit_levels = config.takeprofit_levels
 
         # Define action and observation spaces sell, hold (do nothing), buy
-        self.action_map = combinatory_action_map(self.stoploss_levels, self.takeprofit_levels)
+        self.action_map = build_sltp_action_map(
+            self.stoploss_levels,
+            self.takeprofit_levels,
+            include_hold_action=config.include_hold_action,
+            include_short_positions=False
+        )
         self.action_spec = Categorical(len(self.action_map))
 
         # Get the number of features from the observer
@@ -196,29 +187,40 @@ class LongOnlyOneStepEnv(EnvBase):
         action: float,
         trade_info: Dict,
     ) -> float:
-        # --- Terminal: sparse reward ---
-        #reward = (new_portfolio_value - old_portfolio_value) / old_portfolio_value
-#        reward = torch.log(torch.tensor(new_portfolio_value, dtype=torch.float) / torch.tensor(old_portfolio_value, dtype=torch.float))
-        # compute sharp ratio as return
-        if len(self.rollout_returns) == 0 or action == (None, None):
-            return 0.0
+        """
+        Calculate reward using custom or default function.
 
-        # Convert list to tensor
-        returns = torch.stack(self.rollout_returns)
-        
-        # Need at least 2 points for a valid standard deviation
-        if returns.numel() < 2:
-            return float(returns.sum()) # Return raw sum if we can't compute volatility
+        If config.reward_function is provided, uses that custom function.
+        Otherwise, uses the default log return reward.
 
-        mean_return = returns.mean()
-        std_return = returns.std()
-        
-        # 1. Epsilon prevents NaN if std is 0
-        # 2. Multiply by sqrt(N) to annualize based on the execution timeframe
-        sharpe = (mean_return / (std_return + 1e-9)) * np.sqrt(self.periods_per_year)
-        
-        # Clip to avoid extreme gradients in RL
-        return torch.clamp(sharpe, -10.0, 10.0).item()
+        Args:
+            old_portfolio_value: Portfolio value before action
+            new_portfolio_value: Portfolio value after action
+            action: Action taken
+            trade_info: Dictionary with trade execution details
+
+        Returns:
+            Reward value (float)
+        """
+        # Use custom reward function if provided
+        if self.config.reward_function is not None:
+            ctx = build_reward_context(
+                self,
+                old_portfolio_value,
+                new_portfolio_value,
+                action,
+                trade_info,
+                portfolio_value_history=self.portfolio_value_history,
+                action_history=self.action_history,
+                reward_history=self.reward_history,
+                base_price_history=self.base_price_history,
+                initial_portfolio_value=self.initial_portfolio_value,
+                rollout_returns=self.rollout_returns,
+            )
+            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
+
+        # Otherwise use default log return (no context needed)
+        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
     def _get_portfolio_value(self, current_price: float = None) -> float:
         """Calculate total portfolio value."""

@@ -7,7 +7,6 @@ with the one-step rollout pattern from LongOnlyOneStepEnv.
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union, Callable
-from itertools import product
 from enum import Enum
 import math
 
@@ -19,7 +18,8 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map
+from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 import logging
 import sys
 
@@ -42,59 +42,6 @@ class MarginType(Enum):
     """Margin type for futures trading."""
     ISOLATED = "isolated"
     CROSSED = "crossed"
-
-
-def futures_onestep_action_map(
-    stoploss_levels: List[float],
-    takeprofit_levels: List[float],
-) -> Dict[int, tuple]:
-    """
-    Create action map for futures one-step environment.
-
-    Actions:
-    - 0: Hold (no action)
-    - 1 to N: Long positions with SL/TP combinations
-    - N+1 to 2N: Short positions with SL/TP combinations
-
-    Args:
-        stoploss_levels: List of stop-loss percentages (e.g., [-0.02, -0.05])
-        takeprofit_levels: List of take-profit percentages (e.g., [0.05, 0.1])
-
-    Returns:
-        Dictionary mapping action indices to (side, sl, tp) tuples
-        where side is None (hold), "long", or "short"
-    """
-    action_map = {}
-    # Action 0 = HOLD
-    action_map[0] = (None, None, None)
-
-    idx = 1
-    # Long positions
-    for sl, tp in product(stoploss_levels, takeprofit_levels):
-        action_map[idx] = ("long", sl, tp)
-        idx += 1
-
-    # Short positions
-    for sl, tp in product(stoploss_levels, takeprofit_levels):
-        action_map[idx] = ("short", sl, tp)
-        idx += 1
-
-    return action_map
-
-
-class InitialBalanceSampler:
-    """Sampler for initial balance with optional randomization."""
-
-    def __init__(self, initial_cash: Union[List[int], int], seed: Optional[int] = None):
-        self.initial_cash = initial_cash
-        if seed is not None:
-            np.random.seed(seed)
-
-    def sample(self) -> float:
-        if isinstance(self.initial_cash, int):
-            return float(self.initial_cash)
-        else:
-            return float(np.random.randint(self.initial_cash[0], self.initial_cash[1]))
 
 
 @dataclass
@@ -141,6 +88,11 @@ class FuturesOneStepEnvConfig:
     include_base_features: bool = False
     max_traj_length: Optional[int] = None
 
+    # Reward settings
+    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
+    reward_scaling: float = 1.0
+    include_hold_action: bool = True  # Include HOLD action (index 0) in action space
+
 
 class FuturesOneStepEnv(EnvBase):
     """
@@ -177,6 +129,11 @@ class FuturesOneStepEnv(EnvBase):
             feature_preprocessing_fn: Optional custom preprocessing function
         """
         self.config = config
+
+        # Validate custom reward function signature if provided
+        if config.reward_function is not None:
+            validate_reward_function(config.reward_function)
+
         self.transaction_fee = config.transaction_fee
         self.slippage = config.slippage
         self.leverage = config.leverage
@@ -220,7 +177,12 @@ class FuturesOneStepEnv(EnvBase):
         self.takeprofit_levels = list(config.takeprofit_levels) if not isinstance(config.takeprofit_levels, list) else config.takeprofit_levels
 
         # Create action map
-        self.action_map = futures_onestep_action_map(self.stoploss_levels, self.takeprofit_levels)
+        self.action_map = build_sltp_action_map(
+            self.stoploss_levels,
+            self.takeprofit_levels,
+            include_hold_action=config.include_hold_action,
+            include_short_positions=True
+        )
         self.action_spec = Categorical(len(self.action_map))
 
         # Get market data keys
@@ -418,33 +380,48 @@ class FuturesOneStepEnv(EnvBase):
         trade_info: Dict,
     ) -> float:
         """
-        Calculate reward using Sharpe ratio of rollout returns.
+        Calculate reward using custom or default function.
 
-        Similar to LongOnlyOneStepEnv but accounting for futures positions.
-        PERF: rollout_returns is now a list of floats, converted to tensor once here.
+        If config.reward_function is provided, uses that custom function.
+        Otherwise, uses the default log return reward.
+
+        Args:
+            old_portfolio_value: Portfolio value before action
+            new_portfolio_value: Portfolio value after action
+            action_tuple: Action taken (side, sl, tp)
+            trade_info: Dictionary with trade execution details
+
+        Returns:
+            Reward value (float)
         """
-        if len(self.rollout_returns) == 0 or action_tuple[0] is None:
-            return 0.0
+        # Use custom reward function if provided
+        if self.config.reward_function is not None:
+            # Calculate margin ratio
+            total_balance = self.balance + self.unrealized_pnl
+            margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
 
-        # PERF: Convert list of floats to tensor once (instead of per-step tensor creation)
-        returns = torch.tensor(self.rollout_returns, dtype=torch.float)
+            ctx = build_reward_context(
+                self,
+                old_portfolio_value,
+                new_portfolio_value,
+                action_tuple,
+                trade_info,
+                portfolio_value_history=self.portfolio_value_history,
+                action_history=self.action_history,
+                reward_history=self.reward_history,
+                base_price_history=self.base_price_history,
+                position_history=self.position_history,
+                initial_portfolio_value=self.initial_portfolio_value,
+                rollout_returns=self.rollout_returns,
+                liquidated=trade_info.get("liquidated", False),
+                leverage=float(self.leverage),
+                margin_ratio=margin_ratio,
+                liquidation_price=self.liquidation_price,
+            )
+            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
 
-        # Need at least 2 points for a valid standard deviation
-        if returns.numel() < 2:
-            return float(returns.sum())
-
-        mean_return = returns.mean()
-        std_return = returns.std()
-
-        # Compute Sharpe ratio
-        sharpe = (mean_return / (std_return + 1e-9)) * np.sqrt(self.periods_per_year)
-
-        # Add penalty for liquidation
-        if trade_info.get("liquidated", False):
-            sharpe = sharpe - 2.0  # Significant penalty
-
-        # Clip to avoid extreme gradients
-        return torch.clamp(sharpe, -10.0, 10.0).item()
+        # Otherwise use default log return (no context needed)
+        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
     def _get_portfolio_value(self, current_price: float = None) -> float:
         """Calculate total portfolio value including unrealized PnL.

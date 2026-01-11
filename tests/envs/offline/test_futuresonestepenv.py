@@ -10,11 +10,19 @@ import torch
 from torchtrade.envs.offline.futuresonestepenv import (
     FuturesOneStepEnv,
     FuturesOneStepEnvConfig,
-    InitialBalanceSampler,
-    futures_onestep_action_map,
     MarginType,
 )
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.utils import (
+    TimeFrame,
+    TimeFrameUnit,
+    InitialBalanceSampler,
+    build_sltp_action_map,
+)
+
+
+def futures_onestep_action_map(stoploss_levels, takeprofit_levels):
+    """Wrapper for backward compatibility in tests."""
+    return build_sltp_action_map(stoploss_levels, takeprofit_levels, include_short_positions=True)
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:

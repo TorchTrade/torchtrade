@@ -244,7 +244,13 @@ class TestBinanceFuturesTorchTradingEnv:
         assert reward > 0  # Positive reward for profit
 
     def test_reward_calculation_invalid_action(self, env):
-        """Test reward calculation for invalid action."""
+        """Test reward calculation when action is not executed.
+
+        With the default log return reward, if portfolio value doesn't change,
+        the reward is 0 (log(1000/1000) = log(1) = 0). No penalty is applied
+        by the default reward function - users can implement penalties in
+        custom reward functions if desired.
+        """
         trade_info = {"executed": False, "closed_position": False}
 
         reward = env._calculate_reward(
@@ -254,7 +260,8 @@ class TestBinanceFuturesTorchTradingEnv:
             trade_info=trade_info,
         )
 
-        assert reward < 0  # Negative reward for invalid action
+        # Default reward is pure log return, no penalty for invalid actions
+        assert reward == 0.0  # log(1000/1000) = log(1) = 0
 
 
 class TestBinanceFuturesTradingEnvConfig:

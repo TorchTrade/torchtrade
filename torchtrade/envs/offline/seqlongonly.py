@@ -1,9 +1,6 @@
-import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple, Union, Callable
-from warnings import warn
-from zoneinfo import ZoneInfo
+from datetime import datetime
+from typing import Dict, List, Optional, Union, Callable
 import matplotlib.pyplot as plt
 from datetime import datetime
 
@@ -15,8 +12,8 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
-import random
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, InitialBalanceSampler
+from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 
 @dataclass
 class SeqLongOnlyEnvConfig:
@@ -25,18 +22,25 @@ class SeqLongOnlyEnvConfig:
     window_sizes: Union[List[int], int] = 10
     execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute) # On which timeframe to execute trades
     initial_cash: Union[List[int], int] = (1000, 5000)
-    transaction_fee: float = 0.025 
+    transaction_fee: float = 0.025
     bankrupt_threshold: float = 0.1  # 10% of initial balance
     slippage: float = 0.01
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
     max_traj_length: Optional[int] = None
     random_start: bool = True
+    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
+    reward_scaling: float = 1.0
 
 class SeqLongOnlyEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: SeqLongOnlyEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
         self.action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Do-Nothing, Buy-all
         self.config = config
+
+        # Validate custom reward function signature if provided
+        if config.reward_function is not None:
+            validate_reward_function(config.reward_function)
+
         self.transaction_fee = config.transaction_fee
         self.slippage = config.slippage
         if not (0 <= config.transaction_fee <= 1):
@@ -59,8 +63,9 @@ class SeqLongOnlyEnv(EnvBase):
         self.execute_on_value = config.execute_on.value
         self.execute_on_unit = config.execute_on.unit.value
 
-        # reset settings 
+        # reset settings
         self.initial_cash = config.initial_cash
+        self.initial_cash_sampler = InitialBalanceSampler(config.initial_cash, config.seed)
         self.position_hold_counter = 0
 
         # Define action and observation spaces sell, hold (do nothing), buy
@@ -150,147 +155,48 @@ class SeqLongOnlyEnv(EnvBase):
         action: float,
         trade_info: Dict,
     ) -> float:
-        """GROK REWARD FUNCTION
-        Hybrid reward:
-        - Dense per-step: shaped to encourage smart entry and patient holding
-        - Sparse terminal: your strong baseline (beat max of cash or buy-and-hold)
         """
+        Calculate reward using custom or default function.
 
-        # --- Initialize running stats on first call ---
-        if not hasattr(self, "returns_history"):
-            self.returns_history = []      # for potential future use
-            self.A = 0.0                   # DSR running mean
-            self.B = 0.0001                # DSR running variance proxy (small init to avoid div0)
-            self.t = 0
-            self.hold_start_value = old_portfolio_value  # track entry value for unrealized
+        If config.reward_function is provided, uses that custom function.
+        Otherwise, uses the default log return reward.
 
-        # Daily portfolio return
-        daily_return = (new_portfolio_value - old_portfolio_value) / old_portfolio_value
-        self.returns_history.append(daily_return)
+        Args:
+            old_portfolio_value: Portfolio value before action
+            new_portfolio_value: Portfolio value after action
+            action: Action taken
+            trade_info: Dictionary with trade execution details
 
-        # Transaction fee (normalized)
-        tc = trade_info.get("fee_paid", 0.0) / old_portfolio_value if old_portfolio_value > 0 else 0.0
-        # Or if you track it directly: tc = self.transaction_fee * abs(action) or similar
-
-        # --- Dense per-step reward ---
-        dense_reward = daily_return - tc  # core: profit minus cost of trading
-
-        # Position tracking
-        position_size = getattr(self, "position_size", 0.0)  # assume you have this
-
-        if position_size > 0:
-            # Unrealized PnL since entry (approximate)
-            unrealized_pnl = (new_portfolio_value - self.hold_start_value) / self.hold_start_value
-            if unrealized_pnl > 0:
-                dense_reward += 0.0008 * unrealized_pnl  # bonus for letting winners run
-
-            # Reset hold_start_value on new buy (if you detect entry)
-            if trade_info.get("executed") and trade_info.get("side") == "buy":
-                self.hold_start_value = new_portfolio_value
-
-        # Differential Sharpe Ratio - incremental, online Sharpe update
-        self.t += 1
-        eta = 0.015  # adaptation rate (higher = reacts faster; good for intraday)
-        old_A = self.A
-        self.A += eta * (daily_return - old_A)
-        self.B = (1 - eta) * self.B + eta * (daily_return - old_A) * (daily_return - self.A)
-
-        if self.B > 1e-8:
-            dsr = (self.A - old_A) / np.sqrt(self.B) if self.B > 0 else 0.0
-            dense_reward += 3.0 * dsr  # scale so it matters but doesn't dominate
-
-        # Small bonus for entering a position (overcomes fee fear slightly)
-        if trade_info.get("executed") and trade_info.get("side") == "buy":
-            dense_reward += 0.0005
-
-        # Clip dense to prevent any single step from dominating
-        dense_reward = np.clip(dense_reward, -0.05, 0.05)
-
-        # --- Non-terminal: return dense guidance ---
-        if self.step_counter < self.max_traj_length - 1:
-            return dense_reward
-
-        # --- Terminal: your original strong sparse reward ---
-        buy_and_hold_value = (
-            self.initial_portfolio_value / self.base_price_history[0]
-        ) * self.base_price_history[-1]
-
-        compare_value = max(self.initial_portfolio_value, buy_and_hold_value)
-        if compare_value <= 0:
-            terminal_reward = 0.0
-        else:
-            # Terminal reward as percentage (1.0 = 100% better than benchmark)
-            terminal_reward = (new_portfolio_value - compare_value) / compare_value
-            # Clip to [-5, 5] to prevent extreme values
-            terminal_reward = np.clip(terminal_reward, -5.0, 5.0)
-
-        # Optional: add small dense carryover, or keep pure sparse
-        return terminal_reward  # or: terminal_reward + dense_reward
-
-
-    def _calculate_reward_(
-        self,
-        old_portfolio_value: float,
-        new_portfolio_value: float,
-        action: float,
-        trade_info: Dict,
-    ) -> float:
+        Returns:
+            Reward value (float)
         """
-        Sophisticated reward function:
-        - Realized profits from SELL actions
-        - Gradual reward/penalty for unrealized PnL
-        - Penalize invalid actions
-        - Penalize excessive holding of losing positions
-        """
+        # Use custom reward function if provided
+        if self.config.reward_function is not None:
+            # Compute buy & hold value if terminal
+            is_terminal = self.step_counter >= self.max_traj_length - 1
+            buy_and_hold_value = None
+            if is_terminal and len(self.base_price_history) > 0:
+                buy_and_hold_value = (
+                    self.initial_portfolio_value / self.base_price_history[0]
+                ) * self.base_price_history[-1]
 
-        # 1. Portfolio return
-        portfolio_return = (new_portfolio_value - old_portfolio_value) / old_portfolio_value
+            ctx = build_reward_context(
+                self,
+                old_portfolio_value,
+                new_portfolio_value,
+                action,
+                trade_info,
+                portfolio_value_history=self.portfolio_value_history,
+                action_history=self.action_history,
+                reward_history=self.reward_history,
+                base_price_history=self.base_price_history,
+                initial_portfolio_value=self.initial_portfolio_value,
+                buy_and_hold_value=buy_and_hold_value,
+            )
+            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
 
-        reward = 0.0
-
-        realized_pnl_weight = 2.0
-        unrealized_pnl_weight = 0.005
-        exposure_weight = 0.001
-
-        # 2. Reward realized PnL on SELL
-        if trade_info["executed"] and trade_info["side"] == "sell":
-            # Reward realized profit
-            reward += portfolio_return * 2.0  # scale to emphasize realization
-            # NOTE: maybe we can weight it by the holding time. ideally we want short profits in and out 
-
-        # 3. Small reward for holding profitable positions (unrealized PnL)
-        # if self.position_size > 0:
-        #     reward += self.unrealized_pnlpc * 0.001
-
-        # Market exposure reward
-        if self.position_size > 0:
-            reward += 0.0001
-        
-        # Buy-in bonus
-        if trade_info["executed"] and trade_info["side"] == "buy":
-            reward += 0.001
-
-        # 6. Clip reward to avoid exploding values
-        reward = np.clip(reward, -1.0, 1.0)
-
-        # Test sparse reward
-        if self.step_counter == self.max_traj_length-1:
-            # compare to initial value
-            #reward = 100 * (self.balance - self.initial_portfolio_value) / self.initial_portfolio_value
-            # compare to Buy and hold
-            #buy_and_hold_value = (self.initial_portfolio_value /  self.base_price_history[0]) * self.base_price_history[-1]
-            #reward  = 100 * (self.balance - buy_and_hold_value) / buy_and_hold_value
-            # compare to max between initial or buy and hold because if no invest was better we stay out of the market.
-            buy_and_hold_value = (self.initial_portfolio_value /  self.base_price_history[0]) * self.base_price_history[-1]
-            compare_value = max(self.initial_portfolio_value, buy_and_hold_value)
-            reward += 100 * (self.balance - compare_value) / compare_value
-        
-        else:
-            reward += 0.0
-
-        #print(f"Step: {self.step_counter}/{self.max_traj_length}, Reward: {reward}")
-
-        return reward
+        # Otherwise use default log return (no context needed)
+        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
     def _get_portfolio_value(self, current_price: float = None) -> float:
         """Calculate total portfolio value."""
@@ -318,7 +224,7 @@ class SeqLongOnlyEnv(EnvBase):
 
         max_episode_steps = self.sampler.reset(random_start=self.random_start)
         self.max_traj_length = max_episode_steps # overwrite as we might execute on different time frame so actual step might differ
-        initial_portfolio_value = self.initial_cash if isinstance(self.initial_cash, int) else random.randint(self.initial_cash[0], self.initial_cash[1])
+        initial_portfolio_value = self.initial_cash_sampler.sample()
         self.balance = initial_portfolio_value
         self.initial_portfolio_value = initial_portfolio_value
         self.position_hold_counter = 0

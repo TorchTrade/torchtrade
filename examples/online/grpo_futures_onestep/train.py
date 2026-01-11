@@ -20,14 +20,12 @@ def main(cfg: DictConfig):  # noqa: F821
     import torch.optim
     import tqdm
     import wandb
-    from tensordict import TensorDict
     from tensordict.nn import CudaGraphModule
 
     from torchrl._utils import timeit
     from torchrl.envs import ExplorationType, set_exploration_type
     from torchrl.record.loggers import generate_exp_name, get_logger
     from utils import make_environment, make_grpo_policy, make_collector, log_metrics
-    from torchtrade.envs.transforms import CoverageTracker
 
     torch.set_float32_matmul_precision("high")
 
@@ -75,7 +73,6 @@ def main(cfg: DictConfig):  # noqa: F821
     )
 
     total_frames = cfg.collector.total_frames
-    frames_per_batch = cfg.collector.frames_per_batch
     test_interval = cfg.logger.test_interval
 
     compile_mode = None
@@ -137,7 +134,6 @@ def main(cfg: DictConfig):  # noqa: F821
 
     def update(batch):
         optim.zero_grad(set_to_none=True)
-        # PERF: batch is already on device from collector, skip redundant transfer
 
         # Forward pass GRPO loss
         loss_td = loss_module(batch)
@@ -165,7 +161,6 @@ def main(cfg: DictConfig):  # noqa: F821
         timeit.printevery(1000, total_iter, erase=True)
 
         with timeit("collecting"):
-            # PERF: Use non_blocking=True for async transfer
             data = next(collector_iter).to(device, non_blocking=True)
 
         metrics_to_log = {}
@@ -175,7 +170,6 @@ def main(cfg: DictConfig):  # noqa: F821
 
         # Get training rewards and episode lengths
         batch_reward = data["next", "reward"].mean()
-        # PERF: Defer .item() calls to reduce GPU sync points
         # These will be logged later, so we compute them but don't block
         action_std = data["action"].float().std()
         metrics_to_log.update({"train/reward": batch_reward, "train/action_std": action_std})

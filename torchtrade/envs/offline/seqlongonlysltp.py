@@ -6,7 +6,6 @@ from warnings import warn
 from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
 from datetime import datetime
-from itertools import product
 
 import numpy as np
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
@@ -16,18 +15,8 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Bounded, MultiCategorical, Categorical
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
-import random
-
-def combinatory_action_map(stoploss_levels: List[float], takeprofit_levels: List[float]) -> Dict:
-    action_map = {}
-    # 0 = HOLD
-    action_map[0] = (None, None)
-    idx = 1
-    for sl, tp in product(stoploss_levels, takeprofit_levels):
-        action_map[idx] = (sl, tp)
-        idx += 1
-    return action_map
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, InitialBalanceSampler, build_sltp_action_map
+from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 
 @dataclass
 class SeqLongOnlySLTPEnvConfig:
@@ -45,11 +34,19 @@ class SeqLongOnlySLTPEnvConfig:
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
     max_traj_length: Optional[int] = None
     random_start: bool = True
+    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
+    reward_scaling: float = 1.0
+    include_hold_action: bool = True  # Include HOLD action (index 0) in action space
 
 class SeqLongOnlySLTPEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: SeqLongOnlySLTPEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
         self.action_levels = [0.0, 1.0]  #Do-Nothing, Buy-all
         self.config = config
+
+        # Validate custom reward function signature if provided
+        if config.reward_function is not None:
+            validate_reward_function(config.reward_function)
+
         self.transaction_fee = config.transaction_fee
         self.slippage = config.slippage
         if not (0 <= config.transaction_fee <= 1):
@@ -72,8 +69,9 @@ class SeqLongOnlySLTPEnv(EnvBase):
         self.execute_on_value = config.execute_on.value
         self.execute_on_unit = config.execute_on.unit.value
 
-        # reset settings 
+        # reset settings
         self.initial_cash = config.initial_cash
+        self.initial_cash_sampler = InitialBalanceSampler(config.initial_cash, config.seed)
         self.position_hold_counter = 0
 
         # action levels
@@ -81,7 +79,12 @@ class SeqLongOnlySLTPEnv(EnvBase):
         self.takeprofit_levels = config.takeprofit_levels
 
         # Define action and observation spaces sell, hold (do nothing), buy
-        self.action_map = combinatory_action_map(self.stoploss_levels, self.takeprofit_levels)
+        self.action_map = build_sltp_action_map(
+            self.stoploss_levels,
+            self.takeprofit_levels,
+            include_hold_action=config.include_hold_action,
+            include_short_positions=False
+        )
         self.action_spec = Categorical(len(self.action_map))
 
         # Get the number of features from the observer
@@ -166,25 +169,48 @@ class SeqLongOnlySLTPEnv(EnvBase):
         action: float,
         trade_info: Dict,
     ) -> float:
-        # --- Terminal: sparse reward ---
-        buy_and_hold_value = (
-            self.initial_portfolio_value / self.base_price_history[0]
-        ) * self.base_price_history[-1]
+        """
+        Calculate reward using custom or default function.
 
-        compare_value = max(self.initial_portfolio_value, buy_and_hold_value)
-        if self.step_counter < self.max_traj_length - 1:
-            reward = 0.0
-        else:
-            # Terminal reward as percentage (1.0 = 100% better than benchmark)
-            terminal_reward = (new_portfolio_value - compare_value) / compare_value
-            # Clip to [-5, 5] to prevent extreme values
-            terminal_reward = np.clip(terminal_reward, -5.0, 5.0)
-            if 1 in self.action_history and -1 in self.action_history:
-                # we need to have at least one trade
-                reward = terminal_reward
-            else:
-                reward = -0.1  # Small penalty instead of -10
-        return reward
+        If config.reward_function is provided, uses that custom function.
+        Otherwise, uses the default log return reward.
+
+        Args:
+            old_portfolio_value: Portfolio value before action
+            new_portfolio_value: Portfolio value after action
+            action: Action taken
+            trade_info: Dictionary with trade execution details
+
+        Returns:
+            Reward value (float)
+        """
+        # Use custom reward function if provided
+        if self.config.reward_function is not None:
+            # Compute buy & hold value if terminal
+            is_terminal = self.step_counter >= self.max_traj_length - 1
+            buy_and_hold_value = None
+            if is_terminal and len(self.base_price_history) > 0:
+                buy_and_hold_value = (
+                    self.initial_portfolio_value / self.base_price_history[0]
+                ) * self.base_price_history[-1]
+
+            ctx = build_reward_context(
+                self,
+                old_portfolio_value,
+                new_portfolio_value,
+                action,
+                trade_info,
+                portfolio_value_history=self.portfolio_value_history,
+                action_history=self.action_history,
+                reward_history=self.reward_history,
+                base_price_history=self.base_price_history,
+                initial_portfolio_value=self.initial_portfolio_value,
+                buy_and_hold_value=buy_and_hold_value,
+            )
+            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
+
+        # Otherwise use default log return (no context needed)
+        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
 
 
@@ -214,7 +240,7 @@ class SeqLongOnlySLTPEnv(EnvBase):
 
         max_episode_steps = self.sampler.reset(random_start=self.random_start)
         self.max_traj_length = max_episode_steps # overwrite as we might execute on different time frame so actual step might differ
-        initial_portfolio_value = self.initial_cash if isinstance(self.initial_cash, int) else random.randint(self.initial_cash[0], self.initial_cash[1])
+        initial_portfolio_value = self.initial_cash_sampler.sample()
         self.balance = initial_portfolio_value
         self.initial_portfolio_value = initial_portfolio_value
         self.position_hold_counter = 0
