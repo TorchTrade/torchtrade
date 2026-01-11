@@ -30,23 +30,8 @@ import torch.nn as nn
 
 from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from torchtrade.envs.transforms import ChronosEmbeddingTransform
-
-
-def create_sample_data(num_points=5000):
-    """Create sample OHLCV data for demonstration."""
-    dates = pd.date_range("2024-01-01", periods=num_points, freq="1min")
-    base_price = 100.0
-    trend = pd.Series(range(num_points)) * 0.01
-    noise = pd.Series([i * 0.1 for i in range(num_points)])
-
-    return pd.DataFrame({
-        "timestamp": dates,
-        "open": base_price + trend + noise,
-        "high": base_price + trend + noise + 1.0,
-        "low": base_price + trend + noise - 1.0,
-        "close": base_price + trend + noise + 0.5,
-        "volume": 1000.0 + pd.Series(range(num_points)),
-    })
+import datasets
+from torchtrade.envs.offline.utils import TimeFrame, get_timeframe_unit
 
 
 def example_basic_and_multitimeframe():
@@ -55,14 +40,22 @@ def example_basic_and_multitimeframe():
     print("Example 1: Basic & Multi-Timeframe Chronos Embeddings")
     print("=" * 60)
 
-    df = create_sample_data()
+    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
+    df = df["train"].to_pandas()
+
+    time_frames = [
+        TimeFrame(t, get_timeframe_unit(f))
+        for t, f in zip([1, 5, 15], ["Min", "Min", "Min"])
+    ]
+    execute_on = TimeFrame(5, get_timeframe_unit("Min"))
+
 
     # Create environment with multiple timeframes
     config = SeqLongOnlyEnvConfig(
         symbol="BTC/USD",
-        time_frames=[1, 5, 15],  # 1min, 5min, 15min
+        time_frames=time_frames,  # 1min, 5min, 15min
         window_sizes=[12, 8, 6],
-        execute_on=(5, "Minute"),
+        execute_on=execute_on,
         initial_cash=1000,
     )
     base_env = SeqLongOnlyEnv(df, config)
