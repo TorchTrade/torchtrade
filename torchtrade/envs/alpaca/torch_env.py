@@ -14,6 +14,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
+from torchtrade.envs.reward import RewardContext, default_reward_function
 
 @dataclass
 class AlpacaTradingEnvConfig:
@@ -31,6 +32,7 @@ class AlpacaTradingEnvConfig:
     trade_mode: TradeMode = TradeMode.NOTIONAL
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
+    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
 class AlpacaTorchTradingEnv(EnvBase):
     def __init__(
@@ -175,6 +177,65 @@ class AlpacaTorchTradingEnv(EnvBase):
 
         return out_td
 
+    def _build_reward_context(
+        self,
+        old_portfolio_value: float,
+        new_portfolio_value: float,
+        action: float,
+        trade_info: Dict,
+    ) -> RewardContext:
+        """Build RewardContext from current state for custom reward functions."""
+        # Get current account state
+        status = self.trader.get_status()
+        position_status = status.get("position_status", None)
+
+        if position_status is None:
+            cash = float(self.trader.client.get_account().cash)
+            position_size = 0.0
+            position_value = 0.0
+            entry_price = 0.0
+            current_price = 0.0
+            unrealized_pnl_pct = 0.0
+        else:
+            cash = float(self.trader.client.get_account().cash)
+            position_size = position_status.qty
+            position_value = position_status.market_value
+            entry_price = position_status.avg_entry_price
+            current_price = position_status.current_price
+            unrealized_pnl_pct = position_status.unrealized_plpc
+
+        # Map action to side string
+        trade_side = "hold"
+        if action == 1:
+            trade_side = "buy"
+        elif action == -1:
+            trade_side = "sell"
+
+        return RewardContext(
+            old_portfolio_value=old_portfolio_value,
+            new_portfolio_value=new_portfolio_value,
+            action=int(action),
+            current_step=0,  # Live environment doesn't track steps
+            max_steps=1,  # Live environment is continuous
+            trade_executed=trade_info.get("executed", False),
+            trade_side=trade_side,
+            fee_paid=0.0,  # Not tracked in this environment
+            slippage_amount=0.0,  # Not tracked in this environment
+            cash=cash,
+            position_size=position_size,
+            position_value=position_value,
+            entry_price=entry_price,
+            current_price=current_price,
+            unrealized_pnl_pct=unrealized_pnl_pct,
+            holding_time=self.position_hold_counter,
+            portfolio_value_history=[],  # Not tracked in live environment
+            action_history=[],  # Not tracked in live environment
+            reward_history=[],  # Not tracked in live environment
+            base_price_history=[],  # Not tracked in live environment
+            initial_portfolio_value=old_portfolio_value,  # Approximate
+            buy_and_hold_value=None,  # Not applicable for live trading
+        )
+
     def _calculate_reward(
         self,
         old_portfolio_value: float,
@@ -182,43 +243,41 @@ class AlpacaTorchTradingEnv(EnvBase):
         action: float,
         trade_info: Dict,
     ) -> float:
-        """Calculate the step reward.
+        """
+        Calculate reward using custom or default function.
 
-        This function computes the reward for the agent at a single step in the environment. 
-        The reward is primarily based on realized profit from executed SELL actions. 
-        It can also include a small penalty if the agent attempts an invalid action 
-        (e.g., trying to SELL with no position or BUY when already in position).
+        If config.reward_function is provided, uses that custom function.
+        Otherwise, uses the default log return reward.
 
         Args:
-            old_portfolio_value (float): Portfolio value before the action.
-            new_portfolio_value (float): Portfolio value after the action.
-            action (float): Action taken by the agent. For example:
-                1 = BUY, -1 = SELL, 0 = HOLD
-            trade_info (dict): Trade information from the Alpaca client. Expected keys:
-                - "executed" (bool): Whether the trade was successfully executed.
-                - Other fields as needed for trade details (e.g., price, size).
+            old_portfolio_value: Portfolio value before action
+            new_portfolio_value: Portfolio value after action
+            action: Action taken (-1=SELL, 0=HOLD, 1=BUY)
+            trade_info: Dictionary with trade execution details
 
         Returns:
-            float: The reward for this step, scaled by `self.config.reward_scaling`.
-                Positive if realized profit was made, small negative for invalid actions,
-                or 0 otherwise.
+            Reward value (float), scaled by config.reward_scaling
         """
+        # Use custom reward function if provided
+        if self.config.reward_function is not None:
+            ctx = self._build_reward_context(
+                old_portfolio_value,
+                new_portfolio_value,
+                action,
+                trade_info
+            )
+            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
 
-        if action == -1 and trade_info["executed"]:
-            # Calculate portfolio return on realized profit
-            portfolio_return = (
-                new_portfolio_value - old_portfolio_value
-            ) / old_portfolio_value
-        elif not trade_info["executed"] and action != 0:
-            # small penalty if agent tries an invalid action
-            portfolio_return = - 0.001
-        else:
-            portfolio_return = 0.0
-
-        # Scale the reward
-        reward = portfolio_return * self.config.reward_scaling
-
-        return reward
+        # Otherwise use default log return
+        reward = default_reward_function(
+            self._build_reward_context(
+                old_portfolio_value,
+                new_portfolio_value,
+                action,
+                trade_info
+            )
+        )
+        return reward * self.config.reward_scaling
 
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value."""
