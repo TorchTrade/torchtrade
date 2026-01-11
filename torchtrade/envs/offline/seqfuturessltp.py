@@ -19,7 +19,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, InitialBalanceSampler, build_futures_sltp_action_map
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, InitialBalanceSampler, build_sltp_action_map
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 
 
@@ -150,10 +150,11 @@ class SeqFuturesSLTPEnv(EnvBase):
         )
 
         # Create action map
-        self.action_map = build_futures_sltp_action_map(
+        self.action_map = build_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
-            include_hold_action=config.include_hold_action
+            include_hold_action=config.include_hold_action,
+            include_short_positions=True
         )
         # PERF: Convert action_map to tuple for O(1) indexed lookup (faster than dict hashing)
         self._action_tuple = tuple(self.action_map[i] for i in range(len(self.action_map)))

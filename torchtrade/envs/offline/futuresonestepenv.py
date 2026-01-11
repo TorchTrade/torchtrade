@@ -18,7 +18,7 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler, build_futures_sltp_action_map
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 import logging
 import sys
@@ -177,10 +177,11 @@ class FuturesOneStepEnv(EnvBase):
         self.takeprofit_levels = list(config.takeprofit_levels) if not isinstance(config.takeprofit_levels, list) else config.takeprofit_levels
 
         # Create action map
-        self.action_map = build_futures_sltp_action_map(
+        self.action_map = build_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
-            include_hold_action=config.include_hold_action
+            include_hold_action=config.include_hold_action,
+            include_short_positions=True
         )
         self.action_spec = Categorical(len(self.action_map))
 

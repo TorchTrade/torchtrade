@@ -14,8 +14,13 @@ from torchtrade.envs.offline.seqfuturessltp import (
 from torchtrade.envs.offline.utils import (
     TimeFrame,
     TimeFrameUnit,
-    build_futures_sltp_action_map as futures_sltp_action_map,
+    build_sltp_action_map,
 )
+
+
+def futures_sltp_action_map(stoploss_levels, takeprofit_levels):
+    """Wrapper for backward compatibility in tests."""
+    return build_sltp_action_map(stoploss_levels, takeprofit_levels, include_short_positions=True)
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
