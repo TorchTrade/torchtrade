@@ -44,6 +44,9 @@ llm_local = [
     "accelerate>=0.20.0",
     "bitsandbytes>=0.41.0",
 ]
+chronos = [
+    "chronos-forecasting @ git+https://github.com/amazon-science/chronos-forecasting.git",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
