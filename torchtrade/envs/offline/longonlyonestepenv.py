@@ -12,6 +12,7 @@ import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto
+from torchtrade.envs.reward import RewardContext, default_reward_function
 import logging
 import sys
 
@@ -67,6 +68,7 @@ class LongOnlyOneStepEnvConfig:
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
     max_traj_length: Optional[int] = None
+    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
 class LongOnlyOneStepEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: LongOnlyOneStepEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
@@ -189,6 +191,48 @@ class LongOnlyOneStepEnv(EnvBase):
         obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
         return TensorDict(obs_data, batch_size=())
 
+    def _build_reward_context(
+        self,
+        old_portfolio_value: float,
+        new_portfolio_value: float,
+        action: float,
+        trade_info: Dict,
+    ) -> RewardContext:
+        """Build RewardContext from current state for custom reward functions."""
+        is_terminal = True  # One-step environment is always terminal after action
+
+        # Map action to side string
+        trade_side = "hold"
+        if trade_info.get("executed"):
+            trade_side = trade_info.get("side", "hold")
+        elif action != (None, None) and action != 0:
+            trade_side = "buy"
+
+        return RewardContext(
+            old_portfolio_value=old_portfolio_value,
+            new_portfolio_value=new_portfolio_value,
+            action=int(action) if isinstance(action, (int, float)) else 0,
+            current_step=self.step_counter,
+            max_steps=1,  # One-step environment
+            trade_executed=trade_info.get("executed", False),
+            trade_side=trade_side,
+            fee_paid=trade_info.get("fee_paid", 0.0),
+            slippage_amount=trade_info.get("price_noise", 0.0),
+            cash=self.balance,
+            position_size=self.position_size,
+            position_value=self.position_value,
+            entry_price=self.entry_price,
+            current_price=self._cached_base_features["close"],
+            unrealized_pnl_pct=self.unrealized_pnlpc,
+            holding_time=self.position_hold_counter,
+            portfolio_value_history=self.portfolio_value_history.copy(),
+            action_history=self.action_history.copy(),
+            reward_history=self.reward_history.copy(),
+            base_price_history=self.base_price_history.copy(),
+            initial_portfolio_value=self.initial_portfolio_value,
+            buy_and_hold_value=None,  # One-step environment doesn't use buy & hold
+        )
+
     def _calculate_reward(
         self,
         old_portfolio_value: float,
@@ -196,29 +240,40 @@ class LongOnlyOneStepEnv(EnvBase):
         action: float,
         trade_info: Dict,
     ) -> float:
-        # --- Terminal: sparse reward ---
-        #reward = (new_portfolio_value - old_portfolio_value) / old_portfolio_value
-#        reward = torch.log(torch.tensor(new_portfolio_value, dtype=torch.float) / torch.tensor(old_portfolio_value, dtype=torch.float))
-        # compute sharp ratio as return
-        if len(self.rollout_returns) == 0 or action == (None, None):
-            return 0.0
+        """
+        Calculate reward using custom or default function.
 
-        # Convert list to tensor
-        returns = torch.stack(self.rollout_returns)
-        
-        # Need at least 2 points for a valid standard deviation
-        if returns.numel() < 2:
-            return float(returns.sum()) # Return raw sum if we can't compute volatility
+        If config.reward_function is provided, uses that custom function.
+        Otherwise, uses the default log return reward.
 
-        mean_return = returns.mean()
-        std_return = returns.std()
-        
-        # 1. Epsilon prevents NaN if std is 0
-        # 2. Multiply by sqrt(N) to annualize based on the execution timeframe
-        sharpe = (mean_return / (std_return + 1e-9)) * np.sqrt(self.periods_per_year)
-        
-        # Clip to avoid extreme gradients in RL
-        return torch.clamp(sharpe, -10.0, 10.0).item()
+        Args:
+            old_portfolio_value: Portfolio value before action
+            new_portfolio_value: Portfolio value after action
+            action: Action taken
+            trade_info: Dictionary with trade execution details
+
+        Returns:
+            Reward value (float)
+        """
+        # Use custom reward function if provided
+        if self.config.reward_function is not None:
+            ctx = self._build_reward_context(
+                old_portfolio_value,
+                new_portfolio_value,
+                action,
+                trade_info
+            )
+            return float(self.config.reward_function(ctx))
+
+        # Otherwise use default log return
+        return default_reward_function(
+            self._build_reward_context(
+                old_portfolio_value,
+                new_portfolio_value,
+                action,
+                trade_info
+            )
+        )
 
     def _get_portfolio_value(self, current_price: float = None) -> float:
         """Calculate total portfolio value."""
