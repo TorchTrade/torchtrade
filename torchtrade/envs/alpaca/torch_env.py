@@ -14,7 +14,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
-from torchtrade.envs.reward import build_reward_context, default_log_return
+from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 
 @dataclass
 class AlpacaTradingEnvConfig:
@@ -56,6 +56,10 @@ class AlpacaTorchTradingEnv(EnvBase):
             trader: Optional pre-configured AlpacaOrderClass for dependency injection
         """
         self.config = config
+
+        # Validate custom reward function signature if provided
+        if config.reward_function is not None:
+            validate_reward_function(config.reward_function)
 
         # Initialize Alpaca clients - use injected instances or create new ones
         self.observer = observer if observer is not None else AlpacaObservationClass(

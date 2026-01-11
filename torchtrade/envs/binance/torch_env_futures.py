@@ -17,7 +17,7 @@ from torchtrade.envs.binance.futures_order_executor import (
     TradeMode,
     MarginType,
 )
-from torchtrade.envs.reward import build_reward_context, default_log_return
+from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -117,6 +117,10 @@ class BinanceFuturesTorchTradingEnv(EnvBase):
             trader: Optional pre-configured BinanceFuturesOrderClass
         """
         self.config = config
+
+        # Validate custom reward function signature if provided
+        if config.reward_function is not None:
+            validate_reward_function(config.reward_function)
 
         # Normalize intervals to list
         intervals = config.intervals if isinstance(config.intervals, list) else [config.intervals]

@@ -74,6 +74,11 @@ class LongOnlyOneStepEnvConfig:
 class LongOnlyOneStepEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: LongOnlyOneStepEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
         self.config = config
+
+        # Validate custom reward function signature if provided
+        if config.reward_function is not None:
+            validate_reward_function(config.reward_function)
+
         self.transaction_fee = config.transaction_fee
         self.slippage = config.slippage
         if not (0 <= config.transaction_fee <= 1):

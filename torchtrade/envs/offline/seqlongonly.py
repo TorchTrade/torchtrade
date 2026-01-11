@@ -16,7 +16,7 @@ import torch
 from torchrl.data import Categorical, Bounded
 import pandas as pd
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
-from torchtrade.envs.reward import build_reward_context, default_log_return
+from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 import random
 
 @dataclass
@@ -40,6 +40,11 @@ class SeqLongOnlyEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: SeqLongOnlyEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
         self.action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Do-Nothing, Buy-all
         self.config = config
+
+        # Validate custom reward function signature if provided
+        if config.reward_function is not None:
+            validate_reward_function(config.reward_function)
+
         self.transaction_fee = config.transaction_fee
         self.slippage = config.slippage
         if not (0 <= config.transaction_fee <= 1):
