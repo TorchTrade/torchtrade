@@ -20,6 +20,7 @@ import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto
+from torchtrade.envs.reward import RewardContext, default_reward_function
 import logging
 import sys
 
@@ -140,6 +141,9 @@ class FuturesOneStepEnvConfig:
     seed: Optional[int] = 42
     include_base_features: bool = False
     max_traj_length: Optional[int] = None
+
+    # Reward settings
+    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
 
 class FuturesOneStepEnv(EnvBase):
@@ -410,6 +414,63 @@ class FuturesOneStepEnv(EnvBase):
         obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
         return TensorDict(obs_data, batch_size=())
 
+    def _build_reward_context(
+        self,
+        old_portfolio_value: float,
+        new_portfolio_value: float,
+        action_tuple: tuple,
+        trade_info: Dict,
+    ) -> RewardContext:
+        """Build RewardContext from current state for custom reward functions."""
+        is_terminal = True  # One-step environment is always terminal after action
+
+        # Map action to side string
+        trade_side = "hold"
+        if action_tuple[0] is not None:
+            trade_side = action_tuple[0]  # "long" or "short"
+        elif trade_info.get("executed"):
+            if self.position_size > 0:
+                trade_side = "long"
+            elif self.position_size < 0:
+                trade_side = "short"
+
+        # Get current price
+        current_price = self._cached_portfolio_price
+
+        # Calculate margin ratio
+        total_balance = self.balance + self.unrealized_pnl
+        margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
+
+        return RewardContext(
+            old_portfolio_value=old_portfolio_value,
+            new_portfolio_value=new_portfolio_value,
+            action=0 if action_tuple[0] is None else 1,  # Simplified action representation
+            current_step=self.step_counter,
+            max_steps=1,  # One-step environment
+            trade_executed=trade_info.get("executed", False),
+            trade_side=trade_side,
+            fee_paid=trade_info.get("fee_paid", 0.0),
+            slippage_amount=trade_info.get("price_noise", 0.0),
+            cash=self.balance,
+            position_size=self.position_size,
+            position_value=self.position_value,
+            entry_price=self.entry_price,
+            current_price=current_price,
+            unrealized_pnl_pct=self.unrealized_pnl_pct,
+            holding_time=self.position_hold_counter,
+            portfolio_value_history=self.portfolio_value_history.copy(),
+            action_history=self.action_history.copy(),
+            reward_history=self.reward_history.copy(),
+            base_price_history=self.base_price_history.copy(),
+            position_history=self.position_history.copy(),
+            liquidated=trade_info.get("liquidated", False),
+            leverage=float(self.leverage),
+            margin_ratio=margin_ratio,
+            liquidation_price=self.liquidation_price,
+            initial_portfolio_value=self.initial_portfolio_value,
+            buy_and_hold_value=None,  # One-step environment doesn't use buy & hold
+        )
+
     def _calculate_reward(
         self,
         old_portfolio_value: float,
@@ -418,33 +479,39 @@ class FuturesOneStepEnv(EnvBase):
         trade_info: Dict,
     ) -> float:
         """
-        Calculate reward using Sharpe ratio of rollout returns.
+        Calculate reward using custom or default function.
 
-        Similar to LongOnlyOneStepEnv but accounting for futures positions.
-        PERF: rollout_returns is now a list of floats, converted to tensor once here.
+        If config.reward_function is provided, uses that custom function.
+        Otherwise, uses the default log return reward.
+
+        Args:
+            old_portfolio_value: Portfolio value before action
+            new_portfolio_value: Portfolio value after action
+            action_tuple: Action taken (side, sl, tp)
+            trade_info: Dictionary with trade execution details
+
+        Returns:
+            Reward value (float)
         """
-        if len(self.rollout_returns) == 0 or action_tuple[0] is None:
-            return 0.0
+        # Use custom reward function if provided
+        if self.config.reward_function is not None:
+            ctx = self._build_reward_context(
+                old_portfolio_value,
+                new_portfolio_value,
+                action_tuple,
+                trade_info
+            )
+            return float(self.config.reward_function(ctx))
 
-        # PERF: Convert list of floats to tensor once (instead of per-step tensor creation)
-        returns = torch.tensor(self.rollout_returns, dtype=torch.float)
-
-        # Need at least 2 points for a valid standard deviation
-        if returns.numel() < 2:
-            return float(returns.sum())
-
-        mean_return = returns.mean()
-        std_return = returns.std()
-
-        # Compute Sharpe ratio
-        sharpe = (mean_return / (std_return + 1e-9)) * np.sqrt(self.periods_per_year)
-
-        # Add penalty for liquidation
-        if trade_info.get("liquidated", False):
-            sharpe = sharpe - 2.0  # Significant penalty
-
-        # Clip to avoid extreme gradients
-        return torch.clamp(sharpe, -10.0, 10.0).item()
+        # Otherwise use default log return
+        return default_reward_function(
+            self._build_reward_context(
+                old_portfolio_value,
+                new_portfolio_value,
+                action_tuple,
+                trade_info
+            )
+        )
 
     def _get_portfolio_value(self, current_price: float = None) -> float:
         """Calculate total portfolio value including unrealized PnL.

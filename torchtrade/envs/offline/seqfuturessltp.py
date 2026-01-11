@@ -22,6 +22,7 @@ from torchrl.envs import EnvBase
 
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.reward import RewardContext, default_reward_function
 
 
 class MarginType(Enum):
@@ -111,6 +112,7 @@ class SeqFuturesSLTPEnvConfig:
 
     # Reward settings
     reward_scaling: float = 1.0
+    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
 
 class SeqFuturesSLTPEnv(EnvBase):
@@ -475,6 +477,70 @@ class SeqFuturesSLTPEnv(EnvBase):
 
         return out_td
 
+    def _build_reward_context(
+        self,
+        old_portfolio_value: float,
+        new_portfolio_value: float,
+        action: int,
+        trade_info: Dict,
+    ) -> RewardContext:
+        """Build RewardContext from current state for custom reward functions."""
+        is_terminal = self.step_counter >= self.max_traj_length - 1
+
+        # Compute buy & hold value if terminal
+        buy_and_hold_value = None
+        if is_terminal and len(self.base_price_history) > 0:
+            buy_and_hold_value = (
+                self.initial_portfolio_value / self.base_price_history[0]
+            ) * self.base_price_history[-1]
+
+        # Map action to side string
+        trade_side = "hold"
+        if trade_info.get("executed"):
+            if self.position_size > 0:
+                trade_side = "long"
+            elif self.position_size < 0:
+                trade_side = "short"
+            else:
+                trade_side = trade_info.get("side", "hold")
+
+        # Get current price
+        current_price = self._cached_ohlcv.close
+
+        # Calculate margin ratio
+        total_balance = self.balance + self.unrealized_pnl
+        margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
+
+        return RewardContext(
+            old_portfolio_value=old_portfolio_value,
+            new_portfolio_value=new_portfolio_value,
+            action=int(action),
+            current_step=self.step_counter,
+            max_steps=self.max_traj_length,
+            trade_executed=trade_info.get("executed", False),
+            trade_side=trade_side,
+            fee_paid=trade_info.get("fee_paid", 0.0),
+            slippage_amount=trade_info.get("price_noise", 0.0),
+            cash=self.balance,
+            position_size=self.position_size,
+            position_value=self.position_value,
+            entry_price=self.entry_price,
+            current_price=current_price,
+            unrealized_pnl_pct=self.unrealized_pnl_pct,
+            holding_time=self.position_hold_counter,
+            portfolio_value_history=self.portfolio_value_history.copy(),
+            action_history=self.action_history.copy(),
+            reward_history=self.reward_history.copy(),
+            base_price_history=self.base_price_history.copy(),
+            position_history=self.position_history.copy(),
+            liquidated=trade_info.get("liquidated", False),
+            leverage=float(self.leverage),
+            margin_ratio=margin_ratio,
+            liquidation_price=self.liquidation_price,
+            initial_portfolio_value=self.initial_portfolio_value,
+            buy_and_hold_value=buy_and_hold_value,
+        )
+
     def _calculate_reward(
         self,
         old_portfolio_value: float,
@@ -483,49 +549,40 @@ class SeqFuturesSLTPEnv(EnvBase):
         trade_info: Dict,
     ) -> float:
         """
-        Calculate the step reward.
+        Calculate reward using custom or default function.
 
-        Uses a hybrid approach:
-        - Dense rewards based on portfolio return
-        - Sparse terminal reward comparing to buy-and-hold
+        If config.reward_function is provided, uses that custom function.
+        Otherwise, uses the default log return reward.
+
+        Args:
+            old_portfolio_value: Portfolio value before action
+            new_portfolio_value: Portfolio value after action
+            action: Action taken
+            trade_info: Dictionary with trade execution details
+
+        Returns:
+            Reward value (float), scaled by config.reward_scaling
         """
-        if old_portfolio_value == 0:
-            return 0.0
+        # Use custom reward function if provided
+        if self.config.reward_function is not None:
+            ctx = self._build_reward_context(
+                old_portfolio_value,
+                new_portfolio_value,
+                action,
+                trade_info
+            )
+            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
 
-        # Portfolio return
-        portfolio_return = (
-            (new_portfolio_value - old_portfolio_value) / old_portfolio_value
+        # Otherwise use default log return
+        reward = default_reward_function(
+            self._build_reward_context(
+                old_portfolio_value,
+                new_portfolio_value,
+                action,
+                trade_info
+            )
         )
-
-        # Dense reward
-        dense_reward = portfolio_return
-
-        # Transaction cost penalty
-        if trade_info.get("fee_paid", 0) > 0:
-            dense_reward -= trade_info["fee_paid"] / old_portfolio_value
-
-        # Liquidation penalty
-        if trade_info.get("liquidated", False):
-            dense_reward -= 0.1  # Significant penalty for liquidation
-
-        # Clip dense reward
-        dense_reward = np.clip(dense_reward, -0.1, 0.1)
-
-        # Terminal reward
-        if self.step_counter >= self.max_traj_length - 1:
-            buy_and_hold_value = (
-                self.initial_portfolio_value / self.base_price_history[0]
-            ) * self.base_price_history[-1]
-
-            compare_value = max(self.initial_portfolio_value, buy_and_hold_value)
-            if compare_value > 0:
-                # Terminal reward as percentage (1.0 = 100% better than benchmark)
-                terminal_reward = (new_portfolio_value - compare_value) / compare_value
-                # Clip to [-5, 5] to prevent extreme values
-                terminal_reward = np.clip(terminal_reward, -5.0, 5.0)
-                return terminal_reward * self.config.reward_scaling
-
-        return dense_reward * self.config.reward_scaling
+        return reward * self.config.reward_scaling
 
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value including unrealized PnL."""
