@@ -34,6 +34,7 @@ class SeqLongOnlyEnvConfig:
     max_traj_length: Optional[int] = None
     random_start: bool = True
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
+    reward_scaling: float = 1.0
 
 class SeqLongOnlyEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: SeqLongOnlyEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
@@ -190,75 +191,10 @@ class SeqLongOnlyEnv(EnvBase):
                 initial_portfolio_value=self.initial_portfolio_value,
                 buy_and_hold_value=buy_and_hold_value,
             )
-            return float(self.config.reward_function(ctx))
+            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
 
         # Otherwise use default log return (no context needed)
-        return default_log_return(old_portfolio_value, new_portfolio_value)
-
-
-    def _calculate_reward_(
-        self,
-        old_portfolio_value: float,
-        new_portfolio_value: float,
-        action: float,
-        trade_info: Dict,
-    ) -> float:
-        """
-        Sophisticated reward function:
-        - Realized profits from SELL actions
-        - Gradual reward/penalty for unrealized PnL
-        - Penalize invalid actions
-        - Penalize excessive holding of losing positions
-        """
-
-        # 1. Portfolio return
-        portfolio_return = (new_portfolio_value - old_portfolio_value) / old_portfolio_value
-
-        reward = 0.0
-
-        realized_pnl_weight = 2.0
-        unrealized_pnl_weight = 0.005
-        exposure_weight = 0.001
-
-        # 2. Reward realized PnL on SELL
-        if trade_info["executed"] and trade_info["side"] == "sell":
-            # Reward realized profit
-            reward += portfolio_return * 2.0  # scale to emphasize realization
-            # NOTE: maybe we can weight it by the holding time. ideally we want short profits in and out 
-
-        # 3. Small reward for holding profitable positions (unrealized PnL)
-        # if self.position_size > 0:
-        #     reward += self.unrealized_pnlpc * 0.001
-
-        # Market exposure reward
-        if self.position_size > 0:
-            reward += 0.0001
-        
-        # Buy-in bonus
-        if trade_info["executed"] and trade_info["side"] == "buy":
-            reward += 0.001
-
-        # 6. Clip reward to avoid exploding values
-        reward = np.clip(reward, -1.0, 1.0)
-
-        # Test sparse reward
-        if self.step_counter == self.max_traj_length-1:
-            # compare to initial value
-            #reward = 100 * (self.balance - self.initial_portfolio_value) / self.initial_portfolio_value
-            # compare to Buy and hold
-            #buy_and_hold_value = (self.initial_portfolio_value /  self.base_price_history[0]) * self.base_price_history[-1]
-            #reward  = 100 * (self.balance - buy_and_hold_value) / buy_and_hold_value
-            # compare to max between initial or buy and hold because if no invest was better we stay out of the market.
-            buy_and_hold_value = (self.initial_portfolio_value /  self.base_price_history[0]) * self.base_price_history[-1]
-            compare_value = max(self.initial_portfolio_value, buy_and_hold_value)
-            reward += 100 * (self.balance - compare_value) / compare_value
-        
-        else:
-            reward += 0.0
-
-        #print(f"Step: {self.step_counter}/{self.max_traj_length}, Reward: {reward}")
-
-        return reward
+        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
     def _get_portfolio_value(self, current_price: float = None) -> float:
         """Calculate total portfolio value."""

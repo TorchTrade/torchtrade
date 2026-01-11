@@ -69,6 +69,7 @@ class LongOnlyOneStepEnvConfig:
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
     max_traj_length: Optional[int] = None
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
+    reward_scaling: float = 1.0
 
 class LongOnlyOneStepEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: LongOnlyOneStepEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
@@ -228,10 +229,10 @@ class LongOnlyOneStepEnv(EnvBase):
                 initial_portfolio_value=self.initial_portfolio_value,
                 rollout_returns=self.rollout_returns,
             )
-            return float(self.config.reward_function(ctx))
+            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
 
         # Otherwise use default log return (no context needed)
-        return default_log_return(old_portfolio_value, new_portfolio_value)
+        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
     def _get_portfolio_value(self, current_price: float = None) -> float:
         """Calculate total portfolio value."""

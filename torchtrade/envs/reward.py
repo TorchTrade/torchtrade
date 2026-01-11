@@ -27,8 +27,9 @@ Examples:
 """
 
 from dataclasses import dataclass
-from typing import Protocol, List, Optional
+from typing import Protocol, List, Optional, Callable
 import numpy as np
+import inspect
 
 
 @dataclass
@@ -49,8 +50,28 @@ class RewardContext:
         trade_executed: Whether a trade was executed this step
         fee_paid: Transaction fees paid this step (default: 0.0)
         slippage_amount: Slippage incurred this step (default: 0.0)
-        metadata: Optional dict for environment-specific data (e.g., history,
-                  futures-specific fields). Access via: ctx.metadata['leverage']
+        metadata: Optional dict for environment-specific data.
+                  Available fields vary by environment type:
+
+                  **Offline Sequential Envs** (SeqLongOnly, SeqLongOnlySLTP):
+                  - portfolio_value_history, action_history, reward_history
+                  - base_price_history, initial_portfolio_value
+                  - buy_and_hold_value (terminal step only)
+
+                  **Offline Futures Envs** (SeqFutures, SeqFuturesSLTP, FuturesOneStep):
+                  - All sequential env fields above, plus:
+                  - position_history, leverage, margin_ratio
+                  - liquidation_price, liquidated (bool)
+
+                  **Offline One-Step Envs** (LongOnlyOneStep):
+                  - All sequential env fields, plus:
+                  - rollout_returns (list of returns during rollout)
+
+                  **Live Envs** (Alpaca, Binance):
+                  - No history tracking (for performance)
+                  - Futures live envs may include: leverage, margin_ratio, liquidation_price
+
+                  Access via: ctx.metadata.get('key', default_value)
 
     Example:
         >>> def my_reward(ctx: RewardContext) -> float:
@@ -117,6 +138,42 @@ class RewardFunction(Protocol):
 # ============================================================================
 
 
+def validate_reward_function(reward_function: Callable) -> None:
+    """
+    Validate that a custom reward function has the correct signature.
+
+    Checks that the function accepts exactly one parameter (RewardContext)
+    and provides a helpful error message if not.
+
+    Args:
+        reward_function: The custom reward function to validate
+
+    Raises:
+        TypeError: If the reward function doesn't have the correct signature
+
+    Example:
+        >>> def my_reward(ctx: RewardContext) -> float:
+        ...     return 1.0
+        >>> validate_reward_function(my_reward)  # OK
+        >>>
+        >>> def bad_reward(x, y):
+        ...     return 1.0
+        >>> validate_reward_function(bad_reward)  # Raises TypeError
+    """
+    if reward_function is None:
+        return
+
+    sig = inspect.signature(reward_function)
+    params = list(sig.parameters.values())
+
+    if len(params) != 1:
+        raise TypeError(
+            f"Reward function must accept exactly 1 parameter (RewardContext), "
+            f"but got {len(params)} parameters: {list(sig.parameters.keys())}. "
+            f"Expected signature: def reward_function(ctx: RewardContext) -> float"
+        )
+
+
 def build_reward_context(
     env,
     old_portfolio_value: float,
@@ -181,13 +238,13 @@ def default_log_return(old_portfolio_value: float, new_portfolio_value: float) -
         new_portfolio_value: Portfolio value after action
 
     Returns:
-        Log return reward, or 0.0 if old portfolio value is invalid
+        Log return reward, or 0.0 if either portfolio value is invalid (<= 0)
 
     Note:
         This function doesn't require a RewardContext, making it more efficient
         for the default case. Use this when you don't need custom reward logic.
     """
-    if old_portfolio_value <= 0:
+    if old_portfolio_value <= 0 or new_portfolio_value <= 0:
         return 0.0
     return float(np.log(new_portfolio_value / old_portfolio_value))
 

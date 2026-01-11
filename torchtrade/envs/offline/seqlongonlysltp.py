@@ -47,6 +47,7 @@ class SeqLongOnlySLTPEnvConfig:
     max_traj_length: Optional[int] = None
     random_start: bool = True
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
+    reward_scaling: float = 1.0
 
 class SeqLongOnlySLTPEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: SeqLongOnlySLTPEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
@@ -206,10 +207,10 @@ class SeqLongOnlySLTPEnv(EnvBase):
                 initial_portfolio_value=self.initial_portfolio_value,
                 buy_and_hold_value=buy_and_hold_value,
             )
-            return float(self.config.reward_function(ctx))
+            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
 
         # Otherwise use default log return (no context needed)
-        return default_log_return(old_portfolio_value, new_portfolio_value)
+        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
 
 

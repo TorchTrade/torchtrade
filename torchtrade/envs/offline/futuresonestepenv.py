@@ -144,6 +144,7 @@ class FuturesOneStepEnvConfig:
 
     # Reward settings
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
+    reward_scaling: float = 1.0
 
 
 class FuturesOneStepEnv(EnvBase):
@@ -460,10 +461,10 @@ class FuturesOneStepEnv(EnvBase):
                 margin_ratio=margin_ratio,
                 liquidation_price=self.liquidation_price,
             )
-            return float(self.config.reward_function(ctx))
+            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
 
         # Otherwise use default log return (no context needed)
-        return default_log_return(old_portfolio_value, new_portfolio_value)
+        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
     def _get_portfolio_value(self, current_price: float = None) -> float:
         """Calculate total portfolio value including unrealized PnL.
