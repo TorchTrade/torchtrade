@@ -157,7 +157,7 @@ def example_with_policy():
             )
 
         def forward(self, embd1, embd2, account_state):
-            x = torch.cat([embd1, embd2, account_state.unsqueeze(0)], dim=-1)
+            x = torch.cat([embd1, embd2, account_state], dim=-1)
             return self.net(x)
 
     policy_module = TradingPolicy(embedding_dim, account_dim)
