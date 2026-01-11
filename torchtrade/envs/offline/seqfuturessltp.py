@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union, Callable
 from itertools import product
 from enum import Enum
-import random
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,7 +20,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, InitialBalanceSampler
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 
 
@@ -207,6 +206,7 @@ class SeqFuturesSLTPEnv(EnvBase):
 
         # Reset settings
         self.initial_cash = config.initial_cash
+        self.initial_cash_sampler = InitialBalanceSampler(config.initial_cash, config.seed)
         self.position_hold_counter = 0
 
         # Define action spec
@@ -572,11 +572,7 @@ class SeqFuturesSLTPEnv(EnvBase):
         self.max_traj_length = max_episode_steps
 
         # Initialize balance
-        initial_portfolio_value = (
-            self.initial_cash
-            if isinstance(self.initial_cash, int)
-            else random.randint(self.initial_cash[0], self.initial_cash[1])
-        )
+        initial_portfolio_value = self.initial_cash_sampler.sample()
         self.balance = initial_portfolio_value
         self.initial_portfolio_value = initial_portfolio_value
 
@@ -758,8 +754,8 @@ class SeqFuturesSLTPEnv(EnvBase):
         # PERF: Use cached OHLCV instead of calling get_base_features
         current_price = self._cached_ohlcv.close
 
-        # PERF: Use Python random instead of torch.empty().uniform_() to avoid tensor allocation
-        price_noise = random.uniform(1 - self.slippage, 1 + self.slippage)
+        # PERF: Use numpy random instead of torch.empty().uniform_() to avoid tensor allocation
+        price_noise = np.random.uniform(1 - self.slippage, 1 + self.slippage)
 
         if side is None:
             # Hold or close action

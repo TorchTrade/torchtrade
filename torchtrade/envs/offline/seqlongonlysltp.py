@@ -16,9 +16,8 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Bounded, MultiCategorical, Categorical
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, InitialBalanceSampler
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
-import random
 
 def combinatory_action_map(stoploss_levels: List[float], takeprofit_levels: List[float]) -> Dict:
     action_map = {}
@@ -80,8 +79,9 @@ class SeqLongOnlySLTPEnv(EnvBase):
         self.execute_on_value = config.execute_on.value
         self.execute_on_unit = config.execute_on.unit.value
 
-        # reset settings 
+        # reset settings
         self.initial_cash = config.initial_cash
+        self.initial_cash_sampler = InitialBalanceSampler(config.initial_cash, config.seed)
         self.position_hold_counter = 0
 
         # action levels
@@ -245,7 +245,7 @@ class SeqLongOnlySLTPEnv(EnvBase):
 
         max_episode_steps = self.sampler.reset(random_start=self.random_start)
         self.max_traj_length = max_episode_steps # overwrite as we might execute on different time frame so actual step might differ
-        initial_portfolio_value = self.initial_cash if isinstance(self.initial_cash, int) else random.randint(self.initial_cash[0], self.initial_cash[1])
+        initial_portfolio_value = self.initial_cash_sampler.sample()
         self.balance = initial_portfolio_value
         self.initial_portfolio_value = initial_portfolio_value
         self.position_hold_counter = 0

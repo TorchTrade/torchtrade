@@ -1,6 +1,7 @@
 from enum import Enum
-from typing import List
+from typing import List, Union, Optional
 import pandas as pd
+import numpy as np
 
 def get_timeframe_unit(tf_str: "Min"):
     if tf_str == "Min" or tf_str == "min" or tf_str == "Minute":
@@ -70,3 +71,27 @@ def tf_to_timedelta(tf: TimeFrame) -> pd.Timedelta:
         return pd.Timedelta(days=tf.value)
     else:
         raise ValueError(f"Unknown TimeFrameUnit {tf.unit}")
+
+
+class InitialBalanceSampler:
+    """Sampler for initial balance with optional domain randomization.
+
+    Args:
+        initial_cash: Fixed amount (int) or range [min, max] (list) for randomization
+        seed: Optional random seed for reproducibility
+    """
+    def __init__(self, initial_cash: Union[List[int], int], seed: Optional[int] = None):
+        self.initial_cash = initial_cash
+        if seed is not None:
+            np.random.seed(seed)
+
+    def sample(self) -> float:
+        """Sample an initial balance value.
+
+        Returns:
+            Initial balance as float
+        """
+        if isinstance(self.initial_cash, int):
+            return float(self.initial_cash)
+        else:
+            return float(np.random.randint(self.initial_cash[0], self.initial_cash[1]))

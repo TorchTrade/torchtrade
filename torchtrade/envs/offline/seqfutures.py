@@ -18,9 +18,8 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, InitialBalanceSampler
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
-import random
 
 
 class MarginType(Enum):
@@ -149,6 +148,7 @@ class SeqFuturesEnv(EnvBase):
 
         # Reset settings
         self.initial_cash = config.initial_cash
+        self.initial_cash_sampler = InitialBalanceSampler(config.initial_cash, config.seed)
         self.position_hold_counter = 0
 
         # Define action spec
@@ -418,11 +418,7 @@ class SeqFuturesEnv(EnvBase):
         self.max_traj_length = max_episode_steps
 
         # Initialize balance
-        initial_portfolio_value = (
-            self.initial_cash
-            if isinstance(self.initial_cash, int)
-            else random.randint(self.initial_cash[0], self.initial_cash[1])
-        )
+        initial_portfolio_value = self.initial_cash_sampler.sample()
         self.balance = initial_portfolio_value
         self.initial_portfolio_value = initial_portfolio_value
 

@@ -11,7 +11,7 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler
 from torchtrade.envs.reward import build_reward_context, default_log_return
 import logging
 import sys
@@ -40,18 +40,6 @@ def combinatory_action_map(stoploss_levels: List[float], takeprofit_levels: List
         action_map[idx] = (sl, tp)
         idx += 1
     return action_map
-
-class InitialBalanceSampler:
-    def __init__(self, initial_cash: Union[List[int], int], seed: Optional[int] = None):
-        self.initial_cash = initial_cash
-        if seed is not None:
-            np.random.seed(seed)
-
-    def sample(self) -> float:
-        if isinstance(self.initial_cash, int):
-            return float(self.initial_cash)
-        else:
-            return float(np.random.randint(self.initial_cash[0], self.initial_cash[1]))
 
 @dataclass
 class LongOnlyOneStepEnvConfig:
