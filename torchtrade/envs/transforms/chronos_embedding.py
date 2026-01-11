@@ -111,8 +111,7 @@ class ChronosEmbeddingTransform(Transform):
         # Lazy initialization - model loaded on first forward pass
         self.pipeline = None
         self._initialized = False
-        self._encoder = None
-        self._tokenizer = None
+        self.model = None
 
         # Embedding dimension (set after initialization based on model)
         self.embedding_dim = None
@@ -152,19 +151,10 @@ class ChronosEmbeddingTransform(Transform):
 
             # Access encoder and tokenizer directly for embedding extraction
             # Chronos uses T5 architecture, so we access the encoder part
-            self._encoder = self.pipeline.model.encoder
-            self._tokenizer = self.pipeline.tokenizer
+            self.model = self.pipeline.model
 
-            # Determine embedding dimension from encoder config
-            # T5 models have d_model in their config
-            if hasattr(self._encoder.config, 'd_model'):
-                self.embedding_dim = self._encoder.config.d_model
-            else:
-                # Fallback: try to infer from a dummy forward pass
-                dummy_input_ids = torch.zeros((1, 10), dtype=torch.long, device=self.device)
-                with torch.no_grad():
-                    dummy_output = self._encoder(input_ids=dummy_input_ids)
-                    self.embedding_dim = dummy_output.last_hidden_state.shape[-1]
+            self.embedding_dim = self.pipeline.model.encode(torch.zeros((1, 10), dtype=torch.long, device=self.device),
+                                                            torch.ones((1, 10), dtype=torch.long, device=self.device))[:, -1, :].shape[-1]
 
             self._initialized = True
 
@@ -188,29 +178,7 @@ class ChronosEmbeddingTransform(Transform):
         # Ensure series is on correct device
         series = series.to(self.device)
 
-        # Chronos preprocessing: scale and tokenize
-        # We need to follow Chronos's preprocessing pipeline
-        # For now, use simple tokenization approach
-        # TODO: Investigate proper Chronos tokenization for embedding extraction
-
-        # Simple approach: Use mean pooling over sequence
-        # This is a placeholder until we properly integrate with Chronos internals
-        # The proper implementation should:
-        # 1. Tokenize the series using Chronos tokenizer
-        # 2. Pass through encoder
-        # 3. Pool the encoder hidden states
-
-        # Placeholder implementation - return zeros for now
-        # This will be replaced with actual encoder extraction
-        warnings.warn(
-            "ChronosEmbeddingTransform is using placeholder embeddings. "
-            "Full Chronos encoder integration is pending investigation of internals.",
-            UserWarning,
-            stacklevel=3
-        )
-
-        # Return placeholder embedding
-        return torch.zeros(self.embedding_dim, device=self.device, dtype=self.torch_dtype)
+        return self.model.encode(series, torch.ones_like(series).to(self.device))[:, -1, :]
 
     def _aggregate_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
         """Aggregate feature embeddings using configured strategy.

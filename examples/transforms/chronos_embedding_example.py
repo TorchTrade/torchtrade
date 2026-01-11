@@ -70,7 +70,7 @@ def example_basic_and_multitimeframe():
                     "market_data_5Minute_8",
                     "market_data_15Minute_6"
                 ],
-                out_keys=["emb_1min", "emb_5min", "emb_15min"],
+                out_keys=["embedding_1min", "embedding_5min", "embedding_15min"],
                 model_name="amazon/chronos-t5-large",
                 aggregation="mean",
                 device="cuda" if torch.cuda.is_available() else "cpu"
