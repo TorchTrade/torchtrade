@@ -103,15 +103,15 @@ class RewardContext:
     reward_history: List[float]
     base_price_history: List[float]
 
+    # Benchmark (required fields must come before optional fields)
+    initial_portfolio_value: float
+
     # Optional environment-specific fields
     position_history: Optional[List[float]] = None
     liquidated: bool = False
     leverage: Optional[float] = None
     margin_ratio: Optional[float] = None
     liquidation_price: Optional[float] = None
-
-    # Benchmark
-    initial_portfolio_value: float
     buy_and_hold_value: Optional[float] = None
 
 
