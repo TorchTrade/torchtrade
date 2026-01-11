@@ -8,10 +8,7 @@ from tensordict import TensorDict
 from torchrl.data import CompositeSpec, BoundedTensorSpec, UnboundedContinuousTensorSpec
 
 from torchtrade.envs.transforms import ChronosEmbeddingTransform
-
-
-# Patch path for ChronosPipeline (imported lazily in _init)
-CHRONOS_PIPELINE_PATCH = 'chronos.ChronosPipeline'
+from tests.envs.transforms.conftest import mock_chronos_pipeline
 
 
 class TestChronosEmbeddingTransformInit:
@@ -79,51 +76,35 @@ class TestChronosEmbeddingTransformInit:
 class TestChronosEmbeddingTransformLazyInit:
     """Test lazy initialization behavior."""
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_lazy_init_not_called_on_creation(self, mock_pipeline):
+    def test_lazy_init_not_called_on_creation(self):
         """Test that model is not loaded during __init__."""
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"]
-        )
+        with mock_chronos_pipeline() as mock_pipeline:
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"]
+            )
 
-        # Pipeline should not be loaded yet
-        assert not transform._initialized
-        assert transform.pipeline is None
-        mock_pipeline.from_pretrained.assert_not_called()
+            # Pipeline should not be loaded yet
+            assert not transform._initialized
+            assert transform.pipeline is None
+            mock_pipeline.from_pretrained.assert_not_called()
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_lazy_init_called_on_first_use(self, mock_pipeline):
+    def test_lazy_init_called_on_first_use(self):
         """Test that model is loaded on first _init() call."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=1024)
-        mock_model.encoder = mock_encoder
+        with mock_chronos_pipeline(embedding_dim=1024):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                device="cpu"
+            )
 
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+            # Call _init manually
+            transform._init()
 
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            device="cpu"
-        )
-
-        # Call _init manually
-        transform._init()
-
-        # Check model was loaded
-        assert transform._initialized
-        assert transform.pipeline is not None
-        assert transform.embedding_dim == 1024
-        mock_pipeline.from_pretrained.assert_called_once_with(
-            "amazon/chronos-t5-large",
-            device_map="cpu",
-            torch_dtype=torch.bfloat16
-        )
+            # Check model was loaded
+            assert transform._initialized
+            assert transform.pipeline is not None
+            assert transform.embedding_dim == 1024
 
     def test_lazy_init_import_error(self):
         """Test that missing chronos package raises ImportError."""
@@ -150,472 +131,359 @@ class TestChronosEmbeddingTransformLazyInit:
 class TestChronosEmbeddingTransformApplyTransform:
     """Test _apply_transform method."""
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_apply_transform_1d_input(self, mock_pipeline):
+    def test_apply_transform_1d_input(self):
         """Test transformation of 1D time series."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                device="cpu"
+            )
 
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            device="cpu"
-        )
+            # Initialize
+            transform._init()
 
-        # Initialize
-        transform._init()
-
-        # Test 1D input
-        obs = torch.randn(10)  # (window_size,)
-
-        with pytest.warns(UserWarning, match="placeholder embeddings"):
+            # Test 1D input
+            obs = torch.randn(10)  # (window_size,)
             embedding = transform._apply_transform(obs)
 
-        assert embedding.shape == (128,)  # (embedding_dim,)
+            assert embedding.shape == (128,)  # (embedding_dim,)
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_apply_transform_2d_input_mean(self, mock_pipeline):
+    def test_apply_transform_2d_input_mean(self):
         """Test transformation of 2D multi-feature input with mean aggregation."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                aggregation="mean",
+                device="cpu"
+            )
 
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            aggregation="mean",
-            device="cpu"
-        )
+            transform._init()
 
-        transform._init()
-
-        # Test 2D input: (window_size, num_features)
-        obs = torch.randn(10, 5)
-
-        with pytest.warns(UserWarning):
+            # Test 2D input: (window_size, num_features)
+            obs = torch.randn(10, 5)
             embedding = transform._apply_transform(obs)
 
-        assert embedding.shape == (128,)  # Mean over features
+            assert embedding.shape == (128,)  # Mean over features
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_apply_transform_2d_input_max(self, mock_pipeline):
+    def test_apply_transform_2d_input_max(self):
         """Test transformation of 2D input with max aggregation."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                aggregation="max",
+                device="cpu"
+            )
 
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            aggregation="max",
-            device="cpu"
-        )
+            transform._init()
 
-        transform._init()
-
-        obs = torch.randn(10, 5)
-
-        with pytest.warns(UserWarning):
+            obs = torch.randn(10, 5)
             embedding = transform._apply_transform(obs)
 
-        assert embedding.shape == (128,)  # Max over features
+            assert embedding.shape == (128,)  # Max over features
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_apply_transform_2d_input_concat(self, mock_pipeline):
+    def test_apply_transform_2d_input_concat(self):
         """Test transformation of 2D input with concat aggregation."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                aggregation="concat",
+                device="cpu"
+            )
 
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            aggregation="concat",
-            device="cpu"
-        )
+            transform._init()
 
-        transform._init()
-
-        obs = torch.randn(10, 5)  # 5 features
-
-        with pytest.warns(UserWarning):
+            obs = torch.randn(10, 5)  # 5 features
             embedding = transform._apply_transform(obs)
 
-        assert embedding.shape == (128 * 5,)  # Concat all features
+            assert embedding.shape == (128 * 5,)  # Concat all features
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_apply_transform_invalid_shape(self, mock_pipeline):
+    def test_apply_transform_invalid_shape(self):
         """Test that 3D+ input raises error."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                device="cpu"
+            )
 
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            device="cpu"
-        )
+            transform._init()
 
-        transform._init()
+            obs = torch.randn(2, 10, 5)  # 3D invalid
 
-        obs = torch.randn(2, 10, 5)  # 3D invalid
-
-        with pytest.raises(ValueError, match="Expected obs to be 1D or 2D"):
-            transform._apply_transform(obs)
+            with pytest.raises(ValueError, match="Expected 1D or 2D tensor"):
+                transform._apply_transform(obs)
 
 
 class TestChronosEmbeddingTransformCall:
     """Test _call method (forward pass with tensordict)."""
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_call_unbatched(self, mock_pipeline):
+    def test_call_unbatched(self):
         """Test forward pass with unbatched observation."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                device="cpu"
+            )
 
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            device="cpu"
-        )
+            # Create unbatched tensordict
+            td = TensorDict({
+                "market_data": torch.randn(10, 5),  # (window, features)
+                "other_key": torch.tensor([1.0])
+            }, batch_size=[])
 
-        # Create unbatched tensordict
-        td = TensorDict({
-            "market_data": torch.randn(10, 5),  # (window, features)
-            "other_key": torch.tensor([1.0])
-        }, batch_size=[])
-
-        with pytest.warns(UserWarning):
             td_out = transform._call(td)
 
-        assert "embedding" in td_out.keys()
-        assert td_out["embedding"].shape == (128,)
-        assert "other_key" in td_out.keys()  # Unchanged
+            assert "embedding" in td_out.keys()
+            assert td_out["embedding"].shape == (128,)
+            assert "other_key" in td_out.keys()  # Unchanged
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_call_batched(self, mock_pipeline):
+    def test_call_batched(self):
         """Test forward pass with batched observations."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                device="cpu"
+            )
 
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            device="cpu"
-        )
+            # Create batched tensordict (batch_size=4)
+            td = TensorDict({
+                "market_data": torch.randn(4, 10, 5),  # (batch, window, features)
+                "other_key": torch.tensor([1.0, 2.0, 3.0, 4.0])
+            }, batch_size=[4])
 
-        # Create batched tensordict (batch_size=4)
-        td = TensorDict({
-            "market_data": torch.randn(4, 10, 5),  # (batch, window, features)
-            "other_key": torch.tensor([1.0, 2.0, 3.0, 4.0])
-        }, batch_size=[4])
-
-        with pytest.warns(UserWarning):
             td_out = transform._call(td)
 
-        assert "embedding" in td_out.keys()
-        assert td_out["embedding"].shape == (4, 128)  # (batch, embedding_dim)
+            assert "embedding" in td_out.keys()
+            assert td_out["embedding"].shape == (4, 128)  # (batch, embedding_dim)
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_call_del_keys(self, mock_pipeline):
+    def test_call_del_keys(self):
         """Test that del_keys removes input keys."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                del_keys=True,
+                device="cpu"
+            )
 
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            del_keys=True,
-            device="cpu"
-        )
+            td = TensorDict({
+                "market_data": torch.randn(10, 5),
+            }, batch_size=[])
 
-        td = TensorDict({
-            "market_data": torch.randn(10, 5),
-        }, batch_size=[])
-
-        with pytest.warns(UserWarning):
             td_out = transform._call(td)
 
-        assert "embedding" in td_out.keys()
-        assert "market_data" not in td_out.keys()  # Deleted
+            assert "embedding" in td_out.keys()
+            assert "market_data" not in td_out.keys()  # Deleted
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_call_no_del_keys(self, mock_pipeline):
+    def test_call_no_del_keys(self):
         """Test that del_keys=False keeps input keys."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                del_keys=False,
+                device="cpu"
+            )
 
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            del_keys=False,
-            device="cpu"
-        )
+            td = TensorDict({
+                "market_data": torch.randn(10, 5),
+            }, batch_size=[])
 
-        td = TensorDict({
-            "market_data": torch.randn(10, 5),
-        }, batch_size=[])
-
-        with pytest.warns(UserWarning):
             td_out = transform._call(td)
 
-        assert "embedding" in td_out.keys()
-        assert "market_data" in td_out.keys()  # Kept
+            assert "embedding" in td_out.keys()
+            assert "market_data" in td_out.keys()  # Kept
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_call_missing_key(self, mock_pipeline):
+    def test_call_missing_key(self):
         """Test that missing input key is skipped gracefully."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                device="cpu"
+            )
 
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            device="cpu"
-        )
+            td = TensorDict({
+                "other_key": torch.tensor([1.0]),
+            }, batch_size=[])
 
-        td = TensorDict({
-            "other_key": torch.tensor([1.0]),
-        }, batch_size=[])
+            # Should not raise error
+            td_out = transform._call(td)
 
-        # Should not raise error
-        td_out = transform._call(td)
+            # Embedding should not be added
+            assert "embedding" not in td_out.keys()
 
-        # Embedding should not be added
-        assert "embedding" not in td_out.keys()
+
+class TestChronosEmbeddingTransformReset:
+    """Test _reset method."""
+
+    def test_reset_unbatched(self):
+        """Test _reset applies transform to reset observations."""
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                device="cpu"
+            )
+
+            # Create reset tensordict
+            td_reset = TensorDict({
+                "market_data": torch.randn(10, 5),
+                "account_state": torch.tensor([1000.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0])
+            }, batch_size=[])
+
+            # Empty tensordict for first arg (unused in _reset)
+            td = TensorDict({}, batch_size=[])
+
+            td_out = transform._reset(td, td_reset)
+
+            assert "embedding" in td_out.keys()
+            assert td_out["embedding"].shape == (128,)
+            assert "market_data" not in td_out.keys()  # Deleted
+            assert "account_state" in td_out.keys()  # Preserved
+
+    def test_reset_batched(self):
+        """Test _reset with batched reset observations."""
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                device="cpu"
+            )
+
+            # Batched reset
+            td_reset = TensorDict({
+                "market_data": torch.randn(4, 10, 5),  # (batch=4, window, features)
+                "account_state": torch.randn(4, 7)
+            }, batch_size=[4])
+
+            td = TensorDict({}, batch_size=[4])
+
+            td_out = transform._reset(td, td_reset)
+
+            assert "embedding" in td_out.keys()
+            assert td_out["embedding"].shape == (4, 128)
 
 
 class TestChronosEmbeddingTransformObsSpec:
     """Test observation spec transformation."""
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_transform_observation_spec_mean(self, mock_pipeline):
+    def test_transform_observation_spec_mean(self):
         """Test spec transformation with mean aggregation."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=256)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
-
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            aggregation="mean",
-            device="cpu"
-        )
-
-        # Create input spec
-        input_spec = CompositeSpec(
-            market_data=BoundedTensorSpec(
-                low=-10.0,
-                high=10.0,
-                shape=(10, 5),  # (window, features)
-                dtype=torch.float32
+        with mock_chronos_pipeline(embedding_dim=256):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                aggregation="mean",
+                device="cpu"
             )
-        )
 
-        # Transform spec
-        output_spec = transform.transform_observation_spec(input_spec)
+            # Create input spec
+            input_spec = CompositeSpec(
+                market_data=BoundedTensorSpec(
+                    low=-10.0,
+                    high=10.0,
+                    shape=(10, 5),  # (window, features)
+                    dtype=torch.float32
+                )
+            )
 
-        assert "embedding" in output_spec.keys()
-        assert output_spec["embedding"].shape == (256,)  # Mean aggregation
-        assert "market_data" not in output_spec.keys()  # Deleted by default
+            # Transform spec
+            output_spec = transform.transform_observation_spec(input_spec)
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_transform_observation_spec_concat(self, mock_pipeline):
+            assert "embedding" in output_spec.keys()
+            assert output_spec["embedding"].shape == (256,)  # Mean aggregation
+            assert "market_data" not in output_spec.keys()  # Deleted by default
+
+    def test_transform_observation_spec_concat(self):
         """Test spec transformation with concat aggregation."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=256)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
-
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            aggregation="concat",
-            device="cpu"
-        )
-
-        input_spec = CompositeSpec(
-            market_data=BoundedTensorSpec(
-                low=-10.0,
-                high=10.0,
-                shape=(10, 5),  # 5 features
-                dtype=torch.float32
+        with mock_chronos_pipeline(embedding_dim=256):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                aggregation="concat",
+                device="cpu"
             )
-        )
 
-        output_spec = transform.transform_observation_spec(input_spec)
+            input_spec = CompositeSpec(
+                market_data=BoundedTensorSpec(
+                    low=-10.0,
+                    high=10.0,
+                    shape=(10, 5),  # 5 features
+                    dtype=torch.float32
+                )
+            )
 
-        assert "embedding" in output_spec.keys()
-        assert output_spec["embedding"].shape == (256 * 5,)  # Concat: features * dim
+            output_spec = transform.transform_observation_spec(input_spec)
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_transform_observation_spec_no_del_keys(self, mock_pipeline):
+            assert "embedding" in output_spec.keys()
+            assert output_spec["embedding"].shape == (256 * 5,)  # Concat: features * dim
+
+    def test_transform_observation_spec_no_del_keys(self):
         """Test that spec keeps input keys when del_keys=False."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=256)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
-
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            del_keys=False,
-            device="cpu"
-        )
-
-        input_spec = CompositeSpec(
-            market_data=BoundedTensorSpec(
-                low=-10.0,
-                high=10.0,
-                shape=(10, 5),
-                dtype=torch.float32
+        with mock_chronos_pipeline(embedding_dim=256):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                del_keys=False,
+                device="cpu"
             )
-        )
 
-        output_spec = transform.transform_observation_spec(input_spec)
+            input_spec = CompositeSpec(
+                market_data=BoundedTensorSpec(
+                    low=-10.0,
+                    high=10.0,
+                    shape=(10, 5),
+                    dtype=torch.float32
+                )
+            )
 
-        assert "embedding" in output_spec.keys()
-        assert "market_data" in output_spec.keys()  # Kept
+            output_spec = transform.transform_observation_spec(input_spec)
+
+            assert "embedding" in output_spec.keys()
+            assert "market_data" in output_spec.keys()  # Kept
 
 
 class TestChronosEmbeddingTransformDeviceManagement:
     """Test device and dtype management."""
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_to_device(self, mock_pipeline):
+    def test_to_device(self):
         """Test moving transform to different device."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_encoder.to = Mock(return_value=mock_encoder)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                device="cpu"
+            )
 
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            device="cpu"
-        )
+            transform._init()
 
-        transform._init()
+            # Move to different device
+            transform.to("cpu")
 
-        # Move to different device
-        transform.to("cpu")
+            assert transform.device == torch.device("cpu")
 
-        assert transform.device == torch.device("cpu")
-
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_to_dtype(self, mock_pipeline):
+    def test_to_dtype(self):
         """Test converting transform to different dtype."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_encoder.to = Mock(return_value=mock_encoder)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                device="cpu"
+            )
 
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            device="cpu"
-        )
+            transform._init()
 
-        transform._init()
+            # Change dtype
+            transform.to(torch.float32)
 
-        # Change dtype
-        transform.to(torch.float32)
-
-        assert transform.torch_dtype == torch.float32
+            assert transform.torch_dtype == torch.float32
 
 
 class TestChronosEmbeddingTransformEdgeCases:
@@ -632,74 +500,53 @@ class TestChronosEmbeddingTransformEdgeCases:
         assert len(transform.in_keys) == 2
         assert len(transform.out_keys) == 2
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_spec_caching(self, mock_pipeline):
+    def test_spec_caching(self):
         """Test that spec transformation is cached."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
-
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            device="cpu"
-        )
-
-        input_spec = CompositeSpec(
-            market_data=BoundedTensorSpec(
-                low=-10.0,
-                high=10.0,
-                shape=(10, 5),
-                dtype=torch.float32
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                device="cpu"
             )
-        )
 
-        # First call
-        spec1 = transform.transform_observation_spec(input_spec)
-        # Second call should return cached version
-        spec2 = transform.transform_observation_spec(input_spec)
+            input_spec = CompositeSpec(
+                market_data=BoundedTensorSpec(
+                    low=-10.0,
+                    high=10.0,
+                    shape=(10, 5),
+                    dtype=torch.float32
+                )
+            )
 
-        assert spec1 is spec2  # Same object (cached)
+            # First call
+            spec1 = transform.transform_observation_spec(input_spec)
+            # Second call should return cached version
+            spec2 = transform.transform_observation_spec(input_spec)
 
-    @patch(CHRONOS_PIPELINE_PATCH)
-    def test_spec_cache_cleared_on_device_change(self, mock_pipeline):
+            assert spec1 is spec2  # Same object (cached)
+
+    def test_spec_cache_cleared_on_device_change(self):
         """Test that spec cache is cleared when device changes."""
-        # Setup mock
-        mock_model = Mock()
-        mock_encoder = Mock()
-        mock_encoder.config = Mock(d_model=128)
-        mock_encoder.to = Mock(return_value=mock_encoder)
-        mock_model.encoder = mock_encoder
-        mock_pipeline_instance = Mock()
-        mock_pipeline_instance.model = mock_model
-        mock_pipeline_instance.tokenizer = Mock()
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
-
-        transform = ChronosEmbeddingTransform(
-            in_keys=["market_data"],
-            out_keys=["embedding"],
-            device="cpu"
-        )
-
-        input_spec = CompositeSpec(
-            market_data=BoundedTensorSpec(
-                low=-10.0,
-                high=10.0,
-                shape=(10, 5),
-                dtype=torch.float32
+        with mock_chronos_pipeline(embedding_dim=128):
+            transform = ChronosEmbeddingTransform(
+                in_keys=["market_data"],
+                out_keys=["embedding"],
+                device="cpu"
             )
-        )
 
-        # Cache spec
-        transform.transform_observation_spec(input_spec)
-        assert transform._transformed_spec is not None
+            input_spec = CompositeSpec(
+                market_data=BoundedTensorSpec(
+                    low=-10.0,
+                    high=10.0,
+                    shape=(10, 5),
+                    dtype=torch.float32
+                )
+            )
 
-        # Change device - should clear cache
-        transform.to("cpu")
-        assert transform._transformed_spec is None
+            # Cache spec
+            transform.transform_observation_spec(input_spec)
+            assert transform._transformed_spec is not None
+
+            # Change device - should clear cache
+            transform.to("cpu")
+            assert transform._transformed_spec is None

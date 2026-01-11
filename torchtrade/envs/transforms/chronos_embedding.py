@@ -172,7 +172,7 @@ class ChronosEmbeddingTransform(Transform):
             Embedding tensor of shape (embedding_dim,)
         """
         embeddings, _ = self.pipeline.embed(series.cpu()) # chronos error when we keep it on GPU! BAD
-        return embeddings[:, -1, :]
+        return embeddings[:, -1, :].squeeze(0)  # Remove batch dimension
 
     def _aggregate_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
         """Aggregate feature embeddings using configured strategy.
@@ -339,17 +339,25 @@ class ChronosEmbeddingTransform(Transform):
         if isinstance(dest, (torch.device, str)) and not isinstance(dest, torch.dtype):
             self.device = torch.device(dest) if isinstance(dest, str) else dest
 
-            # Move model if already initialized
-            if self._initialized and self._encoder is not None:
-                self._encoder = self._encoder.to(self.device)
+            # Move pipeline if already initialized
+            if self._initialized and self.pipeline is not None:
+                # Note: Chronos pipeline movement is handled by the pipeline itself
+                # We just update our device tracker
+                pass
 
         # Handle dtype changes
         if isinstance(dest, torch.dtype):
             self.torch_dtype = dest
 
-            # Convert model if already initialized
-            if self._initialized and self._encoder is not None:
-                self._encoder = self._encoder.to(dtype=dest)
+            # Note: Chronos pipeline dtype is set during initialization
+            # Runtime dtype changes may require reinitialization
+            if self._initialized:
+                import warnings
+                warnings.warn(
+                    "Changing dtype after initialization may not affect the Chronos pipeline. "
+                    "Consider creating a new transform with the desired dtype.",
+                    UserWarning
+                )
 
         # Clear cached spec since device/dtype changed
         self._transformed_spec = None
