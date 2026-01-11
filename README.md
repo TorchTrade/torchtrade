@@ -13,6 +13,7 @@ TorchTrade is a modular RL framework built on TorchRL that provides:
 - 🔴 **Live Trading** - Direct Alpaca and Binance API integration
 - 🧠 **LLM Integration** - Use GPT-4o-mini as trading agent
 - 📐 **Rule-Based Actors** - Hard-coded strategies for imitation learning and baselines
+- 🔮 **Pretrained Encoder Transforms** - Foundation model embeddings for time series feature extraction
 - 📈 **Research to Production** - Same code for backtesting and live deployment
 
 ---
