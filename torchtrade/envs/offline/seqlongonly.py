@@ -16,6 +16,7 @@ import torch
 from torchrl.data import Categorical, Bounded
 import pandas as pd
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
+from torchtrade.envs.reward import RewardContext, default_reward_function
 import random
 
 @dataclass
@@ -25,13 +26,14 @@ class SeqLongOnlyEnvConfig:
     window_sizes: Union[List[int], int] = 10
     execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute) # On which timeframe to execute trades
     initial_cash: Union[List[int], int] = (1000, 5000)
-    transaction_fee: float = 0.025 
+    transaction_fee: float = 0.025
     bankrupt_threshold: float = 0.1  # 10% of initial balance
     slippage: float = 0.01
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
     max_traj_length: Optional[int] = None
     random_start: bool = True
+    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
 class SeqLongOnlyEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: SeqLongOnlyEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
@@ -143,6 +145,53 @@ class SeqLongOnlyEnv(EnvBase):
 
         return out_td
 
+    def _build_reward_context(
+        self,
+        old_portfolio_value: float,
+        new_portfolio_value: float,
+        action: float,
+        trade_info: Dict,
+    ) -> RewardContext:
+        """Build RewardContext from current state for custom reward functions."""
+        is_terminal = self.step_counter >= self.max_traj_length - 1
+
+        # Compute buy & hold value if terminal
+        buy_and_hold_value = None
+        if is_terminal and len(self.base_price_history) > 0:
+            buy_and_hold_value = (
+                self.initial_portfolio_value / self.base_price_history[0]
+            ) * self.base_price_history[-1]
+
+        # Map action to side string
+        trade_side = "hold"
+        if trade_info.get("executed"):
+            trade_side = trade_info.get("side", "hold")
+
+        return RewardContext(
+            old_portfolio_value=old_portfolio_value,
+            new_portfolio_value=new_portfolio_value,
+            action=int(action) if isinstance(action, (int, float)) else 0,
+            current_step=self.step_counter,
+            max_steps=self.max_traj_length,
+            trade_executed=trade_info.get("executed", False),
+            trade_side=trade_side,
+            fee_paid=trade_info.get("fee_paid", 0.0),
+            slippage_amount=trade_info.get("price_noise", 0.0),
+            cash=self.balance,
+            position_size=self.position_size,
+            position_value=self.position_value,
+            entry_price=self.entry_price,
+            current_price=self._cached_base_features["close"],
+            unrealized_pnl_pct=self.unrealized_pnlpc,
+            holding_time=self.position_hold_counter,
+            portfolio_value_history=self.portfolio_value_history.copy(),
+            action_history=self.action_history.copy(),
+            reward_history=self.reward_history.copy(),
+            base_price_history=self.base_price_history.copy(),
+            initial_portfolio_value=self.initial_portfolio_value,
+            buy_and_hold_value=buy_and_hold_value,
+        )
+
     def _calculate_reward(
         self,
         old_portfolio_value: float,
@@ -150,82 +199,40 @@ class SeqLongOnlyEnv(EnvBase):
         action: float,
         trade_info: Dict,
     ) -> float:
-        """GROK REWARD FUNCTION
-        Hybrid reward:
-        - Dense per-step: shaped to encourage smart entry and patient holding
-        - Sparse terminal: your strong baseline (beat max of cash or buy-and-hold)
         """
+        Calculate reward using custom or default function.
 
-        # --- Initialize running stats on first call ---
-        if not hasattr(self, "returns_history"):
-            self.returns_history = []      # for potential future use
-            self.A = 0.0                   # DSR running mean
-            self.B = 0.0001                # DSR running variance proxy (small init to avoid div0)
-            self.t = 0
-            self.hold_start_value = old_portfolio_value  # track entry value for unrealized
+        If config.reward_function is provided, uses that custom function.
+        Otherwise, uses the default log return reward.
 
-        # Daily portfolio return
-        daily_return = (new_portfolio_value - old_portfolio_value) / old_portfolio_value
-        self.returns_history.append(daily_return)
+        Args:
+            old_portfolio_value: Portfolio value before action
+            new_portfolio_value: Portfolio value after action
+            action: Action taken
+            trade_info: Dictionary with trade execution details
 
-        # Transaction fee (normalized)
-        tc = trade_info.get("fee_paid", 0.0) / old_portfolio_value if old_portfolio_value > 0 else 0.0
-        # Or if you track it directly: tc = self.transaction_fee * abs(action) or similar
+        Returns:
+            Reward value (float)
+        """
+        # Use custom reward function if provided
+        if self.config.reward_function is not None:
+            ctx = self._build_reward_context(
+                old_portfolio_value,
+                new_portfolio_value,
+                action,
+                trade_info
+            )
+            return float(self.config.reward_function(ctx))
 
-        # --- Dense per-step reward ---
-        dense_reward = daily_return - tc  # core: profit minus cost of trading
-
-        # Position tracking
-        position_size = getattr(self, "position_size", 0.0)  # assume you have this
-
-        if position_size > 0:
-            # Unrealized PnL since entry (approximate)
-            unrealized_pnl = (new_portfolio_value - self.hold_start_value) / self.hold_start_value
-            if unrealized_pnl > 0:
-                dense_reward += 0.0008 * unrealized_pnl  # bonus for letting winners run
-
-            # Reset hold_start_value on new buy (if you detect entry)
-            if trade_info.get("executed") and trade_info.get("side") == "buy":
-                self.hold_start_value = new_portfolio_value
-
-        # Differential Sharpe Ratio - incremental, online Sharpe update
-        self.t += 1
-        eta = 0.015  # adaptation rate (higher = reacts faster; good for intraday)
-        old_A = self.A
-        self.A += eta * (daily_return - old_A)
-        self.B = (1 - eta) * self.B + eta * (daily_return - old_A) * (daily_return - self.A)
-
-        if self.B > 1e-8:
-            dsr = (self.A - old_A) / np.sqrt(self.B) if self.B > 0 else 0.0
-            dense_reward += 3.0 * dsr  # scale so it matters but doesn't dominate
-
-        # Small bonus for entering a position (overcomes fee fear slightly)
-        if trade_info.get("executed") and trade_info.get("side") == "buy":
-            dense_reward += 0.0005
-
-        # Clip dense to prevent any single step from dominating
-        dense_reward = np.clip(dense_reward, -0.05, 0.05)
-
-        # --- Non-terminal: return dense guidance ---
-        if self.step_counter < self.max_traj_length - 1:
-            return dense_reward
-
-        # --- Terminal: your original strong sparse reward ---
-        buy_and_hold_value = (
-            self.initial_portfolio_value / self.base_price_history[0]
-        ) * self.base_price_history[-1]
-
-        compare_value = max(self.initial_portfolio_value, buy_and_hold_value)
-        if compare_value <= 0:
-            terminal_reward = 0.0
-        else:
-            # Terminal reward as percentage (1.0 = 100% better than benchmark)
-            terminal_reward = (new_portfolio_value - compare_value) / compare_value
-            # Clip to [-5, 5] to prevent extreme values
-            terminal_reward = np.clip(terminal_reward, -5.0, 5.0)
-
-        # Optional: add small dense carryover, or keep pure sparse
-        return terminal_reward  # or: terminal_reward + dense_reward
+        # Otherwise use default log return
+        return default_reward_function(
+            self._build_reward_context(
+                old_portfolio_value,
+                new_portfolio_value,
+                action,
+                trade_info
+            )
+        )
 
 
     def _calculate_reward_(
