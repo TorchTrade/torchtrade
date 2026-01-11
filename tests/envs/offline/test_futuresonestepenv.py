@@ -10,11 +10,14 @@ import torch
 from torchtrade.envs.offline.futuresonestepenv import (
     FuturesOneStepEnv,
     FuturesOneStepEnvConfig,
-    InitialBalanceSampler,
-    futures_onestep_action_map,
     MarginType,
 )
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.utils import (
+    TimeFrame,
+    TimeFrameUnit,
+    InitialBalanceSampler,
+    build_futures_sltp_action_map as futures_onestep_action_map,
+)
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:

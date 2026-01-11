@@ -7,7 +7,6 @@ with the one-step rollout pattern from LongOnlyOneStepEnv.
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union, Callable
-from itertools import product
 from enum import Enum
 import math
 
@@ -19,7 +18,7 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler, build_futures_sltp_action_map
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 import logging
 import sys
@@ -43,44 +42,6 @@ class MarginType(Enum):
     """Margin type for futures trading."""
     ISOLATED = "isolated"
     CROSSED = "crossed"
-
-
-def futures_onestep_action_map(
-    stoploss_levels: List[float],
-    takeprofit_levels: List[float],
-) -> Dict[int, tuple]:
-    """
-    Create action map for futures one-step environment.
-
-    Actions:
-    - 0: Hold (no action)
-    - 1 to N: Long positions with SL/TP combinations
-    - N+1 to 2N: Short positions with SL/TP combinations
-
-    Args:
-        stoploss_levels: List of stop-loss percentages (e.g., [-0.02, -0.05])
-        takeprofit_levels: List of take-profit percentages (e.g., [0.05, 0.1])
-
-    Returns:
-        Dictionary mapping action indices to (side, sl, tp) tuples
-        where side is None (hold), "long", or "short"
-    """
-    action_map = {}
-    # Action 0 = HOLD
-    action_map[0] = (None, None, None)
-
-    idx = 1
-    # Long positions
-    for sl, tp in product(stoploss_levels, takeprofit_levels):
-        action_map[idx] = ("long", sl, tp)
-        idx += 1
-
-    # Short positions
-    for sl, tp in product(stoploss_levels, takeprofit_levels):
-        action_map[idx] = ("short", sl, tp)
-        idx += 1
-
-    return action_map
 
 
 @dataclass
@@ -130,6 +91,7 @@ class FuturesOneStepEnvConfig:
     # Reward settings
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
+    include_hold_action: bool = True  # Include HOLD action (index 0) in action space
 
 
 class FuturesOneStepEnv(EnvBase):
@@ -215,7 +177,11 @@ class FuturesOneStepEnv(EnvBase):
         self.takeprofit_levels = list(config.takeprofit_levels) if not isinstance(config.takeprofit_levels, list) else config.takeprofit_levels
 
         # Create action map
-        self.action_map = futures_onestep_action_map(self.stoploss_levels, self.takeprofit_levels)
+        self.action_map = build_futures_sltp_action_map(
+            self.stoploss_levels,
+            self.takeprofit_levels,
+            include_hold_action=config.include_hold_action
+        )
         self.action_spec = Categorical(len(self.action_map))
 
         # Get market data keys

@@ -10,9 +10,12 @@ import torch
 from torchtrade.envs.offline.seqlongonlysltp import (
     SeqLongOnlySLTPEnv,
     SeqLongOnlySLTPEnvConfig,
-    combinatory_action_map,
 )
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.utils import (
+    TimeFrame,
+    TimeFrameUnit,
+    build_longonly_sltp_action_map as combinatory_action_map,
+)
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:

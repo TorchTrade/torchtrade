@@ -7,7 +7,6 @@ This environment combines:
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union, Callable
-from itertools import product
 from enum import Enum
 
 import matplotlib.pyplot as plt
@@ -20,7 +19,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, InitialBalanceSampler
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, InitialBalanceSampler, build_futures_sltp_action_map
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 
 
@@ -28,40 +27,6 @@ class MarginType(Enum):
     """Margin type for futures trading."""
     ISOLATED = "isolated"
     CROSSED = "crossed"
-
-
-def futures_sltp_action_map(
-    stoploss_levels: List[float],
-    takeprofit_levels: List[float],
-) -> Dict[int, Tuple[Optional[str], Optional[float], Optional[float]]]:
-    """
-    Create action map for futures SLTP environment.
-
-    Action space:
-    - 0: HOLD/Close (no new position)
-    - 1 to N: Long positions with (SL, TP) combinations
-    - N+1 to 2N: Short positions with (SL, TP) combinations
-
-    Returns:
-        Dict mapping action index to (side, sl_pct, tp_pct)
-        where side is None, "long", or "short"
-    """
-    action_map = {}
-    # 0 = HOLD/Close
-    action_map[0] = (None, None, None)
-
-    idx = 1
-    # Long positions
-    for sl, tp in product(stoploss_levels, takeprofit_levels):
-        action_map[idx] = ("long", sl, tp)
-        idx += 1
-
-    # Short positions
-    for sl, tp in product(stoploss_levels, takeprofit_levels):
-        action_map[idx] = ("short", sl, tp)
-        idx += 1
-
-    return action_map
 
 
 @dataclass
@@ -112,6 +77,7 @@ class SeqFuturesSLTPEnvConfig:
     # Reward settings
     reward_scaling: float = 1.0
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
+    include_hold_action: bool = True  # Include HOLD action (index 0) in action space
 
 
 class SeqFuturesSLTPEnv(EnvBase):
@@ -184,8 +150,10 @@ class SeqFuturesSLTPEnv(EnvBase):
         )
 
         # Create action map
-        self.action_map = futures_sltp_action_map(
-            self.stoploss_levels, self.takeprofit_levels
+        self.action_map = build_futures_sltp_action_map(
+            self.stoploss_levels,
+            self.takeprofit_levels,
+            include_hold_action=config.include_hold_action
         )
         # PERF: Convert action_map to tuple for O(1) indexed lookup (faster than dict hashing)
         self._action_tuple = tuple(self.action_map[i] for i in range(len(self.action_map)))

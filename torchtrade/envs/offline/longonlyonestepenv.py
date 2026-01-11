@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Callable
 from warnings import warn
-from itertools import product
 
 import numpy as np
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
@@ -11,8 +10,8 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler
-from torchtrade.envs.reward import build_reward_context, default_log_return
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler, build_longonly_sltp_action_map
+from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 import logging
 import sys
 
@@ -31,16 +30,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def combinatory_action_map(stoploss_levels: List[float], takeprofit_levels: List[float]) -> Dict:
-    action_map = {}
-    # 0 = HOLD
-    action_map[0] = (None, None)
-    idx = 1
-    for sl, tp in product(stoploss_levels, takeprofit_levels):
-        action_map[idx] = (sl, tp)
-        idx += 1
-    return action_map
-
 @dataclass
 class LongOnlyOneStepEnvConfig:
     symbol: str = "BTC/USD"
@@ -58,6 +47,7 @@ class LongOnlyOneStepEnvConfig:
     max_traj_length: Optional[int] = None
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
+    include_hold_action: bool = True  # Include HOLD action (index 0) in action space
 
 class LongOnlyOneStepEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: LongOnlyOneStepEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
@@ -101,7 +91,11 @@ class LongOnlyOneStepEnv(EnvBase):
         self.takeprofit_levels = config.takeprofit_levels
 
         # Define action and observation spaces sell, hold (do nothing), buy
-        self.action_map = combinatory_action_map(self.stoploss_levels, self.takeprofit_levels)
+        self.action_map = build_longonly_sltp_action_map(
+            self.stoploss_levels,
+            self.takeprofit_levels,
+            include_hold_action=config.include_hold_action
+        )
         self.action_spec = Categorical(len(self.action_map))
 
         # Get the number of features from the observer

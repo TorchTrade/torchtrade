@@ -10,9 +10,12 @@ import torch
 from torchtrade.envs.offline.seqfuturessltp import (
     SeqFuturesSLTPEnv,
     SeqFuturesSLTPEnvConfig,
-    futures_sltp_action_map,
 )
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.utils import (
+    TimeFrame,
+    TimeFrameUnit,
+    build_futures_sltp_action_map as futures_sltp_action_map,
+)
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
