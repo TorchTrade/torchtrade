@@ -19,7 +19,7 @@ import torch
 from torchrl.data import Categorical, Bounded
 import pandas as pd
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
-from torchtrade.envs.reward import RewardContext, default_reward_function
+from torchtrade.envs.reward import build_reward_context, default_log_return
 import random
 
 
@@ -324,70 +324,6 @@ class SeqFuturesEnv(EnvBase):
 
         return out_td
 
-    def _build_reward_context(
-        self,
-        old_portfolio_value: float,
-        new_portfolio_value: float,
-        action: float,
-        trade_info: Dict,
-    ) -> RewardContext:
-        """Build RewardContext from current state for custom reward functions."""
-        is_terminal = self.step_counter >= self.max_traj_length - 1
-
-        # Compute buy & hold value if terminal
-        buy_and_hold_value = None
-        if is_terminal and len(self.base_price_history) > 0:
-            buy_and_hold_value = (
-                self.initial_portfolio_value / self.base_price_history[0]
-            ) * self.base_price_history[-1]
-
-        # Map action to side string
-        trade_side = "hold"
-        if trade_info.get("executed"):
-            if self.position_size > 0:
-                trade_side = "long"
-            elif self.position_size < 0:
-                trade_side = "short"
-            else:
-                trade_side = trade_info.get("side", "hold")
-
-        # Get current price
-        current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
-
-        # Calculate margin ratio
-        total_balance = self.balance + self.unrealized_pnl
-        margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
-
-        return RewardContext(
-            old_portfolio_value=old_portfolio_value,
-            new_portfolio_value=new_portfolio_value,
-            action=int(action) if isinstance(action, (int, float)) else 0,
-            current_step=self.step_counter,
-            max_steps=self.max_traj_length,
-            trade_executed=trade_info.get("executed", False),
-            trade_side=trade_side,
-            fee_paid=trade_info.get("fee_paid", 0.0),
-            slippage_amount=trade_info.get("price_noise", 0.0),
-            cash=self.balance,
-            position_size=self.position_size,
-            position_value=self.position_value,
-            entry_price=self.entry_price,
-            current_price=current_price,
-            unrealized_pnl_pct=self.unrealized_pnl_pct,
-            holding_time=self.position_hold_counter,
-            portfolio_value_history=self.portfolio_value_history.copy(),
-            action_history=self.action_history.copy(),
-            reward_history=self.reward_history.copy(),
-            base_price_history=self.base_price_history.copy(),
-            position_history=self.position_history.copy(),
-            liquidated=trade_info.get("liquidated", False),
-            leverage=float(self.leverage),
-            margin_ratio=margin_ratio,
-            liquidation_price=self.liquidation_price,
-            initial_portfolio_value=self.initial_portfolio_value,
-            buy_and_hold_value=buy_and_hold_value,
-        )
-
     def _calculate_reward(
         self,
         old_portfolio_value: float,
@@ -412,24 +348,40 @@ class SeqFuturesEnv(EnvBase):
         """
         # Use custom reward function if provided
         if self.config.reward_function is not None:
-            ctx = self._build_reward_context(
+            # Compute buy & hold value if terminal
+            is_terminal = self.step_counter >= self.max_traj_length - 1
+            buy_and_hold_value = None
+            if is_terminal and len(self.base_price_history) > 0:
+                buy_and_hold_value = (
+                    self.initial_portfolio_value / self.base_price_history[0]
+                ) * self.base_price_history[-1]
+
+            # Calculate margin ratio
+            total_balance = self.balance + self.unrealized_pnl
+            margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
+
+            ctx = build_reward_context(
+                self,
                 old_portfolio_value,
                 new_portfolio_value,
                 action,
-                trade_info
+                trade_info,
+                portfolio_value_history=self.portfolio_value_history,
+                action_history=self.action_history,
+                reward_history=self.reward_history,
+                base_price_history=self.base_price_history,
+                position_history=self.position_history,
+                initial_portfolio_value=self.initial_portfolio_value,
+                buy_and_hold_value=buy_and_hold_value,
+                liquidated=trade_info.get("liquidated", False),
+                leverage=float(self.leverage),
+                margin_ratio=margin_ratio,
+                liquidation_price=self.liquidation_price,
             )
             return float(self.config.reward_function(ctx)) * self.config.reward_scaling
 
-        # Otherwise use default log return
-        reward = default_reward_function(
-            self._build_reward_context(
-                old_portfolio_value,
-                new_portfolio_value,
-                action,
-                trade_info
-            )
-        )
-        return reward * self.config.reward_scaling
+        # Otherwise use default log return (no context needed)
+        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value including unrealized PnL."""

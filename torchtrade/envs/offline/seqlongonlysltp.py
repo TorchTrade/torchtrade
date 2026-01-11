@@ -17,7 +17,7 @@ import torch
 from torchrl.data import Bounded, MultiCategorical, Categorical
 import pandas as pd
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta
-from torchtrade.envs.reward import RewardContext, default_reward_function
+from torchtrade.envs.reward import build_reward_context, default_log_return
 import random
 
 def combinatory_action_map(stoploss_levels: List[float], takeprofit_levels: List[float]) -> Dict:
@@ -161,53 +161,6 @@ class SeqLongOnlySLTPEnv(EnvBase):
         obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
         return TensorDict(obs_data, batch_size=())
 
-    def _build_reward_context(
-        self,
-        old_portfolio_value: float,
-        new_portfolio_value: float,
-        action: float,
-        trade_info: Dict,
-    ) -> RewardContext:
-        """Build RewardContext from current state for custom reward functions."""
-        is_terminal = self.step_counter >= self.max_traj_length - 1
-
-        # Compute buy & hold value if terminal
-        buy_and_hold_value = None
-        if is_terminal and len(self.base_price_history) > 0:
-            buy_and_hold_value = (
-                self.initial_portfolio_value / self.base_price_history[0]
-            ) * self.base_price_history[-1]
-
-        # Map action to side string
-        trade_side = "hold"
-        if trade_info.get("executed"):
-            trade_side = trade_info.get("side", "hold")
-
-        return RewardContext(
-            old_portfolio_value=old_portfolio_value,
-            new_portfolio_value=new_portfolio_value,
-            action=int(action) if isinstance(action, (int, float)) else 0,
-            current_step=self.step_counter,
-            max_steps=self.max_traj_length,
-            trade_executed=trade_info.get("executed", False),
-            trade_side=trade_side,
-            fee_paid=trade_info.get("fee_paid", 0.0),
-            slippage_amount=trade_info.get("price_noise", 0.0),
-            cash=self.balance,
-            position_size=self.position_size,
-            position_value=self.position_value,
-            entry_price=self.entry_price,
-            current_price=self._cached_base_features["close"],
-            unrealized_pnl_pct=self.unrealized_pnlpc,
-            holding_time=self.position_hold_counter,
-            portfolio_value_history=self.portfolio_value_history.copy(),
-            action_history=self.action_history.copy(),
-            reward_history=self.reward_history.copy(),
-            base_price_history=self.base_price_history.copy(),
-            initial_portfolio_value=self.initial_portfolio_value,
-            buy_and_hold_value=buy_and_hold_value,
-        )
-
     def _calculate_reward(
         self,
         old_portfolio_value: float,
@@ -232,23 +185,31 @@ class SeqLongOnlySLTPEnv(EnvBase):
         """
         # Use custom reward function if provided
         if self.config.reward_function is not None:
-            ctx = self._build_reward_context(
+            # Compute buy & hold value if terminal
+            is_terminal = self.step_counter >= self.max_traj_length - 1
+            buy_and_hold_value = None
+            if is_terminal and len(self.base_price_history) > 0:
+                buy_and_hold_value = (
+                    self.initial_portfolio_value / self.base_price_history[0]
+                ) * self.base_price_history[-1]
+
+            ctx = build_reward_context(
+                self,
                 old_portfolio_value,
                 new_portfolio_value,
                 action,
-                trade_info
+                trade_info,
+                portfolio_value_history=self.portfolio_value_history,
+                action_history=self.action_history,
+                reward_history=self.reward_history,
+                base_price_history=self.base_price_history,
+                initial_portfolio_value=self.initial_portfolio_value,
+                buy_and_hold_value=buy_and_hold_value,
             )
             return float(self.config.reward_function(ctx))
 
-        # Otherwise use default log return
-        return default_reward_function(
-            self._build_reward_context(
-                old_portfolio_value,
-                new_portfolio_value,
-                action,
-                trade_info
-            )
-        )
+        # Otherwise use default log return (no context needed)
+        return default_log_return(old_portfolio_value, new_portfolio_value)
 
 
 

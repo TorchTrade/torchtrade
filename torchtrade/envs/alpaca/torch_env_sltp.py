@@ -15,7 +15,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
-from torchtrade.envs.reward import RewardContext, default_reward_function
+from torchtrade.envs.reward import build_reward_context, default_log_return
 
 
 def combinatory_action_map(stoploss_levels: List[float], takeprofit_levels: List[float]) -> Dict:
@@ -220,63 +220,6 @@ class AlpacaSLTPTorchTradingEnv(EnvBase):
 
         return out_td
 
-    def _build_reward_context(
-        self,
-        old_portfolio_value: float,
-        new_portfolio_value: float,
-        action_tuple: Tuple[Optional[float], Optional[float]],
-        trade_info: Dict,
-    ) -> RewardContext:
-        """Build RewardContext from current state for custom reward functions."""
-        # Get current account state
-        status = self.trader.get_status()
-        position_status = status.get("position_status", None)
-
-        if position_status is None:
-            cash = float(self.trader.client.get_account().cash)
-            position_size = 0.0
-            position_value = 0.0
-            entry_price = 0.0
-            current_price = 0.0
-            unrealized_pnl_pct = 0.0
-        else:
-            cash = float(self.trader.client.get_account().cash)
-            position_size = position_status.qty
-            position_value = position_status.market_value
-            entry_price = position_status.avg_entry_price
-            current_price = position_status.current_price
-            unrealized_pnl_pct = position_status.unrealized_plpc
-
-        # Map action to side string
-        trade_side = "hold"
-        if action_tuple != (None, None):
-            trade_side = "buy"  # SLTP actions are buys with bracket orders
-
-        return RewardContext(
-            old_portfolio_value=old_portfolio_value,
-            new_portfolio_value=new_portfolio_value,
-            action=0 if action_tuple == (None, None) else 1,
-            current_step=0,  # Live environment doesn't track steps
-            max_steps=1,  # Live environment is continuous
-            trade_executed=trade_info.get("executed", False),
-            trade_side=trade_side,
-            fee_paid=0.0,  # Not tracked in this environment
-            slippage_amount=0.0,  # Not tracked in this environment
-            cash=cash,
-            position_size=position_size,
-            position_value=position_value,
-            entry_price=entry_price,
-            current_price=current_price,
-            unrealized_pnl_pct=unrealized_pnl_pct,
-            holding_time=self.position_hold_counter,
-            portfolio_value_history=[],  # Not tracked in live environment
-            action_history=[],  # Not tracked in live environment
-            reward_history=[],  # Not tracked in live environment
-            base_price_history=[],  # Not tracked in live environment
-            initial_portfolio_value=old_portfolio_value,  # Approximate
-            buy_and_hold_value=None,  # Not applicable for live trading
-        )
-
     def _calculate_reward(
         self,
         old_portfolio_value: float,
@@ -301,24 +244,18 @@ class AlpacaSLTPTorchTradingEnv(EnvBase):
         """
         # Use custom reward function if provided
         if self.config.reward_function is not None:
-            ctx = self._build_reward_context(
+            # Note: Live environments don't track history for performance
+            ctx = build_reward_context(
+                self,
                 old_portfolio_value,
                 new_portfolio_value,
                 action_tuple,
-                trade_info
+                trade_info,
             )
             return float(self.config.reward_function(ctx)) * self.config.reward_scaling
 
-        # Otherwise use default log return
-        reward = default_reward_function(
-            self._build_reward_context(
-                old_portfolio_value,
-                new_portfolio_value,
-                action_tuple,
-                trade_info
-            )
-        )
-        return reward * self.config.reward_scaling
+        # Otherwise use default log return (no context needed)
+        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value."""

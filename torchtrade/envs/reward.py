@@ -34,11 +34,11 @@ import numpy as np
 @dataclass
 class RewardContext:
     """
-    Context passed to custom reward functions containing all necessary state and history.
+    Minimal context for custom reward functions.
 
-    This dataclass provides comprehensive information about the current environment state,
-    trade execution details, and historical data needed to compute sophisticated reward
-    metrics like Sharpe ratio, drawdown, win rate, etc.
+    Provides core state needed for most reward computations. For advanced metrics
+    (Sharpe ratio, drawdown, win rate), use the helper functions or access the
+    environment directly via the metadata dict.
 
     Attributes:
         old_portfolio_value: Portfolio value before the action
@@ -46,73 +46,45 @@ class RewardContext:
         action: Action taken (integer action index)
         current_step: Current step in the episode (0-indexed)
         max_steps: Maximum steps in the episode
-
         trade_executed: Whether a trade was executed this step
-        trade_side: Side of the trade ('buy', 'sell', 'hold', 'long', 'short')
-        fee_paid: Transaction fees paid this step
-        slippage_amount: Slippage incurred this step
+        fee_paid: Transaction fees paid this step (default: 0.0)
+        slippage_amount: Slippage incurred this step (default: 0.0)
+        metadata: Optional dict for environment-specific data (e.g., history,
+                  futures-specific fields). Access via: ctx.metadata['leverage']
 
-        cash: Current cash balance
-        position_size: Current position size (shares/contracts)
-        position_value: Current position value in base currency
-        entry_price: Entry price of current position (0 if no position)
-        current_price: Current market price
-        unrealized_pnl_pct: Unrealized PnL as percentage of entry value
-        holding_time: Steps holding current position
-
-        portfolio_value_history: Historical portfolio values
-        action_history: Historical actions taken
-        reward_history: Historical rewards received
-        base_price_history: Historical close prices
-
-        position_history: Historical position sizes (futures only)
-        liquidated: Whether position was liquidated this step
-        leverage: Current leverage (futures only)
-        margin_ratio: Current margin ratio (futures only)
-        liquidation_price: Liquidation price (futures only)
-
-        initial_portfolio_value: Portfolio value at episode start
-        buy_and_hold_value: Buy & hold benchmark value (computed at terminal step)
+    Example:
+        >>> def my_reward(ctx: RewardContext) -> float:
+        ...     # Simple log return
+        ...     return np.log(ctx.new_portfolio_value / ctx.old_portfolio_value)
+        ...
+        >>> def advanced_reward(ctx: RewardContext) -> float:
+        ...     # Access environment-specific data via metadata
+        ...     leverage = ctx.metadata.get('leverage', 1.0)
+        ...     history = ctx.metadata.get('portfolio_value_history', [])
+        ...     # Compute metrics using helpers
+        ...     sharpe = compute_sharpe_ratio(history)
+        ...     return sharpe / leverage
     """
 
-    # Current step state
+    # Core state (always present)
     old_portfolio_value: float
     new_portfolio_value: float
     action: int
     current_step: int
     max_steps: int
-
-    # Trade execution info
     trade_executed: bool
-    trade_side: str  # 'buy', 'sell', 'hold', 'long', 'short'
-    fee_paid: float
-    slippage_amount: float
 
-    # Account state (7-10 elements depending on environment)
-    cash: float
-    position_size: float
-    position_value: float
-    entry_price: float
-    current_price: float
-    unrealized_pnl_pct: float
-    holding_time: int
+    # Transaction costs (optional, default to 0)
+    fee_paid: float = 0.0
+    slippage_amount: float = 0.0
 
-    # History for complex metrics (drawdown, Sharpe, etc.)
-    portfolio_value_history: List[float]
-    action_history: List[int]
-    reward_history: List[float]
-    base_price_history: List[float]
-
-    # Benchmark (required fields must come before optional fields)
-    initial_portfolio_value: float
-
-    # Optional environment-specific fields
-    position_history: Optional[List[float]] = None
-    liquidated: bool = False
-    leverage: Optional[float] = None
-    margin_ratio: Optional[float] = None
-    liquidation_price: Optional[float] = None
-    buy_and_hold_value: Optional[float] = None
+    # Optional extensions for advanced use cases
+    # Access environment-specific data like:
+    # - ctx.metadata['portfolio_value_history']
+    # - ctx.metadata['leverage']
+    # - ctx.metadata['liquidated']
+    # - ctx.metadata['buy_and_hold_value']
+    metadata: Optional[dict] = None
 
 
 class RewardFunction(Protocol):
@@ -141,13 +113,61 @@ class RewardFunction(Protocol):
 
 
 # ============================================================================
-# Default Reward Function
+# Utility Functions
 # ============================================================================
 
 
-def default_reward_function(ctx: RewardContext) -> float:
+def build_reward_context(
+    env,
+    old_portfolio_value: float,
+    new_portfolio_value: float,
+    action,
+    trade_info: dict,
+    **metadata_fields
+) -> RewardContext:
     """
-    Default reward function: log return of portfolio value.
+    Build reward context from environment state.
+
+    This is a utility function to eliminate code duplication across all environments.
+    Extracts common fields from any TorchTrade environment and allows passing
+    environment-specific data via metadata_fields.
+
+    Args:
+        env: The environment instance (any TorchTrade environment)
+        old_portfolio_value: Portfolio value before action
+        new_portfolio_value: Portfolio value after action
+        action: Action taken (will be converted to int)
+        trade_info: Dict with trade execution details
+        **metadata_fields: Additional environment-specific data to include in metadata
+
+    Returns:
+        RewardContext with core fields populated and metadata dict
+
+    Example:
+        >>> # In environment's _calculate_reward method:
+        >>> ctx = build_reward_context(
+        ...     self, old_pv, new_pv, action, trade_info,
+        ...     portfolio_value_history=self.portfolio_value_history,
+        ...     leverage=float(self.leverage)
+        ... )
+        >>> return self.config.reward_function(ctx)
+    """
+    return RewardContext(
+        old_portfolio_value=old_portfolio_value,
+        new_portfolio_value=new_portfolio_value,
+        action=int(action) if isinstance(action, (int, float)) else 0,
+        current_step=getattr(env, 'step_counter', 0),
+        max_steps=getattr(env, 'max_traj_length', 1),
+        trade_executed=trade_info.get('executed', False),
+        fee_paid=trade_info.get('fee_paid', 0.0),
+        slippage_amount=trade_info.get('price_noise', 0.0),
+        metadata=metadata_fields if metadata_fields else None,
+    )
+
+
+def default_log_return(old_portfolio_value: float, new_portfolio_value: float) -> float:
+    """
+    Simple default reward: log return of portfolio value.
 
     Computes: log(portfolio_value_t / portfolio_value_t-1)
 
@@ -157,14 +177,36 @@ def default_reward_function(ctx: RewardContext) -> float:
     - Is scale-invariant (works for any portfolio size)
 
     Args:
-        ctx: RewardContext containing portfolio values
+        old_portfolio_value: Portfolio value before action
+        new_portfolio_value: Portfolio value after action
 
     Returns:
         Log return reward, or 0.0 if old portfolio value is invalid
+
+    Note:
+        This function doesn't require a RewardContext, making it more efficient
+        for the default case. Use this when you don't need custom reward logic.
     """
-    if ctx.old_portfolio_value <= 0:
+    if old_portfolio_value <= 0:
         return 0.0
-    return float(np.log(ctx.new_portfolio_value / ctx.old_portfolio_value))
+    return float(np.log(new_portfolio_value / old_portfolio_value))
+
+
+# Backward compatibility: keep default_reward_function for users who may reference it
+def default_reward_function(ctx: RewardContext) -> float:
+    """
+    Default reward function: log return (context-based version).
+
+    This is kept for backward compatibility. For better performance, environments
+    should use default_log_return() directly instead of building a context.
+
+    Args:
+        ctx: RewardContext containing portfolio values
+
+    Returns:
+        Log return reward
+    """
+    return default_log_return(ctx.old_portfolio_value, ctx.new_portfolio_value)
 
 
 # ============================================================================
@@ -180,30 +222,23 @@ def sharpe_ratio_reward(ctx: RewardContext) -> float:
     Useful for encouraging risk-adjusted returns rather than raw returns.
 
     Args:
-        ctx: RewardContext containing portfolio value history
+        ctx: RewardContext with portfolio_value_history in metadata
 
     Returns:
         Sharpe ratio clipped to [-10.0, 10.0], or 0.0 if insufficient history
+
+    Example:
+        >>> # When building context, pass history:
+        >>> ctx = build_reward_context(
+        ...     env, old_pv, new_pv, action, trade_info,
+        ...     portfolio_value_history=env.portfolio_value_history
+        ... )
     """
-    if len(ctx.portfolio_value_history) < 2:
+    if ctx.metadata is None:
         return 0.0
 
-    # Compute log returns
-    returns = []
-    for i in range(1, len(ctx.portfolio_value_history)):
-        if ctx.portfolio_value_history[i - 1] <= 0:
-            continue
-        ret = np.log(ctx.portfolio_value_history[i] / ctx.portfolio_value_history[i - 1])
-        returns.append(ret)
-
-    if len(returns) == 0:
-        return 0.0
-
-    # Sharpe ratio = mean / std
-    mean_ret = float(np.mean(returns))
-    std_ret = float(np.std(returns)) + 1e-9
-    sharpe = mean_ret / std_ret
-
+    portfolio_history = ctx.metadata.get('portfolio_value_history', [])
+    sharpe = compute_sharpe_ratio(portfolio_history)
     return float(np.clip(sharpe, -10.0, 10.0))
 
 
@@ -216,25 +251,23 @@ def drawdown_penalty_reward(ctx: RewardContext) -> float:
     discouraging large drawdowns.
 
     Args:
-        ctx: RewardContext containing portfolio values and history
+        ctx: RewardContext with portfolio_value_history in metadata
 
     Returns:
         Log return with drawdown penalty
     """
     # Base reward: log return
-    if ctx.old_portfolio_value <= 0:
-        return 0.0
-    log_return = float(np.log(ctx.new_portfolio_value / ctx.old_portfolio_value))
+    log_return = default_log_return(ctx.old_portfolio_value, ctx.new_portfolio_value)
 
-    # Compute drawdown from peak
-    if len(ctx.portfolio_value_history) == 0:
+    # Compute drawdown from peak if history available
+    if ctx.metadata is None:
         return log_return
 
-    peak = float(np.max(ctx.portfolio_value_history))
-    if peak <= 0:
+    portfolio_history = ctx.metadata.get('portfolio_value_history', [])
+    if len(portfolio_history) == 0:
         return log_return
 
-    current_dd = (peak - ctx.new_portfolio_value) / peak
+    current_dd = compute_drawdown(portfolio_history + [ctx.new_portfolio_value])
 
     # Apply penalty for significant drawdown (> 10%)
     dd_penalty = -5.0 * current_dd if current_dd > 0.1 else 0.0
@@ -253,25 +286,27 @@ def terminal_comparison_reward(ctx: RewardContext) -> float:
     providing intermediate feedback.
 
     Args:
-        ctx: RewardContext with terminal state information
+        ctx: RewardContext with buy_and_hold_value and initial_portfolio_value in metadata
 
     Returns:
         0.0 for non-terminal steps, portfolio outperformance for terminal step
     """
     is_terminal = ctx.current_step >= ctx.max_steps - 1
 
-    if not is_terminal:
+    if not is_terminal or ctx.metadata is None:
         return 0.0
 
-    if ctx.buy_and_hold_value is None:
+    buy_and_hold_value = ctx.metadata.get('buy_and_hold_value')
+    initial_value = ctx.metadata.get('initial_portfolio_value', ctx.old_portfolio_value)
+
+    if buy_and_hold_value is None:
         return 0.0
 
-    compare_value = max(ctx.initial_portfolio_value, ctx.buy_and_hold_value)
+    compare_value = max(initial_value, buy_and_hold_value)
     if compare_value <= 0:
         return 0.0
 
     terminal_return = (ctx.new_portfolio_value - compare_value) / compare_value
-
     return float(np.clip(terminal_return, -5.0, 5.0))
 
 
@@ -289,30 +324,36 @@ def hybrid_dense_sparse_reward(ctx: RewardContext) -> float:
     This balances immediate feedback (dense) with long-term objective (sparse).
 
     Args:
-        ctx: RewardContext with full state and history
+        ctx: RewardContext with buy_and_hold_value and initial_portfolio_value in metadata
 
     Returns:
         Dense reward for non-terminal steps, dense + terminal for terminal step
     """
-    is_terminal = ctx.current_step >= ctx.max_steps - 1
-
     # Dense component: log return with fee penalty
-    if ctx.old_portfolio_value <= 0:
-        dense_reward = 0.0
-    else:
-        log_return = np.log(ctx.new_portfolio_value / ctx.old_portfolio_value)
-        fee_penalty = -ctx.fee_paid / ctx.old_portfolio_value
-        dense_reward = float(log_return + fee_penalty)
+    log_return = default_log_return(ctx.old_portfolio_value, ctx.new_portfolio_value)
+    fee_penalty = -ctx.fee_paid / ctx.old_portfolio_value if ctx.old_portfolio_value > 0 else 0.0
+    dense_reward = log_return + fee_penalty
+    clipped_dense = float(np.clip(dense_reward, -0.1, 0.1))
+
+    # Early return if not terminal or no metadata
+    is_terminal = ctx.current_step >= ctx.max_steps - 1
+    if not is_terminal or ctx.metadata is None:
+        return clipped_dense
 
     # Terminal component: compare to benchmark
-    if is_terminal and ctx.buy_and_hold_value is not None:
-        compare_value = max(ctx.initial_portfolio_value, ctx.buy_and_hold_value)
-        if compare_value > 0:
-            terminal_return = (ctx.new_portfolio_value - compare_value) / compare_value
-            terminal_reward = float(np.clip(terminal_return, -5.0, 5.0))
-            return float(np.clip(dense_reward, -0.1, 0.1)) + terminal_reward
+    buy_and_hold_value = ctx.metadata.get('buy_and_hold_value')
+    initial_value = ctx.metadata.get('initial_portfolio_value', ctx.old_portfolio_value)
 
-    return float(np.clip(dense_reward, -0.1, 0.1))
+    if buy_and_hold_value is None:
+        return clipped_dense
+
+    compare_value = max(initial_value, buy_and_hold_value)
+    if compare_value <= 0:
+        return clipped_dense
+
+    terminal_return = (ctx.new_portfolio_value - compare_value) / compare_value
+    terminal_reward = float(np.clip(terminal_return, -5.0, 5.0))
+    return clipped_dense + terminal_reward
 
 
 def realized_pnl_reward(ctx: RewardContext) -> float:
