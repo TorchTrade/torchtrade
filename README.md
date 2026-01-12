@@ -2,7 +2,7 @@
 
 ![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-![TorchRL](https://img.shields.io/badge/TorchRL-Compatible-orange.svg)
+![TorchRL](https://img.shields.io/badge/TorchRL-Compatible-green.svg)
 
 **Reinforcement learning environments for algorithmic trading. Train policies in backtesting, deploy to live markets.**
 
