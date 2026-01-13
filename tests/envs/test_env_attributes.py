@@ -70,6 +70,22 @@ class TestOfflineEnvironmentAttributes:
         # Check market_data_keys is not empty
         assert len(env.market_data_keys) > 0, "market_data_keys should not be empty"
 
+        # Check getter methods exist
+        assert hasattr(env, "get_account_state"), "SeqLongOnlyEnv missing get_account_state method"
+        assert hasattr(env, "get_market_data_keys"), "SeqLongOnlyEnv missing get_market_data_keys method"
+
+        # Check getter methods are callable
+        assert callable(env.get_account_state), "get_account_state should be callable"
+        assert callable(env.get_market_data_keys), "get_market_data_keys should be callable"
+
+        # Check getter methods return correct values
+        assert env.get_account_state() == env.account_state, "get_account_state() should return same as attribute"
+        assert env.get_market_data_keys() == env.market_data_keys, "get_market_data_keys() should return same as attribute"
+
+        # Check return types
+        assert isinstance(env.get_account_state(), list), "get_account_state() should return a list"
+        assert isinstance(env.get_market_data_keys(), list), "get_market_data_keys() should return a list"
+
     def test_seqlongonlysltp_has_attributes(self, sample_ohlcv_df):
         """Test SeqLongOnlySLTPEnv has account_state and market_data_keys."""
         config = SeqLongOnlySLTPEnvConfig(
@@ -91,6 +107,16 @@ class TestOfflineEnvironmentAttributes:
         assert env.account_state == STANDARD_ACCOUNT_STATE
         assert len(env.market_data_keys) > 0
 
+        # Check getter methods
+        assert hasattr(env, "get_account_state"), "SeqLongOnlySLTPEnv missing get_account_state method"
+        assert hasattr(env, "get_market_data_keys"), "SeqLongOnlySLTPEnv missing get_market_data_keys method"
+        assert callable(env.get_account_state)
+        assert callable(env.get_market_data_keys)
+        assert env.get_account_state() == env.account_state
+        assert env.get_market_data_keys() == env.market_data_keys
+        assert isinstance(env.get_account_state(), list)
+        assert isinstance(env.get_market_data_keys(), list)
+
     def test_longonlyonestepenv_has_attributes(self, sample_ohlcv_df):
         """Test LongOnlyOneStepEnv has account_state and market_data_keys."""
         config = LongOnlyOneStepEnvConfig(
@@ -109,6 +135,16 @@ class TestOfflineEnvironmentAttributes:
         assert isinstance(env.market_data_keys, list)
         assert env.account_state == STANDARD_ACCOUNT_STATE
         assert len(env.market_data_keys) > 0
+
+        # Check getter methods
+        assert hasattr(env, "get_account_state"), "LongOnlyOneStepEnv missing get_account_state method"
+        assert hasattr(env, "get_market_data_keys"), "LongOnlyOneStepEnv missing get_market_data_keys method"
+        assert callable(env.get_account_state)
+        assert callable(env.get_market_data_keys)
+        assert env.get_account_state() == env.account_state
+        assert env.get_market_data_keys() == env.market_data_keys
+        assert isinstance(env.get_account_state(), list)
+        assert isinstance(env.get_market_data_keys(), list)
 
     def test_seqfutures_has_attributes(self, sample_ohlcv_df):
         """Test SeqFuturesEnv has account_state and market_data_keys with 10 elements."""
@@ -129,6 +165,16 @@ class TestOfflineEnvironmentAttributes:
         assert isinstance(env.market_data_keys, list)
         assert env.account_state == FUTURES_ACCOUNT_STATE, f"Expected {FUTURES_ACCOUNT_STATE}, got {env.account_state}"
         assert len(env.market_data_keys) > 0
+
+        # Check getter methods
+        assert hasattr(env, "get_account_state"), "SeqFuturesEnv missing get_account_state method"
+        assert hasattr(env, "get_market_data_keys"), "SeqFuturesEnv missing get_market_data_keys method"
+        assert callable(env.get_account_state)
+        assert callable(env.get_market_data_keys)
+        assert env.get_account_state() == env.account_state
+        assert env.get_market_data_keys() == env.market_data_keys
+        assert isinstance(env.get_account_state(), list)
+        assert isinstance(env.get_market_data_keys(), list)
 
     def test_seqfuturessltp_has_attributes(self, sample_ohlcv_df):
         """Test SeqFuturesSLTPEnv has account_state and market_data_keys with 10 elements."""
@@ -152,6 +198,16 @@ class TestOfflineEnvironmentAttributes:
         assert env.account_state == FUTURES_ACCOUNT_STATE
         assert len(env.market_data_keys) > 0
 
+        # Check getter methods
+        assert hasattr(env, "get_account_state"), "SeqFuturesSLTPEnv missing get_account_state method"
+        assert hasattr(env, "get_market_data_keys"), "SeqFuturesSLTPEnv missing get_market_data_keys method"
+        assert callable(env.get_account_state)
+        assert callable(env.get_market_data_keys)
+        assert env.get_account_state() == env.account_state
+        assert env.get_market_data_keys() == env.market_data_keys
+        assert isinstance(env.get_account_state(), list)
+        assert isinstance(env.get_market_data_keys(), list)
+
     def test_futuresonestepenv_has_attributes(self, sample_ohlcv_df):
         """Test FuturesOneStepEnv has account_state and market_data_keys with 10 elements."""
         config = FuturesOneStepEnvConfig(
@@ -173,6 +229,16 @@ class TestOfflineEnvironmentAttributes:
         assert isinstance(env.market_data_keys, list)
         assert env.account_state == FUTURES_ACCOUNT_STATE
         assert len(env.market_data_keys) > 0
+
+        # Check getter methods
+        assert hasattr(env, "get_account_state"), "FuturesOneStepEnv missing get_account_state method"
+        assert hasattr(env, "get_market_data_keys"), "FuturesOneStepEnv missing get_market_data_keys method"
+        assert callable(env.get_account_state)
+        assert callable(env.get_market_data_keys)
+        assert env.get_account_state() == env.account_state
+        assert env.get_market_data_keys() == env.market_data_keys
+        assert isinstance(env.get_account_state(), list)
+        assert isinstance(env.get_market_data_keys(), list)
 
 
 class TestAlpacaEnvironmentAttributes:
