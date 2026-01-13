@@ -9,7 +9,6 @@ from torchtrade.envs.offline.utils import (
     TimeFrame,
     TimeFrameUnit,
     tf_to_timedelta,
-    get_timeframe_unit,
     compute_periods_per_year_crypto,
     parse_timeframe_string,
 )
@@ -132,37 +131,6 @@ class TestTfToTimedelta:
         for value, unit, expected in test_cases:
             tf = TimeFrame(value, unit)
             assert tf_to_timedelta(tf) == expected
-
-
-class TestGetTimeframeUnit:
-    """Tests for get_timeframe_unit function."""
-
-    def test_minute_variations(self):
-        """Should recognize various minute string formats."""
-        assert get_timeframe_unit("Min") == TimeFrameUnit.Minute
-        assert get_timeframe_unit("min") == TimeFrameUnit.Minute
-        assert get_timeframe_unit("Minute") == TimeFrameUnit.Minute
-
-    def test_hour_variations(self):
-        """Should recognize various hour string formats."""
-        assert get_timeframe_unit("Hour") == TimeFrameUnit.Hour
-        assert get_timeframe_unit("hour") == TimeFrameUnit.Hour
-        assert get_timeframe_unit("H") == TimeFrameUnit.Hour
-        assert get_timeframe_unit("h") == TimeFrameUnit.Hour
-
-    def test_day_variations(self):
-        """Should recognize various day string formats."""
-        assert get_timeframe_unit("Day") == TimeFrameUnit.Day
-        assert get_timeframe_unit("day") == TimeFrameUnit.Day
-        assert get_timeframe_unit("D") == TimeFrameUnit.Day
-
-    def test_unknown_unit_raises(self):
-        """Should raise ValueError for unknown unit strings."""
-        with pytest.raises(ValueError, match="Unknown TimeFrameUnit"):
-            get_timeframe_unit("Week")
-
-        with pytest.raises(ValueError, match="Unknown TimeFrameUnit"):
-            get_timeframe_unit("invalid")
 
 
 class TestComputePeriodsPerYearCrypto:

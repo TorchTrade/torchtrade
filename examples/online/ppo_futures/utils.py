@@ -184,9 +184,9 @@ class BatchSafeWrapper(torch.nn.Module):
         return out
 
 
-def make_discrete_ppo_binmtabl_model(cfg, env, device):
-    """Make discrete PPO agent with BiNMTABL encoder."""
-    activation = "tanh"
+def make_discrete_ppo_model(cfg, env, device):
+    """Make discrete PPO agent"""
+    activation = cfg.model.activation
     action_spec = env.action_spec
     market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
     assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"
@@ -194,16 +194,12 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
 
     time_frames = cfg.env.time_frames
     window_sizes = cfg.env.window_sizes
-    # Extract frequency units from timeframe strings (e.g., "5Min" -> "min")
-    import re
-    freqs = [re.sub(r'\d+', '', tf).lower() for tf in cfg.env.time_frames]
-    assert len(time_frames) == len(market_data_keys), f"Amount of time frames {len(time_frames)} and env market data keys do not match! Keys: {market_data_keys}"
 
     encoders = []
     num_features = env.observation_spec[market_data_keys[0]].shape[-1]
 
     # Build CNN encoders for market data
-    for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
+    for key, t, w in zip(market_data_keys, time_frames, window_sizes):
         base_model = SimpleCNNEncoder(
             input_shape=(w, num_features),
             output_shape=(1, 14),
@@ -218,7 +214,7 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
         encoders.append(SafeModule(
             module=model,
             in_keys=key,
-            out_keys=[f"encoding_{t}_{fre}_{w}"],
+            out_keys=[f"encoding_{t}_{w}"],
         ).to(device))
 
     # Account state encoder with MLP
@@ -246,7 +242,7 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
 
     common_module = SafeModule(
         module=common,
-        in_keys=[f"encoding_{t}_{fre}_{w}" for t, w, fre in zip(time_frames, window_sizes, freqs)] + ["encoding_account_state"],
+        in_keys=[f"encoding_{t}_{w}" for t, w in zip(time_frames, window_sizes)] + ["encoding_account_state"],
         out_keys=["common_features"],
     )
     common_module = SafeSequential(*encoders, account_state_encoder, common_module)
