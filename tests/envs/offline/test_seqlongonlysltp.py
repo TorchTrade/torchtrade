@@ -146,8 +146,8 @@ class TestSeqLongOnlySLTPEnvReset:
     def test_reset_clears_position(self, env):
         """Reset should clear position."""
         env.reset()
-        assert env.position_size == 0.0
-        assert env.current_position == 0.0
+        assert env.position.position_size == 0.0
+        assert env.position.current_position == 0.0
 
 
 class TestSeqLongOnlySLTPEnvBuyWithSLTP:
@@ -162,7 +162,7 @@ class TestSeqLongOnlySLTPEnvBuyWithSLTP:
         env.step(td)
 
         assert env.stop_loss > 0
-        assert env.stop_loss < env.entry_price  # SL is below entry
+        assert env.stop_loss < env.position.entry_price  # SL is below entry
 
     def test_buy_sets_take_profit(self, env):
         """Buy action should set take profit level."""
@@ -172,7 +172,7 @@ class TestSeqLongOnlySLTPEnvBuyWithSLTP:
         env.step(td)
 
         assert env.take_profit > 0
-        assert env.take_profit > env.entry_price  # TP is above entry
+        assert env.take_profit > env.position.entry_price  # TP is above entry
 
     def test_sl_tp_calculated_correctly(self, env):
         """SL/TP should be calculated as percentages of entry price."""
@@ -184,8 +184,8 @@ class TestSeqLongOnlySLTPEnvBuyWithSLTP:
         td.set("action", torch.tensor(1))
         env.step(td)
 
-        expected_sl = env.entry_price * (1 + sl_pct)
-        expected_tp = env.entry_price * (1 + tp_pct)
+        expected_sl = env.position.entry_price * (1 + sl_pct)
+        expected_tp = env.position.entry_price * (1 + tp_pct)
 
         assert abs(env.stop_loss - expected_sl) < 0.01
         assert abs(env.take_profit - expected_tp) < 0.01
@@ -227,8 +227,8 @@ class TestSeqLongOnlySLTPEnvTriggers:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size > 0
-        initial_position = env.position_size
+        assert env.position.position_size > 0
+        initial_position = env.position.position_size
 
         # Continue stepping - SL should trigger
         sl_triggered = False
@@ -237,7 +237,7 @@ class TestSeqLongOnlySLTPEnvTriggers:
             result = env.step(td)
             td = result["next"]
 
-            if env.position_size == 0 and initial_position > 0:
+            if env.position.position_size == 0 and initial_position > 0:
                 sl_triggered = True
                 break
 
@@ -269,8 +269,8 @@ class TestSeqLongOnlySLTPEnvTriggers:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size > 0
-        initial_position = env.position_size
+        assert env.position.position_size > 0
+        initial_position = env.position.position_size
 
         # Continue stepping - TP should trigger
         tp_triggered = False
@@ -279,7 +279,7 @@ class TestSeqLongOnlySLTPEnvTriggers:
             result = env.step(td)
             td = result["next"]
 
-            if env.position_size == 0 and initial_position > 0:
+            if env.position.position_size == 0 and initial_position > 0:
                 tp_triggered = True
                 break
 
@@ -317,9 +317,9 @@ class TestSeqLongOnlySLTPEnvTriggers:
             result = env.step(td)
             td = result["next"]
 
-            if env.position_size == 0:
+            if env.position.position_size == 0:
                 # Position exited - check SL/TP cleared
-                assert env.entry_price == 0.0
+                assert env.position.entry_price == 0.0
                 break
 
             if td.get("done", False):
@@ -397,7 +397,7 @@ class TestSeqLongOnlySLTPEnvStep:
         result = env.step(td)
         td = result["next"]
 
-        position_after_buy = env.position_size
+        position_after_buy = env.position.position_size
         balance_after_buy = env.balance
 
         # Try to buy again with different SL/TP
@@ -405,8 +405,8 @@ class TestSeqLongOnlySLTPEnvStep:
         result = env.step(td)
 
         # Position and balance should be unchanged (except for any SL/TP triggers)
-        if env.position_size > 0:  # If SL/TP didn't trigger
-            assert env.position_size == position_after_buy
+        if env.position.position_size > 0:  # If SL/TP didn't trigger
+            assert env.position.position_size == position_after_buy
 
     def test_hold_increments_counter(self, env):
         """Hold should increment position hold counter."""
@@ -417,14 +417,14 @@ class TestSeqLongOnlySLTPEnvStep:
         result = env.step(td)
         td = result["next"]
 
-        if env.position_size > 0:
+        if env.position.position_size > 0:
             # Hold
             td.set("action", torch.tensor(0))
             result = env.step(td)
             td = result["next"]
 
-            if env.position_size > 0:  # If SL/TP didn't trigger
-                assert env.position_hold_counter >= 1
+            if env.position.position_size > 0:  # If SL/TP didn't trigger
+                assert env.position.hold_counter >= 1
 
     def test_full_episode_completes(self, env):
         """Full episode should complete without errors."""
@@ -494,7 +494,7 @@ class TestSeqLongOnlySLTPEnvEdgeCases:
 
             assert env.stop_loss == 0.0
             assert env.take_profit == 0.0
-            assert env.position_size == 0.0
+            assert env.position.position_size == 0.0
 
             for _ in range(20):
                 action = env.action_spec.sample()
@@ -528,8 +528,8 @@ class TestSeqLongOnlySLTPEnvEdgeCases:
         result = env.step(td)
         td = result["next"]
 
-        if env.position_size > 0:
-            initial_position = env.position_size
+        if env.position.position_size > 0:
+            initial_position = env.position.position_size
 
             # Step through until gap-down triggers SL
             sl_triggered = False
@@ -538,7 +538,7 @@ class TestSeqLongOnlySLTPEnvEdgeCases:
                 result = env.step(td)
                 td = result["next"]
 
-                if env.position_size == 0 and initial_position > 0:
+                if env.position.position_size == 0 and initial_position > 0:
                     sl_triggered = True
                     break
 

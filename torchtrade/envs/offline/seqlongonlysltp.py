@@ -92,23 +92,21 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
         current_price = self._cached_base_features["close"]
 
         # Update position value and unrealized PnL
-        self.position_value = round(self.position_size * current_price, 3)
-        if self.position_size > 0:
-            self.unrealized_pnlpc = round(
-                (current_price - self.entry_price) / self.entry_price, 4
-            )
+        self.position.position_value = round(self.position.position_size * current_price, 3)
+        if self.position.position_size > 0:
+            self.position.unrealized_pnlpc = round((current_price - self.position.entry_price) / self.position.entry_price, 4)
         else:
-            self.unrealized_pnlpc = 0.0
+            self.position.unrealized_pnlpc = 0.0
 
         # Build account state
         account_state = torch.tensor([
             self.balance,
-            self.position_size,
-            self.position_value,
-            self.entry_price,
+            self.position.position_size,
+            self.position.position_value,
+            self.position.entry_price,
             current_price,
-            self.unrealized_pnlpc,
-            self.position_hold_counter
+            self.position.unrealized_pnlpc,
+            self.position.hold_counter
         ], dtype=torch.float)
 
         # Combine account state and market data
@@ -143,7 +141,7 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
         trade_action = 0
         if trade_info["executed"]:
             trade_action = 1 if trade_info["side"] == "buy" else -1
-            self.current_position = 1 if trade_info["side"] == "buy" else 0
+            self.position.current_position = 1 if trade_info["side"] == "buy" else 0
         self.action_history.append(trade_action)
         self.base_price_history.append(cached_price)
         self.portfolio_value_history.append(old_portfolio_value)
@@ -172,17 +170,17 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
     def trigger_sell(self, trade_info, execution_price):
 
         # Sell all available position
-        sell_amount = self.position_size
+        sell_amount = self.position.position_size
         # Calculate proceeds and fee based on noisy execution price
         proceeds = sell_amount * execution_price
         fee_paid = proceeds * self.transaction_fee
         self.balance += round(proceeds - fee_paid, 3)
-        self.position_size = 0.0
-        self.position_hold_counter = 0
-        self.position_value = 0.0
-        self.unrealized_pnlpc = 0.0
-        self.entry_price = 0.0
-        self.current_position = 0.0
+        self.position.position_size = 0.0
+        self.position.hold_counter = 0
+        self.position.position_value = 0.0
+        self.position.unrealized_pnlpc = 0.0
+        self.position.entry_price = 0.0
+        self.position.current_position = 0.0
         trade_info.update({
             "executed": True,
             "amount": sell_amount,
@@ -200,7 +198,7 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
         if ohlcv_base_values is None:
             ohlcv_base_values = self.sampler.get_base_features(self.current_timestamp)
         # Test if stop loss or take profit are triggered
-        if self.position_size > 0 and self.stop_loss > 0 and self.take_profit > 0:
+        if self.position.position_size > 0 and self.stop_loss > 0 and self.take_profit > 0:
             open_price = ohlcv_base_values["open"]
             close_price = ohlcv_base_values["close"]
             high_price = ohlcv_base_values["high"]
@@ -217,15 +215,15 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
                 return self.trigger_sell(trade_info, close_price)
 
         # If holding position or no change in position, do nothing
-        if self.current_position == 1 or action_tuple == (None, None):
+        if self.position.current_position == 1 or action_tuple == (None, None):
             # Compute unrealized PnL, add hold counter update last_portfolio_value
-            if self.position_size > 0:
-                self.position_hold_counter += 1
+            if self.position.position_size > 0:
+                self.position.hold_counter += 1
 
             return trade_info
-        
+
         # Determine trade details
-        if self.position_size == 0 and self.current_position == 0 and action_tuple != (None, None):
+        if self.position.position_size == 0 and self.position.current_position == 0 and action_tuple != (None, None):
             side = "buy"
             amount = self._calculate_trade_amount(side)
 
@@ -237,12 +235,12 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
             fee_paid = amount * self.transaction_fee
             effective_amount = amount - fee_paid
             self.balance -= amount
-            self.position_size = round(effective_amount / execution_price, 3)
-            self.entry_price = execution_price
-            self.position_hold_counter = 0
-            self.position_value = round(self.position_size * execution_price, 3)
-            self.unrealized_pnlpc = 0.0
-            self.current_position = 1.0
+            self.position.position_size = round(effective_amount / execution_price, 3)
+            self.position.entry_price = execution_price
+            self.position.hold_counter = 0
+            self.position.position_value = round(self.position.position_size * execution_price, 3)
+            self.position.unrealized_pnlpc = 0.0
+            self.position.current_position = 1.0
             stop_loss_pct, take_profit_pct = action_tuple
             self.stop_loss = execution_price * (1 + stop_loss_pct)
             self.take_profit = execution_price * (1 + take_profit_pct)

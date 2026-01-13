@@ -12,6 +12,7 @@ from torchrl.data.tensor_specs import CompositeSpec, Unbounded
 from torchtrade.envs.base import TorchTradeBaseEnv
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
 from torchtrade.envs.offline.utils import InitialBalanceSampler
+from torchtrade.envs.state import PositionState
 
 
 class TorchTradeOfflineEnv(TorchTradeBaseEnv):
@@ -79,20 +80,13 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         self.step_counter = 0
         self.max_steps = self.sampler.get_max_steps()
 
-        # Initialize position tracking
-        self.position_hold_counter = 0
-
         # Initialize state attributes (set to valid defaults, will be properly set in _reset)
         self.current_timestamp = None
         self.truncated = False
         self._cached_base_features = None
 
-        # Initialize position state variables
-        self.current_position = 0.0
-        self.position_value = 0.0
-        self.position_size = 0.0
-        self.entry_price = 0.0
-        self.unrealized_pnlpc = 0.0
+        # Initialize position state
+        self.position = PositionState()
 
     def _init_sampler(
         self,
@@ -214,12 +208,7 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
 
         Subclasses may override to add additional position state.
         """
-        self.position_hold_counter = 0
-        self.current_position = 0.0
-        self.position_value = 0.0
-        self.position_size = 0.0
-        self.entry_price = 0.0
-        self.unrealized_pnlpc = 0.0
+        self.position.reset()
         self.step_counter = 0
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
@@ -323,7 +312,7 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
                 f"This indicates invalid data in the dataset."
             )
 
-        return self.balance + self.position_size * current_price
+        return self.balance + self.position.position_size * current_price
 
     def _get_observation_scaffold(self):
         """

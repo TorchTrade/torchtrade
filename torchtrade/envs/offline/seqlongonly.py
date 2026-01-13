@@ -80,23 +80,23 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         current_price = self._cached_base_features["close"]
 
         # Update position value and unrealized PnL
-        self.position_value = round(self.position_size * current_price, 3)
-        if self.position_size > 0:
-            self.unrealized_pnlpc = round(
-                (current_price - self.entry_price) / self.entry_price, 4
+        self.position.position_value = round(self.position.position_size * current_price, 3)
+        if self.position.position_size > 0:
+            self.position.unrealized_pnlpc = round(
+                (current_price - self.position.entry_price) / self.position.entry_price, 4
             )
         else:
-            self.unrealized_pnlpc = 0.0
+            self.position.unrealized_pnlpc = 0.0
 
         # Build account state
         account_state = torch.tensor([
             self.balance,
-            self.position_size,
-            self.position_value,
-            self.entry_price,
+            self.position.position_size,
+            self.position.position_value,
+            self.position.entry_price,
             current_price,
-            self.unrealized_pnlpc,
-            self.position_hold_counter
+            self.position.unrealized_pnlpc,
+            self.position.hold_counter
         ], dtype=torch.float)
 
         # Combine account state and market data
@@ -126,7 +126,7 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         self.portfolio_value_history.append(old_portfolio_value)
 
         if trade_info["executed"]:
-            self.current_position = 1 if trade_info["side"] == "buy" else 0
+            self.position.current_position = 1 if trade_info["side"] == "buy" else 0
 
         # Get updated state (this advances timestamp and caches new base features)
         next_tensordict = self._get_observation()
@@ -157,14 +157,14 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
 
         # No action requested (hold)
         if desired_position == 0:
-            if self.position_size > 0:
-                self.position_hold_counter += 1
+            if self.position.position_size > 0:
+                self.position.hold_counter += 1
             return trade_info
 
         # Already at desired position
-        if desired_position == self.current_position:
-            if self.position_size > 0:
-                self.position_hold_counter += 1
+        if desired_position == self.position.current_position:
+            if self.position.position_size > 0:
+                self.position.hold_counter += 1
             return trade_info
 
         # Determine trade details
@@ -182,27 +182,27 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
             fee_paid = amount * self.transaction_fee
             effective_amount = amount - fee_paid
             self.balance -= amount
-            self.position_size = round(effective_amount / execution_price, 3)
-            self.entry_price = execution_price
-            self.position_hold_counter = 0
-            self.position_value = round(self.position_size * execution_price, 3)
-            self.unrealized_pnlpc = 0.0
-            self.current_position = 1.0
-            
+            self.position.position_size = round(effective_amount / execution_price, 3)
+            self.position.entry_price = execution_price
+            self.position.hold_counter = 0
+            self.position.position_value = round(self.position.position_size * execution_price, 3)
+            self.position.unrealized_pnlpc = 0.0
+            self.position.current_position = 1.0
+
         else:
             # Sell all available position
-            sell_amount = self.position_size
+            sell_amount = self.position.position_size
             # Calculate proceeds and fee based on noisy execution price
             proceeds = sell_amount * execution_price
             fee_paid = proceeds * self.transaction_fee
             self.balance += round(proceeds - fee_paid, 3)
-            self.position_size = 0.0
-            self.position_hold_counter = 0
-            self.position_value = 0.0
-            self.unrealized_pnlpc = 0.0
-            self.entry_price = 0.0
-            self.current_position = 0.0
-        
+            self.position.position_size = 0.0
+            self.position.hold_counter = 0
+            self.position.position_value = 0.0
+            self.position.unrealized_pnlpc = 0.0
+            self.position.entry_price = 0.0
+            self.position.current_position = 0.0
+
         trade_info.update({
             "executed": True,
             "amount": amount if side == "buy" else sell_amount,
@@ -211,7 +211,7 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
             "price_noise": price_noise_factor,
             "fee_paid": fee_paid
         })
-        
+
         return trade_info
 
     def _calculate_trade_amount(self, side: str) -> float:
