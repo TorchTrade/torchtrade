@@ -1,7 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-#
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
 from __future__ import annotations
 
 import functools
@@ -11,7 +7,7 @@ from contextlib import nullcontext
 import torch
 from tensordict.nn import InteractionType
 
-from torch import nn, optim
+from torch import optim
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import (
     Composite,

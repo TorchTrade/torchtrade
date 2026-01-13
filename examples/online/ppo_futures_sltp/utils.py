@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 
 import torch.nn
-from tensordict.nn import TensorDictModule
 from torchrl.envs import (
     DoubleToFloat,
     EnvCreator,
@@ -31,7 +30,6 @@ from torchrl.modules import (
 from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
 from torchtrade.envs import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
-import numpy as np
 import pandas as pd
 from torchrl.trainers.helpers.models import ACTIVATIONS
 
@@ -187,9 +185,9 @@ class BatchSafeWrapper(torch.nn.Module):
         return out
 
 
-def make_discrete_ppo_binmtabl_model(cfg, env, device):
-    """Make discrete PPO agent with BiNMTABL encoder."""
-    activation = "tanh"
+def make_discrete_ppo_model(cfg, env, device):
+    """Make discrete PPO agent"""
+    activation = cfg.model.activation
     action_spec = env.action_spec
     market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
     assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"

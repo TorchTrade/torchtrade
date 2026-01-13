@@ -41,8 +41,6 @@ from torchrl.trainers.helpers.models import ACTIVATIONS
 from torchtrade.models.simple_encoders import SimpleCNNEncoder
 import copy
 from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-import ta
-import numpy as np
 import pandas as pd
 
 # ====================================================================

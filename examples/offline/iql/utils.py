@@ -232,13 +232,8 @@ def make_offline_replay_buffer(rb_cfg):
 # ====================================================================
 # Model
 # -----
-#
-# We give one version of the model for learning from pixels, and one for state.
-# TorchRL comes in handy at this point, as the high-level interactions with
-# these models is unchanged, regardless of the modality.
-#
 
-def make_discrete_iql_wavenet_model(cfg, env, device):
+def make_discrete_iql_model(cfg, env, device):
     """Make discrete IQL agent."""
     # Define Actor Network
     market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]

@@ -27,8 +27,6 @@ from torchrl.modules import (
 from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
 from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig, SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
-import ta
-import numpy as np
 import pandas as pd
 from torchrl.trainers.helpers.models import ACTIVATIONS
 
@@ -42,66 +40,17 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     Preprocess OHLCV dataframe with engineered features for RL trading.
 
     Expected columns: ["open", "high", "low", "close", "volume"]
-    Index can be datetime or integer.
     """
 
     df = df.copy().reset_index(drop=False)
 
-    # --- Basic features ---
-    # Log returns
-    # df["features_return_log"] = np.log(df["close"]).diff()
     df["features_close"] = df["close"]
     df["features_open"] = df["open"]
     df["features_high"] = df["high"]
     df["features_low"] = df["low"]
     df["features_volume"] = df["volume"]
 
-    # # Rolling volatility (5-period)
-    # df["features_volatility"] = df["features_return_log"].rolling(window=5).std()
-
-    # # ATR (14) normalized
-    # df["features_atr"] = ta.volatility.AverageTrueRange(
-    #     high=df["high"], low=df["low"], close=df["close"], window=14
-    # ).average_true_range() / df["close"]
-
-    # --- Momentum & trend ---
-    # ema_12 = ta.trend.EMAIndicator(close=df["close"], window=12).ema_indicator()
-    # ema_24 = ta.trend.EMAIndicator(close=df["close"], window=24).ema_indicator()
-    # df["features_ema_12"] = ema_12
-    # df["features_ema_24"] = ema_24
-    #df["features_ema_slope"] = ema_12.diff()
-
-    # macd = ta.trend.MACD(close=df["close"], window_slow=26, window_fast=12, window_sign=9)
-    # df["features_macd_hist"] = macd.macd_diff()
-
-    # df["features_rsi_14"] = ta.momentum.RSIIndicator(close=df["close"], window=14).rsi()
-
-    # # --- Volatility bands ---
-    # bb = ta.volatility.BollingerBands(close=df["close"], window=20, window_dev=2)
-    # df["features_bb_pct"] = bb.bollinger_pband()
-
-    # --- Volume / flow ---
-    # df["features_volume_z"] = (
-    #     (df["volume"] - df["volume"].rolling(20).mean()) /
-    #     df["volume"].rolling(20).std()
-    # )
-    # df["features_vwap_dev"] = df["close"] - (
-    #     (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
-    # )
-
-    # # --- Candle structure ---
-    # df["features_body_ratio"] = (df["close"] - df["open"]) / (df["high"] - df["low"] + 1e-9)
-    # df["features_upper_wick"] = (df["high"] - df[["close", "open"]].max(axis=1)) / (
-    #     df["high"] - df["low"] + 1e-9
-    # )
-    # df["features_lower_wick"] = (df[["close", "open"]].min(axis=1) - df["low"]) / (
-    #     df["high"] - df["low"] + 1e-9
-    #)
-
-    # Drop rows with NaN from indicators
-    #df.dropna(inplace=True)
     df.fillna(0, inplace=True)
-
 
     return df
 
@@ -213,7 +162,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1,
 # --------------------------------------------------------------------
 
 
-def make_discrete_ppo_binmtabl_model(cfg, env, device):
+def make_discrete_ppo_model(cfg, env, device):
     """Make discrete PPO agent."""
     # Define Actor Network
     activation = "tanh"
@@ -320,7 +269,7 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
 
 
 def make_ppo_models(env, device, cfg):
-    common_module, policy_module, value_module = make_discrete_ppo_binmtabl_model(
+    common_module, policy_module, value_module = make_discrete_ppo_model(
         cfg,
         env,
         device=device,

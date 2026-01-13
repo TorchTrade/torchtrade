@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 
 import torch.nn
-from tensordict.nn import TensorDictModule
 from torchrl.envs import (
     DoubleToFloat,
     EnvCreator,
@@ -26,11 +25,9 @@ from torchrl.modules import (
     ProbabilisticActor,
     ValueOperator,
     SafeModule,
-    SafeSequential,
 )
 
 from torchtrade.envs import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
-import numpy as np
 import pandas as pd
 from torchrl.trainers.helpers.models import ACTIVATIONS
 
