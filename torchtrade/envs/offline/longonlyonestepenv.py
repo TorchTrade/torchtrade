@@ -109,8 +109,9 @@ class LongOnlyOneStepEnv(EnvBase):
         self.market_data_key = "market_data"
         self.account_state_key = "account_state"
 
-        # Account state spec: [cash, portfolio_value, position_size, entry_price, unrealized_pnlpct, holding_time]
-        account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(7,), dtype=torch.float)
+        # Account state spec: [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpct, holding_time]
+        self.account_state = ["cash", "position_size", "position_value", "entry_price", "current_price", "unrealized_pnlpct", "holding_time"]
+        account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(len(self.account_state),), dtype=torch.float)
         self.market_data_keys = []
         for i, market_data_name in enumerate(market_data_keys):
             market_data_key = "market_data_" + market_data_name + "_" + str(config.window_sizes[i])

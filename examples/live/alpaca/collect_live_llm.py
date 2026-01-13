@@ -109,6 +109,9 @@ def main():
     )
 
     def apply_env_transforms(env, max_episode_steps=1000):
+        # Build unsqueeze keys dynamically from environment
+        unsqueeze_keys = env.market_data_keys + ["account_state"]
+
         transformed_env = TransformedEnv(
             env,
             Compose(
@@ -116,16 +119,17 @@ def main():
                 StepCounter(max_episode_steps),
                 DoubleToFloat(),
                 RewardSum(),
-                UnsqueezeTransform(dim=0, allow_positive_dim=True, in_keys=["market_data_1Minute_12",
-                                                                            "market_data_5Minute_8",
-                                                                            "market_data_15Minute_8",
-                                                                            "market_data_1Hour_24",
-                                                                            "account_state"]),
+                UnsqueezeTransform(dim=0, allow_positive_dim=True, in_keys=unsqueeze_keys),
             ),
         )
         return transformed_env
 
     env = apply_env_transforms(env, max_rollout_steps)
+
+    # Get market data keys dynamically from the base environment
+    base_env = env.env  # Unwrap TransformedEnv to access base env
+    transform_keys = base_env.market_data_keys + ["account_state"]
+
     scratch_dir = None
     storage_cls = (
         functools.partial(LazyTensorStorage, device=device)
@@ -142,20 +146,20 @@ def main():
             batch_size=1,
             shared=False,
         )
-    policy = LLMActor(model="gpt-5-mini", debug=True)
+    policy = LLMActor(
+        market_data_keys=base_env.market_data_keys,
+        account_state=base_env.account_state,
+        model="gpt-5-mini",
+        debug=True,
+        symbol=config.symbol,
+        execute_on="5Minute",
+    )
     policy_type="gpt5mini"
     collector = make_collector(env, policy=policy, frames_per_batch=1, total_frames=total_farming_steps)
 
-    squeezer = SqueezeTransform(dim=-3, in_keys=["market_data_1Minute_12",
-                                                                "market_data_5Minute_8",
-                                                                "market_data_15Minute_8",
-                                                                "market_data_1Hour_24",
-                                                                "account_state",
-                                                                ("next", "market_data_1Minute_12"),
-                                                                ("next", "market_data_5Minute_8"),
-                                                                ("next", "market_data_15Minute_8"),
-                                                                ("next", "market_data_1Hour_24"),
-                                                                ("next", "account_state")])
+    # Build squeeze keys dynamically: current keys + next keys
+    squeeze_keys = transform_keys + [("next", key) for key in transform_keys]
+    squeezer = SqueezeTransform(dim=-3, in_keys=squeeze_keys)
 
     # Run Farming
     # Main loop
@@ -199,10 +203,6 @@ def main():
         if collected_frames % save_buffer_every == 0:
             replay_buffer.dumps(f"./replay_buffer_{policy_type}.pt")
 
-
-    
-
-    
 
 if __name__ == "__main__":
     main()
