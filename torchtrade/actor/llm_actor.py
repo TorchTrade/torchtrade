@@ -172,7 +172,7 @@ You must choose exactly one action from: {available_actions}.
 
     def construct_account_state(self, tensordict):
         account_state = tensordict.get("account_state")
-        assert account_state.shape == (1, len(self.account_state)), f"Expected account state shape (1, {self.account_state}), got {account_state.shape}"
+        assert account_state.shape == (1, len(self.account_state)), f"Expected account state shape (1, {len(self.account_state)}), got {account_state.shape}"
         out = """Current account state: \n"""
         for idx, state in enumerate(self.account_state):
             out += f"{state}: {round(account_state[0, idx].item(), 2)}\n"
