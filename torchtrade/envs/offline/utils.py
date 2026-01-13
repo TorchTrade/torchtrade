@@ -128,7 +128,18 @@ def normalize_timeframe_config(
         execute_on = parse_fn(execute_on)
 
     # Normalize time_frames to list
-    if not isinstance(time_frames, list):
+    # Handle both regular lists, tuples, and Hydra ListConfig
+    # Use duck typing: if it has __iter__ and __len__, treat it as a sequence
+    try:
+        # Try to iterate and check if it's list-like
+        if hasattr(time_frames, '__iter__') and hasattr(time_frames, '__len__') and not isinstance(time_frames, (str, TimeFrame)):
+            # It's list-like (list, tuple, ListConfig, etc.) - convert to regular list
+            time_frames = list(time_frames)
+        else:
+            # It's a single element
+            time_frames = [time_frames]
+    except TypeError:
+        # Not iterable, wrap in list
         time_frames = [time_frames]
 
     # Convert all string timeframes to TimeFrame objects
@@ -140,6 +151,9 @@ def normalize_timeframe_config(
     # Normalize window_sizes to list
     if isinstance(window_sizes, int):
         window_sizes = [window_sizes] * len(time_frames)
+    else:
+        # Convert to regular list (handles ListConfig, tuples, etc.)
+        window_sizes = list(window_sizes)
 
     # Validate lengths match
     if len(window_sizes) != len(time_frames):

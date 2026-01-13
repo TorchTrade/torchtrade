@@ -31,7 +31,6 @@ import torch.nn as nn
 from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from torchtrade.envs.transforms import ChronosEmbeddingTransform
 import datasets
-from torchtrade.envs.offline.utils import TimeFrame, get_timeframe_unit
 
 
 def example_basic_and_multitimeframe():
@@ -43,19 +42,12 @@ def example_basic_and_multitimeframe():
     df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
     df = df["train"].to_pandas()
 
-    time_frames = [
-        TimeFrame(t, get_timeframe_unit(f))
-        for t, f in zip([1, 5, 15], ["Min", "Min", "Min"])
-    ]
-    execute_on = TimeFrame(5, get_timeframe_unit("Min"))
-
-
     # Create environment with multiple timeframes
     config = SeqLongOnlyEnvConfig(
         symbol="BTC/USD",
-        time_frames=time_frames,  # 1min, 5min, 15min
+        time_frames=["1Min", "5Min", "15Min"],  # 1min, 5min, 15min
         window_sizes=[12, 8, 6],
-        execute_on=execute_on,
+        execute_on="5Min",
         initial_cash=1000,
     )
     base_env = SeqLongOnlyEnv(df, config)
@@ -109,18 +101,12 @@ def example_with_policy():
     df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
     df = df["train"].to_pandas()
 
-    time_frames = [
-        TimeFrame(t, get_timeframe_unit(f))
-        for t, f in zip([5, 15], ["Min", "Min",])
-    ]
-    execute_on = TimeFrame(5, get_timeframe_unit("Min"))
-
     # Create environment with Chronos embedding
     config = SeqLongOnlyEnvConfig(
         symbol="BTC/USD",
-        time_frames=time_frames,
+        time_frames=["5Min", "15Min"],
         window_sizes=[12, 8],
-        execute_on=execute_on,
+        execute_on="5Min",
         initial_cash=1000,
     )
     base_env = SeqLongOnlyEnv(df, config)

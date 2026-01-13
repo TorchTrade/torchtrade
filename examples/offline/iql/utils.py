@@ -248,13 +248,20 @@ def make_discrete_iql_wavenet_model(cfg, env, device):
     account_state_key = "account_state"
     # Define Actor Network
     time_frames = cfg.env.time_frames
+    window_sizes = cfg.env.window_sizes
+    # Extract frequency units from timeframe strings (e.g., "5Min" -> "min")
+    import re
+    freqs = [re.sub(r'\d+', '', tf).lower() for tf in time_frames]
     assert len(time_frames) == len(market_data_keys), f"Amount of time frames {len(time_frames)} and env market data keys do not match! Keys: {market_data_keys}"
     encoders = []
-    
+
+    # Get number of features from environment observation spec
+    num_features = env.observation_spec[market_data_keys[0]].shape[-1]
+
     # Build the encoder
-    for key, freq, t, w in zip(market_data_keys, cfg.env.freqs, cfg.env.time_frames, cfg.env.window_sizes):
+    for key, freq, t, w in zip(market_data_keys, freqs, time_frames, window_sizes):
         net = SimpleCNNEncoder(
-            input_shape=(w, 14),
+            input_shape=(w, num_features),
             output_shape=(1, 14),
             hidden_channels=64,
             kernel_size=3,

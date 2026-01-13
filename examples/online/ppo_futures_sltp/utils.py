@@ -202,7 +202,9 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
 
     time_frames = cfg.env.time_frames
     window_sizes = cfg.env.window_sizes
-    freqs = cfg.env.freqs
+    # Extract frequency units from timeframe strings (e.g., "5Min" -> "min")
+    import re
+    freqs = [re.sub(r'\d+', '', tf).lower() for tf in cfg.env.time_frames]
     assert len(time_frames) == len(market_data_keys), f"Amount of time frames {len(time_frames)} and env market data keys do not match! Keys: {market_data_keys}"
 
     encoders = []
