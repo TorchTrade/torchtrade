@@ -3,8 +3,19 @@ from typing import List, Union, Optional, Dict, Tuple
 from itertools import product
 import pandas as pd
 import numpy as np
+import re
+import warnings
 
 def get_timeframe_unit(tf_str: "Min"):
+    """DEPRECATED: Use parse_timeframe_string() instead.
+
+    This function will be removed in version 2.0.
+    """
+    warnings.warn(
+        "get_timeframe_unit() is deprecated. Use parse_timeframe_string() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     if tf_str == "Min" or tf_str == "min" or tf_str == "Minute":
         return TimeFrameUnit.Minute
     elif tf_str == "Hour" or tf_str == "h" or tf_str == "H" or tf_str == "hour":
@@ -13,6 +24,59 @@ def get_timeframe_unit(tf_str: "Min"):
         return TimeFrameUnit.Day
     else:
         raise ValueError(f"Unknown TimeFrameUnit {tf_str}")
+
+
+def parse_timeframe_string(s: str) -> "TimeFrame":
+    """Parse timeframe string to TimeFrame object.
+
+    Supports formats: "5Min", "5min", "5Minute", "5 minutes", "5M", "5H", "5D"
+
+    Args:
+        s: Timeframe string (e.g., "5Min", "1Hour", "15Minute")
+
+    Returns:
+        TimeFrame object
+
+    Raises:
+        ValueError: If string format is invalid or unit is unknown
+
+    Examples:
+        >>> parse_timeframe_string("5Min")
+        TimeFrame(5, TimeFrameUnit.Minute)
+        >>> parse_timeframe_string("1Hour")
+        TimeFrame(1, TimeFrameUnit.Hour)
+        >>> parse_timeframe_string("15 minutes")
+        TimeFrame(15, TimeFrameUnit.Minute)
+    """
+    s = s.strip()
+
+    # Pattern: <number><optional space><unit>
+    pattern = r'^(\d+)\s*([a-zA-Z]+)$'
+    match = re.match(pattern, s)
+
+    if not match:
+        raise ValueError(
+            f"Invalid timeframe format: '{s}'. "
+            f"Expected format: '<number><unit>' (e.g., '5Min', '1Hour', '15Minute')"
+        )
+
+    value = int(match.group(1))
+    unit_str = match.group(2).lower()
+
+    # Map unit variations to TimeFrameUnit
+    if unit_str in ('min', 'minute', 'minutes', 'm'):
+        unit = TimeFrameUnit.Minute
+    elif unit_str in ('hour', 'hours', 'h', 'hr'):
+        unit = TimeFrameUnit.Hour
+    elif unit_str in ('day', 'days', 'd'):
+        unit = TimeFrameUnit.Day
+    else:
+        raise ValueError(
+            f"Unknown time unit: '{unit_str}'. "
+            f"Supported units: Min/Minute/Minutes/M, Hour/Hours/H, Day/Days/D"
+        )
+
+    return TimeFrame(value, unit)
 
 
 def compute_periods_per_year_crypto(execute_on_unit: str, execute_on_value: float):

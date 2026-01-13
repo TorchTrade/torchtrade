@@ -10,7 +10,7 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map, parse_timeframe_string
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 import logging
 import sys
@@ -33,9 +33,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class LongOnlyOneStepEnvConfig:
     symbol: str = "BTC/USD"
-    time_frames: Union[List[TimeFrame], TimeFrame] = TimeFrame(1, TimeFrameUnit.Minute)
+    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Min"
     window_sizes: Union[List[int], int] = 10
-    execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute) # On which timeframe to execute trades
+    execute_on: Union[str, TimeFrame] = "1Min"  # On which timeframe to execute trades
     initial_cash: Union[List[int], int] = (1000, 5000)
     transaction_fee: float = 0.025
     stoploss_levels: Union[List[float], float] = (-0.025, -0.05, -0.1)
@@ -48,6 +48,32 @@ class LongOnlyOneStepEnvConfig:
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
     include_hold_action: bool = True  # Include HOLD action (index 0) in action space
+
+    def __post_init__(self):
+        # Convert execute_on string to TimeFrame
+        if isinstance(self.execute_on, str):
+            self.execute_on = parse_timeframe_string(self.execute_on)
+
+        # Normalize time_frames to list
+        if not isinstance(self.time_frames, list):
+            self.time_frames = [self.time_frames]
+
+        # Convert all string timeframes to TimeFrame objects
+        self.time_frames = [
+            parse_timeframe_string(tf) if isinstance(tf, str) else tf
+            for tf in self.time_frames
+        ]
+
+        # Normalize window_sizes to list
+        if isinstance(self.window_sizes, int):
+            self.window_sizes = [self.window_sizes] * len(self.time_frames)
+
+        # Validate lengths match
+        if len(self.window_sizes) != len(self.time_frames):
+            raise ValueError(
+                f"window_sizes length ({len(self.window_sizes)}) must match "
+                f"time_frames length ({len(self.time_frames)})"
+            )
 
 class LongOnlyOneStepEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: LongOnlyOneStepEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):

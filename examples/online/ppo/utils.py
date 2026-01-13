@@ -27,7 +27,6 @@ from torchrl.modules import (
 from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
 from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig, SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, get_timeframe_unit
 import ta
 import numpy as np
 import pandas as pd
@@ -108,19 +107,15 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
 
-    window_sizes = cfg.env.window_sizes
-    execute_on = cfg.env.execute_on
-
-    time_frames = [TimeFrame(t, get_timeframe_unit(f)) for t, f in zip(cfg.env.time_frames, cfg.env.freqs)]
-    execute_on=TimeFrame(execute_on[0], get_timeframe_unit(execute_on[1]))
+    window_sizes = list(cfg.env.window_sizes)
 
     if cfg.env.name == "SeqLongOnlyEnv":
 
         config = SeqLongOnlyEnvConfig(
             symbol=cfg.env.symbol,
-            time_frames=time_frames,
+            time_frames=cfg.env.time_frames,
             window_sizes=window_sizes,
-            execute_on=execute_on,
+            execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
             slippage=cfg.env.slippage,
@@ -134,9 +129,9 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
     elif cfg.env.name == "SeqLongOnlySLTPEnv":
         config = SeqLongOnlySLTPEnvConfig(
             symbol=cfg.env.symbol,
-            time_frames=time_frames,
+            time_frames=cfg.env.time_frames,
             window_sizes=window_sizes,
-            execute_on=execute_on,
+            execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
             slippage=cfg.env.slippage,

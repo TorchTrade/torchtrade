@@ -11,6 +11,7 @@ from torchtrade.envs.offline.utils import (
     tf_to_timedelta,
     get_timeframe_unit,
     compute_periods_per_year_crypto,
+    parse_timeframe_string,
 )
 
 
@@ -224,3 +225,126 @@ class TestComputePeriodsPerYearCrypto:
         periods = compute_periods_per_year_crypto("D", 1)
         annualization_factor = math.sqrt(periods)
         assert annualization_factor == pytest.approx(math.sqrt(365))
+
+
+class TestParseTimeframeString:
+    """Tests for parse_timeframe_string function."""
+
+    def test_standard_formats(self):
+        """Should parse standard pandas-style formats."""
+        result = parse_timeframe_string("5Min")
+        assert result.value == 5
+        assert result.unit == TimeFrameUnit.Minute
+
+        result = parse_timeframe_string("1Hour")
+        assert result.value == 1
+        assert result.unit == TimeFrameUnit.Hour
+
+        result = parse_timeframe_string("7Day")
+        assert result.value == 7
+        assert result.unit == TimeFrameUnit.Day
+
+    def test_case_insensitive(self):
+        """Should handle case variations."""
+        result = parse_timeframe_string("5min")
+        assert result.value == 5
+        assert result.unit == TimeFrameUnit.Minute
+
+        result = parse_timeframe_string("5MIN")
+        assert result.value == 5
+        assert result.unit == TimeFrameUnit.Minute
+
+        result = parse_timeframe_string("1hour")
+        assert result.value == 1
+        assert result.unit == TimeFrameUnit.Hour
+
+        result = parse_timeframe_string("1HOUR")
+        assert result.value == 1
+        assert result.unit == TimeFrameUnit.Hour
+
+    def test_with_spaces(self):
+        """Should handle spaces between number and unit."""
+        result = parse_timeframe_string("5 Min")
+        assert result.value == 5
+        assert result.unit == TimeFrameUnit.Minute
+
+        result = parse_timeframe_string("1 Hour")
+        assert result.value == 1
+        assert result.unit == TimeFrameUnit.Hour
+
+        result = parse_timeframe_string("  15  Minute  ")
+        assert result.value == 15
+        assert result.unit == TimeFrameUnit.Minute
+
+    def test_plural_forms(self):
+        """Should parse plural unit names."""
+        result = parse_timeframe_string("5Minutes")
+        assert result.value == 5
+        assert result.unit == TimeFrameUnit.Minute
+
+        result = parse_timeframe_string("1Hours")
+        assert result.value == 1
+        assert result.unit == TimeFrameUnit.Hour
+
+        result = parse_timeframe_string("7Days")
+        assert result.value == 7
+        assert result.unit == TimeFrameUnit.Day
+
+    def test_single_letter_abbreviations(self):
+        """Should parse single-letter units."""
+        result = parse_timeframe_string("5M")
+        assert result.value == 5
+        assert result.unit == TimeFrameUnit.Minute
+
+        result = parse_timeframe_string("1H")
+        assert result.value == 1
+        assert result.unit == TimeFrameUnit.Hour
+
+        result = parse_timeframe_string("7D")
+        assert result.value == 7
+        assert result.unit == TimeFrameUnit.Day
+
+    def test_large_values(self):
+        """Should handle large numeric values."""
+        result = parse_timeframe_string("999Min")
+        assert result.value == 999
+        assert result.unit == TimeFrameUnit.Minute
+
+        result = parse_timeframe_string("1440Min")
+        assert result.value == 1440
+        assert result.unit == TimeFrameUnit.Minute
+
+    def test_invalid_format_raises(self):
+        """Should raise ValueError for invalid formats."""
+        with pytest.raises(ValueError, match="Invalid timeframe format"):
+            parse_timeframe_string("invalid")
+
+        with pytest.raises(ValueError, match="Invalid timeframe format"):
+            parse_timeframe_string("Min5")  # reversed
+
+        with pytest.raises(ValueError, match="Invalid timeframe format"):
+            parse_timeframe_string("5")  # missing unit
+
+        with pytest.raises(ValueError, match="Invalid timeframe format"):
+            parse_timeframe_string("")  # empty
+
+    def test_unknown_unit_raises(self):
+        """Should raise ValueError for unknown units."""
+        with pytest.raises(ValueError, match="Unknown time unit"):
+            parse_timeframe_string("5Week")
+
+        with pytest.raises(ValueError, match="Unknown time unit"):
+            parse_timeframe_string("1Month")
+
+    def test_result_compatible_with_timeframe(self):
+        """Result should be usable as a TimeFrame object."""
+        result = parse_timeframe_string("15Min")
+
+        # Should work with to_pandas_freq
+        assert result.to_pandas_freq() == "15Min"
+
+        # Should work with obs_key_freq
+        assert result.obs_key_freq() == "15Minute"
+
+        # Should work with tf_to_timedelta
+        assert tf_to_timedelta(result) == pd.Timedelta(minutes=15)

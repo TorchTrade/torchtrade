@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.alpaca.utils import parse_alpaca_timeframe_string
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
 from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass, TradeMode
 from tensordict import TensorDict, TensorDictBase
@@ -21,9 +22,9 @@ class AlpacaTradingEnvConfig:
     symbol: str = "BTC/USD"
     action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Do-Nothing, Buy-all
     max_position: float = 1.0  # Maximum position size as a fraction of balance
-    time_frames: Union[List[TimeFrame], TimeFrame] = TimeFrame(1, TimeFrameUnit.Minute)
+    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Min"
     window_sizes: Union[List[int], int] = 10
-    execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute) # On which timeframe to execute trades
+    execute_on: Union[str, TimeFrame] = "1Min"  # On which timeframe to execute trades
     reward_scaling: float = 1.0
     position_penalty: float = 0.0001  # Penalty for holding positions
     done_on_bankruptcy: bool = True
@@ -33,6 +34,32 @@ class AlpacaTradingEnvConfig:
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
+
+    def __post_init__(self):
+        # Convert execute_on string to TimeFrame
+        if isinstance(self.execute_on, str):
+            self.execute_on = parse_alpaca_timeframe_string(self.execute_on)
+
+        # Normalize time_frames to list
+        if not isinstance(self.time_frames, list):
+            self.time_frames = [self.time_frames]
+
+        # Convert all string timeframes to TimeFrame objects
+        self.time_frames = [
+            parse_alpaca_timeframe_string(tf) if isinstance(tf, str) else tf
+            for tf in self.time_frames
+        ]
+
+        # Normalize window_sizes to list
+        if isinstance(self.window_sizes, int):
+            self.window_sizes = [self.window_sizes] * len(self.time_frames)
+
+        # Validate lengths match
+        if len(self.window_sizes) != len(self.time_frames):
+            raise ValueError(
+                f"window_sizes length ({len(self.window_sizes)}) must match "
+                f"time_frames length ({len(self.time_frames)})"
+            )
 
 class AlpacaTorchTradingEnv(EnvBase):
     def __init__(
