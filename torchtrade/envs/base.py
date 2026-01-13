@@ -1,7 +1,7 @@
 """Base environment classes for TorchTrade."""
 
 from abc import abstractmethod
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 import torch
@@ -82,8 +82,8 @@ class TorchTradeBaseEnv(EnvBase):
         self,
         old_portfolio_value: float,
         new_portfolio_value: float,
-        action: float,
-        trade_info: Dict,
+        action: int,
+        trade_info: Dict[str, Any],
     ) -> float:
         """
         Calculate reward using custom or default function.

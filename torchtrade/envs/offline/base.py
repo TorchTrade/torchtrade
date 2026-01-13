@@ -5,7 +5,7 @@ from typing import Callable, List, Optional
 import numpy as np
 import pandas as pd
 import torch
-from tensordict import TensorDict, TensorDictBase
+from tensordict import TensorDictBase
 from torchrl.data import Bounded
 from torchrl.data.tensor_specs import CompositeSpec, Unbounded
 
