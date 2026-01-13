@@ -296,7 +296,7 @@ def make_discrete_ppo_model(cfg, env, device):
 
 def make_ppo_models(env, device, cfg):
     """Create PPO actor and critic models."""
-    common_module, policy_module, value_module = make_discrete_ppo_binmtabl_model(
+    common_module, policy_module, value_module = make_discrete_ppo_model(
         cfg,
         env,
         device=device,
