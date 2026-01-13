@@ -29,7 +29,6 @@ from torchrl.modules import (
 from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
 from torchtrade.envs import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig, SeqLongOnlySLTPEnvConfig, SeqLongOnlySLTPEnv
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, get_timeframe_unit
 import pandas as pd
 from torchrl.trainers.helpers.models import ACTIVATIONS
 
@@ -107,43 +106,40 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
-
-    window_sizes = cfg.env.window_sizes
-    execute_on = cfg.env.execute_on
-
-    time_frames = [TimeFrame(t, get_timeframe_unit(f)) for t, f in zip(cfg.env.time_frames, cfg.env.freqs)]
-    execute_on=TimeFrame(execute_on[0], get_timeframe_unit(execute_on[1]))
+    window_sizes = list(cfg.env.window_sizes)
+    stoploss_levels = list(cfg.env.stoploss_levels)
+    takeprofit_levels = list(cfg.env.takeprofit_levels)
 
     if not eval:
         config = LongOnlyOneStepEnvConfig(
             symbol=cfg.env.symbol,
-            time_frames=time_frames,
+            time_frames=cfg.env.time_frames,
             window_sizes=window_sizes,
-            execute_on=execute_on,
+            execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
             slippage=cfg.env.slippage,
             transaction_fee=cfg.env.transaction_fee,
             bankrupt_threshold=cfg.env.bankrupt_threshold,
             seed=cfg.env.seed,
-            stoploss_levels=cfg.env.stoploss_levels,
-            takeprofit_levels=cfg.env.takeprofit_levels,
+            stoploss_levels=stoploss_levels,
+            takeprofit_levels=takeprofit_levels,
             max_traj_length=max_traj_length,
         )
         return LongOnlyOneStepEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
     else:
         config = SeqLongOnlySLTPEnvConfig(
             symbol=cfg.env.symbol,
-            time_frames=time_frames,
+            time_frames=cfg.env.time_frames,
             window_sizes=window_sizes,
-            execute_on=execute_on,
+            execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
             slippage=cfg.env.slippage,
             transaction_fee=cfg.env.transaction_fee,
             bankrupt_threshold=cfg.env.bankrupt_threshold,
-            stoploss_levels=cfg.env.stoploss_levels,
-            takeprofit_levels=cfg.env.takeprofit_levels,
+            stoploss_levels=stoploss_levels,
+            takeprofit_levels=takeprofit_levels,
             seed=cfg.env.seed,
             max_traj_length=max_traj_length,
             random_start=False

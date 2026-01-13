@@ -1,4 +1,4 @@
-"""Utility functions for PPO training on SeqFuturesSLTPEnv."""
+"""Utility functions for PPO training with Chronos embeddings."""
 from __future__ import annotations
 import functools
 
@@ -17,7 +17,7 @@ from torchrl.envs import (
     VecNormV2,
 )
 
-from torchtrade.envs.transforms import CoverageTracker
+from torchtrade.envs.transforms import CoverageTracker, ChronosEmbeddingTransform
 from torchrl.collectors import SyncDataCollector
 
 from torchrl.modules import (
@@ -28,7 +28,6 @@ from torchrl.modules import (
     SafeModule,
     SafeSequential,
 )
-from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
 from torchtrade.envs import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
 import numpy as np
@@ -49,11 +48,11 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy().reset_index(drop=False)
 
-    # Basic OHLCV features
-    df["features_close"] = df["close"]
+    # Basic OHLCV features for Chronos embedding
     df["features_open"] = df["open"]
     df["features_high"] = df["high"]
     df["features_low"] = df["low"]
+    df["features_close"] = df["close"]
     df["features_volume"] = df["volume"]
 
     # Fill NaN values
@@ -89,19 +88,42 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
     return SeqFuturesSLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
 
 
-def apply_env_transforms(env, max_steps):
-    """Apply standard transforms to the environment.
+def apply_env_transforms(env, max_steps, cfg):
+    """Apply standard transforms including Chronos embedding to the environment.
 
     Args:
         env: Base environment
         max_steps: Maximum steps for StepCounter
+        cfg: Hydra config containing Chronos settings
 
     Returns:
         transformed_env: Environment with transforms applied
         vecnorm: The VecNormV2 instance for potential statistics sharing
     """
-    # Get observation keys for normalization (market_data_* and account_state)
-    obs_keys = [k for k in env.observation_spec.keys() if k.startswith("market_data") or k == "account_state"]
+    # Get market data keys for Chronos embedding
+    market_data_keys = [k for k in env.observation_spec.keys() if k.startswith("market_data")]
+
+    # Create Chronos transforms for each market data observation
+    chronos_transforms = []
+    chronos_out_keys = []
+
+    for market_key in market_data_keys:
+        out_key = f"chronos_embedding_{market_key}"
+        chronos_out_keys.append(out_key)
+
+        chronos_transform = ChronosEmbeddingTransform(
+            in_keys=[market_key],
+            out_keys=[out_key],
+            model_name=cfg.model.chronos_model,
+            aggregation="concat",  # Concatenate embeddings across features
+            del_keys=True,  # Remove raw market data after embedding
+            device=cfg.optim.device if cfg.optim.device else "cpu",
+        )
+        chronos_transforms.append(chronos_transform)
+
+    # Get observation keys for normalization (chronos embeddings and account_state)
+    # Account state should still be normalized
+    obs_keys = ["account_state"]
 
     vecnorm = VecNormV2(
         in_keys=obs_keys,
@@ -109,15 +131,25 @@ def apply_env_transforms(env, max_steps):
         eps=1e-8,
     )
 
+    # Build transform composition
+    transform_list = [
+        InitTracker(),
+        DoubleToFloat(),
+    ]
+
+    # Add all Chronos transforms
+    transform_list.extend(chronos_transforms)
+
+    # Add normalization and other transforms
+    transform_list.extend([
+        vecnorm,
+        RewardSum(),
+        StepCounter(max_steps=max_steps),
+    ])
+
     transformed_env = TransformedEnv(
         env,
-        Compose(
-            InitTracker(),
-            DoubleToFloat(),
-            vecnorm,
-            RewardSum(),
-            StepCounter(max_steps=max_steps),
-        ),
+        Compose(*transform_list),
     )
     return transformed_env, vecnorm
 
@@ -144,11 +176,9 @@ def make_environment(
     parallel_env.set_seed(cfg.env.seed)
 
     # Create train environment and get its VecNormV2 instance
-    train_env, train_vecnorm = apply_env_transforms(parallel_env, max_train_steps)
+    train_env, train_vecnorm = apply_env_transforms(parallel_env, max_train_steps, cfg)
 
     # Create eval environment with its own VecNormV2
-    # Note: Each VecNormV2 will maintain its own running statistics
-    # This is acceptable as eval will normalize observations consistently during evaluation
     maker = functools.partial(
         env_maker, test_df, cfg, max_traj_length=max_eval_traj_length
     )
@@ -159,8 +189,8 @@ def make_environment(
     )
     max_eval_steps = test_df.shape[0]
 
-    # Create eval environment with separate VecNormV2 (will compute its own statistics)
-    eval_env, eval_vecnorm = apply_env_transforms(eval_base_env, max_eval_steps)
+    # Create eval environment with separate VecNormV2
+    eval_env, eval_vecnorm = apply_env_transforms(eval_base_env, max_eval_steps, cfg)
 
     # Create coverage tracker for postproc (used in collector)
     coverage_tracker = CoverageTracker()
@@ -171,82 +201,40 @@ def make_environment(
 # ====================================================================
 # Model utils
 # --------------------------------------------------------------------
-# NOTE: Safety wrappers (AccountStateNormalizer, SafeEncoderWrapper, etc.)
-# were removed after confirming BiNMTABL works fine with clean datasets.
-# NaN issues were caused by data gaps, not model architecture.
-# If you see NaN during training, check your dataset for missing periods.
 
 
-class BatchSafeWrapper(torch.nn.Module):
-    """Wrapper to ensure consistent batch dimension in output."""
-    def __init__(self, model, output_features):
-        super().__init__()
-        self.model = model
-        self.output_features = output_features
-
-    def forward(self, x):
-        out = self.model(x)
-        # If batch dimension was squeezed (batch_size=1), add it back
-        if out.dim() == 1 and out.shape[0] == self.output_features:
-            out = out.unsqueeze(0)
-        return out
-
-
-def make_discrete_ppo_binmtabl_model(cfg, env, device):
-    """Make discrete PPO agent with BiNMTABL encoder."""
-    activation = "tanh"
+def make_discrete_ppo_chronos_model(cfg, env, device):
+    """Make discrete PPO agent with Chronos embeddings as input."""
+    activation = cfg.model.activation
     action_spec = env.action_spec
-    market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
+
+    # Get chronos embedding keys (these replace market_data keys)
+    chronos_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("chronos_embedding")]
+    assert len(chronos_keys) > 0, "No chronos embedding keys found in observation spec"
+
     assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"
     account_state_key = "account_state"
 
-    time_frames = cfg.env.time_frames
-    window_sizes = cfg.env.window_sizes
-    freqs = cfg.env.freqs
-    assert len(time_frames) == len(market_data_keys), f"Amount of time frames {len(time_frames)} and env market data keys do not match! Keys: {market_data_keys}"
+    # Calculate total input features
+    # Each chronos embedding + account state features
+    total_input_features = 0
+    for key in chronos_keys:
+        embedding_shape = env.observation_spec[key].shape
+        total_input_features += embedding_shape[-1]
 
-    encoders = []
-    num_features = env.observation_spec[market_data_keys[0]].shape[-1]
+    # Account state: 10 features for futures environment
+    account_state_dim = env.observation_spec[account_state_key].shape[-1]
+    total_input_features += account_state_dim
 
-    # Build CNN encoders for market data
-    for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
-        model = SimpleCNNEncoder(
-            input_shape=(w, num_features),
-            output_shape=(1, 14),
-            hidden_channels=64,
-            kernel_size=3,
-            activation=activation,
-            final_activation=activation,
-            dropout=0.1
-        )
-        encoders.append(SafeModule(
-            module=model,
-            in_keys=key,
-            out_keys=[f"encoding_{t}_{fre}_{w}"],
-        ).to(device))
+    print(f"Total input features (Chronos embeddings + account state): {total_input_features}")
+    print(f"  Chronos embedding keys: {chronos_keys}")
+    print(f"  Account state dim: {account_state_dim}")
 
-    # Account state encoder with SimpleMLPEncoder
-    # IMPORTANT: SeqFuturesSLTPEnv has 10 account state features (not 7 like SeqLongOnly)
-    # [cash, position_size, position_value, entry_price, current_price,
-    #  unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
-    account_encoder_model = SimpleMLPEncoder(
-        input_shape=(1, 10),  # 10 features for futures (vs 7 for long-only)
-        output_shape=(1, 14),  # Match embedding_dim output
-        hidden_sizes=(32, 32),
-        activation="gelu",
-        dropout=0.1,
-        final_activation="gelu",
-    )
-
-    account_state_encoder = SafeModule(
-        module=account_encoder_model,
-        in_keys=[account_state_key],
-        out_keys=["encoding_account_state"],
-    ).to(device)
-
-    # Common feature extractor
+    # Common feature extractor - directly takes concatenated chronos embeddings + account state
+    # TorchRL's MLP with multiple in_keys will automatically concatenate them
     common = MLP(
-        num_cells=[128, 128],
+        in_features=total_input_features,
+        num_cells=[256, 256, 128],
         out_features=128,
         activation_class=ACTIVATIONS[activation],
         device=device,
@@ -254,10 +242,9 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
 
     common_module = SafeModule(
         module=common,
-        in_keys=[f"encoding_{t}_{fre}_{w}" for t, w, fre in zip(time_frames, window_sizes, freqs)] + ["encoding_account_state"],
+        in_keys=chronos_keys + [account_state_key],
         out_keys=["common_features"],
     )
-    common_module = SafeSequential(*encoders, account_state_encoder, common_module)
 
     action_out_features = action_spec.n
     distribution_class = torch.distributions.Categorical
@@ -305,7 +292,7 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
 
 def make_ppo_models(env, device, cfg):
     """Create PPO actor and critic models."""
-    common_module, policy_module, value_module = make_discrete_ppo_binmtabl_model(
+    common_module, policy_module, value_module = make_discrete_ppo_chronos_model(
         cfg,
         env,
         device=device,
@@ -342,7 +329,7 @@ def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=N
         device="cpu",
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
-        postproc=postproc,  # Add coverage tracker as postproc
+        postproc=postproc,
     )
     collector.set_seed(cfg.env.seed)
     return collector

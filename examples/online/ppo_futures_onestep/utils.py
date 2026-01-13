@@ -32,7 +32,6 @@ from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
 from torchtrade.envs import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
 from torchtrade.envs import FuturesOneStepEnv, FuturesOneStepEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, get_timeframe_unit
 import numpy as np
 import pandas as pd
 from torchrl.trainers.helpers.models import ACTIVATIONS
@@ -76,23 +75,16 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
     """
     # Convert Hydra ListConfig to regular Python lists
     window_sizes = list(cfg.env.window_sizes)
-    execute_on = list(cfg.env.execute_on)
     stoploss_levels = list(cfg.env.stoploss_levels)
     takeprofit_levels = list(cfg.env.takeprofit_levels)
-
-    time_frames = [
-        TimeFrame(t, get_timeframe_unit(f))
-        for t, f in zip(cfg.env.time_frames, cfg.env.freqs)
-    ]
-    execute_on = TimeFrame(execute_on[0], get_timeframe_unit(execute_on[1]))
 
     if not eval:
         # Training: use FuturesOneStepEnv for GRPO-style training
         config = FuturesOneStepEnvConfig(
             symbol=cfg.env.symbol,
-            time_frames=time_frames,
+            time_frames=cfg.env.time_frames,
             window_sizes=window_sizes,
-            execute_on=execute_on,
+            execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
             slippage=cfg.env.slippage,
@@ -110,9 +102,9 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
         # Both envs have the same 19-action space (1 hold + 9 long + 9 short)
         config = SeqFuturesSLTPEnvConfig(
             symbol=cfg.env.symbol,
-            time_frames=time_frames,
+            time_frames=cfg.env.time_frames,
             window_sizes=window_sizes,
-            execute_on=execute_on,
+            execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
             slippage=cfg.env.slippage,

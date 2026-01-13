@@ -14,7 +14,6 @@ from torchrl.envs import (
 from torchrl.collectors import SyncDataCollector
 
 from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
 import pandas as pd
 
 # ====================================================================
@@ -25,47 +24,29 @@ import pandas as pd
 def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """
     Preprocess OHLCV dataframe with engineered features for RL trading.
-
     Expected columns: ["open", "high", "low", "close", "volume"]
-    Index can be datetime or integer.
     """
 
     df = df.copy().reset_index(drop=False)
 
-    # --- Basic features ---
-
-
-    # --- Momentum & trend ---
-    ema_12 = ta.trend.EMAIndicator(close=df["close"], window=12).ema_indicator()
-    ema_24 = ta.trend.EMAIndicator(close=df["close"], window=24).ema_indicator()
-    df["features_ema_12"] = ema_12
-    df["features_ema_24"] = ema_24
-
     df["features_close"] = df["close"]
-
+    df["features_open"] = df["open"]
+    df["features_high"] = df["high"]
+    df["features_low"] = df["low"]
+    df["features_volume"] = df["volume"]
     df.fillna(0, inplace=True)
-
 
     return df
 
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
-
-    # TODO: Make this configurable with config
-    time_frames=[
-        TimeFrame(1, TimeFrameUnit.Minute),
-        TimeFrame(5, TimeFrameUnit.Minute),
-        TimeFrame(15, TimeFrameUnit.Minute),
-        TimeFrame(1, TimeFrameUnit.Hour),
-    ]
-    window_sizes=[12, 8, 8, 24]  # ~12m, 40m, 2h, 1d
-    execute_on=TimeFrame(5, TimeFrameUnit.Minute) # Try 15min
+    window_sizes = list(cfg.env.window_sizes)
 
     config = SeqLongOnlyEnvConfig(
         symbol=cfg.env.symbol,
-        time_frames=time_frames,
+        time_frames=cfg.env.time_frames,
         window_sizes=window_sizes,
-        execute_on=execute_on,
+        execute_on=cfg.env.execute_on,
         include_base_features=False,
         initial_cash=cfg.env.initial_cash,
         slippage=cfg.env.slippage,
