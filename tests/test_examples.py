@@ -431,7 +431,7 @@ EXAMPLE_COMMANDS = {
         "collector.total_frames=10 "
         "collector.frames_per_batch=5 "
         "env.train_envs=2 "
-        "loss.mini_batch_size=25 "
+        "loss.mini_batch_size=5 "
         "logger.backend= "
         "logger.test_interval=1000000 "
     ),
@@ -440,7 +440,7 @@ EXAMPLE_COMMANDS = {
         "collector.total_frames=10 "
         "collector.frames_per_batch=5 "
         "env.train_envs=2 "
-        "loss.mini_batch_size=25 "
+        "loss.mini_batch_size=5 "
         "logger.backend= "
         "logger.test_interval=1000000 "
     ),
