@@ -8,7 +8,7 @@ from itertools import product
 
 import numpy as np
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
-from torchtrade.envs.alpaca.utils import parse_alpaca_timeframe_string
+from torchtrade.envs.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
 from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass, TradeMode
 from tensordict import TensorDict, TensorDictBase
@@ -60,30 +60,9 @@ class AlpacaSLTPTradingEnvConfig:
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
     def __post_init__(self):
-        # Convert execute_on string to TimeFrame
-        if isinstance(self.execute_on, str):
-            self.execute_on = parse_alpaca_timeframe_string(self.execute_on)
-
-        # Normalize time_frames to list
-        if not isinstance(self.time_frames, list):
-            self.time_frames = [self.time_frames]
-
-        # Convert all string timeframes to TimeFrame objects
-        self.time_frames = [
-            parse_alpaca_timeframe_string(tf) if isinstance(tf, str) else tf
-            for tf in self.time_frames
-        ]
-
-        # Normalize window_sizes to list
-        if isinstance(self.window_sizes, int):
-            self.window_sizes = [self.window_sizes] * len(self.time_frames)
-
-        # Validate lengths match
-        if len(self.window_sizes) != len(self.time_frames):
-            raise ValueError(
-                f"window_sizes length ({len(self.window_sizes)}) must match "
-                f"time_frames length ({len(self.time_frames)})"
-            )
+        self.execute_on, self.time_frames, self.window_sizes = normalize_alpaca_timeframe_config(
+            self.execute_on, self.time_frames, self.window_sizes
+        )
 
 
 class AlpacaSLTPTorchTradingEnv(EnvBase):

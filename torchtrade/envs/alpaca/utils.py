@@ -1,13 +1,13 @@
 """Utility functions for Alpaca environments."""
-import re
-from typing import Union
+from typing import List, Union, Tuple
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.utils import parse_timeframe_string as _parse_offline_tf
 
 
 def parse_alpaca_timeframe_string(s: str) -> TimeFrame:
     """Parse timeframe string to Alpaca TimeFrame object.
 
-    Supports formats: "5Min", "5min", "5Minute", "5 minutes", "5M", "5H", "5D"
+    Uses shared parsing logic from offline utils and converts to Alpaca's TimeFrame.
 
     Args:
         s: Timeframe string (e.g., "5Min", "1Hour", "15Minute")
@@ -23,35 +23,41 @@ def parse_alpaca_timeframe_string(s: str) -> TimeFrame:
         TimeFrame(5, TimeFrameUnit.Minute)
         >>> parse_alpaca_timeframe_string("1Hour")
         TimeFrame(1, TimeFrameUnit.Hour)
-        >>> parse_alpaca_timeframe_string("15 minutes")
-        TimeFrame(15, TimeFrameUnit.Minute)
     """
-    s = s.strip()
+    # Parse using shared offline logic
+    offline_tf = _parse_offline_tf(s)
 
-    # Pattern: <number><optional space><unit>
-    pattern = r'^(\d+)\s*([a-zA-Z]+)$'
-    match = re.match(pattern, s)
+    # Map offline TimeFrameUnit enum values to Alpaca TimeFrameUnit
+    alpaca_unit_map = {
+        "Min": TimeFrameUnit.Minute,
+        "H": TimeFrameUnit.Hour,
+        "D": TimeFrameUnit.Day,
+    }
 
-    if not match:
-        raise ValueError(
-            f"Invalid timeframe format: '{s}'. "
-            f"Expected format: '<number><unit>' (e.g., '5Min', '1Hour', '15Minute')"
-        )
+    # Convert to Alpaca TimeFrame
+    alpaca_unit = alpaca_unit_map[offline_tf.unit.value]
+    return TimeFrame(offline_tf.value, alpaca_unit)
 
-    value = int(match.group(1))
-    unit_str = match.group(2).lower()
 
-    # Map unit variations to Alpaca TimeFrameUnit
-    if unit_str in ('min', 'minute', 'minutes', 'm'):
-        unit = TimeFrameUnit.Minute
-    elif unit_str in ('hour', 'hours', 'h', 'hr'):
-        unit = TimeFrameUnit.Hour
-    elif unit_str in ('day', 'days', 'd'):
-        unit = TimeFrameUnit.Day
-    else:
-        raise ValueError(
-            f"Unknown time unit: '{unit_str}'. "
-            f"Supported units: Min/Minute/Minutes/M, Hour/Hours/H, Day/Days/D"
-        )
+def normalize_alpaca_timeframe_config(
+    execute_on: Union[str, TimeFrame],
+    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]],
+    window_sizes: Union[List[int], int],
+) -> Tuple[TimeFrame, List[TimeFrame], List[int]]:
+    """Normalize timeframe configuration for Alpaca environment configs.
 
-    return TimeFrame(value, unit)
+    Wrapper around normalize_timeframe_config that uses Alpaca's TimeFrame class.
+
+    Args:
+        execute_on: Execution timeframe (string or Alpaca TimeFrame)
+        time_frames: List of timeframes or single timeframe
+        window_sizes: List of window sizes or single window size
+
+    Returns:
+        Tuple of (execute_on_tf, time_frames_list, window_sizes_list)
+    """
+    from torchtrade.envs.offline.utils import normalize_timeframe_config
+
+    return normalize_timeframe_config(
+        execute_on, time_frames, window_sizes, parse_fn=parse_alpaca_timeframe_string
+    )

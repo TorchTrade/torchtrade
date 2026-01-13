@@ -63,20 +63,92 @@ def parse_timeframe_string(s: str) -> "TimeFrame":
     value = int(match.group(1))
     unit_str = match.group(2).lower()
 
-    # Map unit variations to TimeFrameUnit
-    if unit_str in ('min', 'minute', 'minutes', 'm'):
-        unit = TimeFrameUnit.Minute
-    elif unit_str in ('hour', 'hours', 'h', 'hr'):
-        unit = TimeFrameUnit.Hour
-    elif unit_str in ('day', 'days', 'd'):
-        unit = TimeFrameUnit.Day
-    else:
+    # Map unit variations to TimeFrameUnit using dictionary for clarity
+    unit_map = {
+        'min': TimeFrameUnit.Minute,
+        'minute': TimeFrameUnit.Minute,
+        'minutes': TimeFrameUnit.Minute,
+        'm': TimeFrameUnit.Minute,
+        'hour': TimeFrameUnit.Hour,
+        'hours': TimeFrameUnit.Hour,
+        'h': TimeFrameUnit.Hour,
+        'hr': TimeFrameUnit.Hour,
+        'day': TimeFrameUnit.Day,
+        'days': TimeFrameUnit.Day,
+        'd': TimeFrameUnit.Day,
+    }
+
+    unit = unit_map.get(unit_str)
+    if unit is None:
         raise ValueError(
             f"Unknown time unit: '{unit_str}'. "
             f"Supported units: Min/Minute/Minutes/M, Hour/Hours/H, Day/Days/D"
         )
 
     return TimeFrame(value, unit)
+
+
+def normalize_timeframe_config(
+    execute_on: Union[str, "TimeFrame"],
+    time_frames: Union[List[Union[str, "TimeFrame"]], Union[str, "TimeFrame"]],
+    window_sizes: Union[List[int], int],
+    parse_fn=None,
+) -> Tuple["TimeFrame", List["TimeFrame"], List[int]]:
+    """Normalize timeframe configuration for environment configs.
+
+    Converts string timeframes to TimeFrame objects, normalizes to lists,
+    and validates that window_sizes matches time_frames length.
+
+    Args:
+        execute_on: Execution timeframe (string or TimeFrame)
+        time_frames: List of timeframes or single timeframe (strings or TimeFrame objects)
+        window_sizes: List of window sizes or single window size
+        parse_fn: Function to parse timeframe strings (defaults to parse_timeframe_string)
+
+    Returns:
+        Tuple of (execute_on_tf, time_frames_list, window_sizes_list)
+
+    Raises:
+        ValueError: If window_sizes length doesn't match time_frames length
+
+    Examples:
+        >>> execute_on, tfs, ws = normalize_timeframe_config("5Min", ["1Min", "5Min"], 10)
+        >>> execute_on.to_pandas_freq()
+        '5Min'
+        >>> len(tfs)
+        2
+        >>> ws
+        [10, 10]
+    """
+    if parse_fn is None:
+        parse_fn = parse_timeframe_string
+
+    # Convert execute_on string to TimeFrame
+    if isinstance(execute_on, str):
+        execute_on = parse_fn(execute_on)
+
+    # Normalize time_frames to list
+    if not isinstance(time_frames, list):
+        time_frames = [time_frames]
+
+    # Convert all string timeframes to TimeFrame objects
+    time_frames = [
+        parse_fn(tf) if isinstance(tf, str) else tf
+        for tf in time_frames
+    ]
+
+    # Normalize window_sizes to list
+    if isinstance(window_sizes, int):
+        window_sizes = [window_sizes] * len(time_frames)
+
+    # Validate lengths match
+    if len(window_sizes) != len(time_frames):
+        raise ValueError(
+            f"window_sizes length ({len(window_sizes)}) must match "
+            f"time_frames length ({len(time_frames)})"
+        )
+
+    return execute_on, time_frames, window_sizes
 
 
 def compute_periods_per_year_crypto(execute_on_unit: str, execute_on_value: float):

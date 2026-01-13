@@ -12,7 +12,7 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, InitialBalanceSampler, parse_timeframe_string
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, InitialBalanceSampler, normalize_timeframe_config
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 
 @dataclass
@@ -33,30 +33,9 @@ class SeqLongOnlyEnvConfig:
     reward_scaling: float = 1.0
 
     def __post_init__(self):
-        # Convert execute_on string to TimeFrame
-        if isinstance(self.execute_on, str):
-            self.execute_on = parse_timeframe_string(self.execute_on)
-
-        # Normalize time_frames to list
-        if not isinstance(self.time_frames, list):
-            self.time_frames = [self.time_frames]
-
-        # Convert all string timeframes to TimeFrame objects
-        self.time_frames = [
-            parse_timeframe_string(tf) if isinstance(tf, str) else tf
-            for tf in self.time_frames
-        ]
-
-        # Normalize window_sizes to list
-        if isinstance(self.window_sizes, int):
-            self.window_sizes = [self.window_sizes] * len(self.time_frames)
-
-        # Validate lengths match
-        if len(self.window_sizes) != len(self.time_frames):
-            raise ValueError(
-                f"window_sizes length ({len(self.window_sizes)}) must match "
-                f"time_frames length ({len(self.time_frames)})"
-            )
+        self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
+            self.execute_on, self.time_frames, self.window_sizes
+        )
 
 class SeqLongOnlyEnv(EnvBase):
     def __init__(self, df: pd.DataFrame, config: SeqLongOnlyEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
