@@ -4,10 +4,9 @@ env:
   stoploss_levels: [-0.02, -0.04]
   takeprofit_levels: [0.02, 0.04, 0.06, 0.08, 0.1]
   symbol: "BTC/USD"
-  freqs: ["Min"] #, "Min", "Min", "Hour"]
-  time_frames: [15] #, 5, 15, 1]
+  time_frames: ["15Min"] #, "5Min", "15Min", "1Hour"]
   window_sizes: [32] #, 24, 24, 24]
-  execute_on: [15, "Min"]
+  execute_on: "15Min"
   initial_cash: [1000, 5000]
   transaction_fee: 0.0025 
   slippage: 0.001
