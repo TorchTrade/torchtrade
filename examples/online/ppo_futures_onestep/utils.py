@@ -73,17 +73,12 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
     Training uses FuturesOneStepEnv (one-step GRPO-style training).
     Evaluation uses SeqFuturesSLTPEnv (sequential episodes with render_history).
     """
-    # Convert Hydra ListConfig to regular Python lists
-    window_sizes = list(cfg.env.window_sizes)
-    stoploss_levels = list(cfg.env.stoploss_levels)
-    takeprofit_levels = list(cfg.env.takeprofit_levels)
-
     if not eval:
         # Training: use FuturesOneStepEnv for GRPO-style training
         config = FuturesOneStepEnvConfig(
             symbol=cfg.env.symbol,
             time_frames=cfg.env.time_frames,
-            window_sizes=window_sizes,
+            window_sizes=cfg.env.window_sizes,
             execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
@@ -92,8 +87,8 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             bankrupt_threshold=cfg.env.bankrupt_threshold,
             seed=cfg.env.seed,
             leverage=cfg.env.leverage,
-            stoploss_levels=stoploss_levels,
-            takeprofit_levels=takeprofit_levels,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
             max_traj_length=max_traj_length,
         )
         return FuturesOneStepEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
@@ -103,7 +98,7 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
         config = SeqFuturesSLTPEnvConfig(
             symbol=cfg.env.symbol,
             time_frames=cfg.env.time_frames,
-            window_sizes=window_sizes,
+            window_sizes=cfg.env.window_sizes,
             execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
@@ -112,8 +107,8 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             bankrupt_threshold=cfg.env.bankrupt_threshold,
             seed=cfg.env.seed,
             leverage=cfg.env.leverage,
-            stoploss_levels=stoploss_levels,
-            takeprofit_levels=takeprofit_levels,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
             max_traj_length=max_traj_length,
             random_start=False,
         )

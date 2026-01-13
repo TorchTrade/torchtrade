@@ -112,23 +112,19 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
-    window_sizes = list(cfg.env.window_sizes)
-    stoploss_levels = list(cfg.env.stoploss_levels)
-    takeprofit_levels = list(cfg.env.takeprofit_levels)
-
     if not eval:
         config = LongOnlyOneStepEnvConfig(
             symbol=cfg.env.symbol,
             time_frames=cfg.env.time_frames,
-            window_sizes=window_sizes,
+            window_sizes=cfg.env.window_sizes,
             execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
             slippage=cfg.env.slippage,
             transaction_fee=cfg.env.transaction_fee,
             bankrupt_threshold=cfg.env.bankrupt_threshold,
-            stoploss_levels=stoploss_levels,
-            takeprofit_levels=takeprofit_levels,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
             seed=cfg.env.seed,
             max_traj_length=max_traj_length,
         )
@@ -137,15 +133,15 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
         config = SeqLongOnlySLTPEnvConfig(
             symbol=cfg.env.symbol,
             time_frames=cfg.env.time_frames,
-            window_sizes=window_sizes,
+            window_sizes=cfg.env.window_sizes,
             execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
             slippage=cfg.env.slippage,
             transaction_fee=cfg.env.transaction_fee,
             bankrupt_threshold=cfg.env.bankrupt_threshold,
-            stoploss_levels=stoploss_levels,
-            takeprofit_levels=takeprofit_levels,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
             seed=cfg.env.seed,
             max_traj_length=max_traj_length,
             random_start=False

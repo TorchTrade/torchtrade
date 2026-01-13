@@ -64,15 +64,10 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
     """Create a SeqFuturesSLTPEnv instance."""
-    # Convert Hydra ListConfig to regular Python lists
-    window_sizes = list(cfg.env.window_sizes)
-    stoploss_levels = list(cfg.env.stoploss_levels)
-    takeprofit_levels = list(cfg.env.takeprofit_levels)
-
     config = SeqFuturesSLTPEnvConfig(
         symbol=cfg.env.symbol,
         time_frames=cfg.env.time_frames,
-        window_sizes=window_sizes,
+        window_sizes=cfg.env.window_sizes,
         execute_on=cfg.env.execute_on,
         include_base_features=False,
         initial_cash=cfg.env.initial_cash,
@@ -83,8 +78,8 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
         max_traj_length=max_traj_length,
         random_start=random_start,
         leverage=cfg.env.leverage,
-        stoploss_levels=stoploss_levels,
-        takeprofit_levels=takeprofit_levels,
+        stoploss_levels=cfg.env.stoploss_levels,
+        takeprofit_levels=cfg.env.takeprofit_levels,
     )
     return SeqFuturesSLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
 

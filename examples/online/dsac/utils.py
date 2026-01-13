@@ -69,12 +69,10 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def env_maker(df, cfg, device="cpu"):
-    window_sizes = list(cfg.env.window_sizes)
-
     config = SeqLongOnlyEnvConfig(
         symbol=cfg.env.symbol,
         time_frames=cfg.env.time_frames,
-        window_sizes=window_sizes,
+        window_sizes=cfg.env.window_sizes,
         execute_on=cfg.env.execute_on,
         include_base_features=False,
         initial_cash=cfg.env.initial_cash,

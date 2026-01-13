@@ -64,13 +64,10 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
     """Create a SeqFuturesEnv instance."""
-    # Convert Hydra ListConfig to regular Python lists
-    window_sizes = list(cfg.env.window_sizes)
-
     config = SeqFuturesEnvConfig(
         symbol=cfg.env.symbol,
         time_frames=cfg.env.time_frames,
-        window_sizes=window_sizes,
+        window_sizes=cfg.env.window_sizes,
         execute_on=cfg.env.execute_on,
         include_base_features=False,
         initial_cash=cfg.env.initial_cash,
