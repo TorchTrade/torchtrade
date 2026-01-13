@@ -13,7 +13,7 @@ from torchrl.envs import EnvBase
 import torch
 from torchrl.data import Categorical, Bounded
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, InitialBalanceSampler
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, InitialBalanceSampler, normalize_timeframe_config
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 
 
@@ -34,13 +34,9 @@ class SeqFuturesEnvConfig:
     - Isolated/crossed margin
     """
     symbol: str = "BTC/USD"
-    time_frames: Union[List[TimeFrame], TimeFrame] = field(
-        default_factory=lambda: TimeFrame(1, TimeFrameUnit.Minute)
-    )
+    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Min"
     window_sizes: Union[List[int], int] = 10
-    execute_on: TimeFrame = field(
-        default_factory=lambda: TimeFrame(1, TimeFrameUnit.Minute)
-    )
+    execute_on: Union[str, TimeFrame] = "1Min"
 
     # Initial capital settings
     initial_cash: Union[Tuple[int, int], int] = (1000, 5000)
@@ -69,6 +65,11 @@ class SeqFuturesEnvConfig:
     # Reward settings
     reward_scaling: float = 1.0
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
+
+    def __post_init__(self):
+        self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
+            self.execute_on, self.time_frames, self.window_sizes
+        )
 
 
 class SeqFuturesEnv(EnvBase):
@@ -677,6 +678,14 @@ class SeqFuturesEnv(EnvBase):
         """Check if episode should terminate."""
         bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
         return portfolio_value < bankruptcy_threshold or self.step_counter >= self.max_steps
+
+    def get_market_data_keys(self) -> List[str]:
+        """Return the list of market data keys."""
+        return self.market_data_keys
+
+    def get_account_state(self) -> List[str]:
+        """Return the list of account state field names."""
+        return self.account_state
 
     def close(self):
         """Clean up resources."""

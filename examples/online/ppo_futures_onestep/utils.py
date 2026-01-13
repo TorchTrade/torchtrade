@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 
 import torch.nn
-from tensordict.nn import TensorDictModule
 from torchrl.envs import (
     DoubleToFloat,
     EnvCreator,
@@ -32,8 +31,6 @@ from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
 from torchtrade.envs import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
 from torchtrade.envs import FuturesOneStepEnv, FuturesOneStepEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, get_timeframe_unit
-import numpy as np
 import pandas as pd
 from torchrl.trainers.helpers.models import ACTIVATIONS
 
@@ -74,25 +71,13 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
     Training uses FuturesOneStepEnv (one-step GRPO-style training).
     Evaluation uses SeqFuturesSLTPEnv (sequential episodes with render_history).
     """
-    # Convert Hydra ListConfig to regular Python lists
-    window_sizes = list(cfg.env.window_sizes)
-    execute_on = list(cfg.env.execute_on)
-    stoploss_levels = list(cfg.env.stoploss_levels)
-    takeprofit_levels = list(cfg.env.takeprofit_levels)
-
-    time_frames = [
-        TimeFrame(t, get_timeframe_unit(f))
-        for t, f in zip(cfg.env.time_frames, cfg.env.freqs)
-    ]
-    execute_on = TimeFrame(execute_on[0], get_timeframe_unit(execute_on[1]))
-
     if not eval:
         # Training: use FuturesOneStepEnv for GRPO-style training
         config = FuturesOneStepEnvConfig(
             symbol=cfg.env.symbol,
-            time_frames=time_frames,
-            window_sizes=window_sizes,
-            execute_on=execute_on,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
             slippage=cfg.env.slippage,
@@ -100,8 +85,8 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             bankrupt_threshold=cfg.env.bankrupt_threshold,
             seed=cfg.env.seed,
             leverage=cfg.env.leverage,
-            stoploss_levels=stoploss_levels,
-            takeprofit_levels=takeprofit_levels,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
             max_traj_length=max_traj_length,
         )
         return FuturesOneStepEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
@@ -110,9 +95,9 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
         # Both envs have the same 19-action space (1 hold + 9 long + 9 short)
         config = SeqFuturesSLTPEnvConfig(
             symbol=cfg.env.symbol,
-            time_frames=time_frames,
-            window_sizes=window_sizes,
-            execute_on=execute_on,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
             slippage=cfg.env.slippage,
@@ -120,8 +105,8 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             bankrupt_threshold=cfg.env.bankrupt_threshold,
             seed=cfg.env.seed,
             leverage=cfg.env.leverage,
-            stoploss_levels=stoploss_levels,
-            takeprofit_levels=takeprofit_levels,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
             max_traj_length=max_traj_length,
             random_start=False,
         )
@@ -247,9 +232,9 @@ class BatchSafeWrapper(torch.nn.Module):
         return out
 
 
-def make_discrete_ppo_binmtabl_model(cfg, env, device):
-    """Make discrete PPO agent with BiNMTABL encoder."""
-    activation = "tanh"
+def make_discrete_ppo_model(cfg, env, device):
+    """Make discrete PPO agent """
+    activation = cfg.model.activation
     action_spec = env.action_spec
     market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
     assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"
@@ -257,14 +242,12 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
 
     time_frames = cfg.env.time_frames
     window_sizes = cfg.env.window_sizes
-    freqs = cfg.env.freqs
-    assert len(time_frames) == len(market_data_keys), f"Amount of time frames {len(time_frames)} and env market data keys do not match! Keys: {market_data_keys}"
 
     encoders = []
     num_features = env.observation_spec[market_data_keys[0]].shape[-1]
 
     # Build CNN encoders for market data
-    for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
+    for key, t, w in zip(market_data_keys, time_frames, window_sizes):
         model = SimpleCNNEncoder(
             input_shape=(w, num_features),
             output_shape=(1, 14),
@@ -277,7 +260,7 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
         encoders.append(SafeModule(
             module=model,
             in_keys=key,
-            out_keys=[f"encoding_{t}_{fre}_{w}"],
+            out_keys=[f"encoding_{t}_{w}"],
         ).to(device))
 
     # Account state encoder with SimpleMLPEncoder
@@ -309,7 +292,7 @@ def make_discrete_ppo_binmtabl_model(cfg, env, device):
 
     common_module = SafeModule(
         module=common,
-        in_keys=[f"encoding_{t}_{fre}_{w}" for t, w, fre in zip(time_frames, window_sizes, freqs)] + ["encoding_account_state"],
+        in_keys=[f"encoding_{t}_{w}" for t, w in zip(time_frames, window_sizes)] + ["encoding_account_state"],
         out_keys=["common_features"],
     )
     common_module = SafeSequential(*encoders, account_state_encoder, common_module)
@@ -366,7 +349,7 @@ def make_ppo_models(env, device, cfg):
         actor: The policy operator
         critic: The value operator
     """
-    common_module, policy_module, value_module = make_discrete_ppo_binmtabl_model(
+    common_module, policy_module, value_module = make_discrete_ppo_model(
         cfg,
         env,
         device=device,

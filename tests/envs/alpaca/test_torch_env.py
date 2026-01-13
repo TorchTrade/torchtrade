@@ -119,6 +119,7 @@ class TestAlpacaTorchTradingEnvInitialization:
         """Test initialization with multiple timeframes."""
         config = AlpacaTradingEnvConfig(
             symbol="BTC/USD",
+            time_frames=["1Min", "5Min"],
             window_sizes=[10, 20],
         )
 
