@@ -14,7 +14,6 @@ def main(cfg: DictConfig):  # noqa: F821
     import torch.optim
     import tqdm
     import wandb
-    from tensordict import TensorDict
     from tensordict.nn import CudaGraphModule
 
     from torchrl._utils import timeit
@@ -59,9 +58,7 @@ def main(cfg: DictConfig):  # noqa: F821
         max_eval_traj_length=max_eval_traj_length
     )
 
-    # Correct
     total_frames = cfg.collector.total_frames 
-    frames_per_batch = cfg.collector.frames_per_batch 
     test_interval = cfg.logger.test_interval 
 
     compile_mode = None

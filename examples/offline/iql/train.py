@@ -26,7 +26,7 @@ from utils import (
     log_metrics,
     make_environment,
     make_iql_optimizer,
-    make_discrete_iql_wavenet_model,
+    make_discrete_iql_model,
     make_discrete_loss,
     make_offline_replay_buffer,
 )
@@ -84,8 +84,7 @@ def main(cfg: DictConfig):  # noqa: F821
     replay_buffer = make_offline_replay_buffer(cfg.replay_buffer)
 
     # Create agent
-    #model = make_iql_model(cfg, train_env, eval_env, device)
-    model = make_discrete_iql_wavenet_model(cfg, eval_env, device)
+    model = make_discrete_iql_model(cfg, eval_env, device)
 
     # Create loss
     loss_module, target_net_updater = make_discrete_loss(cfg.loss, model, device=device)

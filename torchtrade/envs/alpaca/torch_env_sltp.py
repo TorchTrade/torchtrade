@@ -8,6 +8,7 @@ from itertools import product
 
 import numpy as np
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
 from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass, TradeMode
 from tensordict import TensorDict, TensorDictBase
@@ -42,13 +43,9 @@ class AlpacaSLTPTradingEnvConfig:
     represents a (stop_loss_pct, take_profit_pct) pair for bracket orders.
     """
     symbol: str = "BTC/USD"
-    time_frames: Union[List[TimeFrame], TimeFrame] = field(
-        default_factory=lambda: TimeFrame(1, TimeFrameUnit.Minute)
-    )
+    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Min"
     window_sizes: Union[List[int], int] = 10
-    execute_on: TimeFrame = field(
-        default_factory=lambda: TimeFrame(1, TimeFrameUnit.Minute)
-    )
+    execute_on: Union[str, TimeFrame] = "1Min"
     # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
     stoploss_levels: Tuple[float, ...] = (-0.025, -0.05, -0.1)
     # Take profit levels as percentages (positive values, e.g., 0.05 = 5%)
@@ -61,6 +58,11 @@ class AlpacaSLTPTradingEnvConfig:
     seed: Optional[int] = 42
     include_base_features: bool = False
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
+
+    def __post_init__(self):
+        self.execute_on, self.time_frames, self.window_sizes = normalize_alpaca_timeframe_config(
+            self.execute_on, self.time_frames, self.window_sizes
+        )
 
 
 class AlpacaSLTPTorchTradingEnv(EnvBase):
@@ -454,6 +456,14 @@ class AlpacaSLTPTorchTradingEnv(EnvBase):
 
         bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
         return portfolio_value < bankruptcy_threshold
+
+    def get_market_data_keys(self) -> List[str]:
+        """Return the list of market data keys."""
+        return self.market_data_keys
+
+    def get_account_state(self) -> List[str]:
+        """Return the list of account state field names."""
+        return self.account_state
 
     def close(self):
         """Clean up resources."""

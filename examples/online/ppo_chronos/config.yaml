@@ -1,5 +1,5 @@
 env:
-  name: SeqFuturesEnv
+  name: SeqFuturesSLTPEnv-Chronos
   symbol: "BTC/USD"
   time_frames: ["5Min", "15Min"]
   window_sizes: [10, 10]
@@ -9,9 +9,11 @@ env:
   slippage: 0.001
   bankrupt_threshold: 0.1
   leverage: 5  # 5x leverage
+  stoploss_levels: [-0.02]  # 2%, 5%, 10% stop loss
+  takeprofit_levels: [0.04, 0.06,]    # 5%, 10%, 20% take profit
   exp_name: ${logger.exp_name}
   seed: 0
-  train_envs: 5
+  train_envs: 10
   eval_envs: 1
   data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
   test_split_start: "2025-01-01"
@@ -19,26 +21,27 @@ env:
 # collector
 collector:
   device:
-  frames_per_batch: 10000
-  total_frames: 1_000_000
+  frames_per_batch: 100000
+  total_frames: 1_000_000_000
 
 # logger
 logger:
   mode: online
   backend: wandb
-  project_name: TorchTrade-Futures
+  project_name: TorchTrade-Chronos
   group_name: ${env.name}
-  exp_name: ppo_futures
-  test_interval: 100_000
+  exp_name: ppo_chronos_15min
+  test_interval: 10_000_000
   num_test_episodes: 1
 
 # model
 model:
   activation: tanh
+  chronos_model: "amazon/chronos-t5-small"  # Chronos small model for embeddings
 
 # optimization
 optim:
-  lr: 2.5e-4
+  lr: 1.0e-6
   eps: 1.0e-6
   weight_decay: 0.0
   max_grad_norm: 0.5
@@ -48,7 +51,7 @@ optim:
 # loss
 loss:
   gamma: 0.9
-  mini_batch_size: 3333
+  mini_batch_size: 33333
   ppo_epochs: 3
   gae_lambda: 0.95
   clip_epsilon: 0.1

@@ -1,11 +1,6 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-#
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
 from __future__ import annotations
 import functools
-
-import torch.nn
+import torch
 from torchrl.envs import (
     DoubleToFloat,
     EnvCreator,
@@ -29,7 +24,6 @@ from torchrl.modules import (
 from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
 from torchtrade.envs import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig, SeqLongOnlySLTPEnvConfig, SeqLongOnlySLTPEnv
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, get_timeframe_unit
 import pandas as pd
 from torchrl.trainers.helpers.models import ACTIVATIONS
 
@@ -48,78 +42,23 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy().reset_index(drop=False)
 
-    # --- Basic features ---
-    # Log returns
-    # df["features_return_log"] = np.log(df["close"]).diff()
     df["features_close"] = df["close"]
     df["features_open"] = df["open"]
     df["features_high"] = df["high"]
     df["features_low"] = df["low"]
     df["features_volume"] = df["volume"]
 
-    # # Rolling volatility (5-period)
-    # df["features_volatility"] = df["features_return_log"].rolling(window=5).std()
-
-    # # ATR (14) normalized
-    # df["features_atr"] = ta.volatility.AverageTrueRange(
-    #     high=df["high"], low=df["low"], close=df["close"], window=14
-    # ).average_true_range() / df["close"]
-
-    # --- Momentum & trend ---
-    # ema_12 = ta.trend.EMAIndicator(close=df["close"], window=12).ema_indicator()
-    # ema_24 = ta.trend.EMAIndicator(close=df["close"], window=24).ema_indicator()
-    # df["features_ema_12"] = ema_12
-    # df["features_ema_24"] = ema_24
-    #df["features_ema_slope"] = ema_12.diff()
-
-    # macd = ta.trend.MACD(close=df["close"], window_slow=26, window_fast=12, window_sign=9)
-    # df["features_macd_hist"] = macd.macd_diff()
-
-    # df["features_rsi_14"] = ta.momentum.RSIIndicator(close=df["close"], window=14).rsi()
-
-    # # --- Volatility bands ---
-    # bb = ta.volatility.BollingerBands(close=df["close"], window=20, window_dev=2)
-    # df["features_bb_pct"] = bb.bollinger_pband()
-
-    # --- Volume / flow ---
-    # df["features_volume_z"] = (
-    #     (df["volume"] - df["volume"].rolling(20).mean()) /
-    #     df["volume"].rolling(20).std()
-    # )
-    # df["features_vwap_dev"] = df["close"] - (
-    #     (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
-    # )
-
-    # # --- Candle structure ---
-    # df["features_body_ratio"] = (df["close"] - df["open"]) / (df["high"] - df["low"] + 1e-9)
-    # df["features_upper_wick"] = (df["high"] - df[["close", "open"]].max(axis=1)) / (
-    #     df["high"] - df["low"] + 1e-9
-    # )
-    # df["features_lower_wick"] = (df[["close", "open"]].min(axis=1) - df["low"]) / (
-    #     df["high"] - df["low"] + 1e-9
-    #)
-
-    # Drop rows with NaN from indicators
-    #df.dropna(inplace=True)
     df.fillna(0, inplace=True)
-
 
     return df
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
-
-    window_sizes = cfg.env.window_sizes
-    execute_on = cfg.env.execute_on
-
-    time_frames = [TimeFrame(t, get_timeframe_unit(f)) for t, f in zip(cfg.env.time_frames, cfg.env.freqs)]
-    execute_on=TimeFrame(execute_on[0], get_timeframe_unit(execute_on[1]))
-
     if not eval:
         config = LongOnlyOneStepEnvConfig(
             symbol=cfg.env.symbol,
-            time_frames=time_frames,
-            window_sizes=window_sizes,
-            execute_on=execute_on,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
             slippage=cfg.env.slippage,
@@ -134,9 +73,9 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
     else:
         config = SeqLongOnlySLTPEnvConfig(
             symbol=cfg.env.symbol,
-            time_frames=time_frames,
-            window_sizes=window_sizes,
-            execute_on=execute_on,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
             include_base_features=False,
             initial_cash=cfg.env.initial_cash,
             slippage=cfg.env.slippage,
@@ -225,7 +164,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1,
 # --------------------------------------------------------------------
 
 
-def make_discrete_grpo_binmtabl_model(cfg, env, device):
+def make_discrete_grpo_model(cfg, env, device):
     """Make discrete PPO agent."""
     # Define Actor Network
     activation = "tanh"
@@ -236,14 +175,12 @@ def make_discrete_grpo_binmtabl_model(cfg, env, device):
     # Define Actor Network
     time_frames = cfg.env.time_frames
     window_sizes = cfg.env.window_sizes
-    freqs = cfg.env.freqs
-    assert len(time_frames) == len(market_data_keys), f"Amount of time frames {len(time_frames)} and env market data keys do not match! Keys: {market_data_keys}"
     encoders = []
 
     num_features = env.observation_spec[market_data_keys[0]].shape[-1]
     
     # Build the encoder
-    for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
+    for key, t, w in zip(market_data_keys, time_frames, window_sizes):
     
         model = SimpleCNNEncoder(input_shape=(w, num_features),
                             output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
@@ -255,7 +192,7 @@ def make_discrete_grpo_binmtabl_model(cfg, env, device):
         encoders.append(SafeModule(
             module=model,
             in_keys=key,
-            out_keys=[f"encoding_{t}_{fre}_{w}"],
+            out_keys=[f"encoding_{t}_{w}"],
         ).to(device))
 
 
@@ -284,7 +221,7 @@ def make_discrete_grpo_binmtabl_model(cfg, env, device):
 
     common_module = SafeModule(
         module=common,
-        in_keys=[f"encoding_{t}_{fre}_{w}" for t, w, fre in zip(time_frames, window_sizes, freqs)] + ["encoding_account_state"],
+        in_keys=[f"encoding_{t}_{w}" for t, w in zip(time_frames, window_sizes)] + ["encoding_account_state"],
         out_keys=["common_features"],
     )
     action_out_features = action_spec.n
@@ -321,7 +258,7 @@ def make_discrete_grpo_binmtabl_model(cfg, env, device):
     return policy
 
 def make_grpo_policy(env, device, cfg):
-    policy = make_discrete_grpo_binmtabl_model(
+    policy = make_discrete_grpo_model(
         cfg,
         env,
         device=device,

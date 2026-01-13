@@ -8,7 +8,6 @@ from torchrl.envs import TransformedEnv, Compose, InitTracker, RewardSum
 from tensordict import TensorDict
 
 from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, get_timeframe_unit
 from torchtrade.envs.transforms import ChronosEmbeddingTransform
 from tests.envs.transforms.conftest import mock_chronos_pipeline
 
@@ -36,17 +35,11 @@ class TestChronosEmbeddingIntegration:
         """Test ChronosEmbeddingTransform with SeqLongOnlyEnv."""
         with mock_chronos_pipeline(embedding_dim=256):
             # Create base environment
-            time_frames = [
-                TimeFrame(t, get_timeframe_unit(f))
-                for t, f in zip([1, 5], ["Min", "Min"])
-            ]
-            execute_on = TimeFrame(5, get_timeframe_unit("Min"))
-
             config = SeqLongOnlyEnvConfig(
                 symbol="BTC/USD",
-                time_frames=time_frames,
+                time_frames=["1Min", "5Min"],
                 window_sizes=[10, 8],
-                execute_on=execute_on,
+                execute_on="5Min",
                 initial_cash=1000,
             )
             base_env = SeqLongOnlyEnv(sample_ohlcv_df, config)
@@ -89,9 +82,9 @@ class TestChronosEmbeddingIntegration:
             # Create environment with multiple timeframes
             config = SeqLongOnlyEnvConfig(
                 symbol="BTC/USD",
-                time_frames=[TimeFrame(t, get_timeframe_unit(f)) for t, f in zip([1, 5, 15], ["Min", "Min", "Min"])],
+                time_frames=["1Min", "5Min", "15Min"],
                 window_sizes=[10, 8, 6],
-                execute_on=TimeFrame(5, get_timeframe_unit("Min")),
+                execute_on="5Min",
                 initial_cash=1000,
             )
             base_env = SeqLongOnlyEnv(sample_ohlcv_df, config)
@@ -135,9 +128,9 @@ class TestChronosEmbeddingIntegration:
         with mock_chronos_pipeline(embedding_dim=128):
             config = SeqLongOnlyEnvConfig(
                 symbol="BTC/USD",
-                time_frames=[TimeFrame(t, get_timeframe_unit(f)) for t, f in zip([1, 5], ["Min", "Min"])],
+                time_frames=["1Min", "5Min"],
                 window_sizes=[10, 8],
-                execute_on=TimeFrame(5, get_timeframe_unit("Min")),
+                execute_on="5Min",
                 initial_cash=1000,
             )
             base_env = SeqLongOnlyEnv(sample_ohlcv_df, config)
@@ -166,9 +159,9 @@ class TestChronosEmbeddingIntegration:
         with mock_chronos_pipeline(embedding_dim=256):
             config = SeqLongOnlyEnvConfig(
                 symbol="BTC/USD",
-                time_frames=[TimeFrame(t, get_timeframe_unit(f)) for t, f in zip([1], ["Min"])],
+                time_frames=["1Min"],
                 window_sizes=[10],
-                execute_on=TimeFrame(5, get_timeframe_unit("Min")),
+                execute_on="5Min",
                 initial_cash=1000,
             )
             base_env = SeqLongOnlyEnv(sample_ohlcv_df, config)
@@ -200,9 +193,9 @@ class TestChronosEmbeddingIntegration:
         with mock_chronos_pipeline(embedding_dim=128):
             config = SeqLongOnlyEnvConfig(
                 symbol="BTC/USD",
-                time_frames=[TimeFrame(t, get_timeframe_unit(f)) for t, f in zip([1], ["Min"])],
+                time_frames=["1Min"],
                 window_sizes=[10],
-                execute_on=TimeFrame(5, get_timeframe_unit("Min")),
+                execute_on="5Min",
                 initial_cash=1000,
             )
             base_env = SeqLongOnlyEnv(sample_ohlcv_df, config)
@@ -230,9 +223,9 @@ class TestChronosEmbeddingIntegration:
         with mock_chronos_pipeline(embedding_dim=128):
             config = SeqLongOnlyEnvConfig(
                 symbol="BTC/USD",
-                time_frames=[TimeFrame(t, get_timeframe_unit(f)) for t, f in zip([1, 5], ["Min", "Min"])],
+                time_frames=["1Min", "5Min"],
                 window_sizes=[10, 8],
-                execute_on=TimeFrame(5, get_timeframe_unit("Min")),
+                execute_on="5Min",
                 initial_cash=1000,
             )
             base_env = SeqLongOnlyEnv(sample_ohlcv_df, config)
@@ -275,9 +268,9 @@ class TestChronosEmbeddingPerformance:
         with mock_chronos_pipeline(embedding_dim=128):
             config = SeqLongOnlyEnvConfig(
                 symbol="BTC/USD",
-                time_frames=[TimeFrame(t, get_timeframe_unit(f)) for t, f in zip([1], ["Min"])],
+                time_frames=["1Min"],
                 window_sizes=[10],
-                execute_on=TimeFrame(5, get_timeframe_unit("Min")),
+                execute_on="5Min",
                 initial_cash=1000,
             )
             base_env = SeqLongOnlyEnv(sample_ohlcv_df, config)

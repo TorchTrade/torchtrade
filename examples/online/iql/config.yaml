@@ -2,10 +2,9 @@
 env:
   name: SeqLongOnlyEnv
   symbol: "BTC/USD"
-  freqs: ["Min", "Min", "Min", "Hour"]
-  time_frames: [1, 5, 15, 60]
-  window_sizes: [12, 8, 8, 24]
-  execute_on: 5
+  time_frames: ["5Min", "15Min"]
+  window_sizes: [10, 10]
+  execute_on: "15Min"
   initial_cash: 1000
   transaction_fee: 0.015
   slippage: 0.01

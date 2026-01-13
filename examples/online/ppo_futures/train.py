@@ -30,7 +30,6 @@ def main(cfg: DictConfig):  # noqa: F821
     from torchrl.objectives.value.advantages import GAE
     from torchrl.record.loggers import generate_exp_name, get_logger
     from utils import make_environment, make_ppo_models, make_collector, log_metrics
-    from torchtrade.envs.transforms import CoverageTracker
 
     torch.set_float32_matmul_precision("high")
 
