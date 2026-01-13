@@ -102,7 +102,12 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
         self.rollout_returns = []
         self.episode_idx = 0
 
-        # Force random_start to True for one-step environments
+        # Force random_start to True for one-step environments (contextual bandit setting requires diverse starts)
+        if not config.random_start:
+            logger.warning(
+                "LongOnlyOneStepEnv requires random_start=True for proper one-step/contextual bandit training. "
+                "Ignoring config.random_start=False and forcing random_start=True."
+            )
         self.random_start = True
 
 
@@ -296,8 +301,8 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
             # Get base price and apply noise to simulate slippage
             if base_price is None:
                 base_price = self.sampler.get_base_features(self.current_timestamp)["close"]
-            # Apply ±5% noise to the price to simulate market slippage
-            price_noise_factor = 1.0 #self.np_rng.uniform(1 - self.slippage, 1 + self.slippage)
+            # Apply noise to the price to simulate market slippage
+            price_noise_factor = torch.empty(1,).uniform_(1 - self.slippage, 1 + self.slippage).item()
             execution_price = base_price * price_noise_factor
             logger.debug(f"Execution price: {execution_price}")
             
