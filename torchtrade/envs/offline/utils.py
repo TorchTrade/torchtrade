@@ -4,6 +4,53 @@ from itertools import product
 import pandas as pd
 import numpy as np
 
+
+def normalize_timeframe_config(
+    execute_on: "TimeFrame",
+    time_frames: Union[List["TimeFrame"], "TimeFrame"],
+    window_sizes: Union[List[int], int]
+) -> Tuple["TimeFrame", List["TimeFrame"], List[int]]:
+    """
+    Normalize timeframe configuration to consistent list format.
+
+    Converts single TimeFrame/int to lists and validates that lengths match.
+    Used in config __post_init__ for early validation and normalization.
+
+    Args:
+        execute_on: TimeFrame for trade execution
+        time_frames: Single TimeFrame or list of TimeFrames for observation windows
+        window_sizes: Single int or list of ints for window sizes
+
+    Returns:
+        Tuple of (execute_on, time_frames_list, window_sizes_list)
+
+    Raises:
+        ValueError: If window_sizes length doesn't match time_frames length
+
+    Example:
+        >>> tf = TimeFrame(1, TimeFrameUnit.Minute)
+        >>> execute_on, tfs, sizes = normalize_timeframe_config(tf, tf, 10)
+        >>> assert isinstance(tfs, list) and len(tfs) == 1
+        >>> assert isinstance(sizes, list) and len(sizes) == 1
+    """
+    # Normalize time_frames to list
+    if not isinstance(time_frames, list):
+        time_frames = [time_frames]
+
+    # Normalize window_sizes to list
+    if isinstance(window_sizes, int):
+        window_sizes = [window_sizes] * len(time_frames)
+
+    # Validate lengths match
+    if len(window_sizes) != len(time_frames):
+        raise ValueError(
+            f"window_sizes length ({len(window_sizes)}) must match "
+            f"time_frames length ({len(time_frames)})"
+        )
+
+    return execute_on, time_frames, window_sizes
+
+
 def get_timeframe_unit(tf_str: "Min"):
     if tf_str == "Min" or tf_str == "min" or tf_str == "Minute":
         return TimeFrameUnit.Minute
