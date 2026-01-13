@@ -91,6 +91,12 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
     - Zero for no position
     """
 
+    # Futures-specific account state (includes leverage, margin_ratio, liquidation_price)
+    ACCOUNT_STATE = [
+        "cash", "position_size", "position_value", "entry_price", "current_price",
+        "unrealized_pnlpct", "leverage", "margin_ratio", "liquidation_price", "holding_time"
+    ]
+
     def __init__(
         self,
         df: pd.DataFrame,
@@ -121,13 +127,9 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         # Define action spec
         self.action_spec = Categorical(len(self.action_levels))
 
-        # Build observation specs with futures-specific account state
-        account_state = [
-            "cash", "position_size", "position_value", "entry_price", "current_price",
-            "unrealized_pnlpct", "leverage", "margin_ratio", "liquidation_price", "holding_time"
-        ]
+        # Build observation specs using class constant
         num_features = len(self.sampler.get_feature_keys())
-        self._build_observation_specs(account_state, num_features)
+        self._build_observation_specs(self.ACCOUNT_STATE, num_features)
 
         # Initialize futures-specific state
         self.unrealized_pnl = 0.0
@@ -255,8 +257,6 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         self.unrealized_pnl = 0.0
         self.unrealized_pnl_pct = 0.0
         self.liquidation_price = 0.0
-        # Reset position history
-        self.position_history = []
 
     def _reset_history(self):
         """Reset all history tracking arrays including position history."""

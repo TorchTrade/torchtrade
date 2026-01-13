@@ -238,14 +238,26 @@ def default_log_return(old_portfolio_value: float, new_portfolio_value: float) -
         new_portfolio_value: Portfolio value after action
 
     Returns:
-        Log return reward, or 0.0 if either portfolio value is invalid (<= 0)
+        Log return reward
+
+    Raises:
+        ValueError: If either portfolio value is invalid (<= 0), which indicates
+                   bankruptcy, data corruption, or a calculation error
 
     Note:
         This function doesn't require a RewardContext, making it more efficient
         for the default case. Use this when you don't need custom reward logic.
     """
-    if old_portfolio_value <= 0 or new_portfolio_value <= 0:
-        return 0.0
+    if old_portfolio_value <= 0:
+        raise ValueError(
+            f"Invalid old_portfolio_value: {old_portfolio_value}. "
+            f"Portfolio value must be positive. This indicates bankruptcy or a calculation error."
+        )
+    if new_portfolio_value <= 0:
+        raise ValueError(
+            f"Invalid new_portfolio_value: {new_portfolio_value}. "
+            f"Portfolio value must be positive. This indicates bankruptcy or a calculation error."
+        )
     return float(np.log(new_portfolio_value / old_portfolio_value))
 
 
