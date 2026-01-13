@@ -196,8 +196,10 @@ class FuturesOneStepEnv(EnvBase):
         self.account_state_key = "account_state"
 
         # Account state spec (10 elements for futures)
+        self.account_state = ["cash", "position_size", "position_value", "entry_price", "current_price",
+                              "unrealized_pnlpct", "leverage", "margin_ratio", "liquidation_price", "holding_time"]
         account_state_spec = Bounded(
-            low=-torch.inf, high=torch.inf, shape=(10,), dtype=torch.float
+            low=-torch.inf, high=torch.inf, shape=(len(self.account_state),), dtype=torch.float
         )
 
         self.market_data_keys = []
