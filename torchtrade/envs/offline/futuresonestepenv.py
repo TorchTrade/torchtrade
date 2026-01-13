@@ -774,6 +774,14 @@ class FuturesOneStepEnv(EnvBase):
         bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
         return portfolio_value < bankruptcy_threshold or self.step_counter >= self.max_steps
 
+    def get_market_data_keys(self) -> List[str]:
+        """Return the list of market data keys."""
+        return self.market_data_keys
+
+    def get_account_state(self) -> List[str]:
+        """Return the list of account state field names."""
+        return self.account_state
+
     def close(self):
         """Clean up resources."""
         pass
