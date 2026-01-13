@@ -206,17 +206,14 @@ def make_discrete_iql_model(cfg, env, device):
     # Define Actor Network
     time_frames = cfg.env.time_frames
     window_sizes = cfg.env.window_sizes
-    # Extract frequency units from timeframe strings (e.g., "5Min" -> "min")
-    import re
-    freqs = [re.sub(r'\d+', '', tf).lower() for tf in time_frames]
-    assert len(time_frames) == len(market_data_keys), f"Amount of time frames {len(time_frames)} and env market data keys do not match! Keys: {market_data_keys}"
+
     encoders = []
 
     # Get number of features from environment observation spec
     num_features = env.observation_spec[market_data_keys[0]].shape[-1]
 
     # Build the encoder
-    for key, t, w, fre in zip(market_data_keys, time_frames, window_sizes, freqs):
+    for key, t, w in zip(market_data_keys, time_frames, window_sizes):
 
         model = SimpleCNNEncoder(input_shape=(w, num_features),
                             output_shape=(1, 14), # if None, the output shape will be the same as the input shape otherwise you have to provide the output shape (out_seq, out_feat)
@@ -228,7 +225,7 @@ def make_discrete_iql_model(cfg, env, device):
         encoders.append(SafeModule(
             module=model,
             in_keys=key,
-            out_keys=[f"encoding_{t}_{fre}_{w}"],
+            out_keys=[f"encoding_{t}_{w}"],
         ).to(device))
 
     account_state_encoder = SafeModule(
@@ -254,7 +251,7 @@ def make_discrete_iql_model(cfg, env, device):
 
     actor_module = SafeModule(
         module=actor_net,
-        in_keys=[f"encoding_{t}_{fre}_{w}" for t, w, fre in zip(time_frames, window_sizes, freqs)] + ["encoding_account_state"],
+        in_keys=[f"encoding_{t}_{w}" for t, w in zip(time_frames, window_sizes)] + ["encoding_account_state"],
         out_keys=["logits"],
     )
     full_actor = SafeSequential(encoder, actor_module)
@@ -280,7 +277,7 @@ def make_discrete_iql_model(cfg, env, device):
     
     qvalue = SafeModule(
         module=qvalue_net,
-        in_keys=[f"encoding_{t}_{fre}_{w}" for t, w, fre in zip(time_frames, window_sizes, freqs)] + ["encoding_account_state"],
+        in_keys=[f"encoding_{t}_{w}" for t, w in zip(time_frames, window_sizes)] + ["encoding_account_state"],
         out_keys=["state_action_value"],
     )
     full_qvalue = SafeSequential(copy.deepcopy(encoder), qvalue)
@@ -294,7 +291,7 @@ def make_discrete_iql_model(cfg, env, device):
     )
     value_net = SafeModule(
         module=value_net,
-        in_keys=[f"encoding_{t}_{fre}_{w}" for t, w, fre in zip(time_frames, window_sizes, freqs)] + ["encoding_account_state"],
+        in_keys=[f"encoding_{t}_{w}" for t, w in zip(time_frames, window_sizes)] + ["encoding_account_state"],
         out_keys=["state_value"],
     )   
     full_value = SafeSequential(copy.deepcopy(encoder), value_net)
