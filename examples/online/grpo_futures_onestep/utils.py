@@ -230,8 +230,8 @@ class BatchSafeWrapper(torch.nn.Module):
         return out
 
 
-def make_discrete_grpo_binmtabl_model(cfg, env, device):
-    """Make discrete GRPO agent with BiNMTABL encoder (same as PPO)."""
+def make_discrete_grpo_model(cfg, env, device):
+    """Make discrete GRPO agent encoder (same as PPO)."""
     activation = "tanh"
     action_spec = env.action_spec
     market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
@@ -328,7 +328,7 @@ def make_discrete_grpo_binmtabl_model(cfg, env, device):
 
 def make_grpo_policy(env, device, cfg):
     """Create GRPO policy."""
-    policy = make_discrete_grpo_binmtabl_model(
+    policy = make_discrete_grpo_model(
         cfg,
         env,
         device=device,

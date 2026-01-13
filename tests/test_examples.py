@@ -407,17 +407,19 @@ EXAMPLE_COMMANDS = {
 
     "grpo_longonlyonestep": (
         "python examples/online/long_onestep_env/train.py "
-        "collector.total_frames=100 "
-        "collector.frames_per_batch=50 "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=5 "
         "env.train_envs=2 "
         "logger.backend= "
+        "logger.test_interval=1000000 "
     ),
     "grpo_futuresonestep": (
         "python examples/online/grpo_futures_onestep/train.py "
-        "collector.total_frames=100 "
-        "collector.frames_per_batch=50 "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=5 "
         "env.train_envs=2 "
         "logger.backend= "
+        "logger.test_interval=1000000 "
     ),
 
     # ==========================================================================
@@ -426,8 +428,8 @@ EXAMPLE_COMMANDS = {
 
     "ppo_seqlongonlysltp": (
         "python examples/online/ppo/train.py "
-        "collector.total_frames=100 "
-        "collector.frames_per_batch=50 "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=5 "
         "env.train_envs=2 "
         "loss.mini_batch_size=25 "
         "logger.backend= "
@@ -435,8 +437,8 @@ EXAMPLE_COMMANDS = {
     ),
     "ppo_longonlyonestep": (
         "python examples/online/long_onestep_env/train_ppo.py "
-        "collector.total_frames=100 "
-        "collector.frames_per_batch=50 "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=5 "
         "env.train_envs=2 "
         "loss.mini_batch_size=25 "
         "logger.backend= "
@@ -444,28 +446,28 @@ EXAMPLE_COMMANDS = {
     ),
     "ppo_futuresonestep": (
         "python examples/online/ppo_futures_onestep/train.py "
-        "collector.total_frames=100 "
-        "collector.frames_per_batch=50 "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=5 "
         "env.train_envs=2 "
-        "loss.mini_batch_size=25 "
+        "loss.mini_batch_size=5 "
         "logger.backend= "
         "logger.test_interval=1000000 "
     ),
     "ppo_seqfutures": (
         "python examples/online/ppo_futures/train.py "
-        "collector.total_frames=100 "
-        "collector.frames_per_batch=50 "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=5 "
         "env.train_envs=2 "
-        "loss.mini_batch_size=25 "
+        "loss.mini_batch_size=5 "
         "logger.backend= "
         "logger.test_interval=1000000 "
     ),
     "ppo_seqfuturessltp": (
         "python examples/online/ppo_futures_sltp/train.py "
-        "collector.total_frames=100 "
-        "collector.frames_per_batch=50 "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=5 "
         "env.train_envs=2 "
-        "loss.mini_batch_size=25 "
+        "loss.mini_batch_size=5 "
         "logger.backend= "
         "logger.test_interval=1000000 "
     ),
@@ -476,12 +478,12 @@ EXAMPLE_COMMANDS = {
 
     "iql_online": (
         "python examples/online/iql/train.py "
-        "collector.total_frames=100 "
-        "collector.frames_per_batch=50 "
-        "collector.init_random_frames=10 "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=5 "
+        "collector.init_random_frames=5 "
         "env.train_envs=2 "
-        "replay_buffer.batch_size=16 "
-        "replay_buffer.buffer_size=100 "
+        "replay_buffer.batch_size=5 "
+        "replay_buffer.buffer_size=20 "
         "logger.backend= "
         "logger.eval_iter=1000000 "
     ),
@@ -504,13 +506,13 @@ EXAMPLE_COMMANDS = {
 
     "dsac_online": (
         "python examples/online/dsac/train.py "
-        "collector.total_frames=100 "
-        "collector.frames_per_batch=50 "
-        "collector.init_random_frames=10 "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=5 "
+        "collector.init_random_frames=5 "
         "env.train_envs=2 "
         "env.eval_envs=2 "
-        "optim.batch_size=16 "
-        "replay_buffer.size=100 "
+        "optim.batch_size=5 "
+        "replay_buffer.size=20 "
         "logger.backend= "
         "logger.eval_iter=1000000 "
     ),
