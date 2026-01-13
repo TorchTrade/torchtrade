@@ -8,15 +8,12 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 import numpy as np
-from torchtrade.envs.offline.sampler import MarketDataObservationSampler
 from tensordict import TensorDict, TensorDictBase
-from torchrl.data.tensor_specs import CompositeSpec
-from torchrl.envs import EnvBase
 import torch
-from torchrl.data import Bounded, MultiCategorical, Categorical
+from torchrl.data import Categorical
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, InitialBalanceSampler, build_sltp_action_map, normalize_timeframe_config
-from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
+from torchtrade.envs.offline.base import TorchTradeOfflineEnv
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, build_sltp_action_map, normalize_timeframe_config
 
 @dataclass
 class SeqLongOnlySLTPEnvConfig:
@@ -43,47 +40,30 @@ class SeqLongOnlySLTPEnvConfig:
             self.execute_on, self.time_frames, self.window_sizes
         )
 
-class SeqLongOnlySLTPEnv(EnvBase):
+class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
+    """Sequential long-only trading environment with stop-loss/take-profit support.
+
+    Supports combinatorial action space with configurable SL/TP levels.
+    """
+
     def __init__(self, df: pd.DataFrame, config: SeqLongOnlySLTPEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
-        self.action_levels = [0.0, 1.0]  #Do-Nothing, Buy-all
-        self.config = config
+        """
+        Initialize the sequential long-only SLTP environment.
 
-        # Validate custom reward function signature if provided
-        if config.reward_function is not None:
-            validate_reward_function(config.reward_function)
+        Args:
+            df: OHLCV DataFrame for backtesting
+            config: Environment configuration
+            feature_preprocessing_fn: Optional function to preprocess features
+        """
+        # Initialize base class (handles sampler, history, balance, transaction fee validation, etc.)
+        super().__init__(df, config, feature_preprocessing_fn)
 
-        self.transaction_fee = config.transaction_fee
-        self.slippage = config.slippage
-        if not (0 <= config.transaction_fee <= 1):
-            raise ValueError("Transaction fee must be between 0 and 1 (e.g., 0.025 for 2.5%).")
-        if not (0 <= config.slippage <= 1):
-            raise ValueError("Slippage must be between 0 and 1 (e.g., 0.05 for 5%).")
-
-        self.sampler = MarketDataObservationSampler(
-            df,
-            time_frames=config.time_frames,
-            window_sizes=config.window_sizes,
-            execute_on=config.execute_on,
-            feature_processing_fn=feature_preprocessing_fn,
-            features_start_with="features_",
-            max_traj_length=config.max_traj_length,
-        )
-        self.random_start = config.random_start
-        self.max_traj_length = config.max_traj_length
-        # Execute trades on the specified time frame
-        self.execute_on_value = config.execute_on.value
-        self.execute_on_unit = config.execute_on.unit.value
-
-        # reset settings
-        self.initial_cash = config.initial_cash
-        self.initial_cash_sampler = InitialBalanceSampler(config.initial_cash, config.seed)
-        self.position_hold_counter = 0
-
-        # action levels
+        # Environment-specific configuration
+        self.action_levels = [0.0, 1.0]  # Do-Nothing, Buy-all
         self.stoploss_levels = config.stoploss_levels
         self.takeprofit_levels = config.takeprofit_levels
 
-        # Define action and observation spaces sell, hold (do nothing), buy
+        # Define action and observation spaces
         self.action_map = build_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
@@ -92,68 +72,36 @@ class SeqLongOnlySLTPEnv(EnvBase):
         )
         self.action_spec = Categorical(len(self.action_map))
 
-        # Get the number of features from the observer
-        market_data_keys = self.sampler.get_observation_keys()
+        # Build observation specs
+        account_state = [
+            "cash", "position_size", "position_value", "entry_price",
+            "current_price", "unrealized_pnlpct", "holding_time"
+        ]
         num_features = len(self.sampler.get_feature_keys())
+        self._build_observation_specs(account_state, num_features)
 
-        # Observation space includes market data features and current position info
-        self.observation_spec = CompositeSpec(shape=())
-           
-        self.market_data_key = "market_data"
-        self.account_state_key = "account_state"
-
-        # Account state spec: [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpct, holding_time]
-        self.account_state = ["cash", "position_size", "position_value", "entry_price", "current_price", "unrealized_pnlpct", "holding_time"]
-        account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(len(self.account_state),), dtype=torch.float)
-        self.market_data_keys = []
-        for i, market_data_name in enumerate(market_data_keys):
-            market_data_key = "market_data_" + market_data_name + "_" + str(config.window_sizes[i])
-            market_data_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(config.window_sizes[i], num_features), dtype=torch.float)
-            self.observation_spec.set(market_data_key, market_data_spec)
-            self.market_data_keys.append(market_data_key)
-        self.observation_spec.set(self.account_state_key, account_state_spec)
-
-        # Add coverage tracking indices to observation spec (only when random_start=True)
-        if self.random_start:
-            from torchrl.data.tensor_specs import Unbounded
-            # reset_index: tracks episode start position diversity
-            self.observation_spec.set(
-                "reset_index",
-                Unbounded(shape=(), dtype=torch.long)
-            )
-            # state_index: tracks all timesteps visited during episodes
-            self.observation_spec.set(
-                "state_index",
-                Unbounded(shape=(), dtype=torch.long)
-            )
-
-        self.reward_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(1,), dtype=torch.float)
-        self.max_steps = self.sampler.get_max_steps()
-        self.step_counter = 0
-
-        self.base_price_history = []
-        self.action_history = []
-        self.reward_history = []
-        self.portfolio_value_history = []
-        super().__init__()
+        # Initialize SLTP-specific state
+        self.stop_loss = 0.0
+        self.take_profit = 0.0
 
 
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
-        # Get market data
-        obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
-
-        # Cache base features for the new timestamp (avoids redundant calls)
-        self._cached_base_features = self.sampler.get_base_features(self.current_timestamp)
+        # Get market data (scaffold sets current_timestamp, truncated, and caches base features)
+        obs_dict = self._get_observation_scaffold()
         current_price = self._cached_base_features["close"]
+
+        # Update position value and unrealized PnL
         self.position_value = round(self.position_size * current_price, 3)
         if self.position_size > 0:
-            self.unrealized_pnlpc = round((current_price - self.entry_price) / self.entry_price, 4)
+            self.unrealized_pnlpc = round(
+                (current_price - self.entry_price) / self.entry_price, 4
+            )
         else:
             self.unrealized_pnlpc = 0.0
 
-        # Get account state
-        account_state = [
+        # Build account state
+        account_state = torch.tensor([
             self.balance,
             self.position_size,
             self.position_value,
@@ -161,112 +109,19 @@ class SeqLongOnlySLTPEnv(EnvBase):
             current_price,
             self.unrealized_pnlpc,
             self.position_hold_counter
-        ]
-        account_state = torch.tensor(account_state, dtype=torch.float)
+        ], dtype=torch.float)
 
+        # Combine account state and market data
         obs_data = {self.account_state_key: account_state}
         obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
+
         return TensorDict(obs_data, batch_size=())
 
-    def _calculate_reward(
-        self,
-        old_portfolio_value: float,
-        new_portfolio_value: float,
-        action: float,
-        trade_info: Dict,
-    ) -> float:
-        """
-        Calculate reward using custom or default function.
-
-        If config.reward_function is provided, uses that custom function.
-        Otherwise, uses the default log return reward.
-
-        Args:
-            old_portfolio_value: Portfolio value before action
-            new_portfolio_value: Portfolio value after action
-            action: Action taken
-            trade_info: Dictionary with trade execution details
-
-        Returns:
-            Reward value (float)
-        """
-        # Use custom reward function if provided
-        if self.config.reward_function is not None:
-            # Compute buy & hold value if terminal
-            is_terminal = self.step_counter >= self.max_traj_length - 1
-            buy_and_hold_value = None
-            if is_terminal and len(self.base_price_history) > 0:
-                buy_and_hold_value = (
-                    self.initial_portfolio_value / self.base_price_history[0]
-                ) * self.base_price_history[-1]
-
-            ctx = build_reward_context(
-                self,
-                old_portfolio_value,
-                new_portfolio_value,
-                action,
-                trade_info,
-                portfolio_value_history=self.portfolio_value_history,
-                action_history=self.action_history,
-                reward_history=self.reward_history,
-                base_price_history=self.base_price_history,
-                initial_portfolio_value=self.initial_portfolio_value,
-                buy_and_hold_value=buy_and_hold_value,
-            )
-            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
-
-        # Otherwise use default log return (no context needed)
-        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
-
-
-
-    def _get_portfolio_value(self, current_price: float = None) -> float:
-        """Calculate total portfolio value."""
-        if current_price is None:
-            current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
-        return self.balance + self.position_size * current_price
-
-
-    def _set_seed(self, seed: int):
-        """Set the seed for the environment."""
-        if seed is not None:
-            np.random.seed(seed)
-            torch.manual_seed(seed)
-        else:
-            np.random.seed(self.config.seed)
-            torch.manual_seed(self.config.seed)
-
-    def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
-        """Reset the environment."""
-
-        self.base_price_history = []
-        self.action_history = []
-        self.reward_history = []
-        self.portfolio_value_history = []
-
-        max_episode_steps = self.sampler.reset(random_start=self.random_start)
-        self.max_traj_length = max_episode_steps # overwrite as we might execute on different time frame so actual step might differ
-        initial_portfolio_value = self.initial_cash_sampler.sample()
-        self.balance = initial_portfolio_value
-        self.initial_portfolio_value = initial_portfolio_value
-        self.position_hold_counter = 0
-        self.current_position = 0.0
-        self.position_value = 0.0
-        self.position_size = 0.0
-        self.entry_price = 0.0
-        self.unrealized_pnlpc = 0.0
-        self.step_counter = 0
+    def _reset_position_state(self):
+        """Reset position tracking state including SLTP-specific state."""
+        super()._reset_position_state()
         self.stop_loss = 0.0
         self.take_profit = 0.0
-
-        obs = self._get_observation()
-
-        # Add coverage tracking indices (only during training with random_start)
-        if self.random_start:
-            obs.set("reset_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
-            obs.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
-
-        return obs
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
@@ -420,14 +275,6 @@ class SeqLongOnlySLTPEnv(EnvBase):
         """Check if episode should terminate."""
         bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
         return portfolio_value < bankruptcy_threshold or self.step_counter >= self.max_steps
-
-    def get_market_data_keys(self) -> List[str]:
-        """Return the list of market data keys."""
-        return self.market_data_keys
-
-    def get_account_state(self) -> List[str]:
-        """Return the list of account state field names."""
-        return self.account_state
 
     def close(self):
         """Clean up resources."""
