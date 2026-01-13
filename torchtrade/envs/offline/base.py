@@ -12,6 +12,7 @@ from torchrl.data.tensor_specs import CompositeSpec, Unbounded
 from torchtrade.envs.base import TorchTradeBaseEnv
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
 from torchtrade.envs.offline.utils import InitialBalanceSampler
+from torchtrade.envs.state import HistoryTracker
 
 
 class TorchTradeOfflineEnv(TorchTradeBaseEnv):
@@ -20,7 +21,7 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
 
     Provides common functionality for all offline environments:
     - MarketDataObservationSampler initialization (single source of truth)
-    - History tracking (price, action, reward, portfolio)
+    - History tracking via HistoryTracker (price, action, reward, portfolio)
     - Coverage tracking indices (reset_index, state_index)
     - Reset logic scaffold
     - Market data observation spec construction
@@ -28,6 +29,9 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
 
     Subclasses must implement:
     - _step(): Environment step logic (trade execution)
+
+    Attributes:
+        history: HistoryTracker instance for episode history management
     """
 
     def __init__(
@@ -197,11 +201,12 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         return self.market_data_keys
 
     def _reset_history(self):
-        """Reset all history tracking arrays."""
-        self.base_price_history = []
-        self.action_history = []
-        self.reward_history = []
-        self.portfolio_value_history = []
+        """Reset all history tracking.
+
+        Subclasses using FuturesHistoryTracker should call their own reset method
+        which will properly clear all fields including positions.
+        """
+        self.history = HistoryTracker()
 
     def _reset_balance(self):
         """Reset balance to sampled initial value."""

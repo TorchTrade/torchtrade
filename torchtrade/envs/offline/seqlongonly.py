@@ -121,9 +121,6 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
 
         # Calculate and execute trade if needed (pass cached price)
         trade_info = self._execute_trade_if_needed(desired_action, cached_price)
-        self.action_history.append(desired_action)
-        self.base_price_history.append(cached_price)
-        self.portfolio_value_history.append(old_portfolio_value)
 
         if trade_info["executed"]:
             self.current_position = 1 if trade_info["side"] == "buy" else 0
@@ -140,7 +137,14 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
 
         # Calculate reward and check termination
         reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, desired_action, trade_info)
-        self.reward_history.append(reward)
+
+        # Record step history
+        self.history.record_step(
+            price=cached_price,
+            action=desired_action,
+            reward=reward,
+            portfolio_value=old_portfolio_value
+        )
 
         done = self._check_termination(new_portfolio_value)
         next_tensordict.set("reward", reward)
@@ -236,12 +240,13 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
     
     def render_history(self, return_fig=False):
         """Render the history of the environment."""
-        
-        price_history = self.base_price_history
+
+        history_dict = self.history.to_dict()
+        price_history = history_dict['base_prices']
         time_indices = list(range(len(price_history)))
-        action_history = self.action_history
-        reward_history = self.reward_history
-        portfolio_value_history = self.portfolio_value_history
+        action_history = history_dict['actions']
+        reward_history = history_dict['rewards']
+        portfolio_value_history = history_dict['portfolio_values']
 
         # Calculate buy-and-hold balance
         initial_balance = portfolio_value_history[0]  # Starting balance
