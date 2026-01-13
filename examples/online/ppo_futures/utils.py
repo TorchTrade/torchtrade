@@ -188,7 +188,8 @@ def make_discrete_ppo_model(cfg, env, device):
     """Make discrete PPO agent"""
     activation = cfg.model.activation
     action_spec = env.action_spec
-    market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
+    # TODO: should use the get_market_data function of the env
+    market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")] 
     assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"
     account_state_key = "account_state"
 
@@ -293,7 +294,7 @@ def make_discrete_ppo_model(cfg, env, device):
 
 def make_ppo_models(env, device, cfg):
     """Create PPO actor and critic models."""
-    common_module, policy_module, value_module = make_discrete_ppo_binmtabl_model(
+    common_module, policy_module, value_module = make_discrete_ppo_model(
         cfg,
         env,
         device=device,
