@@ -346,3 +346,80 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
         self._cached_base_features = self.sampler.get_base_features(self.current_timestamp)
         return obs_dict
+
+    def _update_position_metrics(self, current_price: float):
+        """Update position value and unrealized PnL based on current price.
+
+        This is common logic used by most environments to update position metrics
+        from the current price. Sets self.position_value and self.unrealized_pnlpc.
+
+        Args:
+            current_price: Current asset price
+        """
+        self.position_value = round(self.position_size * current_price, 3)
+        if self.position_size > 0:
+            self.unrealized_pnlpc = round(
+                (current_price - self.entry_price) / self.entry_price, 4
+            )
+        else:
+            self.unrealized_pnlpc = 0.0
+
+    def _build_standard_observation(
+        self,
+        obs_dict: dict,
+        account_state_values: list
+    ) -> TensorDictBase:
+        """Build observation TensorDict from market data and account state.
+
+        This is common logic used by most environments to assemble the final
+        observation from market data and account state.
+
+        Args:
+            obs_dict: Market data observation dictionary from sampler
+            account_state_values: List of account state values
+
+        Returns:
+            TensorDict with combined observation
+        """
+        from tensordict import TensorDict
+        import torch
+
+        account_state = torch.tensor(account_state_values, dtype=torch.float)
+        obs_data = {self.account_state_key: account_state}
+        obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
+        return TensorDict(obs_data, batch_size=())
+
+    def _validate_observation(self, obs: TensorDictBase) -> None:
+        """Validate observation for NaN/Inf values.
+
+        Checks all tensors in the observation for invalid values and raises
+        informative errors if found. This helps catch data corruption early
+        before it causes silent failures downstream.
+
+        Args:
+            obs: Observation TensorDict to validate
+
+        Raises:
+            ValueError: If any NaN or Inf values are found in the observation
+
+        Example:
+            >>> obs = self._get_observation()
+            >>> self._validate_observation(obs)  # Raises if invalid
+            >>> return obs
+        """
+        import torch
+
+        for key, value in obs.items():
+            if isinstance(value, torch.Tensor):
+                if torch.isnan(value).any():
+                    raise ValueError(
+                        f"Invalid observation: NaN values found in '{key}' at timestamp {self.current_timestamp}. "
+                        f"This indicates corrupted data or calculation errors. "
+                        f"Check your dataset and feature preprocessing function."
+                    )
+                if torch.isinf(value).any():
+                    raise ValueError(
+                        f"Invalid observation: Inf values found in '{key}' at timestamp {self.current_timestamp}. "
+                        f"This indicates corrupted data or calculation errors (possible division by zero). "
+                        f"Check your dataset and feature preprocessing function."
+                    )

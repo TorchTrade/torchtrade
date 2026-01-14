@@ -1,5 +1,6 @@
 """Base environment classes for TorchTrade."""
 
+import logging
 from abc import abstractmethod
 from typing import Any, Dict, Optional
 
@@ -9,6 +10,8 @@ from torchrl.data import Bounded
 from torchrl.envs import EnvBase
 
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
+
+logger = logging.getLogger(__name__)
 
 
 class TorchTradeBaseEnv(EnvBase):
@@ -45,10 +48,11 @@ class TorchTradeBaseEnv(EnvBase):
         if reward_function is not None:
             validate_reward_function(reward_function)
 
-        # Validate and store transaction parameters
-        self._validate_transaction_parameters(config)
-        self.transaction_fee = config.transaction_fee
-        self.slippage = config.slippage
+        # Validate and store transaction parameters (only for offline environments)
+        if hasattr(config, 'transaction_fee') and hasattr(config, 'slippage'):
+            self._validate_transaction_parameters(config)
+            self.transaction_fee = config.transaction_fee
+            self.slippage = config.slippage
 
         # Create reward spec (common across all environments)
         self.reward_spec = Bounded(
@@ -116,7 +120,12 @@ class TorchTradeBaseEnv(EnvBase):
                     buy_and_hold_value = (
                         self.initial_portfolio_value / first_price
                     ) * self.base_price_history[-1]
-                # else: first_price is <= 0, skip buy_and_hold calculation (silently, as this is data issue)
+                else:
+                    logger.warning(
+                        f"Cannot calculate buy-and-hold benchmark: first price is {first_price} "
+                        f"(must be positive). This indicates corrupted price data. "
+                        f"Custom reward functions will receive buy_and_hold_value=None."
+                    )
 
             # Check if this is an offline environment (has history tracking)
             # For offline envs using custom rewards, history attributes are required

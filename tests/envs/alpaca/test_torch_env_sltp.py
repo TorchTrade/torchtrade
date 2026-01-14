@@ -12,8 +12,8 @@ from tensordict import TensorDict
 from torchtrade.envs.alpaca.torch_env_sltp import (
     AlpacaSLTPTorchTradingEnv,
     AlpacaSLTPTradingEnvConfig,
-    combinatory_action_map,
 )
+from torchtrade.envs.action_maps import create_alpaca_sltp_action_map as combinatory_action_map
 from torchtrade.envs.alpaca.order_executor import TradeMode
 from .mocks import MockObserver, MockTrader, PositionStatus
 
