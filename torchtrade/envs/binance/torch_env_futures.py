@@ -102,6 +102,11 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # Store old portfolio value
         old_portfolio_value = self._get_portfolio_value()
 
+        # Get current price and position for history recording
+        obs = self._get_observation()
+        current_price = obs[self.account_state_key][4].item()  # current_price is at index 4
+        position_size = obs[self.account_state_key][1].item()  # position_size is at index 1
+
         # Get desired action
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
@@ -131,6 +136,15 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             old_portfolio_value, new_portfolio_value, desired_action, trade_info
         )
         done = self._check_termination(new_portfolio_value)
+
+        # Record step history
+        self.history.record_step(
+            price=current_price,
+            action=desired_action,
+            reward=reward,
+            portfolio_value=old_portfolio_value,
+            position=position_size
+        )
 
         next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
         next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))

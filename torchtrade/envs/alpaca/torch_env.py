@@ -65,30 +65,42 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
-        
+
         # Store old portfolio value for reward calculation
         old_portfolio_value = self._get_portfolio_value()
-        
+
         # Get desired action and current position
         desired_action = self.action_levels[tensordict.get("action", 0)]
-        
+
+        # Get current price for history recording
+        obs = self._get_observation()
+        current_price = obs[self.account_state_key][4].item()  # current_price is at index 4
+
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
 
         if trade_info["executed"]:
             self.current_position = 1 if trade_info["side"] == "buy" else 0
 
-        
+
         # Wait for next time step
         self._wait_for_next_timestamp()
-        
+
         # Get updated state
         new_portfolio_value = self._get_portfolio_value()
         next_tensordict = self._get_observation()
-        
+
         # Calculate reward and check termination
         reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, desired_action, trade_info)
         done = self._check_termination(new_portfolio_value)
+
+        # Record step history
+        self.history.record_step(
+            price=current_price,
+            action=desired_action,
+            reward=reward,
+            portfolio_value=old_portfolio_value
+        )
 
         next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
         next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))

@@ -140,6 +140,11 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         # Store old portfolio value
         old_portfolio_value = self._get_portfolio_value()
 
+        # Get current price and position for history recording
+        obs = self._get_observation()
+        current_price = obs[self.account_state_key][4].item()  # current_price is at index 4
+        position_size = obs[self.account_state_key][1].item()  # position_size is at index 1
+
         # Get action and map to (side, SL, TP) tuple
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
@@ -178,6 +183,24 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
             old_portfolio_value, new_portfolio_value, action_tuple, trade_info
         )
         done = self._check_termination(new_portfolio_value)
+
+        # Record step history (convert action_tuple to numeric action)
+        # action_tuple is (side, sl, tp) where side can be "long", "short", or None
+        side, _, _ = action_tuple
+        if side == "long":
+            action_value = 1.0
+        elif side == "short":
+            action_value = -1.0
+        else:
+            action_value = 0.0
+
+        self.history.record_step(
+            price=current_price,
+            action=action_value,
+            reward=reward,
+            portfolio_value=old_portfolio_value,
+            position=position_size
+        )
 
         next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
         next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))

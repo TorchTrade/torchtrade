@@ -11,6 +11,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
 from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass
 from torchtrade.envs.live import TorchTradeLiveEnv
+from torchtrade.envs.state import HistoryTracker
 
 
 class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -92,6 +93,9 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         # Initialize current position tracking
         self.current_position = 0.0
+
+        # Initialize history tracking
+        self.history = HistoryTracker()
 
     def _init_trading_clients(
         self,
@@ -233,6 +237,9 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         """Reset the environment."""
         # Cancel all orders
         self.trader.cancel_open_orders()
+
+        # Reset history tracking
+        self.history.reset()
 
         # Get current state
         account = self.trader.client.get_account()
