@@ -435,7 +435,7 @@ class TestCombinatoryActionMap:
 
     def test_action_map_basic(self):
         """Test basic action map generation."""
-        from torchtrade.envs.binance.torch_env_futures_sltp import combinatory_action_map
+        from torchtrade.envs.action_maps import create_sltp_action_map as combinatory_action_map
 
         action_map = combinatory_action_map(
             stoploss_levels=[-0.02, -0.05],
@@ -449,7 +449,7 @@ class TestCombinatoryActionMap:
 
     def test_action_map_long_only(self):
         """Test action map with shorts disabled."""
-        from torchtrade.envs.binance.torch_env_futures_sltp import combinatory_action_map
+        from torchtrade.envs.action_maps import create_sltp_action_map as combinatory_action_map
 
         action_map = combinatory_action_map(
             stoploss_levels=[-0.02, -0.05],
@@ -462,7 +462,7 @@ class TestCombinatoryActionMap:
 
     def test_action_map_long_sides(self):
         """Test that long actions have correct structure."""
-        from torchtrade.envs.binance.torch_env_futures_sltp import combinatory_action_map
+        from torchtrade.envs.action_maps import create_sltp_action_map as combinatory_action_map
 
         action_map = combinatory_action_map(
             stoploss_levels=[-0.02],
@@ -478,7 +478,7 @@ class TestCombinatoryActionMap:
 
     def test_action_map_short_sign_flip(self):
         """Test that short actions have flipped signs."""
-        from torchtrade.envs.binance.torch_env_futures_sltp import combinatory_action_map
+        from torchtrade.envs.action_maps import create_sltp_action_map as combinatory_action_map
 
         action_map = combinatory_action_map(
             stoploss_levels=[-0.02],

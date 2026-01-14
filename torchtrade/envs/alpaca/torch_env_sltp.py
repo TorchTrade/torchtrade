@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
-from itertools import product
 
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.alpaca.utils import normalize_alpaca_timeframe_config
@@ -9,22 +8,8 @@ from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass, TradeMode
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 from torchtrade.envs.alpaca.base import AlpacaBaseTorchTradingEnv
-
-
-def combinatory_action_map(stoploss_levels: List[float], takeprofit_levels: List[float]) -> Dict:
-    """Create a mapping from action indices to (stop_loss, take_profit) tuples.
-
-    Action 0 = HOLD (no trade)
-    Actions 1..N = combinations of (stoploss_level, takeprofit_level)
-    """
-    action_map = {}
-    # 0 = HOLD
-    action_map[0] = (None, None)
-    idx = 1
-    for sl, tp in product(stoploss_levels, takeprofit_levels):
-        action_map[idx] = (sl, tp)
-        idx += 1
-    return action_map
+from torchtrade.envs.action_maps import create_alpaca_sltp_action_map
+from torchtrade.envs.sltp_mixin import SLTPMixin
 
 
 @dataclass
@@ -57,7 +42,7 @@ class AlpacaSLTPTradingEnvConfig:
         )
 
 
-class AlpacaSLTPTorchTradingEnv(AlpacaBaseTorchTradingEnv):
+class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
     """Alpaca Live Trading Environment with Stop Loss and Take Profit action spec.
 
     This environment uses bracket orders to implement stop-loss and take-profit
@@ -97,7 +82,7 @@ class AlpacaSLTPTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         # Create action map from SL/TP combinations
         self.stoploss_levels = list(config.stoploss_levels)
         self.takeprofit_levels = list(config.takeprofit_levels)
-        self.action_map = combinatory_action_map(self.stoploss_levels, self.takeprofit_levels)
+        self.action_map = create_alpaca_sltp_action_map(self.stoploss_levels, self.takeprofit_levels)
 
         # Categorical action spec: 0=HOLD, 1..N = SL/TP combinations
         self.action_spec = Categorical(len(self.action_map))
@@ -111,9 +96,8 @@ class AlpacaSLTPTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         # Call base reset
         result = super()._reset(tensordict, **kwargs)
 
-        # Reset SLTP-specific state
-        self.active_stop_loss = 0.0
-        self.active_take_profit = 0.0
+        # Reset SLTP-specific state using mixin
+        self._reset_sltp_state()
 
         return result
 
@@ -161,16 +145,6 @@ class AlpacaSLTPTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         next_tensordict.set("terminated", False)
 
         return next_tensordict
-
-    def _check_position_closed(self) -> bool:
-        """Check if position was closed by stop-loss or take-profit trigger."""
-        status = self.trader.get_status()
-        position_status = status.get("position_status", None)
-
-        # If we had a position but now we don't, it was closed
-        if self.current_position == 1 and position_status is None:
-            return True
-        return False
 
     def _execute_trade_if_needed(self, action_tuple: Tuple[Optional[float], Optional[float]]) -> Dict:
         """Execute trade if position change is needed.

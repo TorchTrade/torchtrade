@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union, Callable
-from itertools import product
 
 import torch
 from tensordict import TensorDict, TensorDictBase
@@ -13,49 +12,11 @@ from torchtrade.envs.binance.futures_order_executor import (
     MarginType,
 )
 from torchtrade.envs.binance.base import BinanceBaseTorchTradingEnv
+from torchtrade.envs.action_maps import create_sltp_action_map
+from torchtrade.envs.sltp_mixin import SLTPMixin
 from dotenv import load_dotenv
 
 load_dotenv()
-
-
-def combinatory_action_map(
-    stoploss_levels: List[float],
-    takeprofit_levels: List[float],
-    include_short_positions: bool = True
-) -> Dict:
-    """Create a mapping from action indices to (side, stop_loss, take_profit) tuples.
-
-    Action 0 = HOLD (no trade)
-    Actions 1..N = combinations of (side, stoploss_level, takeprofit_level)
-
-    Args:
-        stoploss_levels: List of stop-loss percentages (negative values)
-        takeprofit_levels: List of take-profit percentages (positive values)
-        include_short_positions: If True, include short position actions
-
-    Returns:
-        Dict mapping action index to (side, stop_loss_pct, take_profit_pct) tuple
-        where side is "long", "short", or None for HOLD
-    """
-    action_map = {}
-    # 0 = HOLD
-    action_map[0] = (None, None, None)
-    idx = 1
-
-    # Long positions with SL/TP combinations
-    for sl, tp in product(stoploss_levels, takeprofit_levels):
-        action_map[idx] = ("long", sl, tp)
-        idx += 1
-
-    # Short positions with SL/TP combinations (if enabled)
-    if include_short_positions:
-        for sl, tp in product(stoploss_levels, takeprofit_levels):
-            # For shorts: SL is above entry (positive), TP is below entry (negative)
-            # We swap: takeprofit_levels (positive) become SL, stoploss_levels (negative) become TP
-            action_map[idx] = ("short", tp, sl)
-            idx += 1
-
-    return action_map
 
 
 @dataclass
@@ -101,7 +62,7 @@ class BinanceFuturesSLTPTradingEnvConfig:
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
 
-class BinanceFuturesSLTPTorchTradingEnv(BinanceBaseTorchTradingEnv):
+class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
     """
     Binance Futures trading environment with Stop Loss and Take Profit action spec.
 
@@ -154,7 +115,7 @@ class BinanceFuturesSLTPTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # Create action map from SL/TP combinations
         self.stoploss_levels = list(config.stoploss_levels)
         self.takeprofit_levels = list(config.takeprofit_levels)
-        self.action_map = combinatory_action_map(
+        self.action_map = create_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
             include_short_positions=config.include_short_positions
@@ -172,9 +133,8 @@ class BinanceFuturesSLTPTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # Call base reset
         result = super()._reset(tensordict, **kwargs)
 
-        # Reset SLTP-specific state
-        self.active_stop_loss = 0.0
-        self.active_take_profit = 0.0
+        # Reset SLTP-specific state using mixin
+        self._reset_sltp_state()
 
         return result
 
@@ -228,16 +188,6 @@ class BinanceFuturesSLTPTorchTradingEnv(BinanceBaseTorchTradingEnv):
         next_tensordict.set("terminated", torch.tensor([done], dtype=torch.bool))
 
         return next_tensordict
-
-    def _check_position_closed(self) -> bool:
-        """Check if position was closed by stop-loss or take-profit trigger."""
-        status = self.trader.get_status()
-        position_status = status.get("position_status", None)
-
-        # If we had a position but now we don't, it was closed
-        if self.current_position != 0 and position_status is None:
-            return True
-        return False
 
     def _execute_trade_if_needed(
         self, action_tuple: Tuple[Optional[str], Optional[float], Optional[float]]
