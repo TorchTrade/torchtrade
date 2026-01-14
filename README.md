@@ -7,10 +7,10 @@
 **Reinforcement learning environments for algorithmic trading. Train policies in backtesting, deploy to live markets.**
 
 TorchTrade is a modular RL framework built on TorchRL that provides:
-- 🎯 **9 Trading Environments** - Spot, futures, bracket orders, one-step variants
+- 🎯 **11 Trading Environments** - Spot, futures, bracket orders, one-step variants
 - 🤖 **Multiple RL Algorithms** - PPO, IQL, GRPO, DSAC, CTRL implementations
 - 📊 **Multi-Timeframe Support** - Train on multiple time scales simultaneously
-- 🔴 **Live Trading** - Direct Alpaca and Binance API integration
+- 🔴 **Live Trading** - Direct Alpaca, Binance, and Bitget API integration
 - 🧠 **LLM Integration** - Use GPT-4o-mini as trading agent
 - 📐 **Rule-Based Actors** - Hard-coded strategies for imitation learning and baselines
 - 🔮 **Pretrained Encoder Transforms** - Foundation model embeddings for time series feature extraction
@@ -105,10 +105,14 @@ Live environments connect to real trading APIs for paper trading or live executi
 | **AlpacaTorchTradingEnv** | Alpaca | Crypto/Stocks | ❌ | ❌ | ❌ | Paper/live spot trading |
 | **AlpacaSLTPTorchTradingEnv** | Alpaca | Crypto/Stocks | ❌ | ❌ | ✅ | Live risk management |
 | **BinanceFuturesTorchTradingEnv** | Binance | Crypto | ✅ | ✅ (1-125x) | ❌ | Binance futures trading |
+| **BinanceFuturesSLTPTorchTradingEnv** | Binance | Crypto | ✅ | ✅ (1-125x) | ✅ | Binance bracket orders |
+| **BitgetFuturesTorchTradingEnv** | Bitget | Crypto | ✅ | ✅ (1-125x) | ❌ | Bitget futures trading |
+| **BitgetFuturesSLTPTorchTradingEnv** | Bitget | Crypto | ✅ | ✅ (1-125x) | ✅ | Bitget bracket orders |
 
 **Key Differences:**
 - **Alpaca**: Commission-free stocks and crypto trading with paper trading mode. Best for US markets.
 - **Binance**: Cryptocurrency futures with high leverage. Supports testnet for safe testing.
+- **Bitget**: Cryptocurrency futures with competitive fees and testnet support. Alternative to Binance.
 
 ---
 
@@ -163,6 +167,55 @@ config = AlpacaTradingEnvConfig(
 env = AlpacaTorchTradingEnv(config)
 
 # See full example: examples/live/alpaca/collect_live.py
+```
+
+### Live Futures Trading with Bitget
+
+```python
+from torchtrade.envs.bitget import (
+    BitgetFuturesTorchTradingEnv,
+    BitgetFuturesTradingEnvConfig,
+)
+
+# Configure Bitget futures environment
+config = BitgetFuturesTradingEnvConfig(
+    symbol="BTCUSDT",
+    intervals=["1m", "5m"],               # Multi-timeframe support
+    window_sizes=[12, 8],
+    execute_on="1m",                      # Execute every 1 minute
+    leverage=5,                           # 5x leverage
+    quantity_per_trade=0.002,             # Position size per trade
+    demo=True,                            # Start with testnet!
+)
+
+# Create environment (requires BITGET_API_KEY, BITGET_SECRET, BITGET_PASSPHRASE)
+env = BitgetFuturesTorchTradingEnv(
+    config,
+    api_key=os.getenv("BITGET_API_KEY"),
+    api_secret=os.getenv("BITGET_SECRET"),
+    api_passphrase=os.getenv("BITGET_PASSPHRASE"),
+)
+
+# For bracket orders with stop-loss/take-profit:
+from torchtrade.envs.bitget import (
+    BitgetFuturesSLTPTorchTradingEnv,
+    BitgetFuturesSLTPTradingEnvConfig,
+)
+
+sltp_config = BitgetFuturesSLTPTradingEnvConfig(
+    symbol="BTCUSDT",
+    intervals=["1m", "5m"],
+    window_sizes=[12, 8],
+    execute_on="1m",
+    leverage=5,
+    quantity_per_trade=0.002,
+    stoploss_levels=(-0.02, -0.05),      # -2%, -5%
+    takeprofit_levels=(0.03, 0.06, 0.10), # +3%, +6%, +10%
+    include_short_positions=True,         # Enable both long and short
+    demo=True,
+)
+
+sltp_env = BitgetFuturesSLTPTorchTradingEnv(sltp_config, ...)
 ```
 
 ### Using Stop-Loss/Take-Profit Bracket Orders
@@ -720,10 +773,17 @@ Start live trading with these supported platforms:
 ### 🪙 Cryptocurrency Trading
 
 **[Binance](https://www.binance.com/en/activity/referral-entry/CPA)** - Leading cryptocurrency exchange
-- **Supported by:** `BinanceFuturesTorchTradingEnv`
+- **Supported by:** `BinanceFuturesTorchTradingEnv`, `BinanceFuturesSLTPTorchTradingEnv`
 - **Features:** Spot & futures trading, up to 125x leverage, testnet available
 - **Commission:** Maker 0.02% / Taker 0.04% (with BNB discount)
 - **Get Started:** [Sign up for Binance](https://www.binance.com/en/activity/referral-entry/CPA) <!-- Replace with your affiliate link -->
+
+**[Bitget](https://www.bitget.com/)** - Fast-growing cryptocurrency exchange
+- **Supported by:** `BitgetFuturesTorchTradingEnv`, `BitgetFuturesSLTPTorchTradingEnv`
+- **Features:** Futures trading with up to 125x leverage, testnet for safe testing
+- **Commission:** Maker 0.02% / Taker 0.06% (competitive rates)
+- **Key Advantage:** Alternative to Binance with growing liquidity and feature parity
+- **Get Started:** [Sign up for Bitget](https://www.bitget.com/)
 
 ### 📈 Stock & Crypto API
 
@@ -743,7 +803,7 @@ Start live trading with these supported platforms:
 
 ---
 
-**Note:** Binance and OANDA links are affiliate links. Using them helps support TorchTrade development at no extra cost to you. Alpaca does not offer an affiliate program.
+**Note:** Some platform links may be affiliate links. Using them helps support TorchTrade development at no extra cost to you.
 
 ---
 
