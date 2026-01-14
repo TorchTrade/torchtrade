@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Optional, Union, Callable, Dict
+import logging
 
 import torch
 from tensordict import TensorDictBase
@@ -12,6 +13,9 @@ from torchtrade.envs.bitget.futures_order_executor import (
     MarginMode,
 )
 from torchtrade.envs.bitget.base import BitgetBaseTorchTradingEnv
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

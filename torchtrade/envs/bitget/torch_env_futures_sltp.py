@@ -14,6 +14,7 @@ from torchtrade.envs.bitget.futures_order_executor import (
 from torchtrade.envs.bitget.base import BitgetBaseTorchTradingEnv
 from torchtrade.envs.action_maps import create_sltp_action_map
 from torchtrade.envs.sltp_mixin import SLTPMixin
+from torchtrade.envs.sltp_helpers import calculate_bracket_prices
 
 
 @dataclass
@@ -256,8 +257,10 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
 
         if side == "long":
             # Open LONG with SL/TP bracket order
-            stop_loss_price = current_price * (1 + stop_loss_pct)
-            take_profit_price = current_price * (1 + take_profit_pct)
+            # Use helper to calculate correct SL/TP for longs
+            stop_loss_price, take_profit_price = calculate_bracket_prices(
+                "long", current_price, stop_loss_pct, take_profit_pct
+            )
 
             try:
                 success = self.trader.trade(
@@ -286,9 +289,11 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
 
         elif side == "short":
             # Open SHORT with SL/TP bracket order
-            # For shorts: SL is above entry, TP is below entry
-            stop_loss_price = current_price * (1 + stop_loss_pct)
-            take_profit_price = current_price * (1 + take_profit_pct)
+            # Use helper to calculate correct SL/TP for shorts
+            # The action_map already swaps SL/TP for shorts, helper handles this correctly
+            stop_loss_price, take_profit_price = calculate_bracket_prices(
+                "short", current_price, stop_loss_pct, take_profit_pct
+            )
 
             try:
                 success = self.trader.trade(
