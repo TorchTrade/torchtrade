@@ -108,6 +108,11 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         # Store old portfolio value for reward calculation
         old_portfolio_value = self._get_portfolio_value()
 
+        # Get current price from trader status (avoids redundant observation call)
+        status = self.trader.get_status()
+        position_status = status.get("position_status", None)
+        current_price = position_status.current_price if position_status else 0.0
+
         # Get action and map to SL/TP tuple
         action_idx = tensordict.get("action", 0)
         if hasattr(action_idx, "item"):
@@ -139,6 +144,15 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         # Calculate reward and check termination
         reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, action_tuple, trade_info)
         done = self._check_termination(new_portfolio_value)
+
+        # Record step history (convert action_tuple to numeric action)
+        action_value = 1.0 if action_tuple != (None, None) else 0.0
+        self.history.record_step(
+            price=current_price,
+            action=action_value,
+            reward=reward,
+            portfolio_value=old_portfolio_value
+        )
 
         next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
         next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))

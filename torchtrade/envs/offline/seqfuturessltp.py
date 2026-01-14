@@ -21,6 +21,7 @@ from torchtrade.envs.offline.base import TorchTradeOfflineEnv
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, InitialBalanceSampler, build_sltp_action_map, normalize_timeframe_config
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
+from torchtrade.envs.state import FuturesHistoryTracker
 
 
 class MarginType(Enum):
@@ -179,7 +180,6 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         self.unrealized_pnl = 0.0
         self.unrealized_pnl_pct = 0.0
         self.liquidation_price = 0.0
-        self.position_history = []
 
         # Initialize SLTP-specific state
         self.stop_loss = 0.0
@@ -209,9 +209,8 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         }
 
     def _reset_history(self):
-        """Reset all history tracking arrays including position_history for futures."""
-        super()._reset_history()
-        self.position_history = []
+        """Reset all history tracking arrays including position history for futures."""
+        self.history = FuturesHistoryTracker()
 
     def _reset_position_state(self):
         """Reset position tracking state including futures and SLTP specific state."""
@@ -446,12 +445,12 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
             # Compute buy & hold value if terminal
             is_terminal = self.step_counter >= self.max_traj_length - 1
             buy_and_hold_value = None
-            if is_terminal and len(self.base_price_history) > 0:
-                first_price = self.base_price_history[0]
+            if is_terminal and len(self.history) > 0:
+                first_price = self.history.base_prices[0]
                 if first_price > 0:
                     buy_and_hold_value = (
                         self.initial_portfolio_value / first_price
-                    ) * self.base_price_history[-1]
+                    ) * self.history.base_prices[-1]
 
             # Calculate margin ratio for futures-specific context
             total_balance = self.balance + self.unrealized_pnl
@@ -463,11 +462,11 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
                 new_portfolio_value,
                 action,
                 trade_info,
-                portfolio_value_history=self.portfolio_value_history,
-                action_history=self.action_history,
-                reward_history=self.reward_history,
-                base_price_history=self.base_price_history,
-                position_history=self.position_history,
+                portfolio_value_history=self.history.portfolio_values,
+                action_history=self.history.actions,
+                reward_history=self.history.rewards,
+                base_price_history=self.history.base_prices,
+                position_history=self.history.positions,
                 initial_portfolio_value=self.initial_portfolio_value,
                 buy_and_hold_value=buy_and_hold_value,
                 liquidated=trade_info.get("liquidated", False),
@@ -523,11 +522,6 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
                 trade_action = 1
             elif trade_info["side"] == "short":
                 trade_action = -1
-        self.action_history.append(trade_action)
-        self.base_price_history.append(current_price)
-        self.portfolio_value_history.append(old_portfolio_value)
-        self.position_history.append(self.position_size)
-
         # Get updated state
         next_tensordict = self._get_observation()
         new_portfolio_value = self._get_portfolio_value()
@@ -540,7 +534,15 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         reward = self._calculate_reward(
             old_portfolio_value, new_portfolio_value, action_idx, trade_info
         )
-        self.reward_history.append(reward)
+
+        # Record step history
+        self.history.record_step(
+            price=current_price,
+            action=trade_action,
+            reward=reward,
+            portfolio_value=old_portfolio_value,
+            position=self.position_size
+        )
 
         # Check termination
         done = self._check_termination(new_portfolio_value)
@@ -818,8 +820,8 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         from torchtrade.envs.offline.utils import compute_periods_per_year_crypto
 
         # Convert histories to tensors
-        portfolio_values = torch.tensor(self.portfolio_value_history, dtype=torch.float32)
-        rewards = torch.tensor(self.reward_history, dtype=torch.float32)
+        portfolio_values = torch.tensor(self.history.portfolio_values, dtype=torch.float32)
+        rewards = torch.tensor(self.history.rewards, dtype=torch.float32)
 
         # Compute periods per year for annualization
         periods_per_year = compute_periods_per_year_crypto(
@@ -831,17 +833,18 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         return compute_all_metrics(
             portfolio_values=portfolio_values,
             rewards=rewards,
-            action_history=self.action_history,
+            action_history=self.history.actions,
             periods_per_year=periods_per_year,
         )
 
     def render_history(self, return_fig=False):
         """Render the history of the environment."""
-        price_history = self.base_price_history
+        history_dict = self.history.to_dict()
+        price_history = history_dict['base_prices']
         time_indices = list(range(len(price_history)))
-        action_history = self.action_history
-        portfolio_value_history = self.portfolio_value_history
-        position_history = self.position_history
+        action_history = history_dict['actions']
+        portfolio_value_history = history_dict['portfolio_values']
+        position_history = history_dict['positions']
 
         # Calculate buy-and-hold balance
         initial_balance = portfolio_value_history[0]
