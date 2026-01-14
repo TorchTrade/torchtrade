@@ -11,6 +11,10 @@ from torchtrade.envs.binance.torch_env_futures import (
     BinanceFuturesTorchTradingEnv,
     BinanceFuturesTradingEnvConfig,
 )
+from torchtrade.envs.binance.torch_env_futures_sltp import (
+    BinanceFuturesSLTPTorchTradingEnv,
+    BinanceFuturesSLTPTradingEnvConfig,
+)
 
 __all__ = [
     "BinanceObservationClass",
@@ -22,4 +26,6 @@ __all__ = [
     "PositionStatus",
     "BinanceFuturesTorchTradingEnv",
     "BinanceFuturesTradingEnvConfig",
+    "BinanceFuturesSLTPTorchTradingEnv",
+    "BinanceFuturesSLTPTradingEnvConfig",
 ]
