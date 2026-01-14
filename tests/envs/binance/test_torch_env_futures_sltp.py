@@ -569,3 +569,279 @@ class TestMultipleSteps:
                 rewards.append(next_td["next", "reward"].item())
 
             assert len(rewards) == 5
+
+
+class TestCriticalEdgeCases:
+    """Test critical edge cases identified in PR review."""
+
+    @pytest.fixture
+    def env_with_mocks(self):
+        """Create environment for critical edge case testing."""
+        from torchtrade.envs.binance.torch_env_futures_sltp import (
+            BinanceFuturesSLTPTorchTradingEnv,
+            BinanceFuturesSLTPTradingEnvConfig,
+        )
+        from torchtrade.envs.binance.obs_class import BinanceObservationClass
+        from torchtrade.envs.binance.futures_order_executor import (
+            BinanceFuturesOrderClass,
+            PositionStatus,
+        )
+
+        config = BinanceFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_short_positions=True,
+            demo=True,
+        )
+
+        mock_observer = MagicMock(spec=BinanceObservationClass)
+        mock_trader = MagicMock(spec=BinanceFuturesOrderClass)
+
+        def mock_get_observations(return_base_ohlc=False):
+            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
+            if return_base_ohlc:
+                obs["base_features"] = np.array(
+                    [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
+                )
+            return obs
+
+        mock_observer.get_observations = MagicMock(side_effect=mock_get_observations)
+        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
+
+        mock_trader.get_account_balance = MagicMock(
+            return_value={
+                "total_wallet_balance": 1000.0,
+                "available_balance": 1000.0,
+                "total_margin_balance": 1000.0,
+            }
+        )
+        mock_trader.get_status = MagicMock(return_value={"position_status": None})
+        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
+        mock_trader.cancel_open_orders = MagicMock()
+        mock_trader.close_position = MagicMock()
+
+        env = BinanceFuturesSLTPTorchTradingEnv(
+            config, observer=mock_observer, trader=mock_trader
+        )
+        return env, mock_trader, mock_observer
+
+    def test_trade_failure_does_not_set_active_sltp(self, env_with_mocks):
+        """Test that failed trades don't set active SL/TP levels (Critical: 9/10)."""
+        env, mock_trader, _ = env_with_mocks
+
+        # Trade fails (returns False)
+        mock_trader.trade = MagicMock(return_value=False)
+
+        env.reset()
+        action_tuple = ("long", -0.02, 0.03)
+        trade_info = env._execute_trade_if_needed(action_tuple)
+
+        # Verify failed trade doesn't corrupt state
+        assert trade_info["executed"] is True
+        assert trade_info["success"] is False
+        assert env.active_stop_loss == 0.0
+        assert env.active_take_profit == 0.0
+        assert env.current_position == 0
+
+    def test_trade_exception_handling_long(self, env_with_mocks):
+        """Test that trade exceptions are handled gracefully for long positions (Critical: 9/10)."""
+        env, mock_trader, _ = env_with_mocks
+
+        # Trade raises exception (e.g., insufficient margin)
+        mock_trader.trade = MagicMock(side_effect=Exception("Insufficient margin"))
+
+        env.reset()
+        action_tuple = ("long", -0.02, 0.03)
+
+        # Should not raise exception
+        trade_info = env._execute_trade_if_needed(action_tuple)
+
+        # Verify graceful handling
+        assert trade_info["executed"] is False
+        assert trade_info["success"] is False
+        assert env.active_stop_loss == 0.0
+        assert env.active_take_profit == 0.0
+        assert env.current_position == 0
+
+    def test_trade_exception_handling_short(self, env_with_mocks):
+        """Test that trade exceptions are handled gracefully for short positions (Critical: 9/10)."""
+        env, mock_trader, _ = env_with_mocks
+
+        # Trade raises exception
+        mock_trader.trade = MagicMock(side_effect=Exception("Rate limit exceeded"))
+
+        env.reset()
+        action_tuple = ("short", 0.03, -0.02)
+
+        # Should not raise exception
+        trade_info = env._execute_trade_if_needed(action_tuple)
+
+        # Verify graceful handling
+        assert trade_info["executed"] is False
+        assert trade_info["success"] is False
+        assert env.active_stop_loss == 0.0
+        assert env.active_take_profit == 0.0
+        assert env.current_position == 0
+
+    def test_invalid_action_index_handling(self, env_with_mocks):
+        """Test handling of invalid action indices (Critical: 8/10)."""
+        env, mock_trader, _ = env_with_mocks
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+
+            # Test out-of-bounds action
+            action_td = TensorDict({"action": torch.tensor(999)}, batch_size=())
+
+            with pytest.raises(KeyError) as exc_info:
+                env.step(action_td)
+
+            # Verify it's a KeyError with the invalid index
+            assert "999" in str(exc_info.value)
+
+    def test_negative_action_index_handling(self, env_with_mocks):
+        """Test handling of negative action indices (Critical: 8/10)."""
+        env, mock_trader, _ = env_with_mocks
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+
+            # Test negative action
+            action_td = TensorDict({"action": torch.tensor(-1)}, batch_size=())
+
+            with pytest.raises(KeyError):
+                env.step(action_td)
+
+    def test_reward_calculation_at_bankruptcy(self, env_with_mocks):
+        """Test reward calculation when portfolio value reaches zero (Critical: 8/10).
+
+        Currently raises ValueError - documents that environment doesn't handle
+        bankruptcy gracefully in reward calculation.
+        """
+        env, mock_trader, _ = env_with_mocks
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            env.initial_portfolio_value = 1000.0
+
+            # Simulate going bankrupt (portfolio value -> 0)
+            mock_trader.get_account_balance = MagicMock(
+                return_value={
+                    "total_wallet_balance": 0.0,
+                    "available_balance": 0.0,
+                    "total_margin_balance": 0.0,
+                }
+            )
+
+            action_td = TensorDict({"action": torch.tensor(0)}, batch_size=())
+
+            # Currently raises ValueError due to zero portfolio value
+            # TODO: Consider handling this more gracefully
+            with pytest.raises(ValueError, match="Invalid old_portfolio_value: 0.0"):
+                env.step(action_td)
+
+    def test_reward_with_portfolio_increase(self, env_with_mocks):
+        """Test reward when portfolio value increases (Critical: 8/10)."""
+        env, mock_trader, _ = env_with_mocks
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+
+            # Simulate profit by mocking _get_portfolio_value directly
+            # First call (old_portfolio_value): 1000
+            # Second call (new_portfolio_value): 1100
+            with patch.object(
+                env, "_get_portfolio_value", side_effect=[1000.0, 1100.0]
+            ):
+                action_td = TensorDict({"action": torch.tensor(0)}, batch_size=())
+                next_td = env.step(action_td)
+
+                reward = next_td["next", "reward"].item()
+
+                # Profit should give positive reward (log return)
+                assert reward > 0
+                assert np.isfinite(reward)
+                # Log return from 1000 to 1100 is log(1100/1000) = log(1.1) ≈ 0.0953
+                assert reward == pytest.approx(np.log(1100 / 1000), rel=1e-5)
+
+    def test_position_state_resync_on_reset(self, env_with_mocks):
+        """Test that reset synchronizes position state with exchange (Critical: 8/10)."""
+        env, mock_trader, _ = env_with_mocks
+
+        # Env has stale state (thinks position exists)
+        env.current_position = 1
+        env.active_stop_loss = 49000.0
+        env.active_take_profit = 51000.0
+
+        # But exchange actually has no position
+        mock_trader.get_status = MagicMock(return_value={"position_status": None})
+
+        env.reset()
+
+        # After reset, should sync with actual exchange state
+        assert env.current_position == 0
+        # Note: active_stop_loss/take_profit are reset in _reset override
+
+    def test_bracket_order_with_zero_current_price(self, env_with_mocks):
+        """Test bracket order calculation when current price is zero (Critical: 5/10)."""
+        env, mock_trader, mock_observer = env_with_mocks
+
+        def mock_obs_zero_price(return_base_ohlc=False):
+            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
+            if return_base_ohlc:
+                # Zero price edge case
+                obs["base_features"] = np.array(
+                    [[0, 0, 0, 0]] * 10, dtype=np.float32
+                )
+            return obs
+
+        mock_observer.get_observations = MagicMock(side_effect=mock_obs_zero_price)
+
+        env.reset()
+        action_tuple = ("long", -0.02, 0.03)
+        trade_info = env._execute_trade_if_needed(action_tuple)
+
+        # Should handle gracefully
+        if trade_info["executed"] and trade_info.get("stop_loss") is not None:
+            # If trade executed, prices should be valid
+            assert trade_info["stop_loss"] >= 0
+            assert trade_info["take_profit"] >= 0
+
+    def test_cannot_open_new_position_same_step_as_closure(self, env_with_mocks):
+        """Test 1-step delay between position closure and re-entry (Critical: 6/10).
+
+        Documents intentional behavior: when SL/TP closes position,
+        agent cannot open new position in the same step.
+        """
+        env, mock_trader, _ = env_with_mocks
+        from torchtrade.envs.binance.futures_order_executor import PositionStatus
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+
+            # First, open a position
+            mock_trader.trade = MagicMock(return_value=True)
+            env.current_position = 1
+            env.active_stop_loss = 49000.0
+
+            # Position closed by SL/TP on exchange
+            mock_trader.get_status = MagicMock(return_value={"position_status": None})
+
+            # Agent tries to open new long in same step
+            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
+            next_td = env.step(action_td)
+
+            # Trade should NOT execute in this step (position still tracked as 1)
+            # This is because _execute_trade_if_needed checks current_position != 0
+            # and _check_position_closed happens after
+            mock_trader.trade.assert_not_called()
+
+            # But position should be reset for next step
+            assert env.current_position == 0
+            assert env.active_stop_loss == 0.0
+
+            # Next step should allow new trade
+            mock_trader.trade.reset_mock()
+            next_td2 = env.step(action_td)
+            mock_trader.trade.assert_called_once()
