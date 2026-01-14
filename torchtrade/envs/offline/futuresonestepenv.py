@@ -470,7 +470,7 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
             action=trade_action,
             reward=reward,
             portfolio_value=old_portfolio_value,
-            position=self.position_size
+            position=self.position.position_size
         )
 
         next_tensordict.set("reward", reward)
