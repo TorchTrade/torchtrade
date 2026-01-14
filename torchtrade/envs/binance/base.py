@@ -210,7 +210,7 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status", None)
 
         if position_status is None:
-            self.position_hold_counter = 0
+            self.position.hold_counter = 0
             position_size = 0.0
             position_value = 0.0
             entry_price = 0.0
@@ -221,7 +221,7 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
             liquidation_price = 0.0
             holding_time = 0.0
         else:
-            self.position_hold_counter += 1
+            self.position.hold_counter += 1
             position_size = position_status.qty  # Positive=long, Negative=short
             position_value = abs(position_status.notional_value)
             entry_price = position_status.entry_price
@@ -231,7 +231,7 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
             # Calculate margin ratio (position value / total balance)
             margin_ratio = position_value / total_balance if total_balance > 0 else 0.0
             liquidation_price = position_status.liquidation_price
-            holding_time = float(self.position_hold_counter)
+            holding_time = float(self.position.hold_counter)
 
         # Build account state tensor (10 elements for Binance futures)
         account_state = torch.tensor(
@@ -286,13 +286,16 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         status = self.trader.get_status()
         position_status = status.get("position_status")
-        self.position_hold_counter = 0
+        self.position.hold_counter = 0
 
         if position_status is None:
-            self.position.current_position = 0  # No position
+            self.position.current_position = 0
+        elif position_status.qty > 0:
+            self.position.current_position = 1  # Long position
+        elif position_status.qty < 0:
+            self.position.current_position = -1  # Short position
         else:
-            # Binance: positive qty = long, negative qty = short
-            self.position.current_position = 1 if position_status.qty > 0 else -1 if position_status.qty < 0 else 0
+            self.position.current_position = 0  # No position
 
         # Get initial observation
         return self._get_observation()

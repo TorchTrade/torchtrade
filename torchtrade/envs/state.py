@@ -1,6 +1,6 @@
 """State classes for trading environments."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 
 @dataclass
@@ -24,9 +24,5 @@ class PositionState:
 
     def reset(self):
         """Reset all position state to initial values."""
-        self.current_position = 0.0
-        self.position_size = 0.0
-        self.position_value = 0.0
-        self.entry_price = 0.0
-        self.unrealized_pnlpc = 0.0
-        self.hold_counter = 0
+        for field in fields(self):
+            setattr(self, field.name, field.default)
