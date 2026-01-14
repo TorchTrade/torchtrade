@@ -14,7 +14,7 @@ import numpy as np
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data.tensor_specs import CompositeSpec
-from torchrl.envs import EnvBase
+from torchtrade.envs.offline.base import TorchTradeOfflineEnv
 import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
@@ -83,6 +83,7 @@ class FuturesOneStepEnvConfig:
     seed: Optional[int] = 42
     include_base_features: bool = False
     max_traj_length: Optional[int] = None
+    random_start: bool = True  # Always True for one-step environments
 
     # Reward settings
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
@@ -95,7 +96,7 @@ class FuturesOneStepEnvConfig:
         )
 
 
-class FuturesOneStepEnv(EnvBase):
+class FuturesOneStepEnv(TorchTradeOfflineEnv):
     """
     Futures One-Step Environment for GRPO-style RL training.
 
@@ -115,6 +116,12 @@ class FuturesOneStepEnv(EnvBase):
      unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
     """
 
+    # Futures-specific account state (includes leverage, margin_ratio, liquidation_price)
+    ACCOUNT_STATE = [
+        "cash", "position_size", "position_value", "entry_price", "current_price",
+        "unrealized_pnlpct", "leverage", "margin_ratio", "liquidation_price", "holding_time"
+    ]
+
     def __init__(
         self,
         df: pd.DataFrame,
@@ -129,49 +136,24 @@ class FuturesOneStepEnv(EnvBase):
             config: Environment configuration
             feature_preprocessing_fn: Optional custom preprocessing function
         """
-        self.config = config
+        # Initialize base class (handles sampler, history, balance, etc.)
+        super().__init__(df, config, feature_preprocessing_fn)
 
         # Validate custom reward function signature if provided
         if config.reward_function is not None:
             validate_reward_function(config.reward_function)
 
-        self.transaction_fee = config.transaction_fee
-        self.slippage = config.slippage
+        # Environment-specific configuration
         self.leverage = config.leverage
         self.margin_type = config.margin_type
         self.maintenance_margin_rate = config.maintenance_margin_rate
 
-        if not (0 <= config.transaction_fee <= 1):
-            raise ValueError("Transaction fee must be between 0 and 1.")
-        if not (0 <= config.slippage <= 1):
-            raise ValueError("Slippage must be between 0 and 1.")
+        # Validate config parameters
         if not (1 <= config.leverage <= 125):
             raise ValueError("Leverage must be between 1 and 125.")
 
-        self.initial_cash_sampler = InitialBalanceSampler(config.initial_cash, config.seed)
         self.episode_idx = 0
-
-        self.sampler = MarketDataObservationSampler(
-            df,
-            time_frames=config.time_frames,
-            window_sizes=config.window_sizes,
-            execute_on=config.execute_on,
-            feature_processing_fn=feature_preprocessing_fn,
-            features_start_with="features_",
-            max_traj_length=config.max_traj_length,
-            seed=config.seed
-        )
-        self.random_start = True
-        self.max_traj_length = config.max_traj_length
-
-        # Execute trades on the specified time frame
-        self.execute_on_value = config.execute_on.value
-        self.execute_on_unit = config.execute_on.unit.value
         self.periods_per_year = compute_periods_per_year_crypto(self.execute_on_unit, self.execute_on_value)
-
-        # Reset settings
-        self.initial_cash = config.initial_cash
-        self.position_hold_counter = 0
 
         # SLTP levels
         self.stoploss_levels = list(config.stoploss_levels) if not isinstance(config.stoploss_levels, list) else config.stoploss_levels
@@ -186,62 +168,24 @@ class FuturesOneStepEnv(EnvBase):
         )
         self.action_spec = Categorical(len(self.action_map))
 
-        # Get market data keys
-        market_data_keys = self.sampler.get_observation_keys()
+        # Build observation specs using class constant
         num_features = len(self.sampler.get_feature_keys())
+        self._build_observation_specs(self.ACCOUNT_STATE, num_features)
 
-        # Observation space
-        self.observation_spec = CompositeSpec(shape=())
-
-        self.market_data_key = "market_data"
-        self.account_state_key = "account_state"
-
-        # Account state spec (10 elements for futures)
-        self.account_state = ["cash", "position_size", "position_value", "entry_price", "current_price",
-                              "unrealized_pnlpct", "leverage", "margin_ratio", "liquidation_price", "holding_time"]
-        account_state_spec = Bounded(
-            low=-torch.inf, high=torch.inf, shape=(len(self.account_state),), dtype=torch.float
-        )
-
-        self.market_data_keys = []
-        window_sizes_list = (
-            config.window_sizes
-            if isinstance(config.window_sizes, list)
-            else [config.window_sizes]
-        )
-        for i, market_data_name in enumerate(market_data_keys):
-            market_data_key = f"market_data_{market_data_name}_{window_sizes_list[i]}"
-            market_data_spec = Bounded(
-                low=-torch.inf, high=torch.inf,
-                shape=(window_sizes_list[i], num_features), dtype=torch.float
-            )
-            self.observation_spec.set(market_data_key, market_data_spec)
-            self.market_data_keys.append(market_data_key)
-        self.observation_spec.set(self.account_state_key, account_state_spec)
-
-        # Add coverage tracking indices to observation spec (only when random_start=True)
-        if self.random_start:
-            from torchrl.data.tensor_specs import Unbounded
-            # reset_index: tracks episode start position diversity
-            self.observation_spec.set(
-                "reset_index",
-                Unbounded(shape=(), dtype=torch.long)
-            )
-            # state_index: tracks all timesteps visited during episodes
-            self.observation_spec.set(
-                "state_index",
-                Unbounded(shape=(), dtype=torch.long)
-            )
-
+        # Reward spec
         self.reward_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(1,), dtype=torch.float)
-        self.max_steps = self.sampler.get_max_steps()
-        self.step_counter = 0
 
-        # History tracking
-        self.base_price_history = []
-        self.action_history = []
-        self.reward_history = []
-        self.portfolio_value_history = []
+        # Initialize futures-specific state
+        self.unrealized_pnl = 0.0
+        self.unrealized_pnl_pct = 0.0
+        self.liquidation_price = 0.0
+        self.position_history = []
+
+        # Initialize one-step specific state
+        self.stop_loss_price = 0.0
+        self.take_profit_price = 0.0
+        self.previous_portfolio_value = 0.0
+        self.rollout_returns = []
 
         # PERF: Pre-allocate account state tensor to avoid allocation each step
         self._account_state_buffer = torch.zeros(10, dtype=torch.float)
@@ -250,7 +194,31 @@ class FuturesOneStepEnv(EnvBase):
         self._cached_portfolio_value = 0.0
         self._cached_portfolio_price = 0.0
 
-        super().__init__()
+        # Force random_start to True for one-step environments (contextual bandit setting requires diverse starts)
+        if not config.random_start:
+            logger.warning(
+                "FuturesOneStepEnv requires random_start=True for proper one-step/contextual bandit training. "
+                "Ignoring config.random_start=False and forcing random_start=True."
+            )
+        self.random_start = True
+
+    def _reset_history(self):
+        """Reset all history tracking arrays including position_history for futures."""
+        super()._reset_history()
+        self.position_history = []
+
+    def _reset_position_state(self):
+        """Reset position tracking state including futures and one-step specific state."""
+        super()._reset_position_state()
+        # Futures-specific state
+        self.unrealized_pnl = 0.0
+        self.unrealized_pnl_pct = 0.0
+        self.liquidation_price = 0.0
+        # One-step specific state
+        self.stop_loss_price = 0.0
+        self.take_profit_price = 0.0
+        self.previous_portfolio_value = 0.0
+        self.rollout_returns = []
 
     def _calculate_liquidation_price(self, entry_price: float, position_size: float) -> float:
         """
@@ -446,51 +414,6 @@ class FuturesOneStepEnv(EnvBase):
     def _set_seed(self, seed: int):
         """Set the seed for the environment."""
         self.seed = seed
-
-    def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
-        """Reset the environment."""
-        self.base_price_history = []
-        self.action_history = []
-        self.reward_history = []
-        self.portfolio_value_history = []
-
-        max_episode_steps = self.sampler.reset(random_start=self.random_start)
-        self.max_traj_length = max_episode_steps
-
-        initial_portfolio_value = self.initial_cash_sampler.sample()
-        self.balance = initial_portfolio_value
-        self.initial_portfolio_value = initial_portfolio_value
-
-        # Reset position state
-        self.position_hold_counter = 0
-        self.current_position = 0  # -1=short, 0=none, 1=long
-        self.position_size = 0.0
-        self.position_value = 0.0
-        self.entry_price = 0.0
-        self.unrealized_pnl = 0.0
-        self.unrealized_pnl_pct = 0.0
-        self.liquidation_price = 0.0
-        self.step_counter = 0
-
-        # SLTP levels
-        self.stop_loss_price = 0.0
-        self.take_profit_price = 0.0
-        self.previous_portfolio_value = 0.0
-
-        logger.debug(f"Reset environment with initial portfolio value: {initial_portfolio_value}")
-
-        obs = self._get_observation(initial=True)
-
-        # Add coverage tracking indices (only during training with random_start)
-        if self.random_start:
-            # Store the reset index to track episode start diversity
-            # Ensure index is within valid range for coverage tracking
-            max_valid_idx = len(self.sampler._exec_times_arr) - 1
-            self._reset_idx = min(self.sampler._sequential_idx, max_valid_idx)
-            obs.set("reset_index", torch.tensor(self._reset_idx, dtype=torch.long))
-            obs.set("state_index", torch.tensor(self._reset_idx, dtype=torch.long))
-
-        return obs
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
@@ -773,14 +696,6 @@ class FuturesOneStepEnv(EnvBase):
         """Check if episode should terminate."""
         bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
         return portfolio_value < bankruptcy_threshold or self.step_counter >= self.max_steps
-
-    def get_market_data_keys(self) -> List[str]:
-        """Return the list of market data keys."""
-        return self.market_data_keys
-
-    def get_account_state(self) -> List[str]:
-        """Return the list of account state field names."""
-        return self.account_state
 
     def close(self):
         """Clean up resources."""
