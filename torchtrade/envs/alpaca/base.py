@@ -11,7 +11,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
 from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass
 from torchtrade.envs.live import TorchTradeLiveEnv
-from torchtrade.envs.state import PositionState
+from torchtrade.envs.state import HistoryTracker, PositionState
 
 
 class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -36,7 +36,9 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
     - _check_termination(): Episode termination logic
     """
 
-    # Standard account state for Alpaca environments
+    # Standard account state for Alpaca environments (7 elements)
+    # Note: Subclasses may define their own ACCOUNT_STATE if they have different state dimensions.
+    # For example, futures environments have 10 elements instead of 7.
     ACCOUNT_STATE = [
         "cash", "position_size", "position_value", "entry_price",
         "current_price", "unrealized_pnlpct", "holding_time"
@@ -93,6 +95,9 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         # Initialize position state
         self.position = PositionState()
+
+        # Initialize history tracking
+        self.history = HistoryTracker()
 
     def _init_trading_clients(
         self,
@@ -232,6 +237,9 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         """Reset the environment."""
         # Cancel all orders
         self.trader.cancel_open_orders()
+
+        # Reset history tracking
+        self.history.reset()
 
         # Get current state
         account = self.trader.client.get_account()

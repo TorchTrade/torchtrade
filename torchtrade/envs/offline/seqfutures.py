@@ -12,6 +12,7 @@ from torchrl.data import Categorical, Bounded
 import pandas as pd
 from torchtrade.envs.offline.base import TorchTradeOfflineEnv
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, normalize_timeframe_config
+from torchtrade.envs.state import FuturesHistoryTracker
 
 
 class MarginType(Enum):
@@ -137,7 +138,10 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         self.unrealized_pnl = 0.0  # Absolute unrealized PnL (calculated from leverage)
         self.unrealized_pnl_pct = 0.0  # Percentage unrealized PnL
         self.liquidation_price = 0.0  # Price at which position would be liquidated
-        self.position_history = []  # Track position sizes over time
+
+    def _reset_history(self):
+        """Reset all history tracking including position history."""
+        self.history = FuturesHistoryTracker()
 
     def _calculate_liquidation_price(self, entry_price: float, position_size: float) -> float:
         """
@@ -261,11 +265,6 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         self.liquidation_price = 0.0
         self.position_history = []
 
-    def _reset_history(self):
-        """Reset all history tracking arrays including position history."""
-        super()._reset_history()
-        self.position_history = []
-
     def _get_portfolio_value(self, current_price: Optional[float] = None) -> float:
         """Calculate total portfolio value including unrealized PnL for futures."""
         if current_price is None:
@@ -305,17 +304,13 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         else:
             trade_info = self._execute_trade_if_needed(desired_action)
 
-        # Record history
+        # Record trade action
         trade_action = 0
         if trade_info["executed"]:
             if trade_info["side"] == "long":
                 trade_action = 1
             elif trade_info["side"] == "short":
                 trade_action = -1
-        self.action_history.append(trade_action)
-        self.base_price_history.append(current_price)
-        self.portfolio_value_history.append(old_portfolio_value)
-        self.position_history.append(self.position.position_size)
 
         # Get updated state
         next_tensordict = self._get_observation()
@@ -329,7 +324,15 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         reward = self._calculate_reward(
             old_portfolio_value, new_portfolio_value, desired_action, trade_info
         )
-        self.reward_history.append(reward)
+
+        # Record step history
+        self.history.record_step(
+            price=current_price,
+            action=trade_action,
+            reward=reward,
+            portfolio_value=old_portfolio_value,
+            position=self.position.position_size
+        )
 
         # Check termination
         done = self._check_termination(new_portfolio_value)
@@ -546,8 +549,8 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         from torchtrade.envs.offline.utils import compute_periods_per_year_crypto
 
         # Convert histories to tensors
-        portfolio_values = torch.tensor(self.portfolio_value_history, dtype=torch.float32)
-        rewards = torch.tensor(self.reward_history, dtype=torch.float32)
+        portfolio_values = torch.tensor(self.history.portfolio_values, dtype=torch.float32)
+        rewards = torch.tensor(self.history.rewards, dtype=torch.float32)
 
         # Compute periods per year for annualization
         periods_per_year = compute_periods_per_year_crypto(
@@ -559,17 +562,18 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         return compute_all_metrics(
             portfolio_values=portfolio_values,
             rewards=rewards,
-            action_history=self.action_history,
+            action_history=self.history.actions,
             periods_per_year=periods_per_year,
         )
 
     def render_history(self, return_fig=False):
         """Render the history of the environment."""
-        price_history = self.base_price_history
+        history_dict = self.history.to_dict()
+        price_history = history_dict['base_prices']
         time_indices = list(range(len(price_history)))
-        action_history = self.action_history
-        portfolio_value_history = self.portfolio_value_history
-        position_history = self.position_history
+        action_history = history_dict['actions']
+        portfolio_value_history = history_dict['portfolio_values']
+        position_history = history_dict['positions']
 
         # Calculate buy-and-hold balance
         initial_balance = portfolio_value_history[0]

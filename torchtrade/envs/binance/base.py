@@ -11,7 +11,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchtrade.envs.binance.obs_class import BinanceObservationClass
 from torchtrade.envs.binance.futures_order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.live import TorchTradeLiveEnv
-from torchtrade.envs.state import PositionState
+from torchtrade.envs.state import FuturesHistoryTracker, PositionState
 
 
 # Interval to seconds mapping for waiting
@@ -53,6 +53,8 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
     """
 
     # Standard account state for Binance futures environments (10 elements)
+    # Note: This is intentionally different from Alpaca's 7-element state because futures trading
+    # requires additional state: leverage, margin_ratio, and liquidation_price.
     ACCOUNT_STATE = [
         "cash", "position_size", "position_value", "entry_price", "current_price",
         "unrealized_pnlpct", "leverage", "margin_ratio", "liquidation_price", "holding_time"
@@ -110,6 +112,9 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         # Initialize position state
         self.position = PositionState()  # current_position: 0=no position, 1=long, -1=short
+
+        # Initialize history tracking (futures environments use FuturesHistoryTracker)
+        self.history = FuturesHistoryTracker()
 
     def _init_trading_clients(
         self,
@@ -272,6 +277,9 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         """Reset the environment."""
         # Cancel all orders
         self.trader.cancel_open_orders()
+
+        # Reset history tracking
+        self.history.reset()
 
         # Optionally close positions on reset (configurable)
         if hasattr(self.config, 'close_position_on_reset') and self.config.close_position_on_reset:

@@ -197,7 +197,13 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
             logger.debug(f"Episode truncated after {self.step_counter} steps")
             reward = 0 # set to 0 as we do not want to reward the agent for not selling
 
-        self.reward_history.append(reward)
+        # Record step history (one-step env only tracks minimal history)
+        self.history.record_step(
+            price=cached_price,
+            action=action_tuple[0] if isinstance(action_tuple, tuple) else action_tuple,
+            reward=reward,
+            portfolio_value=old_portfolio_value
+        )
 
         next_tensordict.set("reward", reward)
         next_tensordict.set("done", True)
