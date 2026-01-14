@@ -1,7 +1,7 @@
 """State management dataclasses for TorchTrade environments."""
 
 from dataclasses import asdict, dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Union
 
 
 @dataclass
@@ -41,10 +41,10 @@ class HistoryTracker:
 
     def record_step(
         self,
-        price: float,
-        action: float,
-        reward: float,
-        portfolio_value: float
+        price: Union[int, float],
+        action: Union[int, float],
+        reward: Union[int, float],
+        portfolio_value: Union[int, float]
     ) -> None:
         """Record a single step's history.
 
@@ -103,11 +103,11 @@ class FuturesHistoryTracker(HistoryTracker):
 
     def record_step(
         self,
-        price: float,
-        action: float,
-        reward: float,
-        portfolio_value: float,
-        position: float
+        price: Union[int, float],
+        action: Union[int, float],
+        reward: Union[int, float],
+        portfolio_value: Union[int, float],
+        position: Union[int, float]
     ) -> None:
         """Record a single step's history including position.
 
