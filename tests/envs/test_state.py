@@ -160,14 +160,15 @@ class TestFuturesHistoryTracker:
         assert history.portfolio_values == [5000.0]
         assert history.positions == [0.5]
 
-    def test_record_step_without_position(self):
-        """Test recording a step without position parameter."""
+    def test_record_step_with_zero_position(self):
+        """Test recording a step with zero position (no position)."""
         history = FuturesHistoryTracker()
         history.record_step(
             price=50000.0,
             action=1.0,
             reward=0.05,
-            portfolio_value=5000.0
+            portfolio_value=5000.0,
+            position=0.0
         )
 
         assert len(history) == 1
@@ -175,7 +176,7 @@ class TestFuturesHistoryTracker:
         assert history.actions == [1.0]
         assert history.rewards == [0.05]
         assert history.portfolio_values == [5000.0]
-        assert history.positions == []  # Position not added when None
+        assert history.positions == [0.0]  # Zero position recorded
 
     def test_record_multiple_steps_with_positions(self):
         """Test recording multiple steps with positions."""
@@ -251,20 +252,19 @@ class TestFuturesHistoryTracker:
         assert isinstance(history, HistoryTracker)
         assert isinstance(history, FuturesHistoryTracker)
 
-    def test_mixed_position_recording(self):
-        """Test recording steps with and without position."""
+    def test_mixed_position_values(self):
+        """Test recording steps with different position values (including zero)."""
         history = FuturesHistoryTracker()
 
-        # Record with position
+        # Record with long position
         history.record_step(50000.0, 1.0, 0.05, 5000.0, position=0.5)
         assert len(history.positions) == 1
 
-        # Record without position
-        history.record_step(51000.0, 0.0, 0.02, 5100.0)
-        # Position list stays the same length (None is not appended)
-        assert len(history.positions) == 1
-
-        # Record with position again
-        history.record_step(49000.0, -1.0, -0.04, 4900.0, position=-0.3)
+        # Record with no position (zero)
+        history.record_step(51000.0, 0.0, 0.02, 5100.0, position=0.0)
         assert len(history.positions) == 2
-        assert history.positions == [0.5, -0.3]
+
+        # Record with short position
+        history.record_step(49000.0, -1.0, -0.04, 4900.0, position=-0.3)
+        assert len(history.positions) == 3
+        assert history.positions == [0.5, 0.0, -0.3]

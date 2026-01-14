@@ -1,7 +1,7 @@
 """State management dataclasses for TorchTrade environments."""
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Dict, List
 
 
 @dataclass
@@ -65,12 +65,7 @@ class HistoryTracker:
         Returns:
             Dictionary mapping history field names to their value lists
         """
-        return {
-            'base_prices': self.base_prices,
-            'actions': self.actions,
-            'rewards': self.rewards,
-            'portfolio_values': self.portfolio_values
-        }
+        return asdict(self)
 
     def __len__(self) -> int:
         """Return the number of steps recorded.
@@ -112,7 +107,7 @@ class FuturesHistoryTracker(HistoryTracker):
         action: float,
         reward: float,
         portfolio_value: float,
-        position: Optional[float] = None
+        position: float
     ) -> None:
         """Record a single step's history including position.
 
@@ -124,15 +119,5 @@ class FuturesHistoryTracker(HistoryTracker):
             position: Position size at this step (positive=long, negative=short)
         """
         super().record_step(price, action, reward, portfolio_value)
-        if position is not None:
-            self.positions.append(position)
+        self.positions.append(position)
 
-    def to_dict(self) -> Dict[str, List[float]]:
-        """Export history as dictionary including position history.
-
-        Returns:
-            Dictionary mapping history field names to their value lists
-        """
-        result = super().to_dict()
-        result['positions'] = self.positions
-        return result

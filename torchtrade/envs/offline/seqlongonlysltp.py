@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 from warnings import warn
 from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
-from datetime import datetime
 
 import numpy as np
 from tensordict import TensorDict, TensorDictBase
