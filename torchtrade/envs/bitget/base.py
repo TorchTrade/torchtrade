@@ -11,6 +11,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 from torchtrade.envs.bitget.futures_order_executor import BitgetFuturesOrderClass
 from torchtrade.envs.live import TorchTradeLiveEnv
+from torchtrade.envs.state import FuturesHistoryTracker
 
 
 # Interval to seconds mapping for waiting
@@ -114,6 +115,9 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         # Initialize current position tracking
         self.current_position = 0  # 0=no position, 1=long, -1=short
+
+        # Initialize history tracking (futures environments use FuturesHistoryTracker)
+        self.history = FuturesHistoryTracker()
 
     def _init_trading_clients(
         self,
@@ -285,6 +289,9 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         """Reset the environment."""
         # Cancel all orders
         self.trader.cancel_open_orders()
+
+        # Reset history tracking
+        self.history.reset()
 
         # Optionally close positions on reset (configurable)
         if hasattr(self.config, 'close_position_on_reset') and self.config.close_position_on_reset:
