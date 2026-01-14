@@ -1,7 +1,7 @@
-from typing import List, Union, Callable, Dict, Optional
-from datetime import datetime, timedelta
-import numpy as np
+from typing import Union, List, Optional, Callable
 import pandas as pd
+
+from torchtrade.envs.futures.obs_class import BaseFuturesObservationClass
 
 
 # Bitget interval mapping for futures klines
@@ -22,12 +22,12 @@ INTERVAL_MAP = {
 }
 
 
-class BitgetObservationClass:
+class BitgetObservationClass(BaseFuturesObservationClass):
     """
     Observation class for fetching market data from Bitget.
 
-    Similar to BinanceObservationClass but uses Bitget API for data fetching.
-    Supports multiple timeframes and custom feature preprocessing.
+    Inherits common functionality from BaseFuturesObservationClass.
+    Implements Bitget-specific API interaction for futures market data.
     """
 
     def __init__(
@@ -46,175 +46,109 @@ class BitgetObservationClass:
         Args:
             symbol: The trading symbol (e.g., "BTCUSDT")
             intervals: Single interval or list of intervals (e.g., "1m", "5m", "1H")
-                      Valid intervals: 1m, 3m, 5m, 15m, 30m, 1H, 2H, 4H, 6H, 12H, 1D, 3D, 1W
-            window_sizes: Single integer or list of integers specifying window sizes.
-                         If a list is provided, it must have the same length as intervals.
-            product_type: Product type for Bitget futures (SUMCBL=testnet USDT, UMCBL=prod USDT)
-            feature_preprocessing_fn: Optional custom preprocessing function that takes a DataFrame
-                                     and returns a DataFrame with feature columns
-            client: Optional pre-configured Bitget Client for dependency injection (useful for testing)
+            window_sizes: Single integer or list of integers specifying window sizes
+            product_type: Product type for Bitget futures (SUMCBL=testnet, UMCBL=prod)
+            feature_preprocessing_fn: Optional custom preprocessing function
+            client: Optional pre-configured Bitget Client for dependency injection
             demo: Whether to use demo/testnet environment (default: True)
         """
-        # Normalize symbol (remove slash if present)
-        self.symbol = symbol.replace("/", "")
-
-        self.intervals = [intervals] if isinstance(intervals, str) else intervals
-        self.window_sizes = [window_sizes] if isinstance(window_sizes, int) else window_sizes
+        # Store Bitget-specific attributes before calling super().__init__
         self.product_type = "SUMCBL" if demo else product_type  # Force testnet for demo
-        self.demo = demo
-        self.default_lookback = 200  # Bitget default limit
 
-        # Validate intervals
-        for interval in self.intervals:
-            if interval not in INTERVAL_MAP:
-                raise ValueError(f"Invalid interval: {interval}. Valid intervals: {list(INTERVAL_MAP.keys())}")
+        # Call parent constructor
+        super().__init__(
+            symbol=symbol,
+            intervals=intervals,
+            window_sizes=window_sizes,
+            feature_preprocessing_fn=feature_preprocessing_fn,
+            client=client,
+            demo=demo,
+        )
 
-        # Validate that intervals and window_sizes have matching lengths
-        if len(self.intervals) != len(self.window_sizes):
-            raise ValueError("intervals and window_sizes must have the same length")
-
-        self.feature_preprocessing_fn = feature_preprocessing_fn or self._default_preprocessing
-
-        # Initialize client if not provided
-        if client is not None:
-            self.client = client
-        else:
-            try:
-                from pybitget import Client
-                # For market data, we can use public API (no keys required)
-                # But pybitget requires keys, so we'll use empty strings for read-only
-                self.client = Client("", "", passphrase="")
-            except ImportError:
-                raise ImportError("python-bitget is required. Install with: pip install python-bitget")
-
-    def _default_preprocessing(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Default preprocessing function if none is provided."""
-        df = df.copy()
-        df.dropna(inplace=True)
-        df.drop_duplicates(inplace=True)
-
-        # Generating base features (normalized)
-        df["feature_close"] = df["close"].pct_change().fillna(0)
-        df["feature_open"] = df["open"] / df["close"]
-        df["feature_high"] = df["high"] / df["close"]
-        df["feature_low"] = df["low"] / df["close"]
-        df.dropna(inplace=True)
-        return df
-
-    def _get_numpy_obs(self, df: pd.DataFrame, columns: List[str] = None) -> np.ndarray:
-        """Convert specified columns to numpy array."""
-        if columns is None:
-            columns = [col for col in df.columns if "feature" in col]
-        if not columns:
-            raise ValueError(f"No columns found in preprocessed DataFrame matching: {columns}")
-        return np.array(df[columns], dtype=np.float32)
-
-    def _fetch_single_interval(self, interval: str, limit: int = None) -> pd.DataFrame:
-        """Fetch and preprocess data for a single interval."""
-        if limit is None:
-            limit = self.default_lookback
-
-        # Map interval to Bitget format
-        bitget_interval = INTERVAL_MAP[interval]
-
+    def _create_client(self) -> object:
+        """Create Bitget API client."""
         try:
-            # Bitget candles API: mix_get_candles(symbol, granularity, productType, limit=...)
-            # Granularity format: "1m", "5m", "1H", "1D", etc.
-            candles = self.client.mix_get_candles(
-                symbol=self.symbol,
-                granularity=bitget_interval,
-                productType=self.product_type,
-                limit=limit
+            from pybitget import Client
+            # For market data, we can use public API (no keys required)
+            # But pybitget requires keys, so we'll use empty strings for read-only
+            return Client("", "", passphrase="")
+        except ImportError:
+            raise ImportError("python-bitget is required. Install with: pip install python-bitget")
+
+    def _validate_interval(self, interval: str) -> None:
+        """Validate that an interval is supported by Bitget."""
+        if interval not in INTERVAL_MAP:
+            raise ValueError(
+                f"Invalid interval: {interval}. "
+                f"Valid intervals: {list(INTERVAL_MAP.keys())}"
             )
 
-            # Bitget candles format (per their API docs):
-            # [timestamp, open, high, low, close, volume, quote_volume]
-            # Note: Timestamp is in milliseconds
-            if not candles or len(candles) == 0:
-                raise ValueError(f"No candle data returned for {self.symbol} on {interval}")
-
-            df = pd.DataFrame(candles, columns=[
-                'timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume'
-            ])
-
-            # Convert types
-            df['open'] = df['open'].astype(float)
-            df['high'] = df['high'].astype(float)
-            df['low'] = df['low'].astype(float)
-            df['close'] = df['close'].astype(float)
-            df['volume'] = df['volume'].astype(float)
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-
-            # Sort by timestamp (ascending) - some exchanges return in reverse order
-            df = df.sort_values('timestamp').reset_index(drop=True)
-
-            return df
-
-        except Exception as e:
-            raise RuntimeError(f"Failed to fetch candles from Bitget for {self.symbol} on {interval}: {str(e)}")
-
-    def get_keys(self) -> List[str]:
+    def _fetch_klines(self, symbol: str, interval: str, limit: int) -> list:
         """
-        Get the list of keys that will be present in the observations dictionary.
-
-        Returns:
-            List of strings formatted as '{interval}_{window_size}'
-        """
-        return [
-            f"{interval}_{ws}"
-            for interval, ws in zip(self.intervals, self.window_sizes)
-        ]
-
-    def get_features(self) -> Dict[str, List[str]]:
-        """Returns a dictionary with the observation features and the original features."""
-        def get_dummy_data(window_size: int):
-            df = pd.DataFrame()
-            df["open"] = np.random.rand(window_size)
-            df["high"] = np.random.rand(window_size)
-            df["low"] = np.random.rand(window_size)
-            df["close"] = np.random.rand(window_size)
-            df["volume"] = np.random.rand(window_size)
-            return df
-
-        dummy_df = self.feature_preprocessing_fn(get_dummy_data(self.window_sizes[0]))
-        observation_features = [f for f in dummy_df.columns if "feature" in f]
-        original_features = [f for f in dummy_df.columns if "feature" not in f]
-        return {"observation_features": observation_features, "original_features": original_features}
-
-    def get_observations(self, return_base_ohlc: bool = False) -> Dict[str, np.ndarray]:
-        """
-        Fetch and process observations for all specified intervals and window sizes.
+        Fetch raw kline data from Bitget API.
 
         Args:
-            return_base_ohlc: If True, includes the raw OHLC data from the first interval
-                            in the observations dictionary under the 'base_features' key.
+            symbol: Trading symbol (e.g., "BTCUSDT")
+            interval: Bitget-specific interval string (e.g., "1H", "1D")
+            limit: Number of candles to fetch
 
         Returns:
-            Dictionary with keys formatted as '{interval}_{window_size}' and numpy array values.
-            If return_base_ohlc is True, includes 'base_features' and 'base_timestamps' keys.
+            Raw kline data: list of [timestamp, open, high, low, close, volume, quote_volume]
         """
-        observations = {}
+        candles = self.client.mix_get_candles(
+            symbol=symbol,
+            granularity=interval,
+            productType=self.product_type,
+            limit=limit
+        )
+        return candles
 
-        for interval, window_size in zip(self.intervals, self.window_sizes):
-            key = f"{interval}_{window_size}"
-            # Fetch extra data for preprocessing (rolling windows may need more)
-            df = self._fetch_single_interval(interval, limit=window_size + 50)
+    def _parse_klines(self, raw_klines: list) -> pd.DataFrame:
+        """
+        Parse raw Bitget kline data into standardized DataFrame.
 
-            # Store base OHLC features if this is the first interval and return_base_ohlc is True
-            if return_base_ohlc and interval == self.intervals[0]:
-                base_df = df.copy()
-                observations['base_features'] = self._get_numpy_obs(
-                    base_df,
-                    columns=['open', 'high', 'low', 'close']
-                )[-window_size:]
-                observations['base_timestamps'] = base_df['timestamp'].values[-window_size:]
+        Bitget candles format: [timestamp, open, high, low, close, volume, quote_volume]
+        Note: Timestamp is in milliseconds
 
-            processed_df = self.feature_preprocessing_fn(df)
-            # Apply window size
-            processed_df = processed_df.iloc[-window_size:]
-            observations[key] = self._get_numpy_obs(processed_df)
+        Args:
+            raw_klines: Raw kline data from Bitget API
 
-        return observations
+        Returns:
+            DataFrame with columns: timestamp, open, high, low, close, volume
+        """
+        df = pd.DataFrame(raw_klines, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume'
+        ])
+
+        # Convert types
+        df['open'] = df['open'].astype(float)
+        df['high'] = df['high'].astype(float)
+        df['low'] = df['low'].astype(float)
+        df['close'] = df['close'].astype(float)
+        df['volume'] = df['volume'].astype(float)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+
+        return df
+
+    def _convert_interval(self, interval: str) -> str:
+        """
+        Convert standard interval to Bitget-specific format.
+
+        Args:
+            interval: Standard interval (e.g., "1h", "1d")
+
+        Returns:
+            Bitget interval string (e.g., "1H", "1D")
+        """
+        return INTERVAL_MAP[interval]
+
+    def _get_default_lookback(self) -> int:
+        """Get the default number of candles to fetch (Bitget limit)."""
+        return 200
+
+    def _get_timestamp_column(self) -> str:
+        """Get the name of the timestamp column."""
+        return "timestamp"
 
 
 # Example usage:
