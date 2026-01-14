@@ -114,6 +114,8 @@ Live environments connect to real trading APIs for paper trading or live executi
 - **Binance**: Cryptocurrency futures with high leverage. Supports testnet for safe testing.
 - **Bitget**: Cryptocurrency futures with competitive fees and testnet support. Alternative to Binance.
 
+**Need another broker?** If you need support for a different trading platform (OKX, Bybit, Interactive Brokers, etc.), please [create an issue](https://github.com/TorchTrade/torchtrade_envs/issues/new) or contact us at torchtradecontact@gmail.com.
+
 ---
 
 ## Common Use Cases
