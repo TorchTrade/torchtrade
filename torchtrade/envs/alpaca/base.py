@@ -11,6 +11,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
 from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass
 from torchtrade.envs.live import TorchTradeLiveEnv
+from torchtrade.envs.state import PositionState
 
 
 class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -90,8 +91,8 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Build observation specs
         self._build_observation_specs()
 
-        # Initialize current position tracking
-        self.current_position = 0.0
+        # Initialize position state
+        self.position = PositionState()
 
     def _init_trading_clients(
         self,
@@ -244,9 +245,9 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.position_hold_counter = 0
 
         if position_status is None:
-            self.current_position = 0.0
+            self.position.current_position = 0.0
         else:
-            self.current_position = 1 if position_status.qty > 0 else 0
+            self.position.current_position = 1 if position_status.qty > 0 else 0
 
         # Get initial observation
         return self._get_observation()

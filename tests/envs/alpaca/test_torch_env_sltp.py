@@ -242,7 +242,7 @@ class TestAlpacaSLTPTradingEnvReset:
 
         assert env.active_stop_loss == 0.0
         assert env.active_take_profit == 0.0
-        assert env.current_position == 0.0
+        assert env.position.current_position == 0.0
 
 
 class TestAlpacaSLTPTradingEnvStep:
@@ -283,7 +283,7 @@ class TestAlpacaSLTPTradingEnvStep:
         td_in = TensorDict({"action": torch.tensor(0)}, batch_size=())
         env._step(td_in)
 
-        assert env.current_position == 0
+        assert env.position.current_position == 0
 
     def test_step_buy_with_sltp(self, env):
         """Test buy action with SL/TP (action > 0)."""
@@ -293,7 +293,7 @@ class TestAlpacaSLTPTradingEnvStep:
         td_in = TensorDict({"action": torch.tensor(1)}, batch_size=())
         td_out = env._step(td_in)
 
-        assert env.current_position == 1
+        assert env.position.current_position == 1
 
     def test_step_contains_reward_and_done(self, env):
         """Test that step returns reward and done flags."""

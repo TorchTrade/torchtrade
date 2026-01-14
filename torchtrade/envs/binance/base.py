@@ -11,6 +11,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchtrade.envs.binance.obs_class import BinanceObservationClass
 from torchtrade.envs.binance.futures_order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.live import TorchTradeLiveEnv
+from torchtrade.envs.state import PositionState
 
 
 # Interval to seconds mapping for waiting
@@ -107,8 +108,8 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Build observation specs
         self._build_observation_specs()
 
-        # Initialize current position tracking
-        self.current_position = 0  # 0=no position, 1=long, -1=short
+        # Initialize position state
+        self.position = PositionState()  # current_position: 0=no position, 1=long, -1=short
 
     def _init_trading_clients(
         self,
@@ -288,10 +289,10 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.position_hold_counter = 0
 
         if position_status is None:
-            self.current_position = 0  # No position
+            self.position.current_position = 0  # No position
         else:
             # Binance: positive qty = long, negative qty = short
-            self.current_position = 1 if position_status.qty > 0 else -1 if position_status.qty < 0 else 0
+            self.position.current_position = 1 if position_status.qty > 0 else -1 if position_status.qty < 0 else 0
 
         # Get initial observation
         return self._get_observation()

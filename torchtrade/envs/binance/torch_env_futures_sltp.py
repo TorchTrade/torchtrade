@@ -155,14 +155,14 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
 
         if trade_info["executed"]:
             if trade_info["side"] == "BUY":
-                self.current_position = 1  # Long
+                self.position.current_position = 1  # Long
             elif trade_info["side"] == "SELL":
-                self.current_position = -1  # Short
+                self.position.current_position = -1  # Short
             elif trade_info["closed_position"]:
-                self.current_position = 0  # Closed
+                self.position.current_position = 0  # Closed
 
         if position_closed:
-            self.current_position = 0
+            self.position.current_position = 0
             self.active_stop_loss = 0.0
             self.active_take_profit = 0.0
 
@@ -209,7 +209,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         side, stop_loss_pct, take_profit_pct = action_tuple
 
         # HOLD action or already in position
-        if action_tuple == (None, None, None) or self.current_position != 0:
+        if action_tuple == (None, None, None) or self.position.current_position != 0:
             return trade_info
 
         # Get current price for calculating absolute SL/TP levels

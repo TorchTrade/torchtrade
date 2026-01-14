@@ -76,7 +76,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         trade_info = self._execute_trade_if_needed(desired_action)
 
         if trade_info["executed"]:
-            self.current_position = 1 if trade_info["side"] == "buy" else 0
+            self.position.current_position = 1 if trade_info["side"] == "buy" else 0
 
         
         # Wait for next time step
@@ -104,7 +104,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         
         
         # If holding position or no change in position, do nothing
-        if desired_position == 0 or desired_position == self.current_position:
+        if desired_position == 0 or desired_position == self.position.current_position:
             return trade_info
         
         # Determine trade details
