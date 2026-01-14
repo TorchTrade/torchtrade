@@ -20,6 +20,7 @@ from torchrl.data import Bounded, Categorical
 import pandas as pd
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map, normalize_timeframe_config
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
+from torchtrade.envs.state import PositionState
 import logging
 import sys
 
@@ -171,7 +172,9 @@ class FuturesOneStepEnv(EnvBase):
 
         # Reset settings
         self.initial_cash = config.initial_cash
-        self.position_hold_counter = 0
+
+        # Initialize position state
+        self.position = PositionState()
 
         # SLTP levels
         self.stoploss_levels = list(config.stoploss_levels) if not isinstance(config.stoploss_levels, list) else config.stoploss_levels
@@ -310,10 +313,10 @@ class FuturesOneStepEnv(EnvBase):
 
     def _check_liquidation(self, current_price: float) -> bool:
         """Check if current position should be liquidated."""
-        if self.position_size == 0:
+        if self.position.position_size == 0:
             return False
 
-        if self.position_size > 0:
+        if self.position.position_size > 0:
             # Long position - liquidated if price below liquidation price
             return current_price <= self.liquidation_price
         else:
@@ -322,7 +325,7 @@ class FuturesOneStepEnv(EnvBase):
 
     def _get_observation(self, initial: bool = False) -> TensorDictBase:
         """Get the current observation state."""
-        if initial or self.position_size == 0:
+        if initial or self.position.position_size == 0:
             # PERF: Use combined method to avoid redundant searchsorted
             obs_dict, self.current_timestamp, self.truncated, self._cached_base_features = (
                 self.sampler.get_sequential_observation_with_ohlcv()
@@ -336,15 +339,15 @@ class FuturesOneStepEnv(EnvBase):
         current_price = self._cached_base_features.close
 
         # Calculate position value (absolute value of notional)
-        self.position_value = abs(self.position_size * current_price)
+        self.position.position_value = abs(self.position.position_size * current_price)
 
         # Calculate unrealized PnL
-        if self.position_size != 0:
+        if self.position.position_size != 0:
             self.unrealized_pnl = self._calculate_unrealized_pnl(
-                self.entry_price, current_price, self.position_size
+                self.position.entry_price, current_price, self.position.position_size
             )
             self.unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(
-                self.entry_price, current_price, self.position_size
+                self.position.entry_price, current_price, self.position.position_size
             )
         else:
             self.unrealized_pnl = 0.0
@@ -352,7 +355,7 @@ class FuturesOneStepEnv(EnvBase):
 
         # Calculate margin ratio
         total_balance = self.balance + self.unrealized_pnl
-        margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
+        margin_ratio = self.position.position_value / total_balance if total_balance > 0 else 0.0
 
         # PERF: Cache portfolio value and price to avoid recalculation in _get_portfolio_value()
         self._cached_portfolio_value = total_balance
@@ -360,15 +363,15 @@ class FuturesOneStepEnv(EnvBase):
 
         # PERF: Update pre-allocated account state buffer in-place
         self._account_state_buffer[0] = self.balance
-        self._account_state_buffer[1] = self.position_size  # Positive=long, Negative=short
-        self._account_state_buffer[2] = self.position_value
-        self._account_state_buffer[3] = self.entry_price
+        self._account_state_buffer[1] = self.position.position_size  # Positive=long, Negative=short
+        self._account_state_buffer[2] = self.position.position_value
+        self._account_state_buffer[3] = self.position.entry_price
         self._account_state_buffer[4] = current_price
         self._account_state_buffer[5] = self.unrealized_pnl_pct
         self._account_state_buffer[6] = float(self.leverage)
         self._account_state_buffer[7] = margin_ratio
         self._account_state_buffer[8] = self.liquidation_price
-        self._account_state_buffer[9] = float(self.position_hold_counter)
+        self._account_state_buffer[9] = float(self.position.hold_counter)
 
         # Clone to avoid issues with in-place modifications downstream
         obs_data = {self.account_state_key: self._account_state_buffer.clone()}
@@ -401,7 +404,7 @@ class FuturesOneStepEnv(EnvBase):
         if self.config.reward_function is not None:
             # Calculate margin ratio
             total_balance = self.balance + self.unrealized_pnl
-            margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
+            margin_ratio = self.position.position_value / total_balance if total_balance > 0 else 0.0
 
             ctx = build_reward_context(
                 self,
@@ -439,7 +442,7 @@ class FuturesOneStepEnv(EnvBase):
             return self._cached_portfolio_value
 
         unrealized_pnl = self._calculate_unrealized_pnl(
-            self.entry_price, current_price, self.position_size
+            self.position.entry_price, current_price, self.position.position_size
         )
         return self.balance + unrealized_pnl
 
@@ -462,11 +465,11 @@ class FuturesOneStepEnv(EnvBase):
         self.initial_portfolio_value = initial_portfolio_value
 
         # Reset position state
-        self.position_hold_counter = 0
-        self.current_position = 0  # -1=short, 0=none, 1=long
-        self.position_size = 0.0
-        self.position_value = 0.0
-        self.entry_price = 0.0
+        self.position.hold_counter = 0
+        self.position.current_position = 0  # -1=short, 0=none, 1=long
+        self.position.position_size = 0.0
+        self.position.position_value = 0.0
+        self.position.entry_price = 0.0
         self.unrealized_pnl = 0.0
         self.unrealized_pnl_pct = 0.0
         self.liquidation_price = 0.0
@@ -564,23 +567,23 @@ class FuturesOneStepEnv(EnvBase):
 
         # Calculate PnL
         pnl = self._calculate_unrealized_pnl(
-            self.entry_price, execution_price, self.position_size
+            self.position.entry_price, execution_price, self.position.position_size
         )
 
         # Calculate fee
-        notional = abs(self.position_size * execution_price)
+        notional = abs(self.position.position_size * execution_price)
         fee_paid = notional * self.transaction_fee
 
         # Update balance
         self.balance += pnl - fee_paid
 
         # Reset position
-        self.position_size = 0.0
-        self.position_value = 0.0
-        self.entry_price = 0.0
+        self.position.position_size = 0.0
+        self.position.position_value = 0.0
+        self.position.entry_price = 0.0
         self.liquidation_price = 0.0
-        self.current_position = 0
-        self.position_hold_counter = 0
+        self.position.current_position = 0
+        self.position.hold_counter = 0
         self.stop_loss_price = 0.0
         self.take_profit_price = 0.0
 
@@ -599,22 +602,22 @@ class FuturesOneStepEnv(EnvBase):
         logger.debug(f"Liquidation triggered at price: {self.liquidation_price}")
 
         # Realize loss at liquidation price
-        if self.position_size > 0:
-            loss = (self.liquidation_price - self.entry_price) * self.position_size
+        if self.position.position_size > 0:
+            loss = (self.liquidation_price - self.position.entry_price) * self.position.position_size
         else:
-            loss = (self.entry_price - self.liquidation_price) * abs(self.position_size)
+            loss = (self.position.entry_price - self.liquidation_price) * abs(self.position.position_size)
 
         # Apply loss and fees
-        liquidation_fee = abs(self.position_size * self.liquidation_price) * self.transaction_fee
+        liquidation_fee = abs(self.position.position_size * self.liquidation_price) * self.transaction_fee
         self.balance += loss - liquidation_fee
 
         # Reset position
-        self.position_size = 0.0
-        self.position_value = 0.0
-        self.entry_price = 0.0
+        self.position.position_size = 0.0
+        self.position.position_value = 0.0
+        self.position.entry_price = 0.0
         self.liquidation_price = 0.0
-        self.current_position = 0
-        self.position_hold_counter = 0
+        self.position.current_position = 0
+        self.position.hold_counter = 0
         self.stop_loss_price = 0.0
         self.take_profit_price = 0.0
 
@@ -646,8 +649,8 @@ class FuturesOneStepEnv(EnvBase):
         liq_price = self.liquidation_price
         sl_price = self.stop_loss_price
         tp_price = self.take_profit_price
-        is_long = self.position_size > 0
-        is_short = self.position_size < 0
+        is_long = self.position.position_size > 0
+        is_short = self.position.position_size < 0
 
         future_rollout_steps = 1
         while not self.truncated:
@@ -740,22 +743,22 @@ class FuturesOneStepEnv(EnvBase):
         trade_info["fee_paid"] = fee
 
         if side == "long":
-            self.position_size = position_qty
-            self.current_position = 1
+            self.position.position_size = position_qty
+            self.position.current_position = 1
             # Long: SL below entry, TP above entry
             self.stop_loss_price = execution_price * (1 + sl_pct)  # sl_pct is negative
             self.take_profit_price = execution_price * (1 + tp_pct)
         else:  # short
-            self.position_size = -position_qty
-            self.current_position = -1
+            self.position.position_size = -position_qty
+            self.position.current_position = -1
             # Short: SL above entry, TP below entry
             self.stop_loss_price = execution_price * (1 - sl_pct)  # sl_pct is negative, so this raises the price
             self.take_profit_price = execution_price * (1 - tp_pct)  # tp_pct is positive, so this lowers the price
 
-        self.entry_price = execution_price
-        self.position_value = notional_value
-        self.liquidation_price = self._calculate_liquidation_price(execution_price, self.position_size)
-        self.position_hold_counter = 0
+        self.position.entry_price = execution_price
+        self.position.position_value = notional_value
+        self.liquidation_price = self._calculate_liquidation_price(execution_price, self.position.position_size)
+        self.position.hold_counter = 0
         self.previous_portfolio_value = self._get_portfolio_value(execution_price)
 
         logger.debug(f"Entry: {execution_price}, SL: {self.stop_loss_price}, TP: {self.take_profit_price}")

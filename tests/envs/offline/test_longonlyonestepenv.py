@@ -160,9 +160,9 @@ class TestLongOnlyOneStepEnvReset:
         """Reset should clear all state."""
         env.reset()
 
-        assert env.position_size == 0.0
-        assert env.current_position == 0.0
-        assert env.entry_price == 0.0
+        assert env.position.position_size == 0.0
+        assert env.position.current_position == 0.0
+        assert env.position.entry_price == 0.0
         assert env.stop_loss == 0.0
         assert env.take_profit == 0.0
         assert env.step_counter == 0
@@ -264,7 +264,7 @@ class TestLongOnlyOneStepEnvRollout:
         env.step(td)
 
         # Position should be closed after rollout
-        assert env.position_size == 0.0
+        assert env.position.position_size == 0.0
 
     def test_rollout_terminates_on_tp(self, trending_up_df):
         """Rollout should terminate when take profit is hit."""
@@ -285,7 +285,7 @@ class TestLongOnlyOneStepEnvRollout:
         env.step(td)
 
         # Position should be closed after rollout
-        assert env.position_size == 0.0
+        assert env.position.position_size == 0.0
 
     def test_rollout_accumulates_returns(self, env):
         """Rollout should accumulate log returns."""
@@ -309,7 +309,7 @@ class TestLongOnlyOneStepEnvRollout:
 
         # After step, the environment may have position=1 if still in trade
         # or position=0 if SL/TP triggered - both are valid states
-        assert env.current_position in [0, 1]
+        assert env.position.current_position in [0, 1]
 
 
 class TestLongOnlyOneStepEnvReward:
@@ -474,7 +474,7 @@ class TestLongOnlyOneStepEnvMultipleEpisodes:
         for episode in range(5):
             td = env.reset()
 
-            assert env.position_size == 0.0
+            assert env.position.position_size == 0.0
             assert env.step_counter == 0
 
             action = env.action_spec.sample()

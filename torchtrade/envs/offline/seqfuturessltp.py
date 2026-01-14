@@ -21,6 +21,7 @@ from torchrl.envs import EnvBase
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, InitialBalanceSampler, build_sltp_action_map, normalize_timeframe_config
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
+from torchtrade.envs.state import PositionState
 
 
 class MarginType(Enum):
@@ -177,7 +178,9 @@ class SeqFuturesSLTPEnv(EnvBase):
         # Reset settings
         self.initial_cash = config.initial_cash
         self.initial_cash_sampler = InitialBalanceSampler(config.initial_cash, config.seed)
-        self.position_hold_counter = 0
+
+        # Initialize position state
+        self.position = PositionState()
 
         # Define action spec
         self.action_spec = Categorical(len(self.action_map))
@@ -332,10 +335,10 @@ class SeqFuturesSLTPEnv(EnvBase):
 
     def _check_liquidation(self, current_price: float) -> bool:
         """Check if current position should be liquidated."""
-        if self.position_size == 0:
+        if self.position.position_size == 0:
             return False
 
-        if self.position_size > 0:
+        if self.position.position_size > 0:
             # Long position - liquidated if price below liquidation price
             return current_price <= self.liquidation_price
         else:
@@ -354,7 +357,7 @@ class SeqFuturesSLTPEnv(EnvBase):
             "tp" if take-profit triggered
             None if neither triggered
         """
-        if self.position_size == 0:
+        if self.position.position_size == 0:
             return None
         if self.stop_loss == 0.0 and self.take_profit == 0.0:
             return None
@@ -365,7 +368,7 @@ class SeqFuturesSLTPEnv(EnvBase):
         low_price = ohlcv.low
         close_price = ohlcv.close
 
-        if self.position_size > 0:
+        if self.position.position_size > 0:
             # Long position
             # SL triggers when price drops below SL level
             if self.stop_loss > 0:
@@ -417,15 +420,15 @@ class SeqFuturesSLTPEnv(EnvBase):
         current_price = self._cached_ohlcv.close
 
         # Calculate position value (absolute value of notional)
-        self.position_value = abs(self.position_size * current_price)
+        self.position.position_value = abs(self.position.position_size * current_price)
 
         # Calculate unrealized PnL
-        if self.position_size != 0:
+        if self.position.position_size != 0:
             self.unrealized_pnl = self._calculate_unrealized_pnl(
-                self.entry_price, current_price, self.position_size
+                self.position.entry_price, current_price, self.position.position_size
             )
             self.unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(
-                self.entry_price, current_price, self.position_size
+                self.position.entry_price, current_price, self.position.position_size
             )
         else:
             self.unrealized_pnl = 0.0
@@ -433,20 +436,20 @@ class SeqFuturesSLTPEnv(EnvBase):
 
         # Calculate margin ratio
         total_balance = self.balance + self.unrealized_pnl
-        margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
+        margin_ratio = self.position.position_value / total_balance if total_balance > 0 else 0.0
 
         # PERF: Update pre-allocated account state buffer in-place
         buf = self._account_state_buffer
         buf[0] = self.balance
-        buf[1] = self.position_size  # Positive=long, Negative=short
-        buf[2] = self.position_value
-        buf[3] = self.entry_price
+        buf[1] = self.position.position_size  # Positive=long, Negative=short
+        buf[2] = self.position.position_value
+        buf[3] = self.position.entry_price
         buf[4] = current_price
         buf[5] = self.unrealized_pnl_pct
         buf[6] = self._leverage_float  # PERF: Use cached float instead of float() call
         buf[7] = margin_ratio
         buf[8] = self.liquidation_price
-        buf[9] = float(self.position_hold_counter)
+        buf[9] = float(self.position.hold_counter)
 
         obs_data = {self.account_state_key: buf.clone()}
         obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
@@ -488,7 +491,7 @@ class SeqFuturesSLTPEnv(EnvBase):
 
             # Calculate margin ratio
             total_balance = self.balance + self.unrealized_pnl
-            margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
+            margin_ratio = self.position.position_value / total_balance if total_balance > 0 else 0.0
 
             ctx = build_reward_context(
                 self,
@@ -518,7 +521,7 @@ class SeqFuturesSLTPEnv(EnvBase):
         # PERF: Use cached OHLCV instead of calling get_base_features
         current_price = self._cached_ohlcv.close
         unrealized_pnl = self._calculate_unrealized_pnl(
-            self.entry_price, current_price, self.position_size
+            self.position.entry_price, current_price, self.position.position_size
         )
         return self.balance + unrealized_pnl
 
@@ -549,11 +552,11 @@ class SeqFuturesSLTPEnv(EnvBase):
         self.initial_portfolio_value = initial_portfolio_value
 
         # Reset position state
-        self.position_hold_counter = 0
-        self.current_position = 0  # -1=short, 0=none, 1=long
-        self.position_size = 0.0  # Negative for short, positive for long
-        self.position_value = 0.0
-        self.entry_price = 0.0
+        self.position.hold_counter = 0
+        self.position.current_position = 0  # -1=short, 0=none, 1=long
+        self.position.position_size = 0.0  # Negative for short, positive for long
+        self.position.position_value = 0.0
+        self.position.entry_price = 0.0
         self.unrealized_pnl = 0.0
         self.unrealized_pnl_pct = 0.0
         self.liquidation_price = 0.0
@@ -600,7 +603,7 @@ class SeqFuturesSLTPEnv(EnvBase):
         if self._check_liquidation(current_price):
             trade_info = self._execute_liquidation(current_price)
         # 2. Check for SL/TP trigger
-        elif self.position_size != 0:
+        elif self.position.position_size != 0:
             sltp_trigger = self._check_sltp_trigger(ohlcv)
             if sltp_trigger is not None:
                 trade_info = self._execute_sltp_close(ohlcv, sltp_trigger)
@@ -618,7 +621,7 @@ class SeqFuturesSLTPEnv(EnvBase):
         self.action_history.append(trade_action)
         self.base_price_history.append(current_price)
         self.portfolio_value_history.append(old_portfolio_value)
-        self.position_history.append(self.position_size)
+        self.position_history.append(self.position.position_size)
 
         # Get updated state
         next_tensordict = self._get_observation()
@@ -655,16 +658,16 @@ class SeqFuturesSLTPEnv(EnvBase):
         }
 
         # Realize the loss at liquidation price
-        if self.position_size > 0:
+        if self.position.position_size > 0:
             # Long position liquidated
-            loss = (self.liquidation_price - self.entry_price) * self.position_size
+            loss = (self.liquidation_price - self.position.entry_price) * self.position.position_size
         else:
             # Short position liquidated
-            loss = (self.entry_price - self.liquidation_price) * abs(self.position_size)
+            loss = (self.position.entry_price - self.liquidation_price) * abs(self.position.position_size)
 
         # Apply loss and fees
         liquidation_fee = (
-            abs(self.position_size * self.liquidation_price) * self.transaction_fee
+            abs(self.position.position_size * self.liquidation_price) * self.transaction_fee
         )
         self.balance += loss - liquidation_fee
         trade_info["fee_paid"] = liquidation_fee
@@ -692,11 +695,11 @@ class SeqFuturesSLTPEnv(EnvBase):
 
         # Calculate PnL
         pnl = self._calculate_unrealized_pnl(
-            self.entry_price, execution_price, self.position_size
+            self.position.entry_price, execution_price, self.position.position_size
         )
 
         # Calculate fee
-        notional = abs(self.position_size * execution_price)
+        notional = abs(self.position.position_size * execution_price)
         fee = notional * self.transaction_fee
 
         # Update balance
@@ -731,40 +734,40 @@ class SeqFuturesSLTPEnv(EnvBase):
 
         if side is None:
             # Hold or close action
-            if self.position_size != 0:
+            if self.position.position_size != 0:
                 # Close existing position
                 trade_info = self._close_position(current_price, price_noise)
             # Update hold counter if still holding
-            if self.position_size != 0:
-                self.position_hold_counter += 1
+            if self.position.position_size != 0:
+                self.position.hold_counter += 1
             return trade_info
 
         # Opening a new position
         if side == "long":
-            if self.position_size < 0:
+            if self.position.position_size < 0:
                 # Close short first
                 self._close_position(current_price, price_noise)
 
-            if self.position_size <= 0:
+            if self.position.position_size <= 0:
                 # Open long position
                 trade_info = self._open_position(
                     "long", current_price, price_noise, sl_pct, tp_pct
                 )
 
         elif side == "short":
-            if self.position_size > 0:
+            if self.position.position_size > 0:
                 # Close long first
                 self._close_position(current_price, price_noise)
 
-            if self.position_size >= 0:
+            if self.position.position_size >= 0:
                 # Open short position
                 trade_info = self._open_position(
                     "short", current_price, price_noise, sl_pct, tp_pct
                 )
 
         # Update hold counter
-        if self.position_size != 0:
-            self.position_hold_counter += 1
+        if self.position.position_size != 0:
+            self.position.hold_counter += 1
 
         return trade_info
 
@@ -811,24 +814,24 @@ class SeqFuturesSLTPEnv(EnvBase):
         trade_info["fee_paid"] = fee
 
         if side == "long":
-            self.position_size = position_qty
-            self.current_position = 1
+            self.position.position_size = position_qty
+            self.position.current_position = 1
             # For long: SL is below entry, TP is above entry
             self.stop_loss = execution_price * (1 + sl_pct)  # sl_pct is negative
             self.take_profit = execution_price * (1 + tp_pct)  # tp_pct is positive
         else:  # short
-            self.position_size = -position_qty
-            self.current_position = -1
+            self.position.position_size = -position_qty
+            self.position.current_position = -1
             # For short: SL is above entry, TP is below entry
             self.stop_loss = execution_price * (1 - sl_pct)  # sl_pct is negative, so this goes up
             self.take_profit = execution_price * (1 - tp_pct)  # tp_pct is positive, so this goes down
 
-        self.entry_price = execution_price
-        self.position_value = notional_value
+        self.position.entry_price = execution_price
+        self.position.position_value = notional_value
         self.liquidation_price = self._calculate_liquidation_price(
-            execution_price, self.position_size
+            execution_price, self.position.position_size
         )
-        self.position_hold_counter = 0
+        self.position.hold_counter = 0
 
         return trade_info
 
@@ -842,7 +845,7 @@ class SeqFuturesSLTPEnv(EnvBase):
             "sltp_triggered": None,
         }
 
-        if self.position_size == 0:
+        if self.position.position_size == 0:
             trade_info["executed"] = False
             return trade_info
 
@@ -850,11 +853,11 @@ class SeqFuturesSLTPEnv(EnvBase):
 
         # Calculate PnL
         pnl = self._calculate_unrealized_pnl(
-            self.entry_price, execution_price, self.position_size
+            self.position.entry_price, execution_price, self.position.position_size
         )
 
         # Calculate fee
-        notional = abs(self.position_size * execution_price)
+        notional = abs(self.position.position_size * execution_price)
         fee = notional * self.transaction_fee
 
         # Update balance
@@ -868,12 +871,12 @@ class SeqFuturesSLTPEnv(EnvBase):
 
     def _reset_position(self):
         """Reset position state."""
-        self.position_size = 0.0
-        self.position_value = 0.0
-        self.entry_price = 0.0
+        self.position.position_size = 0.0
+        self.position.position_value = 0.0
+        self.position.entry_price = 0.0
         self.liquidation_price = 0.0
-        self.current_position = 0
-        self.position_hold_counter = 0
+        self.position.current_position = 0
+        self.position.hold_counter = 0
         self.stop_loss = 0.0
         self.take_profit = 0.0
 

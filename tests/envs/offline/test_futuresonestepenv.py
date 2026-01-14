@@ -202,9 +202,9 @@ class TestFuturesOneStepEnvReset:
         """Reset should clear all state."""
         env.reset()
 
-        assert env.position_size == 0.0
-        assert env.current_position == 0
-        assert env.entry_price == 0.0
+        assert env.position.position_size == 0.0
+        assert env.position.current_position == 0
+        assert env.position.entry_price == 0.0
         assert env.stop_loss_price == 0.0
         assert env.take_profit_price == 0.0
         assert env.liquidation_price == 0.0
@@ -306,8 +306,8 @@ class TestFuturesOneStepEnvLongPosition:
         td.set("action", torch.tensor(1))  # Long
         env._execute_trade_if_needed(env.action_map[1])
 
-        assert env.position_size > 0
-        assert env.current_position == 1
+        assert env.position.position_size > 0
+        assert env.position.current_position == 1
 
     def test_long_sets_sl_below_entry(self, env):
         """Long should set stop loss below entry price."""
@@ -351,8 +351,8 @@ class TestFuturesOneStepEnvShortPosition:
         short_action = 1 + num_long  # First short action
         env._execute_trade_if_needed(env.action_map[short_action])
 
-        assert env.position_size < 0
-        assert env.current_position == -1
+        assert env.position.position_size < 0
+        assert env.position.current_position == -1
 
     def test_short_sets_sl_above_entry(self, env):
         """Short should set stop loss above entry price."""
@@ -411,7 +411,7 @@ class TestFuturesOneStepEnvRollout:
         env.step(td)
 
         # Position should be closed after rollout
-        assert env.position_size == 0.0
+        assert env.position.position_size == 0.0
 
     def test_rollout_terminates_on_long_tp(self, trending_up_df):
         """Rollout should terminate when long take profit is hit."""
@@ -433,7 +433,7 @@ class TestFuturesOneStepEnvRollout:
         env.step(td)
 
         # Position should be closed after rollout
-        assert env.position_size == 0.0
+        assert env.position.position_size == 0.0
 
     def test_rollout_terminates_on_short_sl(self, trending_up_df):
         """Rollout should terminate when short stop loss is hit."""
@@ -457,7 +457,7 @@ class TestFuturesOneStepEnvRollout:
         env.step(td)
 
         # Position should be closed after rollout
-        assert env.position_size == 0.0
+        assert env.position.position_size == 0.0
 
     def test_rollout_terminates_on_short_tp(self, trending_down_df):
         """Rollout should terminate when short take profit is hit."""
@@ -480,7 +480,7 @@ class TestFuturesOneStepEnvRollout:
         env.step(td)
 
         # Position should be closed after rollout
-        assert env.position_size == 0.0
+        assert env.position.position_size == 0.0
 
     def test_rollout_accumulates_returns(self, env):
         """Rollout should accumulate log returns."""
@@ -526,7 +526,7 @@ class TestFuturesOneStepEnvLiquidation:
     def test_check_liquidation_long(self, env):
         """Should detect liquidation for long position."""
         env.reset()
-        env.position_size = 1.0
+        env.position.position_size = 1.0
         env.liquidation_price = 90.0
 
         assert env._check_liquidation(89.0) == True  # Below liquidation
@@ -535,7 +535,7 @@ class TestFuturesOneStepEnvLiquidation:
     def test_check_liquidation_short(self, env):
         """Should detect liquidation for short position."""
         env.reset()
-        env.position_size = -1.0
+        env.position.position_size = -1.0
         env.liquidation_price = 110.0
 
         assert env._check_liquidation(111.0) == True  # Above liquidation
@@ -673,7 +673,7 @@ class TestFuturesOneStepEnvMultipleEpisodes:
         for episode in range(5):
             td = env.reset()
 
-            assert env.position_size == 0.0
+            assert env.position.position_size == 0.0
             assert env.step_counter == 0
 
             action = env.action_spec.sample()
@@ -826,7 +826,7 @@ class TestFuturesOneStepEnvLeverage:
         env_high._execute_trade_if_needed(env_high.action_map[1])
 
         # Higher leverage should have larger position
-        assert abs(env_high.position_size) > abs(env_low.position_size)
+        assert abs(env_high.position.position_size) > abs(env_low.position.position_size)
 
     def test_leverage_affects_liquidation_distance(self, sample_ohlcv_df):
         """Higher leverage should have closer liquidation price."""
@@ -855,8 +855,8 @@ class TestFuturesOneStepEnvLeverage:
         env_high._execute_trade_if_needed(env_high.action_map[1])
 
         # Distance from entry to liquidation
-        dist_low = abs(env_low.entry_price - env_low.liquidation_price) / env_low.entry_price
-        dist_high = abs(env_high.entry_price - env_high.liquidation_price) / env_high.entry_price
+        dist_low = abs(env_low.position.entry_price - env_low.liquidation_price) / env_low.entry_price
+        dist_high = abs(env_high.position.entry_price - env_high.liquidation_price) / env_high.entry_price
 
         # Higher leverage should have smaller distance (closer to liquidation)
         assert dist_high < dist_low

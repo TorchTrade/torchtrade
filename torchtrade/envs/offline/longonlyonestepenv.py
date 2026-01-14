@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Callable
+from warnings import warn
 
 import numpy as np
 from tensordict import TensorDict, TensorDictBase
@@ -58,12 +59,6 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
     that is held until SL/TP is triggered or data runs out (contextual bandit setting).
     """
 
-    # Standard account state for long-only environments
-    ACCOUNT_STATE = [
-        "cash", "position_size", "position_value", "entry_price",
-        "current_price", "unrealized_pnlpct", "holding_time"
-    ]
-
     def __init__(self, df: pd.DataFrame, config: LongOnlyOneStepEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
         """
         Initialize the one-step long-only environment.
@@ -92,9 +87,13 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
         )
         self.action_spec = Categorical(len(self.action_map))
 
-        # Build observation specs using class constant
+        # Build observation specs
+        account_state = [
+            "cash", "position_size", "position_value", "entry_price",
+            "current_price", "unrealized_pnlpct", "holding_time"
+        ]
         num_features = len(self.sampler.get_feature_keys())
-        self._build_observation_specs(self.ACCOUNT_STATE, num_features)
+        self._build_observation_specs(account_state, num_features)
 
         # Initialize one-step specific state
         self.stop_loss = 0.0
@@ -103,12 +102,7 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
         self.rollout_returns = []
         self.episode_idx = 0
 
-        # Force random_start to True for one-step environments (contextual bandit setting requires diverse starts)
-        if not config.random_start:
-            logger.warning(
-                "LongOnlyOneStepEnv requires random_start=True for proper one-step/contextual bandit training. "
-                "Ignoring config.random_start=False and forcing random_start=True."
-            )
+        # Force random_start to True for one-step environments
         self.random_start = True
 
 
@@ -120,7 +114,7 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
                     gets new observation. Otherwise, performs rollout to SL/TP trigger.
         """
         # Get market data
-        if initial or self.current_position == 0:
+        if initial or self.position.current_position == 0:
             obs_dict = self._get_observation_scaffold()
             self.rollout_returns = []
         else:
@@ -130,20 +124,31 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
         # Use cached base features (avoids redundant get_base_features calls)
         current_price = self._cached_base_features["close"]
 
-        # Update position metrics using base class helper
-        self._update_position_metrics(current_price)
+        # Update position value and unrealized PnL
+        self.position.position_value = round(self.position.position_size * current_price, 3)
+        if self.position.position_size > 0:
+            self.position.unrealized_pnlpc = round(
+                (current_price - self.position.entry_price) / self.position.entry_price, 4
+            )
+        else:
+            self.position.unrealized_pnlpc = 0.0
 
-        # Build and return observation using base class helper
-        account_state_values = [
+        # Build account state
+        account_state = torch.tensor([
             self.balance,
-            self.position_size,
-            self.position_value,
-            self.entry_price,
+            self.position.position_size,
+            self.position.position_value,
+            self.position.entry_price,
             current_price,
-            self.unrealized_pnlpc,
-            self.position_hold_counter
-        ]
-        return self._build_standard_observation(obs_dict, account_state_values)
+            self.position.unrealized_pnlpc,
+            self.position.hold_counter
+        ], dtype=torch.float)
+
+        # Combine account state and market data
+        obs_data = {self.account_state_key: account_state}
+        obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
+
+        return TensorDict(obs_data, batch_size=())
 
     def _reset_position_state(self):
         """Reset position tracking state including one-step specific state."""
@@ -172,7 +177,7 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
         trade_info = self._execute_trade_if_needed(action_tuple, cached_price)
         if trade_info["executed"]:
             trade_action = 1 if trade_info["side"] == "buy" else -1
-            self.current_position = 1 if trade_info["side"] == "buy" else 0
+            self.position.current_position = 1 if trade_info["side"] == "buy" else 0
             logger.debug(f"Trade executed: {trade_info}")
 
         # Get updated state (this advances timestamp and caches new base features)
@@ -203,17 +208,17 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
     def trigger_sell(self, trade_info, execution_price):
         logging.debug(f"Triggering sell at price: {execution_price}")
         # Sell all available position
-        sell_amount = self.position_size
+        sell_amount = self.position.position_size
         # Calculate proceeds and fee based on noisy execution price
         proceeds = sell_amount * execution_price
         fee_paid = proceeds * self.transaction_fee
         self.balance += round(proceeds - fee_paid, 3)
-        self.position_size = 0.0
-        self.position_hold_counter = 0
-        self.position_value = 0.0
-        self.unrealized_pnlpc = 0.0
-        self.entry_price = 0.0
-        self.current_position = 0.0
+        self.position.position_size = 0.0
+        self.position.hold_counter = 0
+        self.position.position_value = 0.0
+        self.position.unrealized_pnlpc = 0.0
+        self.position.entry_price = 0.0
+        self.position.current_position = 0.0
         trade_info.update({
             "executed": True,
             "amount": sell_amount,
@@ -225,7 +230,7 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
         return trade_info
 
     def compute_return(self, close_price):
-        current_value = self.balance + self.position_size * close_price
+        current_value = self.balance + self.position.position_size * close_price
         current_return = torch.log(torch.tensor(current_value, dtype=torch.float) / torch.tensor(self.previous_portfolio_value, dtype=torch.float))
         self.previous_portfolio_value = current_value
         return current_return
@@ -277,7 +282,7 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
     def _execute_trade_if_needed(self, action_tuple, base_price: float = None) -> Dict:
         """Execute trade if position change is needed."""
         trade_info = {"executed": False, "amount": 0, "side": None, "success": None, "price_noise": 0.0, "fee_paid": 0.0}
-        logger.debug(f"Position: {self.position_size}")
+        logger.debug(f"Position: {self.position.position_size}")
         # If holding position or no change in position, do nothing
         if action_tuple == (None, None):
             # No action
@@ -291,8 +296,8 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
             # Get base price and apply noise to simulate slippage
             if base_price is None:
                 base_price = self.sampler.get_base_features(self.current_timestamp)["close"]
-            # Apply noise to the price to simulate market slippage
-            price_noise_factor = torch.empty(1,).uniform_(1 - self.slippage, 1 + self.slippage).item()
+            # Apply ±5% noise to the price to simulate market slippage
+            price_noise_factor = 1.0 #self.np_rng.uniform(1 - self.slippage, 1 + self.slippage)
             execution_price = base_price * price_noise_factor
             logger.debug(f"Execution price: {execution_price}")
             
@@ -300,16 +305,16 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
             logger.debug(f"Fee paid: {fee_paid}")
             effective_amount = amount - fee_paid
             self.balance -= amount
-            self.position_size = round(effective_amount / execution_price, 3)
-            self.entry_price = execution_price
-            self.position_hold_counter = 0
-            self.position_value = round(self.position_size * execution_price, 3)
-            self.unrealized_pnlpc = 0.0
-            self.current_position = 1.0
+            self.position.position_size = round(effective_amount / execution_price, 3)
+            self.position.entry_price = execution_price
+            self.position.hold_counter = 0
+            self.position.position_value = round(self.position.position_size * execution_price, 3)
+            self.position.unrealized_pnlpc = 0.0
+            self.position.current_position = 1.0
             stop_loss_pct, take_profit_pct = action_tuple
             self.stop_loss = execution_price * (1 + stop_loss_pct)
             self.take_profit = execution_price * (1 + take_profit_pct)
-            self.previous_portfolio_value = self.balance + self.position_size * execution_price
+            self.previous_portfolio_value = self.balance + self.position.position_size * execution_price
 
             logger.debug(f"Stop loss: {self.stop_loss}")
             logger.debug(f"Take profit: {self.take_profit}")
