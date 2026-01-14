@@ -20,6 +20,7 @@ classifiers = [
 dependencies = [
     "alpaca-py",
     "python-binance",
+    "python-bitget>=1.0.0",
     "python-dotenv",
     "torchrl",
     "wandb",

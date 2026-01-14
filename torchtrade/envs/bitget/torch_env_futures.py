@@ -1,69 +1,79 @@
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union, Callable
+from dataclasses import dataclass
+from typing import List, Optional, Union, Callable, Dict
+import logging
 
 import torch
-from tensordict import TensorDict, TensorDictBase
+from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.binance.obs_class import BinanceObservationClass
-from torchtrade.envs.binance.futures_order_executor import (
-    BinanceFuturesOrderClass,
+from torchtrade.envs.bitget.obs_class import BitgetObservationClass
+from torchtrade.envs.bitget.futures_order_executor import (
+    BitgetFuturesOrderClass,
     TradeMode,
-    MarginType,
+    MarginMode,
 )
-from torchtrade.envs.binance.base import BinanceBaseTorchTradingEnv
+from torchtrade.envs.bitget.base import BitgetBaseTorchTradingEnv
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
-class BinanceFuturesTradingEnvConfig:
-    """Configuration for Binance Futures Trading Environment."""
+class BitgetFuturesTradingEnvConfig:
+    """Configuration for Bitget Futures Trading Environment."""
 
     symbol: str = "BTCUSDT"
-    # Action levels: -1 = short, 0 = close/hold, 1 = long
-    action_levels: List[float] = field(default_factory=lambda: [-1.0, 0.0, 1.0])
-    max_position: float = 1.0  # Maximum position size as fraction of balance
+    action_levels: List[float] = None  # Default set in __post_init__
 
     # Timeframes and windows
-    intervals: Union[List[str], str] = field(default_factory=lambda: ["1m"])
+    intervals: Union[List[str], str] = "1m"
     window_sizes: Union[List[int], int] = 10
     execute_on: str = "1m"  # Interval for trade execution timing
 
     # Trading parameters
+    product_type: str = "SUMCBL"  # SUMCBL=testnet, UMCBL=production
     leverage: int = 1  # Leverage (1-125)
-    margin_type: MarginType = MarginType.ISOLATED
+    margin_mode: MarginMode = MarginMode.ISOLATED
     quantity_per_trade: float = 0.001  # Base quantity per trade
     trade_mode: TradeMode = TradeMode.QUANTITY
 
     # Reward settings
     reward_scaling: float = 1.0
-    position_penalty: float = 0.0001
+    position_penalty: float = 0.0001  # Penalty for holding positions
 
     # Termination settings
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
 
     # Environment settings
-    demo: bool = True  # Use demo/testnet for paper trading
+    demo: bool = True  # Use testnet for demo
     seed: Optional[int] = 42
     include_base_features: bool = False
     close_position_on_reset: bool = False  # Whether to close positions on env.reset()
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
+    def __post_init__(self):
+        # Set default action levels if not provided
+        if self.action_levels is None:
+            self.action_levels = [-1.0, 0.0, 1.0]  # short, close/hold, long
 
-class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
+        # Normalize to lists
+        if isinstance(self.intervals, str):
+            self.intervals = [self.intervals]
+        if isinstance(self.window_sizes, int):
+            self.window_sizes = [self.window_sizes]
+
+
+class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
     """
-    TorchRL environment for Binance Futures trading.
+    Bitget Futures trading environment with 3-action discrete space.
 
-    Supports:
-    - Long and short positions
-    - Configurable leverage
-    - Multiple timeframe observations
-    - Demo (paper) trading via Binance testnet
+    This environment supports long and short positions with a simple action space:
+    - Action 0 (-1.0): Go SHORT (or close if in position)
+    - Action 1 (0.0): HOLD / CLOSE position
+    - Action 2 (1.0): Go LONG (or close if in position)
 
-    Action Space (default):
-    - Action 0: Go Short (or increase short position)
-    - Action 1: Close position / Hold (do nothing)
-    - Action 2: Go Long (or increase long position)
+    The environment uses market orders for execution and supports configurable leverage.
 
     Account State (10 elements):
     [cash, position_size, position_value, entry_price, current_price,
@@ -72,26 +82,28 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
 
     def __init__(
         self,
-        config: BinanceFuturesTradingEnvConfig,
+        config: BitgetFuturesTradingEnvConfig,
         api_key: str = "",
         api_secret: str = "",
+        api_passphrase: str = "",
         feature_preprocessing_fn: Optional[Callable] = None,
-        observer: Optional[BinanceObservationClass] = None,
-        trader: Optional[BinanceFuturesOrderClass] = None,
+        observer: Optional[BitgetObservationClass] = None,
+        trader: Optional[BitgetFuturesOrderClass] = None,
     ):
         """
-        Initialize the BinanceFuturesTorchTradingEnv.
+        Initialize the BitgetFuturesTorchTradingEnv.
 
         Args:
             config: Environment configuration
-            api_key: Binance API key
-            api_secret: Binance API secret
+            api_key: Bitget API key
+            api_secret: Bitget API secret
+            api_passphrase: Bitget API passphrase (required!)
             feature_preprocessing_fn: Optional custom preprocessing function
-            observer: Optional pre-configured BinanceObservationClass
-            trader: Optional pre-configured BinanceFuturesOrderClass
+            observer: Optional pre-configured BitgetObservationClass
+            trader: Optional pre-configured BitgetFuturesOrderClass
         """
         # Initialize base class (handles observer/trader, obs specs, portfolio value, etc.)
-        super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
+        super().__init__(config, api_key, api_secret, api_passphrase, feature_preprocessing_fn, observer, trader)
 
         # Define action space (environment-specific)
         self.action_levels = config.action_levels
@@ -99,7 +111,8 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
-        # Store old portfolio value
+
+        # Store old portfolio value for reward calculation
         old_portfolio_value = self._get_portfolio_value()
 
         # Get current price and position from trader status (avoids redundant observation call)
@@ -112,22 +125,22 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             current_price = self.trader.get_mark_price()
             position_size = 0.0
 
-        # Get desired action
+        # Get desired action level
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()
         desired_action = self.action_levels[action_idx]
 
-        # Execute trade
+        # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
 
         if trade_info["executed"]:
-            if trade_info["side"] == "BUY":
-                self.current_position = 1
-            elif trade_info["side"] == "SELL":
-                self.current_position = -1
-            elif trade_info["closed_position"]:
-                self.current_position = 0
+            if trade_info["side"] == "buy":
+                self.current_position = 1  # Long
+            elif trade_info["side"] == "sell" and trade_info.get("closed_position"):
+                self.current_position = 0  # Closed
+            elif trade_info["side"] == "sell":
+                self.current_position = -1  # Short
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -137,9 +150,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         next_tensordict = self._get_observation()
 
         # Calculate reward and check termination
-        reward = self._calculate_reward(
-            old_portfolio_value, new_portfolio_value, desired_action, trade_info
-        )
+        reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, desired_action, trade_info)
         done = self._check_termination(new_portfolio_value)
 
         # Record step history
@@ -191,7 +202,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
                 success=success,
             )
         except Exception as e:
-            logger.error(f"{side} trade failed for {self.config.symbol}: quantity={quantity}, error={e}")
+            logger.error(f"{side.capitalize()} trade failed for {self.config.symbol}: quantity={quantity}, error={e}")
             return self._create_trade_info(executed=True, success=False)
 
     def _handle_close_action(self, current_qty: float) -> Dict:
@@ -200,11 +211,13 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             return self._create_trade_info(executed=False)
 
         success = self.trader.close_position()
+        side = "sell" if current_qty > 0 else "buy"
+        self.current_position = 0
 
         return self._create_trade_info(
             executed=True,
             quantity=abs(current_qty),
-            side="CLOSE",
+            side=side,
             success=success,
             closed_position=True,
         )
@@ -219,7 +232,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         if current_qty > 0:
             return self._create_trade_info(executed=False)
 
-        return self._execute_market_order("BUY", self.config.quantity_per_trade)
+        return self._execute_market_order("buy", self.config.quantity_per_trade)
 
     def _handle_short_action(self, current_qty: float) -> Dict:
         """Handle go short action."""
@@ -231,7 +244,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         if current_qty < 0:
             return self._create_trade_info(executed=False)
 
-        return self._execute_market_order("SELL", self.config.quantity_per_trade)
+        return self._execute_market_order("sell", self.config.quantity_per_trade)
 
     def _execute_trade_if_needed(self, desired_action: float) -> Dict:
         """
@@ -265,37 +278,43 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
 
 if __name__ == "__main__":
     import os
-    from dotenv import load_dotenv
 
-    load_dotenv()
+    print("Testing BitgetFuturesTorchTradingEnv...")
 
     # Create environment configuration
-    config = BinanceFuturesTradingEnvConfig(
+    config = BitgetFuturesTradingEnvConfig(
         symbol="BTCUSDT",
         demo=True,
-        intervals=["1m", "5m"],
-        window_sizes=[10, 10],
+        intervals=["1m"],
+        window_sizes=[10],
         execute_on="1m",
         leverage=5,
-        quantity_per_trade=0.002,  # ~$190 notional to meet $100 minimum
+        quantity_per_trade=0.002,  # Adjust based on Bitget minimums
         include_base_features=False,
     )
 
-    # Create environment
-    env = BinanceFuturesTorchTradingEnv(
-        config,
-        api_key=os.getenv("BINANCE_API_KEY", ""),
-        api_secret=os.getenv("BINANCE_SECRET", ""),
-    )
+    try:
+        # Create environment
+        env = BitgetFuturesTorchTradingEnv(
+            config,
+            api_key=os.getenv("BITGET_API_KEY", ""),
+            api_secret=os.getenv("BITGET_SECRET", ""),
+            api_passphrase=os.getenv("BITGET_PASSPHRASE", ""),
+        )
 
-    td = env.reset()
-    print("Reset observation:")
-    print(td)
-    for i in range(5):
-        action = env.action_spec.rand()
-        td = TensorDict({"action": action}, batch_size=())
-        next_td = env.step(td)
-        print(f"Step {i+1}: Action={action.item()}, Reward={next_td['next', 'reward'].item():.6f}")
-        if next_td["next", "done"].item():
-            print("Episode terminated")
-            break
+        print(f"✓ Environment created")
+        print(f"  Action space size: {env.action_spec.n}")
+        print(f"  Action levels: {env.action_levels}")
+
+        # Test reset
+        print("\n✓ Testing reset...")
+        td = env.reset()
+        print(f"  Observation keys: {list(td.keys())}")
+        print(f"  Account state shape: {td['account_state'].shape}")
+
+        print("\n✅ All tests passed!")
+
+    except Exception as e:
+        print(f"\n✗ Error: {e}")
+        import traceback
+        traceback.print_exc()
