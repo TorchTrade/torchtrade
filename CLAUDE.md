@@ -31,13 +31,25 @@ TorchTrade is a reinforcement learning framework for algorithmic trading built o
 
 To invoke the agent, use the Task tool with `subagent_type="torchrl-engineer"`.
 
-**IMPORTANT**: After creating each pull request, use the `pr-review-toolkit:code-simplifier` agent to analyze the changes and identify opportunities for simplification. This agent will:
-- Identify overly complex code patterns
-- Suggest simpler alternatives
-- Find unnecessary abstractions
-- Recommend ways to reduce cognitive load
+**IMPORTANT: Pull Request Review Agents**
 
-To invoke the agent, use the Task tool with `subagent_type="pr-review-toolkit:code-simplifier"`.
+Before pushing any PR, **ALWAYS** use these specialized review agents:
+
+1. **Code Simplifier Agent** - Use `pr-review-toolkit:code-simplifier` to review code quality:
+   - Identifies overly complex code patterns
+   - Suggests simpler alternatives
+   - Finds unnecessary abstractions
+   - Recommends ways to reduce cognitive load
+   - Invoke with: `Task` tool with `subagent_type="pr-review-toolkit:code-simplifier"`
+
+2. **Test Analyzer Agent** - Use `pr-review-toolkit:pr-test-analyzer` to review test coverage:
+   - Analyzes test completeness and quality
+   - Identifies missing edge cases
+   - Ensures adequate coverage of new functionality
+   - Verifies critical paths are tested
+   - Invoke with: `Task` tool with `subagent_type="pr-review-toolkit:pr-test-analyzer"`
+
+**Workflow**: Create PR → Run code-simplifier agent → Run pr-test-analyzer agent → Address findings → Merge
 
 ## Environment Management
 
@@ -93,6 +105,35 @@ uv sync
 - Prevents feature disparity between online and offline training
 - Maintains architectural integrity
 - Allows seamless policy transfer between environments
+
+### 4. **CRITICAL**: Run PR Review Agents Before Merging
+
+**Before pushing any PR, ALWAYS run both review agents:**
+
+1. **Code Quality Review**:
+   ```
+   Use @pr-review-toolkit:code-simplifier agent to review the PR
+   ```
+   - Identifies opportunities for simplification
+   - Catches overly complex patterns
+   - Ensures code maintainability
+
+2. **Test Coverage Review**:
+   ```
+   Use @pr-review-toolkit:pr-test-analyzer agent to review the PR
+   ```
+   - Verifies test completeness
+   - Identifies missing edge cases
+   - Ensures critical paths are tested
+
+**Required Workflow**:
+1. Create PR with your changes
+2. Run `@pr-review-toolkit:code-simplifier` agent
+3. Run `@pr-review-toolkit:pr-test-analyzer` agent
+4. Address all findings from both agents
+5. Merge PR
+
+**Do NOT merge without running both agents!**
 
 ## Build & Development Commands
 
