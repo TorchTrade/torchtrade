@@ -188,11 +188,12 @@ class TestSeqFuturesSLTPEnvReset:
     def test_reset_clears_histories(self, env):
         """Reset should clear history lists."""
         env.reset()
-        assert len(env.base_price_history) == 0
-        assert len(env.action_history) == 0
-        assert len(env.reward_history) == 0
-        assert len(env.portfolio_value_history) == 0
-        assert len(env.position_history) == 0
+        assert len(env.history) == 0
+        assert len(env.history.base_prices) == 0
+        assert len(env.history.actions) == 0
+        assert len(env.history.rewards) == 0
+        assert len(env.history.portfolio_values) == 0
+        assert len(env.history.positions) == 0
 
 
 class TestSeqFuturesSLTPEnvLongWithSLTP:

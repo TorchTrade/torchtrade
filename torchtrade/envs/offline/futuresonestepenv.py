@@ -20,6 +20,7 @@ from torchrl.data import Bounded, Categorical
 import pandas as pd
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map, normalize_timeframe_config
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
+from torchtrade.envs.state import FuturesHistoryTracker
 import logging
 import sys
 
@@ -179,7 +180,6 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         self.unrealized_pnl = 0.0
         self.unrealized_pnl_pct = 0.0
         self.liquidation_price = 0.0
-        self.position_history = []
 
         # Initialize one-step specific state
         self.stop_loss_price = 0.0
@@ -203,9 +203,8 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         self.random_start = True
 
     def _reset_history(self):
-        """Reset all history tracking arrays including position_history for futures."""
-        super()._reset_history()
-        self.position_history = []
+        """Reset all history tracking arrays including position history for futures."""
+        self.history = FuturesHistoryTracker()
 
     def _reset_position_state(self):
         """Reset position tracking state including futures and one-step specific state."""
@@ -377,11 +376,11 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
                 new_portfolio_value,
                 action_tuple,
                 trade_info,
-                portfolio_value_history=self.portfolio_value_history,
-                action_history=self.action_history,
-                reward_history=self.reward_history,
-                base_price_history=self.base_price_history,
-                position_history=self.position_history,
+                portfolio_value_history=self.history.portfolio_values,
+                action_history=self.history.actions,
+                reward_history=self.history.rewards,
+                base_price_history=self.history.base_prices,
+                position_history=self.history.positions,
                 initial_portfolio_value=self.initial_portfolio_value,
                 rollout_returns=self.rollout_returns,
                 liquidated=trade_info.get("liquidated", False),
@@ -457,7 +456,20 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
             logger.debug(f"Episode truncated after {self.step_counter} steps")
             reward = 0  # No reward for truncated episodes
 
-        self.reward_history.append(reward)
+        # Record step history
+        trade_action = 0
+        if trade_info["executed"]:
+            if trade_info["side"] == "long":
+                trade_action = 1
+            elif trade_info["side"] == "short":
+                trade_action = -1
+        self.history.record_step(
+            price=cached_price,
+            action=trade_action,
+            reward=reward,
+            portfolio_value=old_portfolio_value,
+            position=self.position_size
+        )
 
         next_tensordict.set("reward", reward)
         next_tensordict.set("done", True)  # One-step environment
@@ -723,8 +735,8 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         from torchtrade.envs.offline.utils import compute_periods_per_year_crypto
 
         # Convert histories to tensors
-        portfolio_values = torch.tensor(self.portfolio_value_history, dtype=torch.float32)
-        rewards = torch.tensor(self.reward_history, dtype=torch.float32)
+        portfolio_values = torch.tensor(self.history.portfolio_values, dtype=torch.float32)
+        rewards = torch.tensor(self.history.rewards, dtype=torch.float32)
 
         # Compute periods per year for annualization
         periods_per_year = compute_periods_per_year_crypto(
@@ -736,7 +748,7 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         return compute_all_metrics(
             portfolio_values=portfolio_values,
             rewards=rewards,
-            action_history=self.action_history,
+            action_history=self.history.actions,
             periods_per_year=periods_per_year,
         )
 

@@ -112,12 +112,13 @@ class TestSeqLongOnlyEnvReset:
         assert env.position_hold_counter == 0
 
     def test_reset_clears_histories(self, env):
-        """Reset should clear history lists."""
+        """Reset should clear history."""
         env.reset()
-        assert len(env.base_price_history) == 0
-        assert len(env.action_history) == 0
-        assert len(env.reward_history) == 0
-        assert len(env.portfolio_value_history) == 0
+        assert len(env.history) == 0
+        assert len(env.history.base_prices) == 0
+        assert len(env.history.actions) == 0
+        assert len(env.history.rewards) == 0
+        assert len(env.history.portfolio_values) == 0
 
     def test_reset_observation_has_correct_keys(self, env):
         """Reset observation should have all required keys."""
@@ -193,15 +194,16 @@ class TestSeqLongOnlyEnvStep:
         assert env.balance == initial_balance
 
     def test_step_updates_histories(self, env):
-        """Step should update history lists."""
+        """Step should update history."""
         td = env.reset()
         td.set("action", torch.tensor(1))  # hold
         env.step(td)
 
-        assert len(env.base_price_history) == 1
-        assert len(env.action_history) == 1
-        assert len(env.reward_history) == 1
-        assert len(env.portfolio_value_history) == 1
+        assert len(env.history) == 1
+        assert len(env.history.base_prices) == 1
+        assert len(env.history.actions) == 1
+        assert len(env.history.rewards) == 1
+        assert len(env.history.portfolio_values) == 1
 
     def test_full_episode_completes(self, env):
         """Full episode should complete without errors."""
