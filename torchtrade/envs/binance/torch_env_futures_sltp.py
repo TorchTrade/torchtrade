@@ -51,8 +51,8 @@ def combinatory_action_map(
     if include_short_positions:
         for sl, tp in product(stoploss_levels, takeprofit_levels):
             # For shorts: SL is above entry (positive), TP is below entry (negative)
-            # So we flip the signs
-            action_map[idx] = ("short", -tp, -sl)
+            # We swap: takeprofit_levels (positive) become SL, stoploss_levels (negative) become TP
+            action_map[idx] = ("short", tp, sl)
             idx += 1
 
     return action_map
