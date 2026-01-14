@@ -180,7 +180,6 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         self.unrealized_pnl = 0.0
         self.unrealized_pnl_pct = 0.0
         self.liquidation_price = 0.0
-        self.position_history = []
 
         # Initialize SLTP-specific state
         self.stop_loss = 0.0
@@ -210,9 +209,8 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         }
 
     def _reset_history(self):
-        """Reset all history tracking arrays including position_history for futures."""
+        """Reset all history tracking arrays including position history for futures."""
         self.history = FuturesHistoryTracker()
-        self.position_history = []
 
     def _reset_position_state(self):
         """Reset position tracking state including futures and SLTP specific state."""

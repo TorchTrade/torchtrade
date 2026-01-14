@@ -140,10 +140,15 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         # Store old portfolio value
         old_portfolio_value = self._get_portfolio_value()
 
-        # Get current price and position for history recording
-        obs = self._get_observation()
-        current_price = obs[self.account_state_key][4].item()  # current_price is at index 4
-        position_size = obs[self.account_state_key][1].item()  # position_size is at index 1
+        # Get current price and position from trader status (avoids redundant observation call)
+        status = self.trader.get_status()
+        position_status = status.get("position_status", None)
+        if position_status:
+            current_price = position_status.mark_price
+            position_size = position_status.qty
+        else:
+            current_price = self.trader.get_mark_price()
+            position_size = 0.0
 
         # Get action and map to (side, SL, TP) tuple
         action_idx = tensordict.get("action", 0)

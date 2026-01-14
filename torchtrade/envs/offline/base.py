@@ -201,10 +201,14 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         return self.market_data_keys
 
     def _reset_history(self):
-        """Reset all history tracking.
+        """Reset all history tracking to a new HistoryTracker instance.
 
-        Subclasses using FuturesHistoryTracker should call their own reset method
-        which will properly clear all fields including positions.
+        Subclasses supporting futures trading should override this method
+        to instantiate FuturesHistoryTracker instead:
+
+        Example:
+            def _reset_history(self):
+                self.history = FuturesHistoryTracker()
         """
         self.history = HistoryTracker()
 

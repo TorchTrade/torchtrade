@@ -262,11 +262,6 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         self.unrealized_pnl_pct = 0.0
         self.liquidation_price = 0.0
 
-    def _reset_history(self):
-        """Reset all history tracking arrays including position history."""
-        self.history = FuturesHistoryTracker()
-        self.position_history = []
-
     def _get_portfolio_value(self, current_price: Optional[float] = None) -> float:
         """Calculate total portfolio value including unrealized PnL for futures."""
         if current_price is None:

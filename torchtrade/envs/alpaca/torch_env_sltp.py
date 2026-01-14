@@ -108,9 +108,10 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         # Store old portfolio value for reward calculation
         old_portfolio_value = self._get_portfolio_value()
 
-        # Get current price for history recording
-        obs = self._get_observation()
-        current_price = obs[self.account_state_key][4].item()  # current_price is at index 4
+        # Get current price from trader status (avoids redundant observation call)
+        status = self.trader.get_status()
+        position_status = status.get("position_status", None)
+        current_price = position_status.current_price if position_status else 0.0
 
         # Get action and map to SL/TP tuple
         action_idx = tensordict.get("action", 0)

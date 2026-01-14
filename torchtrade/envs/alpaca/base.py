@@ -36,7 +36,9 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
     - _check_termination(): Episode termination logic
     """
 
-    # Standard account state for Alpaca environments
+    # Standard account state for Alpaca environments (7 elements)
+    # Note: Subclasses may define their own ACCOUNT_STATE if they have different state dimensions.
+    # For example, futures environments have 10 elements instead of 7.
     ACCOUNT_STATE = [
         "cash", "position_size", "position_value", "entry_price",
         "current_price", "unrealized_pnlpct", "holding_time"

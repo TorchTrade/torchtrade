@@ -53,6 +53,8 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
     """
 
     # Standard account state for Binance futures environments (10 elements)
+    # Note: This is intentionally different from Alpaca's 7-element state because futures trading
+    # requires additional state: leverage, margin_ratio, and liquidation_price.
     ACCOUNT_STATE = [
         "cash", "position_size", "position_value", "entry_price", "current_price",
         "unrealized_pnlpct", "leverage", "margin_ratio", "liquidation_price", "holding_time"

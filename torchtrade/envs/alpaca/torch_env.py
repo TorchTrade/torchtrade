@@ -72,9 +72,10 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         # Get desired action and current position
         desired_action = self.action_levels[tensordict.get("action", 0)]
 
-        # Get current price for history recording
-        obs = self._get_observation()
-        current_price = obs[self.account_state_key][4].item()  # current_price is at index 4
+        # Get current price from trader status (avoids redundant observation call)
+        status = self.trader.get_status()
+        position_status = status.get("position_status", None)
+        current_price = position_status.current_price if position_status else 0.0
 
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
