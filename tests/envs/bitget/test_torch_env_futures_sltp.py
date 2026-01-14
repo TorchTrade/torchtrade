@@ -277,7 +277,7 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
             # Set active SL/TP
             env.active_stop_loss = 49000.0
             env.active_take_profit = 51000.0
-            env.current_position = 1
+            env.position.current_position = 1
 
             # Mock position closed (SL/TP triggered)
             mock_trader.get_status = MagicMock(return_value={
@@ -291,7 +291,7 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
             # SL/TP should be reset
             assert env.active_stop_loss == 0.0
             assert env.active_take_profit == 0.0
-            assert env.current_position == 0
+            assert env.position.current_position == 0
 
     def test_reward_tensor_shape(self, env):
         """Test that reward is returned as tensor with correct shape."""
@@ -362,7 +362,7 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            env.current_position = 1  # Mark as having position
+            env.position.current_position = 1  # Mark as having position
 
             # Try to place another order
             action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
