@@ -419,6 +419,67 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         )
         return self.balance + unrealized_pnl
 
+    def _calculate_reward(
+        self,
+        old_portfolio_value: float,
+        new_portfolio_value: float,
+        action: int,
+        trade_info: Dict,
+    ) -> float:
+        """
+        Calculate reward using custom or default function.
+
+        Overrides base class to provide futures-specific context (leverage,
+        margin_ratio, liquidation_price) to custom reward functions.
+
+        Args:
+            old_portfolio_value: Portfolio value before action
+            new_portfolio_value: Portfolio value after action
+            action: Action taken
+            trade_info: Dictionary with trade execution details
+
+        Returns:
+            Reward value (float), scaled by config.reward_scaling
+        """
+        # Use custom reward function if provided
+        if self.config.reward_function is not None:
+            # Compute buy & hold value if terminal
+            is_terminal = self.step_counter >= self.max_traj_length - 1
+            buy_and_hold_value = None
+            if is_terminal and len(self.base_price_history) > 0:
+                first_price = self.base_price_history[0]
+                if first_price > 0:
+                    buy_and_hold_value = (
+                        self.initial_portfolio_value / first_price
+                    ) * self.base_price_history[-1]
+
+            # Calculate margin ratio for futures-specific context
+            total_balance = self.balance + self.unrealized_pnl
+            margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
+
+            ctx = build_reward_context(
+                self,
+                old_portfolio_value,
+                new_portfolio_value,
+                action,
+                trade_info,
+                portfolio_value_history=self.portfolio_value_history,
+                action_history=self.action_history,
+                reward_history=self.reward_history,
+                base_price_history=self.base_price_history,
+                position_history=self.position_history,
+                initial_portfolio_value=self.initial_portfolio_value,
+                buy_and_hold_value=buy_and_hold_value,
+                liquidated=trade_info.get("liquidated", False),
+                leverage=float(self.leverage),
+                margin_ratio=margin_ratio,
+                liquidation_price=self.liquidation_price,
+            )
+            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
+
+        # Otherwise use default log return (no context needed)
+        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
+
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
         self.step_counter += 1
