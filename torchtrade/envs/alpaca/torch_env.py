@@ -94,10 +94,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))
         next_tensordict.set("truncated", torch.tensor([False], dtype=torch.bool))
         next_tensordict.set("terminated", torch.tensor([done], dtype=torch.bool))
-        
-        # TODO: Make a dashboard that shows the portfolio value and action history etc
-        _ = self._create_info_dict(new_portfolio_value, trade_info, desired_action)
-        
+
         return next_tensordict
 
 
@@ -132,18 +129,12 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         """Calculate the dollar amount to trade."""
         if self.config.trade_mode == TradeMode.QUANTITY:
             raise NotImplementedError
-        
+
         # NOTIONAL mode
         if side == "buy":
-            return self.balance # buy with all cash we have
+            return self.balance  # Buy with all available cash
         else:  # sell
-            # TODO: if we do fine grained trading this needs to be calculated now we sell all available
-            return -1
-            # status = self.trader.get_status()
-            # if status.get("position_status"):
-            #     position_value = (status["position_status"].qty * 
-            #                     status["position_status"].current_price)
-            #     return position_value # sell all we have
+            return -1  # Special value: sell entire position
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""

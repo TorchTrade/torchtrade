@@ -339,7 +339,15 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         return self.ACCOUNT_STATE
 
     def close(self):
-        """Clean up resources."""
+        """Clean up resources.
+
+        Note: This method cancels open orders but does NOT automatically close
+        positions. Closing positions is intentionally left to manual intervention
+        to prevent accidental liquidation of intended positions, especially in
+        live trading scenarios where automated position closure could result in
+        unexpected losses or interrupt longer-term trading strategies.
+
+        If you need to close positions on environment cleanup, call
+        `env.trader.close_position()` explicitly before `env.close()`.
+        """
         self.trader.cancel_open_orders()
-        # Optionally close positions - commented out for safety
-        # self.trader.close_position()

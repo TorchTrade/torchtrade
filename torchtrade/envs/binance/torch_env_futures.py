@@ -12,9 +12,6 @@ from torchtrade.envs.binance.futures_order_executor import (
     MarginType,
 )
 from torchtrade.envs.binance.base import BinanceBaseTorchTradingEnv
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 @dataclass

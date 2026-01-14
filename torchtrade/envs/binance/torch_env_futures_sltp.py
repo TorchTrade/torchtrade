@@ -14,9 +14,6 @@ from torchtrade.envs.binance.futures_order_executor import (
 from torchtrade.envs.binance.base import BinanceBaseTorchTradingEnv
 from torchtrade.envs.action_maps import create_sltp_action_map
 from torchtrade.envs.sltp_mixin import SLTPMixin
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 @dataclass
