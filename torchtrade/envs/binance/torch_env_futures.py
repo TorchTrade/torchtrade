@@ -1,15 +1,9 @@
-import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple, Union, Callable
-from warnings import warn
+from typing import Dict, List, Optional, Union, Callable
 
-import numpy as np
 import torch
 from tensordict import TensorDict, TensorDictBase
-from torchrl.data.tensor_specs import CompositeSpec
-from torchrl.envs import EnvBase
-from torchrl.data import Categorical, Bounded
+from torchrl.data import Categorical
 
 from torchtrade.envs.binance.obs_class import BinanceObservationClass
 from torchtrade.envs.binance.futures_order_executor import (
@@ -17,11 +11,10 @@ from torchtrade.envs.binance.futures_order_executor import (
     TradeMode,
     MarginType,
 )
-from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
+from torchtrade.envs.binance.base import BinanceBaseTorchTradingEnv
 from dotenv import load_dotenv
 
 load_dotenv()
-
 
 
 @dataclass
@@ -42,6 +35,7 @@ class BinanceFuturesTradingEnvConfig:
     leverage: int = 1  # Leverage (1-125)
     margin_type: MarginType = MarginType.ISOLATED
     quantity_per_trade: float = 0.001  # Base quantity per trade
+    trade_mode: TradeMode = TradeMode.QUANTITY
 
     # Reward settings
     reward_scaling: float = 1.0
@@ -59,24 +53,7 @@ class BinanceFuturesTradingEnvConfig:
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
 
-# Interval to seconds mapping for waiting
-INTERVAL_SECONDS = {
-    "1m": 60,
-    "3m": 180,
-    "5m": 300,
-    "15m": 900,
-    "30m": 1800,
-    "1h": 3600,
-    "2h": 7200,
-    "4h": 14400,
-    "6h": 21600,
-    "8h": 28800,
-    "12h": 43200,
-    "1d": 86400,
-}
-
-
-class BinanceFuturesTorchTradingEnv(EnvBase):
+class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
     """
     TorchRL environment for Binance Futures trading.
 
@@ -116,264 +93,12 @@ class BinanceFuturesTorchTradingEnv(EnvBase):
             observer: Optional pre-configured BinanceObservationClass
             trader: Optional pre-configured BinanceFuturesOrderClass
         """
-        self.config = config
+        # Initialize base class (handles observer/trader, obs specs, portfolio value, etc.)
+        super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
 
-        # Validate custom reward function signature if provided
-        if config.reward_function is not None:
-            validate_reward_function(config.reward_function)
-
-        # Normalize intervals to list
-        intervals = config.intervals if isinstance(config.intervals, list) else [config.intervals]
-        window_sizes = config.window_sizes if isinstance(config.window_sizes, list) else [config.window_sizes]
-
-        # Initialize observer
-        self.observer = observer if observer is not None else BinanceObservationClass(
-            symbol=config.symbol,
-            intervals=intervals,
-            window_sizes=window_sizes,
-            feature_preprocessing_fn=feature_preprocessing_fn,
-            demo=config.demo,
-        )
-
-        # Initialize trader
-        self.trader = trader if trader is not None else BinanceFuturesOrderClass(
-            symbol=config.symbol,
-            trade_mode=TradeMode.QUANTITY,
-            api_key=api_key,
-            api_secret=api_secret,
-            demo=config.demo,
-            leverage=config.leverage,
-            margin_type=config.margin_type,
-        )
-
-        # Execute interval
-        self.execute_on = config.execute_on
-        self.execute_interval_seconds = INTERVAL_SECONDS.get(config.execute_on, 60)
-
-        # Reset settings
-        self.trader.cancel_open_orders()
-        self.trader.close_position()
-
-        balance = self.trader.get_account_balance()
-        self.initial_portfolio_value = balance.get("total_wallet_balance", 0)
-        self.position_hold_counter = 0
-
+        # Define action space (environment-specific)
         self.action_levels = config.action_levels
-        # Define action spec
         self.action_spec = Categorical(len(self.action_levels))
-
-        # Get the number of features from the observer
-        obs = self.observer.get_observations()
-        first_key = self.observer.get_keys()[0]
-        num_features = obs[first_key].shape[1]
-
-        # Get market data obs names
-        market_data_names = self.observer.get_keys()
-
-        # Observation space
-        self.observation_spec = CompositeSpec(shape=())
-
-        self.market_data_key = "market_data"
-        self.account_state_key = "account_state"
-
-        # Account state spec (10 elements for futures):
-        # [cash, position_size, position_value, entry_price, current_price,
-        #  unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
-        self.account_state = ["cash", "position_size", "position_value", "entry_price", "current_price",
-                              "unrealized_pnlpct", "leverage", "margin_ratio", "liquidation_price", "holding_time"]
-        account_state_spec = Bounded(
-            low=-torch.inf, high=torch.inf, shape=(len(self.account_state),), dtype=torch.float
-        )
-
-        self.market_data_keys = []
-        for i, market_data_name in enumerate(market_data_names):
-            market_data_key = "market_data_" + market_data_name
-            ws = window_sizes[i] if isinstance(window_sizes, list) else window_sizes
-            market_data_spec = Bounded(
-                low=-torch.inf, high=torch.inf,
-                shape=(ws, num_features), dtype=torch.float
-            )
-            self.observation_spec.set(market_data_key, market_data_spec)
-            self.market_data_keys.append(market_data_key)
-
-        self.observation_spec.set(self.account_state_key, account_state_spec)
-        self.reward_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(1,), dtype=torch.float)
-
-        self._reset(TensorDict({}))
-        super().__init__()
-
-    def _get_observation(self) -> TensorDictBase:
-        """Get the current observation state."""
-        # Get market data
-        obs_dict = self.observer.get_observations(
-            return_base_ohlc=self.config.include_base_features
-        )
-
-        if self.config.include_base_features:
-            base_features = obs_dict.get("base_features")
-
-        market_data = [obs_dict[features_name] for features_name in self.observer.get_keys()]
-
-        # Get account state
-        status = self.trader.get_status()
-        balance = self.trader.get_account_balance()
-
-        cash = balance.get("available_balance", 0)
-        total_balance = balance.get("total_wallet_balance", 0)
-
-        position_status = status.get("position_status", None)
-
-        if position_status is None:
-            self.position_hold_counter = 0
-            position_size = 0.0
-            position_value = 0.0
-            entry_price = 0.0
-            current_price = self.trader.get_mark_price()
-            unrealized_pnl_pct = 0.0
-            leverage = float(self.config.leverage)
-            margin_ratio = 0.0
-            liquidation_price = 0.0
-            holding_time = 0.0
-        else:
-            self.position_hold_counter += 1
-            position_size = position_status.qty  # Positive=long, Negative=short
-            position_value = abs(position_status.notional_value)
-            entry_price = position_status.entry_price
-            current_price = position_status.mark_price
-            unrealized_pnl_pct = position_status.unrealized_pnl_pct
-            leverage = float(position_status.leverage)
-            # Calculate margin ratio (position value / total balance)
-            margin_ratio = position_value / total_balance if total_balance > 0 else 0.0
-            liquidation_price = position_status.liquidation_price
-            holding_time = float(self.position_hold_counter)
-
-        account_state = torch.tensor(
-            [
-                cash,
-                position_size,
-                position_value,
-                entry_price,
-                current_price,
-                unrealized_pnl_pct,
-                leverage,
-                margin_ratio,
-                liquidation_price,
-                holding_time,
-            ],
-            dtype=torch.float,
-        )
-
-        out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
-        for market_data_name, data in zip(self.market_data_keys, market_data):
-            out_td.set(market_data_name, torch.from_numpy(data))
-
-        if self.config.include_base_features and base_features is not None:
-            out_td.set("base_features", torch.from_numpy(base_features))
-
-        return out_td
-
-    def _calculate_reward(
-        self,
-        old_portfolio_value: float,
-        new_portfolio_value: float,
-        action: float,
-        trade_info: Dict,
-    ) -> float:
-        """
-        Calculate reward using custom or default function.
-
-        If config.reward_function is provided, uses that custom function.
-        Otherwise, uses the default log return reward.
-
-        Args:
-            old_portfolio_value: Portfolio value before action
-            new_portfolio_value: Portfolio value after action
-            action: Action taken (-1=short, 0=close, 1=long)
-            trade_info: Dictionary with trade execution details
-
-        Returns:
-            Reward value (float), scaled by config.reward_scaling
-        """
-        # Use custom reward function if provided
-        if self.config.reward_function is not None:
-            # Get current position state for metadata
-            position_status = self.trader.get_position_status()
-            metadata = {}
-            if position_status is not None:
-                balance = self.trader.get_account_balance()
-                position_value = abs(position_status.position_amount * position_status.entry_price)
-                total_balance = balance.get("total_margin_balance", 0)
-                metadata = {
-                    "leverage": float(position_status.leverage),
-                    "margin_ratio": position_value / total_balance if total_balance > 0 else 0.0,
-                    "liquidation_price": position_status.liquidation_price,
-                }
-
-            # Note: Live environments don't track history for performance
-            ctx = build_reward_context(
-                self,
-                old_portfolio_value,
-                new_portfolio_value,
-                action,
-                trade_info,
-                **metadata
-            )
-            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
-
-        # Otherwise use default log return (no context needed)
-        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
-
-    def _get_portfolio_value(self) -> float:
-        """Calculate total portfolio value."""
-        balance = self.trader.get_account_balance()
-        return balance.get("total_margin_balance", 0)
-
-    def _wait_for_next_timestamp(self) -> None:
-        """Wait until the next time step based on the configured execute_on interval."""
-        current_time = datetime.now()
-
-        # Calculate next execution time (round up to next interval)
-        seconds = self.execute_interval_seconds
-        next_step = current_time + timedelta(seconds=seconds)
-        next_step = next_step.replace(second=0, microsecond=0)
-
-        # Wait until target time with a single sleep call
-        sleep_seconds = (next_step - datetime.now()).total_seconds()
-        if sleep_seconds > 0:
-            time.sleep(sleep_seconds)
-
-    def _set_seed(self, seed: int):
-        """Set the seed for the environment."""
-        if seed is not None:
-            np.random.seed(seed)
-            torch.manual_seed(seed)
-        else:
-            np.random.seed(self.config.seed)
-            torch.manual_seed(self.config.seed)
-
-    def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
-        """Reset the environment."""
-        # Cancel all orders
-        self.trader.cancel_open_orders()
-
-        # Optionally close positions on reset (configurable)
-        if self.config.close_position_on_reset:
-            self.trader.close_position()
-
-        balance = self.trader.get_account_balance()
-        self.balance = balance.get("available_balance", 0)
-        self.last_portfolio_value = self._get_portfolio_value()
-
-        status = self.trader.get_status()
-        position_status = status.get("position_status")
-        self.position_hold_counter = 0
-
-        if position_status is None:
-            self.current_position = 0  # No position
-        else:
-            self.current_position = 1 if position_status.qty > 0 else -1 if position_status.qty < 0 else 0
-
-        return self._get_observation()
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
@@ -495,20 +220,6 @@ class BinanceFuturesTorchTradingEnv(EnvBase):
 
         bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
         return portfolio_value < bankruptcy_threshold
-
-    def get_market_data_keys(self) -> List[str]:
-        """Return the list of market data keys."""
-        return self.market_data_keys
-
-    def get_account_state(self) -> List[str]:
-        """Return the list of account state field names."""
-        return self.account_state
-
-    def close(self):
-        """Clean up resources."""
-        self.trader.cancel_open_orders()
-        # Optionally close positions - commented out for safety
-        # self.trader.close_all_positions()
 
 
 if __name__ == "__main__":
