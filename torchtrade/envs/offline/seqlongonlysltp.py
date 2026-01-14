@@ -1,11 +1,7 @@
-import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple, Union, Callable
-from warnings import warn
-from zoneinfo import ZoneInfo
-import matplotlib.pyplot as plt
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple, Union, Callable
+import matplotlib.pyplot as plt
 
 import numpy as np
 from tensordict import TensorDict, TensorDictBase
@@ -46,6 +42,12 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
     Supports combinatorial action space with configurable SL/TP levels.
     """
 
+    # Standard account state for long-only environments
+    ACCOUNT_STATE = [
+        "cash", "position_size", "position_value", "entry_price",
+        "current_price", "unrealized_pnlpct", "holding_time"
+    ]
+
     def __init__(self, df: pd.DataFrame, config: SeqLongOnlySLTPEnvConfig, feature_preprocessing_fn: Optional[Callable] = None):
         """
         Initialize the sequential long-only SLTP environment.
@@ -72,13 +74,9 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
         )
         self.action_spec = Categorical(len(self.action_map))
 
-        # Build observation specs
-        account_state = [
-            "cash", "position_size", "position_value", "entry_price",
-            "current_price", "unrealized_pnlpct", "holding_time"
-        ]
+        # Build observation specs using class constant
         num_features = len(self.sampler.get_feature_keys())
-        self._build_observation_specs(account_state, num_features)
+        self._build_observation_specs(self.ACCOUNT_STATE, num_features)
 
         # Initialize SLTP-specific state
         self.stop_loss = 0.0
@@ -91,17 +89,11 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
         obs_dict = self._get_observation_scaffold()
         current_price = self._cached_base_features["close"]
 
-        # Update position value and unrealized PnL
-        self.position_value = round(self.position_size * current_price, 3)
-        if self.position_size > 0:
-            self.unrealized_pnlpc = round(
-                (current_price - self.entry_price) / self.entry_price, 4
-            )
-        else:
-            self.unrealized_pnlpc = 0.0
+        # Update position metrics using base class helper
+        self._update_position_metrics(current_price)
 
-        # Build account state
-        account_state = torch.tensor([
+        # Build and return observation using base class helper
+        account_state_values = [
             self.balance,
             self.position_size,
             self.position_value,
@@ -109,13 +101,8 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
             current_price,
             self.unrealized_pnlpc,
             self.position_hold_counter
-        ], dtype=torch.float)
-
-        # Combine account state and market data
-        obs_data = {self.account_state_key: account_state}
-        obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
-
-        return TensorDict(obs_data, batch_size=())
+        ]
+        return self._build_standard_observation(obs_dict, account_state_values)
 
     def _reset_position_state(self):
         """Reset position tracking state including SLTP-specific state."""
