@@ -407,6 +407,7 @@ class TestLongOnlyOneStepEnvSLTPPlacement:
             initial_cash=1000,
             stoploss_levels=[-0.05],  # 5% below
             takeprofit_levels=[0.10],  # 10% above
+            slippage=0.0,  # Disable slippage for deterministic test
             max_traj_length=50,
         )
         env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
