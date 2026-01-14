@@ -48,10 +48,11 @@ class TorchTradeBaseEnv(EnvBase):
         if reward_function is not None:
             validate_reward_function(reward_function)
 
-        # Validate and store transaction parameters
-        self._validate_transaction_parameters(config)
-        self.transaction_fee = config.transaction_fee
-        self.slippage = config.slippage
+        # Validate and store transaction parameters (only for offline environments)
+        if hasattr(config, 'transaction_fee') and hasattr(config, 'slippage'):
+            self._validate_transaction_parameters(config)
+            self.transaction_fee = config.transaction_fee
+            self.slippage = config.slippage
 
         # Create reward spec (common across all environments)
         self.reward_spec = Bounded(

@@ -1,21 +1,14 @@
-import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple, Union, Callable
-from warnings import warn
-from zoneinfo import ZoneInfo
+from typing import Any, Dict, List, Optional, Union, Callable
 
-import numpy as np
+import torch
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
 from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass, TradeMode
-from tensordict import TensorDict, TensorDictBase
-from torchrl.data.tensor_specs import CompositeSpec
-from torchrl.envs import EnvBase
-import torch
-from torchrl.data import Categorical, Bounded
-from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
+from tensordict import TensorDictBase
+from torchrl.data import Categorical
+from torchtrade.envs.alpaca.base import AlpacaBaseTorchTradingEnv
 
 @dataclass
 class AlpacaTradingEnvConfig:
@@ -40,7 +33,9 @@ class AlpacaTradingEnvConfig:
             self.execute_on, self.time_frames, self.window_sizes
         )
 
-class AlpacaTorchTradingEnv(EnvBase):
+class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
+    """Live trading environment with 3-action discrete action space (sell/hold/buy)."""
+
     def __init__(
         self,
         config: AlpacaTradingEnvConfig,
@@ -61,237 +56,12 @@ class AlpacaTorchTradingEnv(EnvBase):
             observer: Optional pre-configured AlpacaObservationClass for dependency injection
             trader: Optional pre-configured AlpacaOrderClass for dependency injection
         """
-        self.config = config
+        # Initialize base class (handles observer/trader, obs specs, portfolio value, etc.)
+        super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
 
-        # Validate custom reward function signature if provided
-        if config.reward_function is not None:
-            validate_reward_function(config.reward_function)
-
-        # Initialize Alpaca clients - use injected instances or create new ones
-        self.observer = observer if observer is not None else AlpacaObservationClass(
-            symbol=config.symbol,
-            timeframes=config.time_frames,
-            window_sizes=config.window_sizes,
-            feature_preprocessing_fn=feature_preprocessing_fn,
-        )
-
-        self.trader = trader if trader is not None else AlpacaOrderClass(
-            symbol=config.symbol.replace('/', ''),
-            trade_mode=config.trade_mode,
-            api_key=api_key,
-            api_secret=api_secret,
-            paper=config.paper,
-        )
-
-        # Execute trades on the specified time frame
-        self.execute_on_value = config.execute_on.amount
-        self.execute_on_unit = str(config.execute_on.unit)
-
-        # reset settings 
-        self.trader.close_all_positions()
-        self.trader.cancel_open_orders()
-        
-        account = self.trader.client.get_account()
-        cash = float(account.cash)
-        self.initial_portfolio_value = cash
-        self.position_hold_counter = 0
-
+        # Define action space (environment-specific)
         self.action_levels = config.action_levels
-        # Define action and observation spaces
         self.action_spec = Categorical(len(self.action_levels))
-        # action levels [-1, 0, 1], categorical actions [0, 1, 2] -> 0: sell, 1: hold, 2: buy
-        # self.hold_action = self.action_levels[1]
-        # assert self.hold_action == 0.0, "Hold action should be 0.0, possibly action levels are not [-1, 0, 1]!"
-
-        # Get the number of features from the observer
-        num_features = self.observer.get_observations()[
-            self.observer.get_keys()[0]
-        ].shape[1]
-
-        # get market data obs names
-        market_data_names = self.observer.get_keys()
-
-        # Observation space includes market data features and current position info
-        # TODO: needs to be adapted for multiple timeframes
-        self.observation_spec = CompositeSpec(shape=())
-           
-        self.market_data_key = "market_data"
-        self.account_state_key = "account_state"
-
-        # Account state spec: [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpct, holding_time]
-        self.account_state = ["cash", "position_size", "position_value", "entry_price", "current_price", "unrealized_pnlpct", "holding_time"]
-        account_state_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(len(self.account_state),), dtype=torch.float)
-        self.market_data_keys = []
-        for i, market_data_name in enumerate(market_data_names):
-            market_data_key = "market_data_" + market_data_name
-            market_data_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(config.window_sizes[i], num_features), dtype=torch.float)
-            self.observation_spec.set(market_data_key, market_data_spec)
-            self.market_data_keys.append(market_data_key)
-        self.observation_spec.set(self.account_state_key, account_state_spec)
-
-        self.reward_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(1,), dtype=torch.float)
-
-        self._reset(TensorDict({}))
-        super().__init__()
-
-
-    def _get_observation(self) -> TensorDictBase:
-        """Get the current observation state."""
-        # Get market data
-        obs_dict = self.observer.get_observations(return_base_ohlc=True if self.config.include_base_features else False)
-        market_data = obs_dict[self.observer.get_keys()[0]]
-
-        if self.config.include_base_features:
-            base_features = obs_dict["base_features"][-1]
-            #base_timestamps = obs_dict["base_timestamps"][-1]
-            # Convert to Unix timestamps (seconds)
-            #timestamps = base_timestamps.astype('datetime64[s]').astype(np.int64)
-            #base_timestamps = torch.from_numpy(timestamps)
-        
-        market_data = [obs_dict[features_name] for features_name in self.observer.get_keys()]
-
-        # Get account state
-        status = self.trader.get_status()
-        account = self.trader.client.get_account()
-        cash = float(account.cash) # NOTE: should we use buying power?
-        position_status = status.get("position_status", None)
-
-        if position_status is None:
-            self.position_hold_counter = 0
-            position_size = 0.0
-            position_value = 0.0
-            entry_price = 0.0
-            current_price = 0.0
-            unrealized_pnlpc = 0.0
-            holding_time = self.position_hold_counter
-
-        else:
-            self.position_hold_counter += 1
-            position_size = position_status.qty
-            position_value = position_status.market_value
-            entry_price = position_status.avg_entry_price
-            current_price = position_status.current_price
-            unrealized_pnlpc = position_status.unrealized_plpc
-            holding_time = self.position_hold_counter
-
-        account_state = torch.tensor(
-            [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpc, holding_time], dtype=torch.float
-        )
-
-        out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
-        for market_data_name, data in zip(self.market_data_keys, market_data):
-            out_td.set(market_data_name, torch.from_numpy(data))
-
-        if self.config.include_base_features:
-            out_td.set("base_features", torch.from_numpy(base_features))
-            #out_td.set("base_timestamps", base_timestamps)
-
-        return out_td
-
-    def _calculate_reward(
-        self,
-        old_portfolio_value: float,
-        new_portfolio_value: float,
-        action: float,
-        trade_info: Dict,
-    ) -> float:
-        """
-        Calculate reward using custom or default function.
-
-        If config.reward_function is provided, uses that custom function.
-        Otherwise, uses the default log return reward.
-
-        Args:
-            old_portfolio_value: Portfolio value before action
-            new_portfolio_value: Portfolio value after action
-            action: Action taken (-1=SELL, 0=HOLD, 1=BUY)
-            trade_info: Dictionary with trade execution details
-
-        Returns:
-            Reward value (float), scaled by config.reward_scaling
-        """
-        # Use custom reward function if provided
-        if self.config.reward_function is not None:
-            # Note: Live environments don't track history for performance
-            ctx = build_reward_context(
-                self,
-                old_portfolio_value,
-                new_portfolio_value,
-                action,
-                trade_info,
-            )
-            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
-
-        # Otherwise use default log return (no context needed)
-        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
-
-    def _get_portfolio_value(self) -> float:
-        """Calculate total portfolio value."""
-        status = self.trader.get_status()
-        position_status = status.get("position_status", None)
-
-        account = self.trader.client.get_account()
-        self.balance = float(account.cash)
-
-        if position_status is None:
-            return self.balance
-        return self.balance + position_status.market_value
-
-    def _wait_for_next_timestamp(self) -> None:
-        """Wait until the next time step based on the configured execute_on_value and execute_on_unit."""
-
-        # Mapping units to timedelta arguments
-        unit_to_timedelta = {
-            "TimeFrameUnit.Minute": "minutes",
-            "TimeFrameUnit.Hour": "hours",
-            "TimeFrameUnit.Day": "days",
-        }
-
-        if self.execute_on_unit not in unit_to_timedelta:
-            raise ValueError(f"Unsupported time unit: {self.execute_on_unit}")
-
-        # Calculate the wait duration in timedelta
-        wait_duration = timedelta(
-            **{unit_to_timedelta[self.execute_on_unit]: self.execute_on_value}
-        )
-
-        # Get current time in NY timezone
-        current_time = datetime.now(ZoneInfo("America/New_York"))
-
-        # Calculate the next time step
-        next_step = (current_time + wait_duration).replace(second=0, microsecond=0)
-
-        # Wait until the target time
-        while datetime.now(ZoneInfo("America/New_York")) < next_step:
-            time.sleep(1)
-
-    def _set_seed(self, seed: int):
-        """Set the seed for the environment."""
-        if seed is not None:
-            np.random.seed(seed)
-            torch.manual_seed(seed)
-        else:
-            np.random.seed(self.config.seed)
-            torch.manual_seed(self.config.seed)
-
-    def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
-        """Reset the environment."""
-        # Cancel all orders and close all positions
-        self.trader.cancel_open_orders()
-        #self.trader.close_all_positions() # NOTE: Not sure if we want this as we could loose money
-        account = self.trader.client.get_account()
-        self.balance = float(account.cash)
-        self.last_portfolio_value = self.balance
-        status = self.trader.get_status()
-        position_status = status.get("position_status")
-        self.position_hold_counter = 0
-        if position_status is None:
-            self.current_position = 0.0
-        else:
-            self.current_position = 1 if position_status.qty > 0 else 0
-
-        # Get initial observation
-        return self._get_observation()
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
@@ -320,14 +90,11 @@ class AlpacaTorchTradingEnv(EnvBase):
         reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, desired_action, trade_info)
         done = self._check_termination(new_portfolio_value)
 
-        next_tensordict.set("reward", reward)
-        next_tensordict.set("done", done)
-        next_tensordict.set("truncated", False)
-        next_tensordict.set("terminated", False)
-        
-        # TODO: Make a dashboard that shows the portfolio value and action history etc
-        _ = self._create_info_dict(new_portfolio_value, trade_info, desired_action)
-        
+        next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
+        next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))
+        next_tensordict.set("truncated", torch.tensor([False], dtype=torch.bool))
+        next_tensordict.set("terminated", torch.tensor([done], dtype=torch.bool))
+
         return next_tensordict
 
 
@@ -362,18 +129,12 @@ class AlpacaTorchTradingEnv(EnvBase):
         """Calculate the dollar amount to trade."""
         if self.config.trade_mode == TradeMode.QUANTITY:
             raise NotImplementedError
-        
+
         # NOTIONAL mode
         if side == "buy":
-            return self.balance # buy with all cash we have
+            return self.balance  # Buy with all available cash
         else:  # sell
-            # TODO: if we do fine grained trading this needs to be calculated now we sell all available
-            return -1
-            # status = self.trader.get_status()
-            # if status.get("position_status"):
-            #     position_value = (status["position_status"].qty * 
-            #                     status["position_status"].current_price)
-            #     return position_value # sell all we have
+            return -1  # Special value: sell entire position
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""
@@ -406,19 +167,6 @@ class AlpacaTorchTradingEnv(EnvBase):
             "trade_mode": self.trader.trade_mode,
         }
 
-    def get_market_data_keys(self) -> List[str]:
-        """Return the list of market data keys."""
-        return self.market_data_keys
-
-    def get_account_state(self) -> List[str]:
-        """Return the list of account state field names."""
-        return self.account_state
-
-    def close(self):
-        """Clean up resources."""
-        # Cancel all orders and close all positions
-        self.trader.cancel_open_orders()
-        self.trader.close_all_positions()
 
 
 
