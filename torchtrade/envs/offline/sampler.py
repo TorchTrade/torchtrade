@@ -67,6 +67,14 @@ class MarketDataObservationSampler:
                 .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
                 .dropna()
             )
+
+            # Fix lookahead bias: shift higher timeframe bars forward by their period
+            # This ensures bars are indexed by their END time, not START time
+            # Only completed bars will be visible to the agent at any execution time
+            if tf != execute_on:
+                offset = pd.Timedelta(tf.to_pandas_freq())
+                resampled.index = resampled.index + offset
+
             if feature_processing_fn is not None:
                 resampled = feature_processing_fn(resampled)
                 cols_to_keep = [col for col in resampled.columns if col.startswith(features_start_with)]
@@ -88,9 +96,14 @@ class MarketDataObservationSampler:
         self.max_lookback = max(window_durations)
         latest_first_step = max(first_time_stamps)
 
+        # Calculate offset needed for higher timeframes (to account for END-time indexing)
+        # We need extra data to ensure sufficient lookback after the offset
+        higher_tf_offsets = [tf_to_timedelta(tf) for tf in time_frames if tf != execute_on]
+        max_offset = max(higher_tf_offsets) if higher_tf_offsets else pd.Timedelta(0)
+
         # Filter execution times
         exec_times = self.df.resample(execute_on.to_pandas_freq()).first().index
-        self.min_start_time = latest_first_step + self.max_lookback
+        self.min_start_time = latest_first_step + self.max_lookback + max_offset
         self.exec_times = exec_times[exec_times >= self.min_start_time]
         # create base features of execution time frame (we'll keep DataFrame for column names but also build tensors)
         # Use ffill() to handle any NaN values from missing data periods

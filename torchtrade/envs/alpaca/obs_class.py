@@ -74,7 +74,7 @@ class AlpacaObservationClass:
         self, timeframe: TimeFrame #, window_size: int
     ) -> pd.DataFrame:
         """Fetch and preprocess data for a single timeframe."""
-        if timeframe.unit == TimeFrameUnit.Day and self.default_lookback > self.default_lookback:
+        if timeframe.unit == TimeFrameUnit.Day and self.default_lookback > 30:
             raise ValueError("Default lookback is greater than 30 days, which is not allowed for daily data")
         
         now = datetime.now(ZoneInfo("America/New_York"))
