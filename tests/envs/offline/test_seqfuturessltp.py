@@ -318,7 +318,7 @@ class TestSeqFuturesSLTPEnvTriggers:
         td = result["next"]
 
         assert env.position.position_size > 0
-        initial_position = env.position_size
+        initial_position = env.position.position_size
 
         # Continue stepping - SL should trigger
         sl_triggered = False
@@ -361,7 +361,7 @@ class TestSeqFuturesSLTPEnvTriggers:
         td = result["next"]
 
         assert env.position.position_size > 0
-        initial_position = env.position_size
+        initial_position = env.position.position_size
 
         # Continue stepping - TP should trigger
         tp_triggered = False
@@ -404,7 +404,7 @@ class TestSeqFuturesSLTPEnvTriggers:
         td = result["next"]
 
         assert env.position.position_size < 0
-        initial_position = env.position_size
+        initial_position = env.position.position_size
 
         # Continue stepping - SL should trigger
         sl_triggered = False
@@ -447,7 +447,7 @@ class TestSeqFuturesSLTPEnvTriggers:
         td = result["next"]
 
         assert env.position.position_size < 0
-        initial_position = env.position_size
+        initial_position = env.position.position_size
 
         # Continue stepping - TP should trigger
         tp_triggered = False
@@ -539,7 +539,7 @@ class TestSeqFuturesSLTPEnvLiquidation:
 
         # Track if liquidation happens
         was_liquidated = False
-        initial_position = env.position_size
+        initial_position = env.position.position_size
 
         for _ in range(100):
             td.set("action", torch.tensor(0))  # hold
@@ -581,7 +581,7 @@ class TestSeqFuturesSLTPEnvLiquidation:
         result = env.step(td)
         td = result["next"]
 
-        initial_position = env.position_size
+        initial_position = env.position.position_size
 
         for _ in range(100):
             td.set("action", torch.tensor(0))

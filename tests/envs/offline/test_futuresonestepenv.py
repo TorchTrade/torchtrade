@@ -337,7 +337,7 @@ class TestFuturesOneStepEnvLongPosition:
         env._execute_trade_if_needed(env.action_map[1])
 
         assert env.liquidation_price > 0
-        assert env.liquidation_price < env.entry_price
+        assert env.liquidation_price < env.position.entry_price
 
 
 class TestFuturesOneStepEnvShortPosition:
@@ -385,7 +385,7 @@ class TestFuturesOneStepEnvShortPosition:
         env._execute_trade_if_needed(env.action_map[short_action])
 
         assert env.liquidation_price > 0
-        assert env.liquidation_price > env.entry_price
+        assert env.liquidation_price > env.position.entry_price
 
 
 class TestFuturesOneStepEnvRollout:
@@ -855,8 +855,8 @@ class TestFuturesOneStepEnvLeverage:
         env_high._execute_trade_if_needed(env_high.action_map[1])
 
         # Distance from entry to liquidation
-        dist_low = abs(env_low.position.entry_price - env_low.liquidation_price) / env_low.entry_price
-        dist_high = abs(env_high.position.entry_price - env_high.liquidation_price) / env_high.entry_price
+        dist_low = abs(env_low.position.entry_price - env_low.liquidation_price) / env_low.position.entry_price
+        dist_high = abs(env_high.position.entry_price - env_high.liquidation_price) / env_high.position.entry_price
 
         # Higher leverage should have smaller distance (closer to liquidation)
         assert dist_high < dist_low
