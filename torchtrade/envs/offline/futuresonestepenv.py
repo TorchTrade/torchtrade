@@ -175,11 +175,13 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         # Reward spec
         self.reward_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(1,), dtype=torch.float)
 
-        # Initialize futures-specific state
-        self.unrealized_pnl = 0.0
-        self.unrealized_pnl_pct = 0.0
-        self.liquidation_price = 0.0
-        self.position_history = []
+        # Initialize futures-specific state (beyond base PositionState)
+        # Note: These attributes are intentionally separate from PositionState as they are
+        # specific to futures/leveraged trading and not applicable to spot/long-only environments.
+        self.unrealized_pnl = 0.0  # Absolute unrealized PnL (calculated from leverage)
+        self.unrealized_pnl_pct = 0.0  # Percentage unrealized PnL
+        self.liquidation_price = 0.0  # Price at which position would be liquidated
+        self.position_history = []  # Track position sizes over time
 
         # Initialize one-step specific state
         self.stop_loss_price = 0.0

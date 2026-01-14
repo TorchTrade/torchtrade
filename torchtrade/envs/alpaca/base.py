@@ -181,21 +181,19 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status", None)
 
         if position_status is None:
-            self.position.hold_counter = 0
             position_size = 0.0
             position_value = 0.0
             entry_price = 0.0
             current_price = 0.0
             unrealized_pnlpc = 0.0
-            holding_time = self.position.hold_counter
+            holding_time = 0.0
         else:
-            self.position.hold_counter += 1
             position_size = position_status.qty
             position_value = position_status.market_value
             entry_price = position_status.avg_entry_price
             current_price = position_status.current_price
             unrealized_pnlpc = position_status.unrealized_plpc
-            holding_time = self.position.hold_counter
+            holding_time = float(self.position.hold_counter)
 
         # Build account state tensor
         account_state = torch.tensor(

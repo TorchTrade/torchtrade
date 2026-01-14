@@ -130,10 +130,14 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         self._build_observation_specs(account_state, num_features)
 
         # Initialize futures-specific state (beyond base PositionState)
-        self.unrealized_pnl = 0.0  # Absolute unrealized PnL (futures-specific)
-        self.unrealized_pnl_pct = 0.0
-        self.liquidation_price = 0.0  # Futures-specific
-        self.position_history = []
+        # Note: These attributes are intentionally separate from PositionState as they are
+        # specific to futures/leveraged trading and not applicable to spot/long-only environments.
+        # PositionState contains universal position tracking (size, value, entry), while these
+        # track futures-specific calculations (leverage-based PnL, liquidation risk).
+        self.unrealized_pnl = 0.0  # Absolute unrealized PnL (calculated from leverage)
+        self.unrealized_pnl_pct = 0.0  # Percentage unrealized PnL
+        self.liquidation_price = 0.0  # Price at which position would be liquidated
+        self.position_history = []  # Track position sizes over time
 
     def _calculate_liquidation_price(self, entry_price: float, position_size: float) -> float:
         """

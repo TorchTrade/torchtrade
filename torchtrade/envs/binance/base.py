@@ -210,7 +210,6 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status", None)
 
         if position_status is None:
-            self.position.hold_counter = 0
             position_size = 0.0
             position_value = 0.0
             entry_price = 0.0
@@ -221,7 +220,6 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
             liquidation_price = 0.0
             holding_time = 0.0
         else:
-            self.position.hold_counter += 1
             position_size = position_status.qty  # Positive=long, Negative=short
             position_value = abs(position_status.notional_value)
             entry_price = position_status.entry_price

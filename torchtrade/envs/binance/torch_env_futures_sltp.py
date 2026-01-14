@@ -169,6 +169,12 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         # Wait for next time step
         self._wait_for_next_timestamp()
 
+        # Update position hold counter
+        if self.position.current_position != 0:
+            self.position.hold_counter += 1
+        else:
+            self.position.hold_counter = 0
+
         # Get updated state
         new_portfolio_value = self._get_portfolio_value()
         next_tensordict = self._get_observation()
