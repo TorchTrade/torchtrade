@@ -146,88 +146,103 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
 
         return next_tensordict
 
+    def _get_current_position_quantity(self) -> float:
+        """Get current position quantity from trader status."""
+        status = self.trader.get_status()
+        position = status.get("position_status")
+        return position.qty if position is not None else 0.0
+
+    def _create_trade_info(self, executed=False, **kwargs) -> Dict:
+        """Create trade info dictionary with defaults."""
+        info = {
+            "executed": executed,
+            "quantity": 0,
+            "side": None,
+            "success": None,
+            "closed_position": False,
+        }
+        info.update(kwargs)
+        return info
+
+    def _execute_market_order(self, side: str, quantity: float) -> Dict:
+        """Execute a market order with error handling."""
+        try:
+            success = self.trader.trade(
+                side=side,
+                quantity=quantity,
+                order_type="market",
+            )
+            return self._create_trade_info(
+                executed=True,
+                quantity=quantity,
+                side=side,
+                success=success,
+            )
+        except Exception as e:
+            logger.error(f"{side.capitalize()} trade failed for {self.config.symbol}: quantity={quantity}, error={e}")
+            return self._create_trade_info(executed=True, success=False)
+
+    def _handle_close_action(self, current_qty: float) -> Dict:
+        """Handle close position action."""
+        if current_qty == 0:
+            return self._create_trade_info(executed=False)
+
+        success = self.trader.close_position()
+        side = "sell" if current_qty > 0 else "buy"
+        self.current_position = 0
+
+        return self._create_trade_info(
+            executed=True,
+            quantity=abs(current_qty),
+            side=side,
+            success=success,
+            closed_position=True,
+        )
+
+    def _handle_long_action(self, current_qty: float) -> Dict:
+        """Handle go long action."""
+        # Close short position if necessary
+        if current_qty < 0:
+            self.trader.close_position()
+
+        # Only execute if not already long
+        if current_qty > 0:
+            return self._create_trade_info(executed=False)
+
+        return self._execute_market_order("buy", self.config.quantity_per_trade)
+
+    def _handle_short_action(self, current_qty: float) -> Dict:
+        """Handle go short action."""
+        # Close long position if necessary
+        if current_qty > 0:
+            self.trader.close_position()
+
+        # Only execute if not already short
+        if current_qty < 0:
+            return self._create_trade_info(executed=False)
+
+        return self._execute_market_order("sell", self.config.quantity_per_trade)
+
     def _execute_trade_if_needed(self, desired_action: float) -> Dict:
         """
         Execute trade if position change is needed.
 
         Args:
-            desired_action: Action level (-1.0, 0.0, 1.0)
+            desired_action: Action level (-1.0 = short, 0.0 = close/hold, 1.0 = long)
 
         Returns:
             Dict with trade execution info
         """
-        trade_info = {"executed": False, "quantity": 0, "side": None, "success": None, "closed_position": False}
+        current_qty = self._get_current_position_quantity()
 
-        # Get current position status
-        status = self.trader.get_status()
-        position = status.get("position_status")
-        current_qty = position.qty if position is not None else 0.0
-
-        # Action 0: Close position
         if desired_action == 0:
-            if current_qty != 0:
-                success = self.trader.close_position()
-                trade_info.update({
-                    "executed": True,
-                    "quantity": abs(current_qty),
-                    "side": "sell" if current_qty > 0 else "buy",
-                    "success": success,
-                    "closed_position": True,
-                })
-                self.current_position = 0
-            return trade_info
-
-        # Action 1: Go long
-        if desired_action == 1:
-            # If short, close first
-            if current_qty < 0:
-                self.trader.close_position()
-
-            # If not already long, go long
-            if current_qty <= 0:
-                try:
-                    success = self.trader.trade(
-                        side="buy",
-                        quantity=self.config.quantity_per_trade,
-                        order_type="market",
-                    )
-                    trade_info.update({
-                        "executed": True,
-                        "quantity": self.config.quantity_per_trade,
-                        "side": "buy",
-                        "success": success,
-                    })
-                except Exception as e:
-                    print(f"Long trade failed: {str(e)}")
-                    trade_info["success"] = False
-            return trade_info
-
-        # Action -1: Go short
-        if desired_action == -1:
-            # If long, close first
-            if current_qty > 0:
-                self.trader.close_position()
-
-            # If not already short, go short
-            if current_qty >= 0:
-                try:
-                    success = self.trader.trade(
-                        side="sell",
-                        quantity=self.config.quantity_per_trade,
-                        order_type="market",
-                    )
-                    trade_info.update({
-                        "executed": True,
-                        "quantity": self.config.quantity_per_trade,
-                        "side": "sell",
-                        "success": success,
-                    })
-                except Exception as e:
-                    print(f"Short trade failed: {str(e)}")
-                    trade_info["success"] = False
-            return trade_info
-
-        return trade_info
+            return self._handle_close_action(current_qty)
+        elif desired_action == 1:
+            return self._handle_long_action(current_qty)
+        elif desired_action == -1:
+            return self._handle_short_action(current_qty)
+        else:
+            return self._create_trade_info(executed=False)
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""
