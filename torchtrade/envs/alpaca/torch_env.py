@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Callable
 
+import torch
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
@@ -89,10 +90,10 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, desired_action, trade_info)
         done = self._check_termination(new_portfolio_value)
 
-        next_tensordict.set("reward", reward)
-        next_tensordict.set("done", done)
-        next_tensordict.set("truncated", False)
-        next_tensordict.set("terminated", False)
+        next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
+        next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))
+        next_tensordict.set("truncated", torch.tensor([False], dtype=torch.bool))
+        next_tensordict.set("terminated", torch.tensor([done], dtype=torch.bool))
         
         # TODO: Make a dashboard that shows the portfolio value and action history etc
         _ = self._create_info_dict(new_portfolio_value, trade_info, desired_action)
