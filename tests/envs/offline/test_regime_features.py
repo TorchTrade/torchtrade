@@ -306,14 +306,16 @@ class TestMarketRegimeFeatures:
 class TestRegimeFeatureIntegration:
     """Integration tests for regime features with environment."""
 
-    def test_integration_with_futures_env(self):
-        """Test that regime features integrate correctly with FuturesOneStepEnv."""
+    def test_integration_with_transformed_env(self):
+        """Test that MarketRegimeTransform works with TransformedEnv."""
         # Import here to avoid circular dependency issues
         from torchtrade.envs.offline.futuresonestepenv import (
             FuturesOneStepEnv,
             FuturesOneStepEnvConfig,
         )
         from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+        from torchtrade.envs.transforms import MarketRegimeTransform
+        from torchrl.envs import TransformedEnv
         import pandas as pd
 
         # Create sample data
@@ -332,23 +334,31 @@ class TestRegimeFeatureIntegration:
             'volume': volumes,
         })
 
-        # Create config with regime features enabled
+        # Create base config (no regime features in config)
         config = FuturesOneStepEnvConfig(
             symbol="TEST/USD",
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
             initial_cash=1000,
-            include_regime_features=True,
-            regime_volatility_window=20,
-            regime_trend_window=50,
-            regime_trend_short_window=20,
-            regime_volume_window=20,
-            regime_price_position_window=100,
         )
 
-        # Create environment
-        env = FuturesOneStepEnv(df, config)
+        # Create base environment
+        base_env = FuturesOneStepEnv(df, config)
+
+        # Wrap with MarketRegimeTransform
+        env = TransformedEnv(
+            base_env,
+            MarketRegimeTransform(
+                sampler=base_env.sampler,
+                out_keys=["regime_features"],
+                volatility_window=20,
+                trend_window=50,
+                trend_short_window=20,
+                volume_window=20,
+                price_position_window=100,
+            )
+        )
 
         # Check that observation spec includes regime features
         assert "regime_features" in env.observation_spec
@@ -377,8 +387,8 @@ class TestRegimeFeatureIntegration:
         assert volume_regime in [0, 1, 2], f"Invalid volume regime: {volume_regime}"
         assert position_regime in [0, 1, 2], f"Invalid position regime: {position_regime}"
 
-    def test_regime_features_disabled(self):
-        """Test that environment works correctly when regime features are disabled."""
+    def test_env_without_transform(self):
+        """Test that base environment works correctly without regime transform."""
         from torchtrade.envs.offline.futuresonestepenv import (
             FuturesOneStepEnv,
             FuturesOneStepEnvConfig,
@@ -402,17 +412,16 @@ class TestRegimeFeatureIntegration:
             'volume': volumes,
         })
 
-        # Create config with regime features disabled (default)
+        # Create config without regime features
         config = FuturesOneStepEnvConfig(
             symbol="TEST/USD",
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
             initial_cash=1000,
-            include_regime_features=False,  # Explicitly disabled
         )
 
-        # Create environment
+        # Create environment without transform
         env = FuturesOneStepEnv(df, config)
 
         # Check that observation spec does NOT include regime features

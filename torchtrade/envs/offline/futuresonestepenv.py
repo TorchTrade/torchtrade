@@ -21,7 +21,6 @@ import pandas as pd
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map, normalize_timeframe_config
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 from torchtrade.envs.state import FuturesHistoryTracker
-from torchtrade.envs.offline.regime_features import MarketRegimeFeatures
 import logging
 import sys
 
@@ -91,14 +90,6 @@ class FuturesOneStepEnvConfig:
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
     include_hold_action: bool = True  # Include HOLD action (index 0) in action space
-
-    # Market regime feature settings
-    include_regime_features: bool = False  # Include market regime features in observations
-    regime_volatility_window: int = 20  # Window for volatility calculation
-    regime_trend_window: int = 50  # Window for long-term trend MA
-    regime_trend_short_window: int = 20  # Window for short-term trend MA
-    regime_volume_window: int = 20  # Window for volume analysis
-    regime_price_position_window: int = 252  # Window for price position (52-week ~= 252 daily bars)
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
@@ -181,33 +172,6 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         # Build observation specs using class constant
         num_features = len(self.sampler.get_feature_keys())
         self._build_observation_specs(self.ACCOUNT_STATE, num_features)
-
-        # Initialize market regime features if enabled
-        self.include_regime_features = config.include_regime_features
-        if self.include_regime_features:
-            self.regime_calculator = MarketRegimeFeatures(
-                volatility_window=config.regime_volatility_window,
-                trend_window=config.regime_trend_window,
-                trend_short_window=config.regime_trend_short_window,
-                volume_window=config.regime_volume_window,
-                price_position_window=config.regime_price_position_window,
-            )
-
-            # Add regime features to observation spec
-            regime_spec = Bounded(
-                low=-torch.inf,
-                high=torch.inf,
-                shape=(7,),  # 7 regime features
-                dtype=torch.float32
-            )
-            self.observation_spec["regime_features"] = regime_spec
-            logger.debug(
-                f"Market regime features enabled with windows: "
-                f"vol={config.regime_volatility_window}, "
-                f"trend={config.regime_trend_window}/{config.regime_trend_short_window}, "
-                f"volume={config.regime_volume_window}, "
-                f"position={config.regime_price_position_window}"
-            )
 
         # Reward spec
         self.reward_spec = Bounded(low=-torch.inf, high=torch.inf, shape=(1,), dtype=torch.float)
@@ -378,29 +342,6 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         # Clone to avoid issues with in-place modifications downstream
         obs_data = {self.account_state_key: self._account_state_buffer.clone()}
         obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
-
-        # Add regime features if enabled
-        if self.include_regime_features:
-            try:
-                # Get historical data for regime feature calculation
-                # Use max required window to ensure sufficient data
-                max_window = self.regime_calculator.min_data_required
-                prices = self.sampler.get_recent_prices(window=max_window)
-                volumes = self.sampler.get_recent_volumes(window=max_window)
-
-                # Compute regime features
-                regime_features = self.regime_calculator.compute_features(prices, volumes)
-                obs_data["regime_features"] = regime_features
-            except ValueError as e:
-                # Only catch insufficient data errors at the start of episodes
-                if "Insufficient data" in str(e):
-                    logger.debug(f"Not enough data for regime features: {e}. Using defaults.")
-                    # Use neutral/default regime features: [vol=1(med), trend=0(sideways),
-                    # volume=1(normal), position=1(neutral), vol=0.01, trend=0.0, vol_ratio=1.0]
-                    obs_data["regime_features"] = torch.tensor([1, 0, 1, 1, 0.01, 0.0, 1.0], dtype=torch.float32)
-                else:
-                    # Re-raise unexpected ValueErrors
-                    raise
 
         return TensorDict(obs_data, batch_size=())
 
