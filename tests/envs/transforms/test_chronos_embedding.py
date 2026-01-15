@@ -108,11 +108,16 @@ class TestChronosEmbeddingTransformLazyInit:
 
     def test_lazy_init_import_error(self):
         """Test that missing chronos package raises ImportError."""
-        # Remove chronos module from sys.modules to simulate it not being installed
         import sys
-        chronos_module = sys.modules.pop('chronos', None)
 
-        try:
+        # Collect all chronos-related modules to remove
+        chronos_keys = [k for k in sys.modules.keys() if k == 'chronos' or k.startswith('chronos.')]
+
+        # Use patch.dict to temporarily remove chronos from sys.modules
+        # Setting modules to None triggers ImportError on import attempt
+        removed_modules = {k: None for k in chronos_keys}
+
+        with patch.dict('sys.modules', removed_modules):
             transform = ChronosEmbeddingTransform(
                 in_keys=["market_data"],
                 out_keys=["embedding"]
@@ -120,10 +125,6 @@ class TestChronosEmbeddingTransformLazyInit:
 
             with pytest.raises(ImportError, match="chronos-forecasting package required"):
                 transform._init()
-        finally:
-            # Restore chronos module if it existed
-            if chronos_module is not None:
-                sys.modules['chronos'] = chronos_module
 
 
 class TestChronosEmbeddingTransformApplyTransform:
