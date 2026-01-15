@@ -374,6 +374,110 @@ class MarketDataObservationSampler:
         vals = row[:5].tolist()
         return {"open": vals[0], "high": vals[1], "low": vals[2], "close": vals[3], "volume": vals[4]}
 
+    def get_recent_prices(self, window: int, timestamp: Optional[pd.Timestamp] = None) -> torch.Tensor:
+        """
+        Get recent close prices for regime feature calculation.
+
+        Args:
+            window: Number of bars to retrieve
+            timestamp: Optional timestamp (uses current sequential index if None)
+
+        Returns:
+            Tensor of close prices (oldest to newest)
+        """
+        # Determine the index position
+        if timestamp is None:
+            # Use current sequential index (subtract 1 since we already incremented)
+            idx_pos = max(0, self._sequential_idx - 1)
+        else:
+            ts_int = int(timestamp.value)
+            ts_t = torch.tensor(ts_int, dtype=torch.long)
+            pos_t = torch.searchsorted(self.execute_base_idx, ts_t, right=True)
+            idx_pos = int(pos_t.item()) - 1
+
+        if idx_pos < 0:
+            raise ValueError("No data available at the requested timestamp")
+
+        # Get close prices from execute_base_tensor (column index 3)
+        start_idx = max(0, idx_pos - window + 1)
+        end_idx = idx_pos + 1
+        prices = self.execute_base_tensor[start_idx:end_idx, 3]  # Close prices
+
+        return prices
+
+    def get_recent_volumes(self, window: int, timestamp: Optional[pd.Timestamp] = None) -> torch.Tensor:
+        """
+        Get recent volumes for regime feature calculation.
+
+        Args:
+            window: Number of bars to retrieve
+            timestamp: Optional timestamp (uses current sequential index if None)
+
+        Returns:
+            Tensor of volumes (oldest to newest)
+        """
+        # Determine the index position
+        if timestamp is None:
+            # Use current sequential index (subtract 1 since we already incremented)
+            idx_pos = max(0, self._sequential_idx - 1)
+        else:
+            ts_int = int(timestamp.value)
+            ts_t = torch.tensor(ts_int, dtype=torch.long)
+            pos_t = torch.searchsorted(self.execute_base_idx, ts_t, right=True)
+            idx_pos = int(pos_t.item()) - 1
+
+        if idx_pos < 0:
+            raise ValueError("No data available at the requested timestamp")
+
+        # Get volumes from execute_base_tensor (column index 4)
+        start_idx = max(0, idx_pos - window + 1)
+        end_idx = idx_pos + 1
+        volumes = self.execute_base_tensor[start_idx:end_idx, 4]  # Volumes
+
+        return volumes
+
+    def get_recent_ohlcv(
+        self,
+        window: int,
+        timestamp: Optional[pd.Timestamp] = None
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Get recent OHLCV data for regime feature calculation.
+
+        Args:
+            window: Number of bars to retrieve
+            timestamp: Optional timestamp (uses current sequential index if None)
+
+        Returns:
+            Dictionary with keys: 'open', 'high', 'low', 'close', 'volume'
+            Each value is a tensor (oldest to newest)
+        """
+        # Determine the index position
+        if timestamp is None:
+            # Use current sequential index (subtract 1 since we already incremented)
+            idx_pos = max(0, self._sequential_idx - 1)
+        else:
+            ts_int = int(timestamp.value)
+            ts_t = torch.tensor(ts_int, dtype=torch.long)
+            pos_t = torch.searchsorted(self.execute_base_idx, ts_t, right=True)
+            idx_pos = int(pos_t.item()) - 1
+
+        if idx_pos < 0:
+            raise ValueError("No data available at the requested timestamp")
+
+        # Get OHLCV data
+        start_idx = max(0, idx_pos - window + 1)
+        end_idx = idx_pos + 1
+        data = self.execute_base_tensor[start_idx:end_idx, :5]  # First 5 columns: OHLCV
+
+        return {
+            'open': data[:, 0],
+            'high': data[:, 1],
+            'low': data[:, 2],
+            'close': data[:, 3],
+            'volume': data[:, 4],
+        }
+
 
 class MarketDataObservationSampler_old:
     def __init__(
