@@ -12,68 +12,57 @@ from torchtrade.losses import CTRLLoss, CTRLPPOLoss
 class TestCTRLLoss:
     """Test suite for CTRLLoss."""
 
-    @pytest.fixture
-    def obs_dim(self):
-        return 64
+    OBS_DIM = 64
+    EMBEDDING_DIM = 128
+    BATCH_SIZE = 32
+    WINDOW_LEN = 4
 
     @pytest.fixture
-    def embedding_dim(self):
-        return 128
-
-    @pytest.fixture
-    def batch_size(self):
-        return 32
-
-    @pytest.fixture
-    def window_len(self):
-        return 4
-
-    @pytest.fixture
-    def encoder_network(self, obs_dim, embedding_dim):
+    def encoder_network(self):
         """Create a simple encoder network for testing."""
         return TensorDictModule(
             nn.Sequential(
-                nn.Linear(obs_dim, 256),
+                nn.Linear(self.OBS_DIM, 256),
                 nn.ReLU(),
-                nn.Linear(256, embedding_dim),
+                nn.Linear(256, self.EMBEDDING_DIM),
             ),
             in_keys=["observation"],
             out_keys=["embedding"],
         )
 
     @pytest.fixture
-    def sample_data(self, batch_size, window_len, obs_dim):
+    def sample_data(self):
         """Create sample training data with trajectory windows."""
         return TensorDict(
-            {"observation": torch.randn(batch_size, window_len, obs_dim)},
-            batch_size=[batch_size, window_len],
+            {"observation": torch.randn(self.BATCH_SIZE, self.WINDOW_LEN, self.OBS_DIM)},
+            batch_size=[self.BATCH_SIZE, self.WINDOW_LEN],
         )
 
     @pytest.fixture
-    def sample_data_no_window(self, batch_size, obs_dim):
+    def sample_data_no_window(self):
         """Create sample data without window dimension."""
         return TensorDict(
-            {"observation": torch.randn(batch_size, obs_dim)},
-            batch_size=[batch_size],
+            {"observation": torch.randn(self.BATCH_SIZE, self.OBS_DIM)},
+            batch_size=[self.BATCH_SIZE],
         )
 
-    def test_loss_initialization(self, encoder_network, embedding_dim):
+    def test_loss_initialization(self, encoder_network):
         """Test that loss module initializes correctly."""
-        loss = CTRLLoss(encoder_network, embedding_dim)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM)
         assert loss is not None
         assert loss.encoder_network is not None
-        assert loss.embedding_dim == embedding_dim
+        assert loss.embedding_dim == self.EMBEDDING_DIM
         assert loss.projection_head is not None
         assert loss.prediction_head is not None
         assert loss.prototypes is not None
         assert loss.num_prototypes == 512  # default
         assert loss.projection_dim == 128  # default
 
-    def test_loss_initialization_custom_params(self, encoder_network, embedding_dim):
+    def test_loss_initialization_custom_params(self, encoder_network):
         """Test loss initialization with custom parameters."""
         loss = CTRLLoss(
             encoder_network,
-            embedding_dim,
+            self.EMBEDDING_DIM,
             projection_dim=256,
             num_prototypes=1024,
             sinkhorn_iters=5,
@@ -92,26 +81,23 @@ class TestCTRLLoss:
         assert loss.myow_coeff.item() == pytest.approx(2.0)
         assert loss.reduction == "sum"
 
-    def test_functional_property(self, encoder_network, embedding_dim):
+    def test_functional_property(self, encoder_network):
         """Test that CTRL loss is non-functional."""
-        loss = CTRLLoss(encoder_network, embedding_dim)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM)
         assert loss.functional is False
 
-    def test_forward_pass(self, encoder_network, embedding_dim, sample_data_no_window):
+    def test_forward_pass(self, encoder_network, sample_data_no_window):
         """Test forward pass produces expected outputs."""
-        loss = CTRLLoss(encoder_network, embedding_dim)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM)
         output = loss(sample_data_no_window)
 
-        assert "loss_ctrl" in output.keys()
-        assert "loss_proto" in output.keys()
-        assert "loss_myow" in output.keys()
         assert output["loss_ctrl"].requires_grad
         assert output["loss_proto"].requires_grad
         assert output["loss_myow"].requires_grad
 
-    def test_forward_pass_shapes(self, encoder_network, embedding_dim, sample_data_no_window):
+    def test_forward_pass_shapes(self, encoder_network, sample_data_no_window):
         """Test that output shapes are correct."""
-        loss = CTRLLoss(encoder_network, embedding_dim, reduction="mean")
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM, reduction="mean")
         output = loss(sample_data_no_window)
 
         # With mean reduction, all losses should be scalars
@@ -119,9 +105,9 @@ class TestCTRLLoss:
         assert output["loss_proto"].shape == torch.Size([])
         assert output["loss_myow"].shape == torch.Size([])
 
-    def test_backward_pass(self, encoder_network, embedding_dim, sample_data_no_window):
+    def test_backward_pass(self, encoder_network, sample_data_no_window):
         """Test that gradients flow correctly through the loss."""
-        loss = CTRLLoss(encoder_network, embedding_dim)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM)
         output = loss(sample_data_no_window)
 
         # Compute backward
@@ -167,36 +153,36 @@ class TestCTRLLoss:
             assert Q.shape == scores.shape
             assert torch.isfinite(Q).all()
 
-    def test_prototype_loss_computation(self, encoder_network, embedding_dim, sample_data_no_window):
+    def test_prototype_loss_computation(self, encoder_network, sample_data_no_window):
         """Test prototype loss computation."""
-        loss = CTRLLoss(encoder_network, embedding_dim)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM)
         output = loss(sample_data_no_window)
 
         # Prototype loss should be finite and positive (cross-entropy)
         assert torch.isfinite(output["loss_proto"])
         assert output["loss_proto"] >= 0
 
-    def test_myow_loss_computation(self, encoder_network, embedding_dim, sample_data_no_window):
+    def test_myow_loss_computation(self, encoder_network, sample_data_no_window):
         """Test MYOW loss computation."""
-        loss = CTRLLoss(encoder_network, embedding_dim)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM)
         output = loss(sample_data_no_window)
 
         # MYOW loss should be finite
         assert torch.isfinite(output["loss_myow"])
 
-    def test_combined_loss_computation(self, encoder_network, embedding_dim, sample_data_no_window):
+    def test_combined_loss_computation(self, encoder_network, sample_data_no_window):
         """Test that total CTRL loss is combination of proto and MYOW."""
-        loss = CTRLLoss(encoder_network, embedding_dim, myow_coeff=1.0)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM, myow_coeff=1.0)
         output = loss(sample_data_no_window)
 
         # loss_ctrl should be approximately proto + myow_coeff * myow
         # (approximate due to reduction operations)
         assert torch.isfinite(output["loss_ctrl"])
 
-    def test_myow_coefficient_effect(self, encoder_network, embedding_dim, sample_data_no_window):
+    def test_myow_coefficient_effect(self, encoder_network, sample_data_no_window):
         """Test that MYOW coefficient affects total loss."""
-        loss_low = CTRLLoss(encoder_network, embedding_dim, myow_coeff=0.1)
-        loss_high = CTRLLoss(encoder_network, embedding_dim, myow_coeff=10.0)
+        loss_low = CTRLLoss(encoder_network, self.EMBEDDING_DIM, myow_coeff=0.1)
+        loss_high = CTRLLoss(encoder_network, self.EMBEDDING_DIM, myow_coeff=10.0)
 
         output_low = loss_low(sample_data_no_window)
         output_high = loss_high(sample_data_no_window)
@@ -207,52 +193,52 @@ class TestCTRLLoss:
         assert torch.isfinite(output_low["loss_ctrl"])
         assert torch.isfinite(output_high["loss_ctrl"])
 
-    def test_reduction_modes(self, encoder_network, embedding_dim, sample_data_no_window):
+    def test_reduction_modes(self, encoder_network, sample_data_no_window):
         """Test different reduction modes."""
         # Mean reduction
-        loss_mean = CTRLLoss(encoder_network, embedding_dim, reduction="mean")
+        loss_mean = CTRLLoss(encoder_network, self.EMBEDDING_DIM, reduction="mean")
         output_mean = loss_mean(sample_data_no_window)
         assert output_mean["loss_ctrl"].shape == torch.Size([])
 
         # Sum reduction
-        loss_sum = CTRLLoss(encoder_network, embedding_dim, reduction="sum")
+        loss_sum = CTRLLoss(encoder_network, self.EMBEDDING_DIM, reduction="sum")
         output_sum = loss_sum(sample_data_no_window)
         assert output_sum["loss_ctrl"].shape == torch.Size([])
 
-    def test_small_batch_handling(self, encoder_network, embedding_dim, obs_dim):
+    def test_small_batch_handling(self, encoder_network):
         """Test handling of small batch sizes."""
         # Batch size 1 (too small to split)
         small_data = TensorDict(
-            {"observation": torch.randn(1, obs_dim)},
+            {"observation": torch.randn(1, self.OBS_DIM)},
             batch_size=[1],
         )
-        loss = CTRLLoss(encoder_network, embedding_dim)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM)
         output = loss(small_data)
         assert torch.isfinite(output["loss_ctrl"])
 
         # Batch size 2 (minimum for split)
         small_data = TensorDict(
-            {"observation": torch.randn(2, obs_dim)},
+            {"observation": torch.randn(2, self.OBS_DIM)},
             batch_size=[2],
         )
         output = loss(small_data)
         assert torch.isfinite(output["loss_ctrl"])
 
-    def test_different_batch_sizes(self, encoder_network, embedding_dim, obs_dim):
+    @pytest.mark.parametrize("batch_size", [4, 16, 64])
+    def test_different_batch_sizes(self, encoder_network, batch_size):
         """Test with different batch sizes."""
-        loss = CTRLLoss(encoder_network, embedding_dim)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM)
 
-        for batch_size in [4, 16, 64]:
-            data = TensorDict(
-                {"observation": torch.randn(batch_size, obs_dim)},
-                batch_size=[batch_size],
-            )
-            output = loss(data)
-            assert torch.isfinite(output["loss_ctrl"])
+        data = TensorDict(
+            {"observation": torch.randn(batch_size, self.OBS_DIM)},
+            batch_size=[batch_size],
+        )
+        output = loss(data)
+        assert torch.isfinite(output["loss_ctrl"])
 
-    def test_extract_windows(self, encoder_network, embedding_dim, sample_data_no_window):
+    def test_extract_windows(self, encoder_network, sample_data_no_window):
         """Test window extraction for cross-trajectory comparison."""
-        loss = CTRLLoss(encoder_network, embedding_dim)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM)
         batch1, batch2 = loss._extract_windows(sample_data_no_window)
 
         # Check that batches are properly split
@@ -261,74 +247,74 @@ class TestCTRLLoss:
         assert batch1.batch_size[0] == half
         assert batch2.batch_size[0] == half
 
-    def test_extract_windows_small_batch(self, encoder_network, embedding_dim, obs_dim):
+    def test_extract_windows_small_batch(self, encoder_network):
         """Test window extraction with batch size 1."""
         small_data = TensorDict(
-            {"observation": torch.randn(1, obs_dim)},
+            {"observation": torch.randn(1, self.OBS_DIM)},
             batch_size=[1],
         )
-        loss = CTRLLoss(encoder_network, embedding_dim)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM)
         batch1, batch2 = loss._extract_windows(small_data)
 
         # With batch size 1, should duplicate
         assert batch1.batch_size[0] == 1
         assert batch2.batch_size[0] == 1
 
-    def test_missing_embedding_key(self, encoder_network, embedding_dim, sample_data_no_window):
+    def test_missing_embedding_key(self, encoder_network, sample_data_no_window):
         """Test that error is raised when embedding key is missing."""
         # Create encoder with wrong output key
         bad_encoder = TensorDictModule(
-            nn.Linear(64, 128),
+            nn.Linear(self.OBS_DIM, self.EMBEDDING_DIM),
             in_keys=["observation"],
             out_keys=["wrong_key"],
         )
-        loss = CTRLLoss(bad_encoder, embedding_dim)
+        loss = CTRLLoss(bad_encoder, self.EMBEDDING_DIM)
 
         with pytest.raises(KeyError, match="Could not find embedding key"):
             loss(sample_data_no_window)
 
-    def test_in_keys_property(self, encoder_network, embedding_dim):
+    def test_in_keys_property(self, encoder_network):
         """Test that in_keys property returns correct keys."""
-        loss = CTRLLoss(encoder_network, embedding_dim)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM)
         in_keys = loss.in_keys
         assert "observation" in in_keys
 
-    def test_out_keys_property(self, encoder_network, embedding_dim):
+    def test_out_keys_property(self, encoder_network):
         """Test that out_keys property returns correct keys."""
-        loss = CTRLLoss(encoder_network, embedding_dim)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM)
         out_keys = loss.out_keys
         assert "loss_ctrl" in out_keys
         assert "loss_proto" in out_keys
         assert "loss_myow" in out_keys
 
-    def test_projection_head_architecture(self, encoder_network, embedding_dim):
+    def test_projection_head_architecture(self, encoder_network):
         """Test projection head architecture."""
-        loss = CTRLLoss(encoder_network, embedding_dim, projection_dim=256)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM, projection_dim=256)
 
         # Test projection head forward pass
-        dummy_emb = torch.randn(10, embedding_dim)
+        dummy_emb = torch.randn(10, self.EMBEDDING_DIM)
         projected = loss.projection_head(dummy_emb)
         assert projected.shape == (10, 256)
 
-    def test_prediction_head_architecture(self, encoder_network, embedding_dim):
+    def test_prediction_head_architecture(self, encoder_network):
         """Test prediction head architecture."""
-        loss = CTRLLoss(encoder_network, embedding_dim, projection_dim=256)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM, projection_dim=256)
 
         # Test prediction head forward pass
         dummy_proj = torch.randn(10, 256)
         predicted = loss.prediction_head(dummy_proj)
         assert predicted.shape == (10, 256)
 
-    def test_prototypes_initialization(self, encoder_network, embedding_dim):
+    def test_prototypes_initialization(self, encoder_network):
         """Test that prototypes are properly initialized."""
-        loss = CTRLLoss(encoder_network, embedding_dim, num_prototypes=128, projection_dim=64)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM, num_prototypes=128, projection_dim=64)
         assert loss.prototypes.shape == (128, 64)
         assert loss.prototypes.requires_grad
 
-    def test_temperature_effect(self, encoder_network, embedding_dim, sample_data_no_window):
+    def test_temperature_effect(self, encoder_network, sample_data_no_window):
         """Test temperature parameter effect."""
-        loss_low_temp = CTRLLoss(encoder_network, embedding_dim, temperature=0.01)
-        loss_high_temp = CTRLLoss(encoder_network, embedding_dim, temperature=1.0)
+        loss_low_temp = CTRLLoss(encoder_network, self.EMBEDDING_DIM, temperature=0.01)
+        loss_high_temp = CTRLLoss(encoder_network, self.EMBEDDING_DIM, temperature=1.0)
 
         output_low = loss_low_temp(sample_data_no_window)
         output_high = loss_high_temp(sample_data_no_window)
@@ -337,30 +323,30 @@ class TestCTRLLoss:
         assert torch.isfinite(output_low["loss_ctrl"])
         assert torch.isfinite(output_high["loss_ctrl"])
 
-    def test_cuda_if_available(self, encoder_network, embedding_dim, sample_data_no_window):
+    def test_cuda_if_available(self, encoder_network, sample_data_no_window):
         """Test CTRL loss on CUDA if available."""
         if not torch.cuda.is_available():
             pytest.skip("CUDA not available")
 
         device = torch.device("cuda")
-        loss = CTRLLoss(encoder_network, embedding_dim)
+        loss = CTRLLoss(encoder_network, self.EMBEDDING_DIM)
         loss = loss.to(device)
         sample_data_no_window = sample_data_no_window.to(device)
 
         output = loss(sample_data_no_window)
         assert output["loss_ctrl"].device.type == "cuda"
 
-    def test_myow_k_bounds(self, encoder_network, embedding_dim, sample_data_no_window):
+    def test_myow_k_bounds(self, encoder_network, sample_data_no_window):
         """Test MYOW k parameter with different values."""
         # Test with k larger than num_prototypes
         loss_large_k = CTRLLoss(
-            encoder_network, embedding_dim, num_prototypes=10, myow_k=100
+            encoder_network, self.EMBEDDING_DIM, num_prototypes=10, myow_k=100
         )
         output = loss_large_k(sample_data_no_window)
         assert torch.isfinite(output["loss_myow"])
 
         # Test with k = 1
-        loss_small_k = CTRLLoss(encoder_network, embedding_dim, myow_k=1)
+        loss_small_k = CTRLLoss(encoder_network, self.EMBEDDING_DIM, myow_k=1)
         output = loss_small_k(sample_data_no_window)
         assert torch.isfinite(output["loss_myow"])
 
@@ -442,6 +428,6 @@ class TestCTRLPPOLoss:
         output = combined(sample_data_no_window)
 
         # Check that loss_ctrl is scaled
-        if "loss_ctrl" in output.keys():
+        if "loss_ctrl" in output:
             # The scaling should be applied
             assert torch.isfinite(output["loss_ctrl"])

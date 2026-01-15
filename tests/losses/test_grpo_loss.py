@@ -17,27 +17,19 @@ from torchtrade.losses import GRPOLoss
 class TestGRPOLoss:
     """Test suite for GRPOLoss."""
 
-    @pytest.fixture
-    def obs_dim(self):
-        return 4
+    OBS_DIM = 4
+    ACTION_DIM = 3
+    BATCH_SIZE = 10
 
     @pytest.fixture
-    def action_dim(self):
-        return 3
-
-    @pytest.fixture
-    def batch_size(self):
-        return 10
-
-    @pytest.fixture
-    def actor_network(self, obs_dim, action_dim):
+    def actor_network(self):
         """Create a simple actor network for testing."""
         # Create a simple policy network
         policy_net = TensorDictModule(
             nn.Sequential(
-                nn.Linear(obs_dim, 64),
+                nn.Linear(self.OBS_DIM, 64),
                 nn.ReLU(),
-                nn.Linear(64, action_dim),
+                nn.Linear(64, self.ACTION_DIM),
             ),
             in_keys=["observation"],
             out_keys=["logits"],
@@ -54,20 +46,20 @@ class TestGRPOLoss:
         return ProbabilisticTensorDictSequential(policy_net, actor)
 
     @pytest.fixture
-    def sample_data(self, batch_size, obs_dim, action_dim):
+    def sample_data(self):
         """Create sample training data."""
         return TensorDict(
             {
-                "observation": torch.randn(batch_size, obs_dim),
-                "action": torch.randint(0, action_dim, (batch_size,)),
-                "action_log_prob": torch.randn(batch_size),
+                "observation": torch.randn(self.BATCH_SIZE, self.OBS_DIM),
+                "action": torch.randint(0, self.ACTION_DIM, (self.BATCH_SIZE,)),
+                "action_log_prob": torch.randn(self.BATCH_SIZE),
                 "next": {
-                    "reward": torch.randn(batch_size, 1),
-                    "done": torch.zeros(batch_size, 1, dtype=torch.bool),
-                    "terminated": torch.zeros(batch_size, 1, dtype=torch.bool),
+                    "reward": torch.randn(self.BATCH_SIZE, 1),
+                    "done": torch.zeros(self.BATCH_SIZE, 1, dtype=torch.bool),
+                    "terminated": torch.zeros(self.BATCH_SIZE, 1, dtype=torch.bool),
                 },
             },
-            batch_size=[batch_size],
+            batch_size=[self.BATCH_SIZE],
         )
 
     def test_loss_initialization(self, actor_network):
@@ -106,7 +98,6 @@ class TestGRPOLoss:
         loss = GRPOLoss(actor_network=actor_network)
         output = loss(sample_data)
 
-        assert "loss_objective" in output.keys()
         assert output["loss_objective"].requires_grad
         assert output["loss_objective"].shape == torch.Size([])
 
@@ -115,9 +106,9 @@ class TestGRPOLoss:
         loss = GRPOLoss(actor_network=actor_network, entropy_bonus=True)
         output = loss(sample_data)
 
-        assert "loss_objective" in output.keys()
-        assert "entropy" in output.keys()
-        assert "loss_entropy" in output.keys()
+        assert output["loss_objective"]
+        assert output["entropy"]
+        assert output["loss_entropy"]
         assert output["entropy"].shape == torch.Size([])
         assert output["loss_entropy"].requires_grad
 
@@ -126,7 +117,7 @@ class TestGRPOLoss:
         loss = GRPOLoss(actor_network=actor_network, entropy_bonus=False)
         output = loss(sample_data)
 
-        assert "loss_objective" in output.keys()
+        assert output["loss_objective"]
         assert "entropy" not in output.keys()
         assert "loss_entropy" not in output.keys()
 
@@ -158,27 +149,26 @@ class TestGRPOLoss:
         output_sum = loss_sum(sample_data)
         assert output_sum["loss_objective"].shape == torch.Size([])
 
-    def test_loss_with_different_batch_sizes(self, actor_network, obs_dim, action_dim):
+    @pytest.mark.parametrize("batch_size", [1, 5, 32])
+    def test_loss_with_different_batch_sizes(self, actor_network, batch_size):
         """Test loss computation with different batch sizes."""
         loss = GRPOLoss(actor_network=actor_network)
 
-        for batch_size in [1, 5, 32]:
-            data = TensorDict(
-                {
-                    "observation": torch.randn(batch_size, obs_dim),
-                    "action": torch.randint(0, action_dim, (batch_size,)),
-                    "action_log_prob": torch.randn(batch_size),
-                    "next": {
-                        "reward": torch.randn(batch_size, 1),
-                        "done": torch.zeros(batch_size, 1, dtype=torch.bool),
-                        "terminated": torch.zeros(batch_size, 1, dtype=torch.bool),
-                    },
+        data = TensorDict(
+            {
+                "observation": torch.randn(batch_size, self.OBS_DIM),
+                "action": torch.randint(0, self.ACTION_DIM, (batch_size,)),
+                "action_log_prob": torch.randn(batch_size),
+                "next": {
+                    "reward": torch.randn(batch_size, 1),
+                    "done": torch.zeros(batch_size, 1, dtype=torch.bool),
+                    "terminated": torch.zeros(batch_size, 1, dtype=torch.bool),
                 },
-                batch_size=[batch_size],
-            )
-            output = loss(data)
-            assert "loss_objective" in output.keys()
-            assert output["loss_objective"].requires_grad
+            },
+            batch_size=[batch_size],
+        )
+        output = loss(data)
+        assert output["loss_objective"].requires_grad
 
     def test_loss_clipping_behavior(self, actor_network, sample_data):
         """Test that loss clipping works as expected."""
@@ -198,7 +188,7 @@ class TestGRPOLoss:
         output = loss(sample_data)
 
         # Advantage should be in the output for logging
-        assert "advantage" in output.keys()
+        assert output["advantage"]
         assert output["advantage"].shape == torch.Size([])
 
     def test_loss_kl_approximation(self, actor_network, sample_data):
@@ -207,7 +197,7 @@ class TestGRPOLoss:
         output = loss(sample_data)
 
         # KL approximation should be in the output
-        assert "kl_approx" in output.keys()
+        assert output["kl_approx"]
         assert output["kl_approx"].shape == torch.Size([])
 
     def test_entropy_coeff_scalar(self, actor_network):
@@ -275,7 +265,7 @@ class TestGRPOLoss:
         loss = GRPOLoss(actor_network=actor_network)
         output = loss(sample_data)
 
-        assert "loss_objective" in output.keys()
+        assert output["loss_objective"].requires_grad
         assert torch.isfinite(output["loss_objective"])
 
     def test_loss_with_negative_rewards(self, actor_network, sample_data):
@@ -284,7 +274,7 @@ class TestGRPOLoss:
         loss = GRPOLoss(actor_network=actor_network)
         output = loss(sample_data)
 
-        assert "loss_objective" in output.keys()
+        assert output["loss_objective"].requires_grad
         assert torch.isfinite(output["loss_objective"])
 
     def test_loss_with_large_epsilon(self, actor_network, sample_data):
@@ -315,7 +305,7 @@ class TestGRPOLoss:
             entropy_bonus=True,
         )
         output = loss(sample_data)
-        assert "entropy" in output.keys()
+        assert output["entropy"]
         assert torch.isfinite(output["entropy"])
 
     def test_loss_log_explained_variance(self, actor_network):
