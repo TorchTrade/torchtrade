@@ -308,9 +308,12 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         if position_status is None:
             self.position.current_position = 0  # No position
+        elif position_status.qty > 0:
+            self.position.current_position = 1  # Long position
+        elif position_status.qty < 0:
+            self.position.current_position = -1  # Short position
         else:
-            # Bitget: positive qty = long, negative qty = short
-            self.position.current_position = 1 if position_status.qty > 0 else -1 if position_status.qty < 0 else 0
+            self.position.current_position = 0  # No position
 
         # Get initial observation
         return self._get_observation()
