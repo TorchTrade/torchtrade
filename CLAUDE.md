@@ -215,6 +215,28 @@ All environments inherit from TorchRL's `EnvBase` and follow the TensorDict patt
 
 4. **Actions**: Discrete categorical. Standard envs use 3 actions (sell/hold/buy or short/close/long). SLTP envs have 1 + (num_sl_levels × num_tp_levels) actions.
 
+### Lookahead Bias Prevention (Issue #10 - Fixed)
+
+**CRITICAL**: TorchTrade prevents lookahead bias in multi-timeframe observations by indexing higher timeframe bars by their END time.
+
+**The Problem**: Pandas `resample()` indexes bars by START time but aggregates through END time. A 5-minute bar at 00:25:00 contains data from 00:25:00-00:29:59. Without correction, an agent executing at 00:27:00 would see data from minute 29 (future data).
+
+**The Fix** (`torchtrade/envs/offline/sampler.py` lines 71-76):
+```python
+# After resampling, shift higher timeframe bars by their period
+if tf != execute_on:
+    offset = pd.Timedelta(tf.to_pandas_freq())
+    resampled.index = resampled.index + offset
+```
+
+This ensures:
+- Higher timeframe bars are indexed by END time (when they're complete)
+- Only completed bars are visible to the agent at any execution time
+- Backtest results accurately reflect real-world constraints
+- Policies transfer reliably to live trading
+
+**Impact**: This is a BREAKING CHANGE - higher timeframe data is now correct but different from before. Existing models trained with the old (incorrect) data may need retraining.
+
 ### Key Components
 
 **Live Trading Infrastructure:**

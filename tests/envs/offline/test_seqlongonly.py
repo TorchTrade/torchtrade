@@ -610,3 +610,185 @@ class TestSeqLongOnlyEnvEdgeCases:
         assert max(balances) <= 1500
         # With 10 samples, we should see at least 2 different values
         assert len(set(balances)) >= 2
+
+
+class TestLookaheadBiasIntegration:
+    """Integration tests verifying lookahead bias prevention in SeqLongOnlyEnv.
+
+    These tests verify that the lookahead fix in sampler.py actually works
+    when integrated into the environment, ensuring agents can't see incomplete
+    higher timeframe bars through the environment API.
+
+    Related to Issue #10 - Critical data leak in multi-timeframe observations.
+    """
+
+    def test_multiframe_observations_no_future_leakage(self):
+        """
+        CRITICAL: Verify environment enforces lookahead bias prevention.
+
+        When env uses multiple timeframes, higher TF observations should only
+        show completed bars at the current execution time.
+
+        WITHOUT FIX: 5-min bar at index 00:00 contains data through minute 4,
+                     but agent at minute 2 sees it (2 minutes of future data) ❌
+
+        WITH FIX:    5-min bar at index 00:05 contains data through minute 4,
+                     agent at minute 2 doesn't see it yet (incomplete) ✓
+        """
+        # Create test data where close price = minute index (for easy detection)
+        n_minutes = 500
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+        timestamps = pd.date_range(start=start_time, periods=n_minutes, freq="1min")
+
+        # Close price equals the minute index - makes leakage trivial to detect
+        minute_indices = np.arange(n_minutes, dtype=float)
+
+        df = pd.DataFrame({
+            "timestamp": timestamps,
+            "open": minute_indices,
+            "high": minute_indices + 0.5,
+            "low": minute_indices - 0.5,
+            "close": minute_indices,  # close = minute index
+            "volume": np.ones(n_minutes) * 1000,
+        })
+
+        # Simple preprocessing that preserves close prices
+        def preserve_close_fn(df: pd.DataFrame) -> pd.DataFrame:
+            df = df.copy().reset_index(drop=False)
+            df["features_close"] = df["close"]  # Keep original close
+            return df
+
+        config = SeqLongOnlyEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),  # Execute timeframe
+                TimeFrame(5, TimeFrameUnit.Minute),  # Higher timeframe (should be offset)
+            ],
+            window_sizes=[5, 3],  # 5 bars for 1min, 3 bars for 5min
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=1000,
+            max_traj_length=20,
+            random_start=False,  # Start from beginning for predictable test
+            include_base_features=False,  # Only use our feature_close
+        )
+
+        env = SeqLongOnlyEnv(df=df, config=config, feature_preprocessing_fn=preserve_close_fn)
+
+        # Reset environment
+        td = env.reset()
+
+        # Run several steps and verify no future leakage
+        for step_num in range(15):
+            # Get 1-minute observations (window of 5 bars)
+            one_min_obs = td["market_data_1Minute_5"]  # Shape: [5, features]
+
+            # Get 5-minute observations (window of 3 bars)
+            five_min_obs = td["market_data_5Minute_3"]  # Shape: [3, features]
+
+            # Extract close prices (last feature, assuming features_close is last)
+            # features_close should be the only feature (index 0 since include_base_features=False)
+            one_min_closes = one_min_obs[:, 0].numpy()  # Last 5 minutes
+            five_min_closes = five_min_obs[:, 0].numpy()  # Last 3 five-minute bars
+
+            # Current execution minute is the most recent 1-minute close
+            # (since close price = minute index in our test data)
+            current_minute = int(one_min_closes[-1])
+
+            # Verify 1-minute observations only show past data
+            for i, minute_val in enumerate(one_min_closes):
+                assert minute_val <= current_minute, (
+                    f"1-minute observation at position {i} shows future data: "
+                    f"minute {minute_val} > current minute {current_minute}"
+                )
+
+            # Verify 5-minute bars are complete (end at or before current minute)
+            # Each 5-minute bar should end at a multiple of 5
+            # With the fix, 5-min bar indexed at X contains data through minute X-1
+            for i, five_min_close in enumerate(five_min_closes):
+                # The close of a 5-min bar should be the last minute of that bar
+                # With offset fix, bars are indexed by END time
+                assert five_min_close <= current_minute, (
+                    f"5-minute observation at position {i} shows future data: "
+                    f"close at minute {five_min_close} > current minute {current_minute}"
+                )
+
+                # Verify bar is complete (ends at multiple of 5 minus 1)
+                # e.g., bar for minutes [0,1,2,3,4] has close=4
+                bar_end_minute = int(five_min_close)
+                assert bar_end_minute % 5 == 4 or bar_end_minute % 5 == 9, (
+                    f"5-minute bar close at minute {bar_end_minute} doesn't end on "
+                    f"5-minute boundary (should end at X*5-1)"
+                )
+
+            # Take hold action and step
+            action = torch.tensor(1)  # hold
+            td_next = env.step(td.set("action", action))
+            td = td_next
+
+            if td.get("done", False):
+                break
+
+    def test_multiframe_higher_tf_only_shows_complete_bars(self):
+        """Verify higher timeframe observations only contain complete bars.
+
+        This is a simpler test focusing specifically on bar completeness.
+        """
+        n_minutes = 200
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+        timestamps = pd.date_range(start=start_time, periods=n_minutes, freq="1min")
+
+        # Close = minute index
+        minute_indices = np.arange(n_minutes, dtype=float)
+
+        df = pd.DataFrame({
+            "timestamp": timestamps,
+            "open": minute_indices,
+            "high": minute_indices,
+            "low": minute_indices,
+            "close": minute_indices,
+            "volume": np.ones(n_minutes) * 1000,
+        })
+
+        def preserve_close_fn(df: pd.DataFrame) -> pd.DataFrame:
+            df = df.copy().reset_index(drop=False)
+            df["features_close"] = df["close"]
+            return df
+
+        config = SeqLongOnlyEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(15, TimeFrameUnit.Minute),  # 15-minute bars
+            ],
+            window_sizes=[5, 2],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=1000,
+            max_traj_length=30,
+            random_start=False,
+            include_base_features=False,
+        )
+
+        env = SeqLongOnlyEnv(df=df, config=config, feature_preprocessing_fn=preserve_close_fn)
+        td = env.reset()
+
+        for _ in range(25):
+            # Get current minute from 1-minute observation
+            one_min_obs = td["market_data_1Minute_5"]
+            current_minute = int(one_min_obs[-1, 0].item())
+
+            # Get 15-minute observations
+            fifteen_min_obs = td["market_data_15Minute_2"]
+            fifteen_min_closes = fifteen_min_obs[:, 0].numpy()
+
+            # All 15-minute bar closes should be <= current_minute
+            for close_val in fifteen_min_closes:
+                assert close_val <= current_minute, (
+                    f"15-minute bar with close={close_val} visible at minute {current_minute} "
+                    f"(bar not yet complete!)"
+                )
+
+            # Step environment
+            td = env.step(td.set("action", torch.tensor(1)))
+
+            if td.get("done", False):
+                break
