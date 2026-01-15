@@ -1,4 +1,5 @@
 from enum import Enum
+from functools import total_ordering
 from typing import List, Union, Optional, Dict, Tuple
 from itertools import product
 import pandas as pd
@@ -172,6 +173,7 @@ class TimeFrameUnit(Enum):
     Day = 'D'    # Pandas freq for days
     # Add more if needed, e.g., week = 'W'
 
+@total_ordering
 class TimeFrame:
     def __init__(self, value: int, unit: TimeFrameUnit):
         self.value = value
@@ -190,9 +192,41 @@ class TimeFrame:
         else:
             raise ValueError(f"Unknown TimeFrameUnit {self.unit}")
 
+    def __eq__(self, other):
+        """Compare TimeFrames by value and unit."""
+        if not isinstance(other, TimeFrame):
+            return NotImplemented
+        return self.value == other.value and self.unit == other.unit
+
+    def __lt__(self, other):
+        """Less than comparison based on total minutes."""
+        if not isinstance(other, TimeFrame):
+            return NotImplemented
+        return self.to_minutes() < other.to_minutes()
+
+    def __hash__(self):
+        """Make TimeFrame hashable for use in sets and as dict keys."""
+        return hash((self.value, self.unit))
+
+    def __repr__(self):
+        """String representation for debugging."""
+        return f"TimeFrame({self.value}, {self.unit})"
+
+    def to_minutes(self) -> float:
+        """Convert timeframe to total minutes for comparison."""
+        if self.unit == TimeFrameUnit.Minute:
+            return float(self.value)
+        elif self.unit == TimeFrameUnit.Hour:
+            return float(self.value * 60)
+        elif self.unit == TimeFrameUnit.Day:
+            return float(self.value * 60 * 24)
+        else:
+            raise ValueError(f"Unknown TimeFrameUnit {self.unit}")
+
 
 # Correct tf_to_timedelta
 def tf_to_timedelta(tf: TimeFrame) -> pd.Timedelta:
+    """Convert TimeFrame to pandas Timedelta."""
     if tf.unit == TimeFrameUnit.Minute:
         return pd.Timedelta(minutes=tf.value)
     elif tf.unit == TimeFrameUnit.Hour:

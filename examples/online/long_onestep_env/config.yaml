@@ -16,6 +16,7 @@ env:
   train_envs: 8
   eval_envs: 2
   data_path: Torch-Trade/BTCUSD_sport_1m_12_2024_to_09_2025
+  test_split_start: 2025-01-01
 
   # collector
 collector:

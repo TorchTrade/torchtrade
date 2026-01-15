@@ -1,7 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-#
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
 """Discrete SAC Example.
 
 This is a simple self-contained example of a discrete SAC training script.
@@ -17,6 +13,7 @@ import warnings
 
 import hydra
 import numpy as np
+import pandas as pd
 import torch
 import torch.cuda
 import tqdm
@@ -72,16 +69,25 @@ def main(cfg: DictConfig):  # noqa: F821
     # Create environments
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
-    test_df = df[0:(1440 * 14)]  # First 14 days for testing
-    train_df = df[(1440 * 14):]  # Remaining data for training
+    # Split data by date
+    df['0'] = pd.to_datetime(df['0'])
+    test_split_date = pd.to_datetime(cfg.env.test_split_start)
+
+    train_df = df[df['0'] < test_split_date]
+    test_df = df[df['0'] >= test_split_date]
+
+    max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
+    max_eval_traj_length = len(test_df)
 
     print("="*80)
     print("DATA SPLIT INFO:")
     print(f"Total rows: {len(df)}")
     print(f"Train rows (1min): {len(train_df)}")
     print(f"Test rows (1min): {len(test_df)}")
+    print(f"Train date range: {train_df['0'].min()} to {train_df['0'].max()}")
+    print(f"Test date range: {test_df['0'].min()} to {test_df['0'].max()}")
+    print(f"Max train traj length: {max_train_traj_length}")
     print("="*80)
-
     train_env, eval_env = make_environment(
         train_df,
         test_df,
@@ -89,7 +95,6 @@ def main(cfg: DictConfig):  # noqa: F821
         train_num_envs=cfg.env.train_envs,
         eval_num_envs=cfg.env.eval_envs,
     )
-    max_eval_steps = 10000
 
     # Create agent
     model = make_sac_agent(cfg, eval_env, device)
@@ -233,7 +238,7 @@ def main(cfg: DictConfig):  # noqa: F821
             ), torch.no_grad(), timeit("eval"):
                 # Keep eval_env on CPU, move actor to CPU temporarily for eval
                 eval_rollout = eval_env.rollout(
-                    max_eval_steps,
+                    max_eval_traj_length,
                     model[0].to("cpu"),
                     auto_cast_to_device=False,
                     break_when_any_done=True,

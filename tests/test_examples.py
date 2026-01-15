@@ -412,6 +412,7 @@ EXAMPLE_COMMANDS = {
         "env.train_envs=2 "
         "logger.backend= "
         "logger.test_interval=1000000 "
+        "env.test_split_start=2025-07-01 "
     ),
     "grpo_futuresonestep": (
         "python examples/online/grpo_futures_onestep/train.py "
@@ -420,6 +421,7 @@ EXAMPLE_COMMANDS = {
         "env.train_envs=2 "
         "logger.backend= "
         "logger.test_interval=1000000 "
+        "env.test_split_start=2025-07-01 "
     ),
 
     # ==========================================================================
@@ -434,6 +436,7 @@ EXAMPLE_COMMANDS = {
         "loss.mini_batch_size=5 "
         "logger.backend= "
         "logger.test_interval=1000000 "
+        "env.test_split_start=2025-07-01 "
     ),
     "ppo_futuresonestep": (
         "python examples/online/ppo_futures_onestep/train.py "
@@ -443,6 +446,7 @@ EXAMPLE_COMMANDS = {
         "loss.mini_batch_size=5 "
         "logger.backend= "
         "logger.test_interval=1000000 "
+        "env.test_split_start=2025-07-01 "
     ),
     "ppo_seqfutures": (
         "python examples/online/ppo_futures/train.py "
@@ -452,6 +456,7 @@ EXAMPLE_COMMANDS = {
         "loss.mini_batch_size=5 "
         "logger.backend= "
         "logger.test_interval=1000000 "
+        "env.test_split_start=2025-07-01 "
     ),
     "ppo_seqfuturessltp": (
         "python examples/online/ppo_futures_sltp/train.py "
@@ -461,6 +466,7 @@ EXAMPLE_COMMANDS = {
         "loss.mini_batch_size=5 "
         "logger.backend= "
         "logger.test_interval=1000000 "
+        "env.test_split_start=2025-07-01 "
     ),
 
     # ==========================================================================
@@ -477,6 +483,7 @@ EXAMPLE_COMMANDS = {
         "replay_buffer.buffer_size=20 "
         "logger.backend= "
         "logger.eval_iter=1000000 "
+        "env.test_split_start=2025-07-01 "
     ),
 
     # IQL Offline - uses HuggingFace dataset for replay buffer
@@ -506,6 +513,7 @@ EXAMPLE_COMMANDS = {
         "replay_buffer.size=20 "
         "logger.backend= "
         "logger.eval_iter=1000000 "
+        "env.test_split_start=2025-07-01 "
     ),
 }
 

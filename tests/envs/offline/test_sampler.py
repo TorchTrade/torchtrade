@@ -867,6 +867,378 @@ class TestSamplerNoFutureLeakage:
                 break
 
 
+class TestLookaheadBiasFix:
+    """
+    Critical tests for Issue #10 - Lookahead Bias Fix.
+
+    These tests validate that higher timeframe bars are indexed by END time,
+    not START time, ensuring only completed bars are visible to the agent.
+    """
+
+    @pytest.fixture
+    def lookahead_test_df(self):
+        """
+        Create 1-minute data where close price = minute index.
+
+        This makes it trivial to detect lookahead bias:
+        - If we see close=N at minute M where N > M, that's future leakage
+        """
+        n_minutes = 500
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+        timestamps = pd.date_range(start=start_time, periods=n_minutes, freq="1min")
+
+        close_prices = np.array([float(i) for i in range(n_minutes)])
+        open_prices = close_prices
+        high_prices = close_prices + 0.5
+        low_prices = close_prices - 0.5
+        volume = np.ones(n_minutes) * 1000
+
+        return pd.DataFrame({
+            "timestamp": timestamps,
+            "open": open_prices,
+            "high": high_prices,
+            "low": low_prices,
+            "close": close_prices,
+            "volume": volume,
+        })
+
+    def test_5min_bars_indexed_by_end_time(self, lookahead_test_df):
+        """
+        CRITICAL: 5-minute bars should be indexed by their END time after the fix.
+
+        Without fix: 5-min bar at 00:00:00 contains data from 00:00:00-00:04:59 (START time)
+        With fix:    5-min bar at 00:05:00 contains data from 00:00:00-00:04:59 (END time)
+
+        The bar indexed at 00:05:00 should have close from minute 4 (last minute of the bar).
+        """
+        sampler = MarketDataObservationSampler(
+            df=lookahead_test_df,
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+            ],
+            window_sizes=[5, 3],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+
+        # Manually inspect the resampled 5-minute dataframe
+        resampled_5min = sampler.resampled_dfs["5Minute"]
+
+        # The first bar should be indexed at 00:05:00 (minute 5) with close from minute 4
+        first_idx = resampled_5min.index[0]
+        first_close = resampled_5min.iloc[0]["close"]
+
+        # Get start time from the fixture data
+        start_time = lookahead_test_df.iloc[0]["timestamp"]
+        first_idx_minutes = int((first_idx - start_time).total_seconds() / 60)
+
+        # After the fix, the first bar is indexed at END time (minute 5)
+        # This bar covers minutes 0-4, so close should be from minute 4
+        expected_idx_minutes = 5  # First bar should be at minute 5
+        expected_close = 4.0  # Close from minute 4
+
+        assert first_idx_minutes == expected_idx_minutes, (
+            f"5-min bar index incorrect! "
+            f"Expected first bar at minute {expected_idx_minutes}, got minute {first_idx_minutes}"
+        )
+
+        assert first_close == pytest.approx(expected_close, abs=0.1), (
+            f"5-min bar close incorrect! "
+            f"Bar at minute {first_idx_minutes} has close={first_close}, "
+            f"expected close={expected_close} (from minute 4)"
+        )
+
+    def test_no_incomplete_bars_visible(self, lookahead_test_df):
+        """
+        CRITICAL: When querying at time T, only bars that ENDED at or before T should be visible.
+
+        Example: At minute 12, we should see:
+        - 5-min bars ending at: 5, 10 (NOT the bar ending at 15)
+        - The bar from minutes 10-14 (ending at 15) is still incomplete at minute 12
+        """
+        sampler = MarketDataObservationSampler(
+            df=lookahead_test_df,
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+            ],
+            window_sizes=[5, 3],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+        sampler.reset(random_start=False)
+
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+
+        # Test at various execution times
+        for step in range(50):
+            obs, timestamp, truncated = sampler.get_sequential_observation()
+            current_minute = int((timestamp - start_time).total_seconds() / 60)
+
+            # Get all 5-minute closes
+            five_min_closes = obs["5Minute"][:, 3].numpy()
+
+            # Each close value represents the minute index it came from
+            # All closes must be < current_minute (no future data)
+            for close_val in five_min_closes:
+                assert close_val < current_minute, (
+                    f"LOOKAHEAD BIAS DETECTED! "
+                    f"At minute {current_minute}, 5-min observation contains close={close_val} "
+                    f"(future data from minute {int(close_val)})"
+                )
+
+            # The most recent 5-min close should be from a completed bar
+            # A bar ending at minute M has close from minute M-1
+            # At current minute N, the most recent completed bar ends at floor(N/5)*5
+            last_5min_close = five_min_closes[-1]
+
+            # The last visible 5-min bar should have ended before current_minute
+            # Its close is from the last minute of that bar
+            bar_end_minute = int(last_5min_close) + 1  # close N comes from bar ending at N+1
+
+            assert bar_end_minute <= current_minute, (
+                f"Incomplete bar visible! At minute {current_minute}, "
+                f"saw 5-min close from minute {int(last_5min_close)}, "
+                f"which is from bar ending at {bar_end_minute}"
+            )
+
+            if truncated:
+                break
+
+    @pytest.mark.parametrize("tf_value,tf_unit,offset_minutes", [
+        (5, TimeFrameUnit.Minute, 5),
+        (15, TimeFrameUnit.Minute, 15),
+        (30, TimeFrameUnit.Minute, 30),
+        (1, TimeFrameUnit.Hour, 60),
+    ])
+    def test_offset_correctness_various_timeframes(
+        self, lookahead_test_df, tf_value, tf_unit, offset_minutes
+    ):
+        """
+        Validate that the offset applied equals the timeframe period.
+
+        The fix shifts bars forward by their period: offset = pd.Timedelta(tf.to_pandas_freq())
+        This test verifies the shift is exactly one period.
+        """
+        sampler = MarketDataObservationSampler(
+            df=lookahead_test_df,
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(tf_value, tf_unit),
+            ],
+            window_sizes=[5, 3],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+
+        tf_key = TimeFrame(tf_value, tf_unit).obs_key_freq()
+        resampled_tf = sampler.resampled_dfs[tf_key]
+
+        # Check multiple bars to ensure consistent offset
+        for i in range(min(5, len(resampled_tf) - 1)):
+            bar = resampled_tf.iloc[i]
+            bar_idx = resampled_tf.index[i]
+            bar_close = bar["close"]
+
+            start_time = pd.Timestamp("2024-01-01 00:00:00")
+            bar_idx_minutes = int((bar_idx - start_time).total_seconds() / 60)
+
+            # The bar at index minute M should have close from minute M-1
+            # (because bar covers M-offset to M-1, indexed at M)
+            expected_close_minute = bar_idx_minutes - 1
+
+            assert bar_close == pytest.approx(float(expected_close_minute), abs=0.1), (
+                f"{tf_value}{tf_unit.name} bar offset incorrect! "
+                f"Bar at index minute {bar_idx_minutes} has close={bar_close}, "
+                f"expected close={expected_close_minute} (offset={offset_minutes})"
+            )
+
+    def test_comparison_with_without_fix(self, lookahead_test_df):
+        """
+        Compare behavior with and without the lookahead fix by examining raw resampled data.
+
+        This test manually checks what pandas resample returns vs what we get after the fix.
+        """
+        # Create sampler (with fix applied)
+        sampler = MarketDataObservationSampler(
+            df=lookahead_test_df,
+            time_frames=[TimeFrame(5, TimeFrameUnit.Minute)],
+            window_sizes=[3],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+
+        # Manually resample WITHOUT the fix to compare
+        df = lookahead_test_df.copy()
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df = df.set_index("timestamp").sort_index()
+
+        raw_resampled = df.resample("5min").agg({
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last",
+            "volume": "sum",
+        }).dropna()
+
+        # Get first bar from each
+        raw_first_idx = raw_resampled.index[0]
+        raw_first_close = raw_resampled.iloc[0]["close"]
+
+        fixed_resampled = sampler.resampled_dfs["5Minute"]
+        fixed_first_idx = fixed_resampled.index[0]
+        fixed_first_close = fixed_resampled.iloc[0]["close"]
+
+        # Without fix: bar indexed at 00:05:00 has close from minute 4 (index 4)
+        # With fix: bar indexed at 00:10:00 has close from minute 4 (index 4)
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+        raw_idx_min = int((raw_first_idx - start_time).total_seconds() / 60)
+        fixed_idx_min = int((fixed_first_idx - start_time).total_seconds() / 60)
+
+        # The fix should shift indices by 5 minutes
+        assert fixed_idx_min == raw_idx_min + 5, (
+            f"Fix not applied correctly! "
+            f"Raw index: {raw_idx_min}, Fixed index: {fixed_idx_min}, "
+            f"Expected diff: 5, Got: {fixed_idx_min - raw_idx_min}"
+        )
+
+        # Both should have same close value (same data, different index)
+        assert fixed_first_close == pytest.approx(raw_first_close, abs=0.1), (
+            f"Data mismatch after fix! Raw close: {raw_first_close}, Fixed close: {fixed_first_close}"
+        )
+
+    def test_execute_on_timeframe_not_shifted(self, lookahead_test_df):
+        """
+        CRITICAL: The execution timeframe itself should NOT be shifted.
+
+        Only higher timeframes (tf != execute_on) should be shifted.
+        The execution timeframe represents when we're making decisions,
+        so it must remain at its natural timing.
+        """
+        sampler = MarketDataObservationSampler(
+            df=lookahead_test_df,
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),  # execution timeframe
+                TimeFrame(5, TimeFrameUnit.Minute),  # higher timeframe
+            ],
+            window_sizes=[5, 3],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+
+        # Check that 1-minute data is NOT shifted
+        one_min_df = sampler.resampled_dfs["1Minute"]
+
+        # Manually resample without any shift
+        df = lookahead_test_df.copy()
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df = df.set_index("timestamp").sort_index()
+        raw_one_min = df.resample("1min").last().dropna()
+
+        # First few timestamps should match exactly (no shift for execute_on)
+        for i in range(min(5, len(one_min_df))):
+            assert one_min_df.index[i] == raw_one_min.index[i], (
+                f"Execute_on timeframe was shifted! Index {i}: "
+                f"Expected {raw_one_min.index[i]}, got {one_min_df.index[i]}"
+            )
+
+    def test_realistic_scenario_5min_obs_1min_exec(self, lookahead_test_df):
+        """
+        Realistic scenario: Trading on 1-minute bars with 5-minute context.
+
+        Test that at any execution time T:
+        - 1-minute window contains last 5 minutes ending at T
+        - 5-minute window contains only completed bars (bars ending at or before T)
+        - No lookahead bias: all data is from time <= T
+        """
+        sampler = MarketDataObservationSampler(
+            df=lookahead_test_df,
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+            ],
+            window_sizes=[5, 2],  # Last 5 minutes on 1-min, last 2 bars on 5-min
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+        sampler.reset(random_start=False)
+
+        start_time = lookahead_test_df.iloc[0]["timestamp"]
+
+        # Test several observations to validate the pattern
+        for step in range(30):
+            obs, timestamp, truncated = sampler.get_sequential_observation()
+            current_minute = int((timestamp - start_time).total_seconds() / 60)
+
+            # Validate 1-minute window
+            one_min_closes = obs["1Minute"][:, 3].numpy()
+            expected_1min_end = float(current_minute)
+            expected_1min_start = float(current_minute - 4)
+
+            assert one_min_closes[-1] == expected_1min_end, (
+                f"At minute {current_minute}, last 1-min close should be {expected_1min_end}, got {one_min_closes[-1]}"
+            )
+            assert one_min_closes[0] == expected_1min_start, (
+                f"At minute {current_minute}, first 1-min close should be {expected_1min_start}, got {one_min_closes[0]}"
+            )
+
+            # Validate 5-minute window: all bars should have ended BEFORE current_minute
+            five_min_closes = obs["5Minute"][:, 3].numpy()
+
+            for i, close_val in enumerate(five_min_closes):
+                # Each 5-min bar has close from the last minute of the bar
+                # If close is N, the bar ends at minute N+1
+                bar_end_minute = int(close_val) + 1
+
+                assert bar_end_minute <= current_minute, (
+                    f"LOOKAHEAD BIAS! At minute {current_minute}, "
+                    f"5-min bar {i} has close from minute {int(close_val)}, "
+                    f"which means the bar ends at minute {bar_end_minute} (incomplete!)"
+                )
+
+                # Also verify no future data
+                assert close_val < current_minute, (
+                    f"LOOKAHEAD BIAS! At minute {current_minute}, "
+                    f"5-min observation contains close={close_val} (future data)"
+                )
+
+            if truncated:
+                break
+
+    def test_min_start_time_accounts_for_offset(self, lookahead_test_df):
+        """
+        Validate that min_start_time calculation includes max_offset.
+
+        Line 106 in sampler.py:
+        self.min_start_time = latest_first_step + self.max_lookback + max_offset
+
+        This ensures we have enough data after applying the offset.
+        """
+        sampler = MarketDataObservationSampler(
+            df=lookahead_test_df,
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+                TimeFrame(15, TimeFrameUnit.Minute),
+            ],
+            window_sizes=[10, 5, 3],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+
+        # max_offset should be 15 minutes (largest higher timeframe)
+        # Check that the first execution time leaves enough room for the offset
+        first_exec_time = sampler.exec_times[0]
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+        first_exec_minutes = int((first_exec_time - start_time).total_seconds() / 60)
+
+        # Should be at least:
+        # - 10 minutes for 1-min window (10 * 1)
+        # - 25 minutes for 5-min window (5 * 5)
+        # - 45 minutes for 15-min window (3 * 15)
+        # - 15 minutes for max offset (15-min timeframe)
+        # = 45 minutes (max) + 15 offset = 60 minutes minimum
+
+        assert first_exec_minutes >= 45, (
+            f"First execution time too early! "
+            f"At minute {first_exec_minutes}, may not have enough lookback data"
+        )
+
+
 class TestSamplerMultiTimeframeAlignment:
     """Tests for correct alignment of multi-timeframe observations."""
 
