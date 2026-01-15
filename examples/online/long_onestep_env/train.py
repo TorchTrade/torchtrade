@@ -34,12 +34,12 @@ def main(cfg: DictConfig):  # noqa: F821
     # Create env
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
-    # Convert timestamp column to datetime for proper filtering
+    # Split data by date
     df['0'] = pd.to_datetime(df['0'])
     test_split_date = pd.to_datetime(cfg.env.test_split_start)
 
     train_df = df[df['0'] < test_split_date]
-    test_df  = df[df['0'] >= test_split_date]
+    test_df = df[df['0'] >= test_split_date]
 
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
     max_eval_traj_length = len(test_df)

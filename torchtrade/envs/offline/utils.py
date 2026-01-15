@@ -214,33 +214,27 @@ class TimeFrame:
 
     def to_minutes(self) -> float:
         """Convert timeframe to total minutes for comparison."""
-        unit_to_minutes = {
-            TimeFrameUnit.Minute: 1,
-            TimeFrameUnit.Hour: 60,
-            TimeFrameUnit.Day: 60 * 24,
-        }
-
-        multiplier = unit_to_minutes.get(self.unit)
-        if multiplier is None:
+        if self.unit == TimeFrameUnit.Minute:
+            return float(self.value)
+        elif self.unit == TimeFrameUnit.Hour:
+            return float(self.value * 60)
+        elif self.unit == TimeFrameUnit.Day:
+            return float(self.value * 60 * 24)
+        else:
             raise ValueError(f"Unknown TimeFrameUnit {self.unit}")
-
-        return float(self.value * multiplier)
 
 
 # Correct tf_to_timedelta
 def tf_to_timedelta(tf: TimeFrame) -> pd.Timedelta:
     """Convert TimeFrame to pandas Timedelta."""
-    unit_to_kwargs = {
-        TimeFrameUnit.Minute: 'minutes',
-        TimeFrameUnit.Hour: 'hours',
-        TimeFrameUnit.Day: 'days',
-    }
-
-    kwarg_name = unit_to_kwargs.get(tf.unit)
-    if kwarg_name is None:
+    if tf.unit == TimeFrameUnit.Minute:
+        return pd.Timedelta(minutes=tf.value)
+    elif tf.unit == TimeFrameUnit.Hour:
+        return pd.Timedelta(hours=tf.value)
+    elif tf.unit == TimeFrameUnit.Day:
+        return pd.Timedelta(days=tf.value)
+    else:
         raise ValueError(f"Unknown TimeFrameUnit {tf.unit}")
-
-    return pd.Timedelta(**{kwarg_name: tf.value})
 
 
 class InitialBalanceSampler:
