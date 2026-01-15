@@ -187,7 +187,7 @@ class TestAlpacaTorchTradingEnvReset:
     def test_reset_resets_position_counter(self, env):
         """Test that reset resets position hold counter."""
         env.reset()
-        assert env.position_hold_counter == 0
+        assert env.position.hold_counter == 0
 
 
 class TestAlpacaTorchTradingEnvStep:
