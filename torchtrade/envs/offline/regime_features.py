@@ -27,26 +27,31 @@ class MarketRegimeFeatures:
 
     Args:
         volatility_window: Window for volatility calculation (default: 20)
-        trend_window: Window for trend calculation (default: 50)
+        trend_window: Window for long-term trend MA calculation (default: 50)
+        trend_short_window: Window for short-term trend MA calculation (default: 20)
         volume_window: Window for volume analysis (default: 20)
         price_position_window: Window for price position (52-week ~= 252 daily bars, default: 252)
         volatility_thresholds: Percentile thresholds for vol regime [low, high] (default: [0.33, 0.67])
         trend_thresholds: Percentage thresholds for trend regime [down, up] (default: [-0.02, 0.02])
         volume_thresholds: Ratio thresholds for volume regime [low, high] (default: [0.7, 1.3])
+        price_position_thresholds: Position thresholds [oversold, overbought] (default: [0.33, 0.67])
     """
 
     def __init__(
         self,
         volatility_window: int = 20,
         trend_window: int = 50,
+        trend_short_window: int = 20,
         volume_window: int = 20,
         price_position_window: int = 252,
         volatility_thresholds: tuple = (0.33, 0.67),
         trend_thresholds: tuple = (-0.02, 0.02),
         volume_thresholds: tuple = (0.7, 1.3),
+        price_position_thresholds: tuple = (0.33, 0.67),
     ):
         self.vol_window = volatility_window
         self.trend_window = trend_window
+        self.trend_short_window = trend_short_window
         self.volume_window = volume_window
         self.price_position_window = price_position_window
 
@@ -54,11 +59,13 @@ class MarketRegimeFeatures:
         self.vol_low_threshold, self.vol_high_threshold = volatility_thresholds
         self.trend_down_threshold, self.trend_up_threshold = trend_thresholds
         self.vol_ratio_low, self.vol_ratio_high = volume_thresholds
+        self.price_low_threshold, self.price_high_threshold = price_position_thresholds
 
         # Minimum data required for all features
         self.min_data_required = max(
             self.vol_window,
             self.trend_window,
+            self.trend_short_window,
             self.volume_window,
             self.price_position_window
         )
@@ -174,7 +181,7 @@ class MarketRegimeFeatures:
             regime: -1=downtrend, 0=sideways, 1=uptrend
         """
         # Short-term and long-term moving averages
-        ma_short = prices[-20:].mean()
+        ma_short = prices[-self.trend_short_window:].mean()
         ma_long = prices[-self.trend_window:].mean()
 
         # Trend strength as percentage difference
@@ -240,10 +247,10 @@ class MarketRegimeFeatures:
             # No range, assume neutral
             price_position = 0.5
 
-        # Classify regime
-        if price_position < 0.33:
+        # Classify regime using configurable thresholds
+        if price_position < self.price_low_threshold:
             position_regime = 0  # Oversold
-        elif price_position > 0.67:
+        elif price_position > self.price_high_threshold:
             position_regime = 2  # Overbought
         else:
             position_regime = 1  # Neutral

@@ -384,6 +384,9 @@ class MarketDataObservationSampler:
 
         Returns:
             Tensor of close prices (oldest to newest)
+
+        Raises:
+            ValueError: If insufficient data available
         """
         # Determine the index position
         if timestamp is None:
@@ -398,8 +401,16 @@ class MarketDataObservationSampler:
         if idx_pos < 0:
             raise ValueError("No data available at the requested timestamp")
 
+        # Validate sufficient data
+        available_bars = idx_pos + 1
+        if available_bars < window:
+            raise ValueError(
+                f"Insufficient data: requested {window} bars but only "
+                f"{available_bars} bars available"
+            )
+
         # Get close prices from execute_base_tensor (column index 3)
-        start_idx = max(0, idx_pos - window + 1)
+        start_idx = idx_pos - window + 1
         end_idx = idx_pos + 1
         prices = self.execute_base_tensor[start_idx:end_idx, 3]  # Close prices
 
@@ -415,6 +426,9 @@ class MarketDataObservationSampler:
 
         Returns:
             Tensor of volumes (oldest to newest)
+
+        Raises:
+            ValueError: If insufficient data available
         """
         # Determine the index position
         if timestamp is None:
@@ -429,8 +443,16 @@ class MarketDataObservationSampler:
         if idx_pos < 0:
             raise ValueError("No data available at the requested timestamp")
 
+        # Validate sufficient data
+        available_bars = idx_pos + 1
+        if available_bars < window:
+            raise ValueError(
+                f"Insufficient data: requested {window} bars but only "
+                f"{available_bars} bars available"
+            )
+
         # Get volumes from execute_base_tensor (column index 4)
-        start_idx = max(0, idx_pos - window + 1)
+        start_idx = idx_pos - window + 1
         end_idx = idx_pos + 1
         volumes = self.execute_base_tensor[start_idx:end_idx, 4]  # Volumes
 
@@ -451,6 +473,9 @@ class MarketDataObservationSampler:
         Returns:
             Dictionary with keys: 'open', 'high', 'low', 'close', 'volume'
             Each value is a tensor (oldest to newest)
+
+        Raises:
+            ValueError: If insufficient data available
         """
         # Determine the index position
         if timestamp is None:
@@ -465,8 +490,16 @@ class MarketDataObservationSampler:
         if idx_pos < 0:
             raise ValueError("No data available at the requested timestamp")
 
+        # Validate sufficient data
+        available_bars = idx_pos + 1
+        if available_bars < window:
+            raise ValueError(
+                f"Insufficient data: requested {window} bars but only "
+                f"{available_bars} bars available"
+            )
+
         # Get OHLCV data
-        start_idx = max(0, idx_pos - window + 1)
+        start_idx = idx_pos - window + 1
         end_idx = idx_pos + 1
         data = self.execute_base_tensor[start_idx:end_idx, :5]  # First 5 columns: OHLCV
 

@@ -15,6 +15,7 @@ def regime_calculator():
     return MarketRegimeFeatures(
         volatility_window=20,
         trend_window=50,
+        trend_short_window=20,
         volume_window=20,
         price_position_window=252,
     )
@@ -96,11 +97,13 @@ class TestMarketRegimeFeatures:
         calc = MarketRegimeFeatures(
             volatility_window=20,
             trend_window=50,
+            trend_short_window=20,
             volume_window=20,
             price_position_window=252,
         )
         assert calc.vol_window == 20
         assert calc.trend_window == 50
+        assert calc.trend_short_window == 20
         assert calc.volume_window == 20
         assert calc.price_position_window == 252
         assert calc.min_data_required == 252  # max of all windows
@@ -247,17 +250,21 @@ class TestMarketRegimeFeatures:
         calc = MarketRegimeFeatures(
             volatility_window=20,
             trend_window=50,
+            trend_short_window=20,
             volume_window=20,
             price_position_window=252,
             volatility_thresholds=(0.25, 0.75),
             trend_thresholds=(-0.05, 0.05),
             volume_thresholds=(0.5, 1.5),
+            price_position_thresholds=(0.2, 0.8),
         )
 
         assert calc.vol_low_threshold == 0.25
         assert calc.vol_high_threshold == 0.75
         assert calc.trend_down_threshold == -0.05
         assert calc.trend_up_threshold == 0.05
+        assert calc.price_low_threshold == 0.2
+        assert calc.price_high_threshold == 0.8
 
     def test_zero_volume_handling(self, regime_calculator, sample_prices):
         """Test that zero volumes are handled gracefully."""
@@ -282,6 +289,7 @@ class TestMarketRegimeFeatures:
         calc = MarketRegimeFeatures(
             volatility_window=10,
             trend_window=20,
+            trend_short_window=10,
             volume_window=10,
             price_position_window=30,  # This is the max, so min_data_required = 30
         )
@@ -334,6 +342,7 @@ class TestRegimeFeatureIntegration:
             include_regime_features=True,
             regime_volatility_window=20,
             regime_trend_window=50,
+            regime_trend_short_window=20,
             regime_volume_window=20,
             regime_price_position_window=100,
         )
