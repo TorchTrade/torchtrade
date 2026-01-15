@@ -316,3 +316,201 @@ class TestParseTimeframeString:
 
         # Should work with tf_to_timedelta
         assert tf_to_timedelta(result) == pd.Timedelta(minutes=15)
+
+
+class TestTimeFrameComparison:
+    """Tests for TimeFrame comparison operators (Issue #10 lookahead bias fix).
+
+    These tests verify the comparison logic used by the lookahead bias fix
+    in sampler.py line 75: `if tf > execute_on:` to determine which
+    timeframes need offset adjustment.
+    """
+
+    def test_equality_same_value_and_unit(self):
+        """TimeFrames with same value and unit should be equal."""
+        tf1 = TimeFrame(5, TimeFrameUnit.Minute)
+        tf2 = TimeFrame(5, TimeFrameUnit.Minute)
+
+        assert tf1 == tf2
+        assert not (tf1 != tf2)
+
+    def test_inequality_different_values(self):
+        """TimeFrames with different values should not be equal."""
+        tf1 = TimeFrame(5, TimeFrameUnit.Minute)
+        tf2 = TimeFrame(10, TimeFrameUnit.Minute)
+
+        assert tf1 != tf2
+        assert not (tf1 == tf2)
+
+    def test_inequality_different_units(self):
+        """TimeFrames with different units should not be equal, even if same duration."""
+        tf_1day = TimeFrame(1, TimeFrameUnit.Day)
+        tf_24hours = TimeFrame(24, TimeFrameUnit.Hour)
+        tf_1440min = TimeFrame(1440, TimeFrameUnit.Minute)
+
+        # Structural inequality (different representations)
+        assert tf_1day != tf_24hours
+        assert tf_24hours != tf_1440min
+        assert tf_1day != tf_1440min
+
+        # But same temporal duration via to_minutes()
+        assert tf_1day.to_minutes() == tf_24hours.to_minutes() == tf_1440min.to_minutes()
+
+    def test_less_than_same_unit(self):
+        """Less-than should work correctly for same unit."""
+        tf_5min = TimeFrame(5, TimeFrameUnit.Minute)
+        tf_10min = TimeFrame(10, TimeFrameUnit.Minute)
+        tf_15min = TimeFrame(15, TimeFrameUnit.Minute)
+
+        assert tf_5min < tf_10min < tf_15min
+        assert not (tf_10min < tf_5min)
+
+    def test_less_than_different_units(self):
+        """Less-than should compare by duration across different units."""
+        tf_30min = TimeFrame(30, TimeFrameUnit.Minute)
+        tf_1hour = TimeFrame(1, TimeFrameUnit.Hour)
+        tf_2hour = TimeFrame(2, TimeFrameUnit.Hour)
+
+        # 30 min < 1 hour < 2 hours
+        assert tf_30min < tf_1hour
+        assert tf_1hour < tf_2hour
+        assert tf_30min < tf_2hour
+
+    def test_less_than_equal_durations(self):
+        """TimeFrames with equal durations should not compare as less-than."""
+        tf_1day = TimeFrame(1, TimeFrameUnit.Day)
+        tf_24hours = TimeFrame(24, TimeFrameUnit.Hour)
+
+        # Equal duration, neither is less than the other
+        assert not (tf_1day < tf_24hours)
+        assert not (tf_24hours < tf_1day)
+
+    def test_greater_than_same_unit(self):
+        """Greater-than should work correctly for same unit."""
+        tf_5min = TimeFrame(5, TimeFrameUnit.Minute)
+        tf_10min = TimeFrame(10, TimeFrameUnit.Minute)
+
+        assert tf_10min > tf_5min
+        assert not (tf_5min > tf_10min)
+
+    def test_greater_than_different_units(self):
+        """Greater-than should compare by duration across different units.
+
+        This is the critical comparison used in sampler.py line 75:
+        `if tf > execute_on:` to determine which timeframes to offset.
+        """
+        tf_5min = TimeFrame(5, TimeFrameUnit.Minute)
+        tf_1hour = TimeFrame(1, TimeFrameUnit.Hour)
+        tf_1day = TimeFrame(1, TimeFrameUnit.Day)
+
+        # Hour > Minute, Day > Hour
+        assert tf_1hour > tf_5min
+        assert tf_1day > tf_1hour
+        assert tf_1day > tf_5min
+
+    def test_sorting_mixed_units(self):
+        """TimeFrames with mixed units should sort correctly by duration."""
+        tfs = [
+            TimeFrame(1, TimeFrameUnit.Day),      # 1440 min
+            TimeFrame(1, TimeFrameUnit.Hour),     # 60 min
+            TimeFrame(30, TimeFrameUnit.Minute),  # 30 min
+            TimeFrame(2, TimeFrameUnit.Hour),     # 120 min
+            TimeFrame(15, TimeFrameUnit.Minute),  # 15 min
+        ]
+
+        sorted_tfs = sorted(tfs)
+        minutes = [tf.to_minutes() for tf in sorted_tfs]
+
+        # Should be sorted: 15, 30, 60, 120, 1440
+        assert minutes == [15.0, 30.0, 60.0, 120.0, 1440.0]
+
+    def test_hash_consistency_with_equality(self):
+        """Objects that compare equal should have same hash (hash table requirement)."""
+        tf1 = TimeFrame(5, TimeFrameUnit.Minute)
+        tf2 = TimeFrame(5, TimeFrameUnit.Minute)
+
+        assert tf1 == tf2
+        assert hash(tf1) == hash(tf2)
+
+    def test_hash_different_for_unequal(self):
+        """Different timeframes should (ideally) have different hashes."""
+        tf1 = TimeFrame(5, TimeFrameUnit.Minute)
+        tf2 = TimeFrame(10, TimeFrameUnit.Minute)
+        tf3 = TimeFrame(5, TimeFrameUnit.Hour)
+
+        # Not guaranteed but very likely
+        assert hash(tf1) != hash(tf2)
+        assert hash(tf1) != hash(tf3)
+        assert hash(tf2) != hash(tf3)
+
+    def test_hashable_in_set(self):
+        """TimeFrames should be usable as set/dict keys."""
+        tf1 = TimeFrame(5, TimeFrameUnit.Minute)
+        tf2 = TimeFrame(5, TimeFrameUnit.Minute)  # Equal to tf1
+        tf3 = TimeFrame(10, TimeFrameUnit.Minute)
+
+        # Can create set
+        tf_set = {tf1, tf2, tf3}
+
+        # tf1 and tf2 are equal, so set should have 2 items
+        assert len(tf_set) == 2
+
+        # Can use as dict key
+        tf_dict = {tf1: "five", tf3: "ten"}
+        assert tf_dict[tf2] == "five"  # tf2 == tf1
+
+    def test_total_ordering_transitivity(self):
+        """Verify @total_ordering maintains transitivity (a < b < c => a < c)."""
+        a = TimeFrame(5, TimeFrameUnit.Minute)
+        b = TimeFrame(10, TimeFrameUnit.Minute)
+        c = TimeFrame(15, TimeFrameUnit.Minute)
+
+        # Transitivity
+        assert a < b
+        assert b < c
+        assert a < c  # Must hold
+
+        # Test all operators derived by @total_ordering
+        assert a <= b <= c
+        assert c > b > a
+        assert c >= b >= a
+
+    def test_to_minutes_conversion_accuracy(self):
+        """to_minutes() should return accurate minute counts for all units."""
+        test_cases = [
+            (TimeFrame(1, TimeFrameUnit.Minute), 1.0),
+            (TimeFrame(5, TimeFrameUnit.Minute), 5.0),
+            (TimeFrame(60, TimeFrameUnit.Minute), 60.0),
+            (TimeFrame(1, TimeFrameUnit.Hour), 60.0),
+            (TimeFrame(2, TimeFrameUnit.Hour), 120.0),
+            (TimeFrame(24, TimeFrameUnit.Hour), 1440.0),
+            (TimeFrame(1, TimeFrameUnit.Day), 1440.0),
+            (TimeFrame(7, TimeFrameUnit.Day), 10080.0),
+        ]
+
+        for tf, expected_minutes in test_cases:
+            assert tf.to_minutes() == expected_minutes
+
+    def test_comparison_used_by_lookahead_fix(self):
+        """Verify comparison works as expected by lookahead bias fix.
+
+        In sampler.py line 75, the fix uses: `if tf > execute_on:`
+        to determine which timeframes are "higher" and need offset.
+        """
+        execute_on = TimeFrame(1, TimeFrameUnit.Minute)
+
+        # These should be identified as "higher" and offset
+        tf_5min = TimeFrame(5, TimeFrameUnit.Minute)
+        tf_1hour = TimeFrame(1, TimeFrameUnit.Hour)
+        tf_1day = TimeFrame(1, TimeFrameUnit.Day)
+
+        assert tf_5min > execute_on  # Should be offset
+        assert tf_1hour > execute_on  # Should be offset
+        assert tf_1day > execute_on  # Should be offset
+
+        # Execute_on itself should NOT be offset
+        execute_on_2 = TimeFrame(1, TimeFrameUnit.Minute)
+        assert not (execute_on_2 > execute_on)  # Equal, no offset
+
+        # Lower timeframes (if they existed) shouldn't be offset
+        # (Though this scenario doesn't typically occur)

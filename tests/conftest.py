@@ -2,11 +2,24 @@
 Shared pytest fixtures for torchtrade tests.
 """
 
+import os
 import numpy as np
 import pandas as pd
 import pytest
 
 from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+
+
+# Fix MKL threading issue for ParallelEnv tests
+@pytest.fixture(scope="session", autouse=True)
+def set_mkl_threading_layer():
+    """Set MKL threading layer to GNU to avoid conflicts with multiprocessing.
+
+    This prevents EOFError in ParallelEnv tests caused by MKL incompatibility
+    with libgomp when spawning worker processes.
+    """
+    os.environ["MKL_THREADING_LAYER"] = "GNU"
+    yield
 
 
 @pytest.fixture
