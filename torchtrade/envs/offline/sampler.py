@@ -71,7 +71,8 @@ class MarketDataObservationSampler:
             # Fix lookahead bias: shift higher timeframe bars forward by their period
             # This ensures bars are indexed by their END time, not START time
             # Only completed bars will be visible to the agent at any execution time
-            if tf != execute_on:
+            # Only shift timeframes that are HIGHER (coarser) than the execution timeframe
+            if tf > execute_on:
                 offset = pd.Timedelta(tf.to_pandas_freq())
                 resampled.index = resampled.index + offset
 

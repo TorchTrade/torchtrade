@@ -190,6 +190,59 @@ class TimeFrame:
         else:
             raise ValueError(f"Unknown TimeFrameUnit {self.unit}")
 
+    def __eq__(self, other):
+        """Compare TimeFrames by value and unit."""
+        if not isinstance(other, TimeFrame):
+            return False
+        return self.value == other.value and self.unit == other.unit
+
+    def __ne__(self, other):
+        """Not equal comparison."""
+        return not self.__eq__(other)
+
+    def __lt__(self, other):
+        """Less than comparison based on total minutes."""
+        if not isinstance(other, TimeFrame):
+            return NotImplemented
+        return self.to_minutes() < other.to_minutes()
+
+    def __le__(self, other):
+        """Less than or equal comparison."""
+        if not isinstance(other, TimeFrame):
+            return NotImplemented
+        return self.to_minutes() <= other.to_minutes()
+
+    def __gt__(self, other):
+        """Greater than comparison."""
+        if not isinstance(other, TimeFrame):
+            return NotImplemented
+        return self.to_minutes() > other.to_minutes()
+
+    def __ge__(self, other):
+        """Greater than or equal comparison."""
+        if not isinstance(other, TimeFrame):
+            return NotImplemented
+        return self.to_minutes() >= other.to_minutes()
+
+    def __hash__(self):
+        """Make TimeFrame hashable for use in sets and as dict keys."""
+        return hash((self.value, self.unit))
+
+    def __repr__(self):
+        """String representation for debugging."""
+        return f"TimeFrame({self.value}, {self.unit})"
+
+    def to_minutes(self) -> float:
+        """Convert timeframe to total minutes for comparison."""
+        if self.unit == TimeFrameUnit.Minute:
+            return float(self.value)
+        elif self.unit == TimeFrameUnit.Hour:
+            return float(self.value * 60)
+        elif self.unit == TimeFrameUnit.Day:
+            return float(self.value * 60 * 24)
+        else:
+            raise ValueError(f"Unknown TimeFrameUnit {self.unit}")
+
 
 # Correct tf_to_timedelta
 def tf_to_timedelta(tf: TimeFrame) -> pd.Timedelta:
