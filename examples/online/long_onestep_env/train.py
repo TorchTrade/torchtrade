@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import warnings
-
+import pandas as pd
 import hydra
 from torchrl._utils import compile_with_warmup
 import datasets
 from torchtrade.losses import GRPOLoss
-
 
 @hydra.main(config_path="", config_name="config", version_base="1.1")
 def main(cfg: DictConfig):  # noqa: F821
@@ -35,8 +34,12 @@ def main(cfg: DictConfig):  # noqa: F821
     # Create env
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
-    test_df = df[0:(1440 * 21)]  # First 21 days for testing
-    train_df = df[(1440 * 21):]  # Remaining data for training
+    # Convert timestamp column to datetime for proper filtering
+    df['0'] = pd.to_datetime(df['0'])
+    test_split_date = pd.to_datetime(cfg.env.test_split_start)
+
+    train_df = df[df['0'] < test_split_date]
+    test_df  = df[df['0'] >= test_split_date]
 
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
     max_eval_traj_length = len(test_df)
@@ -46,6 +49,8 @@ def main(cfg: DictConfig):  # noqa: F821
     print(f"Total rows: {len(df)}")
     print(f"Train rows (1min): {len(train_df)}")
     print(f"Test rows (1min): {len(test_df)}")
+    print(f"Train date range: {train_df['0'].min()} to {train_df['0'].max()}")
+    print(f"Test date range: {test_df['0'].min()} to {test_df['0'].max()}")
     print(f"Max train traj length: {max_train_traj_length}")
     print("="*80)
     train_env, eval_env = make_environment(
