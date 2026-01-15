@@ -1,4 +1,5 @@
 from enum import Enum
+from functools import total_ordering
 from typing import List, Union, Optional, Dict, Tuple
 from itertools import product
 import pandas as pd
@@ -172,6 +173,7 @@ class TimeFrameUnit(Enum):
     Day = 'D'    # Pandas freq for days
     # Add more if needed, e.g., week = 'W'
 
+@total_ordering
 class TimeFrame:
     def __init__(self, value: int, unit: TimeFrameUnit):
         self.value = value
@@ -193,36 +195,14 @@ class TimeFrame:
     def __eq__(self, other):
         """Compare TimeFrames by value and unit."""
         if not isinstance(other, TimeFrame):
-            return False
+            return NotImplemented
         return self.value == other.value and self.unit == other.unit
-
-    def __ne__(self, other):
-        """Not equal comparison."""
-        return not self.__eq__(other)
 
     def __lt__(self, other):
         """Less than comparison based on total minutes."""
         if not isinstance(other, TimeFrame):
             return NotImplemented
         return self.to_minutes() < other.to_minutes()
-
-    def __le__(self, other):
-        """Less than or equal comparison."""
-        if not isinstance(other, TimeFrame):
-            return NotImplemented
-        return self.to_minutes() <= other.to_minutes()
-
-    def __gt__(self, other):
-        """Greater than comparison."""
-        if not isinstance(other, TimeFrame):
-            return NotImplemented
-        return self.to_minutes() > other.to_minutes()
-
-    def __ge__(self, other):
-        """Greater than or equal comparison."""
-        if not isinstance(other, TimeFrame):
-            return NotImplemented
-        return self.to_minutes() >= other.to_minutes()
 
     def __hash__(self):
         """Make TimeFrame hashable for use in sets and as dict keys."""
@@ -234,26 +214,33 @@ class TimeFrame:
 
     def to_minutes(self) -> float:
         """Convert timeframe to total minutes for comparison."""
-        if self.unit == TimeFrameUnit.Minute:
-            return float(self.value)
-        elif self.unit == TimeFrameUnit.Hour:
-            return float(self.value * 60)
-        elif self.unit == TimeFrameUnit.Day:
-            return float(self.value * 60 * 24)
-        else:
+        unit_to_minutes = {
+            TimeFrameUnit.Minute: 1,
+            TimeFrameUnit.Hour: 60,
+            TimeFrameUnit.Day: 60 * 24,
+        }
+
+        multiplier = unit_to_minutes.get(self.unit)
+        if multiplier is None:
             raise ValueError(f"Unknown TimeFrameUnit {self.unit}")
+
+        return float(self.value * multiplier)
 
 
 # Correct tf_to_timedelta
 def tf_to_timedelta(tf: TimeFrame) -> pd.Timedelta:
-    if tf.unit == TimeFrameUnit.Minute:
-        return pd.Timedelta(minutes=tf.value)
-    elif tf.unit == TimeFrameUnit.Hour:
-        return pd.Timedelta(hours=tf.value)
-    elif tf.unit == TimeFrameUnit.Day:
-        return pd.Timedelta(days=tf.value)
-    else:
+    """Convert TimeFrame to pandas Timedelta."""
+    unit_to_kwargs = {
+        TimeFrameUnit.Minute: 'minutes',
+        TimeFrameUnit.Hour: 'hours',
+        TimeFrameUnit.Day: 'days',
+    }
+
+    kwarg_name = unit_to_kwargs.get(tf.unit)
+    if kwarg_name is None:
         raise ValueError(f"Unknown TimeFrameUnit {tf.unit}")
+
+    return pd.Timedelta(**{kwarg_name: tf.value})
 
 
 class InitialBalanceSampler:
