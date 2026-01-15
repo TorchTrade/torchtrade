@@ -71,8 +71,6 @@ markdown_extensions:
 
 plugins:
   - search
-  - git-revision-date-localized:
-      enable_creation_date: true
 
 repo_url: https://github.com/TorchTrade/torchtrade_envs
 repo_name: TorchTrade/torchtrade_envs
