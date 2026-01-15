@@ -108,11 +108,9 @@ class TestChronosEmbeddingTransformLazyInit:
 
     def test_lazy_init_import_error(self):
         """Test that missing chronos package raises ImportError."""
-        # Hide chronos module
+        # Remove chronos module from sys.modules to simulate it not being installed
         import sys
-        chronos_module = sys.modules.get('chronos')
-        if chronos_module:
-            sys.modules['chronos'] = None
+        chronos_module = sys.modules.pop('chronos', None)
 
         try:
             transform = ChronosEmbeddingTransform(
@@ -124,7 +122,7 @@ class TestChronosEmbeddingTransformLazyInit:
                 transform._init()
         finally:
             # Restore chronos module if it existed
-            if chronos_module:
+            if chronos_module is not None:
                 sys.modules['chronos'] = chronos_module
 
 
