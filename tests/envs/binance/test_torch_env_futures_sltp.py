@@ -265,7 +265,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
         """Test detection of position closed by SL/TP."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            env.current_position = 1  # Simulate having a long position
+            env.position.current_position = 1  # Simulate having a long position
 
             # Simulate position being closed
             mock_trader.get_status = MagicMock(return_value={
@@ -281,7 +281,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            env.current_position = 1
+            env.position.current_position = 1
 
             # Position still exists
             mock_trader.get_status = MagicMock(return_value={
@@ -325,7 +325,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
             # Set active SL/TP
             env.active_stop_loss = 49000.0
             env.active_take_profit = 51000.0
-            env.current_position = 1
+            env.position.current_position = 1
 
             # Simulate position closed
             mock_trader.get_status = MagicMock(return_value={
@@ -343,7 +343,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
         """Test that new positions cannot be opened while holding."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            env.current_position = 1  # Simulate holding long
+            env.position.current_position = 1  # Simulate holding long
 
             # Try to open another long
             action_tuple = ("long", -0.02, 0.03)
@@ -642,7 +642,7 @@ class TestCriticalEdgeCases:
         assert trade_info["success"] is False
         assert env.active_stop_loss == 0.0
         assert env.active_take_profit == 0.0
-        assert env.current_position == 0
+        assert env.position.current_position == 0
 
     def test_trade_exception_handling_long(self, env_with_mocks):
         """Test that trade exceptions are handled gracefully for long positions (Critical: 9/10)."""
@@ -662,7 +662,7 @@ class TestCriticalEdgeCases:
         assert trade_info["success"] is False
         assert env.active_stop_loss == 0.0
         assert env.active_take_profit == 0.0
-        assert env.current_position == 0
+        assert env.position.current_position == 0
 
     def test_trade_exception_handling_short(self, env_with_mocks):
         """Test that trade exceptions are handled gracefully for short positions (Critical: 9/10)."""
@@ -682,7 +682,7 @@ class TestCriticalEdgeCases:
         assert trade_info["success"] is False
         assert env.active_stop_loss == 0.0
         assert env.active_take_profit == 0.0
-        assert env.current_position == 0
+        assert env.position.current_position == 0
 
     def test_invalid_action_index_handling(self, env_with_mocks):
         """Test handling of invalid action indices (Critical: 8/10)."""
@@ -770,7 +770,7 @@ class TestCriticalEdgeCases:
         env, mock_trader, _ = env_with_mocks
 
         # Env has stale state (thinks position exists)
-        env.current_position = 1
+        env.position.current_position = 1
         env.active_stop_loss = 49000.0
         env.active_take_profit = 51000.0
 
@@ -780,7 +780,7 @@ class TestCriticalEdgeCases:
         env.reset()
 
         # After reset, should sync with actual exchange state
-        assert env.current_position == 0
+        assert env.position.current_position == 0
         # Note: active_stop_loss/take_profit are reset in _reset override
 
     def test_bracket_order_with_zero_current_price(self, env_with_mocks):
@@ -822,7 +822,7 @@ class TestCriticalEdgeCases:
 
             # First, open a position
             mock_trader.trade = MagicMock(return_value=True)
-            env.current_position = 1
+            env.position.current_position = 1
             env.active_stop_loss = 49000.0
 
             # Position closed by SL/TP on exchange
@@ -838,7 +838,7 @@ class TestCriticalEdgeCases:
             mock_trader.trade.assert_not_called()
 
             # But position should be reset for next step
-            assert env.current_position == 0
+            assert env.position.current_position == 0
             assert env.active_stop_loss == 0.0
 
             # Next step should allow new trade

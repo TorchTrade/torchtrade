@@ -187,7 +187,7 @@ class TestAlpacaTorchTradingEnvReset:
     def test_reset_resets_position_counter(self, env):
         """Test that reset resets position hold counter."""
         env.reset()
-        assert env.position_hold_counter == 0
+        assert env.position.hold_counter == 0
 
 
 class TestAlpacaTorchTradingEnvStep:
@@ -243,12 +243,12 @@ class TestAlpacaTorchTradingEnvStep:
     def test_step_buy_action(self, env):
         """Test buy action (action=2)."""
         env.reset()
-        initial_position = env.current_position
+        initial_position = env.position.current_position
 
         td_in = TensorDict({"action": torch.tensor(2)}, batch_size=())
         td_out = env._step(td_in)
 
-        assert env.current_position == 1
+        assert env.position.current_position == 1
 
     def test_step_sell_action_with_position(self, env):
         """Test sell action when holding position."""
@@ -262,7 +262,7 @@ class TestAlpacaTorchTradingEnvStep:
         td_sell = TensorDict({"action": torch.tensor(0)}, batch_size=())
         env._step(td_sell)
 
-        assert env.current_position == 0
+        assert env.position.current_position == 0
 
     def test_step_hold_action(self, env):
         """Test hold action (action=1)."""
@@ -270,7 +270,7 @@ class TestAlpacaTorchTradingEnvStep:
         td_in = TensorDict({"action": torch.tensor(1)}, batch_size=())
         env._step(td_in)
 
-        assert env.current_position == 0
+        assert env.position.current_position == 0
 
     def test_step_updates_account_state(self, env):
         """Test that step updates account state."""

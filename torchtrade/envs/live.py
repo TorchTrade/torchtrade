@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from tensordict import TensorDictBase
 
 from torchtrade.envs.base import TorchTradeBaseEnv
+from torchtrade.envs.state import PositionState
 
 
 class TorchTradeLiveEnv(TorchTradeBaseEnv):
@@ -72,8 +73,9 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         # Subclasses should override _init_trading_clients to provide provider-specific setup
         self._init_trading_clients(api_key, api_secret, observer, trader)
 
-        # Initialize position tracking
-        self.position_hold_counter = 0
+        # Initialize position state
+        # Note: Subclasses may override this with their specific position tracking needs
+        self.position = PositionState()
 
     @abstractmethod
     def _init_trading_clients(

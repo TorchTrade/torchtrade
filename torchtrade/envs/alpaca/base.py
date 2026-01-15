@@ -11,7 +11,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
 from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass
 from torchtrade.envs.live import TorchTradeLiveEnv
-from torchtrade.envs.state import HistoryTracker
+from torchtrade.envs.state import HistoryTracker, PositionState
 
 
 class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -93,8 +93,8 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Build observation specs
         self._build_observation_specs()
 
-        # Initialize current position tracking
-        self.current_position = 0.0
+        # Initialize position state
+        self.position = PositionState()
 
         # Initialize history tracking
         self.history = HistoryTracker()
@@ -186,21 +186,19 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status", None)
 
         if position_status is None:
-            self.position_hold_counter = 0
             position_size = 0.0
             position_value = 0.0
             entry_price = 0.0
             current_price = 0.0
             unrealized_pnlpc = 0.0
-            holding_time = self.position_hold_counter
+            holding_time = 0.0
         else:
-            self.position_hold_counter += 1
             position_size = position_status.qty
             position_value = position_status.market_value
             entry_price = position_status.avg_entry_price
             current_price = position_status.current_price
             unrealized_pnlpc = position_status.unrealized_plpc
-            holding_time = self.position_hold_counter
+            holding_time = float(self.position.hold_counter)
 
         # Build account state tensor
         account_state = torch.tensor(
@@ -250,12 +248,12 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         status = self.trader.get_status()
         position_status = status.get("position_status")
-        self.position_hold_counter = 0
+        self.position.hold_counter = 0
 
         if position_status is None:
-            self.current_position = 0.0
+            self.position.current_position = 0.0
         else:
-            self.current_position = 1 if position_status.qty > 0 else 0
+            self.position.current_position = 1 if position_status.qty > 0 else 0
 
         # Get initial observation
         return self._get_observation()

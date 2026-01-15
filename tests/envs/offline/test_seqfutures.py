@@ -118,16 +118,16 @@ class TestSeqFuturesEnvReset:
     def test_reset_clears_position(self, env):
         """Reset should clear any existing position."""
         env.reset()
-        assert env.position_size == 0.0
-        assert env.current_position == 0
-        assert env.entry_price == 0.0
+        assert env.position.position_size == 0.0
+        assert env.position.current_position == 0
+        assert env.position.entry_price == 0.0
         assert env.liquidation_price == 0.0
 
     def test_reset_clears_counters(self, env):
         """Reset should clear step and hold counters."""
         env.reset()
         assert env.step_counter == 0
-        assert env.position_hold_counter == 0
+        assert env.position.hold_counter == 0
 
     def test_reset_clears_histories(self, env):
         """Reset should clear history."""
@@ -213,7 +213,7 @@ class TestSeqFuturesEnvStep:
         td.set("action", torch.tensor(1))  # hold (index 1 = 0.0)
         env.step(td)
 
-        assert env.position_size == 0.0
+        assert env.position.position_size == 0.0
         assert env.balance == initial_balance
 
     def test_step_updates_histories(self, env):
@@ -259,9 +259,9 @@ class TestSeqFuturesEnvLongTrades:
         td.set("action", torch.tensor(2))  # long (index 2 = 1.0)
         env.step(td)
 
-        assert env.position_size > 0  # Positive for long
-        assert env.current_position == 1
-        assert env.entry_price > 0
+        assert env.position.position_size > 0  # Positive for long
+        assert env.position.current_position == 1
+        assert env.position.entry_price > 0
         assert env.liquidation_price > 0
 
     def test_long_position_has_correct_liquidation_price(self, env):
@@ -272,7 +272,7 @@ class TestSeqFuturesEnvLongTrades:
         env.step(td)
 
         # For long, liquidation price should be below entry
-        assert env.liquidation_price < env.entry_price
+        assert env.liquidation_price < env.position.entry_price
 
     def test_long_position_closes_on_hold_action(self, env):
         """Hold action should close existing long position."""
@@ -283,14 +283,14 @@ class TestSeqFuturesEnvLongTrades:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size > 0
+        assert env.position.position_size > 0
 
         # Close with hold action (action 1 = 0.0 = close)
         td.set("action", torch.tensor(1))
         env.step(td)
 
-        assert env.position_size == 0.0
-        assert env.current_position == 0
+        assert env.position.position_size == 0.0
+        assert env.position.current_position == 0
 
     def test_long_pnl_positive_on_price_increase(self, env, trending_up_df):
         """Long position should have positive PnL when price increases."""
@@ -339,9 +339,9 @@ class TestSeqFuturesEnvShortTrades:
         td.set("action", torch.tensor(0))  # short (index 0 = -1.0)
         env.step(td)
 
-        assert env.position_size < 0  # Negative for short
-        assert env.current_position == -1
-        assert env.entry_price > 0
+        assert env.position.position_size < 0  # Negative for short
+        assert env.position.current_position == -1
+        assert env.position.entry_price > 0
         assert env.liquidation_price > 0
 
     def test_short_position_has_correct_liquidation_price(self, env):
@@ -352,7 +352,7 @@ class TestSeqFuturesEnvShortTrades:
         env.step(td)
 
         # For short, liquidation price should be above entry
-        assert env.liquidation_price > env.entry_price
+        assert env.liquidation_price > env.position.entry_price
 
     def test_short_position_closes_on_hold_action(self, env):
         """Hold action should close existing short position."""
@@ -363,14 +363,14 @@ class TestSeqFuturesEnvShortTrades:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size < 0
+        assert env.position.position_size < 0
 
         # Close with hold action
         td.set("action", torch.tensor(1))
         env.step(td)
 
-        assert env.position_size == 0.0
-        assert env.current_position == 0
+        assert env.position.position_size == 0.0
+        assert env.position.current_position == 0
 
     def test_short_pnl_positive_on_price_decrease(self, env, trending_down_df):
         """Short position should have positive PnL when price decreases."""
@@ -421,16 +421,16 @@ class TestSeqFuturesEnvPositionFlipping:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size > 0
-        assert env.current_position == 1
+        assert env.position.position_size > 0
+        assert env.position.current_position == 1
 
         # Flip to short
         td.set("action", torch.tensor(0))
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size < 0
-        assert env.current_position == -1
+        assert env.position.position_size < 0
+        assert env.position.current_position == -1
 
     def test_short_to_long_flip(self, env):
         """Going long while short should close short and open long."""
@@ -441,16 +441,16 @@ class TestSeqFuturesEnvPositionFlipping:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size < 0
-        assert env.current_position == -1
+        assert env.position.position_size < 0
+        assert env.position.current_position == -1
 
         # Flip to long
         td.set("action", torch.tensor(2))
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size > 0
-        assert env.current_position == 1
+        assert env.position.position_size > 0
+        assert env.position.current_position == 1
 
 
 class TestSeqFuturesEnvLeverage:
@@ -494,7 +494,7 @@ class TestSeqFuturesEnvLeverage:
         env_high.step(td_high)
 
         # Higher leverage = larger position size
-        assert abs(env_high.position_size) > abs(env_low.position_size)
+        assert abs(env_high.position.position_size) > abs(env_low.position.position_size)
 
     def test_leverage_stored_in_account_state(self, env):
         """Leverage should be stored in account state."""
@@ -513,7 +513,7 @@ class TestSeqFuturesEnvLiquidation:
         td.set("action", torch.tensor(2))
         env.step(td)
 
-        entry = env.entry_price
+        entry = env.position.entry_price
         liq = env.liquidation_price
         leverage = env.leverage
 
@@ -679,7 +679,7 @@ class TestSeqFuturesEnvEdgeCases:
 
             # Verify clean state
             assert env.step_counter == 0
-            assert env.position_size == 0.0
+            assert env.position.position_size == 0.0
             assert env.balance == 1000
 
             # Run a few steps
@@ -786,7 +786,7 @@ class TestSeqFuturesEnvPositionSizing:
             result = env.step(td)
             td = result["next"]
 
-            if env.position_size > 0:
+            if env.position.position_size > 0:
                 positions_opened += 1
 
             if td.get("done", False):
@@ -833,7 +833,7 @@ class TestSeqFuturesEnvPositionSizing:
         env.step(td)
 
         # Position should have been opened
-        assert env.position_size > 0, "Failed to open position with available balance"
+        assert env.position.position_size > 0, "Failed to open position with available balance"
 
         # Fee should have been deducted
         assert env.balance < initial_balance

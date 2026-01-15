@@ -123,14 +123,20 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
 
         if trade_info["executed"]:
             if trade_info["side"] == "BUY":
-                self.current_position = 1
+                self.position.current_position = 1
             elif trade_info["side"] == "SELL":
-                self.current_position = -1
+                self.position.current_position = -1
             elif trade_info["closed_position"]:
-                self.current_position = 0
+                self.position.current_position = 0
 
         # Wait for next time step
         self._wait_for_next_timestamp()
+
+        # Update position hold counter
+        if self.position.current_position != 0:
+            self.position.hold_counter += 1
+        else:
+            self.position.hold_counter = 0
 
         # Get updated state
         new_portfolio_value = self._get_portfolio_value()

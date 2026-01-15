@@ -101,15 +101,15 @@ class TestSeqLongOnlyEnvReset:
     def test_reset_clears_position(self, env):
         """Reset should clear any existing position."""
         env.reset()
-        assert env.position_size == 0.0
-        assert env.current_position == 0.0
-        assert env.entry_price == 0.0
+        assert env.position.position_size == 0.0
+        assert env.position.current_position == 0.0
+        assert env.position.entry_price == 0.0
 
     def test_reset_clears_counters(self, env):
         """Reset should clear step and hold counters."""
         env.reset()
         assert env.step_counter == 0
-        assert env.position_hold_counter == 0
+        assert env.position.hold_counter == 0
 
     def test_reset_clears_histories(self, env):
         """Reset should clear history."""
@@ -190,7 +190,7 @@ class TestSeqLongOnlyEnvStep:
         td.set("action", torch.tensor(1))  # hold (index 1 = 0.0)
         env.step(td)
 
-        assert env.position_size == 0.0
+        assert env.position.position_size == 0.0
         assert env.balance == initial_balance
 
     def test_step_updates_histories(self, env):
@@ -251,10 +251,10 @@ class TestSeqLongOnlyEnvTradeExecution:
         td.set("action", torch.tensor(2))  # buy (index 2 = 1.0)
         env.step(td)
 
-        assert env.position_size > 0
+        assert env.position.position_size > 0
         assert env.balance < initial_balance
-        assert env.current_position == 1.0
-        assert env.entry_price > 0
+        assert env.position.current_position == 1.0
+        assert env.position.entry_price > 0
 
     def test_sell_action_closes_position(self, env):
         """Sell action should close a position."""
@@ -265,16 +265,16 @@ class TestSeqLongOnlyEnvTradeExecution:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size > 0
-        position_before_sell = env.position_size
+        assert env.position.position_size > 0
+        position_before_sell = env.position.position_size
 
         # Then sell
         td.set("action", torch.tensor(0))  # sell (index 0 = -1.0)
         env.step(td)
 
-        assert env.position_size == 0.0
-        assert env.current_position == 0.0
-        assert env.entry_price == 0.0
+        assert env.position.position_size == 0.0
+        assert env.position.current_position == 0.0
+        assert env.position.entry_price == 0.0
         assert env.balance > 0  # Got proceeds from sale
 
     def test_buy_deducts_fees(self, env):
@@ -316,7 +316,7 @@ class TestSeqLongOnlyEnvTradeExecution:
         env.step(td)
 
         assert env.balance == initial_balance
-        assert env.position_size == 0.0
+        assert env.position.position_size == 0.0
 
     def test_cannot_buy_when_already_holding(self, env):
         """Buy action when already holding should do nothing."""
@@ -327,7 +327,7 @@ class TestSeqLongOnlyEnvTradeExecution:
         result = env.step(td)
         td = result["next"]
 
-        position_after_first_buy = env.position_size
+        position_after_first_buy = env.position.position_size
         balance_after_first_buy = env.balance
 
         # Try to buy again
@@ -335,7 +335,7 @@ class TestSeqLongOnlyEnvTradeExecution:
         env.step(td)
 
         # Position and balance should be unchanged
-        assert env.position_size == position_after_first_buy
+        assert env.position.position_size == position_after_first_buy
         assert env.balance == balance_after_first_buy
 
     def test_hold_increments_counter_when_holding(self, env):
@@ -347,20 +347,20 @@ class TestSeqLongOnlyEnvTradeExecution:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_hold_counter == 0
+        assert env.position.hold_counter == 0
 
         # Hold
         td.set("action", torch.tensor(1))
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_hold_counter == 1
+        assert env.position.hold_counter == 1
 
         # Hold again
         td.set("action", torch.tensor(1))
         env.step(td)
 
-        assert env.position_hold_counter == 2
+        assert env.position.hold_counter == 2
 
     def test_entry_price_recorded_on_buy(self, env):
         """Entry price should be recorded correctly on buy."""
@@ -369,9 +369,9 @@ class TestSeqLongOnlyEnvTradeExecution:
         td.set("action", torch.tensor(2))  # buy
         env.step(td)
 
-        assert env.entry_price > 0
+        assert env.position.entry_price > 0
         # Entry price should be a reasonable value (close to initial price ~100)
-        assert 50 < env.entry_price < 200
+        assert 50 < env.position.entry_price < 200
 
 
 class TestSeqLongOnlyEnvReward:
@@ -573,7 +573,7 @@ class TestSeqLongOnlyEnvEdgeCases:
 
             # Verify clean state
             assert env.step_counter == 0
-            assert env.position_size == 0.0
+            assert env.position.position_size == 0.0
             assert env.balance == 1000
 
             # Run a few steps

@@ -92,12 +92,6 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
     - Zero for no position
     """
 
-    # Futures-specific account state (includes leverage, margin_ratio, liquidation_price)
-    ACCOUNT_STATE = [
-        "cash", "position_size", "position_value", "entry_price", "current_price",
-        "unrealized_pnlpct", "leverage", "margin_ratio", "liquidation_price", "holding_time"
-    ]
-
     def __init__(
         self,
         df: pd.DataFrame,
@@ -128,14 +122,22 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         # Define action spec
         self.action_spec = Categorical(len(self.action_levels))
 
-        # Build observation specs using class constant
+        # Build observation specs with futures-specific account state
+        account_state = [
+            "cash", "position_size", "position_value", "entry_price", "current_price",
+            "unrealized_pnlpct", "leverage", "margin_ratio", "liquidation_price", "holding_time"
+        ]
         num_features = len(self.sampler.get_feature_keys())
-        self._build_observation_specs(self.ACCOUNT_STATE, num_features)
+        self._build_observation_specs(account_state, num_features)
 
-        # Initialize futures-specific state
-        self.unrealized_pnl = 0.0
-        self.unrealized_pnl_pct = 0.0
-        self.liquidation_price = 0.0
+        # Initialize futures-specific state (beyond base PositionState)
+        # Note: These attributes are intentionally separate from PositionState as they are
+        # specific to futures/leveraged trading and not applicable to spot/long-only environments.
+        # PositionState contains universal position tracking (size, value, entry), while these
+        # track futures-specific calculations (leverage-based PnL, liquidation risk).
+        self.unrealized_pnl = 0.0  # Absolute unrealized PnL (calculated from leverage)
+        self.unrealized_pnl_pct = 0.0  # Percentage unrealized PnL
+        self.liquidation_price = 0.0  # Price at which position would be liquidated
 
     def _reset_history(self):
         """Reset all history tracking including position history."""
@@ -199,10 +201,10 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
 
     def _check_liquidation(self, current_price: float) -> bool:
         """Check if current position should be liquidated."""
-        if self.position_size == 0:
+        if self.position.position_size == 0:
             return False
 
-        if self.position_size > 0:
+        if self.position.position_size > 0:
             # Long position - liquidated if price below liquidation price
             return current_price <= self.liquidation_price
         else:
@@ -216,15 +218,15 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         current_price = self._cached_base_features["close"]
 
         # Calculate position value (absolute value of notional)
-        self.position_value = abs(self.position_size * current_price)
+        self.position.position_value = abs(self.position.position_size * current_price)
 
         # Calculate unrealized PnL
-        if self.position_size != 0:
+        if self.position.position_size != 0:
             self.unrealized_pnl = self._calculate_unrealized_pnl(
-                self.entry_price, current_price, self.position_size
+                self.position.entry_price, current_price, self.position.position_size
             )
             self.unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(
-                self.entry_price, current_price, self.position_size
+                self.position.entry_price, current_price, self.position.position_size
             )
         else:
             self.unrealized_pnl = 0.0
@@ -232,20 +234,20 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
 
         # Calculate margin ratio
         total_balance = self.balance + self.unrealized_pnl
-        margin_ratio = self.position_value / total_balance if total_balance > 0 else 0.0
+        margin_ratio = self.position.position_value / total_balance if total_balance > 0 else 0.0
 
         # Account state (10 elements, matching live futures env)
         account_state = torch.tensor([
             self.balance,
-            self.position_size,  # Positive=long, Negative=short
-            self.position_value,
-            self.entry_price,
+            self.position.position_size,  # Positive=long, Negative=short
+            self.position.position_value,
+            self.position.entry_price,
             current_price,
             self.unrealized_pnl_pct,
             float(self.leverage),
             margin_ratio,
             self.liquidation_price,
-            float(self.position_hold_counter),
+            float(self.position.hold_counter),
         ], dtype=torch.float)
 
         # Combine account state and market data
@@ -257,10 +259,11 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
     def _reset_position_state(self):
         """Reset position tracking state including futures-specific state."""
         super()._reset_position_state()
-        self.current_position = 0  # -1=short, 0=none, 1=long
+        # Reset futures-specific state
         self.unrealized_pnl = 0.0
         self.unrealized_pnl_pct = 0.0
         self.liquidation_price = 0.0
+        self.position_history = []
 
     def _get_portfolio_value(self, current_price: Optional[float] = None) -> float:
         """Calculate total portfolio value including unrealized PnL for futures."""
@@ -273,7 +276,7 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
             current_price = self._cached_base_features["close"]
 
         unrealized_pnl = self._calculate_unrealized_pnl(
-            self.entry_price, current_price, self.position_size
+            self.position.entry_price, current_price, self.position.position_size
         )
         return self.balance + unrealized_pnl
 
@@ -328,7 +331,7 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
             action=trade_action,
             reward=reward,
             portfolio_value=old_portfolio_value,
-            position=self.position_size
+            position=self.position.position_size
         )
 
         # Check termination
@@ -351,25 +354,25 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         }
 
         # Realize the loss at liquidation price
-        if self.position_size > 0:
+        if self.position.position_size > 0:
             # Long position liquidated
-            loss = (self.liquidation_price - self.entry_price) * self.position_size
+            loss = (self.liquidation_price - self.position.entry_price) * self.position.position_size
         else:
             # Short position liquidated
-            loss = (self.entry_price - self.liquidation_price) * abs(self.position_size)
+            loss = (self.position.entry_price - self.liquidation_price) * abs(self.position.position_size)
 
         # Apply loss and fees
-        liquidation_fee = abs(self.position_size * self.liquidation_price) * self.transaction_fee
+        liquidation_fee = abs(self.position.position_size * self.liquidation_price) * self.transaction_fee
         self.balance += loss - liquidation_fee
         trade_info["fee_paid"] = liquidation_fee
 
         # Reset position
-        self.position_size = 0.0
-        self.position_value = 0.0
-        self.entry_price = 0.0
+        self.position.position_size = 0.0
+        self.position.position_value = 0.0
+        self.position.entry_price = 0.0
         self.liquidation_price = 0.0
-        self.current_position = 0
-        self.position_hold_counter = 0
+        self.position.current_position = 0
+        self.position.hold_counter = 0
 
         return trade_info
 
@@ -391,7 +394,7 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
 
         if desired_action == 0:
             # Close any existing position
-            if self.position_size != 0:
+            if self.position.position_size != 0:
                 trade_info = self._close_position(current_price, price_noise)
             else:
                 # No position to close, just hold
@@ -399,27 +402,27 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
 
         elif desired_action == 1:
             # Go long
-            if self.position_size < 0:
+            if self.position.position_size < 0:
                 # Close short first
                 self._close_position(current_price, price_noise)
 
-            if self.position_size <= 0:
+            if self.position.position_size <= 0:
                 # Open long position
                 trade_info = self._open_position("long", current_price, price_noise)
 
         elif desired_action == -1:
             # Go short
-            if self.position_size > 0:
+            if self.position.position_size > 0:
                 # Close long first
                 self._close_position(current_price, price_noise)
 
-            if self.position_size >= 0:
+            if self.position.position_size >= 0:
                 # Open short position
                 trade_info = self._open_position("short", current_price, price_noise)
 
         # Update hold counter
-        if self.position_size != 0:
-            self.position_hold_counter += 1
+        if self.position.position_size != 0:
+            self.position.hold_counter += 1
 
         return trade_info
 
@@ -462,18 +465,18 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         trade_info["fee_paid"] = fee
 
         if side == "long":
-            self.position_size = position_qty
-            self.current_position = 1
+            self.position.position_size = position_qty
+            self.position.current_position = 1
         else:  # short
-            self.position_size = -position_qty
-            self.current_position = -1
+            self.position.position_size = -position_qty
+            self.position.current_position = -1
 
-        self.entry_price = execution_price
-        self.position_value = notional_value
+        self.position.entry_price = execution_price
+        self.position.position_value = notional_value
         self.liquidation_price = self._calculate_liquidation_price(
-            execution_price, self.position_size
+            execution_price, self.position.position_size
         )
-        self.position_hold_counter = 0
+        self.position.hold_counter = 0
 
         return trade_info
 
@@ -486,7 +489,7 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
             "liquidated": False,
         }
 
-        if self.position_size == 0:
+        if self.position.position_size == 0:
             trade_info["executed"] = False
             return trade_info
 
@@ -494,11 +497,11 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
 
         # Calculate PnL
         pnl = self._calculate_unrealized_pnl(
-            self.entry_price, execution_price, self.position_size
+            self.position.entry_price, execution_price, self.position.position_size
         )
 
         # Calculate fee
-        notional = abs(self.position_size * execution_price)
+        notional = abs(self.position.position_size * execution_price)
         fee = notional * self.transaction_fee
 
         # Update balance
@@ -506,12 +509,12 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         trade_info["fee_paid"] = fee
 
         # Reset position
-        self.position_size = 0.0
-        self.position_value = 0.0
-        self.entry_price = 0.0
+        self.position.position_size = 0.0
+        self.position.position_value = 0.0
+        self.position.entry_price = 0.0
         self.liquidation_price = 0.0
-        self.current_position = 0
-        self.position_hold_counter = 0
+        self.position.current_position = 0
+        self.position.hold_counter = 0
 
         return trade_info
 

@@ -11,7 +11,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchtrade.envs.binance.obs_class import BinanceObservationClass
 from torchtrade.envs.binance.futures_order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.live import TorchTradeLiveEnv
-from torchtrade.envs.state import FuturesHistoryTracker
+from torchtrade.envs.state import FuturesHistoryTracker, PositionState
 
 
 # Interval to seconds mapping for waiting
@@ -110,8 +110,8 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Build observation specs
         self._build_observation_specs()
 
-        # Initialize current position tracking
-        self.current_position = 0  # 0=no position, 1=long, -1=short
+        # Initialize position state
+        self.position = PositionState()  # current_position: 0=no position, 1=long, -1=short
 
         # Initialize history tracking (futures environments use FuturesHistoryTracker)
         self.history = FuturesHistoryTracker()
@@ -215,7 +215,6 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status", None)
 
         if position_status is None:
-            self.position_hold_counter = 0
             position_size = 0.0
             position_value = 0.0
             entry_price = 0.0
@@ -226,7 +225,6 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
             liquidation_price = 0.0
             holding_time = 0.0
         else:
-            self.position_hold_counter += 1
             position_size = position_status.qty  # Positive=long, Negative=short
             position_value = abs(position_status.notional_value)
             entry_price = position_status.entry_price
@@ -236,7 +234,7 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
             # Calculate margin ratio (position value / total balance)
             margin_ratio = position_value / total_balance if total_balance > 0 else 0.0
             liquidation_price = position_status.liquidation_price
-            holding_time = float(self.position_hold_counter)
+            holding_time = float(self.position.hold_counter)
 
         # Build account state tensor (10 elements for Binance futures)
         account_state = torch.tensor(
@@ -294,13 +292,16 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         status = self.trader.get_status()
         position_status = status.get("position_status")
-        self.position_hold_counter = 0
+        self.position.hold_counter = 0
 
         if position_status is None:
-            self.current_position = 0  # No position
+            self.position.current_position = 0
+        elif position_status.qty > 0:
+            self.position.current_position = 1  # Long position
+        elif position_status.qty < 0:
+            self.position.current_position = -1  # Short position
         else:
-            # Binance: positive qty = long, negative qty = short
-            self.current_position = 1 if position_status.qty > 0 else -1 if position_status.qty < 0 else 0
+            self.position.current_position = 0  # No position
 
         # Get initial observation
         return self._get_observation()

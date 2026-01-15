@@ -127,15 +127,21 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         trade_info["position_closed"] = position_closed
 
         if trade_info["executed"]:
-            self.current_position = 1 if trade_info["side"] == "buy" else 0
+            self.position.current_position = 1 if trade_info["side"] == "buy" else 0
 
         if position_closed:
-            self.current_position = 0
+            self.position.current_position = 0
             self.active_stop_loss = 0.0
             self.active_take_profit = 0.0
 
         # Wait for next time step
         self._wait_for_next_timestamp()
+
+        # Update position hold counter
+        if self.position.current_position != 0:
+            self.position.hold_counter += 1
+        else:
+            self.position.hold_counter = 0
 
         # Get updated state
         new_portfolio_value = self._get_portfolio_value()
@@ -175,11 +181,11 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         stop_loss_pct, take_profit_pct = action_tuple
 
         # HOLD action or already in position
-        if action_tuple == (None, None) or self.current_position == 1:
+        if action_tuple == (None, None) or self.position.current_position == 1:
             return trade_info
 
         # BUY with SL/TP bracket order
-        if self.current_position == 0 and stop_loss_pct is not None and take_profit_pct is not None:
+        if self.position.current_position == 0 and stop_loss_pct is not None and take_profit_pct is not None:
             amount = self._calculate_trade_amount("buy")
 
             # Get current price to calculate absolute SL/TP levels

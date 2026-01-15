@@ -180,9 +180,9 @@ class TestSeqFuturesSLTPEnvReset:
     def test_reset_clears_position(self, env):
         """Reset should clear position."""
         env.reset()
-        assert env.position_size == 0.0
-        assert env.current_position == 0
-        assert env.entry_price == 0.0
+        assert env.position.position_size == 0.0
+        assert env.position.current_position == 0
+        assert env.position.entry_price == 0.0
         assert env.liquidation_price == 0.0
 
     def test_reset_clears_histories(self, env):
@@ -208,7 +208,7 @@ class TestSeqFuturesSLTPEnvLongWithSLTP:
         env.step(td)
 
         assert env.stop_loss > 0
-        assert env.stop_loss < env.entry_price  # SL is below entry for long
+        assert env.stop_loss < env.position.entry_price  # SL is below entry for long
 
     def test_long_sets_take_profit(self, env):
         """Long action should set take profit level."""
@@ -218,7 +218,7 @@ class TestSeqFuturesSLTPEnvLongWithSLTP:
         env.step(td)
 
         assert env.take_profit > 0
-        assert env.take_profit > env.entry_price  # TP is above entry for long
+        assert env.take_profit > env.position.entry_price  # TP is above entry for long
 
     def test_long_position_is_positive(self, env):
         """Long position should have positive position_size."""
@@ -227,8 +227,8 @@ class TestSeqFuturesSLTPEnvLongWithSLTP:
         td.set("action", torch.tensor(1))
         env.step(td)
 
-        assert env.position_size > 0
-        assert env.current_position == 1
+        assert env.position.position_size > 0
+        assert env.position.current_position == 1
 
     def test_long_sl_tp_calculated_correctly(self, env):
         """SL/TP should be calculated as percentages of entry price for long."""
@@ -240,8 +240,8 @@ class TestSeqFuturesSLTPEnvLongWithSLTP:
         td.set("action", torch.tensor(1))
         env.step(td)
 
-        expected_sl = env.entry_price * (1 + sl_pct)
-        expected_tp = env.entry_price * (1 + tp_pct)
+        expected_sl = env.position.entry_price * (1 + sl_pct)
+        expected_tp = env.position.entry_price * (1 + tp_pct)
 
         assert abs(env.stop_loss - expected_sl) < 0.01
         assert abs(env.take_profit - expected_tp) < 0.01
@@ -262,7 +262,7 @@ class TestSeqFuturesSLTPEnvShortWithSLTP:
         env.step(td)
 
         assert env.stop_loss > 0
-        assert env.stop_loss > env.entry_price  # SL is above entry for short
+        assert env.stop_loss > env.position.entry_price  # SL is above entry for short
 
     def test_short_sets_take_profit(self, env):
         """Short action should set take profit level."""
@@ -275,7 +275,7 @@ class TestSeqFuturesSLTPEnvShortWithSLTP:
         env.step(td)
 
         assert env.take_profit > 0
-        assert env.take_profit < env.entry_price  # TP is below entry for short
+        assert env.take_profit < env.position.entry_price  # TP is below entry for short
 
     def test_short_position_is_negative(self, env):
         """Short position should have negative position_size."""
@@ -287,8 +287,8 @@ class TestSeqFuturesSLTPEnvShortWithSLTP:
         td.set("action", torch.tensor(short_action))
         env.step(td)
 
-        assert env.position_size < 0
-        assert env.current_position == -1
+        assert env.position.position_size < 0
+        assert env.position.current_position == -1
 
 
 class TestSeqFuturesSLTPEnvTriggers:
@@ -318,8 +318,8 @@ class TestSeqFuturesSLTPEnvTriggers:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size > 0
-        initial_position = env.position_size
+        assert env.position.position_size > 0
+        initial_position = env.position.position_size
 
         # Continue stepping - SL should trigger
         sl_triggered = False
@@ -328,7 +328,7 @@ class TestSeqFuturesSLTPEnvTriggers:
             result = env.step(td)
             td = result["next"]
 
-            if env.position_size == 0 and initial_position > 0:
+            if env.position.position_size == 0 and initial_position > 0:
                 sl_triggered = True
                 break
 
@@ -361,8 +361,8 @@ class TestSeqFuturesSLTPEnvTriggers:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size > 0
-        initial_position = env.position_size
+        assert env.position.position_size > 0
+        initial_position = env.position.position_size
 
         # Continue stepping - TP should trigger
         tp_triggered = False
@@ -371,7 +371,7 @@ class TestSeqFuturesSLTPEnvTriggers:
             result = env.step(td)
             td = result["next"]
 
-            if env.position_size == 0 and initial_position > 0:
+            if env.position.position_size == 0 and initial_position > 0:
                 tp_triggered = True
                 break
 
@@ -404,8 +404,8 @@ class TestSeqFuturesSLTPEnvTriggers:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size < 0
-        initial_position = env.position_size
+        assert env.position.position_size < 0
+        initial_position = env.position.position_size
 
         # Continue stepping - SL should trigger
         sl_triggered = False
@@ -414,7 +414,7 @@ class TestSeqFuturesSLTPEnvTriggers:
             result = env.step(td)
             td = result["next"]
 
-            if env.position_size == 0 and initial_position < 0:
+            if env.position.position_size == 0 and initial_position < 0:
                 sl_triggered = True
                 break
 
@@ -447,8 +447,8 @@ class TestSeqFuturesSLTPEnvTriggers:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size < 0
-        initial_position = env.position_size
+        assert env.position.position_size < 0
+        initial_position = env.position.position_size
 
         # Continue stepping - TP should trigger
         tp_triggered = False
@@ -457,7 +457,7 @@ class TestSeqFuturesSLTPEnvTriggers:
             result = env.step(td)
             td = result["next"]
 
-            if env.position_size == 0 and initial_position < 0:
+            if env.position.position_size == 0 and initial_position < 0:
                 tp_triggered = True
                 break
 
@@ -496,11 +496,11 @@ class TestSeqFuturesSLTPEnvTriggers:
             result = env.step(td)
             td = result["next"]
 
-            if env.position_size == 0:
+            if env.position.position_size == 0:
                 # Position exited - check SL/TP cleared
                 assert env.stop_loss == 0.0
                 assert env.take_profit == 0.0
-                assert env.entry_price == 0.0
+                assert env.position.entry_price == 0.0
                 break
 
             if td.get("done", False):
@@ -535,12 +535,12 @@ class TestSeqFuturesSLTPEnvLiquidation:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size > 0
+        assert env.position.position_size > 0
         assert env.liquidation_price > 0
 
         # Track if liquidation happens
         was_liquidated = False
-        initial_position = env.position_size
+        initial_position = env.position.position_size
 
         for _ in range(100):
             td.set("action", torch.tensor(0))  # hold
@@ -548,7 +548,7 @@ class TestSeqFuturesSLTPEnvLiquidation:
             td = result["next"]
 
             # Check if liquidation occurred
-            if env.position_size == 0 and initial_position > 0:
+            if env.position.position_size == 0 and initial_position > 0:
                 was_liquidated = True
                 break
 
@@ -556,7 +556,7 @@ class TestSeqFuturesSLTPEnvLiquidation:
                 break
 
         # Either liquidated or hit SL (both are valid exits)
-        assert was_liquidated or env.position_size == 0
+        assert was_liquidated or env.position.position_size == 0
 
     def test_liquidation_clears_sltp(self, trending_down_df):
         """Liquidation should clear SL/TP levels."""
@@ -582,14 +582,14 @@ class TestSeqFuturesSLTPEnvLiquidation:
         result = env.step(td)
         td = result["next"]
 
-        initial_position = env.position_size
+        initial_position = env.position.position_size
 
         for _ in range(100):
             td.set("action", torch.tensor(0))
             result = env.step(td)
             td = result["next"]
 
-            if env.position_size == 0 and initial_position > 0:
+            if env.position.position_size == 0 and initial_position > 0:
                 # Position was closed - SL/TP should be cleared
                 assert env.stop_loss == 0.0
                 assert env.take_profit == 0.0
@@ -647,7 +647,7 @@ class TestSeqFuturesSLTPEnvStep:
         td.set("action", torch.tensor(0))  # hold
         env.step(td)
 
-        assert env.position_size == 0.0
+        assert env.position.position_size == 0.0
         assert env.stop_loss == 0.0
         assert env.take_profit == 0.0
 
@@ -660,13 +660,13 @@ class TestSeqFuturesSLTPEnvStep:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size > 0
+        assert env.position.position_size > 0
 
         # Hold should close
         td.set("action", torch.tensor(0))
         result = env.step(td)
 
-        assert env.position_size == 0.0
+        assert env.position.position_size == 0.0
         assert env.stop_loss == 0.0
         assert env.take_profit == 0.0
 
@@ -679,7 +679,7 @@ class TestSeqFuturesSLTPEnvStep:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size > 0
+        assert env.position.position_size > 0
 
         # Open short (close long first internally)
         num_long_actions = len(env.stoploss_levels) * len(env.takeprofit_levels)
@@ -689,8 +689,8 @@ class TestSeqFuturesSLTPEnvStep:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size < 0
-        assert env.current_position == -1
+        assert env.position.position_size < 0
+        assert env.position.current_position == -1
 
     def test_flip_from_short_to_long(self, env):
         """Should be able to flip from short to long position."""
@@ -704,15 +704,15 @@ class TestSeqFuturesSLTPEnvStep:
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size < 0
+        assert env.position.position_size < 0
 
         # Open long (close short first internally)
         td.set("action", torch.tensor(1))
         result = env.step(td)
         td = result["next"]
 
-        assert env.position_size > 0
-        assert env.current_position == 1
+        assert env.position.position_size > 0
+        assert env.position.current_position == 1
 
     def test_full_episode_completes(self, env):
         """Full episode should complete without errors."""
@@ -784,7 +784,7 @@ class TestSeqFuturesSLTPEnvEdgeCases:
 
             assert env.stop_loss == 0.0
             assert env.take_profit == 0.0
-            assert env.position_size == 0.0
+            assert env.position.position_size == 0.0
             assert env.liquidation_price == 0.0
 
             for _ in range(20):
@@ -834,7 +834,7 @@ class TestSeqFuturesSLTPEnvEdgeCases:
         env_high.step(td_high)
 
         # Higher leverage should result in larger position
-        assert abs(env_high.position_size) > abs(env_low.position_size)
+        assert abs(env_high.position.position_size) > abs(env_low.position.position_size)
 
 
 class TestSeqFuturesSLTPEnvMetrics:

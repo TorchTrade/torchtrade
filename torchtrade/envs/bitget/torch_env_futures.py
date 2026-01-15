@@ -136,11 +136,11 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
 
         if trade_info["executed"]:
             if trade_info["side"] == "buy":
-                self.current_position = 1  # Long
+                self.position.current_position = 1  # Long
             elif trade_info["side"] == "sell" and trade_info.get("closed_position"):
-                self.current_position = 0  # Closed
+                self.position.current_position = 0  # Closed
             elif trade_info["side"] == "sell":
-                self.current_position = -1  # Short
+                self.position.current_position = -1  # Short
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -212,7 +212,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
 
         success = self.trader.close_position()
         side = "sell" if current_qty > 0 else "buy"
-        self.current_position = 0
+        self.position.current_position = 0
 
         return self._create_trade_info(
             executed=True,
