@@ -1,7 +1,8 @@
 """Shared fixtures and helpers for transform tests."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, MagicMock
 from contextlib import contextmanager
+import sys
 
 
 @contextmanager
@@ -24,26 +25,43 @@ def mock_chronos_pipeline(embedding_dim=128):
     """
     import torch
 
-    with patch('chronos.ChronosPipeline') as mock_pipeline:
-        # Setup mock pipeline instance
-        mock_pipeline_instance = Mock()
+    # Create mock chronos module
+    mock_chronos = MagicMock()
+    mock_pipeline_class = MagicMock()
 
-        # Mock the embed() method to return (embeddings, _) tuple
-        # embeddings shape: (batch_size, seq_len, embedding_dim)
-        def mock_embed(series):
-            if isinstance(series, torch.Tensor):
-                batch_size = 1
-                seq_len = series.shape[0] if series.ndim == 1 else series.shape[1]
-            else:
-                batch_size = 1
-                seq_len = 10
+    # Setup mock pipeline instance
+    mock_pipeline_instance = Mock()
 
-            embeddings = torch.randn(batch_size, seq_len, embedding_dim)
-            return embeddings, None
+    # Mock the embed() method to return (embeddings, _) tuple
+    # embeddings shape: (batch_size, seq_len, embedding_dim)
+    def mock_embed(series):
+        if isinstance(series, torch.Tensor):
+            batch_size = 1
+            seq_len = series.shape[0] if series.ndim == 1 else series.shape[1]
+        else:
+            batch_size = 1
+            seq_len = 10
 
-        mock_pipeline_instance.embed = Mock(side_effect=mock_embed)
+        embeddings = torch.randn(batch_size, seq_len, embedding_dim)
+        return embeddings, None
 
-        # Configure from_pretrained to return our mock
-        mock_pipeline.from_pretrained.return_value = mock_pipeline_instance
+    mock_pipeline_instance.embed = Mock(side_effect=mock_embed)
 
-        yield mock_pipeline
+    # Configure from_pretrained to return our mock
+    mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
+
+    # Add ChronosPipeline to the mock module
+    mock_chronos.ChronosPipeline = mock_pipeline_class
+
+    # Inject mock into sys.modules
+    old_chronos = sys.modules.get('chronos')
+    sys.modules['chronos'] = mock_chronos
+
+    try:
+        yield mock_pipeline_class
+    finally:
+        # Restore original module state
+        if old_chronos is None:
+            sys.modules.pop('chronos', None)
+        else:
+            sys.modules['chronos'] = old_chronos
