@@ -1,18 +1,18 @@
 """
-Tests for MarketRegimeFeatures class.
+Tests for MarketRegimeTransform and internal regime feature calculations.
 """
 
 import pytest
 import torch
 import numpy as np
 
-from torchtrade.envs.offline.regime_features import MarketRegimeFeatures
+from torchtrade.envs.transforms.market_regime import _MarketRegimeFeatures
 
 
 @pytest.fixture
 def regime_calculator():
     """Create a default regime calculator for testing."""
-    return MarketRegimeFeatures(
+    return _MarketRegimeFeatures(
         volatility_window=20,
         trend_window=50,
         trend_short_window=20,
@@ -89,12 +89,12 @@ def low_volatility_prices():
     return torch.tensor(prices, dtype=torch.float32)
 
 
-class TestMarketRegimeFeatures:
-    """Test suite for MarketRegimeFeatures class."""
+class Test_MarketRegimeFeatures:
+    """Test suite for _MarketRegimeFeatures class."""
 
     def test_initialization(self):
         """Test that regime calculator initializes correctly."""
-        calc = MarketRegimeFeatures(
+        calc = _MarketRegimeFeatures(
             volatility_window=20,
             trend_window=50,
             trend_short_window=20,
@@ -115,19 +115,14 @@ class TestMarketRegimeFeatures:
         assert features.dtype == torch.float32
 
     def test_feature_names(self, regime_calculator):
-        """Test that feature names are correctly defined."""
-        names = regime_calculator.get_feature_names()
-        assert len(names) == 7
-        expected_names = [
-            "vol_regime",
-            "trend_regime",
-            "volume_regime",
-            "position_regime",
-            "volatility",
-            "trend_strength",
-            "volume_ratio",
-        ]
-        assert names == expected_names
+        """Test that features have the correct structure (7 features)."""
+        # Internal class doesn't expose get_feature_names(), but we know the structure
+        # Based on the docstring and compute_features implementation
+        expected_features = 7
+        sample_prices = torch.linspace(100, 110, 300)
+        sample_volumes = torch.ones(300) * 1000
+        features = regime_calculator.compute_features(sample_prices, sample_volumes)
+        assert len(features) == expected_features
 
     def test_insufficient_data_error(self, regime_calculator):
         """Test that error is raised with insufficient data."""
@@ -247,7 +242,7 @@ class TestMarketRegimeFeatures:
 
     def test_custom_thresholds(self):
         """Test that custom thresholds work correctly."""
-        calc = MarketRegimeFeatures(
+        calc = _MarketRegimeFeatures(
             volatility_window=20,
             trend_window=50,
             trend_short_window=20,
@@ -286,7 +281,7 @@ class TestMarketRegimeFeatures:
 
     def test_with_minimal_required_data(self):
         """Test with exactly the minimum required data."""
-        calc = MarketRegimeFeatures(
+        calc = _MarketRegimeFeatures(
             volatility_window=10,
             trend_window=20,
             trend_short_window=10,

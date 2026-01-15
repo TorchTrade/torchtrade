@@ -11,9 +11,176 @@ from torchrl.data import CompositeSpec, BoundedTensorSpec
 from tensordict import TensorDictBase
 import logging
 
-from torchtrade.envs.offline.regime_features import MarketRegimeFeatures
-
 logger = logging.getLogger(__name__)
+
+
+class _MarketRegimeFeatures:
+    """
+    Internal class to compute market regime indicators from OHLCV data.
+
+    Features computed:
+    1. Volatility regime (0=low, 1=medium, 2=high)
+    2. Trend regime (-1=down, 0=sideways, 1=up)
+    3. Volume regime (0=low, 1=normal, 2=high)
+    4. Price position (0=oversold, 1=neutral, 2=overbought)
+    5. Continuous volatility value
+    6. Continuous trend strength value
+    7. Continuous volume ratio value
+    """
+
+    def __init__(
+        self,
+        volatility_window: int = 20,
+        trend_window: int = 50,
+        trend_short_window: int = 20,
+        volume_window: int = 20,
+        price_position_window: int = 252,
+        volatility_thresholds: tuple = (0.33, 0.67),
+        trend_thresholds: tuple = (-0.02, 0.02),
+        volume_thresholds: tuple = (0.7, 1.3),
+        price_position_thresholds: tuple = (0.33, 0.67),
+    ):
+        self.vol_window = volatility_window
+        self.trend_window = trend_window
+        self.trend_short_window = trend_short_window
+        self.volume_window = volume_window
+        self.price_position_window = price_position_window
+
+        # Thresholds
+        self.vol_low_threshold, self.vol_high_threshold = volatility_thresholds
+        self.trend_down_threshold, self.trend_up_threshold = trend_thresholds
+        self.vol_ratio_low, self.vol_ratio_high = volume_thresholds
+        self.price_low_threshold, self.price_high_threshold = price_position_thresholds
+
+        # Minimum data required for all features
+        self.min_data_required = max(
+            self.vol_window,
+            self.trend_window,
+            self.trend_short_window,
+            self.volume_window,
+            self.price_position_window
+        )
+
+    def compute_features(
+        self,
+        prices: torch.Tensor,
+        volumes: torch.Tensor,
+        highs: Optional[torch.Tensor] = None,
+        lows: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Compute regime features from price and volume history."""
+        # Validate input
+        if len(prices) < self.min_data_required:
+            raise ValueError(
+                f"Insufficient data: need at least {self.min_data_required} bars, "
+                f"got {len(prices)}"
+            )
+
+        if len(prices) != len(volumes):
+            raise ValueError(
+                f"Price and volume arrays must have same length: "
+                f"prices={len(prices)}, volumes={len(volumes)}"
+            )
+
+        # Ensure tensors are float32
+        prices = prices.float()
+        volumes = volumes.float()
+
+        # Compute all regimes
+        vol_regime, volatility = self._compute_volatility_regime(prices)
+        trend_regime, trend_strength = self._compute_trend_regime(prices)
+        volume_regime, volume_ratio = self._compute_volume_regime(volumes)
+        position_regime = self._compute_price_position_regime(prices)
+
+        # Combine into feature vector
+        regime_features = torch.tensor([
+            float(vol_regime),
+            float(trend_regime),
+            float(volume_regime),
+            float(position_regime),
+            volatility.item(),
+            trend_strength.item(),
+            volume_ratio.item(),
+        ], dtype=torch.float32)
+
+        return regime_features
+
+    def _compute_volatility_regime(self, prices: torch.Tensor) -> tuple:
+        """Compute volatility regime and continuous volatility value."""
+        returns = torch.diff(prices) / prices[:-1]
+        current_vol = returns[-self.vol_window:].std()
+
+        if len(returns) >= self.vol_window:
+            hist_vol = returns.unfold(0, self.vol_window, 1).std(dim=1)
+            vol_percentile = (hist_vol < current_vol).float().mean()
+
+            if vol_percentile < self.vol_low_threshold:
+                vol_regime = 0  # Low volatility
+            elif vol_percentile < self.vol_high_threshold:
+                vol_regime = 1  # Medium volatility
+            else:
+                vol_regime = 2  # High volatility
+        else:
+            vol_regime = 1  # Default to medium
+
+        return vol_regime, current_vol
+
+    def _compute_trend_regime(self, prices: torch.Tensor) -> tuple:
+        """Compute trend regime and continuous trend strength value."""
+        ma_short = prices[-self.trend_short_window:].mean()
+        ma_long = prices[-self.trend_window:].mean()
+        trend_strength = (ma_short - ma_long) / ma_long
+
+        if trend_strength > self.trend_up_threshold:
+            trend_regime = 1  # Uptrend
+        elif trend_strength < self.trend_down_threshold:
+            trend_regime = -1  # Downtrend
+        else:
+            trend_regime = 0  # Sideways
+
+        return trend_regime, trend_strength
+
+    def _compute_volume_regime(self, volumes: torch.Tensor) -> tuple:
+        """Compute volume regime and continuous volume ratio value."""
+        current_volume = volumes[-1]
+        avg_volume = volumes[-self.volume_window:].mean()
+
+        if avg_volume > 0:
+            volume_ratio = current_volume / avg_volume
+        else:
+            volume_ratio = torch.tensor(1.0)
+
+        if volume_ratio < self.vol_ratio_low:
+            volume_regime = 0  # Low volume
+        elif volume_ratio > self.vol_ratio_high:
+            volume_regime = 2  # High volume
+        else:
+            volume_regime = 1  # Normal volume
+
+        return volume_regime, volume_ratio
+
+    def _compute_price_position_regime(self, prices: torch.Tensor) -> int:
+        """Compute price position regime (oversold/neutral/overbought)."""
+        window_size = min(self.price_position_window, len(prices))
+        recent_prices = prices[-window_size:]
+
+        current_price = prices[-1]
+        high_price = recent_prices.max()
+        low_price = recent_prices.min()
+
+        if high_price > low_price:
+            price_position = (current_price - low_price) / (high_price - low_price)
+        else:
+            price_position = 0.5  # No range, assume neutral
+
+        if price_position < self.price_low_threshold:
+            position_regime = 0  # Oversold
+        elif price_position > self.price_high_threshold:
+            position_regime = 2  # Overbought
+        else:
+            position_regime = 1  # Neutral
+
+        return position_regime
 
 
 class MarketRegimeTransform(Transform):
@@ -104,7 +271,7 @@ class MarketRegimeTransform(Transform):
         self.sampler = sampler
 
         # Initialize regime feature calculator
-        self.regime_calculator = MarketRegimeFeatures(
+        self.regime_calculator = _MarketRegimeFeatures(
             volatility_window=volatility_window,
             trend_window=trend_window,
             trend_short_window=trend_short_window,
