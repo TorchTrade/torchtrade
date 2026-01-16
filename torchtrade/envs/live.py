@@ -108,7 +108,10 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
 
     def _wait_for_next_timestamp(self):
         """
-        Wait until next time step based on execute_on configuration.
+        Wait until next time step using single calculated sleep.
+
+        Uses a single sleep call with exact duration instead of a polling loop,
+        improving CPU efficiency and timing precision.
 
         This is COMMON across all live environments - timing logic is universal.
 
@@ -143,9 +146,12 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         current_time = datetime.now(self.timezone)
         next_step = (current_time + wait_duration).replace(second=0, microsecond=0)
 
-        # Wait until next step
-        while datetime.now(self.timezone) < next_step:
-            time.sleep(1)
+        # Calculate exact sleep duration
+        sleep_seconds = (next_step - datetime.now(self.timezone)).total_seconds()
+
+        # Single sleep instead of polling loop
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
 
     @abstractmethod
     def _get_portfolio_value(self, *args, **kwargs) -> float:
