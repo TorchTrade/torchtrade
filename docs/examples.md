@@ -13,9 +13,57 @@ TorchTrade examples closely follow the structure of [TorchRL's SOTA implementati
 
 ---
 
+## Direct Compatibility with TorchRL SOTA Implementations
+
+To demonstrate the closeness to TorchRL's [SOTA implementations](https://github.com/pytorch/rl/tree/main/sota-implementations), here is a direct comparison:
+
+**TorchRL's A2C Example:**
+```python
+from torchrl.envs import GymEnv
+
+# Environment setup
+env = GymEnv("CartPole-v1")
+
+# Everything else stays the same
+collector = SyncDataCollector(env, policy, ...)
+loss_module = A2CLoss(actor, critic, ...)
+optimizer = torch.optim.Adam(loss_module.parameters(), lr=1e-3)
+
+for batch in collector:
+    loss_values = loss_module(batch)
+    loss_values["loss"].backward()
+    optimizer.step()
+```
+
+**TorchTrade Adaptation (Only Environment Changes):**
+```python
+from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+
+# Environment setup - ONLY CHANGE
+env = SeqLongOnlyEnv(df, SeqLongOnlyEnvConfig(...))
+
+# Everything else stays EXACTLY the same
+collector = SyncDataCollector(env, policy, ...)
+loss_module = A2CLoss(actor, critic, ...)
+optimizer = torch.optim.Adam(loss_module.parameters(), lr=1e-3)
+
+for batch in collector:
+    loss_values = loss_module(batch)
+    loss_values["loss"].backward()
+    optimizer.step()
+```
+
+**That's it!** The collector, loss function, optimizer, and training loop remain identical. This doesn't only allow the use of any TorchRL algorithm, but any of the other useful components of TorchRL - replay buffers, transforms, modules, data structures - and provides seamless integration into the entire TorchRL ecosystem.
+
+---
+
 ## Available Examples
 
-### Online Training (Offline Backtesting Environments)
+The following examples demonstrate the flexibility of TorchTrade across different algorithms, environments, and use cases. These examples are meant to be starting points for further experimentation and adaptation - customize them according to your needs, ideas, and environments.
+
+### Online RL (Offline Backtesting Environments)
+
+These examples use online RL algorithms (learning from interaction as it happens) with historical market data for backtesting. This allows you to train policies on past data before deploying them to live trading environments. We typically split the training data into training and test environments to evaluate the generalization performance of learned policies on unseen market conditions.
 
 Located in `examples/online/`:
 
@@ -30,9 +78,10 @@ Located in `examples/online/`:
 | **dsac/** | DSAC (Distributional SAC) | SeqLongOnlyEnv | Soft actor-critic with distributional value functions |
 | **grpo_futures_onestep/** | GRPO | FuturesOneStepEnv | Group relative policy optimization for one-step RL |
 | **long_onestep_env/** | GRPO | LongOnlyOneStepEnv | One-step long-only with SLTP bracket orders |
-| **rulebased/** | Rule-Based | SeqLongOnlyEnv | MeanReversionActor baseline (no RL training) |
 
-### Offline Training
+### Offline RL
+
+These examples use offline RL algorithms that learn from pre-collected datasets without requiring live environment interaction during training. The data can be collected from interactions with offline backtesting environments or from real online live trading sessions. We provide simple example offline datasets at [HuggingFace/Torch-Trade](https://huggingface.co/Torch-Trade).
 
 Located in `examples/offline/`:
 
@@ -40,7 +89,11 @@ Located in `examples/offline/`:
 |---------|-----------|-------------|--------------|
 | **iql/** | IQL | SeqLongOnlyEnv | Offline RL from pre-collected trajectories |
 
+**Note**: Thanks to the compatibility with TorchRL, you can easily add other offline RL methods like CQL, TD3+BC, and Decision Transformers from TorchRL to do offline RL with TorchTrade environments.
+
 ### LLM Actors
+
+TorchTrade implements LLMActor that allows the integration of local LLMs for trading decision-making. You can use models directly from [HuggingFace Models](https://huggingface.co/models) or quantized models from [Unsloth](https://unsloth.ai/) for memory-efficient and fast interactions. This approach leverages the reasoning capabilities of LLMs to make trading decisions and provides fertile soil for new ideas and adaptations for trading with LLMs thanks to TorchTrade.
 
 Located in `examples/llm/`:
 
@@ -48,7 +101,23 @@ Located in `examples/llm/`:
 |---------|------|-------------|
 | **local/** | LocalLLMActor | Trading with local LLMs (vLLM/transformers backend) |
 
+**Future Work**: We plan to provide example scripts for fine-tuning LLMs on reasoning traces from frontier models for trading. Additionally, we are working on integrating Vision-Language Models (VLMs) to process trading chart plots for decision-making.
+
+### Rule-Based Actors
+
+TorchTrade provides actor classes that allow easy creation of rule-based trading strategies using technical indicators and market signals, for example mean reversion, breakout, and more. These rule-based actors integrate seamlessly with TorchTrade environments for both backtesting and live trading, serving as baselines or components in hybrid approaches. This is especially interesting with our **[custom feature preprocessing](guides/custom-features.md)**, which allows you to add technical indicators and derived features to enhance rule-based strategies.
+
+Located in `examples/online/rulebased/`:
+
+| Example | Actor Type | Environment | Description |
+|---------|------------|-------------|-------------|
+| **rulebased/** | MeanReversionActor | SeqLongOnlyEnv | Mean reversion strategy using Bollinger Bands and Stochastic RSI |
+
+**Future Work**: We plan to provide examples of hybrid approaches that combine rule-based policies with neural network policies as actors, leveraging the strengths of both deterministic strategies and learned behaviors.
+
 ### Live Trading
+
+These examples demonstrate deploying trained policies to real exchange APIs for live trading. We strongly recommend starting with paper trading to validate your strategies risk-free before transitioning to live capital deployment.
 
 Located in `examples/live/`:
 
@@ -56,21 +125,17 @@ Located in `examples/live/`:
 |---------|----------|-------------|
 | **alpaca/** | Alpaca | Live paper trading with Alpaca API |
 
-### Human Actors
-
-Located in `examples/human/`:
-
-| Example | Type | Description |
-|---------|------|-------------|
-| **human_exe_longseq/** | HumanActor | Interactive human trading for expert demonstrations |
-
 ### Transforms
+
+Inspired by work such as [R3M](https://arxiv.org/abs/2203.12601) and [VIP](https://arxiv.org/abs/2210.00030) that utilize large pretrained models for representation learning, we created the ChronosEmbeddingTransform using [Chronos forecasting models](https://github.com/amazon-science/chronos-forecasting) to embed historical trading data. This demonstrates the flexibility and adaptability of TorchTrade for integrating pretrained models as transforms for enhanced feature representations.
 
 Located in `examples/transforms/`:
 
 | Example | Transform | Description |
 |---------|-----------|-------------|
 | **chronos_embedding_example.py** | ChronosEmbeddingTransform | Time series embedding with Chronos T5 models |
+
+**Note**: If you would like us to add additional transforms for other pretrained models (similar to ChronosEmbedding), we welcome [GitHub issues](https://github.com/TorchTrade/torchtrade_envs/issues) with your requests. We're happy to implement these given the availability of model weights and resources.
 
 ---
 
@@ -145,33 +210,6 @@ def main(cfg):
 ```
 
 This structure mirrors [TorchRL's SOTA implementations](https://github.com/pytorch/rl/tree/main/sota-implementations), making it easy to adapt other algorithms.
-
----
-
-## Adapting TorchRL Algorithms
-
-TorchTrade environments are fully compatible with TorchRL. To use a TorchRL algorithm:
-
-1. **Use TorchTrade environment** instead of Gym environment
-2. **Keep everything else the same** - collector, loss, optimizer
-3. **Optionally customize** - reward functions, features, action spaces
-
-**Example: Adapting TorchRL's A2C to TorchTrade**
-
-```python
-# From TorchRL A2C example
-from torchrl.envs import GymEnv
-env = GymEnv("CartPole-v1")
-
-# Change to TorchTrade
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-env = SeqLongOnlyEnv(df, SeqLongOnlyEnvConfig(...))
-
-# Rest of A2C code works unchanged!
-collector = SyncDataCollector(env, policy, ...)
-loss_module = A2CLoss(actor, critic, ...)
-# ... training loop
-```
 
 ---
 

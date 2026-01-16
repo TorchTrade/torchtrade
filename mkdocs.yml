@@ -1,7 +1,7 @@
 site_name: TorchTrade Documentation
 site_description: Reinforcement learning environments for algorithmic trading
 site_author: TorchTrade Team
-site_url: https://torchtrade.github.io/torchtrade_envs/
+site_url: https://torchtrade.github.io/torchtrade/
 
 theme:
   name: material
@@ -73,8 +73,8 @@ markdown_extensions:
 plugins:
   - search
 
-repo_url: https://github.com/TorchTrade/torchtrade_envs
-repo_name: TorchTrade/torchtrade_envs
+repo_url: https://github.com/TorchTrade/torchtrade
+repo_name: TorchTrade/torchtrade
 edit_uri: edit/main/docs/
 
 nav:
