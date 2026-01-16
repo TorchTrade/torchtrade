@@ -1,447 +1,202 @@
 # Understanding the Sampler
 
-The `MarketDataObservationSampler` is the core component that handles multi-timeframe data sampling in TorchTrade's offline environments. This guide explains how it works and how to use it effectively.
+The `MarketDataObservationSampler` handles multi-timeframe data sampling in TorchTrade's offline environments.
 
 ## What Is the Sampler?
 
-The sampler is responsible for:
+The sampler:
 
-1. **Resampling** 1-minute OHLCV data to multiple timeframes (5m, 15m, 1h, etc.)
-2. **Applying feature preprocessing** to each timeframe
-3. **Creating sliding windows** of market data for observations
-4. **Preventing lookahead bias** by indexing bars correctly
+1. **Resamples** 1-minute OHLCV to multiple timeframes (5m, 15m, 1h)
+2. **Applies feature preprocessing** to each timeframe
+3. **Creates sliding windows** of market data
+4. **Prevents lookahead bias** by correct bar indexing
 
 ```
-1-Minute OHLCV Data
-    ↓
-MarketDataObservationSampler
-    ├── Resample to 5-minute bars
-    ├── Resample to 15-minute bars
-    ├── Resample to 1-hour bars
-    ├── Apply feature preprocessing
-    └── Create sliding windows
-    ↓
-Multi-Timeframe Observations
-    ├── market_data_1Minute: [12, features]
-    ├── market_data_5Minute: [8, features]
-    └── market_data_15Minute: [8, features]
+1-Minute Data → Sampler → Multi-Timeframe Observations
+                  ├── Resample to timeframes
+                  ├── Apply preprocessing
+                  └── Create windows
 ```
+
+---
 
 ## Basic Usage
 
-The sampler is created automatically when you initialize an offline environment:
+The sampler is created automatically:
 
 ```python
 from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-import pandas as pd
-
-# Load 1-minute OHLCV data
-df = pd.read_csv("btcusdt_1m.csv")
-df['timestamp'] = pd.to_datetime(df['timestamp'])
 
 # Configure multi-timeframe sampling
 config = SeqLongOnlyEnvConfig(
-    time_frames=[1, 5, 15, 60],        # Minutes: 1m, 5m, 15m, 1h
+    time_frames=["1min", "5min", "15min", "60min"],        # All values in minutes: 1min, 5min, 15min, 60min
     window_sizes=[12, 8, 8, 24],       # Lookback per timeframe
-    execute_on=(5, "Minute"),          # Execute every 5 minutes
+    execute_on=(5, "Minute"),          # Trade every 5min
 )
 
 env = SeqLongOnlyEnv(df, config)
 
-# The sampler is created internally:
-# env.sampler = MarketDataObservationSampler(...)
+# Observations contain all timeframes
+obs = env.reset()
+# obs["market_data_1Minute"]: (12, features)
+# obs["market_data_5Minute"]: (8, features)
+# obs["market_data_15Minute"]: (8, features)
+# obs["market_data_60Minute"]: (24, features)
 ```
+
+---
 
 ## How Resampling Works
 
-### Basic Resampling
+### Timeframe Alignment
 
-The sampler resamples 1-minute base data to higher timeframes using pandas `resample()`:
+The sampler ensures all timeframes align with the execution timeframe:
+
+**Example: execute_on=5Minute**
+
+```
+1-minute bars:  | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+5-minute bars:  |    A    |    B    |    C    |    D    |
+Execute at:            ↑         ↑         ↑         ↑
+                    t=5       t=10      t=15      t=20
+```
+
+At each execution timestep:
+- All timeframes show data **up to and including** the current bar
+- No future data is leaked
+- Lower timeframes have more recent bars
+
+### Lookahead Bias Prevention
+
+**Key principle**: At time t, only use data from bars that have **closed** by time t.
 
 ```python
-# 1-minute → 5-minute
-resampled_5m = df.resample('5T').agg({
-    'open': 'first',    # First price in 5-min window
-    'high': 'max',      # Highest price in 5-min window
-    'low': 'min',       # Lowest price in 5-min window
-    'close': 'last',    # Last price in 5-min window
-    'volume': 'sum'     # Total volume in 5-min window
-})
+# At t=10 (executing on 5-minute bar B)
+# ✅ Can use: 5-min bar A (closed at t=5)
+# ❌ Cannot use: 5-min bar B (closes at t=10, not fully formed yet)
+
+# Implementation: Sampler indexes one bar behind execution time
+window = data[exec_index - window_size : exec_index]  # Excludes current forming bar
 ```
 
-### Lookahead Bias Prevention (CRITICAL!)
+This is why you see a shift between execution time and visible data.
 
-**Issue #10 Fix**: By default, pandas `resample()` indexes bars by their START time, but aggregates data through their END time. This creates lookahead bias!
+---
 
-Example:
-- A 5-minute bar at `00:25:00` contains data from `00:25:00` to `00:29:59`
-- An agent executing at `00:27:00` would see minute 29 data (future!)
+## Common Configuration Patterns
 
-**Solution**: TorchTrade shifts higher timeframe bars forward by their period, indexing them by END time:
+| Pattern | time_frames | window_sizes | execute_on | Use Case |
+|---------|-------------|--------------|------------|----------|
+| **Single Timeframe** | `["1min"]` | `[100]` | `(1, "Minute")` | High-frequency, simple features |
+| **Multi-Timeframe** | `["1min", "5min", "15min"]` | `[12, 8, 8]` | `(5, "Minute")` | Capture multiple market rhythms |
+| **Hierarchical** | `["1min", "5min", "15min", "60min", "240min"]` | `[12, 8, 8, 24, 48]` | `(5, "Minute")` | Complex strategies, trend analysis |
+| **Long-Term** | `["60min", "240min", "1440min"]` | `[24, 24, 30]` | `(60, "Minute")` | Position trading, low frequency |
 
-```python
-# After resampling
-if tf > execute_on:  # Only shift coarser timeframes
-    offset = pd.Timedelta(tf.to_pandas_freq())
-    resampled.index = resampled.index + offset
-```
+---
 
-This ensures:
-- Higher timeframe bars are indexed by END time (when complete)
-- Only completed bars are visible to the agent
-- No lookahead bias in backtests
+## Key Parameters
 
-**Example:**
-```
-Original (START time indexing):
-00:25:00 → [00:25:00 - 00:29:59] ❌ Visible at 00:27:00 (lookahead!)
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| `time_frames` | list[str] | Timeframes as strings (e.g., "1min", "5min", "1h") | `["1min", "5min", "15min"]` |
+| `window_sizes` | list[int] | Lookback window per timeframe | `[12, 8, 8]` |
+| `execute_on` | tuple | (value, "Minute"/"Hour") | `(5, "Minute")` |
+| `feature_preprocessing_fn` | callable | Transform OHLCV before windowing | `add_indicators` |
 
-Fixed (END time indexing):
-00:30:00 → [00:25:00 - 00:29:59] ✅ Only visible at 00:30:00+
-```
+---
 
-## Multi-Timeframe Configuration
+## Window Size Selection
 
-### Time Frames
+Choose window sizes based on the information needed:
 
-Specify timeframes in minutes:
+**For 1-minute timeframe**:
+- **12 bars** = 12 minutes of data (short-term)
+- **60 bars** = 1 hour of data (medium-term)
+- **240 bars** = 4 hours of data (long-term)
 
-```python
-config = SeqLongOnlyEnvConfig(
-    time_frames=[1, 5, 15, 60],        # 1m, 5m, 15m, 1h
-    ...
-)
-```
+**For 5-minute timeframe**:
+- **8 bars** = 40 minutes
+- **12 bars** = 1 hour
+- **24 bars** = 2 hours
 
-### Window Sizes
+**Rule of thumb**: Higher timeframes need fewer bars (they already capture more history per bar).
 
-Each timeframe has a lookback window:
-
-```python
-config = SeqLongOnlyEnvConfig(
-    time_frames=[1, 5, 15, 60],
-    window_sizes=[12, 8, 8, 24],       # Bars per timeframe
-    ...
-)
-```
-
-This creates observations:
-- `market_data_1Minute`: Last 12 one-minute bars (12 minutes)
-- `market_data_5Minute`: Last 8 five-minute bars (40 minutes)
-- `market_data_15Minute`: Last 8 fifteen-minute bars (2 hours)
-- `market_data_60Minute`: Last 24 one-hour bars (24 hours)
-
-### Execute On
-
-Controls trade execution frequency:
-
-```python
-config = SeqLongOnlyEnvConfig(
-    execute_on=(5, "Minute"),          # Execute every 5 minutes
-    ...
-)
-```
-
-The agent receives observations and can trade every 5 minutes, even though it observes 1m, 5m, 15m, and 1h data.
-
-## Feature Preprocessing
-
-The sampler applies custom feature preprocessing to each timeframe after resampling:
-
-```python
-import ta
-
-def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
-    """Add technical indicators"""
-    df["features_close"] = df["close"]
-    df["features_rsi_14"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
-    df.fillna(0, inplace=True)
-    return df
-
-config = SeqLongOnlyEnvConfig(
-    feature_preprocessing_fn=custom_preprocessing,  # Applied to each timeframe
-    time_frames=[1, 5, 15],
-    ...
-)
-```
-
-The function is called separately for each resampled timeframe:
-1. Resample 1m → 1m (no change)
-2. Apply `custom_preprocessing(df_1m)`
-3. Resample 1m → 5m
-4. Apply `custom_preprocessing(df_5m)`
-5. Resample 1m → 15m
-6. Apply `custom_preprocessing(df_15m)`
-
-## Sliding Windows
-
-The sampler creates sliding windows for each timeframe:
-
-```python
-# Example: window_size=8 for 5-minute timeframe
-# At execution time 01:00:00, the window contains:
-[
-    [00:25:00],  # 5m bar from 00:20:00-00:24:59
-    [00:30:00],  # 5m bar from 00:25:00-00:29:59
-    [00:35:00],  # 5m bar from 00:30:00-00:34:59
-    [00:40:00],  # 5m bar from 00:35:00-00:39:59
-    [00:45:00],  # 5m bar from 00:40:00-00:44:59
-    [00:50:00],  # 5m bar from 00:45:00-00:49:59
-    [00:55:00],  # 5m bar from 00:50:00-00:54:59
-    [01:00:00],  # 5m bar from 00:55:00-00:59:59
-]
-```
-
-At the next execution step (01:05:00), the window slides forward:
-```python
-[
-    [00:30:00],  # Oldest bar dropped
-    [00:35:00],
-    ...
-    [01:00:00],
-    [01:05:00],  # New bar added
-]
-```
-
-## Advanced Usage
-
-### Episode Start Randomization
-
-Episodes can start at random positions in the dataset:
-
-```python
-# During env.reset()
-start_idx = env.sampler.get_random_start_index()
-
-# Or specify max trajectory length
-config = SeqLongOnlyEnvConfig(
-    max_traj_length=1000,  # Limit episode to 1000 steps
-    ...
-)
-```
-
-### Accessing the Sampler
-
-You can access the sampler directly from the environment:
-
-```python
-env = SeqLongOnlyEnv(df, config)
-
-# Access sampler
-sampler = env.sampler
-
-# Get observation at specific index
-obs = sampler.get_observation(index=100)
-
-print(obs.keys())  # ['market_data_1Minute', 'market_data_5Minute', ...]
-```
-
-### Data Requirements
-
-The sampler requires sufficient historical data for the largest lookback window:
-
-```python
-config = SeqLongOnlyEnvConfig(
-    time_frames=[1, 5, 15, 60],
-    window_sizes=[12, 8, 8, 24],       # 24 hours max lookback
-    execute_on=(5, "Minute"),
-)
-
-# Minimum data required: 24 hours + 1 hour buffer = 25 hours
-# At 1-minute resolution: 25 * 60 = 1500 rows
-```
-
-If insufficient data, the sampler raises an error:
-
-```
-ValueError: Resampled dataframe for timeframe 60Minute is empty
-```
-
-## Performance Optimization
-
-### Pre-compute Resampled DataFrames
-
-The sampler pre-computes all resampled DataFrames during initialization:
-
-```python
-# Happens once during env creation
-env = SeqLongOnlyEnv(df, config)  # ← Resampling happens here
-
-# Subsequent resets and steps are fast
-env.reset()  # ← No resampling, uses pre-computed data
-env.step(tensordict)  # ← Fast window lookup
-```
-
-### Named Tuples for Speed
-
-The sampler uses named tuples for fast OHLCV access:
-
-```python
-from collections import namedtuple
-
-OHLCV = namedtuple('OHLCV', ['open', 'high', 'low', 'close', 'volume'])
-
-# Faster than dict access
-ohlcv = OHLCV(open=100, high=105, low=99, close=103, volume=1000)
-print(ohlcv.close)  # Fast attribute access
-```
-
-## Building Custom Samplers
-
-You can create custom samplers by subclassing `MarketDataObservationSampler`:
-
-```python
-from torchtrade.envs.offline.sampler import MarketDataObservationSampler
-
-class CustomSampler(MarketDataObservationSampler):
-    def __init__(self, df, time_frames, window_sizes, execute_on, **kwargs):
-        super().__init__(df, time_frames, window_sizes, execute_on, **kwargs)
-
-    def get_observation(self, index: int) -> Dict[str, torch.Tensor]:
-        """Override to customize observation structure"""
-        obs = super().get_observation(index)
-
-        # Add custom fields
-        obs["custom_feature"] = torch.tensor([...])
-
-        return obs
-```
-
-Then use in your environment:
-
-```python
-class CustomEnv(SeqLongOnlyEnv):
-    def __init__(self, df, config):
-        super().__init__(df, config)
-
-        # Replace sampler with custom one
-        self.sampler = CustomSampler(
-            df,
-            config.time_frames,
-            config.window_sizes,
-            config.execute_on,
-            feature_processing_fn=config.feature_preprocessing_fn
-        )
-```
+---
 
 ## Common Issues
 
-### Issue 1: Empty Resampled DataFrame
+| Issue | Symptom | Solution |
+|-------|---------|----------|
+| **NaN values in observations** | Training crashes | Fill NaN in `feature_preprocessing_fn` with `df.fillna(0)` |
+| **Episode too short** | Episode ends after few steps | Check data length covers `max(window_sizes) * max(time_frames) + episode_length` |
+| **Misaligned timeframes** | Unexpected data patterns | Use `execute_on` that's a multiple of all `time_frames` |
+| **Memory issues** | OOM errors | Reduce `window_sizes` or number of `time_frames` |
+| **Slow sampling** | Environment init takes long | Cache preprocessing results or simplify indicator calculations |
 
-**Error:**
-```
-ValueError: Resampled dataframe for timeframe 60Minute is empty
-```
+---
 
-**Cause:** Insufficient data for the requested timeframe.
+## Performance Tips
 
-**Solution:** Ensure you have enough historical data:
+### 1. Efficient Preprocessing
+
 ```python
-# For 1-hour bars with window_size=24, you need:
-# 24 hours + buffer ≈ 30 hours of 1-minute data
-# = 30 * 60 = 1800 rows minimum
-```
+# ❌ Slow - recalculating indicators
+def slow_preprocessing(df):
+    for i in range(len(df)):
+        df.loc[i, "sma"] = df["close"][i-20:i].mean()
+    return df
 
-### Issue 2: NaN Values in Observations
-
-**Error:** Policy receives NaN values.
-
-**Cause:** Feature preprocessing created NaNs.
-
-**Solution:** Fill NaNs in preprocessing function:
-```python
-def preprocessing(df):
-    df["features_rsi"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
-    df.fillna(0, inplace=True)  # ← Important!
+# ✅ Fast - vectorized operations
+def fast_preprocessing(df):
+    df["sma"] = df["close"].rolling(20).mean()
     return df
 ```
 
-### Issue 3: Slow Environment Creation
+### 2. Appropriate Window Sizes
 
-**Issue:** `SeqLongOnlyEnv(df, config)` takes a long time.
-
-**Cause:** Large dataset with complex feature preprocessing.
-
-**Solution:** Cache pre-processed data:
-```python
-import joblib
-
-# Save preprocessed data
-env = SeqLongOnlyEnv(df, config)
-joblib.dump(env.sampler, "sampler_cache.pkl")
-
-# Load cached sampler
-sampler = joblib.load("sampler_cache.pkl")
-env.sampler = sampler
-```
-
-## Debugging Tips
-
-### Print Sampler Info
+Larger windows = more memory and computation:
 
 ```python
-env = SeqLongOnlyEnv(df, config)
+# Memory usage ≈ batch_size × num_envs × sum(window_sizes) × num_features × 4 bytes
 
-print(f"Resampled timeframes: {env.sampler.resampled_dfs.keys()}")
-print(f"Max lookback: {env.sampler.max_lookback}")
-
-for tf_key, df_resampled in env.sampler.resampled_dfs.items():
-    print(f"{tf_key}: {len(df_resampled)} bars, "
-          f"first={df_resampled.index[0]}, "
-          f"last={df_resampled.index[-1]}")
+# Example: 32 batch × 8 envs × (12+8+8) windows × 10 features × 4 bytes ≈ 290 KB
 ```
 
-### Visualize Observations
+Keep `sum(window_sizes) × num_features` reasonable (< 1000 total values per observation).
+
+---
+
+## Advanced: Custom Resampling
+
+If you need non-standard resampling (e.g., tick bars, volume bars), pass pre-resampled data:
 
 ```python
-import matplotlib.pyplot as plt
+# Prepare custom timeframes externally
+df_1m = raw_data  # Already 1-minute bars
+df_5m = resample_custom(raw_data, method="volume_bars", threshold=1000)
+df_15m = resample_custom(raw_data, method="tick_bars", threshold=100)
 
-# Get observation at specific step
-obs = env.sampler.get_observation(index=100)
-
-# Plot 5-minute close prices
-close_prices = obs["market_data_5Minute"][:, -1]  # Assuming close is last feature
-
-plt.plot(close_prices.numpy())
-plt.title("5-Minute Close Prices (8-bar window)")
-plt.xlabel("Bar")
-plt.ylabel("Price")
-plt.show()
+# Environment handles them as standard timeframes
+config = SeqLongOnlyEnvConfig(
+    time_frames=["1min", "5min", "15min"],  # Interpreted as provided timeframes
+    # ... rest of config
+)
 ```
 
-## Next Steps
+**Note**: This is advanced usage. Standard time-based resampling works for most cases.
 
-- **[Custom Feature Engineering](custom-features.md)** - Add technical indicators
-- **[Custom Reward Functions](reward-functions.md)** - Design better rewards
-- **[Building Custom Environments](custom-environment.md)** - Extend TorchTrade
-- **[Offline Environments](../environments/offline.md)** - Apply sampler knowledge
+---
 
 ## Technical Reference
 
-### Source Code
+- **Source**: [`torchtrade/envs/offline/sampler.py`](https://github.com/TorchTrade/TorchTrade/blob/main/torchtrade/envs/offline/sampler.py)
+- **Resampling Logic**: Uses pandas `resample().agg()` with OHLCV aggregation rules
+- **Indexing**: Execution times mapped to 1-minute bar indices, then resampled timeframes aligned
 
-The sampler implementation is in:
-```
-torchtrade/envs/offline/sampler.py
-```
+---
 
-Key methods:
-- `__init__()`: Initialize and pre-compute resampled data
-- `get_observation(index)`: Get multi-timeframe observation at index
-- `get_random_start_index()`: Get random valid starting position
-- `reset()`: Reset sampler state
+## Next Steps
 
-### TimeFrame Class
-
-```python
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
-
-# Create timeframe
-tf = TimeFrame(5, TimeFrameUnit.Minute)
-
-# Convert to pandas frequency
-tf.to_pandas_freq()  # → "5T"
-
-# Get observation key
-tf.obs_key_freq()  # → "5Minute"
-```
+- **[Custom Feature Engineering](custom-features.md)** - Add technical indicators via preprocessing
+- **[Custom Reward Functions](reward-functions.md)** - Design rewards that work with your sampled data
+- **[Offline Environments](../environments/offline.md)** - Apply sampler configuration to environments

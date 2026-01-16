@@ -1,16 +1,18 @@
 # Building Custom Environments
 
-This guide shows you how to extend TorchTrade to create custom trading environments for your specific needs.
+This guide shows how to extend TorchTrade for custom trading environments.
 
 ## When to Build a Custom Environment
 
-Consider building a custom environment when you need:
+Build a custom environment when you need:
 
-- **Custom asset types**: Options, forex, commodities, etc.
-- **Complex order types**: Market-on-close, iceberg orders, etc.
-- **Custom state representations**: Order book data, sentiment, news, etc.
-- **Specific trading rules**: Pattern day trading rules, portfolio constraints, etc.
-- **New exchange integrations**: Unsupported brokers or APIs
+- **Custom asset types**: Options, forex, commodities
+- **Complex order types**: Market-on-close, iceberg orders
+- **Custom state**: Order book data, sentiment, news
+- **Specific trading rules**: Pattern day trading, portfolio constraints
+- **New exchange integrations**: Unsupported brokers/APIs
+
+---
 
 ## Environment Architecture
 
@@ -19,22 +21,27 @@ TorchTrade environments inherit from TorchRL's `EnvBase`:
 ```
 EnvBase (TorchRL)
     ↓
-BaseTorchTradeEnv (Abstract base)
+BaseTorchTradeEnv (Abstract base - optional)
     ↓
 YourCustomEnv
 ```
 
-Key methods to implement:
-- `_reset()`: Initialize episode state
-- `_step(tensordict)`: Execute action and update state
-- `_set_seed(seed)`: Set random seed
-- `observation_spec`: Define observation space
-- `action_spec`: Define action space
-- `reward_spec`: Define reward space
+### Required Methods
+
+| Method | Purpose | Returns |
+|--------|---------|---------|
+| `_reset()` | Initialize episode state | TensorDict with initial observation |
+| `_step(tensordict)` | Execute action, update state | TensorDict with next observation |
+| `_set_seed(seed)` | Set random seed for reproducibility | None |
+| `observation_spec` | Define observation space | CompositeSpec |
+| `action_spec` | Define action space | DiscreteTensorSpec or ContinuousTensorSpec |
+| `reward_spec` | Define reward space | UnboundedContinuousTensorSpec |
+
+---
 
 ## Example 1: Simple Custom Environment
 
-Let's create a minimal custom environment from scratch:
+Minimal environment from scratch:
 
 ```python
 from torchrl.envs import EnvBase
@@ -46,16 +53,16 @@ class SimpleCustomEnv(EnvBase):
     """
     Minimal custom trading environment.
 
-    State: [price]
+    State: [price, position]
     Actions: 0 (HOLD), 1 (BUY), 2 (SELL)
     Reward: Log return
     """
 
     def __init__(self, prices: torch.Tensor, **kwargs):
         super().__init__(**kwargs)
-        self.prices = prices  # Historical prices
+        self.prices = prices
         self.current_step = 0
-        self.position = 0  # 0 or 1 (no position or holding)
+        self.position = 0  # 0 or 1
         self.entry_price = 0.0
 
         # Define specs
@@ -64,11 +71,11 @@ class SimpleCustomEnv(EnvBase):
             "position": UnboundedContinuousTensorSpec(shape=(1,)),
         })
 
-        self._action_spec = DiscreteTensorSpec(n=3)  # 3 actions
+        self._action_spec = DiscreteTensorSpec(n=3)
         self._reward_spec = UnboundedContinuousTensorSpec(shape=(1,))
 
     def _reset(self, tensordict=None, **kwargs):
-        """Reset environment to initial state"""
+        """Reset to initial state"""
         self.current_step = 0
         self.position = 0
         self.entry_price = 0.0
@@ -78,11 +85,9 @@ class SimpleCustomEnv(EnvBase):
             "position": torch.tensor([0.0]),
         }, batch_size=self.batch_size)
 
-    def _step(self, tensordict: TensorDict):
+    def _step(self, tensordict: TensorDict) -> TensorDict:
         """Execute one step"""
         action = tensordict["action"].item()
-
-        # Get current price
         current_price = self.prices[self.current_step].item()
 
         # Execute action
@@ -99,7 +104,7 @@ class SimpleCustomEnv(EnvBase):
         self.current_step += 1
         done = self.current_step >= len(self.prices) - 1
 
-        # Next observation
+        # Build output tensordict
         next_price = self.prices[self.current_step].item() if not done else current_price
 
         return TensorDict({
@@ -113,471 +118,199 @@ class SimpleCustomEnv(EnvBase):
         """Set random seed"""
         torch.manual_seed(seed)
 
-
 # Usage
-prices = torch.linspace(100, 150, 1000)  # Simulated prices
-env = SimpleCustomEnv(prices)
+prices = torch.randn(1000).cumsum(0) + 100  # Random walk prices
+env = SimpleCustomEnv(prices, batch_size=[])
 
-tensordict = env.reset()
-tensordict["action"] = torch.tensor([1])  # BUY
-tensordict = env.step(tensordict)
-print(f"Reward: {tensordict['reward'].item()}")
+obs = env.reset()
+for _ in range(100):
+    action = env.action_spec.rand()  # Random action
+    obs = env.step(action)
+    if obs["done"]:
+        break
 ```
 
-## Example 2: Extending SeqLongOnlyEnv
+---
 
-The easiest way to create a custom environment is to extend an existing one:
+## Example 2: Extending Existing Environments
+
+Extend `SeqLongOnlyEnv` to add custom features:
 
 ```python
 from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from tensordict import TensorDict
 import torch
 
-class PortfolioConstraintEnv(SeqLongOnlyEnv):
+class CustomLongOnlyEnv(SeqLongOnlyEnv):
     """
-    Custom environment with portfolio constraints.
-
-    - Maximum position size: 50% of cash
-    - Minimum holding time: 10 steps
+    Extended SeqLongOnlyEnv with sentiment data.
     """
 
-    def __init__(self, df, config, max_position_pct=0.5, min_hold_time=10):
+    def __init__(self, df, config: SeqLongOnlyEnvConfig, sentiment_data: torch.Tensor):
         super().__init__(df, config)
-        self.max_position_pct = max_position_pct
-        self.min_hold_time = min_hold_time
-        self.steps_since_buy = 0
+        self.sentiment_data = sentiment_data  # Timeseries sentiment scores
 
-    def _step(self, tensordict: TensorDict):
-        """Override step to enforce constraints"""
-        action = tensordict["action"].item()
+        # Extend observation spec
+        from torchrl.data import UnboundedContinuousTensorSpec
+        self._observation_spec["sentiment"] = UnboundedContinuousTensorSpec(shape=(1,))
 
-        # Enforce minimum holding time
-        if action == 0 and self.steps_since_buy < self.min_hold_time:
-            # Force HOLD action
-            tensordict["action"] = torch.tensor([1])
+    def _reset(self, tensordict=None, **kwargs):
+        """Add sentiment to observations"""
+        obs = super()._reset(tensordict, **kwargs)
 
-        # Call parent step
-        tensordict = super()._step(tensordict)
-
-        # Track holding time
-        if action == 2:  # BUY
-            self.steps_since_buy = 0
-        elif self.position_size > 0:
-            self.steps_since_buy += 1
-
-        return tensordict
-
-    def _calculate_position_size(self, action: int, current_price: float) -> float:
-        """Override to limit position size"""
-        if action == 2:  # BUY
-            # Max 50% of cash
-            max_cash = self.cash * self.max_position_pct
-            return max_cash / current_price
-        return 0.0
-
-
-# Usage
-config = SeqLongOnlyEnvConfig(...)
-env = PortfolioConstraintEnv(df, config, max_position_pct=0.5, min_hold_time=10)
-```
-
-## Example 3: Custom Observation Space
-
-Add custom observations like order book data or sentiment:
-
-```python
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchrl.data import CompositeSpec, UnboundedContinuousTensorSpec
-from tensordict import TensorDict
-import torch
-
-class SentimentAugmentedEnv(SeqLongOnlyEnv):
-    """
-    Environment with sentiment data in observations.
-    """
-
-    def __init__(self, df, config, sentiment_data: torch.Tensor):
-        super().__init__(df, config)
-        self.sentiment_data = sentiment_data  # [num_steps, sentiment_dim]
-
-        # Update observation spec to include sentiment
-        self._observation_spec = CompositeSpec({
-            **self._observation_spec,  # Keep existing specs
-            "sentiment": UnboundedContinuousTensorSpec(shape=(sentiment_data.shape[1],)),
-        })
-
-    def _get_observation(self, index: int) -> TensorDict:
-        """Override to add sentiment data"""
-        obs = super()._get_observation(index)
-
-        # Add sentiment to observation
-        obs["sentiment"] = self.sentiment_data[index]
+        # Add current sentiment
+        sentiment_idx = self.sampler.reset_index
+        obs["sentiment"] = torch.tensor([self.sentiment_data[sentiment_idx].item()])
 
         return obs
 
+    def _step(self, tensordict: TensorDict) -> TensorDict:
+        """Add sentiment to step observations"""
+        obs = super()._step(tensordict)
+
+        # Add current sentiment
+        sentiment_idx = self.sampler.current_index
+        obs["sentiment"] = torch.tensor([self.sentiment_data[sentiment_idx].item()])
+
+        return obs
 
 # Usage
-sentiment = torch.randn(len(df), 10)  # 10-dim sentiment vectors
-config = SeqLongOnlyEnvConfig(...)
-env = SentimentAugmentedEnv(df, config, sentiment_data=sentiment)
-```
-
-## Example 4: Custom Action Space
-
-Create complex action spaces (e.g., continuous position sizing):
-
-```python
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchrl.data import BoundedTensorSpec
-from tensordict import TensorDict
-import torch
-
-class ContinuousPositionEnv(SeqLongOnlyEnv):
-    """
-    Environment with continuous position sizing.
-
-    Action: float in [0, 1] representing % of cash to invest
-    """
-
-    def __init__(self, df, config):
-        super().__init__(df, config)
-
-        # Override action spec for continuous actions
-        self._action_spec = BoundedTensorSpec(
-            low=0.0,
-            high=1.0,
-            shape=(1,),
-        )
-
-    def _step(self, tensordict: TensorDict):
-        """Override step for continuous actions"""
-        action_value = tensordict["action"].item()  # float in [0, 1]
-
-        current_price = self._get_current_price()
-
-        # Calculate position size based on continuous action
-        if action_value < 0.1:  # Close position (< 10%)
-            if self.position_size > 0:
-                self._sell_position(current_price)
-        elif action_value > 0.1:  # Open/adjust position
-            target_investment = self.cash * action_value
-            target_position_size = target_investment / current_price
-
-            # Adjust position
-            if target_position_size > self.position_size:
-                # Buy more
-                amount_to_buy = target_position_size - self.position_size
-                self._buy_position(current_price, amount_to_buy)
-            elif target_position_size < self.position_size:
-                # Sell some
-                amount_to_sell = self.position_size - target_position_size
-                self._partial_sell(current_price, amount_to_sell)
-
-        # Calculate reward
-        reward = self._calculate_reward()
-
-        # Move to next step
-        self.current_step += 1
-        done = self._check_termination()
-
-        # Get next observation
-        next_obs = self._get_observation(self.current_step) if not done else self._get_observation(self.current_step - 1)
-
-        return TensorDict({
-            **next_obs,
-            "reward": torch.tensor([reward]),
-            "done": torch.tensor([done]),
-        }, batch_size=self.batch_size)
-
-
-# Usage
-config = SeqLongOnlyEnvConfig(...)
-env = ContinuousPositionEnv(df, config)
-```
-
-## Example 5: Multi-Asset Portfolio Environment
-
-Manage a portfolio of multiple assets:
-
-```python
-from torchrl.envs import EnvBase
-from torchrl.data import CompositeSpec, UnboundedContinuousTensorSpec, BoundedTensorSpec
-from tensordict import TensorDict
-import torch
 import pandas as pd
 
-class MultiAssetPortfolioEnv(EnvBase):
-    """
-    Portfolio environment with multiple assets.
+df = pd.read_csv("prices.csv")
+sentiment = torch.randn(len(df))  # Random sentiment scores
 
-    State: [prices_asset1, prices_asset2, ..., portfolio_weights]
-    Actions: [weight_asset1, weight_asset2, ...] (must sum to 1)
-    """
+config = SeqLongOnlyEnvConfig(
+    time_frames=["1min", "5min"],
+    window_sizes=[12, 8],
+    execute_on=(5, "Minute"),
+)
 
-    def __init__(self, dfs: List[pd.DataFrame], num_assets: int, **kwargs):
-        super().__init__(**kwargs)
-        self.dfs = dfs  # List of DataFrames (one per asset)
-        self.num_assets = num_assets
-        self.current_step = 0
-        self.portfolio_value = 1.0  # Start with $1
-        self.weights = torch.zeros(num_assets)  # Equal weight initially
-        self.weights[:] = 1.0 / num_assets
+env = CustomLongOnlyEnv(df, config, sentiment)
 
-        # Define specs
-        self._observation_spec = CompositeSpec({
-            "prices": UnboundedContinuousTensorSpec(shape=(num_assets,)),
-            "weights": UnboundedContinuousTensorSpec(shape=(num_assets,)),
-            "portfolio_value": UnboundedContinuousTensorSpec(shape=(1,)),
-        })
-
-        self._action_spec = BoundedTensorSpec(
-            low=0.0,
-            high=1.0,
-            shape=(num_assets,),  # Weights for each asset
-        )
-
-        self._reward_spec = UnboundedContinuousTensorSpec(shape=(1,))
-
-    def _reset(self, tensordict=None, **kwargs):
-        """Reset environment"""
-        self.current_step = 0
-        self.portfolio_value = 1.0
-        self.weights = torch.ones(self.num_assets) / self.num_assets
-
-        prices = torch.tensor([df.iloc[0]["close"] for df in self.dfs])
-
-        return TensorDict({
-            "prices": prices,
-            "weights": self.weights.clone(),
-            "portfolio_value": torch.tensor([1.0]),
-        }, batch_size=self.batch_size)
-
-    def _step(self, tensordict: TensorDict):
-        """Execute one step"""
-        # Get new weights from action (normalize to sum to 1)
-        new_weights = tensordict["action"]
-        new_weights = new_weights / new_weights.sum()
-
-        # Get current and next prices
-        current_prices = torch.tensor([df.iloc[self.current_step]["close"] for df in self.dfs])
-        self.current_step += 1
-        next_prices = torch.tensor([df.iloc[self.current_step]["close"] for df in self.dfs])
-
-        # Calculate returns for each asset
-        returns = (next_prices - current_prices) / current_prices
-
-        # Calculate portfolio return
-        portfolio_return = (self.weights * returns).sum().item()
-
-        # Update portfolio value
-        old_value = self.portfolio_value
-        self.portfolio_value *= (1 + portfolio_return)
-
-        # Rebalance to new weights
-        self.weights = new_weights
-
-        # Reward: log return
-        reward = torch.log(torch.tensor(self.portfolio_value / old_value))
-
-        # Check done
-        done = self.current_step >= min(len(df) for df in self.dfs) - 1
-
-        return TensorDict({
-            "prices": next_prices,
-            "weights": self.weights.clone(),
-            "portfolio_value": torch.tensor([self.portfolio_value]),
-            "reward": reward.unsqueeze(0),
-            "done": torch.tensor([done]),
-        }, batch_size=self.batch_size)
-
-    def _set_seed(self, seed: int):
-        torch.manual_seed(seed)
-
-
-# Usage
-dfs = [btc_df, eth_df, sol_df]  # Multiple asset DataFrames
-env = MultiAssetPortfolioEnv(dfs, num_assets=3)
+# Policy network sees sentiment in observations
+obs = env.reset()
+print(obs.keys())  # [..., 'sentiment']
 ```
 
-## Best Practices
+---
 
-### 1. Use TensorDict Consistently
+## Design Patterns
 
-Always return `TensorDict` from `_reset()` and `_step()`:
+### 1. Composition Over Inheritance
+
+Prefer composing existing components:
 
 ```python
-# ✅ Correct
-return TensorDict({
-    "observation": obs,
-    "reward": reward,
-    "done": done,
-}, batch_size=self.batch_size)
+class CustomEnv(SeqLongOnlyEnv):
+    def __init__(self, df, config, custom_component):
+        super().__init__(df, config)
+        self.custom_component = custom_component  # Inject custom logic
 
-# ❌ Wrong
-return {"observation": obs, "reward": reward, "done": done}
+    def _step(self, tensordict):
+        obs = super()._step(tensordict)
+        # Modify obs with custom_component
+        obs["custom_feature"] = self.custom_component.compute(obs)
+        return obs
 ```
 
-### 2. Define Proper Specs
+### 2. Observation Spec Extension
 
-Specs tell TorchRL about your environment's structure:
+Always update observation specs when adding new fields:
 
 ```python
-self._observation_spec = CompositeSpec({
-    "price": UnboundedContinuousTensorSpec(shape=(1,)),
-    "position": UnboundedContinuousTensorSpec(shape=(1,)),
-})
-
-self._action_spec = DiscreteTensorSpec(n=3)  # 3 discrete actions
-
-self._reward_spec = UnboundedContinuousTensorSpec(shape=(1,))
+# In __init__
+self._observation_spec["new_field"] = UnboundedContinuousTensorSpec(shape=(N,))
 ```
 
-### 3. Handle Edge Cases
+### 3. State Management
+
+Keep environment state in clear instance variables:
 
 ```python
-def _step(self, tensordict: TensorDict):
-    # Check for invalid actions
-    action = tensordict["action"].item()
-    if action < 0 or action >= self.num_actions:
-        raise ValueError(f"Invalid action: {action}")
-
-    # Check for NaN values
-    if torch.isnan(tensordict["observation"]).any():
-        raise ValueError("NaN values in observation")
-
-    # Handle division by zero
-    if self.portfolio_value <= 0:
-        return self._terminate_episode()
-
-    # ... rest of step logic
+def __init__(self):
+    self.current_step = 0      # Clear state
+    self.portfolio_value = 1000
+    self.position = 0
+    # ... not scattered across methods
 ```
 
-### 4. Document Your Environment
+---
+
+## Testing Custom Environments
+
+### 1. Spec Compliance
+
+Verify specs match actual outputs:
 
 ```python
-class MyCustomEnv(EnvBase):
-    """
-    Custom trading environment for [specific use case].
+env = CustomEnv(...)
 
-    Observation Space:
-        - field1: Description
-        - field2: Description
+# Check reset
+obs = env.reset()
+assert env.observation_spec.is_in(obs), "Reset observation doesn't match spec"
 
-    Action Space:
-        - 0: Action description
-        - 1: Action description
-
-    Reward:
-        Description of reward function
-
-    Args:
-        param1: Description
-        param2: Description
-
-    Example:
-        >>> env = MyCustomEnv(...)
-        >>> obs = env.reset()
-        >>> obs = env.step(action)
-    """
+# Check step
+action = env.action_spec.rand()
+obs = env.step(action)
+assert env.observation_spec.is_in(obs), "Step observation doesn't match spec"
+assert env.reward_spec.is_in(obs["reward"]), "Reward doesn't match spec"
 ```
 
-### 5. Test Thoroughly
+### 2. Episode Completion
+
+Ensure episodes terminate correctly:
 
 ```python
-def test_custom_env():
-    """Test suite for custom environment"""
-    env = MyCustomEnv(...)
+env = CustomEnv(...)
+obs = env.reset()
 
-    # Test reset
+for i in range(10000):  # Safety limit
+    action = env.action_spec.rand()
+    obs = env.step(action)
+    if obs["done"]:
+        print(f"Episode ended at step {i}")
+        break
+else:
+    raise AssertionError("Episode never ended!")
+```
+
+### 3. Reward Sanity
+
+Check reward values are reasonable:
+
+```python
+rewards = []
+for episode in range(100):
     obs = env.reset()
-    assert "observation" in obs
-    assert not torch.isnan(obs["observation"]).any()
+    episode_reward = 0
+    while not obs["done"]:
+        action = env.action_spec.rand()
+        obs = env.step(action)
+        episode_reward += obs["reward"].item()
+    rewards.append(episode_reward)
 
-    # Test step
-    action = torch.tensor([0])
-    next_obs = env.step(TensorDict({"action": action}))
-    assert "reward" in next_obs
-    assert "done" in next_obs
-
-    # Test episode completion
-    for _ in range(1000):
-        action = torch.randint(0, 3, (1,))
-        next_obs = env.step(TensorDict({"action": action}))
-        if next_obs["done"].item():
-            break
-
-    print("✅ All tests passed!")
-
-test_custom_env()
+print(f"Mean reward: {sum(rewards)/len(rewards):.2f}")
+print(f"Reward range: [{min(rewards):.2f}, {max(rewards):.2f}]")
 ```
 
-## Debugging Tips
+---
 
-### Print State at Each Step
+## Common Pitfalls
 
-```python
-def _step(self, tensordict: TensorDict):
-    action = tensordict["action"].item()
+| Issue | Problem | Solution |
+|-------|---------|----------|
+| **Spec mismatch** | Observation shape != spec shape | Update `_observation_spec` in `__init__` |
+| **Forgotten batch_size** | TensorDict missing batch_size | Always pass `batch_size=self.batch_size` |
+| **Missing done signal** | Episode never ends | Set `done=True` in terminal state |
+| **Mutable state** | State persists across episodes | Reset ALL state variables in `_reset()` |
+| **Incorrect device** | Tensors on wrong device | Use `self.device` for all tensors |
 
-    print(f"Step {self.current_step}:")
-    print(f"  Action: {action}")
-    print(f"  Current price: {self.current_price}")
-    print(f"  Position: {self.position_size}")
-    print(f"  Portfolio value: {self.portfolio_value}")
-
-    # ... rest of step logic
-```
-
-### Visualize Episode Trajectory
-
-```python
-import matplotlib.pyplot as plt
-
-def visualize_episode(env, policy):
-    """Visualize a full episode"""
-    prices = []
-    actions = []
-    rewards = []
-
-    obs = env.reset()
-    done = False
-
-    while not done:
-        action = policy(obs)
-        obs = env.step(TensorDict({"action": action}))
-
-        prices.append(env.current_price)
-        actions.append(action.item())
-        rewards.append(obs["reward"].item())
-        done = obs["done"].item()
-
-    # Plot
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 8))
-
-    ax1.plot(prices)
-    ax1.set_title("Price")
-
-    ax2.plot(actions)
-    ax2.set_title("Actions")
-
-    ax3.plot(rewards)
-    ax3.set_title("Rewards")
-
-    plt.tight_layout()
-    plt.show()
-```
+---
 
 ## Next Steps
 
-Now that you understand how to build custom environments:
-
-- **[Custom Feature Engineering](custom-features.md)** - Add custom observations
-- **[Custom Reward Functions](reward-functions.md)** - Design better rewards
-- **[Understanding the Sampler](sampler.md)** - Use the sampler in custom environments
-- **[Offline Environments](../environments/offline.md)** - Study existing implementations
-
-## Resources
-
-- **[TorchRL Documentation](https://pytorch.org/rl/)** - TorchRL EnvBase API
-- **[Gymnasium Documentation](https://gymnasium.farama.org/)** - Environment design patterns
-- **[TorchTrade Source Code](https://github.com/TorchTrade/torchtrade_envs)** - Reference implementations
+- **[Offline Environments](../environments/offline.md)** - Understand existing environment architecture
+- **[Custom Reward Functions](reward-functions.md)** - Define custom reward logic
+- **[Custom Feature Engineering](custom-features.md)** - Add technical indicators
+- **[TorchRL EnvBase](https://pytorch.org/rl/reference/envs.html#envbase)** - Base class documentation

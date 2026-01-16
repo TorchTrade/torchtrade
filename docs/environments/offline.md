@@ -34,7 +34,7 @@ from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 
 config = SeqLongOnlyEnvConfig(
     # Multi-timeframe setup
-    time_frames=[1, 5, 15, 60],        # Minutes: 1m, 5m, 15m, 1h
+    time_frames=["1min", "5min", "15min", "60min"],        # Values in minutes: "1min", "5min", "15min", "60min"
     window_sizes=[12, 8, 8, 24],       # Lookback per timeframe
     execute_on=(5, "Minute"),          # Execute every 5 minutes
 
@@ -92,7 +92,7 @@ df['timestamp'] = pd.to_datetime(df['timestamp'])
 
 # Configure environment
 config = SeqLongOnlyEnvConfig(
-    time_frames=[1, 5, 15],
+    time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
     initial_cash=1000
@@ -137,9 +137,10 @@ config = SeqLongOnlySLTPEnvConfig(
     # Stop-loss / Take-profit levels
     stoploss_levels=[-0.02, -0.05],     # -2%, -5%
     takeprofit_levels=[0.05, 0.10],     # +5%, +10%
+    include_hold_action=True,           # Optional: set False to remove HOLD
 
     # Multi-timeframe setup (same as SeqLongOnlyEnv)
-    time_frames=[1, 5, 15],
+    time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
 
@@ -154,9 +155,9 @@ env = SeqLongOnlySLTPEnv(df, config)
 
 ### Action Space
 
-Discrete(1 + num_sl × num_tp):
+Discrete(1 + num_sl × num_tp) when `include_hold_action=True`, or Discrete(num_sl × num_tp) when `False`.
 
-With `stoploss_levels=[-0.02, -0.05]` and `takeprofit_levels=[0.05, 0.10]`:
+With `stoploss_levels=[-0.02, -0.05]` and `takeprofit_levels=[0.05, 0.10]` and `include_hold_action=True`:
 
 - **Action 0**: HOLD / Close position
 - **Action 1**: BUY with SL=-2%, TP=+5%
@@ -174,7 +175,8 @@ from torchtrade.envs.offline import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
 config = SeqLongOnlySLTPEnvConfig(
     stoploss_levels=[-0.02, -0.05, -0.10],   # 3 SL levels
     takeprofit_levels=[0.05, 0.10, 0.15],    # 3 TP levels
-    time_frames=[1, 5, 15],
+    include_hold_action=True,                # Optional: set False to remove HOLD
+    time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
     initial_cash=1000
@@ -182,7 +184,7 @@ config = SeqLongOnlySLTPEnvConfig(
 
 env = SeqLongOnlySLTPEnv(df, config)
 
-# Action space: 1 + (3 × 3) = 10 actions
+# Action space: 1 + (3 × 3) = 10 actions (or 9 without HOLD)
 print(f"Action space size: {env.action_spec.space.n}")
 ```
 
@@ -207,9 +209,10 @@ config = LongOnlyOneStepEnvConfig(
     # Stop-loss / Take-profit
     stoploss_levels=[-0.02, -0.05],
     takeprofit_levels=[0.05, 0.10],
+    include_hold_action=True,           # Optional: set False to remove HOLD
 
     # Multi-timeframe setup
-    time_frames=[1, 5, 15],
+    time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
 
@@ -241,7 +244,7 @@ from torchtrade.envs.offline import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig
 config = LongOnlyOneStepEnvConfig(
     stoploss_levels=[-0.02, -0.05],
     takeprofit_levels=[0.05, 0.10],
-    time_frames=[1, 5, 15],
+    time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
     rollout_steps=24,  # 2 hours (24 × 5min)
@@ -280,7 +283,7 @@ from torchtrade.envs.offline import SeqFuturesEnv, SeqFuturesEnvConfig
 
 config = SeqFuturesEnvConfig(
     # Multi-timeframe setup
-    time_frames=[1, 5, 15, 60],
+    time_frames=["1min", "5min", "15min", "60min"],
     window_sizes=[12, 8, 8, 24],
     execute_on=(5, "Minute"),
 
@@ -351,7 +354,7 @@ Equity: $10,000 - $20,000 = -$10,000 (liquidated!)
 from torchtrade.envs.offline import SeqFuturesEnv, SeqFuturesEnvConfig
 
 config = SeqFuturesEnvConfig(
-    time_frames=[1, 5, 15],
+    time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
     leverage=5,                         # 5x leverage
@@ -397,6 +400,7 @@ config = SeqFuturesSLTPEnvConfig(
     # Stop-loss / Take-profit
     stoploss_levels=[-0.02, -0.05],
     takeprofit_levels=[0.05, 0.10],
+    include_hold_action=True,            # Optional: set False to remove HOLD
     include_short_positions=True,        # Enable short bracket orders
 
     # Futures parameters
@@ -404,7 +408,7 @@ config = SeqFuturesSLTPEnvConfig(
     margin_call_threshold=0.2,
 
     # Multi-timeframe setup
-    time_frames=[1, 5, 15],
+    time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
 
@@ -441,7 +445,7 @@ config = SeqFuturesSLTPEnvConfig(
     include_short_positions=True,
     leverage=10,
     margin_call_threshold=0.2,
-    time_frames=[1, 5, 15],
+    time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
     initial_cash=10000
@@ -472,6 +476,7 @@ config = FuturesOneStepEnvConfig(
     # Stop-loss / Take-profit
     stoploss_levels=[-0.02, -0.05],
     takeprofit_levels=[0.05, 0.10],
+    include_hold_action=True,            # Optional: set False to remove HOLD
     include_short_positions=True,
 
     # Futures parameters
@@ -482,7 +487,7 @@ config = FuturesOneStepEnvConfig(
     rollout_steps=24,
 
     # Multi-timeframe setup
-    time_frames=[1, 5, 15],
+    time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
 
@@ -505,7 +510,7 @@ config = FuturesOneStepEnvConfig(
     include_short_positions=True,
     leverage=5,
     rollout_steps=24,  # Hold for 2 hours
-    time_frames=[1, 5, 15],
+    time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
     initial_cash=10000
@@ -556,6 +561,9 @@ print(f"Terminal reward: {tensordict['reward'].item()}")
 ## Next Steps
 
 - **[Online Environments](online.md)** - Live trading with exchange APIs
+- **[Loss Functions](../components/losses.md)** - Training objectives (GRPOLoss for OneStepEnv, CTRL for representation learning)
+- **[Transforms](../components/transforms.md)** - Data preprocessing (ChronosEmbeddingTransform, CoverageTracker)
+- **[Actors](../components/actors.md)** - Alternative policies (RuleBasedActor for baselines, LLMActor for LLM trading)
 - **[Custom Feature Engineering](../guides/custom-features.md)** - Add technical indicators
 - **[Custom Reward Functions](../guides/reward-functions.md)** - Design better rewards
 - **[Understanding the Sampler](../guides/sampler.md)** - How data sampling works

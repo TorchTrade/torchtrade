@@ -70,6 +70,8 @@ df = pd.DataFrame({
 })
 ```
 
+**Note**: You can also use our pre-processed datasets from [HuggingFace/Torch-Trade](https://huggingface.co/Torch-Trade) which include various cryptocurrency pairs with 1-minute OHLCV data.
+
 ### Step 2: Create an Environment
 
 ```python
@@ -82,7 +84,7 @@ df['timestamp'] = pd.to_datetime(df['timestamp'])
 
 # Configure environment
 config = SeqLongOnlyEnvConfig(
-    time_frames=[1, 5, 15],        # 1m, 5m, 15m bars
+    time_frames=["1min", "5min", "15min"],        # 1m, 5m, 15m bars
     window_sizes=[12, 8, 8],       # Lookback windows
     execute_on=(5, "Minute"),      # Execute every 5 minutes
     initial_cash=1000,             # Starting capital
@@ -112,6 +114,8 @@ print(f"Reward: {tensordict['reward'].item()}")
 print(f"Done: {tensordict['done'].item()}")
 ```
 
+**Note**: TorchTrade uses a default log-return reward function, but you can customize it to shape agent behavior. See **[Custom Reward Functions](guides/reward-functions.md)** for examples including transaction cost penalties, Sharpe ratio rewards, and more.
+
 ## Training Your First Policy
 
 Let's train a PPO policy on the long-only environment.
@@ -124,10 +128,12 @@ uv run python examples/online/ppo/train.py
 
 # Customize with Hydra overrides
 uv run python examples/online/ppo/train.py \
-    env.symbol="ETH/USD" \
+    env.symbol="BTC/USD" \
     optim.lr=1e-4 \
     loss.gamma=0.95
 ```
+
+**Note**: TorchTrade provides several example training scripts (PPO, IQL, DSAC, GRPO, etc.) designed for inspiration and learning. These examples follow the structure of [TorchRL's SOTA implementations](https://github.com/pytorch/rl/tree/main/sota-implementations), enabling near plug-and-play compatibility with any TorchRL algorithm. See the **[Examples](examples.md)** page for a complete list and usage guide.
 
 ### Understanding the Training Script
 
@@ -137,18 +143,16 @@ The training script structure:
 from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from torchrl.collectors import SyncDataCollector
 from torchrl.modules import TanhNormal, ProbabilisticActor
-from trading_nets import MultiTimeframeCNN  # Neural network architectures
 
 # 1. Create environment
 config = SeqLongOnlyEnvConfig(...)
 env = SeqLongOnlyEnv(df, config)
 
-# 2. Create policy network
-actor_net = MultiTimeframeCNN(
-    market_data_keys=["market_data_1Minute", "market_data_5Minute"],
-    account_state_size=7,
-    action_space=3
-)
+# 2. Create your custom policy architecture
+# TorchTrade provides simple default networks in the examples
+# See torchtrade/models/simple_encoders.py for reference implementations
+# Check the examples/ directory for more details on network architectures
+actor_net = YourCustomNetwork(...)
 policy = ProbabilisticActor(...)
 
 # 3. Create data collector
@@ -187,7 +191,7 @@ env = SeqLongOnlyEnv(df, config)
 
 ```python
 config = SeqLongOnlyEnvConfig(
-    time_frames=[1, 5, 15, 60],        # 1m, 5m, 15m, 1h
+    time_frames=["1min", "5min", "15min", "60min"],        # 1m, 5m, 15m, 1h
     window_sizes=[12, 8, 8, 24],       # Lookback per timeframe
     execute_on=(5, "Minute"),          # Execute every 5 minutes
     initial_cash=[1000, 5000],         # Domain randomization
@@ -208,7 +212,7 @@ from torchtrade.envs.offline import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
 config = SeqLongOnlySLTPEnvConfig(
     stoploss_levels=[-0.02, -0.05],     # -2%, -5%
     takeprofit_levels=[0.05, 0.10],     # +5%, +10%
-    time_frames=[1, 5, 15],
+    time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
     initial_cash=1000
@@ -229,6 +233,8 @@ env = SeqLongOnlySLTPEnv(df, config)
 For live trading with real exchanges, you'll need API credentials.
 
 ### Alpaca (US Stocks & Crypto)
+
+Alpaca offers commission-free paper trading for testing strategies without risk. See [Alpaca Paper Trading Docs](https://docs.alpaca.markets/docs/paper-trading) for API credentials setup.
 
 ```bash
 # Create .env file
@@ -258,6 +264,8 @@ env = AlpacaTorchTradingEnv(config)
 
 ### Binance (Crypto Futures)
 
+If you want to trade on Binance, register [here](https://accounts.binance.com/register?ref=25015935) in case you have no account. Binance also allows for demo trading, see [here](https://www.binance.com/en/square/post/14316321292186).
+
 ```bash
 # Add to .env
 BINANCE_API_KEY=your_binance_api_key
@@ -282,6 +290,8 @@ config = BinanceFuturesTradingEnvConfig(
 
 env = BinanceFuturesTorchTradingEnv(config)
 ```
+
+**Note**: Alpaca and Binance are just two examples of live environments/brokers that TorchTrade supports. For more details on all available exchanges and configurations, see **[Online Environments](environments/online.md)**. We're always open to including additional brokers - if you'd like to request support for a new exchange, please [create an issue](https://github.com/TorchTrade/torchtrade_envs/issues) or contact us directly at torchtradecontact@gmail.com.
 
 ## Next Steps
 

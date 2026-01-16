@@ -1,10 +1,12 @@
 # TorchTrade Documentation
 
-Welcome to the TorchTrade documentation! TorchTrade is a reinforcement learning framework for algorithmic trading built on TorchRL.
+Welcome to the TorchTrade documentation! TorchTrade is a machine learning framework for algorithmic trading built on TorchRL.
+
+TorchTrade's goal is to provide accessible deployment of RL methods to trading. The framework supports various RL methodologies including **online RL**, **offline RL**, **model-based RL**, **contrastive learning**, and many more areas of reinforcement learning research. Beyond RL, TorchTrade integrates traditional trading methods such as **rule-based strategies** and **Kalman filters**, as well as modern approaches including **LLMs** (both local models and frontier model integrations) as trading actors.
 
 ## What is TorchTrade?
 
-TorchTrade provides **11 modular environments** spanning **3 exchange integrations** (Alpaca, Binance, Bitget) for live trading and **6 offline backtesting environments**. The framework supports:
+TorchTrade provides modular environments for both live trading with major exchanges and offline backtesting. The framework supports:
 
 - 🎯 **Multi-Timeframe Observations** - Train on 1m, 5m, 15m, 1h bars simultaneously
 - 🤖 **Multiple RL Algorithms** - PPO, IQL, GRPO, DSAC implementations
@@ -12,6 +14,7 @@ TorchTrade provides **11 modular environments** spanning **3 exchange integratio
 - 🔴 **Live Trading** - Direct API integration with major exchanges
 - 📉 **Risk Management** - Stop-loss/take-profit, margin, leverage, liquidation mechanics
 - 🔮 **Futures Trading** - Up to 125x leverage with proper margin management
+- 📦 **Ready-to-Use Datasets** - Pre-processed OHLCV data available at [HuggingFace/Torch-Trade](https://huggingface.co/Torch-Trade)
 
 ## Quick Navigation
 
@@ -26,6 +29,11 @@ TorchTrade provides **11 modular environments** spanning **3 exchange integratio
 - **[Online Environments](environments/online.md)** - Live trading with exchange APIs
   - Alpaca, Binance, Bitget integrations
 
+### Components
+- **[Loss Functions](components/losses.md)** - Training objectives (GRPOLoss, CTRLLoss, CTRLPPOLoss)
+- **[Transforms](components/transforms.md)** - Data preprocessing (CoverageTracker, ChronosEmbeddingTransform)
+- **[Actors](components/actors.md)** - Trading policies (RuleBasedActor, LLMActor, LocalLLMActor, HumanActor)
+
 ### Customization Guides
 - **[Custom Feature Engineering](guides/custom-features.md)** - Add technical indicators and features
 - **[Custom Reward Functions](guides/reward-functions.md)** - Design reward functions for your strategy
@@ -39,7 +47,7 @@ Observe market data at multiple time scales simultaneously:
 
 ```python
 config = SeqLongOnlyEnvConfig(
-    time_frames=[1, 5, 15, 60],        # 1m, 5m, 15m, 1h bars
+    time_frames=["1min", "5min", "15min", "60min"],
     window_sizes=[12, 8, 8, 24],       # Lookback per timeframe
     execute_on=(5, "Minute")           # Execute every 5 minutes
 )
@@ -63,8 +71,9 @@ Risk management with combinatorial action spaces:
 config = SeqLongOnlySLTPEnvConfig(
     stoploss_levels=[-0.02, -0.05],    # -2%, -5%
     takeprofit_levels=[0.05, 0.10],    # +5%, +10%
+    include_hold_action=True,          # Optional: set False to remove HOLD
 )
-# Action space: HOLD + (2 SL × 2 TP) = 5 actions
+# Action space: HOLD + (2 SL × 2 TP) = 5 actions (or 4 without HOLD)
 ```
 
 ## Architecture Overview

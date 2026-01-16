@@ -4,19 +4,13 @@ TorchTrade allows you to add custom technical indicators and features to your ma
 
 ## How It Works
 
-The `feature_preprocessing_fn` parameter in environment configs allows you to transform raw OHLCV data into custom features. This function is called on each resampled timeframe during environment initialization.
+The `feature_preprocessing_fn` parameter in environment configs transforms raw OHLCV data into custom features. This function is called on each resampled timeframe during environment initialization.
 
 ```
-Raw OHLCV Data
-    ↓
-Resample to Multiple Timeframes
-    ↓
-Apply feature_preprocessing_fn  ← Your custom function
-    ↓
-Create Sliding Windows
-    ↓
-Feed to Policy Network
+Raw OHLCV Data → Resample to Timeframes → Apply feature_preprocessing_fn → Sliding Windows → Policy
 ```
+
+---
 
 ## Basic Usage
 
@@ -65,7 +59,7 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 # Use in environment config
 config = SeqLongOnlyEnvConfig(
     feature_preprocessing_fn=custom_preprocessing,
-    time_frames=[1, 5, 15],
+    time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
     initial_cash=1000
@@ -82,7 +76,7 @@ from sklearn.preprocessing import StandardScaler
 
 def normalized_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Normalize features using StandardScaler.
+    Normalize features using StandardScaler for stable training.
     """
     # Basic OHLCV
     df["features_open"] = df["open"]
@@ -111,141 +105,7 @@ config = SeqLongOnlyEnvConfig(
 )
 ```
 
-### Example 3: Volume-Based Features
-
-```python
-import pandas as pd
-
-def volume_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Add volume-based trading features.
-    """
-    # Basic OHLCV
-    df["features_open"] = df["open"]
-    df["features_high"] = df["high"]
-    df["features_low"] = df["low"]
-    df["features_close"] = df["close"]
-    df["features_volume"] = df["volume"]
-
-    # Volume Moving Average
-    df["features_volume_ma_20"] = df["volume"].rolling(window=20).mean()
-
-    # Volume Ratio (current / average)
-    df["features_volume_ratio"] = df["volume"] / (df["features_volume_ma_20"] + 1e-9)
-
-    # On-Balance Volume (OBV)
-    df["features_obv"] = ta.volume.OnBalanceVolumeIndicator(
-        df["close"], df["volume"]
-    ).on_balance_volume()
-
-    # Volume-Weighted Average Price (VWAP)
-    df["features_vwap"] = (df["volume"] * (df["high"] + df["low"] + df["close"]) / 3).cumsum() / df["volume"].cumsum()
-
-    # Fill NaN values
-    df.fillna(0, inplace=True)
-
-    return df
-
-config = SeqLongOnlyEnvConfig(
-    feature_preprocessing_fn=volume_features,
-    ...
-)
-```
-
-## Advanced Usage
-
-### Example 4: Multi-Timeframe Features with Context
-
-Sometimes you want different features for different timeframes. The sampler calls your function separately for each timeframe after resampling.
-
-```python
-import pandas as pd
-import ta
-
-def adaptive_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Adapt features based on timeframe frequency.
-
-    The function receives resampled data for each timeframe independently.
-    """
-    # Basic OHLCV
-    df["features_open"] = df["open"]
-    df["features_high"] = df["high"]
-    df["features_low"] = df["low"]
-    df["features_close"] = df["close"]
-    df["features_volume"] = df["volume"]
-
-    # Infer timeframe from data frequency
-    # (Note: This is approximate - you might want to pass timeframe explicitly)
-    freq = pd.infer_freq(df.index)
-
-    if freq in ['T', '1T']:  # 1-minute data
-        # Short-term indicators for 1m data
-        df["features_rsi_7"] = ta.momentum.RSIIndicator(df["close"], window=7).rsi()
-        df["features_ema_10"] = ta.trend.EMAIndicator(df["close"], window=10).ema_indicator()
-
-    elif freq in ['5T', '5min']:  # 5-minute data
-        # Medium-term indicators for 5m data
-        df["features_rsi_14"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
-        df["features_ema_20"] = ta.trend.EMAIndicator(df["close"], window=20).ema_indicator()
-
-    else:  # Higher timeframes (15m, 1h, etc.)
-        # Long-term indicators
-        df["features_rsi_21"] = ta.momentum.RSIIndicator(df["close"], window=21).rsi()
-        df["features_ema_50"] = ta.trend.EMAIndicator(df["close"], window=50).ema_indicator()
-
-    # Fill NaN values
-    df.fillna(0, inplace=True)
-
-    return df
-
-config = SeqLongOnlyEnvConfig(
-    feature_preprocessing_fn=adaptive_preprocessing,
-    time_frames=[1, 5, 15, 60],
-    ...
-)
-```
-
-### Example 5: Combining Multiple Indicator Libraries
-
-```python
-import pandas as pd
-import ta
-import pandas_ta as pta
-
-def comprehensive_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Combine features from multiple technical analysis libraries.
-    """
-    # Basic OHLCV
-    df["features_open"] = df["open"]
-    df["features_high"] = df["high"]
-    df["features_low"] = df["low"]
-    df["features_close"] = df["close"]
-    df["features_volume"] = df["volume"]
-
-    # From ta library
-    df["features_rsi_14"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
-    df["features_adx"] = ta.trend.ADXIndicator(df["high"], df["low"], df["close"], window=14).adx()
-
-    # From pandas_ta library
-    df["features_cci"] = pta.cci(df["high"], df["low"], df["close"], length=20)
-    df["features_atr"] = pta.atr(df["high"], df["low"], df["close"], length=14)
-
-    # Custom calculations
-    df["features_price_momentum_5"] = df["close"].pct_change(periods=5)
-    df["features_volume_momentum_5"] = df["volume"].pct_change(periods=5)
-
-    # Fill NaN values
-    df.fillna(0, inplace=True)
-
-    return df
-
-config = SeqLongOnlyEnvConfig(
-    feature_preprocessing_fn=comprehensive_preprocessing,
-    ...
-)
-```
+---
 
 ## Important Rules
 
@@ -270,17 +130,14 @@ df["close"] = ...
 Technical indicators often produce NaN values at the beginning. **Always fill NaN values:**
 
 ```python
-# Option 1: Fill with 0
+# Option 1: Fill with 0 (recommended for most indicators)
 df.fillna(0, inplace=True)
 
-# Option 2: Forward fill
+# Option 2: Forward fill (use for prices)
 df.fillna(method='ffill', inplace=True)
 
 # Option 3: Backward fill
 df.fillna(method='bfill', inplace=True)
-
-# Option 4: Drop NaN rows (use carefully!)
-df.dropna(inplace=True)
 ```
 
 ### 3. Return the Modified DataFrame
@@ -305,149 +162,72 @@ df["features_future_return"] = df["close"].pct_change().shift(-1)
 df["features_past_return"] = df["close"].pct_change()
 ```
 
+---
+
 ## Common Technical Indicators
 
-### Momentum Indicators
+### Quick Reference Table
+
+| Category | Indicator | ta Library Code | Use Case |
+|----------|-----------|-----------------|----------|
+| **Momentum** | RSI | `ta.momentum.RSIIndicator(close, window=14).rsi()` | Overbought/oversold detection |
+| | Stochastic | `ta.momentum.StochasticOscillator(high, low, close).stoch()` | Momentum confirmation |
+| | Williams %R | `ta.momentum.WilliamsRIndicator(high, low, close, lbp=14).williams_r()` | Short-term overbought/oversold |
+| **Trend** | SMA | `ta.trend.SMAIndicator(close, window=20).sma_indicator()` | Trend direction |
+| | EMA | `ta.trend.EMAIndicator(close, window=20).ema_indicator()` | Responsive trend following |
+| | MACD | `ta.trend.MACD(close).macd()` | Trend changes |
+| | ADX | `ta.trend.ADXIndicator(high, low, close, window=14).adx()` | Trend strength |
+| **Volatility** | Bollinger Bands | `ta.volatility.BollingerBands(close, window=20)` | Volatility and price bounds |
+| | ATR | `ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range()` | Volatility measurement |
+| | Keltner | `ta.volatility.KeltnerChannel(high, low, close)` | Alternative to Bollinger |
+| **Volume** | OBV | `ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()` | Accumulation/distribution |
+| | VPT | `ta.volume.VolumePriceTrendIndicator(close, volume).volume_price_trend()` | Volume-price confirmation |
+| | ADI | `ta.volume.AccDistIndexIndicator(high, low, close, volume).acc_dist_index()` | Money flow |
+
+### Usage Pattern
 
 ```python
 import ta
 
-# RSI (Relative Strength Index)
-df["features_rsi_14"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
-
-# Stochastic Oscillator
-stoch = ta.momentum.StochasticOscillator(df["high"], df["low"], df["close"])
-df["features_stoch_k"] = stoch.stoch()
-df["features_stoch_d"] = stoch.stoch_signal()
-
-# Williams %R
-df["features_williams_r"] = ta.momentum.WilliamsRIndicator(
-    df["high"], df["low"], df["close"], lbp=14
-).williams_r()
-```
-
-### Trend Indicators
-
-```python
-import ta
-
-# Moving Averages
-df["features_sma_20"] = ta.trend.SMAIndicator(df["close"], window=20).sma_indicator()
-df["features_ema_20"] = ta.trend.EMAIndicator(df["close"], window=20).ema_indicator()
-
-# MACD
-macd = ta.trend.MACD(df["close"])
-df["features_macd"] = macd.macd()
-df["features_macd_signal"] = macd.macd_signal()
-df["features_macd_hist"] = macd.macd_diff()
-
-# ADX (Average Directional Index)
-df["features_adx"] = ta.trend.ADXIndicator(
-    df["high"], df["low"], df["close"], window=14
-).adx()
-```
-
-### Volatility Indicators
-
-```python
-import ta
-
-# Bollinger Bands
-bollinger = ta.volatility.BollingerBands(df["close"], window=20)
-df["features_bb_high"] = bollinger.bollinger_hband()
-df["features_bb_mid"] = bollinger.bollinger_mavg()
-df["features_bb_low"] = bollinger.bollinger_lband()
-df["features_bb_width"] = bollinger.bollinger_wband()
-
-# ATR (Average True Range)
-df["features_atr"] = ta.volatility.AverageTrueRange(
-    df["high"], df["low"], df["close"], window=14
-).average_true_range()
-
-# Keltner Channels
-keltner = ta.volatility.KeltnerChannel(df["high"], df["low"], df["close"])
-df["features_keltner_high"] = keltner.keltner_channel_hband()
-df["features_keltner_low"] = keltner.keltner_channel_lband()
-```
-
-### Volume Indicators
-
-```python
-import ta
-
-# OBV (On-Balance Volume)
-df["features_obv"] = ta.volume.OnBalanceVolumeIndicator(
-    df["close"], df["volume"]
-).on_balance_volume()
-
-# Volume Price Trend
-df["features_vpt"] = ta.volume.VolumePriceTrendIndicator(
-    df["close"], df["volume"]
-).volume_price_trend()
-
-# Accumulation/Distribution
-df["features_adi"] = ta.volume.AccDistIndexIndicator(
-    df["high"], df["low"], df["close"], df["volume"]
-).acc_dist_index()
-```
-
-## Performance Considerations
-
-### Cache Expensive Computations
-
-If your preprocessing is expensive, consider caching results:
-
-```python
-import joblib
-from pathlib import Path
-
-def cached_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
-    cache_file = Path("cache/preprocessed_data.pkl")
-
-    if cache_file.exists():
-        return joblib.load(cache_file)
-
-    # Expensive computations
+def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    # Basic OHLCV
     df["features_close"] = df["close"]
-    # ... more features ...
+    df["features_volume"] = df["volume"]
+    # ... other OHLCV ...
 
-    # Save to cache
-    cache_file.parent.mkdir(exist_ok=True)
-    joblib.dump(df, cache_file)
+    # Pick indicators from table above
+    df["features_rsi_14"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
+    df["features_sma_20"] = ta.trend.SMAIndicator(df["close"], window=20).sma_indicator()
+    df["features_atr"] = ta.volatility.AverageTrueRange(
+        df["high"], df["low"], df["close"], window=14
+    ).average_true_range()
 
+    df.fillna(0, inplace=True)
     return df
 ```
 
+---
+
+## Performance Considerations
+
 ### Vectorize Operations
 
-Use pandas vectorized operations instead of loops:
+Use pandas vectorized operations instead of loops for faster computation:
 
 ```python
 # ❌ Slow - using loops
 for i in range(len(df)):
     df.loc[i, "features_return"] = (df.loc[i, "close"] / df.loc[i-1, "close"]) - 1
 
-# ✅ Fast - vectorized
+# ✅ Fast - vectorized (100x faster)
 df["features_return"] = df["close"].pct_change()
 ```
 
+**General principle**: If you're using a loop, there's probably a pandas method that does it faster.
+
+---
+
 ## Debugging Tips
-
-### Print Feature Shapes
-
-```python
-def debug_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
-    print(f"Input shape: {df.shape}")
-
-    df["features_close"] = df["close"]
-    # ... add more features ...
-
-    feature_cols = [col for col in df.columns if col.startswith("features_")]
-    print(f"Number of features: {len(feature_cols)}")
-    print(f"Feature columns: {feature_cols}")
-
-    return df
-```
 
 ### Check for NaN Values
 
@@ -456,7 +236,7 @@ def safe_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     df["features_close"] = df["close"]
     # ... add features ...
 
-    # Check for NaN values
+    # Check for NaN values before filling
     nan_counts = df.isna().sum()
     if nan_counts.any():
         print("⚠️ Warning: NaN values detected:")
@@ -466,16 +246,26 @@ def safe_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     return df
 ```
 
-## Next Steps
+This helps catch issues with indicator configuration or missing data.
 
-- **[Custom Reward Functions](reward-functions.md)** - Design better reward signals
-- **[Understanding the Sampler](sampler.md)** - How multi-timeframe sampling works
-- **[Building Custom Environments](custom-environment.md)** - Extend TorchTrade
-- **[Offline Environments](../environments/offline.md)** - Apply custom features to environments
+---
 
 ## Recommended Libraries
 
-- **[ta](https://github.com/bukosabino/ta)** - Technical Analysis library
-- **[pandas-ta](https://github.com/twopirllc/pandas-ta)** - 130+ indicators
-- **[TA-Lib](https://github.com/mrjbq7/ta-lib)** - Popular C library with Python bindings
-- **[sklearn](https://scikit-learn.org/)** - Feature scaling and normalization
+| Library | Indicators | Installation | Best For |
+|---------|-----------|--------------|----------|
+| **[ta](https://github.com/bukosabino/ta)** | 40+ | `pip install ta` | Standard indicators, easy API |
+| **[pandas-ta](https://github.com/twopirllc/pandas-ta)** | 130+ | `pip install pandas-ta` | Comprehensive collection |
+| **[TA-Lib](https://github.com/mrjbq7/ta-lib)** | 150+ | `pip install TA-Lib` | Performance, industry standard |
+| **[sklearn](https://scikit-learn.org/)** | N/A | `pip install scikit-learn` | Feature scaling, normalization |
+
+**Recommendation**: Start with `ta` for simplicity, use `TA-Lib` if you need maximum performance.
+
+---
+
+## Next Steps
+
+- **[Custom Reward Functions](reward-functions.md)** - Design reward signals that work with your features
+- **[Understanding the Sampler](sampler.md)** - How multi-timeframe sampling works
+- **[Transforms](../components/transforms.md)** - Alternative feature engineering with Chronos embeddings
+- **[Offline Environments](../environments/offline.md)** - Apply custom features to environments
