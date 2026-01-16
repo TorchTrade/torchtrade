@@ -1,6 +1,5 @@
 """Base class for live trading environments."""
 
-import logging
 import time
 from abc import abstractmethod
 from datetime import datetime, timedelta
@@ -11,8 +10,6 @@ from tensordict import TensorDictBase
 
 from torchtrade.envs.base import TorchTradeBaseEnv
 from torchtrade.envs.state import PositionState
-
-logger = logging.getLogger(__name__)
 
 
 class TorchTradeLiveEnv(TorchTradeBaseEnv):
@@ -111,7 +108,10 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
 
     def _wait_for_next_timestamp(self):
         """
-        Wait until next time step - improved version.
+        Wait until next time step using single calculated sleep.
+
+        Uses a single sleep call with exact duration instead of a polling loop,
+        improving CPU efficiency and timing precision.
 
         This is COMMON across all live environments - timing logic is universal.
 
