@@ -1,4 +1,4 @@
-# Custom Feature Engineering
+# Feature Engineering
 
 TorchTrade allows you to add custom technical indicators and features to your market observations. This guide shows you how to preprocess your OHLCV data with custom features before it's fed to your policy.
 
@@ -265,7 +265,7 @@ This helps catch issues with indicator configuration or missing data.
 
 ## Next Steps
 
-- **[Custom Reward Functions](reward-functions.md)** - Design reward signals that work with your features
+- **[Reward Functions](reward-functions.md)** - Design reward signals that work with your features
 - **[Understanding the Sampler](sampler.md)** - How multi-timeframe sampling works
 - **[Transforms](../components/transforms.md)** - Alternative feature engineering with Chronos embeddings
 - **[Offline Environments](../environments/offline.md)** - Apply custom features to environments

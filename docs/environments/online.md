@@ -576,8 +576,8 @@ Need support for another exchange? We're open to adding more integrations!
 - **[Offline Environments](offline.md)** - Train on historical data first
 - **[Actors](../components/actors.md)** - Alternative policies (RuleBasedActor, LLMActor for live trading)
 - **[Transforms](../components/transforms.md)** - Data preprocessing and monitoring
-- **[Custom Feature Engineering](../guides/custom-features.md)** - Add technical indicators
-- **[Custom Reward Functions](../guides/reward-functions.md)** - Design better rewards
+- **[Feature Engineering](../guides/custom-features.md)** - Add technical indicators
+- **[Reward Functions](../guides/reward-functions.md)** - Design better rewards
 - **[Building Custom Environments](../guides/custom-environment.md)** - Extend TorchTrade
 
 ## Support

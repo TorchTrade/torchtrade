@@ -217,8 +217,8 @@ To create a new training script:
 ## Next Steps
 
 - **[Offline Environments](environments/offline.md)** - Understand environment mechanics
-- **[Custom Reward Functions](guides/reward-functions.md)** - Design better reward signals
-- **[Custom Feature Engineering](guides/custom-features.md)** - Add technical indicators
+- **[Reward Functions](guides/reward-functions.md)** - Design better reward signals
+- **[Feature Engineering](guides/custom-features.md)** - Add technical indicators
 - **[Transforms](components/transforms.md)** - Use ChronosEmbedding and other transforms
 - **[TorchRL SOTA Implementations](https://github.com/pytorch/rl/tree/main/sota-implementations)** - Explore more TorchRL algorithms
 

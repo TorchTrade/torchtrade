@@ -564,6 +564,6 @@ print(f"Terminal reward: {tensordict['reward'].item()}")
 - **[Loss Functions](../components/losses.md)** - Training objectives (GRPOLoss for OneStepEnv, CTRL for representation learning)
 - **[Transforms](../components/transforms.md)** - Data preprocessing (ChronosEmbeddingTransform, CoverageTracker)
 - **[Actors](../components/actors.md)** - Alternative policies (RuleBasedActor for baselines, LLMActor for LLM trading)
-- **[Custom Feature Engineering](../guides/custom-features.md)** - Add technical indicators
-- **[Custom Reward Functions](../guides/reward-functions.md)** - Design better rewards
+- **[Feature Engineering](../guides/custom-features.md)** - Add technical indicators
+- **[Reward Functions](../guides/reward-functions.md)** - Design better rewards
 - **[Understanding the Sampler](../guides/sampler.md)** - How data sampling works

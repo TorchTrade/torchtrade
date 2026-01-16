@@ -1,0 +1,22 @@
+/* TorchTrade Logo Styling */
+
+/* Adjust logo size for better visibility */
+.md-header__button.md-logo img {
+    height: 40px;
+    width: auto;
+}
+
+/* Ensure white logo is visible on all backgrounds */
+.md-logo img {
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.3));
+}
+
+/* Additional styling for light mode - white logo on blue header works well */
+[data-md-color-scheme="default"] .md-logo img {
+    opacity: 1;
+}
+
+/* Dark mode - white logo on dark header also works well */
+[data-md-color-scheme="slate"] .md-logo img {
+    opacity: 0.95;
+}

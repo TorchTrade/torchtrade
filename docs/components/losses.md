@@ -274,4 +274,4 @@ loss_ctrl = loss_proto + myow_coeff * loss_myow
 
 - [Environments Guide](../environments/offline.md) - Compatible environment types
 - [Transforms Guide](transforms.md) - Data augmentation and preprocessing
-- [Custom Reward Functions](../guides/reward-functions.md) - Reward engineering patterns
+- [Reward Functions](../guides/reward-functions.md) - Reward engineering patterns

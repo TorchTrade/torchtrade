@@ -558,6 +558,6 @@ If vLLM import fails, LocalLLMActor automatically falls back to transformers.
 ## See Also
 
 - [Environments Guide](../environments/offline.md) - Compatible environment types
-- [Custom Reward Functions](../guides/reward-functions.md) - Reward engineering for RL actors
+- [Reward Functions](../guides/reward-functions.md) - Reward engineering for RL actors
 - [Loss Functions](losses.md) - Training objectives for neural network actors
 - [TorchRL Actors](https://pytorch.org/rl/reference/modules.html#actors) - Building neural network policies

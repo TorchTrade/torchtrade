@@ -1,4 +1,4 @@
-# Custom Reward Functions
+# Reward Functions
 
 Reward functions shape your agent's behavior. TorchTrade provides a flexible system for defining custom reward functions that go beyond simple log returns.
 
@@ -294,7 +294,7 @@ Bad patterns:
 
 ## Next Steps
 
-- **[Custom Feature Engineering](custom-features.md)** - Engineer features that support your reward function
+- **[Feature Engineering](custom-features.md)** - Engineer features that support your reward function
 - **[Understanding the Sampler](sampler.md)** - How data flows through environments
 - **[Loss Functions](../components/losses.md)** - Training objectives that work with rewards
 - **[Offline Environments](../environments/offline.md)** - Apply custom rewards to environments

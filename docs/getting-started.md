@@ -114,7 +114,7 @@ print(f"Reward: {tensordict['reward'].item()}")
 print(f"Done: {tensordict['done'].item()}")
 ```
 
-**Note**: TorchTrade uses a default log-return reward function, but you can customize it to shape agent behavior. See **[Custom Reward Functions](guides/reward-functions.md)** for examples including transaction cost penalties, Sharpe ratio rewards, and more.
+**Note**: TorchTrade uses a default log-return reward function, but you can customize it to shape agent behavior. See **[Reward Functions](guides/reward-functions.md)** for examples including transaction cost penalties, Sharpe ratio rewards, and more.
 
 ## Training Your First Policy
 
@@ -299,8 +299,9 @@ Now that you have the basics, explore these topics:
 
 - **[Offline Environments](environments/offline.md)** - Deep dive into backtesting environments
 - **[Online Environments](environments/online.md)** - Live trading with exchange APIs
-- **[Custom Feature Engineering](guides/custom-features.md)** - Add technical indicators
-- **[Custom Reward Functions](guides/reward-functions.md)** - Design better reward signals
+- **[Feature Engineering](guides/custom-features.md)** - Add technical indicators
+- **[Reward Functions](guides/reward-functions.md)** - Design better reward signals
+- **[Performance Metrics](guides/metrics.md)** - Evaluate agent performance with trading metrics
 - **[Understanding the Sampler](guides/sampler.md)** - How multi-timeframe sampling works
 - **[Building Custom Environments](guides/custom-environment.md)** - Extend TorchTrade
 

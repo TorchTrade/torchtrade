@@ -5,6 +5,7 @@ site_url: https://torchtrade.github.io/torchtrade_envs/
 
 theme:
   name: material
+  logo: images/torchtrade_white.png
   features:
     - navigation.tabs
     - navigation.tracking
@@ -79,16 +80,24 @@ edit_uri: edit/main/docs/
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Examples: examples.md
 
   - Environments:
       - Offline Environments: environments/offline.md
       - Online Environments: environments/online.md
-
-  - Customization Guides:
-      - Custom Feature Engineering: guides/custom-features.md
-      - Custom Reward Functions: guides/reward-functions.md
+      - Offline RL: environments/offline-rl.md
       - Understanding the Sampler: guides/sampler.md
       - Building Custom Environments: guides/custom-environment.md
+
+  - Components:
+      - Loss Functions: components/losses.md
+      - Transforms: components/transforms.md
+      - Actors: components/actors.md
+
+  - Advanced Customization:
+      - Feature Engineering: guides/custom-features.md
+      - Reward Functions: guides/reward-functions.md
+      - Performance Metrics: guides/metrics.md
 
 copyright: © 2025 <a href="https://github.com/TorchTrade" target="_blank" rel="noopener">TorchTrade</a>
 

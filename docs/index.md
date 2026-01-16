@@ -10,7 +10,7 @@ TorchTrade provides modular environments for both live trading with major exchan
 
 - 🎯 **Multi-Timeframe Observations** - Train on 1m, 5m, 15m, 1h bars simultaneously
 - 🤖 **Multiple RL Algorithms** - PPO, IQL, GRPO, DSAC implementations
-- 📊 **Custom Feature Engineering** - Add technical indicators and custom features
+- 📊 **Feature Engineering** - Add technical indicators and custom features
 - 🔴 **Live Trading** - Direct API integration with major exchanges
 - 📉 **Risk Management** - Stop-loss/take-profit, margin, leverage, liquidation mechanics
 - 🔮 **Futures Trading** - Up to 125x leverage with proper margin management
@@ -34,11 +34,10 @@ TorchTrade provides modular environments for both live trading with major exchan
 - **[Transforms](components/transforms.md)** - Data preprocessing (CoverageTracker, ChronosEmbeddingTransform)
 - **[Actors](components/actors.md)** - Trading policies (RuleBasedActor, LLMActor, LocalLLMActor, HumanActor)
 
-### Customization Guides
-- **[Custom Feature Engineering](guides/custom-features.md)** - Add technical indicators and features
-- **[Custom Reward Functions](guides/reward-functions.md)** - Design reward functions for your strategy
-- **[Understanding the Sampler](guides/sampler.md)** - How multi-timeframe data sampling works
-- **[Building Custom Environments](guides/custom-environment.md)** - Extend TorchTrade for your use case
+### Advanced Customization
+- **[Feature Engineering](guides/custom-features.md)** - Add technical indicators and features
+- **[Reward Functions](guides/reward-functions.md)** - Design reward functions for your strategy
+- **[Performance Metrics](guides/metrics.md)** - Evaluate and customize trading performance metrics
 
 ## Key Features
 
@@ -131,7 +130,7 @@ Ready to get started? Head to the **[Getting Started Guide](getting-started.md)*
 Already familiar with the basics? Check out:
 
 - **[Offline Environments](environments/offline.md)** - Deep dive into backtesting environments
-- **[Custom Reward Functions](guides/reward-functions.md)** - Design better reward signals
+- **[Reward Functions](guides/reward-functions.md)** - Design better reward signals
 - **[Building Custom Environments](guides/custom-environment.md)** - Extend the framework
 
 ## Support

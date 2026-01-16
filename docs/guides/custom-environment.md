@@ -311,6 +311,6 @@ print(f"Reward range: [{min(rewards):.2f}, {max(rewards):.2f}]")
 ## Next Steps
 
 - **[Offline Environments](../environments/offline.md)** - Understand existing environment architecture
-- **[Custom Reward Functions](reward-functions.md)** - Define custom reward logic
-- **[Custom Feature Engineering](custom-features.md)** - Add technical indicators
+- **[Reward Functions](reward-functions.md)** - Define custom reward logic
+- **[Feature Engineering](custom-features.md)** - Add technical indicators
 - **[TorchRL EnvBase](https://pytorch.org/rl/reference/envs.html#envbase)** - Base class documentation

@@ -197,6 +197,6 @@ config = SeqLongOnlyEnvConfig(
 
 ## Next Steps
 
-- **[Custom Feature Engineering](custom-features.md)** - Add technical indicators via preprocessing
-- **[Custom Reward Functions](reward-functions.md)** - Design rewards that work with your sampled data
+- **[Feature Engineering](custom-features.md)** - Add technical indicators via preprocessing
+- **[Reward Functions](reward-functions.md)** - Design rewards that work with your sampled data
 - **[Offline Environments](../environments/offline.md)** - Apply sampler configuration to environments

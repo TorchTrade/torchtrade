@@ -344,6 +344,6 @@ ChronosEmbeddingTransform(
 ## See Also
 
 - [TorchRL Transforms Documentation](https://pytorch.org/rl/reference/envs.html#transforms) - Built-in transforms
-- [Custom Feature Engineering](../guides/custom-features.md) - Manual feature engineering patterns
+- [Feature Engineering](../guides/custom-features.md) - Manual feature engineering patterns
 - [Loss Functions](losses.md) - Training objectives that work with transforms
 - [Example: Chronos Embedding](https://github.com/TorchTrade/TorchTrade/blob/main/examples/transforms/chronos_embedding_example.py) - Complete usage example
