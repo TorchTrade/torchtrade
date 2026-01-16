@@ -1,5 +1,6 @@
 """Base class for live trading environments."""
 
+import logging
 import time
 from abc import abstractmethod
 from datetime import datetime, timedelta
@@ -10,6 +11,8 @@ from tensordict import TensorDictBase
 
 from torchtrade.envs.base import TorchTradeBaseEnv
 from torchtrade.envs.state import PositionState
+
+logger = logging.getLogger(__name__)
 
 
 class TorchTradeLiveEnv(TorchTradeBaseEnv):
@@ -108,7 +111,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
 
     def _wait_for_next_timestamp(self):
         """
-        Wait until next time step based on execute_on configuration.
+        Wait until next time step - improved version.
 
         This is COMMON across all live environments - timing logic is universal.
 
@@ -143,9 +146,12 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         current_time = datetime.now(self.timezone)
         next_step = (current_time + wait_duration).replace(second=0, microsecond=0)
 
-        # Wait until next step
-        while datetime.now(self.timezone) < next_step:
-            time.sleep(1)
+        # Calculate exact sleep duration
+        sleep_seconds = (next_step - datetime.now(self.timezone)).total_seconds()
+
+        # Single sleep instead of polling loop
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
 
     @abstractmethod
     def _get_portfolio_value(self, *args, **kwargs) -> float:
