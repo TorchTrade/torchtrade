@@ -7,7 +7,7 @@ Tests observation fetching, preprocessing, and feature extraction using mock cli
 import pytest
 import numpy as np
 import pandas as pd
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
 from .mocks import MockCryptoHistoricalDataClient
@@ -42,7 +42,7 @@ class TestAlpacaObservationClassInitialization:
         )
 
         assert len(obs_class.timeframes) == 1
-        assert obs_class.timeframes[0].amount == 15
+        assert obs_class.timeframes[0].value == 15
         assert len(obs_class.window_sizes) == 1
         assert obs_class.window_sizes[0] == 20
 

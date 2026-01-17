@@ -8,27 +8,38 @@ from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Bounded
 from torchrl.data.tensor_specs import CompositeSpec
 
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.binance.obs_class import BinanceObservationClass
 from torchtrade.envs.binance.futures_order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.live import TorchTradeLiveEnv
 from torchtrade.envs.state import FuturesHistoryTracker, PositionState
 
 
-# Interval to seconds mapping for waiting
-INTERVAL_SECONDS = {
-    "1m": 60,
-    "3m": 180,
-    "5m": 300,
-    "15m": 900,
-    "30m": 1800,
-    "1h": 3600,
-    "2h": 7200,
-    "4h": 14400,
-    "6h": 21600,
-    "8h": 28800,
-    "12h": 43200,
-    "1d": 86400,
-}
+def timeframe_to_seconds(tf: TimeFrame) -> int:
+    """Convert TimeFrame to seconds for timing purposes.
+
+    Args:
+        tf: Custom TimeFrame object
+
+    Returns:
+        Number of seconds in the timeframe
+
+    Examples:
+        >>> tf = TimeFrame(1, TimeFrameUnit.Minute)
+        >>> timeframe_to_seconds(tf)
+        60
+        >>> tf = TimeFrame(1, TimeFrameUnit.Hour)
+        >>> timeframe_to_seconds(tf)
+        3600
+    """
+    if tf.unit == TimeFrameUnit.Minute:
+        return tf.value * 60
+    elif tf.unit == TimeFrameUnit.Hour:
+        return tf.value * 3600
+    elif tf.unit == TimeFrameUnit.Day:
+        return tf.value * 86400
+    else:
+        raise ValueError(f"Unsupported TimeFrameUnit: {tf.unit}")
 
 
 class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -94,9 +105,9 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
             timezone="UTC"
         )
 
-        # Extract execute interval and convert to seconds
+        # Extract execute timeframe and convert to seconds
         self.execute_on = config.execute_on
-        self.execute_on_value = INTERVAL_SECONDS.get(config.execute_on, 60)
+        self.execute_on_value = timeframe_to_seconds(config.execute_on)
         self.execute_on_unit = "seconds"  # Binance uses simple seconds-based intervals
 
         # Reset settings
@@ -128,14 +139,15 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         Uses dependency injection pattern - uses provided instances or creates new ones.
         """
-        # Normalize intervals to list
-        intervals = self.config.intervals if isinstance(self.config.intervals, list) else [self.config.intervals]
-        window_sizes = self.config.window_sizes if isinstance(self.config.window_sizes, list) else [self.config.window_sizes]
+        # time_frames are already normalized in config.__post_init__,
+        # so we can use them directly
+        time_frames = self.config.time_frames
+        window_sizes = self.config.window_sizes
 
         # Initialize observer
         self.observer = observer if observer is not None else BinanceObservationClass(
             symbol=self.config.symbol,
-            intervals=intervals,
+            time_frames=time_frames,
             window_sizes=window_sizes,
             feature_preprocessing_fn=self._feature_preprocessing_fn,
             demo=self.config.demo,

@@ -28,9 +28,9 @@ class BitgetFuturesSLTPTradingEnvConfig:
     symbol: str = "BTCUSDT"
 
     # Timeframes and windows
-    intervals: Union[List[str], str] = "1m"
+    time_frames: Union[List[Union[str, "TimeFrame"]], Union[str, "TimeFrame"]] = "1Min"
     window_sizes: Union[List[int], int] = 10
-    execute_on: str = "1m"  # Interval for trade execution timing
+    execute_on: Union[str, "TimeFrame"] = "1Min"  # Timeframe for trade execution timing
 
     # Trading parameters
     product_type: str = "SUMCBL"  # SUMCBL=testnet, UMCBL=production
@@ -61,11 +61,11 @@ class BitgetFuturesSLTPTradingEnvConfig:
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
     def __post_init__(self):
-        # Normalize to lists
-        if isinstance(self.intervals, str):
-            self.intervals = [self.intervals]
-        if isinstance(self.window_sizes, int):
-            self.window_sizes = [self.window_sizes]
+        # Normalize timeframes using utility function
+        from torchtrade.envs.bitget.utils import normalize_bitget_timeframe_config
+        self.execute_on, self.time_frames, self.window_sizes = normalize_bitget_timeframe_config(
+            self.execute_on, self.time_frames, self.window_sizes
+        )
 
 
 class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):

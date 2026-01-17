@@ -26,9 +26,9 @@ class BitgetFuturesTradingEnvConfig:
     action_levels: List[float] = None  # Default set in __post_init__
 
     # Timeframes and windows
-    intervals: Union[List[str], str] = "1m"
+    time_frames: Union[List[Union[str, "TimeFrame"]], Union[str, "TimeFrame"]] = "1Min"
     window_sizes: Union[List[int], int] = 10
-    execute_on: str = "1m"  # Interval for trade execution timing
+    execute_on: Union[str, "TimeFrame"] = "1Min"  # Timeframe for trade execution timing
 
     # Trading parameters
     product_type: str = "SUMCBL"  # SUMCBL=testnet, UMCBL=production
@@ -57,11 +57,11 @@ class BitgetFuturesTradingEnvConfig:
         if self.action_levels is None:
             self.action_levels = [-1.0, 0.0, 1.0]  # short, close/hold, long
 
-        # Normalize to lists
-        if isinstance(self.intervals, str):
-            self.intervals = [self.intervals]
-        if isinstance(self.window_sizes, int):
-            self.window_sizes = [self.window_sizes]
+        # Normalize timeframes using utility function
+        from torchtrade.envs.bitget.utils import normalize_bitget_timeframe_config
+        self.execute_on, self.time_frames, self.window_sizes = normalize_bitget_timeframe_config(
+            self.execute_on, self.time_frames, self.window_sizes
+        )
 
 
 class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):

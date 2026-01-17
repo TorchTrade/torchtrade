@@ -1,148 +1,16 @@
-from enum import Enum
-from functools import total_ordering
 from typing import List, Union, Optional, Dict, Tuple
 from itertools import product
 import pandas as pd
 import numpy as np
-import re
 
-def parse_timeframe_string(s: str) -> "TimeFrame":
-    """Parse timeframe string to TimeFrame object.
-
-    Supports formats: "5Min", "5min", "5Minute", "5 minutes", "5M", "5H", "5D"
-
-    Args:
-        s: Timeframe string (e.g., "5Min", "1Hour", "15Minute")
-
-    Returns:
-        TimeFrame object
-
-    Raises:
-        ValueError: If string format is invalid or unit is unknown
-
-    Examples:
-        >>> parse_timeframe_string("5Min")
-        TimeFrame(5, TimeFrameUnit.Minute)
-        >>> parse_timeframe_string("1Hour")
-        TimeFrame(1, TimeFrameUnit.Hour)
-        >>> parse_timeframe_string("15 minutes")
-        TimeFrame(15, TimeFrameUnit.Minute)
-    """
-    s = s.strip()
-
-    # Pattern: <number><optional space><unit>
-    pattern = r'^(\d+)\s*([a-zA-Z]+)$'
-    match = re.match(pattern, s)
-
-    if not match:
-        raise ValueError(
-            f"Invalid timeframe format: '{s}'. "
-            f"Expected format: '<number><unit>' (e.g., '5Min', '1Hour', '15Minute')"
-        )
-
-    value = int(match.group(1))
-    unit_str = match.group(2).lower()
-
-    # Map unit variations to TimeFrameUnit using dictionary for clarity
-    unit_map = {
-        'min': TimeFrameUnit.Minute,
-        'minute': TimeFrameUnit.Minute,
-        'minutes': TimeFrameUnit.Minute,
-        'm': TimeFrameUnit.Minute,
-        'hour': TimeFrameUnit.Hour,
-        'hours': TimeFrameUnit.Hour,
-        'h': TimeFrameUnit.Hour,
-        'hr': TimeFrameUnit.Hour,
-        'day': TimeFrameUnit.Day,
-        'days': TimeFrameUnit.Day,
-        'd': TimeFrameUnit.Day,
-    }
-
-    unit = unit_map.get(unit_str)
-    if unit is None:
-        raise ValueError(
-            f"Unknown time unit: '{unit_str}'. "
-            f"Supported units: Min/Minute/Minutes/M, Hour/Hours/H, Day/Days/D"
-        )
-
-    return TimeFrame(value, unit)
-
-
-def normalize_timeframe_config(
-    execute_on: Union[str, "TimeFrame"],
-    time_frames: Union[List[Union[str, "TimeFrame"]], Union[str, "TimeFrame"]],
-    window_sizes: Union[List[int], int],
-    parse_fn=None,
-) -> Tuple["TimeFrame", List["TimeFrame"], List[int]]:
-    """Normalize timeframe configuration for environment configs.
-
-    Converts string timeframes to TimeFrame objects, normalizes to lists,
-    and validates that window_sizes matches time_frames length.
-
-    Args:
-        execute_on: Execution timeframe (string or TimeFrame)
-        time_frames: List of timeframes or single timeframe (strings or TimeFrame objects)
-        window_sizes: List of window sizes or single window size
-        parse_fn: Function to parse timeframe strings (defaults to parse_timeframe_string)
-
-    Returns:
-        Tuple of (execute_on_tf, time_frames_list, window_sizes_list)
-
-    Raises:
-        ValueError: If window_sizes length doesn't match time_frames length
-
-    Examples:
-        >>> execute_on, tfs, ws = normalize_timeframe_config("5Min", ["1Min", "5Min"], 10)
-        >>> execute_on.to_pandas_freq()
-        '5Min'
-        >>> len(tfs)
-        2
-        >>> ws
-        [10, 10]
-    """
-    if parse_fn is None:
-        parse_fn = parse_timeframe_string
-
-    # Convert execute_on string to TimeFrame
-    if isinstance(execute_on, str):
-        execute_on = parse_fn(execute_on)
-
-    # Normalize time_frames to list
-    # Handle both regular lists, tuples, and Hydra ListConfig
-    # Use duck typing: if it has __iter__ and __len__, treat it as a sequence
-    try:
-        # Try to iterate and check if it's list-like
-        if hasattr(time_frames, '__iter__') and hasattr(time_frames, '__len__') and not isinstance(time_frames, (str, TimeFrame)):
-            # It's list-like (list, tuple, ListConfig, etc.) - convert to regular list
-            time_frames = list(time_frames)
-        else:
-            # It's a single element
-            time_frames = [time_frames]
-    except TypeError:
-        # Not iterable, wrap in list
-        time_frames = [time_frames]
-
-    # Convert all string timeframes to TimeFrame objects
-    time_frames = [
-        parse_fn(tf) if isinstance(tf, str) else tf
-        for tf in time_frames
-    ]
-
-    # Normalize window_sizes to list
-    if isinstance(window_sizes, int):
-        window_sizes = [window_sizes] * len(time_frames)
-    else:
-        # Convert to regular list (handles ListConfig, tuples, etc.)
-        window_sizes = list(window_sizes)
-
-    # Validate lengths match
-    if len(window_sizes) != len(time_frames):
-        raise ValueError(
-            f"window_sizes length ({len(window_sizes)}) must match "
-            f"time_frames length ({len(time_frames)})"
-        )
-
-    return execute_on, time_frames, window_sizes
+# Import TimeFrame infrastructure from shared module
+from torchtrade.envs.timeframe import (
+    TimeFrame,
+    TimeFrameUnit,
+    parse_timeframe_string,
+    normalize_timeframe_config,
+    tf_to_timedelta,
+)
 
 
 def compute_periods_per_year_crypto(execute_on_unit: str, execute_on_value: float):
@@ -166,75 +34,6 @@ def compute_periods_per_year_crypto(execute_on_unit: str, execute_on_value: floa
         raise ValueError(f"Unknown execute_on_unit: {execute_on_unit}")
 
     return periods_per_year
-
-class TimeFrameUnit(Enum):
-    Minute = 'Min'  # Pandas freq for minutes
-    Hour = 'H'    # Pandas freq for hours
-    Day = 'D'    # Pandas freq for days
-    # Add more if needed, e.g., week = 'W'
-
-@total_ordering
-class TimeFrame:
-    def __init__(self, value: int, unit: TimeFrameUnit):
-        self.value = value
-        self.unit = unit
-
-    def to_pandas_freq(self) -> str:
-        return f"{self.value}{self.unit.value}"
-
-    def obs_key_freq(self) -> str:
-        if self.unit == TimeFrameUnit.Minute:
-            return f"{self.value}Minute"
-        elif self.unit == TimeFrameUnit.Hour:
-            return f"{self.value}Hour"
-        elif self.unit == TimeFrameUnit.Day:
-            return f"{self.value}Day"
-        else:
-            raise ValueError(f"Unknown TimeFrameUnit {self.unit}")
-
-    def __eq__(self, other):
-        """Compare TimeFrames by value and unit."""
-        if not isinstance(other, TimeFrame):
-            return NotImplemented
-        return self.value == other.value and self.unit == other.unit
-
-    def __lt__(self, other):
-        """Less than comparison based on total minutes."""
-        if not isinstance(other, TimeFrame):
-            return NotImplemented
-        return self.to_minutes() < other.to_minutes()
-
-    def __hash__(self):
-        """Make TimeFrame hashable for use in sets and as dict keys."""
-        return hash((self.value, self.unit))
-
-    def __repr__(self):
-        """String representation for debugging."""
-        return f"TimeFrame({self.value}, {self.unit})"
-
-    def to_minutes(self) -> float:
-        """Convert timeframe to total minutes for comparison."""
-        if self.unit == TimeFrameUnit.Minute:
-            return float(self.value)
-        elif self.unit == TimeFrameUnit.Hour:
-            return float(self.value * 60)
-        elif self.unit == TimeFrameUnit.Day:
-            return float(self.value * 60 * 24)
-        else:
-            raise ValueError(f"Unknown TimeFrameUnit {self.unit}")
-
-
-# Correct tf_to_timedelta
-def tf_to_timedelta(tf: TimeFrame) -> pd.Timedelta:
-    """Convert TimeFrame to pandas Timedelta."""
-    if tf.unit == TimeFrameUnit.Minute:
-        return pd.Timedelta(minutes=tf.value)
-    elif tf.unit == TimeFrameUnit.Hour:
-        return pd.Timedelta(hours=tf.value)
-    elif tf.unit == TimeFrameUnit.Day:
-        return pd.Timedelta(days=tf.value)
-    else:
-        raise ValueError(f"Unknown TimeFrameUnit {tf.unit}")
 
 
 class InitialBalanceSampler:
