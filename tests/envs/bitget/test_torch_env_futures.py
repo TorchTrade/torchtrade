@@ -69,7 +69,7 @@ class TestBitgetFuturesTorchTradingEnv:
         return BitgetFuturesTradingEnvConfig(
             symbol="BTCUSDT",
             demo=True,
-            intervals=["1m", "5m"],
+            time_frames=["1m", "5m"],
             window_sizes=[10, 10],
             execute_on="1m",
             leverage=5,
@@ -378,13 +378,13 @@ class TestBitgetFuturesTorchTradingEnv:
 
         config = BitgetFuturesTradingEnvConfig(
             symbol="BTCUSDT",
-            intervals="1m",  # Single string
+            time_frames="1m",  # Single string
             window_sizes=10,  # Single int
         )
 
-        assert isinstance(config.intervals, list)
+        assert isinstance(config.time_frames, list)
         assert isinstance(config.window_sizes, list)
-        assert config.intervals == ["1m"]
+        assert config.time_frames == ["1m"]
         assert config.window_sizes == [10]
 
 
@@ -403,7 +403,7 @@ class TestBitgetFuturesTorchTradingEnvIntegration:
         config = BitgetFuturesTradingEnvConfig(
             symbol="BTCUSDT",
             demo=True,
-            intervals=["1m"],
+            time_frames=["1m"],
             window_sizes=[10],
             execute_on="1m",
             leverage=5,

@@ -26,7 +26,7 @@ class BitgetFuturesTradingEnvConfig:
     action_levels: List[float] = None  # Default set in __post_init__
 
     # Timeframes and windows
-    intervals: Union[List[str], str] = "1m"
+    time_frames: Union[List[str], str] = "1m"
     window_sizes: Union[List[int], int] = 10
     execute_on: str = "1m"  # Interval for trade execution timing
 
@@ -58,8 +58,8 @@ class BitgetFuturesTradingEnvConfig:
             self.action_levels = [-1.0, 0.0, 1.0]  # short, close/hold, long
 
         # Normalize to lists
-        if isinstance(self.intervals, str):
-            self.intervals = [self.intervals]
+        if isinstance(self.time_frames, str):
+            self.time_frames = [self.time_frames]
         if isinstance(self.window_sizes, int):
             self.window_sizes = [self.window_sizes]
 
@@ -285,7 +285,7 @@ if __name__ == "__main__":
     config = BitgetFuturesTradingEnvConfig(
         symbol="BTCUSDT",
         demo=True,
-        intervals=["1m"],
+        time_frames=["1m"],
         window_sizes=[10],
         execute_on="1m",
         leverage=5,

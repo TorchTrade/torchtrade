@@ -28,7 +28,7 @@ class BitgetFuturesSLTPTradingEnvConfig:
     symbol: str = "BTCUSDT"
 
     # Timeframes and windows
-    intervals: Union[List[str], str] = "1m"
+    time_frames: Union[List[str], str] = "1m"
     window_sizes: Union[List[int], int] = 10
     execute_on: str = "1m"  # Interval for trade execution timing
 
@@ -62,8 +62,8 @@ class BitgetFuturesSLTPTradingEnvConfig:
 
     def __post_init__(self):
         # Normalize to lists
-        if isinstance(self.intervals, str):
-            self.intervals = [self.intervals]
+        if isinstance(self.time_frames, str):
+            self.time_frames = [self.time_frames]
         if isinstance(self.window_sizes, int):
             self.window_sizes = [self.window_sizes]
 
@@ -340,7 +340,7 @@ if __name__ == "__main__":
     config = BitgetFuturesSLTPTradingEnvConfig(
         symbol="BTCUSDT",
         demo=True,
-        intervals=["1m"],
+        time_frames=["1m"],
         window_sizes=[10],
         execute_on="1m",
         leverage=5,

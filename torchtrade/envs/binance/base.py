@@ -128,8 +128,8 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         Uses dependency injection pattern - uses provided instances or creates new ones.
         """
-        # Normalize intervals to list
-        intervals = self.config.intervals if isinstance(self.config.intervals, list) else [self.config.intervals]
+        # Normalize time_frames to list
+        intervals = self.config.time_frames if isinstance(self.config.time_frames, list) else [self.config.time_frames]
         window_sizes = self.config.window_sizes if isinstance(self.config.window_sizes, list) else [self.config.window_sizes]
 
         # Initialize observer

@@ -27,7 +27,7 @@ class BinanceFuturesSLTPTradingEnvConfig:
     symbol: str = "BTCUSDT"
 
     # Timeframes and windows
-    intervals: Union[List[str], str] = field(default_factory=lambda: ["1m"])
+    time_frames: Union[List[str], str] = field(default_factory=lambda: ["1m"])
     window_sizes: Union[List[int], int] = 10
     execute_on: str = "1m"  # Interval for trade execution timing
 
@@ -332,7 +332,7 @@ if __name__ == "__main__":
     config = BinanceFuturesSLTPTradingEnvConfig(
         symbol="BTCUSDT",
         demo=True,
-        intervals=["1m"],
+        time_frames=["1m"],
         window_sizes=[10],
         execute_on="1m",
         leverage=5,

@@ -24,7 +24,7 @@ class BinanceFuturesTradingEnvConfig:
     max_position: float = 1.0  # Maximum position size as fraction of balance
 
     # Timeframes and windows
-    intervals: Union[List[str], str] = field(default_factory=lambda: ["1m"])
+    time_frames: Union[List[str], str] = field(default_factory=lambda: ["1m"])
     window_sizes: Union[List[int], int] = 10
     execute_on: str = "1m"  # Interval for trade execution timing
 
@@ -279,7 +279,7 @@ if __name__ == "__main__":
     config = BinanceFuturesTradingEnvConfig(
         symbol="BTCUSDT",
         demo=True,
-        intervals=["1m", "5m"],
+        time_frames=["1m", "5m"],
         window_sizes=[10, 10],
         execute_on="1m",
         leverage=5,
