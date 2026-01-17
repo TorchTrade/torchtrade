@@ -19,7 +19,7 @@ TorchTrade provides 6 offline environments:
 
 ## SeqLongOnlyEnv
 
-Simple long-only spot trading environment for sequential RL algorithms.
+Simple long-only spot trading environment for sequential RL algorithms. This is the offline backtesting equivalent of the [AlpacaTorchTradingEnv](online.md#alpacatorchtradingenv) live environment, designed for training on historical data before deploying to live stock and crypto markets.
 
 ### Features
 - **Long-only trading**: Can only buy and hold (no short positions)
@@ -34,7 +34,7 @@ from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 
 config = SeqLongOnlyEnvConfig(
     # Multi-timeframe setup
-    time_frames=["1min", "5min", "15min", "60min"],        # Values in minutes: "1min", "5min", "15min", "60min"
+    time_frames=["1min", "5min", "15min", "1hour"],        # Values: "1min", "5min", "15min", "1hour", "1day"
     window_sizes=[12, 8, 8, 24],       # Lookback per timeframe
     execute_on=(5, "Minute"),          # Execute every 5 minutes
 
@@ -45,6 +45,7 @@ config = SeqLongOnlyEnvConfig(
 
     # Episode configuration
     max_traj_length=None,              # Full dataset (or set limit)
+    random_start=True,                 # True = random episode starts, False = sequential
 
     # Feature preprocessing (optional)
     feature_preprocessing_fn=None,      # Custom feature function
@@ -64,7 +65,7 @@ observation = {
     "market_data_1Minute": Tensor([12, num_features]),    # 1m window
     "market_data_5Minute": Tensor([8, num_features]),     # 5m window
     "market_data_15Minute": Tensor([8, num_features]),    # 15m window
-    "market_data_60Minute": Tensor([24, num_features]),   # 1h window
+    "market_data_1Hour": Tensor([24, num_features]),      # 1h window
     "account_state": Tensor([7]),                         # Account state
 }
 
@@ -120,7 +121,7 @@ while not done:
 
 ## SeqLongOnlySLTPEnv
 
-Long-only environment with stop-loss and take-profit bracket orders.
+Long-only environment with stop-loss and take-profit bracket orders. This is the offline backtesting equivalent of the [AlpacaSLTPTorchTradingEnv](online.md#alpacasltptorchtradingenv) live environment, adding risk management through bracket orders for stock and crypto trading.
 
 ### Features
 - All features of `SeqLongOnlyEnv`
@@ -192,13 +193,16 @@ print(f"Action space size: {env.action_spec.space.n}")
 
 ## LongOnlyOneStepEnv
 
-One-step episodic environment optimized for GRPO and contextual bandit algorithms.
+One-step episodic environment optimized for [GRPO](https://arxiv.org/abs/2402.03300) and contextual bandit algorithms. The agent receives a randomly sampled observation from historical data, takes a single action, and then the environment simulates a future rollout until bracket orders are triggered (stop-loss or take-profit hit) or the maximum rollout length is reached, completing the episode.
 
 ### Features
 - **One-step episodes**: Each episode is a single decision point
 - **Episodic rollout**: Action taken, then position held for fixed duration
 - **Fast iteration**: Train policies quickly with episodic rollouts
 - **Bracket orders**: Includes SL/TP like `SeqLongOnlySLTPEnv`
+
+!!! note "Deployment to Sequential Environments"
+    Policies trained on `LongOnlyOneStepEnv` can be directly deployed to `SeqLongOnlySLTPEnv` for step-by-step trading, since both environments share the same observation and action spaces. This allows fast [GRPO-like](https://arxiv.org/abs/2402.03300) training followed by sequential backtesting or live trading.
 
 ### Configuration
 
@@ -267,7 +271,7 @@ print(f"Done: {tensordict['done'].item()}")  # Always True
 
 ## SeqFuturesEnv
 
-Futures trading environment with leverage, margin management, and liquidation mechanics.
+Futures trading environment with leverage, margin management, and liquidation mechanics. This is the offline backtesting equivalent of the [BinanceFuturesTorchTradingEnv](online.md#binancefuturestorchtradingenv) and [BitgetFuturesTorchTradingEnv](online.md#bitgetfuturestorchtradingenv) live environments, designed for training futures trading strategies on historical data before deploying to live crypto markets.
 
 ### Features
 - **Futures trading**: Long and short positions
@@ -283,7 +287,7 @@ from torchtrade.envs.offline import SeqFuturesEnv, SeqFuturesEnvConfig
 
 config = SeqFuturesEnvConfig(
     # Multi-timeframe setup
-    time_frames=["1min", "5min", "15min", "60min"],
+    time_frames=["1min", "5min", "15min", "1hour"],
     window_sizes=[12, 8, 8, 24],
     execute_on=(5, "Minute"),
 
@@ -313,7 +317,7 @@ observation = {
     "market_data_1Minute": Tensor([12, num_features]),
     "market_data_5Minute": Tensor([8, num_features]),
     "market_data_15Minute": Tensor([8, num_features]),
-    "market_data_60Minute": Tensor([24, num_features]),
+    "market_data_1Hour": Tensor([24, num_features]),
     "account_state": Tensor([10]),  # 10 elements (futures-specific)
 }
 
@@ -384,7 +388,7 @@ while not tensordict["done"].item():
 
 ## SeqFuturesSLTPEnv
 
-Futures environment with stop-loss/take-profit bracket orders.
+Futures environment with stop-loss/take-profit bracket orders. This is the offline backtesting equivalent of the [BinanceFuturesSLTPTorchTradingEnv](online.md#binancefuturessltptorchtradingenv) and [BitgetFuturesSLTPTorchTradingEnv](online.md#bitgetfuturessltptorchtradingenv) live environments, adding risk management through bracket orders for futures trading strategies.
 
 ### Features
 - All features of `SeqFuturesEnv`
@@ -459,13 +463,16 @@ print(f"Action space size: {env.action_spec.space.n}")  # 9 actions
 
 ## FuturesOneStepEnv
 
-One-step episodic futures environment for GRPO training.
+One-step episodic futures environment optimized for [GRPO](https://arxiv.org/abs/2402.03300) training. The agent receives a randomly sampled observation from historical data, takes a single action (long/short with SL/TP or hold), and then the environment simulates a future rollout with leverage and margin mechanics until bracket orders are triggered or the maximum rollout length is reached, completing the episode.
 
 ### Features
 - Combines `SeqFuturesEnv` + `LongOnlyOneStepEnv`
 - **One-step episodes**: Single decision with episodic rollout
 - **Futures with leverage**: Up to 125x leverage
 - **Bracket orders**: SL/TP for long and short
+
+!!! note "Deployment to Sequential Environments"
+    Policies trained on `FuturesOneStepEnv` can be directly deployed to `SeqFuturesSLTPEnv` for step-by-step trading, since both environments share the same observation and action spaces. This allows fast [GRPO-like](https://arxiv.org/abs/2402.03300) training followed by sequential backtesting or live trading.
 
 ### Configuration
 
