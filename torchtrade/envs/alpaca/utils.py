@@ -1,5 +1,5 @@
 """Utility functions for Alpaca environments."""
-from typing import List, Union, Tuple
+from typing import Any, List, Union, Tuple
 import warnings
 from torchtrade.envs.timeframe import (
     TimeFrame,
@@ -65,7 +65,7 @@ def normalize_alpaca_timeframe_config(
         >>> execute_on, tfs, ws = normalize_alpaca_timeframe_config(alpaca_tf, [alpaca_tf], 10)
     """
     # Convert Alpaca TimeFrame to custom TimeFrame for backwards compatibility
-    def convert_if_alpaca(tf):
+    def convert_if_alpaca(tf: Union[TimeFrame, Any]) -> TimeFrame:
         """Convert Alpaca TimeFrame to custom TimeFrame if needed."""
         # Check if it's an Alpaca TimeFrame by checking for 'amount' attribute
         if hasattr(tf, 'amount') and hasattr(tf, 'unit'):

@@ -262,7 +262,8 @@ def normalize_timeframe_config(
 
     # Normalize time_frames to list
     # Handle both regular lists, tuples, and Hydra ListConfig
-    # Use duck typing: if it has __iter__ and __len__, treat it as a sequence
+    # Duck typing is needed because Hydra's OmegaConf.ListConfig is not a standard list type,
+    # but implements __iter__ and __len__. This approach works with any sequence-like object.
     try:
         # Try to iterate and check if it's list-like
         if hasattr(time_frames, '__iter__') and hasattr(time_frames, '__len__') and not isinstance(time_frames, (str, TimeFrame)):
@@ -357,13 +358,13 @@ def timeframe_to_alpaca(tf: TimeFrame):
     return AlpacaTimeFrame(tf.value, alpaca_unit)
 
 
-def alpaca_to_timeframe(atf) -> TimeFrame:
+def alpaca_to_timeframe(alpaca_tf) -> TimeFrame:
     """Convert Alpaca TimeFrame to custom TimeFrame.
 
     Provides backwards compatibility for code using Alpaca's TimeFrame objects.
 
     Args:
-        atf: Alpaca TimeFrame object
+        alpaca_tf: Alpaca TimeFrame object
 
     Returns:
         Custom TimeFrame object
@@ -383,11 +384,11 @@ def alpaca_to_timeframe(atf) -> TimeFrame:
         AlpacaUnit.Day: TimeFrameUnit.Day,
     }
 
-    custom_unit = unit_map.get(atf.unit)
+    custom_unit = unit_map.get(alpaca_tf.unit)
     if custom_unit is None:
-        raise ValueError(f"Unsupported Alpaca TimeFrameUnit: {atf.unit}")
+        raise ValueError(f"Unsupported Alpaca TimeFrameUnit: {alpaca_tf.unit}")
 
-    return TimeFrame(atf.amount, custom_unit)
+    return TimeFrame(alpaca_tf.amount, custom_unit)
 
 
 def timeframe_to_binance(tf: TimeFrame) -> str:
