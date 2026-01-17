@@ -1,10 +1,18 @@
 # Online Environments
 
-Online environments connect to real trading APIs for paper trading or live execution. They provide the same TorchRL interface as offline environments but fetch real-time market data from exchanges.
+Online environments connect to real trading APIs for paper trading or live execution. They provide the same TorchTrade interface as offline environments but fetch real-time market data from exchanges.
+
+**Supported Exchanges:**
+
+- **[Alpaca](https://alpaca.markets/)** - Commission-free US stocks and crypto with paper trading
+
+- **[Binance](https://accounts.binance.com/register?ref=25015935)** - Cryptocurrency futures with high leverage and testnet
+
+- **[Bitget](https://www.bitget.com/)** - Cryptocurrency futures with competitive fees and testnet
 
 ## Overview
 
-TorchTrade supports 3 exchanges with 6 live trading environments:
+TorchTrade provides 6 live trading environments across these exchanges:
 
 | Environment | Exchange | Asset Type | Futures | Leverage | Bracket Orders |
 |-------------|----------|------------|---------|----------|----------------|
@@ -146,7 +154,7 @@ Total: **5 actions**
 
 ## Binance Environments
 
-[Binance](https://www.binance.com/) is a leading cryptocurrency exchange with futures trading and testnet support.
+[Binance](https://accounts.binance.com/register?ref=25015935) is a leading cryptocurrency exchange with futures trading and testnet support.
 
 ### BinanceFuturesTorchTradingEnv
 
