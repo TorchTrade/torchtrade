@@ -48,17 +48,12 @@ EOF
 
 ```python
 from torchtrade.envs.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 config = AlpacaTradingEnvConfig(
     symbol="BTC/USD",                       # Trading symbol
-    time_frames=[
-        TimeFrame(1, TimeFrameUnit.Minute),
-        TimeFrame(5, TimeFrameUnit.Minute),
-        TimeFrame(15, TimeFrameUnit.Minute),
-    ],
-    window_sizes=[12, 8, 8],                # Lookback per timeframe
-    execute_on=TimeFrame(5, TimeFrameUnit.Minute),  # Execute every 5 minutes
+    time_frames=["1Min", "5Min", "15Min", "1Hour"],  # 1min, 5min, 15min, 1hour
+    window_sizes=[12, 8, 8, 24],            # Lookback per timeframe
+    execute_on="5Min",                      # Execute every 5 minutes
     paper=True,                             # Paper trading (recommended!)
     feature_preprocessing_fn=None,          # Optional custom features
     reward_function=None,                   # Optional custom reward
@@ -77,18 +72,14 @@ env = AlpacaTorchTradingEnv(config)
 
 ```python
 from torchtrade.envs.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 import torch
 
 # Configure environment
 config = AlpacaTradingEnvConfig(
     symbol="BTC/USD",
-    time_frames=[
-        TimeFrame(1, TimeFrameUnit.Minute),
-        TimeFrame(5, TimeFrameUnit.Minute),
-    ],
-    window_sizes=[12, 8],
-    execute_on=TimeFrame(5, TimeFrameUnit.Minute),
+    time_frames=["1Min", "5Min", "15Min"],
+    window_sizes=[12, 8, 8],
+    execute_on="5Min",
     paper=True  # Always start with paper trading!
 )
 
@@ -117,16 +108,12 @@ Alpaca environment with stop-loss/take-profit bracket orders.
 
 ```python
 from torchtrade.envs.alpaca import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 config = AlpacaSLTPTradingEnvConfig(
     symbol="BTC/USD",
-    time_frames=[
-        TimeFrame(1, TimeFrameUnit.Minute),
-        TimeFrame(5, TimeFrameUnit.Minute),
-    ],
-    window_sizes=[12, 8],
-    execute_on=TimeFrame(5, TimeFrameUnit.Minute),
+    time_frames=["1Min", "5Min", "15Min"],
+    window_sizes=[12, 8, 8],
+    execute_on="5Min",
 
     # Bracket order configuration
     stoploss_levels=[-0.02, -0.05],         # -2%, -5%
