@@ -2,26 +2,9 @@ from typing import List, Union, Callable, Dict, Optional
 from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
+import warnings
 
-
-# Binance kline intervals mapping
-INTERVAL_MAP = {
-    "1m": "1m",
-    "3m": "3m",
-    "5m": "5m",
-    "15m": "15m",
-    "30m": "30m",
-    "1h": "1h",
-    "2h": "2h",
-    "4h": "4h",
-    "6h": "6h",
-    "8h": "8h",
-    "12h": "12h",
-    "1d": "1d",
-    "3d": "3d",
-    "1w": "1w",
-    "1M": "1M",
-}
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, timeframe_to_binance
 
 
 class BinanceObservationClass:
@@ -35,7 +18,7 @@ class BinanceObservationClass:
     def __init__(
         self,
         symbol: str,
-        intervals: Union[List[str], str],
+        time_frames: Union[List[TimeFrame], TimeFrame],
         window_sizes: Union[List[int], int] = 10,
         feature_preprocessing_fn: Optional[Callable] = None,
         client: Optional[object] = None,
@@ -46,10 +29,9 @@ class BinanceObservationClass:
 
         Args:
             symbol: The trading symbol (e.g., "BTCUSDT")
-            intervals: Single interval or list of intervals (e.g., "1m", "5m", "1h")
-                      Valid intervals: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
+            time_frames: Single custom TimeFrame or list of custom TimeFrames to fetch data for
             window_sizes: Single integer or list of integers specifying window sizes.
-                         If a list is provided, it must have the same length as intervals.
+                         If a list is provided, it must have the same length as time_frames.
             feature_preprocessing_fn: Optional custom preprocessing function that takes a DataFrame
                                      and returns a DataFrame with feature columns
             client: Optional pre-configured Binance Client for dependency injection (useful for testing)
@@ -58,19 +40,14 @@ class BinanceObservationClass:
         # Normalize symbol (remove slash if present)
         self.symbol = symbol.replace("/", "")
 
-        self.intervals = [intervals] if isinstance(intervals, str) else intervals
+        self.time_frames = [time_frames] if isinstance(time_frames, TimeFrame) else time_frames
         self.window_sizes = [window_sizes] if isinstance(window_sizes, int) else window_sizes
         self.demo = demo
         self.default_lookback = 500  # Binance default limit
 
-        # Validate intervals
-        for interval in self.intervals:
-            if interval not in INTERVAL_MAP:
-                raise ValueError(f"Invalid interval: {interval}. Valid intervals: {list(INTERVAL_MAP.keys())}")
-
-        # Validate that intervals and window_sizes have matching lengths
-        if len(self.intervals) != len(self.window_sizes):
-            raise ValueError("intervals and window_sizes must have the same length")
+        # Validate that time_frames and window_sizes have matching lengths
+        if len(self.time_frames) != len(self.window_sizes):
+            raise ValueError("time_frames and window_sizes must have the same length")
 
         self.feature_preprocessing_fn = feature_preprocessing_fn or self._default_preprocessing
 
@@ -107,15 +84,26 @@ class BinanceObservationClass:
             raise ValueError(f"No columns found in preprocessed DataFrame matching: {columns}")
         return np.array(df[columns], dtype=np.float32)
 
-    def _fetch_single_interval(self, interval: str, limit: int = None) -> pd.DataFrame:
-        """Fetch and preprocess data for a single interval."""
+    def _fetch_single_timeframe(self, timeframe: TimeFrame, limit: int = None) -> pd.DataFrame:
+        """Fetch and preprocess data for a single timeframe.
+
+        Args:
+            timeframe: Custom TimeFrame object
+            limit: Number of data points to fetch (default: self.default_lookback)
+
+        Returns:
+            DataFrame with OHLCV data
+        """
         if limit is None:
             limit = self.default_lookback
+
+        # Convert custom TimeFrame to Binance interval string for API calls
+        binance_interval = timeframe_to_binance(timeframe)
 
         # Fetch klines from Binance
         klines = self.client.get_klines(
             symbol=self.symbol,
-            interval=interval,
+            interval=binance_interval,
             limit=limit
         )
 
@@ -144,11 +132,12 @@ class BinanceObservationClass:
         Get the list of keys that will be present in the observations dictionary.
 
         Returns:
-            List of strings formatted as '{interval}_{window_size}'
+            List of strings formatted as '{timeframe}_{window_size}'
+            (e.g., '5Minute_10', '1Hour_20')
         """
         return [
-            f"{interval}_{ws}"
-            for interval, ws in zip(self.intervals, self.window_sizes)
+            f"{tf.obs_key_freq()}_{ws}"
+            for tf, ws in zip(self.time_frames, self.window_sizes)
         ]
 
     def get_features(self) -> Dict[str, List[str]]:
@@ -169,25 +158,25 @@ class BinanceObservationClass:
 
     def get_observations(self, return_base_ohlc: bool = False) -> Dict[str, np.ndarray]:
         """
-        Fetch and process observations for all specified intervals and window sizes.
+        Fetch and process observations for all specified timeframes and window sizes.
 
         Args:
-            return_base_ohlc: If True, includes the raw OHLC data from the first interval
+            return_base_ohlc: If True, includes the raw OHLC data from the first timeframe
                             in the observations dictionary under the 'base_features' key.
 
         Returns:
-            Dictionary with keys formatted as '{interval}_{window_size}' and numpy array values.
+            Dictionary with keys formatted as '{timeframe}_{window_size}' and numpy array values.
             If return_base_ohlc is True, includes 'base_features' and 'base_timestamps' keys.
         """
         observations = {}
 
-        for interval, window_size in zip(self.intervals, self.window_sizes):
-            key = f"{interval}_{window_size}"
+        for timeframe, window_size in zip(self.time_frames, self.window_sizes):
+            key = f"{timeframe.obs_key_freq()}_{window_size}"
             # Fetch extra data for preprocessing (rolling windows may need more)
-            df = self._fetch_single_interval(interval, limit=window_size + 50)
+            df = self._fetch_single_timeframe(timeframe, limit=window_size + 50)
 
-            # Store base OHLC features if this is the first interval and return_base_ohlc is True
-            if return_base_ohlc and interval == self.intervals[0]:
+            # Store base OHLC features if this is the first timeframe and return_base_ohlc is True
+            if return_base_ohlc and timeframe == self.time_frames[0]:
                 base_df = df.copy()
                 observations['base_features'] = self._get_numpy_obs(
                     base_df,
@@ -205,12 +194,14 @@ class BinanceObservationClass:
 
 # Example usage:
 if __name__ == "__main__":
-    # Single interval example
-    print("Testing single interval...")
+    # Note: Examples now use custom TimeFrame from torchtrade.envs.timeframe
+
+    # Single timeframe example
+    print("Testing single timeframe...")
     window_size = 10
     observer = BinanceObservationClass(
         symbol="BTCUSDT",
-        intervals="15m",
+        time_frames=TimeFrame(15, TimeFrameUnit.Minute),
         window_sizes=window_size,
     )
     expected_keys = observer.get_keys()
@@ -220,14 +211,17 @@ if __name__ == "__main__":
     assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
     assert observations[expected_keys[0]].shape == (window_size, 4), \
         f"Expected shape ({window_size}, 4) for default features, got {observations[expected_keys[0]].shape}"
-    print("Single interval test passed!")
+    print("Single timeframe test passed!")
 
-    # Example with multiple intervals and window sizes
-    print("\nTesting multiple intervals...")
+    # Example with multiple timeframes and window sizes
+    print("\nTesting multiple timeframes...")
     window_sizes = [10, 20]
     observer = BinanceObservationClass(
         symbol="BTCUSDT",
-        intervals=["15m", "1h"],
+        time_frames=[
+            TimeFrame(15, TimeFrameUnit.Minute),
+            TimeFrame(1, TimeFrameUnit.Hour)
+        ],
         window_sizes=window_sizes
     )
 
@@ -237,4 +231,4 @@ if __name__ == "__main__":
 
     assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
     assert len(observations) == 2, "Expected exactly 2 observations"
-    print("Multiple intervals test passed!")
+    print("Multiple timeframes test passed!")

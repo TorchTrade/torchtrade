@@ -4,6 +4,7 @@ import pytest
 import numpy as np
 import pandas as pd
 from unittest.mock import MagicMock, patch
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 
 
 class TestBitgetObservationClass:
@@ -35,38 +36,47 @@ class TestBitgetObservationClass:
 
     @pytest.fixture
     def observer_single(self, mock_client):
-        """Create observer with single interval."""
+        """Create observer with single timeframe."""
         from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 
         return BitgetObservationClass(
             symbol="BTCUSDT",
-            intervals="15m",
+            time_frames=TimeFrame(15, TimeFrameUnit.Minute),
             window_sizes=10,
             client=mock_client,
         )
 
     @pytest.fixture
     def observer_multi(self, mock_client):
-        """Create observer with multiple intervals."""
+        """Create observer with multiple timeframes."""
         from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 
         return BitgetObservationClass(
             symbol="BTCUSDT",
-            intervals=["1m", "5m", "1h"],
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+                TimeFrame(1, TimeFrameUnit.Hour),
+            ],
             window_sizes=[10, 20, 15],
             client=mock_client,
         )
 
     def test_single_interval_initialization(self, observer_single):
-        """Test initialization with single interval."""
+        """Test initialization with single timeframe."""
         assert observer_single.symbol == "BTCUSDT"
-        assert observer_single.intervals == ["15m"]
+        assert len(observer_single.time_frames) == 1
+        assert observer_single.time_frames[0].value == 15
+        assert observer_single.time_frames[0].unit == TimeFrameUnit.Minute
         assert observer_single.window_sizes == [10]
 
     def test_multi_interval_initialization(self, observer_multi):
-        """Test initialization with multiple intervals."""
+        """Test initialization with multiple timeframes."""
         assert observer_multi.symbol == "BTCUSDT"
-        assert observer_multi.intervals == ["1m", "5m", "1h"]
+        assert len(observer_multi.time_frames) == 3
+        assert observer_multi.time_frames[0].value == 1
+        assert observer_multi.time_frames[1].value == 5
+        assert observer_multi.time_frames[2].value == 1
         assert observer_multi.window_sizes == [10, 20, 15]
 
     def test_symbol_normalization(self, mock_client):
@@ -75,32 +85,35 @@ class TestBitgetObservationClass:
 
         observer = BitgetObservationClass(
             symbol="BTC/USDT",
-            intervals="1m",
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
             window_sizes=10,
             client=mock_client,
         )
         assert observer.symbol == "BTCUSDT"
 
     def test_invalid_interval_raises_error(self, mock_client):
-        """Test that invalid interval raises ValueError."""
+        """Test that invalid timeframe raises ValueError."""
         from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 
-        with pytest.raises(ValueError, match="Invalid interval"):
+        with pytest.raises(ValueError, match="Unsupported timeframe"):
             BitgetObservationClass(
                 symbol="BTCUSDT",
-                intervals="2m",  # Invalid interval
+                time_frames=TimeFrame(2, TimeFrameUnit.Minute),  # 2 minutes not supported by Bitget
                 window_sizes=10,
                 client=mock_client,
             )
 
     def test_mismatched_lengths_raises_error(self, mock_client):
-        """Test that mismatched intervals and window_sizes raises error."""
+        """Test that mismatched time_frames and window_sizes raises error."""
         from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 
         with pytest.raises(ValueError, match="same length"):
             BitgetObservationClass(
                 symbol="BTCUSDT",
-                intervals=["1m", "5m"],
+                time_frames=[
+                    TimeFrame(1, TimeFrameUnit.Minute),
+                    TimeFrame(5, TimeFrameUnit.Minute),
+                ],
                 window_sizes=[10],  # Mismatched length
                 client=mock_client,
             )
@@ -111,7 +124,7 @@ class TestBitgetObservationClass:
 
         observer = BitgetObservationClass(
             symbol="BTCUSDT",
-            intervals="1m",
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
             window_sizes=10,
             product_type="UMCBL",  # Try production
             demo=True,  # But demo is True
@@ -120,40 +133,40 @@ class TestBitgetObservationClass:
         assert observer.product_type == "SUMCBL"  # Should be forced to testnet
 
     def test_get_keys_single(self, observer_single):
-        """Test get_keys with single interval."""
+        """Test get_keys with single timeframe."""
         keys = observer_single.get_keys()
-        assert keys == ["15m_10"]
+        assert keys == ["15Minute_10"]
 
     def test_get_keys_multi(self, observer_multi):
-        """Test get_keys with multiple intervals."""
+        """Test get_keys with multiple timeframes."""
         keys = observer_multi.get_keys()
-        assert keys == ["1m_10", "5m_20", "1h_15"]
+        assert keys == ["1Minute_10", "5Minute_20", "1Hour_15"]
 
     def test_get_observations_single(self, observer_single):
-        """Test get_observations with single interval."""
+        """Test get_observations with single timeframe."""
         observations = observer_single.get_observations()
 
-        assert "15m_10" in observations
-        assert observations["15m_10"].shape == (10, 4)  # window_size x num_features
-        assert observations["15m_10"].dtype == np.float32
+        assert "15Minute_10" in observations
+        assert observations["15Minute_10"].shape == (10, 4)  # window_size x num_features
+        assert observations["15Minute_10"].dtype == np.float32
 
     def test_get_observations_multi(self, observer_multi):
-        """Test get_observations with multiple intervals."""
+        """Test get_observations with multiple timeframes."""
         observations = observer_multi.get_observations()
 
-        assert "1m_10" in observations
-        assert "5m_20" in observations
-        assert "1h_15" in observations
+        assert "1Minute_10" in observations
+        assert "5Minute_20" in observations
+        assert "1Hour_15" in observations
 
-        assert observations["1m_10"].shape == (10, 4)
-        assert observations["5m_20"].shape == (20, 4)
-        assert observations["1h_15"].shape == (15, 4)
+        assert observations["1Minute_10"].shape == (10, 4)
+        assert observations["5Minute_20"].shape == (20, 4)
+        assert observations["1Hour_15"].shape == (15, 4)
 
     def test_get_observations_with_base_ohlc(self, observer_single):
         """Test get_observations with base OHLC data."""
         observations = observer_single.get_observations(return_base_ohlc=True)
 
-        assert "15m_10" in observations
+        assert "15Minute_10" in observations
         assert "base_features" in observations
         assert "base_timestamps" in observations
 
@@ -172,14 +185,14 @@ class TestBitgetObservationClass:
 
         observer = BitgetObservationClass(
             symbol="BTCUSDT",
-            intervals="1m",
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
             window_sizes=10,
             client=mock_client,
             feature_preprocessing_fn=custom_preprocessing,
         )
 
         observations = observer.get_observations()
-        assert observations["1m_10"].shape == (10, 2)  # 2 custom features
+        assert observations["1Minute_10"].shape == (10, 2)  # 2 custom features
 
     def test_get_features(self, observer_single):
         """Test get_features returns feature information."""
@@ -218,7 +231,7 @@ class TestBitgetObservationClass:
 
         observer = BitgetObservationClass(
             symbol="BTCUSDT",
-            intervals="1m",
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
             window_sizes=10,
             client=mock_client,
         )
@@ -237,10 +250,13 @@ class TestBitgetObservationClassIntegration:
 
         observer = BitgetObservationClass(
             symbol="BTCUSDT",
-            intervals=["1m", "5m"],
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+            ],
             window_sizes=[10, 10],
         )
 
         observations = observer.get_observations()
-        assert "1m_10" in observations
-        assert "5m_10" in observations
+        assert "1Minute_10" in observations
+        assert "5Minute_10" in observations

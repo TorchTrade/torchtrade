@@ -18,7 +18,8 @@ from torchtrade.envs.offline.base import TorchTradeOfflineEnv
 import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, tf_to_timedelta, compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map, normalize_timeframe_config
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta, normalize_timeframe_config
+from torchtrade.envs.offline.utils import compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 from torchtrade.envs.state import FuturesHistoryTracker
 import logging

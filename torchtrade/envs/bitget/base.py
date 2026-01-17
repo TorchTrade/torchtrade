@@ -8,28 +8,11 @@ from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Bounded
 from torchrl.data.tensor_specs import CompositeSpec
 
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, timeframe_to_seconds
 from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 from torchtrade.envs.bitget.futures_order_executor import BitgetFuturesOrderClass
 from torchtrade.envs.live import TorchTradeLiveEnv
 from torchtrade.envs.state import FuturesHistoryTracker, PositionState
-
-
-# Interval to seconds mapping for waiting
-INTERVAL_SECONDS = {
-    "1m": 60,
-    "3m": 180,
-    "5m": 300,
-    "15m": 900,
-    "30m": 1800,
-    "1h": 3600,
-    "2h": 7200,
-    "4h": 14400,
-    "6h": 21600,
-    "12h": 43200,
-    "1d": 86400,
-    "3d": 259200,
-    "1w": 604800,
-}
 
 
 class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -96,9 +79,9 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
             timezone="UTC"
         )
 
-        # Extract execute interval and convert to seconds
+        # Extract execute timeframe and convert to seconds
         self.execute_on = config.execute_on
-        self.execute_on_value = INTERVAL_SECONDS.get(config.execute_on, 60)
+        self.execute_on_value = timeframe_to_seconds(config.execute_on)
         self.execute_on_unit = "seconds"  # Bitget uses simple seconds-based intervals
 
         # Reset settings
@@ -131,9 +114,10 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         Uses dependency injection pattern - uses provided instances or creates new ones.
         """
-        # Normalize intervals to list
-        intervals = self.config.intervals if isinstance(self.config.intervals, list) else [self.config.intervals]
-        window_sizes = self.config.window_sizes if isinstance(self.config.window_sizes, list) else [self.config.window_sizes]
+        # time_frames are already normalized in config.__post_init__,
+        # so we can use them directly
+        time_frames = self.config.time_frames
+        window_sizes = self.config.window_sizes
 
         # Get product type from config
         product_type = getattr(self.config, 'product_type', 'SUMCBL')
@@ -142,7 +126,7 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Initialize observer
         self.observer = observer if observer is not None else BitgetObservationClass(
             symbol=self.config.symbol,
-            intervals=intervals,
+            time_frames=time_frames,
             window_sizes=window_sizes,
             product_type=product_type,
             feature_preprocessing_fn=self._feature_preprocessing_fn,

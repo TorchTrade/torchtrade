@@ -19,7 +19,8 @@ from torchrl.data.tensor_specs import CompositeSpec
 
 from torchtrade.envs.offline.base import TorchTradeOfflineEnv
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, InitialBalanceSampler, build_sltp_action_map, normalize_timeframe_config
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
+from torchtrade.envs.offline.utils import InitialBalanceSampler, build_sltp_action_map
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 from torchtrade.envs.state import FuturesHistoryTracker
 

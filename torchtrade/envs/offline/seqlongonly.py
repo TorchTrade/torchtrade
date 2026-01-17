@@ -10,7 +10,7 @@ from torchrl.data import Categorical
 import pandas as pd
 
 from torchtrade.envs.offline.base import TorchTradeOfflineEnv
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit, normalize_timeframe_config
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
 
 @dataclass
 class SeqLongOnlyEnvConfig:

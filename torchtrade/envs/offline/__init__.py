@@ -1,3 +1,12 @@
+# Re-export TimeFrame utilities from new shared location for backwards compatibility
+from torchtrade.envs.timeframe import (
+    TimeFrame,
+    TimeFrameUnit,
+    parse_timeframe_string,
+    normalize_timeframe_config,
+    tf_to_timedelta,
+)
+
 from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from torchtrade.envs.offline.seqlongonlysltp import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
 from torchtrade.envs.offline.longonlyonestepenv import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig

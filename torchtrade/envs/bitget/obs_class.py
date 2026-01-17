@@ -2,24 +2,8 @@ from typing import Union, List, Optional, Callable
 import pandas as pd
 
 from torchtrade.envs.futures.obs_class import BaseFuturesObservationClass
-
-
-# Bitget interval mapping for futures klines
-INTERVAL_MAP = {
-    "1m": "1m",
-    "3m": "3m",
-    "5m": "5m",
-    "15m": "15m",
-    "30m": "30m",
-    "1h": "1H",
-    "2h": "2H",
-    "4h": "4H",
-    "6h": "6H",
-    "12h": "12H",
-    "1d": "1D",
-    "3d": "3D",
-    "1w": "1W",
-}
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.bitget.utils import timeframe_to_bitget, BITGET_INTERVAL_MAP
 
 
 class BitgetObservationClass(BaseFuturesObservationClass):
@@ -33,7 +17,7 @@ class BitgetObservationClass(BaseFuturesObservationClass):
     def __init__(
         self,
         symbol: str,
-        intervals: Union[List[str], str],
+        time_frames: Union[List[TimeFrame], TimeFrame],
         window_sizes: Union[List[int], int] = 10,
         product_type: str = "SUMCBL",  # SUMCBL for testnet, UMCBL for prod
         feature_preprocessing_fn: Optional[Callable] = None,
@@ -45,7 +29,7 @@ class BitgetObservationClass(BaseFuturesObservationClass):
 
         Args:
             symbol: The trading symbol (e.g., "BTCUSDT")
-            intervals: Single interval or list of intervals (e.g., "1m", "5m", "1H")
+            time_frames: Single TimeFrame or list of TimeFrame objects
             window_sizes: Single integer or list of integers specifying window sizes
             product_type: Product type for Bitget futures (SUMCBL=testnet, UMCBL=prod)
             feature_preprocessing_fn: Optional custom preprocessing function
@@ -58,7 +42,7 @@ class BitgetObservationClass(BaseFuturesObservationClass):
         # Call parent constructor
         super().__init__(
             symbol=symbol,
-            intervals=intervals,
+            time_frames=time_frames,
             window_sizes=window_sizes,
             feature_preprocessing_fn=feature_preprocessing_fn,
             client=client,
@@ -75,12 +59,18 @@ class BitgetObservationClass(BaseFuturesObservationClass):
         except ImportError:
             raise ImportError("python-bitget is required. Install with: pip install python-bitget")
 
-    def _validate_interval(self, interval: str) -> None:
-        """Validate that an interval is supported by Bitget."""
-        if interval not in INTERVAL_MAP:
+    def _validate_timeframe(self, timeframe: TimeFrame) -> None:
+        """Validate that a timeframe is supported by Bitget."""
+        if timeframe.unit not in BITGET_INTERVAL_MAP:
             raise ValueError(
-                f"Invalid interval: {interval}. "
-                f"Valid intervals: {list(INTERVAL_MAP.keys())}"
+                f"Unsupported TimeFrameUnit for Bitget: {timeframe.unit}"
+            )
+
+        unit_map = BITGET_INTERVAL_MAP[timeframe.unit]
+        if timeframe.value not in unit_map:
+            raise ValueError(
+                f"Unsupported timeframe value for Bitget: {timeframe.value}{timeframe.unit.value}. "
+                f"Valid values for {timeframe.unit.value}: {list(unit_map.keys())}"
             )
 
     def _fetch_klines(self, symbol: str, interval: str, limit: int) -> list:
@@ -130,17 +120,17 @@ class BitgetObservationClass(BaseFuturesObservationClass):
 
         return df
 
-    def _convert_interval(self, interval: str) -> str:
+    def _convert_timeframe(self, timeframe: TimeFrame) -> str:
         """
-        Convert standard interval to Bitget-specific format.
+        Convert TimeFrame to Bitget-specific interval format.
 
         Args:
-            interval: Standard interval (e.g., "1h", "1d")
+            timeframe: TimeFrame object
 
         Returns:
             Bitget interval string (e.g., "1H", "1D")
         """
-        return INTERVAL_MAP[interval]
+        return timeframe_to_bitget(timeframe)
 
     def _get_default_lookback(self) -> int:
         """Get the default number of candles to fetch (Bitget limit)."""
@@ -158,12 +148,12 @@ if __name__ == "__main__":
     # Test with demo/testnet (no API keys needed for public data)
     print("Testing BitgetObservationClass...")
 
-    # Single interval example
-    print("\n1. Testing single interval...")
+    # Single timeframe example
+    print("\n1. Testing single timeframe...")
     window_size = 10
     observer = BitgetObservationClass(
         symbol="BTCUSDT",
-        intervals="1m",
+        time_frames=TimeFrame(1, TimeFrameUnit.Minute),
         window_sizes=window_size,
         demo=True
     )
@@ -175,16 +165,19 @@ if __name__ == "__main__":
         assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
         assert observations[expected_keys[0]].shape == (window_size, 4), \
             f"Expected shape ({window_size}, 4) for default features, got {observations[expected_keys[0]].shape}"
-        print("   ✓ Single interval test passed!")
+        print("   ✓ Single timeframe test passed!")
     except Exception as e:
-        print(f"   ✗ Single interval test failed: {e}")
+        print(f"   ✗ Single timeframe test failed: {e}")
 
-    # Multiple intervals example
-    print("\n2. Testing multiple intervals...")
+    # Multiple timeframes example
+    print("\n2. Testing multiple timeframes...")
     window_sizes = [10, 20]
     observer = BitgetObservationClass(
         symbol="BTCUSDT",
-        intervals=["1m", "5m"],
+        time_frames=[
+            TimeFrame(1, TimeFrameUnit.Minute),
+            TimeFrame(5, TimeFrameUnit.Minute),
+        ],
         window_sizes=window_sizes,
         demo=True
     )
@@ -196,8 +189,8 @@ if __name__ == "__main__":
         observations = observer.get_observations()
         assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
         assert len(observations) == 2, "Expected exactly 2 observations"
-        print("   ✓ Multiple intervals test passed!")
+        print("   ✓ Multiple timeframes test passed!")
     except Exception as e:
-        print(f"   ✗ Multiple intervals test failed: {e}")
+        print(f"   ✗ Multiple timeframes test failed: {e}")
 
     print("\n✅ All tests completed!")
