@@ -94,6 +94,36 @@ class TimeFrame:
             raise ValueError(f"Unknown TimeFrameUnit {self.unit}")
 
 
+def timeframe_to_seconds(tf: TimeFrame) -> int:
+    """Convert TimeFrame to seconds for timing purposes.
+
+    Args:
+        tf: TimeFrame object
+
+    Returns:
+        Number of seconds in the timeframe
+
+    Examples:
+        >>> tf = TimeFrame(1, TimeFrameUnit.Minute)
+        >>> timeframe_to_seconds(tf)
+        60
+        >>> tf = TimeFrame(1, TimeFrameUnit.Hour)
+        >>> timeframe_to_seconds(tf)
+        3600
+        >>> tf = TimeFrame(1, TimeFrameUnit.Day)
+        >>> timeframe_to_seconds(tf)
+        86400
+    """
+    if tf.unit == TimeFrameUnit.Minute:
+        return tf.value * 60
+    elif tf.unit == TimeFrameUnit.Hour:
+        return tf.value * 3600
+    elif tf.unit == TimeFrameUnit.Day:
+        return tf.value * 86400
+    else:
+        raise ValueError(f"Unsupported TimeFrameUnit: {tf.unit}")
+
+
 def parse_timeframe_string(s: str) -> TimeFrame:
     """Parse timeframe string to TimeFrame object.
 
@@ -154,6 +184,41 @@ def parse_timeframe_string(s: str) -> TimeFrame:
         )
 
     return TimeFrame(value, unit)
+
+
+def create_provider_parser(provider_converter_fn):
+    """Factory function to create provider-specific timeframe parsers.
+
+    Creates a parser that tries provider-specific format first, then falls back
+    to standard format parsing. This eliminates duplicate parsing logic across
+    providers.
+
+    Args:
+        provider_converter_fn: Provider-specific converter function that converts
+                              provider interval strings to TimeFrame objects.
+                              Should raise ValueError if format is invalid.
+
+    Returns:
+        Parser function that accepts a string and returns a TimeFrame object.
+
+    Examples:
+        >>> # Create a Binance-specific parser
+        >>> parse_binance = create_provider_parser(binance_to_timeframe)
+        >>> parse_binance("5m")  # Binance format
+        TimeFrame(5, TimeFrameUnit.Minute)
+        >>> parse_binance("5Min")  # Standard format
+        TimeFrame(5, TimeFrameUnit.Minute)
+    """
+    def parse_provider_timeframe_string(s: str) -> TimeFrame:
+        """Parse timeframe string (provider-specific or standard format)."""
+        try:
+            # Try provider-specific format first
+            return provider_converter_fn(s)
+        except ValueError:
+            # Fall back to standard format
+            return parse_timeframe_string(s)
+
+    return parse_provider_timeframe_string
 
 
 def normalize_timeframe_config(

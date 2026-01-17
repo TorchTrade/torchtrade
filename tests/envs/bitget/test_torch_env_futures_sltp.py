@@ -6,6 +6,8 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
+from torchtrade.envs import TimeFrame
+
 
 class TestBitgetFuturesSLTPTorchTradingEnv:
     """Tests for BitgetFuturesSLTPTorchTradingEnv."""
@@ -70,7 +72,7 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
         return BitgetFuturesSLTPTradingEnvConfig(
             symbol="BTCUSDT",
             demo=True,
-            intervals=["1m"],
+            time_frames=["1m"],
             window_sizes=[10],
             execute_on="1m",
             leverage=5,
@@ -377,13 +379,14 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
 
         config = BitgetFuturesSLTPTradingEnvConfig(
             symbol="BTCUSDT",
-            intervals="1m",  # Single string
+            time_frames="1m",  # Single string
             window_sizes=10,  # Single int
         )
 
-        assert isinstance(config.intervals, list)
+        assert isinstance(config.time_frames, list)
         assert isinstance(config.window_sizes, list)
-        assert config.intervals == ["1m"]
+        assert len(config.time_frames) == 1
+        assert all(isinstance(tf, TimeFrame) for tf in config.time_frames)
         assert config.window_sizes == [10]
 
     def test_stoploss_takeprofit_levels(self, env):
@@ -407,7 +410,7 @@ class TestBitgetFuturesSLTPTorchTradingEnvIntegration:
         config = BitgetFuturesSLTPTradingEnvConfig(
             symbol="BTCUSDT",
             demo=True,
-            intervals=["1m"],
+            time_frames=["1m"],
             window_sizes=[10],
             execute_on="1m",
             leverage=5,

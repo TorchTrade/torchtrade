@@ -8,38 +8,11 @@ from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Bounded
 from torchrl.data.tensor_specs import CompositeSpec
 
-from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, timeframe_to_seconds
 from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 from torchtrade.envs.bitget.futures_order_executor import BitgetFuturesOrderClass
 from torchtrade.envs.live import TorchTradeLiveEnv
 from torchtrade.envs.state import FuturesHistoryTracker, PositionState
-
-
-def timeframe_to_seconds(tf: TimeFrame) -> int:
-    """Convert TimeFrame to seconds for timing purposes.
-
-    Args:
-        tf: Custom TimeFrame object
-
-    Returns:
-        Number of seconds in the timeframe
-
-    Examples:
-        >>> tf = TimeFrame(1, TimeFrameUnit.Minute)
-        >>> timeframe_to_seconds(tf)
-        60
-        >>> tf = TimeFrame(1, TimeFrameUnit.Hour)
-        >>> timeframe_to_seconds(tf)
-        3600
-    """
-    if tf.unit == TimeFrameUnit.Minute:
-        return tf.value * 60
-    elif tf.unit == TimeFrameUnit.Hour:
-        return tf.value * 3600
-    elif tf.unit == TimeFrameUnit.Day:
-        return tf.value * 86400
-    else:
-        raise ValueError(f"Unsupported TimeFrameUnit: {tf.unit}")
 
 
 class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):

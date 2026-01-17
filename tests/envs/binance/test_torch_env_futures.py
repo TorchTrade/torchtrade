@@ -70,7 +70,7 @@ class TestBinanceFuturesTorchTradingEnv:
         return BinanceFuturesTradingEnvConfig(
             symbol="BTCUSDT",
             demo=True,
-            intervals=["1m", "5m"],
+            time_frames=["1m", "5m"],
             window_sizes=[10, 10],
             execute_on="1m",
             leverage=5,
@@ -329,7 +329,7 @@ class TestMultipleSteps:
 
         config = BinanceFuturesTradingEnvConfig(
             symbol="BTCUSDT",
-            intervals=["1m"],
+            time_frames=["1m"],
             window_sizes=[10],
         )
 
