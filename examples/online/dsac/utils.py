@@ -170,7 +170,7 @@ def make_replay_buffer(
     prb=False,
     buffer_size=1000000,
     scratch_dir=None,
-    device=device,
+    device="cpu",
     prefetch=3,
 ):
     with (
