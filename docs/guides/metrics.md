@@ -123,6 +123,8 @@ print(f"Calmar Ratio: {calmar:.2f}")
 
 ### 5. Win Rate and Profit Metrics
 
+**Note**: Due to the possibility of customized reward functions, we define win rate as the percentage of steps where `reward > 0` rather than using traditional profit/loss definitions.
+
 ```python
 from torchtrade.metrics import compute_win_rate
 
