@@ -1,46 +1,46 @@
-site_name: AlpacaTrading
+site_name: TorchTrade Documentation
+site_description: Reinforcement learning environments for algorithmic trading
+site_author: TorchTrade Team
+site_url: https://torchtrade.github.io/torchtrade/
+
 theme:
- name: material
- features:
-  - navigation.tabs
-  - navigation.tracking
-  - navigation.sections
-  - navigation.top
-  - search.suggest
-  - search.highlight
-  - content.tabs.link
-  - content.code.annotation
-  - content.code.copy
- language: en
- palette:
-  - scheme: default
-    toggle:
-      icon: material/toggle-switch-off-outline
-      name: Switch to Dark Mode
-    primary: blue
-    accent: purple
-  - scheme: slate
-    toggle:
-      icon: material/toggle-switch
-      name: Switch to Light Mode
-    primary: black
-    accent: lime
-
-  # logo: res/arc_icon.jpg
-  # favicon: res/arc_icon.jpg
-
+  name: material
+  logo: images/torchtrade_white.png
+  features:
+    - navigation.tabs
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.expand
+    - navigation.path
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+    - content.code.annotation
+    - content.code.copy
+  language: en
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to Dark Mode
+      primary: grey
+      accent: orange
+    - scheme: slate
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to Light Mode
+      primary: grey
+      accent: orange
 
 extra:
   social:
-    # github
     - icon: fontawesome/brands/github-alt
-      link: https://github.com/BY571
-    # twitter
-    - icon: fontawesome/brands/twitter
-      link: https://twitter.com
-    # linkedin
-    - icon: fontawesome/brands/linkedin
-      link: https://linkedin.com
+      link: https://github.com/TorchTrade/torchtrade_envs
+      name: TorchTrade on GitHub
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/torchtrade/
+      name: TorchTrade on PyPI
 
 markdown_extensions:
   - admonition
@@ -49,21 +49,62 @@ markdown_extensions:
   - pymdownx.snippets
   - pymdownx.mark
   - pymdownx.inlinehilite
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
   - footnotes
   - tables
   - pymdownx.arithmatex:
       generic: true
   - pymdownx.highlight:
       anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - toc:
+      permalink: true
 
 plugins:
-    - search
-    #- awesome-pages
-    #- git-revision-date
+  - search
 
-repo_url: https://github.com/TorchTrade/torchrl_alpaca_env
+repo_url: https://github.com/TorchTrade/torchtrade
+repo_name: TorchTrade/torchtrade
+edit_uri: edit/main/docs/
 
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Examples: examples.md
 
+  - Environments:
+      - Offline Environments: environments/offline.md
+      - Online Environments: environments/online.md
+      - Offline RL: environments/offline-rl.md
+      - Understanding the Sampler: guides/sampler.md
+      - Building Custom Environments: guides/custom-environment.md
 
-copyright: © 2025 <a href="https://torchtrade.com" target="_blank" rel="noopener">TorchTrade</a>
+  - Components:
+      - Loss Functions: components/losses.md
+      - Transforms: components/transforms.md
+      - Actors: components/actors.md
+
+  - Advanced Customization:
+      - Feature Engineering: guides/custom-features.md
+      - Reward Functions: guides/reward-functions.md
+      - Performance Metrics: guides/metrics.md
+
+copyright: © 2025 <a href="https://github.com/TorchTrade" target="_blank" rel="noopener">TorchTrade</a>
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
