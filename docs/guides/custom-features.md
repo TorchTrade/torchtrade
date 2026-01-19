@@ -112,6 +112,51 @@ config = SeqLongOnlyEnvConfig(
 - **TorchRL transforms** - VecNormV2 and ObservationNorm are available but may have device compatibility issues
 - **Network level** - Use BatchNorm, LayerNorm, or other normalization layers in your policy network
 
+### Advanced Normalization Considerations
+
+The StandardScaler approach above uses fixed statistics from the training data. For financial data with **regime changes** (market conditions that shift over time), you might eventually want more adaptive approaches:
+
+**Per-regime normalization:**
+- Detect market regimes (bull/bear, high/low volatility)
+- Maintain separate scalers for each regime
+- Apply the appropriate scaler based on current market conditions
+
+**Rolling window statistics:**
+- Use a sliding window (e.g., last 252 trading days) to compute normalization statistics
+- Updates statistics as new data arrives
+- Adapts to gradual market shifts
+
+**Adaptive normalization:**
+- Exponentially weighted moving average of statistics
+- Continuously updates during training
+- Balances stability with adaptation
+
+**Example of rolling window approach:**
+```python
+def rolling_normalization(df: pd.DataFrame, window=252) -> pd.DataFrame:
+    """Normalize using rolling window statistics."""
+    df = df.copy()
+
+    # Create features
+    df["features_close"] = df["close"]
+    df["features_volume"] = df["volume"]
+
+    # Apply rolling normalization
+    for col in [c for c in df.columns if c.startswith("features_")]:
+        rolling_mean = df[col].rolling(window=window, min_periods=1).mean()
+        rolling_std = df[col].rolling(window=window, min_periods=1).std()
+        df[col] = (df[col] - rolling_mean) / (rolling_std + 1e-8)
+
+    df.fillna(0, inplace=True)
+    return df
+```
+
+**Trade-offs:**
+- Fixed StandardScaler: ✅ Simpler, reproducible | ⚠️ Less adaptive
+- Adaptive methods: ✅ Handles regime changes | ⚠️ More complex, harder to reproduce
+
+For most use cases, StandardScaler is sufficient. Consider adaptive methods if you observe performance degradation over time due to market regime changes.
+
 ---
 
 ## Important Rules
