@@ -48,6 +48,7 @@ class BinanceFuturesTradingEnvConfig:
     demo: bool = True  # Use demo/testnet for paper trading
     seed: Optional[int] = 42
     include_base_features: bool = False
+    include_hold_action: bool = True  # Include HOLD action (0.0) in action space
     close_position_on_reset: bool = False  # Whether to close positions on env.reset()
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
@@ -58,6 +59,9 @@ class BinanceFuturesTradingEnvConfig:
         self.execute_on, self.time_frames, self.window_sizes = normalize_binance_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
+        # Filter out 0.0 (hold action) if include_hold_action is False
+        if not self.include_hold_action:
+            self.action_levels = [level for level in self.action_levels if level != 0.0]
 
 
 class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):

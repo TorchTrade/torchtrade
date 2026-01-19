@@ -57,6 +57,7 @@ class SeqFuturesEnvConfig:
     # Environment settings
     seed: Optional[int] = 42
     include_base_features: bool = False
+    include_hold_action: bool = True  # Include HOLD action (0.0) in action space
     max_traj_length: Optional[int] = None
     random_start: bool = True
 
@@ -64,10 +65,18 @@ class SeqFuturesEnvConfig:
     reward_scaling: float = 1.0
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
+    action_levels: List[float] = None  # Built in __post_init__ based on include_hold_action
+
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
+
+        if self.action_levels is None:
+            if self.include_hold_action:
+                self.action_levels = [-1.0, 0.0, 1.0]  # Short, Hold, Long
+            else:
+                self.action_levels = [-1.0, 1.0]  # Short, Long
 
 
 class SeqFuturesEnv(TorchTradeOfflineEnv):
@@ -110,7 +119,7 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         super().__init__(df, config, feature_preprocessing_fn)
 
         # Environment-specific configuration
-        self.action_levels = [-1.0, 0.0, 1.0]  # Short, Hold/Close, Long
+        self.action_levels = config.action_levels
         self.leverage = config.leverage
         self.margin_type = config.margin_type
         self.maintenance_margin_rate = config.maintenance_margin_rate

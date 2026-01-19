@@ -45,6 +45,8 @@ class BitgetFuturesSLTPTradingEnvConfig:
     takeprofit_levels: Tuple[float, ...] = (0.05, 0.1, 0.2)
     # Include short positions in action space
     include_short_positions: bool = True
+    # Include HOLD action (index 0) in action space
+    include_hold_action: bool = True
 
     # Reward settings
     reward_scaling: float = 1.0
@@ -126,7 +128,8 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
         self.action_map = create_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
-            include_short_positions=config.include_short_positions
+            include_short_positions=config.include_short_positions,
+            include_hold_action=config.include_hold_action
         )
 
         # Categorical action spec: 0=HOLD, 1..N = (side, SL, TP) combinations
