@@ -860,3 +860,129 @@ class TestFuturesOneStepEnvLeverage:
 
         # Higher leverage should have smaller distance (closer to liquidation)
         assert dist_high < dist_low
+
+
+class TestFuturesOneStepEnvIncludeHoldAction:
+    """Tests for include_hold_action parameter."""
+
+    def test_include_hold_action_true_default(self, sample_ohlcv_df):
+        """Should include HOLD action by default."""
+        config = FuturesOneStepEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            initial_cash=1000,
+            stoploss_levels=[-0.05],
+            takeprofit_levels=[0.05],
+            leverage=1,
+            max_traj_length=50,
+        )
+        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        # With 1 SL and 1 TP: 1 hold + 1 long + 1 short = 3 actions
+        assert env.action_spec.n == 3
+        assert env.action_map[0] == (None, None, None), "Action 0 should be HOLD"
+
+    def test_include_hold_action_true_explicit(self, sample_ohlcv_df):
+        """Should include HOLD action when explicitly set to True."""
+        config = FuturesOneStepEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            initial_cash=1000,
+            stoploss_levels=[-0.05, -0.1],
+            takeprofit_levels=[0.05, 0.1],
+            include_hold_action=True,
+            leverage=1,
+            max_traj_length=50,
+        )
+        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        # With 2 SL and 2 TP: 1 hold + 4 longs + 4 shorts = 9 actions
+        assert env.action_spec.n == 9
+        assert env.action_map[0] == (None, None, None), "Action 0 should be HOLD"
+        assert env.action_map[1] != (None, None, None), "Action 1 should be a trade"
+
+    def test_include_hold_action_false(self, sample_ohlcv_df):
+        """Should exclude HOLD action when set to False."""
+        config = FuturesOneStepEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            initial_cash=1000,
+            stoploss_levels=[-0.05],
+            takeprofit_levels=[0.05],
+            include_hold_action=False,
+            leverage=1,
+            max_traj_length=50,
+        )
+        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        # With 1 SL and 1 TP, no hold: 1 long + 1 short = 2 actions
+        assert env.action_spec.n == 2
+        assert env.action_map[0] != (None, None, None), "Action 0 should NOT be HOLD"
+        assert env.action_map[0][0] is not None, "Action 0 should be a trade"
+
+    def test_include_hold_action_false_multiple_sltp(self, sample_ohlcv_df):
+        """Should have correct action count without HOLD with multiple SL/TP."""
+        config = FuturesOneStepEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            initial_cash=1000,
+            stoploss_levels=[-0.05, -0.1],
+            takeprofit_levels=[0.05, 0.1],
+            include_hold_action=False,
+            leverage=1,
+            max_traj_length=50,
+        )
+        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        # With 2 SL and 2 TP, no hold: 4 longs + 4 shorts = 8 actions
+        assert env.action_spec.n == 8
+        # Verify all actions are trades (no None, None, None)
+        for i in range(env.action_spec.n):
+            assert env.action_map[i] != (None, None, None), f"Action {i} should be a trade"
+            assert env.action_map[i][0] is not None, f"Action {i} should have side"
+
+    def test_env_works_without_hold_action(self, sample_ohlcv_df):
+        """Environment should function correctly without HOLD action."""
+        config = FuturesOneStepEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            initial_cash=1000,
+            stoploss_levels=[-0.05],
+            takeprofit_levels=[0.05],
+            include_hold_action=False,
+            leverage=1,
+            max_traj_length=50,
+        )
+        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        # Reset and step
+        td = env.reset()
+        assert td is not None
+
+        # Take action 0 (which is now a trade, not hold)
+        td.set("action", torch.tensor(0))
+        result = env.step(td)
+
+        assert result is not None
+        assert "reward" in result["next"].keys()
+        # Verify reward is numeric and not NaN
+        assert not torch.isnan(result["next"]["reward"]).any()
+
+    def test_action_mapping_without_hold(self, sample_ohlcv_df):
+        """Verify action mapping starts with long positions when no hold."""
+        config = FuturesOneStepEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            initial_cash=1000,
+            stoploss_levels=[-0.05],
+            takeprofit_levels=[0.05],
+            include_hold_action=False,
+            leverage=1,
+            max_traj_length=50,
+        )
+        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        # Action 0 should be the first long position
+        assert env.action_map[0][0] == "long", "First action should be long"
+        # Action 1 should be the first short position
+        assert env.action_map[1][0] == "short", "Second action should be short"

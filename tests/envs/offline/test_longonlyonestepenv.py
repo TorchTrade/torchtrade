@@ -574,3 +574,105 @@ class TestLongOnlyOneStepEnvEdgeCases:
         result = env.step(td)
 
         assert result is not None
+
+
+class TestLongOnlyOneStepEnvIncludeHoldAction:
+    """Tests for include_hold_action parameter."""
+
+    def test_include_hold_action_true_default(self, sample_ohlcv_df):
+        """Should include HOLD action by default."""
+        config = LongOnlyOneStepEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            initial_cash=1000,
+            stoploss_levels=[-0.05],
+            takeprofit_levels=[0.05],
+            max_traj_length=50,
+        )
+        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        # With 1 SL and 1 TP: 1 hold + 1 trade = 2 actions
+        assert env.action_spec.n == 2
+        assert env.action_map[0] == (None, None), "Action 0 should be HOLD"
+
+    def test_include_hold_action_true_explicit(self, sample_ohlcv_df):
+        """Should include HOLD action when explicitly set to True."""
+        config = LongOnlyOneStepEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            initial_cash=1000,
+            stoploss_levels=[-0.05, -0.1],
+            takeprofit_levels=[0.05, 0.1],
+            include_hold_action=True,
+            max_traj_length=50,
+        )
+        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        # With 2 SL and 2 TP: 1 hold + 4 trades = 5 actions
+        assert env.action_spec.n == 5
+        assert env.action_map[0] == (None, None), "Action 0 should be HOLD"
+        assert env.action_map[1] != (None, None), "Action 1 should be a trade"
+
+    def test_include_hold_action_false(self, sample_ohlcv_df):
+        """Should exclude HOLD action when set to False."""
+        config = LongOnlyOneStepEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            initial_cash=1000,
+            stoploss_levels=[-0.05],
+            takeprofit_levels=[0.05],
+            include_hold_action=False,
+            max_traj_length=50,
+        )
+        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        # With 1 SL and 1 TP, no hold: 1 trade action
+        assert env.action_spec.n == 1
+        assert env.action_map[0] != (None, None), "Action 0 should NOT be HOLD"
+        assert env.action_map[0][0] is not None, "Action 0 should be a trade"
+
+    def test_include_hold_action_false_multiple_sltp(self, sample_ohlcv_df):
+        """Should have correct action count without HOLD with multiple SL/TP."""
+        config = LongOnlyOneStepEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            initial_cash=1000,
+            stoploss_levels=[-0.05, -0.1],
+            takeprofit_levels=[0.05, 0.1],
+            include_hold_action=False,
+            max_traj_length=50,
+        )
+        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        # With 2 SL and 2 TP, no hold: 4 trade actions
+        assert env.action_spec.n == 4
+        # Verify all actions are trades (no None, None)
+        for i in range(env.action_spec.n):
+            assert env.action_map[i] != (None, None), f"Action {i} should be a trade"
+            assert env.action_map[i][0] is not None, f"Action {i} should have stop loss"
+
+    def test_env_works_without_hold_action(self, sample_ohlcv_df):
+        """Environment should function correctly without HOLD action."""
+        config = LongOnlyOneStepEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            initial_cash=1000,
+            stoploss_levels=[-0.05],
+            takeprofit_levels=[0.05],
+            include_hold_action=False,
+            max_traj_length=50,
+        )
+        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        # Reset and step
+        td = env.reset()
+        assert td is not None
+
+        # Take action 0 (which is now a trade, not hold)
+        td.set("action", torch.tensor(0))
+        result = env.step(td)
+
+        assert result is not None
+        assert "reward" in result["next"].keys()
+        # Verify reward is numeric and not NaN
+        assert not torch.isnan(result["next"]["reward"]).any()
