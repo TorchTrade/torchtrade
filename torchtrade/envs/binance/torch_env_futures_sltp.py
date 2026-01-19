@@ -1,10 +1,12 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union, Callable
+import warnings
 
 import torch
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical
 
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.binance.obs_class import BinanceObservationClass
 from torchtrade.envs.binance.futures_order_executor import (
     BinanceFuturesOrderClass,
@@ -27,9 +29,9 @@ class BinanceFuturesSLTPTradingEnvConfig:
     symbol: str = "BTCUSDT"
 
     # Timeframes and windows
-    intervals: Union[List[str], str] = field(default_factory=lambda: ["1m"])
+    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Min"
     window_sizes: Union[List[int], int] = 10
-    execute_on: str = "1m"  # Interval for trade execution timing
+    execute_on: Union[str, TimeFrame] = "1Min"  # Timeframe for trade execution timing
 
     # Trading parameters
     leverage: int = 1  # Leverage (1-125)
@@ -43,6 +45,8 @@ class BinanceFuturesSLTPTradingEnvConfig:
     takeprofit_levels: Tuple[float, ...] = (0.05, 0.1, 0.2)
     # Include short positions in action space
     include_short_positions: bool = True
+    # Include HOLD action (index 0) in action space
+    include_hold_action: bool = True
 
     # Reward settings
     reward_scaling: float = 1.0
@@ -57,6 +61,14 @@ class BinanceFuturesSLTPTradingEnvConfig:
     include_base_features: bool = False
     close_position_on_reset: bool = False  # Whether to close positions on env.reset()
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
+
+    def __post_init__(self):
+        """Normalize timeframe configuration."""
+        from torchtrade.envs.binance.utils import normalize_binance_timeframe_config
+
+        self.execute_on, self.time_frames, self.window_sizes = normalize_binance_timeframe_config(
+            self.execute_on, self.time_frames, self.window_sizes
+        )
 
 
 class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
@@ -115,7 +127,8 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         self.action_map = create_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
-            include_short_positions=config.include_short_positions
+            include_short_positions=config.include_short_positions,
+            include_hold_action=config.include_hold_action
         )
 
         # Categorical action spec: 0=HOLD, 1..N = (side, SL, TP) combinations

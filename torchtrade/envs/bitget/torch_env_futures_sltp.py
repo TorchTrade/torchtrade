@@ -28,9 +28,9 @@ class BitgetFuturesSLTPTradingEnvConfig:
     symbol: str = "BTCUSDT"
 
     # Timeframes and windows
-    intervals: Union[List[str], str] = "1m"
+    time_frames: Union[List[Union[str, "TimeFrame"]], Union[str, "TimeFrame"]] = "1Min"
     window_sizes: Union[List[int], int] = 10
-    execute_on: str = "1m"  # Interval for trade execution timing
+    execute_on: Union[str, "TimeFrame"] = "1Min"  # Timeframe for trade execution timing
 
     # Trading parameters
     product_type: str = "SUMCBL"  # SUMCBL=testnet, UMCBL=production
@@ -45,6 +45,8 @@ class BitgetFuturesSLTPTradingEnvConfig:
     takeprofit_levels: Tuple[float, ...] = (0.05, 0.1, 0.2)
     # Include short positions in action space
     include_short_positions: bool = True
+    # Include HOLD action (index 0) in action space
+    include_hold_action: bool = True
 
     # Reward settings
     reward_scaling: float = 1.0
@@ -61,11 +63,11 @@ class BitgetFuturesSLTPTradingEnvConfig:
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
     def __post_init__(self):
-        # Normalize to lists
-        if isinstance(self.intervals, str):
-            self.intervals = [self.intervals]
-        if isinstance(self.window_sizes, int):
-            self.window_sizes = [self.window_sizes]
+        # Normalize timeframes using utility function
+        from torchtrade.envs.bitget.utils import normalize_bitget_timeframe_config
+        self.execute_on, self.time_frames, self.window_sizes = normalize_bitget_timeframe_config(
+            self.execute_on, self.time_frames, self.window_sizes
+        )
 
 
 class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
@@ -126,7 +128,8 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
         self.action_map = create_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
-            include_short_positions=config.include_short_positions
+            include_short_positions=config.include_short_positions,
+            include_hold_action=config.include_hold_action
         )
 
         # Categorical action spec: 0=HOLD, 1..N = (side, SL, TP) combinations

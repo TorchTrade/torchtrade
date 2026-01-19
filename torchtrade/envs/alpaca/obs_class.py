@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, timeframe_to_alpaca
 from alpaca.data.requests import CryptoBarsRequest
 from alpaca.data.historical.crypto import CryptoHistoricalDataClient
 
@@ -21,7 +21,7 @@ class AlpacaObservationClass:
 
         Args:
             symbol: The cryptocurrency symbol to fetch data for
-            timeframes: Single TimeFrame or list of TimeFrames to fetch data for
+            timeframes: Single custom TimeFrame or list of custom TimeFrames to fetch data for
             window_sizes: Single integer or list of integers specifying window_sizes.
                         If a list is provided, it must have the same length as timeframes.
             feature_preprocessing_fn: Optional custom preprocessing function that takes a DataFrame
@@ -73,14 +73,24 @@ class AlpacaObservationClass:
     def _fetch_single_timeframe(
         self, timeframe: TimeFrame #, window_size: int
     ) -> pd.DataFrame:
-        """Fetch and preprocess data for a single timeframe."""
+        """Fetch and preprocess data for a single timeframe.
+
+        Args:
+            timeframe: Custom TimeFrame object
+
+        Returns:
+            DataFrame with OHLCV data
+        """
         if timeframe.unit == TimeFrameUnit.Day and self.default_lookback > 30:
             raise ValueError("Default lookback is greater than 30 days, which is not allowed for daily data")
-        
+
+        # Convert custom TimeFrame to Alpaca TimeFrame for API calls
+        alpaca_timeframe = timeframe_to_alpaca(timeframe)
+
         now = datetime.now(ZoneInfo("America/New_York"))
         request = CryptoBarsRequest(
             symbol_or_symbols=self.symbol,
-            timeframe=timeframe,
+            timeframe=alpaca_timeframe,
             start=now - timedelta(days=self.default_lookback), # TODO: this is critical
             end=now,
             #limit=window_size
@@ -90,12 +100,13 @@ class AlpacaObservationClass:
     def get_keys(self) -> List[str]:
         """
         Get the list of keys that will be present in the observations dictionary.
-        
+
         Returns:
-            List of strings formatted as '{timeframe_amount}{timeframe_unit}_{window_size}'
+            List of strings formatted as '{timeframe}_{window_size}'
+            (e.g., '5Minute_10', '1Hour_20')
         """
         return [
-            f"{tf.amount}{tf.unit.name}_{ws}"
+            f"{tf.obs_key_freq()}_{ws}"
             for tf, ws in zip(self.timeframes, self.window_sizes)
         ]
 
@@ -135,7 +146,7 @@ class AlpacaObservationClass:
         observations = {}
 
         for timeframe, window_size in zip(self.timeframes, self.window_sizes):
-            key = f"{timeframe.amount}{timeframe.unit.name}_{window_size}"
+            key = f"{timeframe.obs_key_freq()}_{window_size}"
             df = self._fetch_single_timeframe(timeframe)
             
             # Store base OHLC features if this is the first timeframe and return_base_ohlc is True
@@ -158,6 +169,9 @@ class AlpacaObservationClass:
 
 # Example usage:
 if __name__ == "__main__":
+    # Note: Examples now use custom TimeFrame from torchtrade.envs.timeframe
+    # instead of Alpaca's TimeFrame class
+
     # Single timeframe example
     print("Testing single timeframe...")
     window_size = 10
@@ -169,7 +183,7 @@ if __name__ == "__main__":
     expected_keys = observer.get_keys()
     observations = observer.get_observations()
     #features = observer.get_features()
-    
+
     assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
     # Default preprocessing has 4 features: feature_close, feature_open, feature_high, feature_low
     assert observations[expected_keys[0]].shape == (window_size, 4), \
@@ -187,19 +201,19 @@ if __name__ == "__main__":
         ],
         window_sizes=window_sizes
     )
-    
+
     expected_keys = observer.get_keys()
     print("Expected keys:", expected_keys)
     observations = observer.get_observations()
     #features = observer.get_features()
-    
+
     assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
     assert len(observations) == 2, "Expected exactly 2 observations"
-    
+
     # Check shapes for each timeframe/window combination
     expected_shapes = { key: (w, 4) for key, w in zip(expected_keys, window_sizes)
     }
-    
+
     for key, expected_shape in expected_shapes.items():
         assert observations[key].shape == expected_shape, \
             f"Shape mismatch for {key}: expected {expected_shape}, got {observations[key].shape}"
@@ -221,7 +235,7 @@ if __name__ == "__main__":
         window_sizes=10,
         feature_preprocessing_fn=custom_preprocessing,
     )
-    
+
     observations_custom = observer_custom.get_observations()
     key = observer_custom.get_keys()[0]
     #features_custom = observer_custom.get_features()

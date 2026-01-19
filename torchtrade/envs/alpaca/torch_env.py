@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Callable
 
 import torch
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
 from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass, TradeMode
@@ -26,12 +26,16 @@ class AlpacaTradingEnvConfig:
     trade_mode: TradeMode = TradeMode.NOTIONAL
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
+    include_hold_action: bool = True  # Include HOLD action (0.0) in action space
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = normalize_alpaca_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
+        # Filter out 0.0 (hold action) if include_hold_action is False
+        if not self.include_hold_action:
+            self.action_levels = [level for level in self.action_levels if level != 0.0]
 
 class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
     """Live trading environment with 3-action discrete action space (sell/hold/buy)."""

@@ -26,9 +26,9 @@ class BitgetFuturesTradingEnvConfig:
     action_levels: List[float] = None  # Default set in __post_init__
 
     # Timeframes and windows
-    intervals: Union[List[str], str] = "1m"
+    time_frames: Union[List[Union[str, "TimeFrame"]], Union[str, "TimeFrame"]] = "1Min"
     window_sizes: Union[List[int], int] = 10
-    execute_on: str = "1m"  # Interval for trade execution timing
+    execute_on: Union[str, "TimeFrame"] = "1Min"  # Timeframe for trade execution timing
 
     # Trading parameters
     product_type: str = "SUMCBL"  # SUMCBL=testnet, UMCBL=production
@@ -49,6 +49,7 @@ class BitgetFuturesTradingEnvConfig:
     demo: bool = True  # Use testnet for demo
     seed: Optional[int] = 42
     include_base_features: bool = False
+    include_hold_action: bool = True  # Include HOLD action (0.0) in action space
     close_position_on_reset: bool = False  # Whether to close positions on env.reset()
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
@@ -57,11 +58,14 @@ class BitgetFuturesTradingEnvConfig:
         if self.action_levels is None:
             self.action_levels = [-1.0, 0.0, 1.0]  # short, close/hold, long
 
-        # Normalize to lists
-        if isinstance(self.intervals, str):
-            self.intervals = [self.intervals]
-        if isinstance(self.window_sizes, int):
-            self.window_sizes = [self.window_sizes]
+        # Normalize timeframes using utility function
+        from torchtrade.envs.bitget.utils import normalize_bitget_timeframe_config
+        self.execute_on, self.time_frames, self.window_sizes = normalize_bitget_timeframe_config(
+            self.execute_on, self.time_frames, self.window_sizes
+        )
+        # Filter out 0.0 (hold action) if include_hold_action is False
+        if not self.include_hold_action:
+            self.action_levels = [level for level in self.action_levels if level != 0.0]
 
 
 class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):

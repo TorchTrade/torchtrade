@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
 
 import torch
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
 from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass, TradeMode
@@ -28,6 +28,7 @@ class AlpacaSLTPTradingEnvConfig:
     stoploss_levels: Tuple[float, ...] = (-0.025, -0.05, -0.1)
     # Take profit levels as percentages (positive values, e.g., 0.05 = 5%)
     takeprofit_levels: Tuple[float, ...] = (0.05, 0.1, 0.2)
+    include_hold_action: bool = True  # Include HOLD action (index 0) in action space
     reward_scaling: float = 1.0
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
@@ -83,9 +84,13 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         # Create action map from SL/TP combinations
         self.stoploss_levels = list(config.stoploss_levels)
         self.takeprofit_levels = list(config.takeprofit_levels)
-        self.action_map = create_alpaca_sltp_action_map(self.stoploss_levels, self.takeprofit_levels)
+        self.action_map = create_alpaca_sltp_action_map(
+            self.stoploss_levels,
+            self.takeprofit_levels,
+            include_hold_action=config.include_hold_action
+        )
 
-        # Categorical action spec: 0=HOLD, 1..N = SL/TP combinations
+        # Categorical action spec: 0=HOLD (if included), 1..N = SL/TP combinations
         self.action_spec = Categorical(len(self.action_map))
 
         # Track active SL/TP levels for current position

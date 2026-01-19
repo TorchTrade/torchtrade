@@ -78,6 +78,7 @@ def create_sltp_action_map(
 def create_alpaca_sltp_action_map(
     stoploss_levels: List[float],
     takeprofit_levels: List[float],
+    include_hold_action: bool = True,
 ) -> Dict[int, Tuple[Optional[float], Optional[float]]]:
     """Create action map for Alpaca SLTP environment (long-only, returns (sl, tp) tuples).
 
@@ -86,16 +87,17 @@ def create_alpaca_sltp_action_map(
     Args:
         stoploss_levels: List of stop-loss percentages
         takeprofit_levels: List of take-profit percentages
+        include_hold_action: If True, action 0 = HOLD (default: True)
 
     Returns:
         Dict mapping action index to (stop_loss_pct, take_profit_pct) tuple
-        Action 0 returns (None, None) for HOLD
+        Action 0 returns (None, None) for HOLD if include_hold_action=True
     """
     full_map = create_sltp_action_map(
         stoploss_levels,
         takeprofit_levels,
         include_short_positions=False,
-        include_hold_action=True,
+        include_hold_action=include_hold_action,
     )
 
     # Convert (side, sl, tp) -> (sl, tp) for Alpaca compatibility
