@@ -2236,6 +2236,28 @@
 <li>SLTP environments: Only SL/TP combinations (no HOLD)</li>
 </ul>
 <p><strong>Use Case</strong>: Set to <code>False</code> when you want to ensure the agent is always actively trading rather than holding neutral positions. Useful for testing aggressive strategies or ensuring the agent explores trading actions.</p>
+<div class="admonition warning">
+<p class="admonition-title">Timeframe Format - Critical for Model Compatibility</p>
+<p>When specifying <code>time_frames</code>, <strong>always use canonical forms</strong>:</p>
+<ul>
+<li>✅ <strong>Correct</strong>: <code>["1min", "5min", "15min", "1hour", "1day"]</code></li>
+<li>❌ <strong>Wrong</strong>: <code>["1min", "5min", "15min", "60min"]</code></li>
+</ul>
+<p><strong>Why this matters:</strong></p>
+<ul>
+<li><code>time_frames=["60min"]</code> creates observation key <code>"market_data_60Minute"</code></li>
+<li><code>time_frames=["1hour"]</code> creates observation key <code>"market_data_1Hour"</code></li>
+<li>These are <strong>DIFFERENT keys</strong> - your model trained with <code>"60min"</code> won't work with config using <code>"1hour"</code></li>
+</ul>
+<p>The framework will issue a warning if you use non-canonical forms. Use the suggested canonical forms to ensure model compatibility and cleaner observation keys.</p>
+<p><strong>Common conversions:</strong></p>
+<ul>
+<li><code>60min</code> → use <code>1hour</code></li>
+<li><code>120min</code> → use <code>2hours</code></li>
+<li><code>1440min</code> → use <code>1day</code></li>
+<li><code>24hour</code> → use <code>1day</code></li>
+</ul>
+</div>
 <hr />
 <h2 id="seqlongonlyenv">SeqLongOnlyEnv<a class="headerlink" href="#seqlongonlyenv" title="Permanent link">&para;</a></h2>
 <p>Simple long-only spot trading environment for sequential RL algorithms. This is the offline backtesting equivalent of the <a href="../online/#alpacatorchtradingenv">AlpacaTorchTradingEnv</a> live environment, designed for training on historical data before deploying to live stock and crypto markets.</p>

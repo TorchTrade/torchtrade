@@ -2235,6 +2235,29 @@
 </tr>
 </tbody>
 </table>
+<div class="admonition warning">
+<p class="admonition-title">Timeframe Format - Critical for Model Compatibility</p>
+<p>When specifying <code>time_frames</code>, <strong>always use canonical forms</strong>:</p>
+<ul>
+<li>✅ <strong>Correct</strong>: <code>["1Min", "5Min", "15Min", "1Hour", "1Day"]</code> (Alpaca format)</li>
+<li>✅ <strong>Correct</strong>: <code>["1m", "5m", "15m", "1h", "1d"]</code> (Binance/Bitget format)</li>
+<li>❌ <strong>Wrong</strong>: <code>["60min"]</code>, <code>["60m"]</code>, <code>["24hour"]</code>, <code>["24h"]</code></li>
+</ul>
+<p><strong>Why this matters:</strong></p>
+<ul>
+<li><code>time_frames=["60min"]</code> creates observation key <code>"market_data_60Minute"</code></li>
+<li><code>time_frames=["1hour"]</code> creates observation key <code>"market_data_1Hour"</code></li>
+<li>These are <strong>DIFFERENT keys</strong> - your model trained with <code>"60min"</code> won't work with config using <code>"1hour"</code></li>
+</ul>
+<p>The framework will issue a warning if you use non-canonical forms. Use the suggested canonical forms to ensure model compatibility and cleaner observation keys.</p>
+<p><strong>Common conversions:</strong></p>
+<ul>
+<li><code>60min</code> / <code>60m</code> → use <code>1Hour</code> / <code>1h</code></li>
+<li><code>120min</code> / <code>120m</code> → use <code>2Hour</code> / <code>2h</code></li>
+<li><code>1440min</code> → use <code>1Day</code> / <code>1d</code></li>
+<li><code>24hour</code> / <code>24h</code> → use <code>1Day</code> / <code>1d</code></li>
+</ul>
+</div>
 <hr />
 <h2 id="alpaca-environments">Alpaca Environments<a class="headerlink" href="#alpaca-environments" title="Permanent link">&para;</a></h2>
 <p><a href="https://alpaca.markets/">Alpaca</a> provides commission-free trading for US stocks and cryptocurrencies with paper trading support.</p>
