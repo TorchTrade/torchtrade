@@ -19,6 +19,8 @@ TorchTrade provides modular environments for both live trading with major exchan
 - 📦 **Ready-to-Use Datasets** - Pre-processed OHLCV data at [HuggingFace/Torch-Trade](https://huggingface.co/Torch-Trade)
 - 📈 **Research to Production** - Same code for backtesting and live deployment
 
+> **Note:** TorchTrade currently focuses on single-asset trading environments (one symbol per environment). Multi-asset portfolio optimization and cross-asset trading environments are planned for future releases.
+
 ---
 
 ## 📚 Full Documentation
