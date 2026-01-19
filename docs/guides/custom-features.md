@@ -6,6 +6,8 @@ TorchTrade allows you to add custom technical indicators and features to your ma
 
 The `feature_preprocessing_fn` parameter in environment configs transforms raw OHLCV data into custom features. This function is called on each resampled timeframe during environment initialization.
 
+**IMPORTANT**: All feature columns must start with `features_` prefix (e.g., `features_close`, `features_rsi_14`). Only columns with this prefix will be included in the observation space.
+
 ---
 
 ## Basic Usage
