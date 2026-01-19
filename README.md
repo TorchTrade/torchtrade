@@ -499,7 +499,6 @@ MIT License - See [LICENSE](LICENSE) file for details.
 
 ## Support
 
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade_envs/issues)
 - 📧 **Email**: torchtradecontact@gmail.com
 
 ---
