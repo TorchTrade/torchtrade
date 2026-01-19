@@ -66,15 +66,9 @@ config = SeqLongOnlyEnvConfig(
 env = SeqLongOnlyEnv(df, config)
 ```
 
-### Example 2: Normalized Features
+### Example 2: Normalized Features (Recommended)
 
-Feature normalization can be done at multiple levels:
-
-- **Feature preprocessing** (shown below) - Normalize in the preprocessing function
-
-- **TorchRL transforms** - Use [VecNorm](https://docs.pytorch.org/rl/main/reference/generated/torchrl.envs.transforms.VecNorm.html) or [ObservationNorm](https://docs.pytorch.org/rl/main/reference/generated/torchrl.envs.transforms.ObservationNorm.html) transforms
-
-- **Network level** - Use BatchNorm, LayerNorm, or other normalization layers in your policy network
+**Feature normalization is critical for stable RL training.** The recommended approach is to normalize features during preprocessing using sklearn's StandardScaler, which avoids device-related issues with TorchRL's VecNorm transforms.
 
 ```python
 import pandas as pd
@@ -83,6 +77,9 @@ from sklearn.preprocessing import StandardScaler
 def normalized_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """
     Normalize features using StandardScaler for stable training.
+
+    This approach is preferred over VecNormV2/ObservationNorm transforms
+    which can have device compatibility issues on GPU.
     """
     # Basic OHLCV
     df["features_open"] = df["open"]
@@ -110,6 +107,10 @@ config = SeqLongOnlyEnvConfig(
     ...
 )
 ```
+
+**Alternative approaches:**
+- **TorchRL transforms** - VecNormV2 and ObservationNorm are available but may have device compatibility issues
+- **Network level** - Use BatchNorm, LayerNorm, or other normalization layers in your policy network
 
 ---
 
