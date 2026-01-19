@@ -536,6 +536,98 @@ print(f"Terminal reward: {tensordict['reward'].item()}")
 
 ---
 
+## State Management
+
+All TorchTrade environments (both offline and online) use structured state management through dedicated dataclasses found in `torchtrade/envs/state.py`.
+
+### PositionState
+
+The `PositionState` dataclass encapsulates all position-related state in a single object:
+
+```python
+from torchtrade.envs.state import PositionState
+
+# Used internally by all environments
+position = PositionState()
+
+# Available attributes:
+position.current_position  # 0=no position, 1=long, -1=short
+position.position_size     # Number of units held (negative for shorts)
+position.position_value    # Current market value of the position
+position.entry_price       # Price at which position was entered
+position.unrealized_pnlpc  # Unrealized P&L as percentage
+position.hold_counter      # Number of steps position has been held
+
+# Reset all fields at once
+position.reset()
+```
+
+**Benefits**:
+- Groups related state variables together
+- Provides single `.reset()` method for all position fields
+- Makes position state explicit and easier to track
+- Used consistently across all TorchTrade environments (offline and online)
+
+See `torchtrade/envs/state.py:8-30` for implementation details.
+
+### HistoryTracker
+
+The `HistoryTracker` class records episode data for analysis and visualization:
+
+```python
+from torchtrade.envs.state import HistoryTracker, FuturesHistoryTracker
+
+# For long-only environments
+history = HistoryTracker()
+
+# During episode
+history.record_step(
+    price=50000.0,
+    action=1.0,
+    reward=0.05,
+    portfolio_value=10500.0
+)
+
+# Export for plotting/analysis
+data = history.to_dict()
+# Returns: {'base_prices': [...], 'actions': [...], 'rewards': [...], 'portfolio_values': [...]}
+
+# Reset for new episode
+history.reset()
+```
+
+**FuturesHistoryTracker** extends `HistoryTracker` with position tracking:
+
+```python
+# For futures environments (SeqFuturesEnv, etc.)
+history = FuturesHistoryTracker()
+
+history.record_step(
+    price=50000.0,
+    action=2.0,
+    reward=0.03,
+    portfolio_value=10300.0,
+    position=0.5  # Positive=long, negative=short
+)
+
+# Export includes position history
+data = history.to_dict()
+# Returns: {..., 'positions': [0.5, ...]}
+```
+
+**Use Cases**:
+- Plot portfolio value over time
+- Analyze action distributions
+- Track position holding patterns
+- Debug environment behavior
+- Generate performance metrics
+
+**Note**: History tracking is available in both offline environments (SeqLongOnlyEnv, SeqFuturesEnv, etc.) and online environments (AlpacaTorchTradingEnv, BinanceFuturesTorchTradingEnv, etc.).
+
+See `torchtrade/envs/state.py:33-148` for implementation details.
+
+---
+
 ## Choosing the Right Environment
 
 ### For Beginners

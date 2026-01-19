@@ -1,6 +1,6 @@
 # Understanding the Sampler
 
-The `MarketDataObservationSampler` handles multi-timeframe data sampling in TorchTrade's offline environments.
+The `MarketDataObservationSampler` (found in `torchtrade/envs/offline/sampler.py`) handles multi-timeframe data sampling in TorchTrade's offline environments. It resamples high-frequency data (1-minute bars) to multiple timeframes and creates synchronized observation windows while preventing lookahead bias. This allows RL agents to observe market patterns across different time scales simultaneously, from short-term momentum to long-term trends.
 
 ## What Is the Sampler?
 
@@ -22,16 +22,57 @@ The sampler:
 
 ## Basic Usage
 
-The sampler is created automatically:
+### How It Works
+
+The sampler takes your 1-minute OHLCV data, resamples it to multiple timeframes, and provides synchronized observation windows at each execution step. Here's a direct example of using the sampler:
+
+```python
+import pandas as pd
+from torchtrade.envs.offline.sampler import MarketDataObservationSampler
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+
+# Load your OHLCV data
+df = pd.read_csv("btcusdt_1m.csv")
+# Required columns: timestamp, open, high, low, close, volume
+
+# Create sampler
+sampler = MarketDataObservationSampler(
+    df=df,
+    time_frames=[
+        TimeFrame(1, TimeFrameUnit.Minute),
+        TimeFrame(5, TimeFrameUnit.Minute),
+        TimeFrame(15, TimeFrameUnit.Minute),
+    ],
+    window_sizes=[12, 8, 8],
+    execute_on=TimeFrame(5, TimeFrameUnit.Minute),
+)
+
+# Get observations
+obs_dict, timestamp, truncated = sampler.get_sequential_observation()
+
+# obs_dict contains:
+# {
+#   "market_data_1Minute": torch.Tensor([12, num_features]),
+#   "market_data_5Minute": torch.Tensor([8, num_features]),
+#   "market_data_15Minute": torch.Tensor([8, num_features]),
+# }
+
+# Reset for new episode
+sampler.reset(random_start=True)
+```
+
+### Usage in Offline Environments
+
+The sampler is used in all offline environments (SeqLongOnlyEnv, SeqFuturesEnv, etc.) and allows flexible selection of timeframes through the environment configuration:
 
 ```python
 from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 
 # Configure multi-timeframe sampling
 config = SeqLongOnlyEnvConfig(
-    time_frames=["1min", "5min", "15min", "60min"],        # All values in minutes: 1min, 5min, 15min, 60min
-    window_sizes=[12, 8, 8, 24],       # Lookback per timeframe
-    execute_on=(5, "Minute"),          # Trade every 5min
+    time_frames=["1min", "5min", "15min", "1hour"],
+    window_sizes=[12, 8, 8, 24],
+    execute_on=(5, "Minute"),
 )
 
 env = SeqLongOnlyEnv(df, config)
@@ -41,7 +82,7 @@ obs = env.reset()
 # obs["market_data_1Minute"]: (12, features)
 # obs["market_data_5Minute"]: (8, features)
 # obs["market_data_15Minute"]: (8, features)
-# obs["market_data_60Minute"]: (24, features)
+# obs["market_data_1Hour"]: (24, features)
 ```
 
 ---
@@ -50,36 +91,62 @@ obs = env.reset()
 
 ### Timeframe Alignment
 
-The sampler ensures all timeframes align with the execution timeframe:
+The sampler resamples your 1-minute OHLCV data to multiple timeframes (5min, 15min, 1hour, etc.) and ensures all observations are synchronized at each execution step.
 
 **Example: execute_on=5Minute**
 
 ```
-1-minute bars:  | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
-5-minute bars:  |    A    |    B    |    C    |    D    |
-Execute at:            ↑         ↑         ↑         ↑
-                    t=5       t=10      t=15      t=20
+Time (minutes):     0    5    10   15   20   25   30
+                    |----|----|----|----|----|----|
+1-minute bars:      60 bars available
+5-minute bars:      |  A  |  B  |  C  |  D  |  E  |  F  |
+15-minute bars:     |      X      |      Y      |      Z      |
+
+Execute at:              ↑         ↑         ↑
+                        t=5      t=10      t=15
 ```
 
-At each execution timestep:
-- All timeframes show data **up to and including** the current bar
-- No future data is leaked
-- Lower timeframes have more recent bars
+At t=10 (executing on 5-minute bar B):
+- **1-minute data**: Last 12 bars (from recent history)
+- **5-minute data**: Bar A (completed at t=5)
+- **15-minute data**: Bar X (completed at t=0)
 
 ### Lookahead Bias Prevention
 
-**Key principle**: At time t, only use data from bars that have **closed** by time t.
+**The Problem**: In real trading, you can't use a bar's data until it has fully closed. A 15-minute bar spanning 0-15 minutes isn't complete until minute 15.
+
+**The Solution**: The sampler indexes higher timeframe bars by their **END time**, not their START time:
 
 ```python
-# At t=10 (executing on 5-minute bar B)
-# ✅ Can use: 5-min bar A (closed at t=5)
-# ❌ Cannot use: 5-min bar B (closes at t=10, not fully formed yet)
+# Without fix (WRONG - causes lookahead bias):
+# 15-min bar covering [0-15] is indexed at t=0
+# At t=10, agent could see bar [0-15] before it closes at t=15 ❌
 
-# Implementation: Sampler indexes one bar behind execution time
-window = data[exec_index - window_size : exec_index]  # Excludes current forming bar
+# With fix (CORRECT - in sampler.py lines 71-77):
+# 15-min bar covering [0-15] is indexed at t=15 (its END time)
+# At t=10, agent can only see bars that closed BEFORE t=10 ✅
 ```
 
-This is why you see a shift between execution time and visible data.
+**Detailed Example at t=10**:
+
+When your agent executes at minute 10, here's what data is available:
+
+```
+✅ CAN use (completed bars only):
+  - 1-min bars: [1, 2, 3, ..., 9] (bar 10 is still forming)
+  - 5-min bar A [0-5]: Closed at t=5, fully complete
+  - 15-min bar covering previous period: Only if it ended before t=10
+
+❌ CANNOT use (incomplete bars):
+  - 5-min bar B [5-10]: Still forming, closes at t=10
+  - 15-min bar X [0-15]: Still forming, closes at t=15
+```
+
+**Why This Matters**: Without this protection, your agent would train on future information (looking into bars that haven't closed yet), leading to unrealistic backtest results that won't work in live trading.
+
+**Implementation Detail** (from `sampler.py:71-77`):
+
+Higher timeframes (coarser than `execute_on`) are shifted forward by their period during resampling. This ensures bars are indexed by their END time. When the agent queries data at execution time, `searchsorted` automatically excludes any bars that haven't closed yet.
 
 ---
 
@@ -163,27 +230,6 @@ Larger windows = more memory and computation:
 ```
 
 Keep `sum(window_sizes) × num_features` reasonable (< 1000 total values per observation).
-
----
-
-## Advanced: Custom Resampling
-
-If you need non-standard resampling (e.g., tick bars, volume bars), pass pre-resampled data:
-
-```python
-# Prepare custom timeframes externally
-df_1m = raw_data  # Already 1-minute bars
-df_5m = resample_custom(raw_data, method="volume_bars", threshold=1000)
-df_15m = resample_custom(raw_data, method="tick_bars", threshold=100)
-
-# Environment handles them as standard timeframes
-config = SeqLongOnlyEnvConfig(
-    time_frames=["1min", "5min", "15min"],  # Interpreted as provided timeframes
-    # ... rest of config
-)
-```
-
-**Note**: This is advanced usage. Standard time-based resampling works for most cases.
 
 ---
 

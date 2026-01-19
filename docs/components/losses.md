@@ -68,7 +68,9 @@ for batch in collector:
     optimizer.step()
 ```
 
-**Reference**: [`torchtrade/losses/grpo_loss.py`](https://github.com/TorchTrade/TorchTrade/blob/main/torchtrade/losses/grpo_loss.py)
+**Paper Reference**: ["DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models" (arXiv:2402.03300)](https://arxiv.org/abs/2402.03300) - Section 2.2 introduces GRPO (Group Relative Policy Optimization)
+
+**Code Reference**: `torchtrade/losses/grpo_loss.py`
 
 ---
 
@@ -137,7 +139,9 @@ for batch in collector:
     optimizer.step()
 ```
 
-**Reference**: ["Cross-Trajectory Representation Learning for Zero-Shot Generalization in RL" (arXiv:2106.02193)](https://arxiv.org/abs/2106.02193)
+**Paper Reference**: ["Cross-Trajectory Representation Learning for Zero-Shot Generalization in RL" (arXiv:2106.02193)](https://arxiv.org/abs/2106.02193)
+
+**Code Reference**: `torchtrade/losses/ctrl.py`
 
 ---
 
@@ -203,6 +207,8 @@ for batch in collector:
     total_loss.backward()
     optimizer.step()
 ```
+
+**Code Reference**: `torchtrade/losses/ctrl.py` (defined in same file as CTRLLoss)
 
 ---
 

@@ -262,7 +262,11 @@ env = env.append_transform(
 pip install git+https://github.com/amazon-science/chronos-forecasting.git
 ```
 
-**Reference**: [`torchtrade/envs/transforms/chronos_embedding.py`](https://github.com/TorchTrade/TorchTrade/blob/main/torchtrade/envs/transforms/chronos_embedding.py)
+**Paper Reference**: ["Chronos: Learning the Language of Time Series" (arXiv:2403.07815)](https://arxiv.org/abs/2403.07815)
+
+**Model Hub**: [amazon-science/chronos-forecasting](https://github.com/amazon-science/chronos-forecasting)
+
+**Code Reference**: `torchtrade/envs/transforms/chronos_embedding.py`
 
 ---
 

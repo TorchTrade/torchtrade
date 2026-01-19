@@ -4,6 +4,8 @@ TorchTrade supports **offline reinforcement learning**, enabling agents to learn
 
 ## Overview
 
+TorchTrade provides **TensorDict-based datasets** that can be loaded and used directly with [TorchRL's replay buffer](https://docs.pytorch.org/rl/main/tutorials/rb_tutorial.html). These datasets are available for download from [HuggingFace/Torch-Trade](https://huggingface.co/Torch-Trade) and contain pre-collected trading trajectories for offline RL research.
+
 Offline RL can be performed using datasets collected from two sources:
 
 1. **Offline Environment Interactions** - Collect trajectories by running policies in backtesting environments (SeqLongOnlyEnv, SeqFuturesEnv, etc.)
@@ -97,13 +99,13 @@ for episode in range(num_episodes):
 
     Stay tuned at [HuggingFace/Torch-Trade](https://huggingface.co/Torch-Trade)!
 
-## Supported Algorithms
+## Additional Offline RL Algorithms
 
 TorchTrade's offline RL support is compatible with any offline RL algorithm from TorchRL, including:
 
-- **IQL (Implicit Q-Learning)** - Conservative offline RL without explicit behavior policy
-- **CQL (Conservative Q-Learning)** - Addresses overestimation in offline Q-learning
-- **TD3+BC** - Combines TD3 with behavior cloning for offline learning
+- **[CQL (Conservative Q-Learning)](https://github.com/pytorch/rl/blob/main/sota-implementations/cql/cql_offline.py)** - Addresses overestimation in offline Q-learning
+- **[TD3+BC](https://github.com/pytorch/rl/tree/main/sota-implementations/td3_bc)** - Combines TD3 with behavior cloning for offline learning
+- **[Decision Transformer](https://github.com/pytorch/rl/tree/main/sota-implementations/decision_transformer)** - Sequence modeling approach to offline RL
 - **Any TorchRL algorithm** - Use replay buffers with offline data
 
 ## Next Steps

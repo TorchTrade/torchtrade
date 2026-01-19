@@ -225,15 +225,91 @@ self._observation_spec["new_field"] = UnboundedContinuousTensorSpec(shape=(N,))
 
 ### 3. State Management
 
-Keep environment state in clear instance variables:
+TorchTrade provides structured state management classes for consistent state handling across all environments. See **[State Management](../environments/offline.md#state-management)** for full details.
+
+**Quick Reference - PositionState**:
+
+The `PositionState` dataclass encapsulates position-related state in a structured way:
 
 ```python
-def __init__(self):
-    self.current_step = 0      # Clear state
-    self.portfolio_value = 1000
-    self.position = 0
-    # ... not scattered across methods
+from torchtrade.envs.state import PositionState
+
+class CustomEnv(EnvBase):
+    def __init__(self):
+        super().__init__()
+        # Use PositionState to group position-related variables
+        self.position = PositionState()
+        # Provides: position.current_position, position.position_size,
+        #          position.position_value, position.entry_price,
+        #          position.unrealized_pnlpc, position.hold_counter
+
+        # Other environment state
+        self.current_step = 0
+        self.cash = 1000.0
+        self.current_timestamp = None
+
+    def _reset(self, tensordict=None, **kwargs):
+        """Reset all state including position"""
+        self.position.reset()  # Resets all position fields to defaults
+        self.current_step = 0
+        self.cash = 1000.0
+        # ... reset other state
+
+    def _step(self, tensordict):
+        """Use position state in step logic"""
+        if action == "BUY" and self.position.position_size == 0:
+            self.position.position_size = 100
+            self.position.entry_price = current_price
+            self.position.current_position = 1.0
+        # ... rest of step logic
 ```
+
+**Benefits of PositionState**:
+- Groups related state variables together (better organization)
+- Provides a single `.reset()` method for all position fields
+- Makes position state explicit and easier to track
+- Used consistently across all TorchTrade environments
+
+Implementation: `torchtrade/envs/state.py:8-30`
+
+**Quick Reference - HistoryTracker**:
+
+Use `HistoryTracker` or `FuturesHistoryTracker` to record episode data for analysis (available in both offline and online environments - see [State Management docs](../environments/offline.md#historytracker) for full examples):
+
+```python
+from torchtrade.envs.state import HistoryTracker, FuturesHistoryTracker
+
+class CustomEnv(EnvBase):
+    def __init__(self):
+        super().__init__()
+        # For long-only environments (spot trading)
+        self.history = HistoryTracker()
+
+        # For futures environments (tracks position size)
+        # self.history = FuturesHistoryTracker()
+
+    def _step(self, tensordict):
+        # ... execute step logic ...
+
+        # Record step data for analysis
+        self.history.record_step(
+            price=current_price,
+            action=action.item(),
+            reward=reward,
+            portfolio_value=self.cash + self.position.position_value
+        )
+
+        # For FuturesHistoryTracker:
+        # self.history.record_step(..., position=self.position.position_size)
+
+    def _reset(self, tensordict=None, **kwargs):
+        self.history.reset()  # Clear history at episode start
+        # ... rest of reset logic
+```
+
+Access history for plotting or analysis: `history.to_dict()` returns `{'base_prices': [...], 'actions': [...], 'rewards': [...], 'portfolio_values': [...]}`
+
+Implementation: `torchtrade/envs/state.py:33-148`
 
 ---
 

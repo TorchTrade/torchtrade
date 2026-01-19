@@ -100,6 +100,11 @@ Concrete implementation of RuleBasedActor using Bollinger Bands and Stochastic R
 | `overbought_threshold` | float | 80.0 | Stoch RSI overbought level |
 | `execute_timeframe` | TimeFrame | 5Minute | Timeframe for feature extraction |
 
+### Technical Indicator References
+
+- **Bollinger Bands**: Bollinger, J. (2001). "Bollinger on Bollinger Bands". McGraw-Hill Education
+- **Stochastic RSI**: Introduced by Stanley Kroll and Tushar Chande (1994) in "The New Technical Trader"
+
 ### Usage Example
 
 ```python
@@ -136,7 +141,7 @@ while not done:
     observation, reward, done, info = env.step(action)
 ```
 
-**Reference**: [`torchtrade/actor/rulebased/meanreversion/actor.py`](https://github.com/TorchTrade/TorchTrade/blob/main/torchtrade/actor/rulebased/meanreversion/actor.py)
+**Code Reference**: `torchtrade/actor/rulebased/meanreversion/actor.py`
 
 ---
 
@@ -247,7 +252,7 @@ I should wait for a pullback before entering.
 
 **Requirements**: `.env` file with `OPENAI_API_KEY`
 
-**Reference**: [`torchtrade/actor/llm_actor.py`](https://github.com/TorchTrade/TorchTrade/blob/main/torchtrade/actor/llm_actor.py)
+**Code Reference**: `torchtrade/actor/llm_actor.py`
 
 ---
 
@@ -368,27 +373,29 @@ pip install vllm
 pip install transformers accelerate bitsandbytes
 ```
 
-**Reference**: [`torchtrade/actor/local_llm_actor.py`](https://github.com/TorchTrade/TorchTrade/blob/main/torchtrade/actor/local_llm_actor.py)
+**Code Reference**: `torchtrade/actor/local_llm_actor.py`
 
 ---
 
 ## HumanActor
 
-Human-in-the-loop trading interface with interactive visualization. Allows human traders to provide demonstrations or control trading decisions directly.
+Interactive debugging and visualization tool that allows humans to step through environments and understand what the agent "sees" at each timestep. Primarily designed for environment validation and debugging, it can also be used to collect human demonstrations for imitation learning.
 
 ### Key Features
 
-- **Interactive visualization**: Plotly dashboards show market data across timeframes
-- **Real-time trading**: Human inputs actions at each step
-- **Expert demonstrations**: Collect human trajectories for imitation learning
-- **Debugging**: Step through environment to understand dynamics
+- **Interactive visualization**: Plotly dashboards show market data across all timeframes
+- **Observation inspection**: View complete account state and market data at each step
+- **Step-by-step debugging**: Manually step through environment to validate dynamics
+- **Agent perspective**: See exactly what your RL agent observes at each timestep
+- **Optional demonstrations**: Can collect human trajectories for imitation learning
 
 ### When to Use
 
-- **Imitation learning**: Collect expert demonstrations for behavioral cloning
-- **Environment validation**: Manually verify environment correctness
-- **Human baseline**: Compare RL agents against human performance
-- **Interactive debugging**: Step through episodes to understand issues
+- **Environment debugging**: Step through episodes to verify environment correctness and understand dynamics
+- **Observation inspection**: See exactly what data the agent receives at each timestep
+- **Reward validation**: Manually verify reward signals make sense for trading decisions
+- **Algorithm understanding**: Understand what information is available to your RL agent
+- **Expert demonstrations**: Optionally collect human trajectories for imitation learning
 
 ### Configuration Parameters
 
@@ -468,7 +475,7 @@ for episode in range(100):
 train_behavioral_cloning(demonstrations)
 ```
 
-**Reference**: [`torchtrade/actor/human.py`](https://github.com/TorchTrade/TorchTrade/blob/main/torchtrade/actor/human.py)
+**Code Reference**: `torchtrade/actor/human.py`
 
 ---
 
@@ -482,7 +489,8 @@ train_behavioral_cloning(demonstrations)
 | RL training | Neural network policy | Standard TorchRL actor-critic |
 | Research prototyping | LLMActor | Fast iteration, interpretable |
 | Production LLM | LocalLLMActor | Local inference, cost-efficient |
-| Data collection | HumanActor | Expert demonstrations |
+| Environment debugging | HumanActor | Visualize observations, validate rewards |
+| Data collection | HumanActor | Expert demonstrations (secondary use) |
 
 ### Common Patterns
 
@@ -502,13 +510,24 @@ actor = LocalLLMActor(model="Qwen/Qwen2.5-1.5B", quantization="4bit")
 # ... trade ...
 ```
 
-**Pattern 3: Human Demonstrations → Imitation Learning**
+**Pattern 3: Environment Debugging & Validation**
 ```python
-# Phase 1: Collect human trajectories
+# Debug environment and understand agent observations
 human_actor = HumanActor(...)
-demos = collect_demonstrations(env, human_actor, num_episodes=100)
+obs = env.reset()
 
-# Phase 2: Train neural network to mimic human
+# Step through manually to verify environment behavior
+for step in range(100):
+    # Visualize what the agent sees
+    action_td = human_actor(obs)  # Shows plotly dashboard + prompts for action
+    obs = env.step(action_td["action"])
+    # Verify rewards, transitions, and observations are correct
+```
+
+**Pattern 4: Optional - Human Demonstrations for Imitation Learning**
+```python
+# Collect expert trajectories (secondary use case)
+demos = collect_demonstrations(env, human_actor, num_episodes=100)
 bc_loss = behavioral_cloning_loss(policy, demos)
 # ... train ...
 ```
