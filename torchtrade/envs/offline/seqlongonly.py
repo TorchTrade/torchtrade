@@ -24,16 +24,34 @@ class SeqLongOnlyEnvConfig:
     slippage: float = 0.01
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
+    include_hold_action: bool = True  # Include HOLD action (0.0) in action space
     max_traj_length: Optional[int] = None
     random_start: bool = True
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
+    action_levels: List[float] = None  # Built in __post_init__ based on include_hold_action
 
     def __post_init__(self):
-        """Normalize timeframe configuration to list format."""
+        """Normalize timeframe configuration and build action levels."""
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
+
+        if self.action_levels is None:
+            if self.include_hold_action:
+                self.action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Hold, Buy-all
+            else:
+                self.action_levels = [-1.0, 1.0]  # Sell-all, Buy-all
+        else:
+            # User provided custom action_levels - include_hold_action is ignored
+            import warnings
+            if not self.include_hold_action and 0.0 in self.action_levels:
+                warnings.warn(
+                    "Custom action_levels provided with include_hold_action=False, but action_levels "
+                    "contains 0.0 (hold action). The custom action_levels will be used as-is. "
+                    "Consider removing 0.0 from action_levels or setting include_hold_action=True.",
+                    UserWarning
+                )
 
 class SeqLongOnlyEnv(TorchTradeOfflineEnv):
     """Sequential long-only trading environment for backtesting.
@@ -59,7 +77,7 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         super().__init__(df, config, feature_preprocessing_fn)
 
         # Environment-specific configuration
-        self.action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Do-Nothing, Buy-all
+        self.action_levels = config.action_levels
 
         # Define action spec
         self.action_spec = Categorical(len(self.action_levels))
