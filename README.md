@@ -146,7 +146,7 @@ Start live trading with these supported platforms:
 
 TorchTrade is open-source and free to use. If you find it valuable for your research or trading, consider supporting development:
 
-- 💰 **Donate via PayPal**: [paypal.me/yourname](https://www.paypal.me/yourname)
+- **Buy Me a Coffee**: [buymeacoffee.com/torchtrade](https://buymeacoffee.com/torchtrade)
 - ⭐ **Star the repo**: Help others discover TorchTrade on [GitHub](https://github.com/TorchTrade/torchtrade)
 - 🪙 **Use affiliate links**: Sign up for exchanges using the links above
 
