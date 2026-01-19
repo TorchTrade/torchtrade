@@ -129,7 +129,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
 # ---------------------------
 
 
-def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=None):
+def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=None, device="cpu"):
     """Make collector."""
     collector = SyncDataCollector(
         train_env,

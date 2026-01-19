@@ -144,7 +144,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
 # ---------------------------
 
 
-def make_collector(cfg, train_env, actor_model_explore, compile_mode):
+def make_collector(cfg, train_env, actor_model_explore, compile_mode, device="cpu"):
     """Make collector."""
     collector = SyncDataCollector(
         train_env,
@@ -153,7 +153,7 @@ def make_collector(cfg, train_env, actor_model_explore, compile_mode):
         init_random_frames=cfg.collector.init_random_frames,
         max_frames_per_traj=cfg.collector.max_frames_per_traj,
         total_frames=cfg.collector.total_frames,
-        device="cpu",
+        device=device,
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
     )
@@ -166,7 +166,7 @@ def make_replay_buffer(
     prb=False,
     buffer_size=1000000,
     scratch_dir=None,
-    device="cpu",
+    device=device,
     prefetch=3,
 ):
     with (

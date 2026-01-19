@@ -375,14 +375,17 @@ def make_ppo_models(env, device, cfg):
     return encoder, actor, critic
 
 
-def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=None):
+def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=None, device="cpu"):
     """Make data collector."""
+    
+    Args:
+        device: Device for data collection (default: "cpu", can use "cuda" now that VecNormV2 is removed)
     collector = SyncDataCollector(
         train_env,
         actor_model_explore,
         frames_per_batch=cfg.collector.frames_per_batch,
         total_frames=cfg.collector.total_frames,
-        device="cpu",
+        device=device,
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
         postproc=postproc,  # Add coverage tracker as postproc

@@ -272,14 +272,14 @@ def make_grpo_policy(env, device, cfg):
     return policy
 
 
-def make_collector(cfg, train_env, actor_model_explore, compile_mode):
+def make_collector(cfg, train_env, actor_model_explore, compile_mode, device="cpu"):
     """Make collector."""
     collector = SyncDataCollector(
         train_env,
         actor_model_explore,
         frames_per_batch=cfg.collector.frames_per_batch,
         total_frames=cfg.collector.total_frames,
-        device="cpu",
+        device=device,
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
     )
