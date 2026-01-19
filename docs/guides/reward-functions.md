@@ -292,6 +292,16 @@ Bad patterns:
 
 ---
 
+## References
+
+### Research Papers on Reward Design
+
+- **[Reward Shaping for Reinforcement Learning in Financial Trading](https://arxiv.org/html/2506.04358v1)** - Comprehensive study on reward function design for trading applications
+- **[Deep Reinforcement Learning for Trading](https://inria.hal.science/hal-05449819v1/document)** - Research on RL approaches and reward engineering for financial markets
+- **[Reward Function Design in Deep Reinforcement Learning for Financial Trading](https://arno.uvt.nl/show.cgi?fid=174684)** - Analysis of different reward formulations and their impact on trading performance
+
+---
+
 ## Next Steps
 
 - **[Feature Engineering](custom-features.md)** - Engineer features that support your reward function
