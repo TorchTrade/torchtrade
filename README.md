@@ -497,27 +497,10 @@ MIT License - See [LICENSE](LICENSE) file for details.
 
 ---
 
-## Citation
-
-If you use TorchTrade in your research, please cite:
-
-```bibtex
-@software{torchtrade2025,
-  title={TorchTrade: Machine Learning Framework for Algorithmic Trading},
-  author={Dittert, Sebastian},
-  year={2025},
-  url={https://github.com/TorchTrade/torchtrade_envs}
-}
-```
-
----
-
 ## Support
 
-- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchtrade_envs/discussions)
 - 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade_envs/issues)
 - 📧 **Email**: torchtradecontact@gmail.com
-- 📘 **Documentation**: [https://torchtrade.github.io/torchtrade_envs/](https://torchtrade.github.io/torchtrade_envs/)
 
 ---
 
