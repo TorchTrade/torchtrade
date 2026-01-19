@@ -133,8 +133,6 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
         EnvCreator(maker),
         serial_for_single=True,
     )
-
-    # Create eval environment
     eval_env = apply_env_transforms(eval_base_env)
 
     return train_env, eval_env

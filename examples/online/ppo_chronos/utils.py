@@ -44,8 +44,6 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     Index can be datetime or integer.
 
     Uses StandardScaler for normalization to avoid VecNormV2 device issues.
-    Expected columns: ["open", "high", "low", "close", "volume"]
-    Index can be datetime or integer.
     """
     df = df.copy().reset_index(drop=False)
 
@@ -186,8 +184,6 @@ def make_environment(
         serial_for_single=True,
     )
     max_eval_steps = test_df.shape[0]
-
-    # Create eval environment
     eval_env = apply_env_transforms(eval_base_env, max_eval_steps, cfg)
 
     # Create coverage tracker for postproc (used in collector)

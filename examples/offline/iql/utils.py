@@ -53,7 +53,6 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     Index can be datetime or integer.
 
     Uses StandardScaler for normalization to avoid VecNormV2 device issues.
-    Expected columns: ["open", "high", "low", "close", "volume"]
     """
 
     df = df.copy().reset_index(drop=False)
@@ -63,6 +62,12 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     df["features_high"] = df["high"]
     df["features_low"] = df["low"]
     df["features_volume"] = df["volume"]
+
+    # Normalize features using StandardScaler
+    scaler = StandardScaler()
+    feature_cols = [col for col in df.columns if col.startswith("features_")]
+    df[feature_cols] = scaler.fit_transform(df[feature_cols])
+
     df.fillna(0, inplace=True)
 
     return df
@@ -128,8 +133,6 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
         EnvCreator(maker),
         serial_for_single=True,
     )
-
-    # Create eval environment
     eval_env = apply_env_transforms(eval_base_env)
 
     return train_env, eval_env

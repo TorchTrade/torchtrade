@@ -148,8 +148,6 @@ def make_environment(
         serial_for_single=True,
     )
     max_eval_steps = test_df.shape[0]
-
-    # Create eval environment
     eval_env = apply_env_transforms(eval_base_env, max_eval_steps)
 
     # Create coverage tracker for postproc (used in collector)

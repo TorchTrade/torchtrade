@@ -148,8 +148,6 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1,
         serial_for_single=True,
     )
     max_eval_steps = test_df.shape[0]
-
-    # Create eval environment
     eval_env = apply_env_transforms(eval_base_env, max_eval_steps)
 
     return train_env, eval_env
