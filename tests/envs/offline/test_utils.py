@@ -278,9 +278,14 @@ class TestParseTimeframeString:
         assert result.value == 999
         assert result.unit == TimeFrameUnit.Minute
 
-        result = parse_timeframe_string("1440Min")
-        assert result.value == 1440
-        assert result.unit == TimeFrameUnit.Minute
+        # 1440Min will trigger a warning (can be normalized to 1day)
+        # We suppress it here since we're testing large values, not warning behavior
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            result = parse_timeframe_string("1440Min")
+            assert result.value == 1440
+            assert result.unit == TimeFrameUnit.Minute
 
     def test_invalid_format_raises(self):
         """Should raise ValueError for invalid formats."""
@@ -316,6 +321,97 @@ class TestParseTimeframeString:
 
         # Should work with tf_to_timedelta
         assert tf_to_timedelta(result) == pd.Timedelta(minutes=15)
+
+
+class TestTimeframeWarnings:
+    """Tests for non-canonical timeframe format warnings (Issue #99)."""
+
+    def test_60min_issues_warning(self):
+        """Should warn when using 60min instead of 1hour."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            tf = parse_timeframe_string("60min")
+
+            assert len(w) == 1
+            assert issubclass(w[0].category, UserWarning)
+            assert "60min" in str(w[0].message).lower()
+            assert "1hour" in str(w[0].message).lower()
+            assert "60Minute" in str(w[0].message)
+            assert "1Hour" in str(w[0].message)
+
+            # Should still create correct TimeFrame
+            assert tf.value == 60
+            assert tf.unit == TimeFrameUnit.Minute
+
+    def test_120min_issues_warning(self):
+        """Should warn when using 120min instead of 2hours."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            tf = parse_timeframe_string("120min")
+
+            assert len(w) == 1
+            assert issubclass(w[0].category, UserWarning)
+            assert "120min" in str(w[0].message).lower()
+            assert "2hours" in str(w[0].message).lower()
+
+    def test_24hour_issues_warning(self):
+        """Should warn when using 24hour instead of 1day."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            tf = parse_timeframe_string("24hour")
+
+            assert len(w) == 1
+            assert issubclass(w[0].category, UserWarning)
+            assert "24hour" in str(w[0].message).lower()
+            assert "1day" in str(w[0].message).lower()
+
+    def test_1440min_issues_warning(self):
+        """Should warn when using 1440min instead of 1day."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            tf = parse_timeframe_string("1440min")
+
+            assert len(w) == 1
+            assert issubclass(w[0].category, UserWarning)
+            assert "1440min" in str(w[0].message).lower()
+            assert "1day" in str(w[0].message).lower()
+
+    def test_canonical_forms_no_warning(self):
+        """Canonical forms should not issue warnings."""
+        import warnings
+
+        canonical_forms = ["1hour", "2hours", "1day", "5min", "15min"]
+
+        for form in canonical_forms:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                parse_timeframe_string(form)
+
+                # Should not issue any warnings
+                assert len(w) == 0, f"Unexpected warning for canonical form '{form}': {w[0].message if w else 'none'}"
+
+    def test_non_divisible_no_warning(self):
+        """Non-divisible timeframes should not issue warnings."""
+        import warnings
+
+        # These cannot be normalized cleanly
+        non_divisible = ["5min", "15min", "45min", "3hour", "7hour"]
+
+        for form in non_divisible:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                parse_timeframe_string(form)
+
+                # Should not issue any warnings
+                assert len(w) == 0, f"Unexpected warning for non-divisible form '{form}'"
 
 
 class TestTimeFrameComparison:

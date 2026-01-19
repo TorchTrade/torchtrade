@@ -8,6 +8,19 @@ The `feature_preprocessing_fn` parameter in environment configs transforms raw O
 
 **IMPORTANT**: All feature columns must start with `features_` prefix (e.g., `features_close`, `features_rsi_14`). Only columns with this prefix will be included in the observation space.
 
+!!! warning "Timeframe Format Matters"
+    When specifying `time_frames`, use **canonical forms** to avoid confusion:
+
+    - ✅ **Use**: `"1hour"`, `"2hours"`, `"1day"`
+    - ❌ **Avoid**: `"60min"`, `"120min"`, `"24hour"`, `"1440min"`
+
+    **Why?** Different formats create different observation keys:
+
+    - `time_frames=["60min"]` → observation key: `"market_data_60Minute"`
+    - `time_frames=["1hour"]` → observation key: `"market_data_1Hour"`
+
+    These are treated as **DIFFERENT timeframes**. Models trained with one format won't work with the other. The framework will issue a warning if you use non-canonical forms like `"60min"` to guide you toward cleaner observation keys.
+
 ---
 
 ## Basic Usage
@@ -57,7 +70,7 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 # Use in environment config
 config = SeqLongOnlyEnvConfig(
     feature_preprocessing_fn=custom_preprocessing,
-    time_frames=["1min", "5min", "15min"],
+    time_frames=["1min", "5min", "15min"],  # Note: use "1hour" not "60min"
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
     initial_cash=1000

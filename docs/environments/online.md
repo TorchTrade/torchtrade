@@ -23,6 +23,28 @@ TorchTrade provides 6 live trading environments across these exchanges:
 | **BitgetFuturesTorchTradingEnv** | Bitget | Crypto | ✅ | ✅ | ❌ |
 | **BitgetFuturesSLTPTorchTradingEnv** | Bitget | Crypto | ✅ | ✅ | ✅ |
 
+!!! warning "Timeframe Format - Critical for Model Compatibility"
+    When specifying `time_frames`, **always use canonical forms**:
+
+    - ✅ **Correct**: `["1Min", "5Min", "15Min", "1Hour", "1Day"]` (Alpaca format)
+    - ✅ **Correct**: `["1m", "5m", "15m", "1h", "1d"]` (Binance/Bitget format)
+    - ❌ **Wrong**: `["60min"]`, `["60m"]`, `["24hour"]`, `["24h"]`
+
+    **Why this matters:**
+
+    - `time_frames=["60min"]` creates observation key `"market_data_60Minute"`
+    - `time_frames=["1hour"]` creates observation key `"market_data_1Hour"`
+    - These are **DIFFERENT keys** - your model trained with `"60min"` won't work with config using `"1hour"`
+
+    The framework will issue a warning if you use non-canonical forms. Use the suggested canonical forms to ensure model compatibility and cleaner observation keys.
+
+    **Common conversions:**
+
+    - `60min` / `60m` → use `1Hour` / `1h`
+    - `120min` / `120m` → use `2Hour` / `2h`
+    - `1440min` → use `1Day` / `1d`
+    - `24hour` / `24h` → use `1Day` / `1d`
+
 ---
 
 ## Alpaca Environments

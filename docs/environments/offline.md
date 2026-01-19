@@ -29,6 +29,27 @@ All environments support the `include_hold_action` parameter (default: `True`):
 
 **Use Case**: Set to `False` when you want to ensure the agent is always actively trading rather than holding neutral positions. Useful for testing aggressive strategies or ensuring the agent explores trading actions.
 
+!!! warning "Timeframe Format - Critical for Model Compatibility"
+    When specifying `time_frames`, **always use canonical forms**:
+
+    - ✅ **Correct**: `["1min", "5min", "15min", "1hour", "1day"]`
+    - ❌ **Wrong**: `["1min", "5min", "15min", "60min"]`
+
+    **Why this matters:**
+
+    - `time_frames=["60min"]` creates observation key `"market_data_60Minute"`
+    - `time_frames=["1hour"]` creates observation key `"market_data_1Hour"`
+    - These are **DIFFERENT keys** - your model trained with `"60min"` won't work with config using `"1hour"`
+
+    The framework will issue a warning if you use non-canonical forms. Use the suggested canonical forms to ensure model compatibility and cleaner observation keys.
+
+    **Common conversions:**
+
+    - `60min` → use `1hour`
+    - `120min` → use `2hours`
+    - `1440min` → use `1day`
+    - `24hour` → use `1day`
+
 ---
 
 ## SeqLongOnlyEnv

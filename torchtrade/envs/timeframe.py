@@ -12,6 +12,7 @@ from functools import total_ordering
 from typing import List, Union, Optional, Tuple
 import pandas as pd
 import re
+import warnings
 
 
 class TimeFrameUnit(Enum):
@@ -129,6 +130,10 @@ def parse_timeframe_string(s: str) -> TimeFrame:
 
     Supports formats: "5Min", "5min", "5Minute", "5 minutes", "5M", "5H", "5D"
 
+    **Important**: Non-canonical forms like "60min" create different observation keys
+    than canonical forms like "1hour". A warning will be issued if a timeframe can be
+    normalized to a cleaner form (e.g., 60min → 1hour, 120min → 2hour, 24hour → 1day).
+
     Args:
         s: Timeframe string (e.g., "5Min", "1Hour", "15Minute")
 
@@ -138,6 +143,9 @@ def parse_timeframe_string(s: str) -> TimeFrame:
     Raises:
         ValueError: If string format is invalid or unit is unknown
 
+    Warns:
+        UserWarning: If timeframe can be normalized to a canonical form
+
     Examples:
         >>> parse_timeframe_string("5Min")
         TimeFrame(5, TimeFrameUnit.Minute)
@@ -145,6 +153,8 @@ def parse_timeframe_string(s: str) -> TimeFrame:
         TimeFrame(1, TimeFrameUnit.Hour)
         >>> parse_timeframe_string("15 minutes")
         TimeFrame(15, TimeFrameUnit.Minute)
+        >>> parse_timeframe_string("60min")  # Issues warning, suggests "1hour"
+        TimeFrame(60, TimeFrameUnit.Minute)
     """
     s = s.strip()
 
@@ -182,6 +192,44 @@ def parse_timeframe_string(s: str) -> TimeFrame:
             f"Unknown time unit: '{unit_str}'. "
             f"Supported units: Min/Minute/Minutes/M, Hour/Hours/H, Day/Days/D"
         )
+
+    # Warn about non-canonical timeframe formats
+    # Check if minutes could be normalized to hours or days
+    if unit == TimeFrameUnit.Minute:
+        if value >= 1440 and value % 1440 == 0:
+            # Can be normalized to days
+            days = value // 1440
+            canonical = f"{days}day" if days == 1 else f"{days}days"
+            warnings.warn(
+                f"Timeframe '{s}' creates observation key '{value}Minute'. "
+                f"Consider using '{canonical}' for a cleaner key '{days}Day'. "
+                f"Note: These are treated as DIFFERENT timeframes - models trained with one won't work with the other.",
+                UserWarning,
+                stacklevel=2
+            )
+        elif value >= 60 and value % 60 == 0:
+            # Can be normalized to hours
+            hours = value // 60
+            canonical = f"{hours}hour" if hours == 1 else f"{hours}hours"
+            warnings.warn(
+                f"Timeframe '{s}' creates observation key '{value}Minute'. "
+                f"Consider using '{canonical}' for a cleaner key '{hours}Hour'. "
+                f"Note: These are treated as DIFFERENT timeframes - models trained with one won't work with the other.",
+                UserWarning,
+                stacklevel=2
+            )
+    # Check if hours could be normalized to days
+    elif unit == TimeFrameUnit.Hour:
+        if value >= 24 and value % 24 == 0:
+            days = value // 24
+            canonical = f"{days}day" if days == 1 else f"{days}days"
+            warnings.warn(
+                f"Timeframe '{s}' creates observation key '{value}Hour'. "
+                f"Consider using '{canonical}' for a cleaner key '{days}Day'. "
+                f"Note: These are treated as DIFFERENT timeframes - models trained with one won't work with the other.",
+                UserWarning,
+                stacklevel=2
+            )
 
     return TimeFrame(value, unit)
 
