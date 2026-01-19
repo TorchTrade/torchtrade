@@ -68,6 +68,11 @@ env = SeqLongOnlyEnv(df, config)
 
 ### Example 2: Normalized Features
 
+Feature normalization can be done at multiple levels:
+- **Feature preprocessing** (shown below) - Normalize in the preprocessing function
+- **TorchRL transforms** - Use [VecNorm](https://docs.pytorch.org/rl/main/reference/generated/torchrl.envs.transforms.VecNorm.html) or [ObservationNorm](https://docs.pytorch.org/rl/main/reference/generated/torchrl.envs.transforms.ObservationNorm.html) transforms
+- **Network level** - Use BatchNorm, LayerNorm, or other normalization layers in your policy network
+
 ```python
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
