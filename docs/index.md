@@ -135,8 +135,8 @@ Already familiar with the basics? Check out:
 
 ## Support
 
-- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchtrade_envs/discussions)
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade_envs/issues)
+- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchtrade/discussions)
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade/issues)
 - 📧 **Email**: torchtradecontact@gmail.com
 
 ---

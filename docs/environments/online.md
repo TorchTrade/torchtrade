@@ -583,7 +583,7 @@ Need support for another exchange? We're open to adding more integrations!
 - OANDA (Forex/CFDs)
 
 **To request a new exchange:**
-1. [Create an issue](https://github.com/TorchTrade/torchtrade_envs/issues/new) with the exchange name
+1. [Create an issue](https://github.com/TorchTrade/torchtrade/issues/new) with the exchange name
 2. Email us at: torchtradecontact@gmail.com
 
 ---
@@ -599,6 +599,6 @@ Need support for another exchange? We're open to adding more integrations!
 
 ## Support
 
-- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchtrade_envs/discussions)
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade_envs/issues)
+- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchtrade/discussions)
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade/issues)
 - 📧 **Email**: torchtradecontact@gmail.com

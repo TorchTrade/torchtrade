@@ -135,7 +135,7 @@ Located in `examples/transforms/`:
 |---------|-----------|-------------|
 | **chronos_embedding_example.py** | ChronosEmbeddingTransform | Time series embedding with Chronos T5 models |
 
-**Note**: If you would like us to add additional transforms for other pretrained models (similar to ChronosEmbedding), we welcome [GitHub issues](https://github.com/TorchTrade/torchtrade_envs/issues) with your requests. We're happy to implement these given the availability of model weights and resources.
+**Note**: If you would like us to add additional transforms for other pretrained models (similar to ChronosEmbedding), we welcome [GitHub issues](https://github.com/TorchTrade/torchtrade/issues) with your requests. We're happy to implement these given the availability of model weights and resources.
 
 ---
 
@@ -264,6 +264,6 @@ To create a new training script:
 
 ## Support
 
-- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchtrade_envs/discussions)
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade_envs/issues)
+- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchtrade/discussions)
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade/issues)
 - 📧 **Email**: torchtradecontact@gmail.com

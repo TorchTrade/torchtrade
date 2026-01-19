@@ -46,8 +46,8 @@ TorchTrade provides modular environments for both live trading with major exchan
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Clone and install
-git clone https://github.com/TorchTrade/torchtrade_envs.git
-cd torchtrade_envs
+git clone https://github.com/TorchTrade/torchtrade.git
+cd torchtrade
 uv sync
 source .venv/bin/activate  # On Unix/macOS
 ```
@@ -106,7 +106,7 @@ TorchTrade supports live trading with major exchanges:
 | **BitgetFuturesTorchTradingEnv** | Bitget | Crypto | ✅ | ✅ (1-125x) | ❌ |
 | **BitgetFuturesSLTPTorchTradingEnv** | Bitget | Crypto | ✅ | ✅ (1-125x) | ✅ |
 
-**Need another broker?** Request support for additional platforms (OKX, Bybit, Interactive Brokers, etc.) by [creating an issue](https://github.com/TorchTrade/torchtrade_envs/issues/new) or emailing torchtradecontact@gmail.com.
+**Need another broker?** Request support for additional platforms (OKX, Bybit, Interactive Brokers, etc.) by [creating an issue](https://github.com/TorchTrade/torchtrade/issues/new) or emailing torchtradecontact@gmail.com.
 
 See **[Online Environments Documentation](https://torchtrade.github.io/torchtrade_envs/environments/online/)** for setup guides and examples.
 
@@ -147,7 +147,7 @@ Start live trading with these supported platforms:
 TorchTrade is open-source and free to use. If you find it valuable for your research or trading, consider supporting development:
 
 - 💰 **Donate via PayPal**: [paypal.me/yourname](https://www.paypal.me/yourname)
-- ⭐ **Star the repo**: Help others discover TorchTrade on [GitHub](https://github.com/TorchTrade/torchtrade_envs)
+- ⭐ **Star the repo**: Help others discover TorchTrade on [GitHub](https://github.com/TorchTrade/torchtrade)
 - 🪙 **Use affiliate links**: Sign up for exchanges using the links above
 
 Your support helps maintain the project, add new features, and keep documentation up-to-date!
@@ -227,8 +227,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 # 2. Clone repository
-git clone https://github.com/TorchTrade/torchtrade_envs.git
-cd torchtrade_envs
+git clone https://github.com/TorchTrade/torchtrade.git
+cd torchtrade
 
 # 3. Install dependencies
 uv sync
@@ -487,7 +487,7 @@ mkdocs serve
 
 Found a bug or have a feature request?
 
-[GitHub Issues](https://github.com/TorchTrade/torchtrade_envs/issues)
+[GitHub Issues](https://github.com/TorchTrade/torchtrade/issues)
 
 ---
 

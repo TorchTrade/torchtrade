@@ -43,7 +43,7 @@ for batch in replay_buffer:
     optimizer.step()
 ```
 
-For a complete implementation, see [examples/offline/iql/](https://github.com/TorchTrade/torchtrade_envs/tree/main/examples/offline/iql).
+For a complete implementation, see [examples/offline/iql/](https://github.com/TorchTrade/torchtrade/tree/main/examples/offline/iql).
 
 ## Dataset Collection
 

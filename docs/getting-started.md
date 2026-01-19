@@ -25,8 +25,8 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ### 2. Clone the Repository
 
 ```bash
-git clone https://github.com/TorchTrade/torchtrade_envs.git
-cd torchtrade_envs
+git clone https://github.com/TorchTrade/torchtrade.git
+cd torchtrade
 ```
 
 ### 3. Install Dependencies
@@ -291,7 +291,7 @@ config = BinanceFuturesTradingEnvConfig(
 env = BinanceFuturesTorchTradingEnv(config)
 ```
 
-**Note**: Alpaca and Binance are just two examples of live environments/brokers that TorchTrade supports. For more details on all available exchanges and configurations, see **[Online Environments](environments/online.md)**. We're always open to including additional brokers - if you'd like to request support for a new exchange, please [create an issue](https://github.com/TorchTrade/torchtrade_envs/issues) or contact us directly at torchtradecontact@gmail.com.
+**Note**: Alpaca and Binance are just two examples of live environments/brokers that TorchTrade supports. For more details on all available exchanges and configurations, see **[Online Environments](environments/online.md)**. We're always open to including additional brokers - if you'd like to request support for a new exchange, please [create an issue](https://github.com/TorchTrade/torchtrade/issues) or contact us directly at torchtradecontact@gmail.com.
 
 ## Next Steps
 
@@ -347,6 +347,6 @@ assert (df[['open', 'high', 'low', 'close']] > 0).all().all()
 
 ## Getting Help
 
-- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchtrade_envs/discussions)
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade_envs/issues)
+- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchtrade/discussions)
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade/issues)
 - 📧 **Email**: torchtradecontact@gmail.com
