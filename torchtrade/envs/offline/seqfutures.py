@@ -68,6 +68,7 @@ class SeqFuturesEnvConfig:
     action_levels: List[float] = None  # Built in __post_init__ based on include_hold_action
 
     def __post_init__(self):
+        """Normalize timeframe configuration and build action levels."""
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
@@ -77,6 +78,16 @@ class SeqFuturesEnvConfig:
                 self.action_levels = [-1.0, 0.0, 1.0]  # Short, Hold, Long
             else:
                 self.action_levels = [-1.0, 1.0]  # Short, Long
+        else:
+            # User provided custom action_levels - include_hold_action is ignored
+            import warnings
+            if not self.include_hold_action and 0.0 in self.action_levels:
+                warnings.warn(
+                    "Custom action_levels provided with include_hold_action=False, but action_levels "
+                    "contains 0.0 (hold action). The custom action_levels will be used as-is. "
+                    "Consider removing 0.0 from action_levels or setting include_hold_action=True.",
+                    UserWarning
+                )
 
 
 class SeqFuturesEnv(TorchTradeOfflineEnv):

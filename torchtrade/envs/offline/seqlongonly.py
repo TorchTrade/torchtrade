@@ -42,6 +42,16 @@ class SeqLongOnlyEnvConfig:
                 self.action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Hold, Buy-all
             else:
                 self.action_levels = [-1.0, 1.0]  # Sell-all, Buy-all
+        else:
+            # User provided custom action_levels - include_hold_action is ignored
+            import warnings
+            if not self.include_hold_action and 0.0 in self.action_levels:
+                warnings.warn(
+                    "Custom action_levels provided with include_hold_action=False, but action_levels "
+                    "contains 0.0 (hold action). The custom action_levels will be used as-is. "
+                    "Consider removing 0.0 from action_levels or setting include_hold_action=True.",
+                    UserWarning
+                )
 
 class SeqLongOnlyEnv(TorchTradeOfflineEnv):
     """Sequential long-only trading environment for backtesting.
