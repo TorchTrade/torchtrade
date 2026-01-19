@@ -341,10 +341,11 @@ def make_grpo_policy(env, device, cfg):
 
 
 def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=None, device="cpu"):
-    """Make data collector."""
-    
+    """Make data collector.
+
     Args:
         device: Device for data collection (default: "cpu", can use "cuda" now that VecNormV2 is removed)
+    """
     collector = SyncDataCollector(
         train_env,
         actor_model_explore,
