@@ -10,7 +10,7 @@ By default, all environments use log returns:
 reward = log(portfolio_value_t / portfolio_value_t-1)
 ```
 
-You can potentially improve learning and generalization by customizing this reward function.
+You can potentially improve learning and generalization by customizing this reward function. See below for some references on reward function design.
 
 ---
 
