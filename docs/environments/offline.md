@@ -15,6 +15,20 @@ TorchTrade provides 6 offline environments:
 | **SeqFuturesSLTPEnv** | Crypto | ✅ | ✅ | ✅ | ❌ |
 | **FuturesOneStepEnv** | Crypto | ✅ | ✅ | ✅ | ✅ |
 
+### Action Space Control
+
+All environments support the `include_hold_action` parameter (default: `True`):
+
+- **`include_hold_action=True`** (default): Includes HOLD/no-op action in the action space
+  - Standard environments: 3 actions (Sell/Short, Hold, Buy/Long)
+  - SLTP environments: HOLD action + SL/TP combinations
+
+- **`include_hold_action=False`**: Removes HOLD action, forcing the agent to always take a trading action
+  - Standard environments: 2 actions (Sell/Short, Buy/Long)
+  - SLTP environments: Only SL/TP combinations (no HOLD)
+
+**Use Case**: Set to `False` when you want to ensure the agent is always actively trading rather than holding neutral positions. Useful for testing aggressive strategies or ensuring the agent explores trading actions.
+
 ---
 
 ## SeqLongOnlyEnv
@@ -46,6 +60,7 @@ config = SeqLongOnlyEnvConfig(
     # Episode configuration
     max_traj_length=None,              # Full dataset (or set limit)
     random_start=True,                 # True = random episode starts, False = sequential
+    include_hold_action=True,          # Include HOLD action (default: True)
 
     # Feature preprocessing (optional)
     feature_preprocessing_fn=None,      # Custom feature function
@@ -76,10 +91,14 @@ observation = {
 
 ### Action Space
 
-Discrete(3):
+**Default (include_hold_action=True)** - Discrete(3):
 - **Action 0**: SELL - Close current position
 - **Action 1**: HOLD - Do nothing
 - **Action 2**: BUY - Open position (100% of cash)
+
+**Without HOLD (include_hold_action=False)** - Discrete(2):
+- **Action 0**: SELL - Close current position
+- **Action 1**: BUY - Open position (100% of cash)
 
 ### Example Usage
 
@@ -156,9 +175,13 @@ env = SeqLongOnlySLTPEnv(df, config)
 
 ### Action Space
 
-Discrete(1 + num_sl × num_tp) when `include_hold_action=True`, or Discrete(num_sl × num_tp) when `False`.
+**Formula**:
+- **With HOLD (include_hold_action=True)**: Discrete(1 + num_sl × num_tp)
+- **Without HOLD (include_hold_action=False)**: Discrete(num_sl × num_tp)
 
-With `stoploss_levels=[-0.02, -0.05]` and `takeprofit_levels=[0.05, 0.10]` and `include_hold_action=True`:
+**Example with include_hold_action=True**:
+
+With `stoploss_levels=[-0.02, -0.05]` and `takeprofit_levels=[0.05, 0.10]`:
 
 - **Action 0**: HOLD / Close position
 - **Action 1**: BUY with SL=-2%, TP=+5%
@@ -167,6 +190,17 @@ With `stoploss_levels=[-0.02, -0.05]` and `takeprofit_levels=[0.05, 0.10]` and `
 - **Action 4**: BUY with SL=-5%, TP=+10%
 
 Total: 1 + (2 × 2) = **5 actions**
+
+**Example with include_hold_action=False**:
+
+Same levels but no HOLD action:
+
+- **Action 0**: BUY with SL=-2%, TP=+5%
+- **Action 1**: BUY with SL=-2%, TP=+10%
+- **Action 2**: BUY with SL=-5%, TP=+5%
+- **Action 3**: BUY with SL=-5%, TP=+10%
+
+Total: 2 × 2 = **4 actions**
 
 ### Example Usage
 
@@ -299,6 +333,7 @@ config = SeqFuturesEnvConfig(
     initial_cash=10000,
     transaction_fee=0.0004,             # 0.04% (futures have lower fees)
     slippage=0.001,
+    include_hold_action=True,           # Include HOLD action (default: True)
 
     # Feature preprocessing (optional)
     feature_preprocessing_fn=None,
@@ -328,10 +363,14 @@ observation = {
 
 ### Action Space
 
-Discrete(3):
+**Default (include_hold_action=True)** - Discrete(3):
 - **Action 0**: SHORT - Open short position with leverage
 - **Action 1**: HOLD - Do nothing or maintain position
 - **Action 2**: LONG - Open long position with leverage
+
+**Without HOLD (include_hold_action=False)** - Discrete(2):
+- **Action 0**: SHORT - Open short position with leverage
+- **Action 1**: LONG - Open long position with leverage
 
 ### Liquidation Mechanics
 
@@ -427,16 +466,26 @@ env = SeqFuturesSLTPEnv(df, config)
 
 ### Action Space
 
-With `include_short_positions=True`:
+**Formula** (with `include_short_positions=True`):
+- **With HOLD (include_hold_action=True)**: Discrete(1 + 2 × (num_sl × num_tp))
+- **Without HOLD (include_hold_action=False)**: Discrete(2 × (num_sl × num_tp))
 
-Discrete(1 + 2 × (num_sl × num_tp)):
+**Example with include_hold_action=True**:
 
-Example with 2 SL levels and 2 TP levels:
+With 2 SL levels and 2 TP levels:
 - **Action 0**: HOLD / Close position
 - **Actions 1-4**: LONG with SL/TP combinations
 - **Actions 5-8**: SHORT with SL/TP combinations
 
 Total: 1 + 2 × (2 × 2) = **9 actions**
+
+**Example with include_hold_action=False**:
+
+Same levels but no HOLD action:
+- **Actions 0-3**: LONG with SL/TP combinations
+- **Actions 4-7**: SHORT with SL/TP combinations
+
+Total: 2 × (2 × 2) = **8 actions**
 
 ### Example Usage
 
