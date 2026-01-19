@@ -6,10 +6,6 @@ TorchTrade allows you to add custom technical indicators and features to your ma
 
 The `feature_preprocessing_fn` parameter in environment configs transforms raw OHLCV data into custom features. This function is called on each resampled timeframe during environment initialization.
 
-```
-Raw OHLCV Data → Resample to Timeframes → Apply feature_preprocessing_fn → Sliding Windows → Policy
-```
-
 ---
 
 ## Basic Usage
