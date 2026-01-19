@@ -288,7 +288,7 @@ def main(cfg: DictConfig):  # noqa: F821
             ) // test_interval:
                 actor.eval()
                 # Don't move eval_env - keep it on CPU
-                # Use auto_cast_to_device=False to avoid device mismatch with VecNormV2
+                # Use auto_cast_to_device=False to keep actor and env on same device
                 eval_rollout = eval_env.rollout(
                     max_eval_traj_length,
                     actor.to("cpu"),  # Move actor to CPU temporarily for eval

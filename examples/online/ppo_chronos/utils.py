@@ -13,7 +13,6 @@ from torchrl.envs import (
     Compose,
     TransformedEnv,
     StepCounter,
-    VecNormV2,
 )
 
 from torchtrade.envs.transforms import CoverageTracker, ChronosEmbeddingTransform
@@ -29,6 +28,7 @@ from torchrl.modules import (
 
 from torchtrade.envs import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS
 
 # ====================================================================
@@ -38,10 +38,12 @@ from torchrl.trainers.helpers.models import ACTIVATIONS
 
 def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Preprocess OHLCV dataframe with features for RL trading.
+    Preprocess OHLCV dataframe with normalized features for RL trading.
 
     Expected columns: ["open", "high", "low", "close", "volume"]
     Index can be datetime or integer.
+
+    Uses StandardScaler for normalization to avoid VecNormV2 device issues.
     """
     df = df.copy().reset_index(drop=False)
 
@@ -51,6 +53,11 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     df["features_low"] = df["low"]
     df["features_close"] = df["close"]
     df["features_volume"] = df["volume"]
+
+    # Normalize features using StandardScaler
+    scaler = StandardScaler()
+    feature_cols = [col for col in df.columns if col.startswith("features_")]
+    df[feature_cols] = scaler.fit_transform(df[feature_cols])
 
     # Fill NaN values
     df.fillna(0, inplace=True)
@@ -95,7 +102,9 @@ def apply_env_transforms(env, max_steps, cfg):
 
     Returns:
         transformed_env: Environment with transforms applied
-        vecnorm: The VecNormV2 instance for potential statistics sharing
+
+    Note: Normalization is handled in the preprocessing function using StandardScaler
+          to avoid VecNormV2 device issues.
     """
     # Get market data keys for Chronos embedding
     market_data_keys = [k for k in env.observation_spec.keys() if k.startswith("market_data")]
@@ -118,16 +127,6 @@ def apply_env_transforms(env, max_steps, cfg):
         )
         chronos_transforms.append(chronos_transform)
 
-    # Get observation keys for normalization (chronos embeddings and account_state)
-    # Account state should still be normalized
-    obs_keys = ["account_state"]
-
-    vecnorm = VecNormV2(
-        in_keys=obs_keys,
-        decay=0.99999,
-        eps=1e-8,
-    )
-
     # Build transform composition
     transform_list = [
         InitTracker(),
@@ -137,9 +136,9 @@ def apply_env_transforms(env, max_steps, cfg):
     # Add all Chronos transforms
     transform_list.extend(chronos_transforms)
 
-    # Add normalization and other transforms
+    # Add other transforms
+    # Note: Normalization for account_state is handled in preprocessing with StandardScaler
     transform_list.extend([
-        vecnorm,
         RewardSum(),
         StepCounter(max_steps=max_steps),
     ])
@@ -148,7 +147,7 @@ def apply_env_transforms(env, max_steps, cfg):
         env,
         Compose(*transform_list),
     )
-    return transformed_env, vecnorm
+    return transformed_env
 
 
 def make_environment(
@@ -172,10 +171,10 @@ def make_environment(
     )
     parallel_env.set_seed(cfg.env.seed)
 
-    # Create train environment and get its VecNormV2 instance
-    train_env, train_vecnorm = apply_env_transforms(parallel_env, max_train_steps, cfg)
+    # Create train environment
+    train_env = apply_env_transforms(parallel_env, max_train_steps, cfg)
 
-    # Create eval environment with its own VecNormV2
+    # Create eval environment
     maker = functools.partial(
         env_maker, test_df, cfg, max_traj_length=max_eval_traj_length
     )
@@ -185,9 +184,7 @@ def make_environment(
         serial_for_single=True,
     )
     max_eval_steps = test_df.shape[0]
-
-    # Create eval environment with separate VecNormV2
-    eval_env, eval_vecnorm = apply_env_transforms(eval_base_env, max_eval_steps, cfg)
+    eval_env = apply_env_transforms(eval_base_env, max_eval_steps, cfg)
 
     # Create coverage tracker for postproc (used in collector)
     coverage_tracker = CoverageTracker()
@@ -316,14 +313,18 @@ def make_ppo_models(env, device, cfg):
     return actor, critic
 
 
-def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=None):
-    """Make data collector."""
+def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=None, device="cpu"):
+    """Make data collector.
+
+    Args:
+        device: Device for data collection (default: "cpu", can use "cuda" now that VecNormV2 is removed)
+    """
     collector = SyncDataCollector(
         train_env,
         actor_model_explore,
         frames_per_batch=cfg.collector.frames_per_batch,
         total_frames=cfg.collector.total_frames,
-        device="cpu",
+        device=device,
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
         postproc=postproc,

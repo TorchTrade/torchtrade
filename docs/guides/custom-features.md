@@ -79,15 +79,9 @@ config = SeqLongOnlyEnvConfig(
 env = SeqLongOnlyEnv(df, config)
 ```
 
-### Example 2: Normalized Features
+### Example 2: Normalized Features (Recommended)
 
-Feature normalization can be done at multiple levels:
-
-- **Feature preprocessing** (shown below) - Normalize in the preprocessing function
-
-- **TorchRL transforms** - Use [VecNorm](https://docs.pytorch.org/rl/main/reference/generated/torchrl.envs.transforms.VecNorm.html) or [ObservationNorm](https://docs.pytorch.org/rl/main/reference/generated/torchrl.envs.transforms.ObservationNorm.html) transforms
-
-- **Network level** - Use BatchNorm, LayerNorm, or other normalization layers in your policy network
+**Feature normalization is critical for stable RL training.** The recommended approach is to normalize features during preprocessing using sklearn's StandardScaler, which avoids device-related issues with TorchRL's VecNorm transforms.
 
 ```python
 import pandas as pd
@@ -96,6 +90,9 @@ from sklearn.preprocessing import StandardScaler
 def normalized_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """
     Normalize features using StandardScaler for stable training.
+
+    This approach is preferred over VecNormV2/ObservationNorm transforms
+    which can have device compatibility issues on GPU.
     """
     # Basic OHLCV
     df["features_open"] = df["open"]
@@ -123,6 +120,55 @@ config = SeqLongOnlyEnvConfig(
     ...
 )
 ```
+
+**Alternative approaches:**
+- **TorchRL transforms** - VecNormV2 and ObservationNorm are available but may have device compatibility issues
+- **Network level** - Use BatchNorm, LayerNorm, or other normalization layers in your policy network
+
+### Advanced Normalization Considerations
+
+The StandardScaler approach above uses fixed statistics from the training data. For financial data with **regime changes** (market conditions that shift over time), you might eventually want more adaptive approaches:
+
+**Per-regime normalization:**
+- Detect market regimes (bull/bear, high/low volatility)
+- Maintain separate scalers for each regime
+- Apply the appropriate scaler based on current market conditions
+
+**Rolling window statistics:**
+- Use a sliding window (e.g., last 252 trading days) to compute normalization statistics
+- Updates statistics as new data arrives
+- Adapts to gradual market shifts
+
+**Adaptive normalization:**
+- Exponentially weighted moving average of statistics
+- Continuously updates during training
+- Balances stability with adaptation
+
+**Example of rolling window approach:**
+```python
+def rolling_normalization(df: pd.DataFrame, window=252) -> pd.DataFrame:
+    """Normalize using rolling window statistics."""
+    df = df.copy()
+
+    # Create features
+    df["features_close"] = df["close"]
+    df["features_volume"] = df["volume"]
+
+    # Apply rolling normalization
+    for col in [c for c in df.columns if c.startswith("features_")]:
+        rolling_mean = df[col].rolling(window=window, min_periods=1).mean()
+        rolling_std = df[col].rolling(window=window, min_periods=1).std()
+        df[col] = (df[col] - rolling_mean) / (rolling_std + 1e-8)
+
+    df.fillna(0, inplace=True)
+    return df
+```
+
+**Trade-offs:**
+- Fixed StandardScaler: ✅ Simpler, reproducible | ⚠️ Less adaptive
+- Adaptive methods: ✅ Handles regime changes | ⚠️ More complex, harder to reproduce
+
+For most use cases, StandardScaler is sufficient. Consider adaptive methods if you observe performance degradation over time due to market regime changes.
 
 ---
 

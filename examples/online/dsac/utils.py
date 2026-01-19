@@ -25,7 +25,6 @@ from torchrl.envs import (
     ParallelEnv,
     RewardSum,
     TransformedEnv,
-    VecNormV2,
 )
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 from torchrl.modules import MLP, SafeModule, SafeSequential
@@ -40,6 +39,7 @@ import copy
 import ta
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 
 # ====================================================================
 # Environment utils
@@ -48,8 +48,11 @@ import pandas as pd
 
 def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Preprocess OHLCV dataframe with engineered features for RL trading.
+    Preprocess OHLCV dataframe with normalized features for RL trading.
+
     Expected columns: ["open", "high", "low", "close", "volume"]
+
+    Uses StandardScaler for normalization to avoid VecNormV2 device issues.
     """
 
     df = df.copy().reset_index(drop=False)
@@ -59,6 +62,12 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     df["features_high"] = df["high"]
     df["features_low"] = df["low"]
     df["features_volume"] = df["volume"]
+
+    # Normalize features using StandardScaler
+    scaler = StandardScaler()
+    feature_cols = [col for col in df.columns if col.startswith("features_")]
+    df[feature_cols] = scaler.fit_transform(df[feature_cols])
+
     df.fillna(0, inplace=True)
 
     return df
@@ -89,27 +98,19 @@ def apply_env_transforms(env):
 
     Returns:
         transformed_env: Environment with transforms applied
-        vecnorm: The VecNormV2 instance for potential statistics sharing
+
+    Note: Normalization is handled in the preprocessing function using StandardScaler
+          to avoid VecNormV2 device issues.
     """
-    # Get observation keys for normalization (market_data_* and account_state)
-    obs_keys = [k for k in env.observation_spec.keys() if k.startswith("market_data") or k == "account_state"]
-
-    vecnorm = VecNormV2(
-        in_keys=obs_keys,
-        decay=0.99999,
-        eps=1e-8,
-    )
-
     transformed_env = TransformedEnv(
         env,
         Compose(
             InitTracker(),
             DoubleToFloat(),
-            vecnorm,
             RewardSum(),
         ),
     )
-    return transformed_env, vecnorm
+    return transformed_env
 
 
 def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
@@ -122,21 +123,17 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
     )
     parallel_env.set_seed(cfg.env.seed)
 
-    # Create train environment and get its VecNormV2 instance
-    train_env, train_vecnorm = apply_env_transforms(parallel_env)
+    # Create train environment
+    train_env = apply_env_transforms(parallel_env)
 
-    # Create eval environment with its own VecNormV2
-    # Note: Each VecNormV2 will maintain its own running statistics
-    # This is acceptable as eval will normalize observations consistently during evaluation
+    # Create eval environment
     maker = functools.partial(env_maker, test_df, cfg)
     eval_base_env = ParallelEnv(
         eval_num_envs,
         EnvCreator(maker),
         serial_for_single=True,
     )
-
-    # Create eval environment with separate VecNormV2 (will compute its own statistics)
-    eval_env, eval_vecnorm = apply_env_transforms(eval_base_env)
+    eval_env = apply_env_transforms(eval_base_env)
 
     return train_env, eval_env
 
@@ -147,8 +144,12 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
 # ---------------------------
 
 
-def make_collector(cfg, train_env, actor_model_explore, compile_mode):
-    """Make collector."""
+def make_collector(cfg, train_env, actor_model_explore, compile_mode, device="cpu"):
+    """Make collector.
+
+    Args:
+        device: Device for data collection (default: "cpu", can use "cuda" now that VecNormV2 is removed)
+    """
     collector = SyncDataCollector(
         train_env,
         actor_model_explore,
@@ -156,7 +157,7 @@ def make_collector(cfg, train_env, actor_model_explore, compile_mode):
         init_random_frames=cfg.collector.init_random_frames,
         max_frames_per_traj=cfg.collector.max_frames_per_traj,
         total_frames=cfg.collector.total_frames,
-        device="cpu",
+        device=device,
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
     )
