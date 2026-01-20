@@ -9,6 +9,9 @@ from torchtrade.envs.bitget.utils import normalize_symbol
 
 logger = logging.getLogger(__name__)
 
+# Bitget error codes that indicate no position exists (expected, not real errors)
+BITGET_NO_POSITION_ERRORS = ["22002", "40773", "No position to close"]
+
 
 class TradeMode(Enum):
     NOTIONAL = "notional"  # Dollar-based orders (not directly supported, calculated from qty)
@@ -114,6 +117,32 @@ class BitgetFuturesOrderClass:
             position_mode: ONE_WAY (single net position) or HEDGE (separate long/short)
             client: Optional pre-configured CCXT exchange instance for dependency injection
         """
+        import os
+        import warnings
+
+        # Check for deprecated environment variable names
+        if os.getenv("BITGET_API_KEY"):
+            warnings.warn(
+                "Environment variable 'BITGET_API_KEY' is deprecated. "
+                "Please use 'BITGETACCESSAPIKEY' instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+        if os.getenv("BITGET_SECRET"):
+            warnings.warn(
+                "Environment variable 'BITGET_SECRET' is deprecated. "
+                "Please use 'BITGETSECRETKEY' instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+        if os.getenv("BITGET_PASSPHRASE"):
+            warnings.warn(
+                "Environment variable 'BITGET_PASSPHRASE' is deprecated. "
+                "Please use 'BITGETPASSPHRASE' instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+
         self.symbol = normalize_symbol(symbol)
         # V2 API uses standardized product types
         self.product_type = product_type
@@ -209,8 +238,7 @@ class BitgetFuturesOrderClass:
             True if error indicates no position, False otherwise
         """
         error_msg = str(error)
-        return any(code in error_msg for code in ["22002", "40773"]) or \
-               "No position to close" in error_msg
+        return any(err_code in error_msg for err_code in BITGET_NO_POSITION_ERRORS)
 
     def _build_order_params(self, reduce_only: bool = False, time_in_force: str = "GTC") -> dict:
         """Build common order parameters for Bitget orders.

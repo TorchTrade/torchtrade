@@ -140,8 +140,10 @@ def normalize_symbol(symbol: str) -> str:
         return f"{base}/USDT:USDT"
 
     # Fallback for other formats
+    normalized = f"{symbol}/USDT:USDT"
     warnings.warn(
-        f"Symbol {symbol} doesn't match expected format. "
-        "Assuming USDT perpetual swap. Please use format 'BTC/USDT:USDT'"
+        f"Symbol '{symbol}' doesn't match expected format. "
+        f"Auto-converted to '{normalized}'. "
+        f"Please use CCXT format 'BTC/USDT:USDT' directly to avoid ambiguity."
     )
-    return f"{symbol}/USDT:USDT"
+    return normalized
