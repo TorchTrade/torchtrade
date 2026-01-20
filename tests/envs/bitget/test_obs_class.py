@@ -241,7 +241,7 @@ class TestBitgetObservationClass:
             )
             observer.client = mock_client
 
-            with pytest.raises(RuntimeError, match="No data"):
+            with pytest.raises(RuntimeError, match="No candle data"):
                 observer.get_observations()
 
 
