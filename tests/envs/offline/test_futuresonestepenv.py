@@ -800,7 +800,7 @@ class TestFuturesOneStepEnvLeverage:
     """Tests for leverage functionality."""
 
     def test_leverage_affects_position_size(self, sample_ohlcv_df):
-        """Higher leverage should allow larger position sizes."""
+        """Leverage affects liquidation risk, not position size (with QUANTITY mode)."""
         config_low = FuturesOneStepEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
@@ -825,8 +825,15 @@ class TestFuturesOneStepEnvLeverage:
         env_low._execute_trade_if_needed(env_low.action_map[1])
         env_high._execute_trade_if_needed(env_high.action_map[1])
 
-        # Higher leverage should have larger position
-        assert abs(env_high.position.position_size) > abs(env_low.position.position_size)
+        # With QUANTITY mode, position size is the same regardless of leverage
+        assert abs(env_high.position.position_size) == abs(env_low.position.position_size)
+
+        # But higher leverage means liquidation price is closer to entry
+        entry_price_low = env_low.position.entry_price
+        entry_price_high = env_high.position.entry_price
+        liq_distance_low = abs(entry_price_low - env_low.liquidation_price)
+        liq_distance_high = abs(entry_price_high - env_high.liquidation_price)
+        assert liq_distance_high < liq_distance_low
 
     def test_leverage_affects_liquidation_distance(self, sample_ohlcv_df):
         """Higher leverage should have closer liquidation price."""

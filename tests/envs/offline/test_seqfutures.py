@@ -457,7 +457,7 @@ class TestSeqFuturesEnvLeverage:
     """Tests for leverage mechanics."""
 
     def test_leverage_increases_position_size(self, sample_ohlcv_df):
-        """Higher leverage should result in larger position size."""
+        """Higher leverage affects liquidation risk, not position size (with QUANTITY mode)."""
         config_low = SeqFuturesEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
@@ -493,8 +493,14 @@ class TestSeqFuturesEnvLeverage:
         env_low.step(td_low)
         env_high.step(td_high)
 
-        # Higher leverage = larger position size
-        assert abs(env_high.position.position_size) > abs(env_low.position.position_size)
+        # With QUANTITY mode, position size is the same regardless of leverage
+        assert abs(env_high.position.position_size) == abs(env_low.position.position_size)
+
+        # But higher leverage means liquidation price is closer to entry
+        entry_price = env_low.position.entry_price
+        liq_distance_low = abs(entry_price - env_low.liquidation_price)
+        liq_distance_high = abs(entry_price - env_high.liquidation_price)
+        assert liq_distance_high < liq_distance_low
 
     def test_leverage_stored_in_account_state(self, env):
         """Leverage should be stored in account state."""

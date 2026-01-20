@@ -797,7 +797,10 @@ class TestSeqFuturesSLTPEnvEdgeCases:
                     break
 
     def test_leverage_affects_position_size(self, sample_ohlcv_df):
-        """Higher leverage should allow larger position sizes."""
+        """
+        With QUANTITY mode, leverage doesn't affect position size.
+        It only affects liquidation risk (higher leverage = closer liquidation price).
+        """
         config_low = SeqFuturesSLTPEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
@@ -833,8 +836,14 @@ class TestSeqFuturesSLTPEnvEdgeCases:
         td_high.set("action", torch.tensor(1))
         env_high.step(td_high)
 
-        # Higher leverage should result in larger position
-        assert abs(env_high.position.position_size) > abs(env_low.position.position_size)
+        # With QUANTITY mode, position sizes should be equal
+        assert abs(env_high.position.position_size) == abs(env_low.position.position_size)
+
+        # But liquidation risk differs - higher leverage = closer liquidation price
+        entry_price = env_low.position.entry_price
+        liq_distance_low = abs(entry_price - env_low.liquidation_price)
+        liq_distance_high = abs(entry_price - env_high.liquidation_price)
+        assert liq_distance_high < liq_distance_low
 
 
 class TestSeqFuturesSLTPEnvMetrics:
