@@ -152,7 +152,7 @@ class TestSLTPWithQuantityMode:
         # Run until SL triggers
         sl_triggered = False
         for _ in range(50):
-            if env.position.position_size == 0 and env.stop_loss is None:
+            if env.position.position_size == 0 and env.stop_loss == 0.0:
                 sl_triggered = True
                 break
             td["action"] = 0  # Hold
@@ -194,7 +194,7 @@ class TestSLTPWithNotionalMode:
         # Run until TP triggers
         tp_triggered = False
         for _ in range(50):
-            if env.position.position_size == 0 and env.take_profit is None:
+            if env.position.position_size == 0 and env.take_profit == 0.0:
                 tp_triggered = True
                 break
             td["action"] = 0  # Hold

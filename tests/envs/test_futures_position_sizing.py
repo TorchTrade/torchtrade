@@ -457,6 +457,7 @@ class TestIntegrationScenarios:
 
         while not done and step_count < 15:
             action = env.action_spec.rand()  # Random action
+            td["action"] = action  # Set action in tensordict
             td = env.step(td)
             done = td["done"].item()
             step_count += 1
