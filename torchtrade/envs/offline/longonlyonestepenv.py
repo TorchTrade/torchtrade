@@ -295,47 +295,52 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
             # No action
             logging.debug("No action")
             return trade_info
-        else:
-            # execute buy
-            side = "buy"
-            amount = self.balance
 
-            # Get base price and apply noise to simulate slippage
-            if base_price is None:
-                base_price = self.sampler.get_base_features(self.current_timestamp)["close"]
-            # Apply ±5% noise to the price to simulate market slippage
-            price_noise_factor = 1.0 #self.np_rng.uniform(1 - self.slippage, 1 + self.slippage)
-            execution_price = base_price * price_noise_factor
-            logger.debug(f"Execution price: {execution_price}")
-            
-            fee_paid = amount * self.transaction_fee
-            logger.debug(f"Fee paid: {fee_paid}")
-            effective_amount = amount - fee_paid
-            self.balance -= amount
-            self.position.position_size = round(effective_amount / execution_price, 3)
-            self.position.entry_price = execution_price
-            self.position.hold_counter = 0
-            self.position.position_value = round(self.position.position_size * execution_price, 3)
-            self.position.unrealized_pnlpc = 0.0
-            self.position.current_position = 1.0
-            stop_loss_pct, take_profit_pct = action_tuple
-            self.stop_loss = execution_price * (1 + stop_loss_pct)
-            self.take_profit = execution_price * (1 + take_profit_pct)
-            self.previous_portfolio_value = self.balance + self.position.position_size * execution_price
-
-            logger.debug(f"Stop loss: {self.stop_loss}")
-            logger.debug(f"Take profit: {self.take_profit}")
-                
-            trade_info.update({
-                "executed": True,
-                "amount": amount,
-                "side": side,
-                "success": True,
-                "price_noise": price_noise_factor,
-                "fee_paid": fee_paid
-            })
-            
+        # Check if already long (ignore duplicate long actions)
+        if self.position.current_position == 1:
+            logger.debug("Already long - ignoring duplicate long action")
             return trade_info
+
+        # execute buy
+        side = "buy"
+        amount = self.balance
+
+        # Get base price and apply noise to simulate slippage
+        if base_price is None:
+            base_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+        # Apply ±5% noise to the price to simulate market slippage
+        price_noise_factor = 1.0 #self.np_rng.uniform(1 - self.slippage, 1 + self.slippage)
+        execution_price = base_price * price_noise_factor
+        logger.debug(f"Execution price: {execution_price}")
+
+        fee_paid = amount * self.transaction_fee
+        logger.debug(f"Fee paid: {fee_paid}")
+        effective_amount = amount - fee_paid
+        self.balance -= amount
+        self.position.position_size = round(effective_amount / execution_price, 3)
+        self.position.entry_price = execution_price
+        self.position.hold_counter = 0
+        self.position.position_value = round(self.position.position_size * execution_price, 3)
+        self.position.unrealized_pnlpc = 0.0
+        self.position.current_position = 1.0
+        stop_loss_pct, take_profit_pct = action_tuple
+        self.stop_loss = execution_price * (1 + stop_loss_pct)
+        self.take_profit = execution_price * (1 + take_profit_pct)
+        self.previous_portfolio_value = self.balance + self.position.position_size * execution_price
+
+        logger.debug(f"Stop loss: {self.stop_loss}")
+        logger.debug(f"Take profit: {self.take_profit}")
+
+        trade_info.update({
+            "executed": True,
+            "amount": amount,
+            "side": side,
+            "success": True,
+            "price_noise": price_noise_factor,
+            "fee_paid": fee_paid
+        })
+
+        return trade_info
 
 
     def _check_termination(self, portfolio_value: float) -> bool:

@@ -576,6 +576,99 @@ class TestLongOnlyOneStepEnvEdgeCases:
         assert result is not None
 
 
+class TestLongOnlyOneStepEnvDuplicateActions:
+    """Tests for duplicate action validation."""
+
+    def test_duplicate_long_action_ignored(self, env):
+        """Taking long action when already long should be ignored."""
+        env.reset()
+        initial_balance = env.balance
+
+        # First long action - should execute
+        trade_info1 = env._execute_trade_if_needed(env.action_map[1])
+        assert trade_info1["executed"] == True
+        assert trade_info1["side"] == "buy"
+        assert env.position.current_position == 1
+        entry_price_1 = env.position.entry_price
+        balance_after_first = env.balance
+        fee_1 = trade_info1["fee_paid"]
+
+        # Second long action - should be ignored
+        trade_info2 = env._execute_trade_if_needed(env.action_map[1])
+        assert trade_info2["executed"] == False
+        assert trade_info2["side"] is None
+        assert env.position.current_position == 1  # Still long
+        assert env.position.entry_price == entry_price_1  # Entry unchanged
+        assert env.balance == balance_after_first  # No additional fee
+        assert trade_info2["fee_paid"] == 0.0
+
+    def test_different_sltp_long_when_already_long_ignored(self, env):
+        """Long with different SL/TP when already long should be ignored."""
+        env.reset()
+
+        # Long with first SL/TP combination
+        trade_info1 = env._execute_trade_if_needed(env.action_map[1])
+        assert trade_info1["executed"] == True
+        entry_1 = env.position.entry_price
+        sl_1 = env.stop_loss
+        tp_1 = env.take_profit
+
+        # Long with different SL/TP combination - should be ignored
+        trade_info2 = env._execute_trade_if_needed(env.action_map[2])
+        assert trade_info2["executed"] == False
+        # SL/TP should not change
+        assert env.stop_loss == sl_1
+        assert env.take_profit == tp_1
+
+    def test_hold_action_does_nothing(self, env):
+        """Hold action should do nothing."""
+        env.reset()
+        initial_balance = env.balance
+
+        # Hold action
+        trade_info = env._execute_trade_if_needed(env.action_map[0])
+        assert trade_info["executed"] == False
+        assert trade_info["side"] is None
+        assert env.position.current_position == 0
+        assert env.position.position_size == 0.0
+        assert env.balance == initial_balance  # No fee
+
+    def test_hold_when_long_does_nothing(self, env):
+        """Hold action when already long should not close position."""
+        env.reset()
+
+        # Open long position
+        env._execute_trade_if_needed(env.action_map[1])
+        assert env.position.current_position == 1
+        position_size = env.position.position_size
+        balance_after_long = env.balance
+
+        # Hold action - should not close position
+        trade_info = env._execute_trade_if_needed(env.action_map[0])
+        assert trade_info["executed"] == False
+        assert env.position.current_position == 1  # Still long
+        assert env.position.position_size == position_size  # Position unchanged
+        assert env.balance == balance_after_long  # No fee
+
+    def test_can_take_multiple_different_actions_when_flat(self, env):
+        """Should be able to take any long action when flat (no position)."""
+        env.reset()
+
+        # Take first long action
+        trade_info1 = env._execute_trade_if_needed(env.action_map[1])
+        assert trade_info1["executed"] == True
+
+        # Manually close position to go flat
+        env.position.current_position = 0
+        env.position.position_size = 0.0
+        env.balance = 1000.0
+
+        # Should be able to take a different long action now
+        trade_info2 = env._execute_trade_if_needed(env.action_map[2])
+        assert trade_info2["executed"] == True
+        assert env.position.current_position == 1
+
+
 class TestLongOnlyOneStepEnvIncludeHoldAction:
     """Tests for include_hold_action parameter."""
 
