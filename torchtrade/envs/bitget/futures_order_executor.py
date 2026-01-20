@@ -124,7 +124,7 @@ class BitgetFuturesOrderClass:
                 from pybitget import Client
                 self.client = Client(
                     api_key=api_key,
-                    api_secret=api_secret,
+                    api_secret_key=api_secret,
                     passphrase=passphrase,
                     use_server_time=False
                 )
