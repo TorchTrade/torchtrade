@@ -1,6 +1,6 @@
 """Sequential Futures Environment for offline training with leverage and shorting support."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
 import matplotlib.pyplot as plt
 from enum import Enum
@@ -8,7 +8,7 @@ from enum import Enum
 import numpy as np
 from tensordict import TensorDict, TensorDictBase
 import torch
-from torchrl.data import Categorical, Bounded
+from torchrl.data import Categorical
 import pandas as pd
 from torchtrade.envs.offline.base import TorchTradeOfflineEnv
 from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config

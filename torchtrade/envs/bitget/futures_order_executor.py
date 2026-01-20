@@ -2,9 +2,10 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Union
-import warnings
 
 import ccxt
+
+from torchtrade.envs.bitget.utils import normalize_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,14 @@ class MarginMode(Enum):
     """
     ISOLATED = "isolated"
     CROSSED = "crossed"
+
+    def to_ccxt(self) -> str:
+        """Convert to CCXT margin mode string.
+
+        Returns:
+            'isolated' for ISOLATED, 'cross' for CROSSED
+        """
+        return 'isolated' if self == MarginMode.ISOLATED else 'cross'
 
 
 @dataclass
@@ -105,23 +114,7 @@ class BitgetFuturesOrderClass:
             position_mode: ONE_WAY (single net position) or HEDGE (separate long/short)
             client: Optional pre-configured CCXT exchange instance for dependency injection
         """
-        # Normalize symbol to CCXT format for futures (with :USDT suffix for perpetual swaps)
-        if "/" not in symbol:
-            # Convert BTCUSDT to BTC/USDT:USDT
-            if symbol.endswith("USDT"):
-                base = symbol[:-4]
-                symbol = f"{base}/USDT:USDT"
-            else:
-                warnings.warn(
-                    f"Symbol {symbol} doesn't contain '/'. "
-                    "Assuming USDT perpetual swap. Please use format 'BTC/USDT:USDT'"
-                )
-                symbol = f"{symbol}/USDT:USDT"
-        elif ":" not in symbol:
-            # Add :USDT suffix for perpetual swaps
-            symbol = f"{symbol}:USDT"
-
-        self.symbol = symbol
+        self.symbol = normalize_symbol(symbol)
         # V2 API uses standardized product types
         self.product_type = product_type
         self.margin_coin = "USDT"  # Margin coin for USDT futures
@@ -157,6 +150,94 @@ class BitgetFuturesOrderClass:
         # Setup futures account
         self._setup_futures_account()
 
+    def _calculate_unrealized_pnl_pct(self, qty: float, entry_price: float, mark_price: float) -> float:
+        """Calculate unrealized PnL percentage.
+
+        Args:
+            qty: Position quantity (positive for long, negative for short)
+            entry_price: Entry price
+            mark_price: Current mark price
+
+        Returns:
+            Unrealized PnL percentage
+        """
+        if entry_price <= 0:
+            return 0.0
+
+        if qty > 0:
+            return (mark_price - entry_price) / entry_price
+        else:
+            return (entry_price - mark_price) / entry_price
+
+    def _get_opposite_side(self, side: str) -> str:
+        """Get the opposite trading side.
+
+        Args:
+            side: Original side ("buy" or "sell")
+
+        Returns:
+            Opposite side ("sell" for "buy", "buy" for "sell")
+        """
+        return "sell" if side == "buy" else "buy"
+
+    def _validate_and_prepare_stop_order(self, order_type: str, stop_price: Optional[float], params: dict) -> str:
+        """Validate and prepare stop order parameters.
+
+        Args:
+            order_type: The order type (e.g., "stop", "stop_market")
+            stop_price: The stop price trigger
+            params: Order parameters dictionary to update
+
+        Returns:
+            Normalized order type for CCXT ("market" or "limit")
+
+        Raises:
+            ValueError: If stop_price is missing for stop orders
+        """
+        if stop_price is None:
+            raise ValueError("stop_price is required for stop orders")
+        params['stopPrice'] = stop_price
+        return 'market' if order_type == 'stop_market' else 'limit'
+
+    def _is_no_position_error(self, error: Exception) -> bool:
+        """Check if error indicates no position exists.
+
+        Args:
+            error: The exception to check
+
+        Returns:
+            True if error indicates no position, False otherwise
+        """
+        error_msg = str(error)
+        return any(code in error_msg for code in ["22002", "40773"]) or \
+               "No position to close" in error_msg
+
+    def _build_order_params(self, reduce_only: bool = False, time_in_force: str = "GTC") -> dict:
+        """Build common order parameters for Bitget orders.
+
+        Args:
+            reduce_only: If True, order will only reduce position
+            time_in_force: Time in force setting
+
+        Returns:
+            Dictionary of order parameters
+        """
+        params = {
+            'marginMode': self.margin_mode.value,
+        }
+
+        if time_in_force != "GTC":
+            params['timeInForce'] = time_in_force
+
+        if reduce_only:
+            params['reduceOnly'] = True
+
+        # Handle position mode
+        if self.position_mode == PositionMode.HEDGE:
+            params['tradeSide'] = 'close' if reduce_only else 'open'
+
+        return params
+
     def _setup_futures_account(self):
         """Configure futures account settings."""
         try:
@@ -189,11 +270,9 @@ class BitgetFuturesOrderClass:
             )
 
             # Set margin mode using CCXT
-            # CCXT uses 'isolated' or 'cross' for margin mode (internally converts to 'crossed')
             try:
-                margin_mode_ccxt = 'isolated' if self.margin_mode == MarginMode.ISOLATED else 'cross'
+                margin_mode_ccxt = self.margin_mode.to_ccxt()
                 logger.info(f"Setting margin mode to: {margin_mode_ccxt}")
-                # Don't pass params - CCXT handles marginCoin and productType internally
                 self.client.set_margin_mode(
                     marginMode=margin_mode_ccxt,
                     symbol=self.symbol
@@ -241,40 +320,13 @@ class BitgetFuturesOrderClass:
             side = side.lower()
             order_type_lower = order_type.lower()
 
-            # Build order parameters for CCXT
-            params = {
-                'timeInForce': time_in_force,
-            }
-
-            # Set margin mode per order (Bitget requires this in params, not via set_margin_mode)
-            # See: https://github.com/ccxt/ccxt/issues/21435
-            margin_mode_value = 'isolated' if self.margin_mode == MarginMode.ISOLATED else 'crossed'
-            params['marginMode'] = margin_mode_value
-
-            # For Bitget position modes:
-            # - ONE_WAY mode: tradeSide should be OMITTED (Bitget API: "tradeSide: ignore")
-            # - HEDGE mode: tradeSide is required ('open' or 'close')
-            # See: https://www.bitget.com/api-doc/contract/trade/Place-Order
-            if self.position_mode == PositionMode.HEDGE:
-                # Only use tradeSide in HEDGE mode
-                if reduce_only:
-                    params['reduceOnly'] = True
-                    params['tradeSide'] = 'close'  # Closing existing position
-                else:
-                    params['tradeSide'] = 'open'  # Opening new position
-            else:
-                # ONE_WAY mode: omit tradeSide parameter entirely
-                if reduce_only:
-                    params['reduceOnly'] = True
-                # Do NOT set tradeSide in ONE_WAY mode
+            # Build order parameters
+            params = self._build_order_params(reduce_only=reduce_only, time_in_force=time_in_force)
 
             # Handle stop orders
             price = limit_price
             if order_type_lower in ['stop', 'stop_market']:
-                if stop_price is None:
-                    raise ValueError("stop_price is required for stop orders")
-                params['stopPrice'] = stop_price
-                order_type_lower = 'market' if order_type_lower == 'stop_market' else 'limit'
+                order_type_lower = self._validate_and_prepare_stop_order(order_type_lower, stop_price, params)
 
             # Use CCXT's bracket order method if both TP and SL are provided (Bitget-specific)
             # This is the proper way to create bracket orders for both ONE_WAY and HEDGE modes
@@ -321,15 +373,8 @@ class BitgetFuturesOrderClass:
 
             # Create take profit order separately if only TP is specified
             if take_profit is not None and stop_loss is None and not reduce_only:
-                tp_side = "sell" if side == "buy" else "buy"
-                margin_mode_value = 'isolated' if self.margin_mode == MarginMode.ISOLATED else 'crossed'
-                tp_params = {
-                    'reduceOnly': True,
-                    'marginMode': margin_mode_value,
-                }
-                # Only use tradeSide in HEDGE mode
-                if self.position_mode == PositionMode.HEDGE:
-                    tp_params['tradeSide'] = 'close'
+                tp_side = self._get_opposite_side(side)
+                tp_params = self._build_order_params(reduce_only=True)
 
                 self.client.create_order(
                     symbol=self.symbol,
@@ -343,15 +388,8 @@ class BitgetFuturesOrderClass:
 
             # Create stop loss order separately if only SL is specified
             if stop_loss is not None and take_profit is None and not reduce_only:
-                sl_side = "sell" if side == "buy" else "buy"
-                margin_mode_value = 'isolated' if self.margin_mode == MarginMode.ISOLATED else 'crossed'
-                sl_params = {
-                    'reduceOnly': True,
-                    'marginMode': margin_mode_value,
-                }
-                # Only use tradeSide in HEDGE mode
-                if self.position_mode == PositionMode.HEDGE:
-                    sl_params['tradeSide'] = 'close'
+                sl_side = self._get_opposite_side(side)
+                sl_params = self._build_order_params(reduce_only=True)
 
                 self.client.create_stop_market_order(
                     symbol=self.symbol,
@@ -447,15 +485,7 @@ class BitgetFuturesOrderClass:
                     entry_price = float(pos.get('entryPrice', 0))
                     mark_price = float(pos.get('markPrice', entry_price))
                     unrealized_pnl = float(pos.get('unrealizedPnl', 0))
-
-                    # Calculate unrealized PnL percentage
-                    if entry_price > 0:
-                        if qty > 0:  # Long
-                            unrealized_pnl_pct = (mark_price - entry_price) / entry_price
-                        else:  # Short
-                            unrealized_pnl_pct = (entry_price - mark_price) / entry_price
-                    else:
-                        unrealized_pnl_pct = 0.0
+                    unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(qty, entry_price, mark_price)
 
                     status["position_status"] = PositionStatus(
                         qty=qty,
@@ -615,18 +645,11 @@ class BitgetFuturesOrderClass:
 
             # Determine side to close
             qty = abs(position.qty)
-            side = "sell" if position.qty > 0 else "buy"
+            position_side_str = "buy" if position.qty > 0 else "sell"
+            side = self._get_opposite_side(position_side_str)
 
             # Create market order to close position
-            # In ONE_WAY mode: omit tradeSide, use reduceOnly
-            # In HEDGE mode: use tradeSide='close'
-            margin_mode_value = 'isolated' if self.margin_mode == MarginMode.ISOLATED else 'crossed'
-            params = {
-                'reduceOnly': True,
-                'marginMode': margin_mode_value,  # Set margin mode per order
-            }
-            if self.position_mode == PositionMode.HEDGE:
-                params['tradeSide'] = 'close'
+            params = self._build_order_params(reduce_only=True)
 
             self.client.create_order(
                 symbol=self.symbol,
@@ -641,12 +664,11 @@ class BitgetFuturesOrderClass:
 
         except Exception as e:
             # "No position to close" error is expected and not really an error
-            error_msg = str(e)
-            if "22002" in error_msg or "No position to close" in error_msg or "40773" in error_msg:
+            if self._is_no_position_error(e):
                 logger.debug("No open position to close")
                 return True  # Not an error, just no position
             else:
-                logger.error(f"Error closing position: {error_msg}")
+                logger.error(f"Error closing position: {str(e)}")
                 return False
 
     def set_leverage(self, leverage: int) -> bool:
@@ -682,10 +704,7 @@ class BitgetFuturesOrderClass:
             bool: True if successful
         """
         try:
-            # CCXT uses 'isolated' or 'cross' for margin mode (internally converts 'cross' to 'crossed')
-            margin_mode_ccxt = 'isolated' if mode == MarginMode.ISOLATED else 'cross'
-            # Don't pass params - CCXT handles marginCoin and productType internally
-            self.client.set_margin_mode(margin_mode_ccxt, self.symbol)
+            self.client.set_margin_mode(mode.to_ccxt(), self.symbol)
             self.margin_mode = mode
             logger.info(f"Margin mode set to {mode.value} for {self.symbol}")
             return True

@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 
 import torch.nn
-from tensordict.nn import TensorDictModule
 from torchrl.envs import (
     DoubleToFloat,
     EnvCreator,
@@ -50,10 +49,10 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy().reset_index(drop=False)
 
     # Basic OHLCV features
-    df["features_close"] = df["close"]
     df["features_open"] = df["open"]
     df["features_high"] = df["high"]
     df["features_low"] = df["low"]
+    df["features_close"] = df["close"]
     df["features_volume"] = df["volume"]
 
     # Fill NaN values

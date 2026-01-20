@@ -2,7 +2,6 @@
 
 import pytest
 import numpy as np
-import pandas as pd
 from unittest.mock import MagicMock, patch
 from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 
@@ -11,48 +10,25 @@ class TestBitgetObservationClass:
     """Tests for BitgetObservationClass using CCXT."""
 
     @pytest.fixture
-    def mock_client(self):
-        """Create a mock CCXT Bitget client."""
-        client = MagicMock()
-
-        # Mock OHLCV data (CCXT fetch_ohlcv returns list of [timestamp, open, high, low, close, volume])
-        def mock_fetch_ohlcv(symbol, timeframe, limit=200):
-            candles = []
-            base_time = 1700000000000  # Base timestamp in ms
-            for i in range(limit):
-                candles.append([
-                    base_time + i * 60000,  # timestamp (int)
-                    50000.0,  # open
-                    50100.0,  # high
-                    49900.0,  # low
-                    50050.0,  # close
-                    100.0,    # volume
-                ])
-            return candles
-
-        client.fetch_ohlcv = MagicMock(side_effect=mock_fetch_ohlcv)
-        return client
-
-    @pytest.fixture
-    def observer_single(self, mock_client):
+    def observer_single(self, mock_ccxt_client):
         """Create observer with single timeframe."""
         from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 
-        with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_client):
+        with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_ccxt_client):
             observer = BitgetObservationClass(
                 symbol="BTC/USDT:USDT",
                 time_frames=TimeFrame(15, TimeFrameUnit.Minute),
                 window_sizes=10,
             )
-            observer.client = mock_client
+            observer.client = mock_ccxt_client
             return observer
 
     @pytest.fixture
-    def observer_multi(self, mock_client):
+    def observer_multi(self, mock_ccxt_client):
         """Create observer with multiple timeframes."""
         from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 
-        with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_client):
+        with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_ccxt_client):
             observer = BitgetObservationClass(
                 symbol="BTC/USDT:USDT",
                 time_frames=[
@@ -62,7 +38,7 @@ class TestBitgetObservationClass:
                 ],
                 window_sizes=[10, 20, 15],
             )
-            observer.client = mock_client
+            observer.client = mock_ccxt_client
             return observer
 
     def test_single_interval_initialization(self, observer_single):
@@ -83,38 +59,38 @@ class TestBitgetObservationClass:
         assert observer_multi.time_frames[2].value == 1
         assert observer_multi.window_sizes == [10, 20, 15]
 
-    def test_symbol_normalization(self, mock_client):
+    def test_symbol_normalization(self, mock_ccxt_client):
         """Test that various symbol formats are handled."""
         from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 
-        with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_client):
+        with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_ccxt_client):
             observer = BitgetObservationClass(
                 symbol="BTCUSDT:USDT",
                 time_frames=TimeFrame(1, TimeFrameUnit.Minute),
                 window_sizes=10,
             )
-            observer.client = mock_client
+            observer.client = mock_ccxt_client
             # Symbol gets normalized to CCXT format
             assert "USDT" in observer.symbol
 
-    def test_invalid_interval_raises_error(self, mock_client):
+    def test_invalid_interval_raises_error(self, mock_ccxt_client):
         """Test that invalid timeframe raises ValueError."""
         from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 
         with pytest.raises(ValueError, match="Unsupported timeframe"):
-            with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_client):
+            with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_ccxt_client):
                 BitgetObservationClass(
                     symbol="BTC/USDT:USDT",
                     time_frames=TimeFrame(2, TimeFrameUnit.Minute),  # 2 minutes not supported
                     window_sizes=10,
                 )
 
-    def test_mismatched_lengths_raises_error(self, mock_client):
+    def test_mismatched_lengths_raises_error(self, mock_ccxt_client):
         """Test that mismatched time_frames and window_sizes raises error."""
         from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 
         with pytest.raises(ValueError, match="same length"):
-            with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_client):
+            with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_ccxt_client):
                 BitgetObservationClass(
                     symbol="BTC/USDT:USDT",
                     time_frames=[
@@ -124,11 +100,11 @@ class TestBitgetObservationClass:
                     window_sizes=[10],  # Mismatched length
                 )
 
-    def test_product_type_demo(self, mock_client):
+    def test_product_type_demo(self, mock_ccxt_client):
         """Test that demo=True sets product type correctly."""
         from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 
-        with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_client):
+        with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_ccxt_client):
             observer = BitgetObservationClass(
                 symbol="BTC/USDT:USDT",
                 time_frames=TimeFrame(1, TimeFrameUnit.Minute),
@@ -136,7 +112,7 @@ class TestBitgetObservationClass:
                 product_type="USDT-FUTURES",
                 demo=True,
             )
-            observer.client = mock_client
+            observer.client = mock_ccxt_client
             assert observer.product_type == "USDT-FUTURES"
 
     def test_get_keys_single(self, observer_single):
@@ -177,7 +153,7 @@ class TestBitgetObservationClass:
         # Base features should have all history
         assert observations["base_features"].shape[1] == 4  # OHLC
 
-    def test_custom_preprocessing(self, mock_client):
+    def test_custom_preprocessing(self, mock_ccxt_client):
         """Test custom preprocessing function."""
         from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 
@@ -199,14 +175,14 @@ class TestBitgetObservationClass:
             df.dropna(inplace=True)
             return df
 
-        with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_client):
+        with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_ccxt_client):
             observer = BitgetObservationClass(
                 symbol="BTC/USDT:USDT",
                 time_frames=TimeFrame(1, TimeFrameUnit.Minute),
                 window_sizes=10,
                 feature_preprocessing_fn=custom_preprocess,
             )
-            observer.client = mock_client
+            observer.client = mock_ccxt_client
 
             observations = observer.get_observations()
             # Should have 5 features (OHLC + custom)
@@ -239,31 +215,31 @@ class TestBitgetObservationClass:
         assert not np.isnan(data).any(), "Data contains NaN values"
         assert data.shape == (10, 4)
 
-    def test_api_call_parameters(self, observer_single, mock_client):
+    def test_api_call_parameters(self, observer_single, mock_ccxt_client):
         """Test that CCXT fetch_ohlcv is called with correct parameters."""
         observer_single.get_observations()
 
         # Check that fetch_ohlcv was called
-        mock_client.fetch_ohlcv.assert_called()
+        mock_ccxt_client.fetch_ohlcv.assert_called()
 
         # Get the call arguments
-        call_args = mock_client.fetch_ohlcv.call_args
+        call_args = mock_ccxt_client.fetch_ohlcv.call_args
         assert call_args is not None
 
-    def test_empty_candles_raises_error(self, mock_client):
+    def test_empty_candles_raises_error(self, mock_ccxt_client):
         """Test that empty candles raises RuntimeError."""
         from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 
         # Mock fetch_ohlcv to return empty list
-        mock_client.fetch_ohlcv = MagicMock(return_value=[])
+        mock_ccxt_client.fetch_ohlcv = MagicMock(return_value=[])
 
-        with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_client):
+        with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_ccxt_client):
             observer = BitgetObservationClass(
                 symbol="BTC/USDT:USDT",
                 time_frames=TimeFrame(1, TimeFrameUnit.Minute),
                 window_sizes=10,
             )
-            observer.client = mock_client
+            observer.client = mock_ccxt_client
 
             with pytest.raises(RuntimeError, match="No candle data"):
                 observer.get_observations()

@@ -4,7 +4,7 @@ import ccxt
 
 from torchtrade.envs.futures.obs_class import BaseFuturesObservationClass
 from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
-from torchtrade.envs.bitget.utils import timeframe_to_bitget, BITGET_INTERVAL_MAP
+from torchtrade.envs.bitget.utils import timeframe_to_bitget, BITGET_INTERVAL_MAP, normalize_symbol
 
 
 class BitgetObservationClass(BaseFuturesObservationClass):
@@ -37,29 +37,8 @@ class BitgetObservationClass(BaseFuturesObservationClass):
             client: Optional pre-configured Bitget Client for dependency injection
             demo: Whether to use demo/testnet environment (default: True)
         """
-        # Normalize symbol to CCXT perpetual swap format before passing to parent
-        # Expected format: "BTC/USDT:USDT"
-        if "/" not in symbol:
-            # Symbol is like "BTCUSDT" or "BTCUSDT:USDT"
-            if ":" in symbol:
-                # Symbol is like "BTCUSDT:USDT" - split and add /
-                base_quote = symbol.split(":")[0]
-                settle = symbol.split(":")[1]
-                if base_quote.endswith("USDT"):
-                    base = base_quote[:-4]
-                    symbol = f"{base}/USDT:{settle}"
-                else:
-                    symbol = f"{base_quote}/USDT:{settle}"
-            else:
-                # Symbol is like "BTCUSDT" - add both / and :USDT
-                if symbol.endswith("USDT"):
-                    base = symbol[:-4]
-                    symbol = f"{base}/USDT:USDT"
-                else:
-                    symbol = f"{symbol}/USDT:USDT"
-        elif ":" not in symbol:
-            # Symbol is like "BTC/USDT" - add :USDT for perpetual swaps
-            symbol = f"{symbol}:USDT"
+        # Normalize symbol before calling parent constructor
+        symbol = normalize_symbol(symbol)
 
         # Store Bitget-specific attributes before calling super().__init__
         self.product_type = product_type
@@ -120,54 +99,10 @@ class BitgetObservationClass(BaseFuturesObservationClass):
         Returns:
             Raw kline data from CCXT: list of [timestamp_ms, open, high, low, close, volume]
         """
-        # Symbol should already be normalized in __init__, but double-check
-        # Parent class might have modified it, so re-normalize if needed
-        if "/" not in symbol or ":" not in symbol:
-            # Something went wrong, re-normalize
-            # Parse the symbol carefully
-            if ":" in symbol:
-                # Symbol is like "BTCUSDT:USDT" - split by :
-                parts = symbol.split(":")
-                base_quote = parts[0]  # "BTCUSDT"
-                settle = parts[1] if len(parts) > 1 else "USDT"  # "USDT"
-
-                # Now parse base_quote to get base currency
-                if base_quote.endswith("USDT"):
-                    base = base_quote[:-4]  # "BTC"
-                    symbol = f"{base}/USDT:{settle}"
-                else:
-                    # Try other common quote currencies
-                    for quote in ["USDC", "USD", "BUSD"]:
-                        if base_quote.endswith(quote):
-                            base = base_quote[:-len(quote)]
-                            symbol = f"{base}/{quote}:{settle}"
-                            break
-                    else:
-                        # Fallback - assume USDT
-                        symbol = f"{base_quote}/USDT:{settle}"
-            else:
-                # Symbol is like "BTCUSDT" or "BTC/USDT" with no :
-                if "/" in symbol:
-                    # Just add :USDT
-                    symbol = f"{symbol}:USDT"
-                else:
-                    # Parse without :
-                    if symbol.endswith("USDT"):
-                        base = symbol[:-4]
-                        symbol = f"{base}/USDT:USDT"
-                    else:
-                        # Try other common quote currencies
-                        for quote in ["USDC", "USD", "BUSD"]:
-                            if symbol.endswith(quote):
-                                base = symbol[:-len(quote)]
-                                symbol = f"{base}/{quote}:USDT"
-                                break
-                        else:
-                            # Fallback
-                            symbol = f"{symbol}/USDT:USDT"
+        # Ensure symbol is normalized (in case parent class modified it)
+        symbol = normalize_symbol(symbol)
 
         # CCXT uses standardized timeframe strings (1m, 5m, 1h, 1d)
-        # Convert Bitget format to CCXT format (already lowercase)
         interval_ccxt = interval.lower()
 
         candles = self.client.fetch_ohlcv(
