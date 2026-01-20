@@ -10,6 +10,7 @@ from torchrl.data import Bounded
 from torchrl.data.tensor_specs import CompositeSpec, Unbounded
 
 from torchtrade.envs.base import TorchTradeBaseEnv
+from torchtrade.envs.common import TradeMode
 from torchtrade.envs.offline.sampler import MarketDataObservationSampler
 from torchtrade.envs.offline.utils import InitialBalanceSampler
 from torchtrade.envs.state import HistoryTracker, PositionState
@@ -415,3 +416,38 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
                         f"This indicates corrupted data or calculation errors (possible division by zero). "
                         f"Check your dataset and feature preprocessing function."
                     )
+
+    def _calculate_position_quantity(self, execution_price: float):
+        """
+        Calculate position quantity and notional value based on trade_mode.
+
+        This method provides a common implementation for futures environments
+        that support both QUANTITY and NOTIONAL trade modes.
+
+        Args:
+            execution_price: Price at which position will be opened
+
+        Returns:
+            Tuple of (position_qty, notional_value):
+            - position_qty: Number of units (positive, sign handled by caller)
+            - notional_value: Market value in quote currency (always positive)
+
+        Raises:
+            AttributeError: If config doesn't have trade_mode or quantity_per_trade
+            ValueError: If trade_mode is unknown, quantity_per_trade is invalid,
+                       or execution_price is non-positive in NOTIONAL mode
+        """
+        if self.config.trade_mode == TradeMode.QUANTITY:
+            position_qty = self.config.quantity_per_trade
+            notional_value = position_qty * execution_price
+        elif self.config.trade_mode == TradeMode.NOTIONAL:
+            if execution_price <= 0:
+                raise ValueError(
+                    f"execution_price must be positive for NOTIONAL mode, got {execution_price}"
+                )
+            notional_value = self.config.quantity_per_trade
+            position_qty = notional_value / execution_price
+        else:
+            raise ValueError(f"Unknown trade_mode: {self.config.trade_mode}")
+
+        return position_qty, notional_value

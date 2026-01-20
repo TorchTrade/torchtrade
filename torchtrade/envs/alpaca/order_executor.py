@@ -16,6 +16,8 @@ from alpaca.trading.requests import (
 )
 from dotenv import load_dotenv
 
+from torchtrade.envs.common import TradeMode
+
 
 # Common Time in Force Options:
 # GTC (Good Till Canceled) – The order remains open until it is executed or manually canceled by the trader. It does not expire at the end of the trading day.
@@ -40,10 +42,6 @@ Below are the descriptions of each TIF:
 - ioc: An Immediate Or Cancel (IOC) order requires all or part of the order to be executed immediately. Any unfilled portion of the order is canceled. Only available with API v2. Most market makers who receive IOC orders will attempt to fill the order on a principal basis only, and cancel any unfilled balance. On occasion, this can result in the entire order being cancelled if the market maker does not have any existing inventory of the security in question.
 - fok: A Fill or Kill (FOK) order is only executed if the entire order quantity can be filled, otherwise the order is canceled. Only available with API v2.
 """
-
-class TradeMode(Enum):
-    NOTIONAL = "notional"
-    QUANTITY = "quantity"
 
 
 @dataclass

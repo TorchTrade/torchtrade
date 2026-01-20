@@ -6,14 +6,11 @@ import warnings
 import os
 from dotenv import load_dotenv
 
+from torchtrade.envs.common import TradeMode
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-
-
-class TradeMode(Enum):
-    NOTIONAL = "notional"  # Dollar-based orders (not directly supported, calculated from qty)
-    QUANTITY = "quantity"  # Unit-based orders
 
 
 class PositionSide(Enum):
