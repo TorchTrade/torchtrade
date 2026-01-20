@@ -2,58 +2,58 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://torchtrade.github.io/torchtrade/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
     <url>
          <loc>https://torchtrade.github.io/torchtrade/examples/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
     <url>
          <loc>https://torchtrade.github.io/torchtrade/getting-started/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
     <url>
          <loc>https://torchtrade.github.io/torchtrade/components/actors/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
     <url>
          <loc>https://torchtrade.github.io/torchtrade/components/losses/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
     <url>
          <loc>https://torchtrade.github.io/torchtrade/components/transforms/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
     <url>
          <loc>https://torchtrade.github.io/torchtrade/environments/offline-rl/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
     <url>
          <loc>https://torchtrade.github.io/torchtrade/environments/offline/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
     <url>
          <loc>https://torchtrade.github.io/torchtrade/environments/online/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
     <url>
          <loc>https://torchtrade.github.io/torchtrade/guides/custom-environment/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
     <url>
          <loc>https://torchtrade.github.io/torchtrade/guides/custom-features/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
     <url>
          <loc>https://torchtrade.github.io/torchtrade/guides/metrics/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
     <url>
          <loc>https://torchtrade.github.io/torchtrade/guides/reward-functions/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
     <url>
          <loc>https://torchtrade.github.io/torchtrade/guides/sampler/</loc>
-         <lastmod>2026-01-19</lastmod>
+         <lastmod>2026-01-20</lastmod>
     </url>
 </urlset>
