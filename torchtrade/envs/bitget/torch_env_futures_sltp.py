@@ -10,6 +10,7 @@ from torchtrade.envs.bitget.futures_order_executor import (
     BitgetFuturesOrderClass,
     TradeMode,
     MarginMode,
+    PositionMode,
 )
 from torchtrade.envs.bitget.base import BitgetBaseTorchTradingEnv
 from torchtrade.envs.action_maps import create_sltp_action_map
@@ -25,7 +26,7 @@ class BitgetFuturesSLTPTradingEnvConfig:
     represents a (side, stop_loss_pct, take_profit_pct) tuple for bracket orders.
     Supports both long and short positions with stop-loss/take-profit.
     """
-    symbol: str = "BTCUSDT"
+    symbol: str = "BTC/USDT:USDT"  # CCXT perpetual swap format
 
     # Timeframes and windows
     time_frames: Union[List[Union[str, "TimeFrame"]], Union[str, "TimeFrame"]] = "1Min"
@@ -33,9 +34,10 @@ class BitgetFuturesSLTPTradingEnvConfig:
     execute_on: Union[str, "TimeFrame"] = "1Min"  # Timeframe for trade execution timing
 
     # Trading parameters
-    product_type: str = "SUMCBL"  # SUMCBL=testnet, UMCBL=production
+    product_type: str = "USDT-FUTURES"  # V2 API: USDT-FUTURES, COIN-FUTURES, USDC-FUTURES
     leverage: int = 1  # Leverage (1-125)
     margin_mode: MarginMode = MarginMode.ISOLATED
+    position_mode: PositionMode = PositionMode.ONE_WAY  # ONE_WAY or HEDGE
     quantity_per_trade: float = 0.001  # Base quantity per trade
     trade_mode: TradeMode = TradeMode.QUANTITY
 

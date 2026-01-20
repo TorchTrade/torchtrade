@@ -1,16 +1,17 @@
 """
-Live data collection example using AlpacaTorchTradingEnv.
+Live data collection example using BitgetFuturesTorchTradingEnv.
 
-This script demonstrates how to collect live trading data from Alpaca
+This script demonstrates how to collect live trading data from Bitget
 using a trained policy or random actions. Data is stored in a replay buffer
 for offline training.
 
 Usage:
-    python examples/live/alpaca/collect_live.py
+    python examples/live/bitget/run_live.py
 
 Requirements:
-    - .env file with API_KEY and SECRET_KEY
-    - Alpaca paper trading account
+    - .env file with BITGETACCESSAPIKEY, BITGETSECRETKEY, and BITGETPASSPHRASE
+    - Bitget demo/testnet account
+    - CCXT library (pip install ccxt)
 """
 from __future__ import annotations
 
@@ -19,10 +20,8 @@ import os
 
 import numpy as np
 import pandas as pd
-import ta
 import torch
 import tqdm
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 from torchrl._utils import timeit
 from torchrl.collectors import SyncDataCollector
@@ -41,9 +40,12 @@ from torchrl.envs.transforms import (
     RewardSum,
     SqueezeTransform,
     StepCounter,
-    UnsqueezeTransform,
 )
 
+from torchtrade.envs.bitget.futures_order_executor import (
+    MarginMode,
+    PositionMode,
+)
 from torchtrade.envs.bitget import BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig
 
 torch.set_float32_matmul_precision("high")
@@ -128,14 +130,16 @@ def main():
 
     # Create environment configuration
     config = BitgetFuturesTradingEnvConfig(
-        symbol="BTC/USD",
+        symbol="BTC/USDT:USDT",  # CCXT perpetual swap format
         demo=True,
         time_frames=["5min", "15min"],
-        window_sizes=[6, 32], 
-        execute_on="5min",
+        window_sizes=[6, 32],
+        execute_on="1min",
         include_base_features=True,
-        quantity_per_trade=0.002,  # Adjust based on Bitget minimums
-        leverage=5,
+        quantity_per_trade=0.003,
+        leverage=6,
+        margin_mode=MarginMode.ISOLATED,
+        position_mode=PositionMode.ONE_WAY,
     )
 
     # Create environment
@@ -207,7 +211,8 @@ def main():
             if key in tensordict.keys():
                 tensordict.pop(key)
 
-        squeezer(tensordict)
+        # Note: squeezer is commented out in the code above
+        # squeezer(tensordict)
         current_frames = tensordict.numel()
         pbar.update(current_frames)
 

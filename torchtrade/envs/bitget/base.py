@@ -6,9 +6,9 @@ from typing import Callable, List, Optional
 import torch
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Bounded
-from torchrl.data.tensor_specs import CompositeSpec
+from torchrl.data.tensor_specs import Composite
 
-from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, timeframe_to_seconds
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 from torchtrade.envs.bitget.futures_order_executor import BitgetFuturesOrderClass
 from torchtrade.envs.live import TorchTradeLiveEnv
@@ -79,10 +79,16 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
             timezone="UTC"
         )
 
-        # Extract execute timeframe and convert to seconds
+        # Extract execute timeframe
         self.execute_on = config.execute_on
-        self.execute_on_value = timeframe_to_seconds(config.execute_on)
-        self.execute_on_unit = "seconds"  # Bitget uses simple seconds-based intervals
+        # Set execute_on_value and execute_on_unit from the TimeFrame object
+        if isinstance(config.execute_on, TimeFrame):
+            self.execute_on_value = config.execute_on.value
+            self.execute_on_unit = str(config.execute_on.unit)  # e.g., "TimeFrameUnit.Minute"
+        else:
+            # Fallback: should not happen after normalization, but handle it
+            self.execute_on_value = config.execute_on.value
+            self.execute_on_unit = str(config.execute_on.unit)
 
         # Reset settings
         self.trader.cancel_open_orders()
@@ -119,8 +125,8 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         time_frames = self.config.time_frames
         window_sizes = self.config.window_sizes
 
-        # Get product type from config
-        product_type = getattr(self.config, 'product_type', 'SUMCBL')
+        # Get product type from config (V2 API uses USDT-FUTURES instead of SUMCBL)
+        product_type = getattr(self.config, 'product_type', 'USDT-FUTURES')
         demo = getattr(self.config, 'demo', True)
 
         # Initialize observer
@@ -144,6 +150,7 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
             demo=demo,
             leverage=self.config.leverage,
             margin_mode=self.config.margin_mode,
+            position_mode=self.config.position_mode if hasattr(self.config, 'position_mode') else None,
         )
 
     def _build_observation_specs(self):
@@ -158,7 +165,7 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         window_sizes = self.config.window_sizes if isinstance(self.config.window_sizes, list) else [self.config.window_sizes]
 
         # Create composite observation spec
-        self.observation_spec = CompositeSpec(shape=())
+        self.observation_spec = Composite(shape=())
         self.market_data_key = "market_data"
         self.account_state_key = "account_state"
 

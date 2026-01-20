@@ -11,6 +11,7 @@ from torchtrade.envs.bitget.futures_order_executor import (
     BitgetFuturesOrderClass,
     TradeMode,
     MarginMode,
+    PositionMode,
 )
 from torchtrade.envs.bitget.base import BitgetBaseTorchTradingEnv
 
@@ -31,9 +32,10 @@ class BitgetFuturesTradingEnvConfig:
     execute_on: Union[str, "TimeFrame"] = "1Min"  # Timeframe for trade execution timing
 
     # Trading parameters
-    product_type: str = "SUMCBL"  # SUMCBL=testnet, UMCBL=production
+    product_type: str = "USDT-FUTURES"  # V2 API: USDT-FUTURES, COIN-FUTURES, USDC-FUTURES
     leverage: int = 1  # Leverage (1-125)
     margin_mode: MarginMode = MarginMode.ISOLATED
+    position_mode: PositionMode = PositionMode.ONE_WAY  # ONE_WAY or HEDGE
     quantity_per_trade: float = 0.001  # Base quantity per trade
     trade_mode: TradeMode = TradeMode.QUANTITY
 
@@ -56,7 +58,7 @@ class BitgetFuturesTradingEnvConfig:
     def __post_init__(self):
         # Set default action levels if not provided
         if self.action_levels is None:
-            self.action_levels = [-1.0, 0.0, 1.0]  # short, close/hold, long
+            self.action_levels = [-1.0, 0.0, 1.0]  # short, hold, long
 
         # Normalize timeframes using utility function
         from torchtrade.envs.bitget.utils import normalize_bitget_timeframe_config
@@ -74,7 +76,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
 
     This environment supports long and short positions with a simple action space:
     - Action 0 (-1.0): Go SHORT (or close if in position)
-    - Action 1 (0.0): HOLD / CLOSE position
+    - Action 1 (0.0): HOLD current position (do nothing)
     - Action 2 (1.0): Go LONG (or close if in position)
 
     The environment uses market orders for execution and supports configurable leverage.
@@ -255,7 +257,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         Execute trade if position change is needed.
 
         Args:
-            desired_action: Action level (-1.0 = short, 0.0 = close/hold, 1.0 = long)
+            desired_action: Action level (-1.0 = short, 0.0 = hold, 1.0 = long)
 
         Returns:
             Dict with trade execution info
@@ -263,7 +265,8 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         current_qty = self._get_current_position_quantity()
 
         if desired_action == 0:
-            return self._handle_close_action(current_qty)
+            # HOLD action: maintain current position (do nothing)
+            return self._create_trade_info(executed=False)
         elif desired_action == 1:
             return self._handle_long_action(current_qty)
         elif desired_action == -1:
@@ -287,9 +290,9 @@ if __name__ == "__main__":
 
     # Create environment configuration
     config = BitgetFuturesTradingEnvConfig(
-        symbol="BTCUSDT",
+        symbol="BTC/USDT:USDT",  # CCXT perpetual swap format
         demo=True,
-        intervals=["1m"],
+        time_frames=["1m"],
         window_sizes=[10],
         execute_on="1m",
         leverage=5,
@@ -301,9 +304,9 @@ if __name__ == "__main__":
         # Create environment
         env = BitgetFuturesTorchTradingEnv(
             config,
-            api_key=os.getenv("BITGET_API_KEY", ""),
-            api_secret=os.getenv("BITGET_SECRET", ""),
-            api_passphrase=os.getenv("BITGET_PASSPHRASE", ""),
+            api_key=os.getenv("BITGETACCESSAPIKEY", ""),
+            api_secret=os.getenv("BITGETSECRETKEY", ""),
+            api_passphrase=os.getenv("BITGETPASSPHRASE", ""),
         )
 
         print(f"✓ Environment created")
