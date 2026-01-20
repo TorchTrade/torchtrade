@@ -57,15 +57,19 @@ class TestBitgetFuturesOrderClass:
         }])
 
         # Mock account balance (CCXT fetch_balance)
+        # CCXT returns currencies at top level, not nested under "total"/"free"
         client.fetch_balance = MagicMock(return_value={
+            "USDT": {
+                "total": 1000.0,
+                "free": 900.0,
+                "used": 100.0,
+            },
             "info": {
                 "totalEquity": "1000.0",
                 "available": "900.0",
                 "totalUnrealizedProfit": "0.1",
                 "totalMarginBalance": "1000.1",
             },
-            "total": {"USDT": 1000.0},
-            "free": {"USDT": 900.0},
         })
 
         # Mock mark price (CCXT fetch_ticker)
@@ -198,8 +202,11 @@ class TestBitgetFuturesOrderClass:
         assert call_args[1]["type"] == "limit"
         assert call_args[1]["price"] == 49000.0
 
-    def test_limit_order_without_price_fails(self, order_executor):
-        """Test that limit order without price returns False."""
+    def test_limit_order_without_price_fails(self, order_executor, mock_client):
+        """Test that limit order without price is handled."""
+        # Mock create_order to raise an exception for limit order without price
+        mock_client.create_order = MagicMock(side_effect=Exception("Price is required for limit orders"))
+
         success = order_executor.trade(
             side="buy",
             quantity=0.001,

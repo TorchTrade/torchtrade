@@ -182,9 +182,21 @@ class TestBitgetObservationClass:
         from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 
         def custom_preprocess(df):
-            """Add a custom feature."""
+            """Add a custom feature (matching naming convention: feature_X)."""
             df = df.copy()
-            df["features_custom"] = df["close"] * 2
+            df.dropna(inplace=True)
+            df.drop_duplicates(inplace=True)
+
+            # Create default features
+            df["feature_close"] = df["close"].pct_change().fillna(0)
+            df["feature_open"] = df["open"] / df["close"]
+            df["feature_high"] = df["high"] / df["close"]
+            df["feature_low"] = df["low"] / df["close"]
+
+            # Add custom feature
+            df["feature_custom"] = df["close"] * 2
+
+            df.dropna(inplace=True)
             return df
 
         with patch('torchtrade.envs.bitget.obs_class.ccxt.bitget', return_value=mock_client):
@@ -203,8 +215,20 @@ class TestBitgetObservationClass:
     def test_get_features(self, observer_single):
         """Test get_features returns feature names."""
         features = observer_single.get_features()
-        expected = ["features_open", "features_high", "features_low", "features_close"]
-        assert features == expected
+
+        # get_features() now returns a dict with 'observation_features' and 'original_features'
+        assert isinstance(features, dict)
+        assert "observation_features" in features
+        assert "original_features" in features
+
+        # Check that observation features contain the expected OHLC features
+        obs_features = features["observation_features"]
+        assert len(obs_features) == 4
+        assert all("feature" in f for f in obs_features)
+        assert any("open" in f for f in obs_features)
+        assert any("high" in f for f in obs_features)
+        assert any("low" in f for f in obs_features)
+        assert any("close" in f for f in obs_features)
 
     def test_default_preprocessing_output(self, observer_single):
         """Test that default preprocessing outputs correct features."""
