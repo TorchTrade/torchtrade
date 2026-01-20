@@ -1,5 +1,6 @@
 """Common enums and utilities shared across all environments."""
 
+import math
 from enum import Enum
 
 
@@ -27,7 +28,14 @@ def validate_quantity_per_trade(quantity_per_trade: float) -> None:
         quantity_per_trade: The quantity per trade value to validate
 
     Raises:
-        ValueError: If quantity_per_trade is not positive
+        TypeError: If quantity_per_trade is not a number
+        ValueError: If quantity_per_trade is not positive, finite, or is NaN
     """
+    if not isinstance(quantity_per_trade, (int, float)):
+        raise TypeError(
+            f"quantity_per_trade must be a number, got {type(quantity_per_trade).__name__}"
+        )
+    if math.isnan(quantity_per_trade) or math.isinf(quantity_per_trade):
+        raise ValueError(f"quantity_per_trade must be finite, got {quantity_per_trade}")
     if quantity_per_trade <= 0:
         raise ValueError(f"quantity_per_trade must be positive, got {quantity_per_trade}")

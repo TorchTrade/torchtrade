@@ -241,6 +241,27 @@ class TestConfigValidation:
                 quantity_per_trade=0.0,
             )
 
+    def test_nan_quantity_per_trade_raises_error(self, sample_df):
+        """Test that NaN quantity_per_trade raises ValueError."""
+        with pytest.raises(ValueError, match="quantity_per_trade must be finite"):
+            config = SeqFuturesEnvConfig(
+                quantity_per_trade=float('nan'),
+            )
+
+    def test_inf_quantity_per_trade_raises_error(self, sample_df):
+        """Test that infinity quantity_per_trade raises ValueError."""
+        with pytest.raises(ValueError, match="quantity_per_trade must be finite"):
+            config = SeqFuturesEnvConfig(
+                quantity_per_trade=float('inf'),
+            )
+
+    def test_invalid_type_quantity_per_trade_raises_error(self, sample_df):
+        """Test that non-numeric quantity_per_trade raises TypeError."""
+        with pytest.raises(TypeError, match="quantity_per_trade must be a number"):
+            config = SeqFuturesEnvConfig(
+                quantity_per_trade="0.001",  # type: ignore
+            )
+
 
 class TestFuturesOneStepEnv:
     """Test position sizing for FuturesOneStepEnv."""
@@ -671,7 +692,7 @@ class TestErrorHandling:
     """Test error handling and edge cases."""
 
     def test_zero_price_handling(self, sample_df):
-        """Test handling of zero price (should raise or handle gracefully)."""
+        """Test that zero price raises ValueError in NOTIONAL mode."""
         config = SeqFuturesEnvConfig(
             trade_mode=TradeMode.NOTIONAL,
             quantity_per_trade=100,
@@ -682,16 +703,25 @@ class TestErrorHandling:
         env = SeqFuturesEnv(sample_df, config)
         env.reset()
 
-        # Attempting to open position at price 0 should either:
-        # 1. Raise an error, or
-        # 2. Reject the trade
-        try:
-            trade_info = env._open_position("long", current_price=0.0, price_noise=1.0)
-            # If no error, trade should be rejected or have inf position size
-            assert trade_info["executed"] is False or np.isinf(env.position.position_size)
-        except (ZeroDivisionError, ValueError):
-            # This is also acceptable behavior
-            pass
+        # Attempting to open position at price 0 should raise ValueError
+        with pytest.raises(ValueError, match="execution_price must be positive for NOTIONAL mode"):
+            env._open_position("long", current_price=0.0, price_noise=1.0)
+
+    def test_negative_price_handling(self, sample_df):
+        """Test that negative price raises ValueError in NOTIONAL mode."""
+        config = SeqFuturesEnvConfig(
+            trade_mode=TradeMode.NOTIONAL,
+            quantity_per_trade=100,
+            leverage=5,
+            initial_cash=10000,
+            seed=42,
+        )
+        env = SeqFuturesEnv(sample_df, config)
+        env.reset()
+
+        # Attempting to open position at negative price should raise ValueError
+        with pytest.raises(ValueError, match="execution_price must be positive for NOTIONAL mode"):
+            env._open_position("long", current_price=-50000.0, price_noise=1.0)
 
     def test_invalid_trade_mode_handling(self, sample_df):
         """Test that invalid trade mode is caught."""
