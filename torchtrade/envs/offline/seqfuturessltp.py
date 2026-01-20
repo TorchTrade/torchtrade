@@ -23,6 +23,7 @@ from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, normalize_timefr
 from torchtrade.envs.offline.utils import InitialBalanceSampler, build_sltp_action_map
 from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
 from torchtrade.envs.state import FuturesHistoryTracker
+from torchtrade.envs.common import TradeMode, validate_quantity_per_trade
 
 
 class MarginType(Enum):
@@ -49,6 +50,10 @@ class SeqFuturesSLTPEnvConfig:
     # Initial capital settings
     initial_cash: Union[Tuple[int, int], int] = (1000, 5000)
 
+    # Position sizing
+    trade_mode: TradeMode = TradeMode.QUANTITY  # Match live environment default
+    quantity_per_trade: float = 0.001  # BTC for QUANTITY, USD for NOTIONAL
+
     # Leverage and margin settings
     leverage: int = 1  # 1x to 125x
     margin_type: MarginType = MarginType.ISOLATED
@@ -64,7 +69,6 @@ class SeqFuturesSLTPEnvConfig:
 
     # Risk management
     bankrupt_threshold: float = 0.1  # 10% of initial balance
-    max_position_size: float = 1.0  # Max position as fraction of balance
 
     # Environment settings
     seed: Optional[int] = 42
@@ -81,6 +85,8 @@ class SeqFuturesSLTPEnvConfig:
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
+
+        validate_quantity_per_trade(self.quantity_per_trade)
 
 
 class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
@@ -699,13 +705,8 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
 
         execution_price = current_price * price_noise
 
-        # Calculate position size based on available balance and leverage
-        usable_balance = self.balance * self.config.max_position_size
-        margin_plus_fee_rate = (1.0 / self.leverage) + self.transaction_fee
-        # Apply 0.1% safety margin to avoid floating-point precision issues
-        max_notional = usable_balance / margin_plus_fee_rate * 0.999
-        notional_value = max_notional
-        position_qty = notional_value / execution_price
+        # Calculate position size using trade mode
+        position_qty, notional_value = self._calculate_position_quantity(execution_price)
 
         # Calculate margin required
         margin_required = self._calculate_margin_required(notional_value)
@@ -714,7 +715,7 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         fee = notional_value * self.transaction_fee
 
         if margin_required + fee > self.balance:
-            # Not enough balance
+            # Not enough balance to open position
             trade_info["executed"] = False
             return trade_info
 

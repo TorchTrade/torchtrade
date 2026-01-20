@@ -6,16 +6,12 @@ from typing import Dict, List, Optional, Union
 import ccxt
 
 from torchtrade.envs.bitget.utils import normalize_symbol
+from torchtrade.envs.common import TradeMode
 
 logger = logging.getLogger(__name__)
 
 # Bitget error codes that indicate no position exists (expected, not real errors)
 BITGET_NO_POSITION_ERRORS = ["22002", "40773", "No position to close"]
-
-
-class TradeMode(Enum):
-    NOTIONAL = "notional"  # Dollar-based orders (not directly supported, calculated from qty)
-    QUANTITY = "quantity"  # Unit-based orders
 
 
 class PositionMode(Enum):
