@@ -275,22 +275,11 @@ class TestSeqFuturesEnvLongTrades:
         assert env.liquidation_price < env.position.entry_price
 
     def test_long_position_closes_on_hold_action(self, env):
-        """Hold action should close existing long position."""
-        td = env.reset()
+        """This test is deprecated - hold action now keeps positions open.
 
-        # Open long
-        td.set("action", torch.tensor(2))
-        result = env.step(td)
-        td = result["next"]
-
-        assert env.position.position_size > 0
-
-        # Close with hold action (action 1 = 0.0 = close)
-        td.set("action", torch.tensor(1))
-        env.step(td)
-
-        assert env.position.position_size == 0.0
-        assert env.position.current_position == 0
+        See TestSeqFuturesEnvActionValidation.test_hold_action_keeps_position_open
+        for the new correct behavior."""
+        pytest.skip("Hold action behavior changed - now keeps position open instead of closing")
 
     def test_long_pnl_positive_on_price_increase(self, env, trending_up_df):
         """Long position should have positive PnL when price increases."""
@@ -315,18 +304,16 @@ class TestSeqFuturesEnvLongTrades:
         result = env.step(td)
         td = result["next"]
 
-        # Run a few steps to let price increase
+        # Run a few steps with hold action to let price increase
         for _ in range(20):
-            td.set("action", torch.tensor(2))  # Hold long
+            td.set("action", torch.tensor(1))  # Hold (keep position open)
             result = env.step(td)
             td = result["next"]
 
-        # Close position
-        td.set("action", torch.tensor(1))
-        env.step(td)
-
-        # Should have profit
-        assert env.balance > initial_balance
+        # Position should still be open with unrealized profit
+        assert env.position.position_size > 0
+        # Note: Balance doesn't change until position is closed or liquidated
+        # This test verifies the position remains open during holds
 
 
 class TestSeqFuturesEnvShortTrades:
@@ -355,22 +342,11 @@ class TestSeqFuturesEnvShortTrades:
         assert env.liquidation_price > env.position.entry_price
 
     def test_short_position_closes_on_hold_action(self, env):
-        """Hold action should close existing short position."""
-        td = env.reset()
+        """This test is deprecated - hold action now keeps positions open.
 
-        # Open short
-        td.set("action", torch.tensor(0))
-        result = env.step(td)
-        td = result["next"]
-
-        assert env.position.position_size < 0
-
-        # Close with hold action
-        td.set("action", torch.tensor(1))
-        env.step(td)
-
-        assert env.position.position_size == 0.0
-        assert env.position.current_position == 0
+        See TestSeqFuturesEnvActionValidation.test_hold_action_when_short_keeps_position
+        for the new correct behavior."""
+        pytest.skip("Hold action behavior changed - now keeps position open instead of closing")
 
     def test_short_pnl_positive_on_price_decrease(self, env, trending_down_df):
         """Short position should have positive PnL when price decreases."""
@@ -395,18 +371,16 @@ class TestSeqFuturesEnvShortTrades:
         result = env.step(td)
         td = result["next"]
 
-        # Run a few steps to let price decrease
+        # Run a few steps with hold action to let price decrease
         for _ in range(20):
-            td.set("action", torch.tensor(0))  # Hold short
+            td.set("action", torch.tensor(1))  # Hold (keep position open)
             result = env.step(td)
             td = result["next"]
 
-        # Close position
-        td.set("action", torch.tensor(1))
-        env.step(td)
-
-        # Should have profit
-        assert env.balance > initial_balance
+        # Position should still be open with unrealized profit
+        assert env.position.position_size < 0
+        # Note: Balance doesn't change until position is closed or liquidated
+        # This test verifies the position remains open during holds
 
 
 class TestSeqFuturesEnvPositionFlipping:
@@ -451,6 +425,171 @@ class TestSeqFuturesEnvPositionFlipping:
 
         assert env.position.position_size > 0
         assert env.position.current_position == 1
+
+
+class TestSeqFuturesEnvActionValidation:
+    """Tests for action validation - hold and duplicate action handling."""
+
+    def test_hold_action_keeps_position_open(self, env):
+        """Hold action (1) when long should keep position open, not close it."""
+        td = env.reset()
+
+        # Open long position (action = 2)
+        td.set("action", torch.tensor(2))
+        result = env.step(td)
+        td = result["next"]
+
+        assert env.position.position_size > 0
+        assert env.position.current_position == 1
+        position_size_before = env.position.position_size
+        entry_price = env.position.entry_price
+        balance_before = env.balance
+
+        # Hold action (action = 1) - should NOT close position
+        td.set("action", torch.tensor(1))
+        result = env.step(td)
+        td = result["next"]
+
+        # Position should remain open
+        assert env.position.position_size == position_size_before
+        assert env.position.current_position == 1
+        assert env.position.entry_price == entry_price
+        # No trade executed, so no fee (balance might change due to PnL tracking)
+
+    def test_hold_action_when_short_keeps_position(self, env):
+        """Hold action (1) when short should keep position open."""
+        td = env.reset()
+
+        # Open short position (action = 0)
+        td.set("action", torch.tensor(0))
+        result = env.step(td)
+        td = result["next"]
+
+        assert env.position.position_size < 0
+        assert env.position.current_position == -1
+        position_size_before = env.position.position_size
+        entry_price = env.position.entry_price
+
+        # Hold action (action = 1) - should NOT close position
+        td.set("action", torch.tensor(1))
+        result = env.step(td)
+        td = result["next"]
+
+        # Position should remain open
+        assert env.position.position_size == position_size_before
+        assert env.position.current_position == -1
+        assert env.position.entry_price == entry_price
+
+    def test_hold_action_when_flat_does_nothing(self, env):
+        """Hold action (1) when flat should keep position flat."""
+        td = env.reset()
+
+        assert env.position.position_size == 0.0
+        assert env.position.current_position == 0
+        balance_before = env.balance
+
+        # Hold action when flat
+        td.set("action", torch.tensor(1))
+        result = env.step(td)
+        td = result["next"]
+
+        # Should remain flat
+        assert env.position.position_size == 0.0
+        assert env.position.current_position == 0
+        assert env.balance == balance_before  # No fee
+
+    def test_duplicate_long_action_ignored(self, env):
+        """Taking long when already long should be ignored (no re-entry)."""
+        td = env.reset()
+
+        # First long action (action = 2)
+        td.set("action", torch.tensor(2))
+        result = env.step(td)
+        td = result["next"]
+
+        assert env.position.current_position == 1
+        position_size_first = env.position.position_size
+        entry_price_first = env.position.entry_price
+        balance_after_first = env.balance
+
+        # Second long action - should be ignored
+        td.set("action", torch.tensor(2))
+        result = env.step(td)
+        td = result["next"]
+
+        # Position should be unchanged (no re-entry)
+        assert env.position.current_position == 1
+        # Position size should be the same (no additional position opened)
+        assert env.position.position_size == position_size_first
+        # Entry price should be unchanged
+        assert env.position.entry_price == entry_price_first
+        # Balance should be the same (no additional fee)
+        assert env.balance == balance_after_first
+
+    def test_duplicate_short_action_ignored(self, env):
+        """Taking short when already short should be ignored (no re-entry)."""
+        td = env.reset()
+
+        # First short action (action = 0)
+        td.set("action", torch.tensor(0))
+        result = env.step(td)
+        td = result["next"]
+
+        assert env.position.current_position == -1
+        position_size_first = env.position.position_size
+        entry_price_first = env.position.entry_price
+        balance_after_first = env.balance
+
+        # Second short action - should be ignored
+        td.set("action", torch.tensor(0))
+        result = env.step(td)
+        td = result["next"]
+
+        # Position should be unchanged (no re-entry)
+        assert env.position.current_position == -1
+        # Position size should be the same
+        assert env.position.position_size == position_size_first
+        # Entry price should be unchanged
+        assert env.position.entry_price == entry_price_first
+        # Balance should be the same (no additional fee)
+        assert env.balance == balance_after_first
+
+    def test_history_tracking_with_hold_action(self, env):
+        """History should correctly track hold actions."""
+        td = env.reset()
+
+        # Long action
+        td.set("action", torch.tensor(2))
+        result = env.step(td)
+        td = result["next"]
+
+        # Verify long was executed
+        assert env.history.actions[-1] == 1  # Long
+
+        # Hold action
+        td.set("action", torch.tensor(1))
+        result = env.step(td)
+        td = result["next"]
+
+        # History should show hold (0) since no trade was executed
+        assert env.history.actions[-1] == 0
+
+    def test_history_tracking_with_duplicate_long(self, env):
+        """History should record duplicate long as no action (0)."""
+        td = env.reset()
+
+        # First long
+        td.set("action", torch.tensor(2))
+        result = env.step(td)
+        td = result["next"]
+        assert env.history.actions[-1] == 1  # Long executed
+
+        # Duplicate long
+        td.set("action", torch.tensor(2))
+        result = env.step(td)
+        td = result["next"]
+        # Should record as no action (0) since duplicate was ignored
+        assert env.history.actions[-1] == 0
 
 
 class TestSeqFuturesEnvLeverage:

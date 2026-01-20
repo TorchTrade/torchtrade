@@ -655,6 +655,12 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
             logger.debug("Hold action - no trade")
             return trade_info
 
+        # Check if already in same position (ignore duplicate actions)
+        position_map = {"long": 1, "short": -1}
+        if side in position_map and self.position.current_position == position_map[side]:
+            logger.debug(f"Already {side} - ignoring duplicate {side} action")
+            return trade_info
+
         # Get base price
         if base_price is None:
             base_price = self.sampler.get_base_features(self.current_timestamp)["close"]

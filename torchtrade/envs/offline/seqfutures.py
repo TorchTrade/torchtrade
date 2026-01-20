@@ -410,34 +410,36 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         # Apply slippage
         price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage).item()
 
-        # Action mapping: -1=short, 0=hold/close, 1=long
+        # Action mapping: -1=short, 0=hold, 1=long
 
         if desired_action == 0:
-            # Close any existing position
-            if self.position.position_size != 0:
-                trade_info = self._close_position(current_price, price_noise)
-            else:
-                # No position to close, just hold
-                pass
+            # Hold - do nothing (keep any existing position open)
+            pass
 
         elif desired_action == 1:
             # Go long
-            if self.position.position_size < 0:
-                # Close short first
+            if self.position.current_position == 1:
+                # Already long - ignore duplicate action
+                pass
+            elif self.position.position_size < 0:
+                # Close short first, then open long
                 self._close_position(current_price, price_noise)
-
-            if self.position.position_size <= 0:
-                # Open long position
+                trade_info = self._open_position("long", current_price, price_noise)
+            else:
+                # Open long from flat position
                 trade_info = self._open_position("long", current_price, price_noise)
 
         elif desired_action == -1:
             # Go short
-            if self.position.position_size > 0:
-                # Close long first
+            if self.position.current_position == -1:
+                # Already short - ignore duplicate action
+                pass
+            elif self.position.position_size > 0:
+                # Close long first, then open short
                 self._close_position(current_price, price_noise)
-
-            if self.position.position_size >= 0:
-                # Open short position
+                trade_info = self._open_position("short", current_price, price_noise)
+            else:
+                # Open short from flat position
                 trade_info = self._open_position("short", current_price, price_noise)
 
         # Update hold counter

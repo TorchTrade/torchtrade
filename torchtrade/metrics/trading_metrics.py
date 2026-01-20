@@ -187,7 +187,27 @@ def compute_calmar_ratio(
     if years <= 0:
         return 0.0
 
-    annualized_return = (1 + total_return) ** (1 / years) - 1
+    # Check if we have very few periods relative to periods_per_year
+    # to avoid overflow in annualization calculation
+    if years < 0.01:  # Less than ~3.65 days for daily data
+        # Not enough data for meaningful annualization - use simple return
+        annualized_return = total_return.item() if isinstance(total_return, torch.Tensor) else total_return
+    else:
+        # Convert to float for calculation to avoid tensor issues
+        total_return_float = total_return.item() if isinstance(total_return, torch.Tensor) else total_return
+        # Clamp the base to avoid overflow: (1 + total_return) ** (1/years)
+        # If years is very small, this can overflow, so we limit annualized return
+        try:
+            annualized_return = (1 + total_return_float) ** (1 / years) - 1
+            # Clamp to reasonable bounds to prevent Inf values
+            # A 1000% annualized return is already extremely high
+            if annualized_return > 10.0:  # 1000% annualized return cap
+                annualized_return = 10.0
+            elif annualized_return < -1.0:  # -100% annualized return floor
+                annualized_return = -1.0
+        except (OverflowError, ValueError):
+            # If calculation overflows, cap at maximum reasonable value
+            annualized_return = 10.0 if total_return_float > 0 else -1.0
 
     # Calculate max drawdown
     dd_metrics = compute_max_drawdown(portfolio_values)
@@ -205,6 +225,10 @@ def compute_calmar_ratio(
     # Convert to float if it's a tensor
     if isinstance(calmar, torch.Tensor):
         calmar = calmar.item()
+
+    # Final sanity check to ensure no Inf values escape
+    if not isinstance(calmar, (int, float)) or abs(calmar) == float('inf'):
+        return 1000.0 if annualized_return > 0 else 0.0
 
     return calmar
 
