@@ -110,3 +110,40 @@ normalize_bitget_timeframe_config = partial(
     normalize_timeframe_config,
     parse_fn=parse_bitget_timeframe_string
 )
+
+
+def normalize_symbol(symbol: str) -> str:
+    """Normalize symbol to CCXT perpetual swap format.
+
+    Args:
+        symbol: Trading symbol in various formats:
+                - "BTCUSDT" -> "BTC/USDT:USDT"
+                - "BTC/USDT" -> "BTC/USDT:USDT"
+                - "BTC/USDT:USDT" -> "BTC/USDT:USDT" (no change)
+
+    Returns:
+        Normalized symbol in CCXT perpetual swap format (e.g., "BTC/USDT:USDT")
+    """
+    import warnings
+
+    # Already in correct format
+    if "/" in symbol and ":" in symbol:
+        return symbol
+
+    # Has slash but no settlement currency
+    if "/" in symbol and ":" not in symbol:
+        return f"{symbol}:USDT"
+
+    # No slash - parse and add both
+    if symbol.endswith("USDT"):
+        base = symbol[:-4]
+        return f"{base}/USDT:USDT"
+
+    # Fallback for other formats
+    normalized = f"{symbol}/USDT:USDT"
+    warnings.warn(
+        f"Symbol '{symbol}' doesn't match expected format. "
+        f"Auto-converted to '{normalized}'. "
+        f"Please use CCXT format 'BTC/USDT:USDT' directly to avoid ambiguity."
+    )
+    return normalized

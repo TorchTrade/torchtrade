@@ -20,7 +20,7 @@ classifiers = [
 dependencies = [
     "alpaca-py",
     "python-binance",
-    "python-bitget>=1.0.0",
+    "ccxt>=4.0.0",  # Replaced python-bitget with ccxt for V2 API support
     "python-dotenv",
     "torchrl",
     "wandb",

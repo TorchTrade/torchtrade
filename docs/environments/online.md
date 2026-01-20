@@ -300,21 +300,26 @@ Total: 1 + 2 × (2 × 3) = **13 actions**
 
 ## Bitget Environments
 
-[Bitget](https://www.bitget.com/) is a fast-growing cryptocurrency exchange with competitive fees and testnet support.
+[Bitget](https://www.bitget.com/) is a fast-growing cryptocurrency exchange with competitive fees and testnet support. TorchTrade uses [CCXT](https://github.com/ccxt/ccxt) library to interface with Bitget's V2 API.
+
+!!! note "CCXT Symbol Format"
+    Bitget environments use CCXT's perpetual swap format: `"BTC/USDT:USDT"` (not `"BTCUSDT"`).
+    Format: `{BASE}/{QUOTE}:{SETTLE}` where BASE=BTC, QUOTE=USDT, SETTLE=USDT.
 
 ### BitgetFuturesTorchTradingEnv
 
-Futures trading environment for Bitget exchange.
+Futures trading environment for Bitget exchange with configurable margin and position modes.
 
 #### Setup
 
 ```bash
 # Get API keys from: https://www.bitget.com/en/support/articles/360038859731
+# Or use demo trading: https://www.bitget.com/demo-trading
 # Create .env file
 cat > .env << EOF
-BITGET_API_KEY=your_bitget_api_key
-BITGET_SECRET=your_bitget_secret
-BITGET_PASSPHRASE=your_bitget_passphrase
+BITGETACCESSAPIKEY=your_bitget_api_key
+BITGETSECRETKEY=your_bitget_secret_key
+BITGETPASSPHRASE=your_bitget_passphrase
 EOF
 ```
 
@@ -325,17 +330,27 @@ from torchtrade.envs.bitget import (
     BitgetFuturesTorchTradingEnv,
     BitgetFuturesTradingEnvConfig
 )
+from torchtrade.envs.bitget.futures_order_executor import (
+    MarginMode,
+    PositionMode,
+)
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 config = BitgetFuturesTradingEnvConfig(
-    symbol="BTCUSDT",
-    intervals=["1m", "5m", "15m"],
-    window_sizes=[12, 8, 8],
-    execute_on="1m",
+    symbol="BTC/USDT:USDT",                 # CCXT perpetual swap format
+    time_frames=["5min", "15min"],          # Timeframes for observations
+    window_sizes=[6, 32],                   # Lookback per timeframe
+    execute_on="1min",                      # Execute every 1 minute
 
     # Futures parameters
-    leverage=5,
+    product_type="USDT-FUTURES",            # V2 API: USDT-FUTURES, COIN-FUTURES
+    leverage=5,                             # Leverage (1-125)
     quantity_per_trade=0.002,               # Position size
+    margin_mode=MarginMode.ISOLATED,        # ISOLATED or CROSSED
+    position_mode=PositionMode.ONE_WAY,     # ONE_WAY (recommended) or HEDGE
 
     # Trading mode
     demo=True,                              # Testnet (recommended!)
@@ -347,16 +362,62 @@ config = BitgetFuturesTradingEnvConfig(
 
 env = BitgetFuturesTorchTradingEnv(
     config,
-    api_key=os.getenv("BITGET_API_KEY"),
-    api_secret=os.getenv("BITGET_SECRET"),
-    api_passphrase=os.getenv("BITGET_PASSPHRASE"),
+    api_key=os.getenv("BITGETACCESSAPIKEY"),
+    api_secret=os.getenv("BITGETSECRETKEY"),
+    api_passphrase=os.getenv("BITGETPASSPHRASE"),
+)
+```
+
+#### Margin Modes
+
+**ISOLATED (Recommended)**:
+- Each position has separate margin allocation
+- If liquidated, only that position's margin is lost
+- Lower risk, better for beginners
+
+**CROSSED**:
+- All positions share the entire account balance
+- Higher risk but more capital efficient
+- Advanced users only
+
+```python
+from torchtrade.envs.bitget.futures_order_executor import MarginMode
+
+config = BitgetFuturesTradingEnvConfig(
+    margin_mode=MarginMode.ISOLATED,  # Safer default
+    # margin_mode=MarginMode.CROSSED,  # Advanced
+)
+```
+
+!!! note "Margin Mode Implementation"
+    Bitget's `set_margin_mode()` API doesn't work reliably. TorchTrade sets margin mode per-order by including `marginMode` in each order's parameters. This is the recommended approach per [CCXT issue #21435](https://github.com/ccxt/ccxt/issues/21435). Each order will use your configured margin mode.
+
+#### Position Modes
+
+**ONE_WAY (Recommended)**:
+- Single net position per symbol
+- Going LONG when SHORT automatically closes the short first
+- Simpler position management
+
+**HEDGE**:
+- Can hold separate long and short positions simultaneously
+- More complex, for advanced hedging strategies
+
+```python
+from torchtrade.envs.bitget.futures_order_executor import PositionMode
+
+config = BitgetFuturesTradingEnvConfig(
+    position_mode=PositionMode.ONE_WAY,  # Recommended
+    # position_mode=PositionMode.HEDGE,   # Advanced
 )
 ```
 
 #### Features
+- **CCXT Integration**: Uses CCXT library with Bitget V2 API
 - **Leverage**: Up to 125x leverage
-- **Testnet**: Safe testing environment
-- **Competitive fees**: Lower fees than some competitors
+- **Testnet**: Safe testing environment ([Demo Trading](https://www.bitget.com/demo-trading))
+- **Competitive fees**: Maker 0.02% / Taker 0.06%
+- **Flexible Risk Management**: Configurable margin and position modes
 - **Alternative to Binance**: Growing liquidity
 
 #### Example Usage
@@ -366,23 +427,32 @@ from torchtrade.envs.bitget import (
     BitgetFuturesTorchTradingEnv,
     BitgetFuturesTradingEnvConfig
 )
+from torchtrade.envs.bitget.futures_order_executor import (
+    MarginMode,
+    PositionMode,
+)
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 config = BitgetFuturesTradingEnvConfig(
-    symbol="BTCUSDT",
-    intervals=["1m", "5m"],
-    window_sizes=[12, 8],
-    execute_on="1m",
+    symbol="BTC/USDT:USDT",                 # CCXT format!
+    time_frames=["5min", "15min"],
+    window_sizes=[6, 32],
+    execute_on="1min",
     leverage=5,
     quantity_per_trade=0.002,
+    margin_mode=MarginMode.ISOLATED,        # Safer for testing
+    position_mode=PositionMode.ONE_WAY,     # Simpler management
     demo=True,
 )
 
 env = BitgetFuturesTorchTradingEnv(
     config,
-    api_key=os.getenv("BITGET_API_KEY"),
-    api_secret=os.getenv("BITGET_SECRET"),
-    api_passphrase=os.getenv("BITGET_PASSPHRASE"),
+    api_key=os.getenv("BITGETACCESSAPIKEY"),
+    api_secret=os.getenv("BITGETSECRETKEY"),
+    api_passphrase=os.getenv("BITGETPASSPHRASE"),
 )
 
 # Trading loop
@@ -392,6 +462,11 @@ for step in range(100):
     action = policy(tensordict)
     tensordict["action"] = action
     tensordict = env.step(tensordict)
+
+    # Monitor account state (10 elements for Bitget futures)
+    account = tensordict["account_state"]
+    # [cash, position_size, position_value, entry_price, current_price,
+    #  unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
 ```
 
 ### BitgetFuturesSLTPTorchTradingEnv
@@ -405,33 +480,57 @@ from torchtrade.envs.bitget import (
     BitgetFuturesSLTPTorchTradingEnv,
     BitgetFuturesSLTPTradingEnvConfig
 )
+from torchtrade.envs.bitget.futures_order_executor import (
+    MarginMode,
+    PositionMode,
+)
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 config = BitgetFuturesSLTPTradingEnvConfig(
-    symbol="BTCUSDT",
-    intervals=["1m", "5m"],
-    window_sizes=[12, 8],
-    execute_on="1m",
+    symbol="BTC/USDT:USDT",                 # CCXT perpetual swap format
+    time_frames=["5min", "15min"],
+    window_sizes=[6, 32],
+    execute_on="1min",
 
     # Bracket orders
-    stoploss_levels=[-0.02, -0.05],
-    takeprofit_levels=[0.03, 0.06, 0.10],
-    include_short_positions=True,
+    stoploss_levels=(-0.025, -0.05, -0.1),  # -2.5%, -5%, -10%
+    takeprofit_levels=(0.05, 0.1, 0.2),     # 5%, 10%, 20%
+    include_short_positions=True,           # Enable short bracket orders
+    include_hold_action=True,               # Include HOLD action
 
     # Futures parameters
+    product_type="USDT-FUTURES",
     leverage=5,
     quantity_per_trade=0.002,
+    margin_mode=MarginMode.ISOLATED,
+    position_mode=PositionMode.ONE_WAY,
 
     demo=True,
 )
 
 env = BitgetFuturesSLTPTorchTradingEnv(
     config,
-    api_key=os.getenv("BITGET_API_KEY"),
-    api_secret=os.getenv("BITGET_SECRET"),
-    api_passphrase=os.getenv("BITGET_PASSPHRASE"),
+    api_key=os.getenv("BITGETACCESSAPIKEY"),
+    api_secret=os.getenv("BITGETSECRETKEY"),
+    api_passphrase=os.getenv("BITGETPASSPHRASE"),
 )
 ```
+
+#### Action Space
+
+With the configuration above (3 SL × 3 TP, both long/short):
+
+- **Action 0**: HOLD / Close position
+- **Actions 1-9**: LONG with SL/TP combinations (3 × 3)
+- **Actions 10-18**: SHORT with SL/TP combinations (3 × 3)
+
+Total: 1 + 2 × (3 × 3) = **19 actions**
+
+For detailed documentation and examples, see:
+- [Bitget Examples README](../../examples/live/bitget/README.md)
 
 ---
 

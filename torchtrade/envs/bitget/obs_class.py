@@ -1,9 +1,10 @@
 from typing import Union, List, Optional, Callable
 import pandas as pd
+import ccxt
 
 from torchtrade.envs.futures.obs_class import BaseFuturesObservationClass
 from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
-from torchtrade.envs.bitget.utils import timeframe_to_bitget, BITGET_INTERVAL_MAP
+from torchtrade.envs.bitget.utils import timeframe_to_bitget, BITGET_INTERVAL_MAP, normalize_symbol
 
 
 class BitgetObservationClass(BaseFuturesObservationClass):
@@ -19,7 +20,7 @@ class BitgetObservationClass(BaseFuturesObservationClass):
         symbol: str,
         time_frames: Union[List[TimeFrame], TimeFrame],
         window_sizes: Union[List[int], int] = 10,
-        product_type: str = "SUMCBL",  # SUMCBL for testnet, UMCBL for prod
+        product_type: str = "USDT-FUTURES",
         feature_preprocessing_fn: Optional[Callable] = None,
         client: Optional[object] = None,
         demo: bool = True,
@@ -28,18 +29,22 @@ class BitgetObservationClass(BaseFuturesObservationClass):
         Initialize the BitgetObservationClass.
 
         Args:
-            symbol: The trading symbol (e.g., "BTCUSDT")
+            symbol: The trading symbol (e.g., "BTC/USDT:USDT")
             time_frames: Single TimeFrame or list of TimeFrame objects
             window_sizes: Single integer or list of integers specifying window sizes
-            product_type: Product type for Bitget futures (SUMCBL=testnet, UMCBL=prod)
+            product_type: Product type for Bitget V2 API (USDT-FUTURES, COIN-FUTURES, etc.)
             feature_preprocessing_fn: Optional custom preprocessing function
             client: Optional pre-configured Bitget Client for dependency injection
             demo: Whether to use demo/testnet environment (default: True)
         """
-        # Store Bitget-specific attributes before calling super().__init__
-        self.product_type = "SUMCBL" if demo else product_type  # Force testnet for demo
+        # Normalize symbol before calling parent constructor
+        symbol = normalize_symbol(symbol)
 
-        # Call parent constructor
+        # Store Bitget-specific attributes before calling super().__init__
+        self.product_type = product_type
+        self.demo = demo
+
+        # Call parent constructor with normalized symbol
         super().__init__(
             symbol=symbol,
             time_frames=time_frames,
@@ -50,14 +55,23 @@ class BitgetObservationClass(BaseFuturesObservationClass):
         )
 
     def _create_client(self) -> object:
-        """Create Bitget API client."""
+        """Create Bitget API client using CCXT."""
         try:
-            from pybitget import Client
             # For market data, we can use public API (no keys required)
-            # But pybitget requires keys, so we'll use empty strings for read-only
-            return Client("", "", passphrase="")
-        except ImportError:
-            raise ImportError("python-bitget is required. Install with: pip install python-bitget")
+            client = ccxt.bitget({
+                'options': {
+                    'defaultType': 'swap',  # Use futures/swap
+                    'sandboxMode': self.demo,
+                }
+            })
+
+            # Enable sandbox/testnet mode if demo
+            if self.demo:
+                client.set_sandbox_mode(True)
+
+            return client
+        except Exception as e:
+            raise ImportError(f"CCXT is required. Install with: pip install ccxt. Error: {e}")
 
     def _validate_timeframe(self, timeframe: TimeFrame) -> None:
         """Validate that a timeframe is supported by Bitget."""
@@ -75,39 +89,44 @@ class BitgetObservationClass(BaseFuturesObservationClass):
 
     def _fetch_klines(self, symbol: str, interval: str, limit: int) -> list:
         """
-        Fetch raw kline data from Bitget API.
+        Fetch raw kline data from Bitget API using CCXT.
 
         Args:
-            symbol: Trading symbol (e.g., "BTCUSDT")
+            symbol: Trading symbol in CCXT format (e.g., "BTC/USDT:USDT")
             interval: Bitget-specific interval string (e.g., "1H", "1D")
             limit: Number of candles to fetch
 
         Returns:
-            Raw kline data: list of [timestamp, open, high, low, close, volume, quote_volume]
+            Raw kline data from CCXT: list of [timestamp_ms, open, high, low, close, volume]
         """
-        candles = self.client.mix_get_candles(
+        # Ensure symbol is normalized (in case parent class modified it)
+        symbol = normalize_symbol(symbol)
+
+        # CCXT uses standardized timeframe strings (1m, 5m, 1h, 1d)
+        interval_ccxt = interval.lower()
+
+        candles = self.client.fetch_ohlcv(
             symbol=symbol,
-            granularity=interval,
-            productType=self.product_type,
+            timeframe=interval_ccxt,
             limit=limit
         )
         return candles
 
     def _parse_klines(self, raw_klines: list) -> pd.DataFrame:
         """
-        Parse raw Bitget kline data into standardized DataFrame.
+        Parse raw CCXT kline data into standardized DataFrame.
 
-        Bitget candles format: [timestamp, open, high, low, close, volume, quote_volume]
+        CCXT candles format: [timestamp_ms, open, high, low, close, volume]
         Note: Timestamp is in milliseconds
 
         Args:
-            raw_klines: Raw kline data from Bitget API
+            raw_klines: Raw kline data from CCXT
 
         Returns:
             DataFrame with columns: timestamp, open, high, low, close, volume
         """
         df = pd.DataFrame(raw_klines, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume'
+            'timestamp', 'open', 'high', 'low', 'close', 'volume'
         ])
 
         # Convert types
@@ -146,13 +165,13 @@ if __name__ == "__main__":
     import os
 
     # Test with demo/testnet (no API keys needed for public data)
-    print("Testing BitgetObservationClass...")
+    print("Testing BitgetObservationClass with CCXT...")
 
     # Single timeframe example
     print("\n1. Testing single timeframe...")
     window_size = 10
     observer = BitgetObservationClass(
-        symbol="BTCUSDT",
+        symbol="BTC/USDT:USDT",  # CCXT perpetual swap format
         time_frames=TimeFrame(1, TimeFrameUnit.Minute),
         window_sizes=window_size,
         demo=True
@@ -168,12 +187,14 @@ if __name__ == "__main__":
         print("   ✓ Single timeframe test passed!")
     except Exception as e:
         print(f"   ✗ Single timeframe test failed: {e}")
+        import traceback
+        traceback.print_exc()
 
     # Multiple timeframes example
     print("\n2. Testing multiple timeframes...")
     window_sizes = [10, 20]
     observer = BitgetObservationClass(
-        symbol="BTCUSDT",
+        symbol="BTC/USDT:USDT",  # CCXT perpetual swap format
         time_frames=[
             TimeFrame(1, TimeFrameUnit.Minute),
             TimeFrame(5, TimeFrameUnit.Minute),
@@ -192,5 +213,7 @@ if __name__ == "__main__":
         print("   ✓ Multiple timeframes test passed!")
     except Exception as e:
         print(f"   ✗ Multiple timeframes test failed: {e}")
+        import traceback
+        traceback.print_exc()
 
     print("\n✅ All tests completed!")
