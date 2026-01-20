@@ -868,7 +868,6 @@ class TestFuturesOneStepEnvDuplicateActions:
     def test_duplicate_long_action_ignored(self, env):
         """Taking long action when already long should be ignored."""
         env.reset()
-        initial_balance = env.balance
 
         # First long action - should execute
         trade_info1 = env._execute_trade_if_needed(env.action_map[1])
@@ -877,7 +876,6 @@ class TestFuturesOneStepEnvDuplicateActions:
         assert env.position.current_position == 1
         entry_price_1 = env.position.entry_price
         balance_after_first = env.balance
-        fee_1 = trade_info1["fee_paid"]
 
         # Second long action - should be ignored
         trade_info2 = env._execute_trade_if_needed(env.action_map[1])

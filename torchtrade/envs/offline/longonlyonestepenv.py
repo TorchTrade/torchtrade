@@ -213,7 +213,7 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
         return next_tensordict
 
     def trigger_sell(self, trade_info, execution_price):
-        logging.debug(f"Triggering sell at price: {execution_price}")
+        logger.debug(f"Triggering sell at price: {execution_price}")
         # Sell all available position
         sell_amount = self.position.position_size
         # Calculate proceeds and fee based on noisy execution price
@@ -293,7 +293,7 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
         # If holding position or no change in position, do nothing
         if action_tuple == (None, None):
             # No action
-            logging.debug("No action")
+            logger.debug("No action")
             return trade_info
 
         # Check if already long (ignore duplicate long actions)

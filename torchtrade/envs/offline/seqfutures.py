@@ -422,8 +422,8 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
                 # Close short first
                 self._close_position(current_price, price_noise)
 
+            # Only open long if not already long (position_size <= 0 prevents duplicates)
             if self.position.position_size <= 0:
-                # Open long position
                 trade_info = self._open_position("long", current_price, price_noise)
 
         elif desired_action == -1:
@@ -432,8 +432,8 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
                 # Close long first
                 self._close_position(current_price, price_noise)
 
+            # Only open short if not already short (position_size >= 0 prevents duplicates)
             if self.position.position_size >= 0:
-                # Open short position
                 trade_info = self._open_position("short", current_price, price_noise)
 
         # Update hold counter
