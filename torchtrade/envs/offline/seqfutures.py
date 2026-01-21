@@ -61,7 +61,6 @@ class SeqFuturesEnvConfig:
     # Environment settings
     seed: Optional[int] = 42
     include_base_features: bool = False
-    include_hold_action: bool = True  # Include HOLD action (0.0) in action space
     max_traj_length: Optional[int] = None
     random_start: bool = True
 
@@ -69,7 +68,13 @@ class SeqFuturesEnvConfig:
     reward_scaling: float = 1.0
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
-    action_levels: List[float] = None  # Built in __post_init__ based on include_hold_action
+    # Action space configuration
+    position_sizing_mode: str = "fractional"  # "fractional" (new default) or "fixed" (legacy)
+    action_levels: List[float] = None  # Custom action levels, or None for defaults
+
+    # DEPRECATED: Only used in legacy "fixed" mode
+    include_hold_action: bool = True  # DEPRECATED - only used when position_sizing_mode="fixed"
+    include_close_action: bool = True  # DEPRECATED - only used when position_sizing_mode="fixed"
 
     def __post_init__(self):
         """Normalize timeframe configuration and build action levels."""
@@ -79,21 +84,25 @@ class SeqFuturesEnvConfig:
 
         validate_quantity_per_trade(self.quantity_per_trade)
 
+        # Set default action levels based on position sizing mode
         if self.action_levels is None:
-            if self.include_hold_action:
-                self.action_levels = [-1.0, 0.0, 1.0]  # Short, Hold, Long
+            if self.position_sizing_mode == "fractional":
+                # New default: fractional sizing with neutral at 0
+                self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]
             else:
-                self.action_levels = [-1.0, 1.0]  # Short, Long
-        else:
-            # User provided custom action_levels - include_hold_action is ignored
-            import warnings
-            if not self.include_hold_action and 0.0 in self.action_levels:
-                warnings.warn(
-                    "Custom action_levels provided with include_hold_action=False, but action_levels "
-                    "contains 0.0 (hold action). The custom action_levels will be used as-is. "
-                    "Consider removing 0.0 from action_levels or setting include_hold_action=True.",
-                    UserWarning
-                )
+                # Legacy mode: maintain backward compatibility
+                if self.include_hold_action and self.include_close_action:
+                    self.action_levels = [-1.0, 0.0, 0.5, 1.0]  # Short, Hold, Close, Long
+                elif self.include_hold_action:
+                    self.action_levels = [-1.0, 0.0, 1.0]  # Short, Hold, Long
+                elif self.include_close_action:
+                    self.action_levels = [-1.0, 0.5, 1.0]  # Short, Close, Long
+                else:
+                    self.action_levels = [-1.0, 1.0]  # Short, Long
+
+        # Validate position_sizing_mode
+        if self.position_sizing_mode not in ["fractional", "fixed"]:
+            raise ValueError(f"position_sizing_mode must be 'fractional' or 'fixed', got '{self.position_sizing_mode}'")
 
 
 class SeqFuturesEnv(TorchTradeOfflineEnv):
@@ -236,6 +245,67 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         else:
             # Short position - liquidated if price above liquidation price
             return current_price >= self.liquidation_price
+
+    def _calculate_fractional_position(
+        self,
+        action_value: float,
+        current_price: float
+    ) -> Tuple[float, float, str]:
+        """Calculate position size from fractional action value.
+
+        This method converts a fractional action value in [-1.0, 1.0] to a concrete
+        position size based on available balance and configured leverage.
+
+        Args:
+            action_value: Action from [-1.0, 1.0] representing fraction of balance to allocate.
+                         - Positive: long position
+                         - Negative: short position
+                         - Zero: flat/neutral (no position)
+            current_price: Current market price for position sizing calculation
+
+        Returns:
+            Tuple of (position_size, notional_value, side):
+            - position_size: Quantity in base currency. Positive for long, negative for short.
+            - notional_value: Absolute value of position in quote currency (USD)
+            - side: Position direction: "long", "short", or "flat"
+
+        Examples:
+            >>> # 50% long with $10k balance, 5x leverage, $50k price
+            >>> self.balance = 10000
+            >>> self.leverage = 5
+            >>> pos, notional, side = self._calculate_fractional_position(0.5, 50000)
+            >>> # Expected: (10000 × 0.5 × 5) / 50000 = 0.5 BTC long
+        """
+        # Handle neutral case
+        if action_value == 0.0:
+            return 0.0, 0.0, "flat"
+
+        # Calculate fraction and direction
+        fraction = abs(action_value)  # 0.0 to 1.0
+        direction = 1 if action_value > 0 else -1
+
+        # Allocate fraction of balance, accounting for fees
+        # Formula: margin_required + fee <= balance * fraction
+        # Where: fee = notional * fee_rate
+        #        notional = margin_required * leverage
+        # So: margin_required * (1 + leverage * fee_rate) <= balance * fraction
+        # Therefore: margin_required = (balance * fraction) / (1 + leverage * fee_rate)
+
+        capital_allocated = self.balance * fraction
+        fee_multiplier = 1 + (self.leverage * self.transaction_fee)
+        margin_required = capital_allocated / fee_multiplier
+
+        # Calculate notional value with leverage
+        notional_value = margin_required * self.leverage
+
+        # Calculate position size
+        position_qty = notional_value / current_price
+
+        # Apply direction
+        position_size = position_qty * direction
+        side = "long" if direction > 0 else "short"
+
+        return position_size, notional_value, side
 
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
@@ -403,7 +473,25 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         return trade_info
 
     def _execute_trade_if_needed(self, desired_action: float) -> Dict:
-        """Execute trade if position change is needed."""
+        """Execute trade if position change is needed.
+
+        Routes to either fractional or fixed position sizing based on config.
+        """
+        current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+
+        # Apply slippage
+        price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage).item()
+        execution_price = current_price * price_noise
+
+        if self.config.position_sizing_mode == "fractional":
+            # NEW: Fractional position sizing
+            return self._execute_fractional_action(desired_action, execution_price)
+        else:
+            # LEGACY: Fixed position sizing (backward compatibility)
+            return self._execute_fixed_action(desired_action, current_price, price_noise)
+
+    def _execute_fixed_action(self, desired_action: float, current_price: float, price_noise: float) -> Dict:
+        """Execute action using fixed position sizing (legacy mode)."""
         trade_info = {
             "executed": False,
             "side": None,
@@ -411,16 +499,16 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
             "liquidated": False,
         }
 
-        current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
-
-        # Apply slippage
-        price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage).item()
-
-        # Action mapping: -1=short, 0=hold, 1=long
+        # Action mapping: -1=short, 0=hold, 0.5=close, 1=long
 
         if desired_action == 0:
             # Hold - do nothing (keep any existing position open)
             pass
+
+        elif desired_action == 0.5:
+            # Close - explicitly exit position and go to cash
+            if self.position.position_size != 0:
+                trade_info = self._close_position(current_price, price_noise)
 
         elif desired_action == 1:
             # Go long
@@ -451,6 +539,239 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         # Update hold counter
         if self.position.position_size != 0:
             self.position.hold_counter += 1
+
+        return trade_info
+
+    def _execute_fractional_action(self, action_value: float, execution_price: float) -> Dict:
+        """Execute action using fractional position sizing.
+
+        This method handles the full lifecycle of position changes in fractional mode:
+        - Opening new positions from flat
+        - Closing positions to go neutral
+        - Switching direction (long ↔ short)
+        - Adjusting position size in same direction
+        - Implicit holding (when target matches current)
+
+        Args:
+            action_value: Fractional action value in [-1.0, 1.0]
+            execution_price: Price at which trade executes (includes slippage)
+
+        Returns:
+            trade_info: Dict with keys:
+                - "executed" (bool): Whether trade was executed
+                - "side" (str): "long", "short", "flat", or None
+                - "fee_paid" (float): Transaction fee deducted
+                - "liquidated" (bool): Always False for normal trades
+        """
+        trade_info = {
+            "executed": False,
+            "side": None,
+            "fee_paid": 0.0,
+            "liquidated": False,
+        }
+
+        # Calculate target position from action value
+        target_position_size, target_notional, target_side = (
+            self._calculate_fractional_position(action_value, execution_price)
+        )
+
+        # Tolerance for position comparison (0.1% of target position, or absolute 0.0001 for very small positions)
+        tolerance = max(abs(target_position_size) * 0.001, 0.0001)
+
+        # If target matches current position, do nothing (implicit HOLD)
+        if abs(target_position_size - self.position.position_size) < tolerance:
+            # Already at target position (implicit hold)
+            if self.position.position_size != 0:
+                self.position.hold_counter += 1
+            return trade_info
+
+        # Need to adjust position
+        if target_position_size == 0.0:
+            # Close position (go to cash)
+            if self.position.position_size != 0:
+                trade_info = self._close_position(execution_price, 1.0)  # No additional slippage
+                trade_info["side"] = "flat"
+
+        elif self.position.position_size == 0.0:
+            # Open new position from flat
+            trade_info = self._open_fractional_position(
+                target_side, target_position_size, target_notional, execution_price
+            )
+
+        elif (self.position.position_size > 0 and target_position_size < 0) or \
+             (self.position.position_size < 0 and target_position_size > 0):
+            # Direction switch: close current, open opposite
+            self._close_position(execution_price, 1.0)
+            # Recalculate target position after closing (balance may have changed)
+            target_position_size, target_notional, target_side = (
+                self._calculate_fractional_position(action_value, execution_price)
+            )
+            trade_info = self._open_fractional_position(
+                target_side, target_position_size, target_notional, execution_price
+            )
+
+        else:
+            # Same direction, adjust size
+            trade_info = self._adjust_position_size(
+                target_position_size, target_notional, execution_price
+            )
+
+        # Update hold counter
+        if self.position.position_size != 0:
+            self.position.hold_counter += 1
+
+        return trade_info
+
+    def _open_fractional_position(
+        self,
+        side: str,
+        position_size: float,
+        notional_value: float,
+        execution_price: float
+    ) -> Dict:
+        """Open a new fractional position from flat.
+
+        Args:
+            side: Position direction: "long" or "short"
+            position_size: Target position size (quantity in base currency)
+            notional_value: Position value in quote currency
+            execution_price: Execution price (with slippage applied)
+
+        Returns:
+            trade_info: Dict with execution details including fees and success status
+        """
+        trade_info = {
+            "executed": True,
+            "side": side,
+            "fee_paid": 0.0,
+            "liquidated": False,
+        }
+
+        # Calculate margin and fee
+        margin_required = notional_value / self.leverage
+        fee = abs(notional_value) * self.transaction_fee
+
+        # Check if sufficient balance
+        if margin_required + fee > self.balance:
+            trade_info["executed"] = False
+            return trade_info
+
+        # Deduct fee and margin
+        self.balance -= fee
+        trade_info["fee_paid"] = fee
+
+        # Set position
+        self.position.position_size = position_size
+        self.position.position_value = abs(notional_value)
+        self.position.entry_price = execution_price
+        self.position.current_position = 1 if side == "long" else -1
+        self.position.hold_counter = 0
+
+        # Calculate liquidation price
+        self.liquidation_price = self._calculate_liquidation_price(
+            execution_price, position_size
+        )
+
+        return trade_info
+
+    def _adjust_position_size(
+        self,
+        target_position_size: float,
+        target_notional: float,
+        execution_price: float
+    ) -> Dict:
+        """Adjust existing position size (same direction).
+
+        Only trades the difference between current and target position.
+        For example, going from 1.0 (100% long) to 0.5 (50% long) only sells 50% of the position.
+
+        Args:
+            target_position_size: Target position size
+            target_notional: Target notional value
+            execution_price: Execution price
+
+        Returns:
+            trade_info: Dict with execution details
+        """
+        trade_info = {
+            "executed": True,
+            "side": None,
+            "fee_paid": 0.0,
+            "liquidated": False,
+        }
+
+        # Calculate the difference
+        delta_position = target_position_size - self.position.position_size
+        delta_notional = abs(delta_position * execution_price)
+
+        if abs(delta_position) < 0.0001:  # Negligible difference
+            trade_info["executed"] = False
+            return trade_info
+
+        if abs(target_position_size) > abs(self.position.position_size):
+            # Increasing position size - add to position
+            trade_info["side"] = "long" if delta_position > 0 else "short"
+
+            # Calculate fee
+            fee = delta_notional * self.transaction_fee
+
+            # Check if sufficient balance
+            margin_required = delta_notional / self.leverage
+            if margin_required + fee > self.balance:
+                trade_info["executed"] = False
+                return trade_info
+
+            # Execute trade
+            self.balance -= fee
+            trade_info["fee_paid"] = fee
+
+            # Update position (keeping weighted average entry price)
+            current_value = abs(self.position.position_size * self.position.entry_price)
+            new_value = delta_notional
+            total_value = current_value + new_value
+
+            # Weighted average entry price
+            if total_value > 0:
+                self.position.entry_price = (
+                    (self.position.entry_price * current_value + execution_price * new_value) / total_value
+                )
+
+            self.position.position_size = target_position_size
+            self.position.position_value = abs(target_notional)
+
+            # Recalculate liquidation price with new average entry
+            self.liquidation_price = self._calculate_liquidation_price(
+                self.position.entry_price, self.position.position_size
+            )
+
+        else:
+            # Decreasing position size - partial close
+            fraction_to_close = 1.0 - (abs(target_position_size) / abs(self.position.position_size))
+            trade_info["side"] = "close_partial"
+
+            # Calculate PnL on the portion being closed
+            pnl = self._calculate_unrealized_pnl(
+                self.position.entry_price,
+                execution_price,
+                self.position.position_size * fraction_to_close
+            )
+
+            # Calculate fee on the portion being closed
+            close_notional = abs(self.position.position_size * fraction_to_close * execution_price)
+            fee = close_notional * self.transaction_fee
+
+            # Update balance
+            self.balance += pnl - fee
+            trade_info["fee_paid"] = fee
+
+            # Update position (entry price stays the same for partial close)
+            self.position.position_size = target_position_size
+            self.position.position_value = abs(target_notional)
+
+            # Liquidation price stays the same (same entry price, just smaller size)
+            self.liquidation_price = self._calculate_liquidation_price(
+                self.position.entry_price, self.position.position_size
+            )
 
         return trade_info
 
