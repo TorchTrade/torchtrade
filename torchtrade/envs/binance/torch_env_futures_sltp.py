@@ -255,13 +255,26 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
 
         side, stop_loss_pct, take_profit_pct = action_tuple
 
-        # HOLD action or already in position
-        if action_tuple == (None, None, None) or self.position.current_position != 0:
+        # HOLD action - do nothing
+        if side is None:
             return trade_info
+
+        # Check if already in same position (ignore duplicate actions)
+        position_map = {"long": 1, "short": -1}
+        if side in position_map and self.position.current_position == position_map[side]:
+            return trade_info  # Already in this position, ignore duplicate action
 
         # Get current price for calculating absolute SL/TP levels
         obs = self.observer.get_observations(return_base_ohlc=True)
         current_price = obs["base_features"][-1, 3]  # Close price
+
+        # Close opposite position if switching directions
+        if self.position.current_position != 0:
+            # We have an existing position that needs to be closed before opening new one
+            if (side == "long" and self.position.current_position == -1) or \
+               (side == "short" and self.position.current_position == 1):
+                self.trader.close_position()
+                self.position.current_position = 0
 
         if side == "long":
             # Open LONG with SL/TP bracket order
