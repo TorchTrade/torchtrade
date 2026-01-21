@@ -696,60 +696,14 @@ data = history.to_dict()
 
 See `torchtrade/envs/state.py:33-148` for implementation details.
 
----
+### Visualizing Episode History
 
-## Visualizing Episode History
+All offline environments support `render_history()` to visualize trading performance. The method automatically creates plots showing:
 
-All offline environments support **`render_history()`** to visualize episode performance after training or evaluation. The method automatically detects the environment type and renders appropriate plots.
+- **Long-only environments**: Price + actions, portfolio vs buy-and-hold (2 subplots)
+- **Futures environments**: Price + actions, portfolio vs buy-and-hold, position history (3 subplots)
 
-### Usage
-
-```python
-# After running an episode
-env.reset()
-for _ in range(episode_length):
-    action = policy(obs)
-    obs, reward, done, truncated, info = env.step(action)
-    if done or truncated:
-        break
-
-# Visualize the episode
-env.render_history()  # Display plots
-
-# Or save to a variable for later
-fig = env.render_history(return_fig=True)
-fig.savefig("episode_history.png")
-```
-
-### Visualization Types
-
-The rendered plots automatically adapt based on environment type:
-
-**Long-Only Environments** (`SeqLongOnlyEnv`, `SeqLongOnlySLTPEnv`, `LongOnlyOneStepEnv`):
-- **2 subplots**:
-  1. Price history with buy/sell actions marked
-  2. Portfolio value vs buy-and-hold benchmark
-
-**Futures Environments** (`SeqFuturesEnv`, `SeqFuturesSLTPEnv`, `FuturesOneStepEnv`):
-- **3 subplots**:
-  1. Price history with long/short actions marked
-  2. Portfolio value vs buy-and-hold benchmark
-  3. Position history (long/short/flat visualization)
-
-### Example Output
-
-<!-- TODO: Insert actual rendered plots here -->
-*Example plots will be added here showing typical visualization output for long-only and futures environments.*
-
-### Implementation Details
-
-- Automatically detects environment type by checking for `positions` in history
-- Uses matplotlib for rendering (requires `matplotlib` to be installed)
-- Buy-and-hold baseline calculated from initial portfolio value
-- All actions are marked on price chart for easy analysis
-- Works with all 6 offline environments
-
-**Note**: The `render_history()` method is inherited from `TorchTradeOfflineEnv` base class and works consistently across all offline environments. See `torchtrade/envs/offline/base.py:457-614` for implementation.
+**See [Visualization Guide](visualization.md)** for detailed usage, examples, and implementation details.
 
 ---
 
