@@ -18,7 +18,7 @@
         <link rel="prev" href="../../examples/">
       
       
-        <link rel="next" href="../online/">
+        <link rel="next" href="../visualization/">
       
       
         
@@ -1039,6 +1039,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#visualizing-episode-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Visualizing Episode History
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1120,6 +1131,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../visualization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Visualization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2010,6 +2049,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#visualizing-episode-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Visualizing Episode History
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2809,6 +2859,13 @@
 - Generate performance metrics</p>
 <p><strong>Note</strong>: History tracking is available in both offline environments (SeqLongOnlyEnv, SeqFuturesEnv, etc.) and online environments (AlpacaTorchTradingEnv, BinanceFuturesTorchTradingEnv, etc.).</p>
 <p>See <code>torchtrade/envs/state.py:33-148</code> for implementation details.</p>
+<h3 id="visualizing-episode-history">Visualizing Episode History<a class="headerlink" href="#visualizing-episode-history" title="Permanent link">&para;</a></h3>
+<p>All offline environments support <code>render_history()</code> to visualize trading performance. The method automatically creates plots showing:</p>
+<ul>
+<li><strong>Long-only environments</strong>: Price + actions, portfolio vs buy-and-hold (2 subplots)</li>
+<li><strong>Futures environments</strong>: Price + actions, portfolio vs buy-and-hold, position history (3 subplots)</li>
+</ul>
+<p><strong>See <a href="../visualization/">Visualization Guide</a></strong> for detailed usage, examples, and implementation details.</p>
 <hr />
 <h2 id="choosing-the-right-environment">Choosing the Right Environment<a class="headerlink" href="#choosing-the-right-environment" title="Permanent link">&para;</a></h2>
 <h3 id="for-beginners">For Beginners<a class="headerlink" href="#for-beginners" title="Permanent link">&para;</a></h3>
