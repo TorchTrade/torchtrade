@@ -17,6 +17,13 @@ from torchtrade.envs.binance.futures_order_executor import (
     MarginType,
 )
 from torchtrade.envs.binance.base import BinanceBaseTorchTradingEnv
+from torchtrade.envs.fractional_sizing import (
+    build_default_action_levels,
+    validate_position_sizing_mode,
+    calculate_fractional_position,
+    PositionCalculationParams,
+    round_to_step_size,
+)
 
 
 @dataclass
@@ -67,21 +74,16 @@ class BinanceFuturesTradingEnvConfig:
             self.execute_on, self.time_frames, self.window_sizes
         )
 
-        # Set default action levels based on position sizing mode
-        if self.action_levels is None:
-            if self.position_sizing_mode == "fractional":
-                # New default: fractional sizing with neutral at 0
-                self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]
-            else:
-                # Legacy mode: maintain backward compatibility
-                if self.include_hold_action:
-                    self.action_levels = [-1.0, 0.0, 1.0]  # Short, Hold, Long
-                else:
-                    self.action_levels = [-1.0, 1.0]  # Short, Long
+        # Validate and build default action levels using shared utility
+        validate_position_sizing_mode(self.position_sizing_mode)
 
-        # Validate position_sizing_mode
-        if self.position_sizing_mode not in ["fractional", "fixed"]:
-            raise ValueError(f"position_sizing_mode must be 'fractional' or 'fixed', got '{self.position_sizing_mode}'")
+        if self.action_levels is None:
+            self.action_levels = build_default_action_levels(
+                position_sizing_mode=self.position_sizing_mode,
+                include_hold_action=self.include_hold_action,
+                include_close_action=False,  # Binance futures doesn't use close action
+                allow_short=True  # Futures allow short positions
+            )
 
 
 class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):

@@ -14,6 +14,12 @@ from torchtrade.envs.offline.base import TorchTradeOfflineEnv
 from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
 from torchtrade.envs.state import FuturesHistoryTracker
 from torchtrade.envs.common import TradeMode, validate_quantity_per_trade
+from torchtrade.envs.fractional_sizing import (
+    build_default_action_levels,
+    validate_position_sizing_mode,
+    calculate_fractional_position,
+    PositionCalculationParams,
+)
 
 
 class MarginType(Enum):
@@ -84,25 +90,16 @@ class SeqFuturesEnvConfig:
 
         validate_quantity_per_trade(self.quantity_per_trade)
 
-        # Set default action levels based on position sizing mode
-        if self.action_levels is None:
-            if self.position_sizing_mode == "fractional":
-                # New default: fractional sizing with neutral at 0
-                self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]
-            else:
-                # Legacy mode: maintain backward compatibility
-                if self.include_hold_action and self.include_close_action:
-                    self.action_levels = [-1.0, 0.0, 0.5, 1.0]  # Short, Hold, Close, Long
-                elif self.include_hold_action:
-                    self.action_levels = [-1.0, 0.0, 1.0]  # Short, Hold, Long
-                elif self.include_close_action:
-                    self.action_levels = [-1.0, 0.5, 1.0]  # Short, Close, Long
-                else:
-                    self.action_levels = [-1.0, 1.0]  # Short, Long
+        # Validate and build default action levels using shared utility
+        validate_position_sizing_mode(self.position_sizing_mode)
 
-        # Validate position_sizing_mode
-        if self.position_sizing_mode not in ["fractional", "fixed"]:
-            raise ValueError(f"position_sizing_mode must be 'fractional' or 'fixed', got '{self.position_sizing_mode}'")
+        if self.action_levels is None:
+            self.action_levels = build_default_action_levels(
+                position_sizing_mode=self.position_sizing_mode,
+                include_hold_action=self.include_hold_action,
+                include_close_action=self.include_close_action,
+                allow_short=True  # Futures allow short positions
+            )
 
 
 class SeqFuturesEnv(TorchTradeOfflineEnv):
@@ -289,59 +286,24 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
     ) -> Tuple[float, float, str]:
         """Calculate position size from fractional action value.
 
-        This method converts a fractional action value in [-1.0, 1.0] to a concrete
-        position size based on available balance and configured leverage.
+        Uses shared utility function for consistent position sizing across all environments.
 
         Args:
-            action_value: Action from [-1.0, 1.0] representing fraction of balance to allocate.
-                         - Positive: long position
-                         - Negative: short position
-                         - Zero: flat/neutral (no position)
+            action_value: Action from [-1.0, 1.0] representing fraction of balance to allocate
             current_price: Current market price for position sizing calculation
 
         Returns:
-            Tuple of (position_size, notional_value, side):
-            - position_size: Quantity in base currency. Positive for long, negative for short.
-            - notional_value: Absolute value of position in quote currency (USD)
-            - side: Position direction: "long", "short", or "flat"
-
-        Examples:
-            >>> # 50% long with $10k balance, 5x leverage, $50k price
-            >>> self.balance = 10000
-            >>> self.leverage = 5
-            >>> pos, notional, side = self._calculate_fractional_position(0.5, 50000)
-            >>> # Expected: (10000 × 0.5 × 5) / 50000 = 0.5 BTC long
+            Tuple of (position_size, notional_value, side)
         """
-        # Handle neutral case
-        if action_value == 0.0:
-            return 0.0, 0.0, "flat"
-
-        # Calculate fraction and direction
-        fraction = abs(action_value)  # 0.0 to 1.0
-        direction = 1 if action_value > 0 else -1
-
-        # Allocate fraction of balance, accounting for fees
-        # Formula: margin_required + fee <= balance * fraction
-        # Where: fee = notional * fee_rate
-        #        notional = margin_required * leverage
-        # So: margin_required * (1 + leverage * fee_rate) <= balance * fraction
-        # Therefore: margin_required = (balance * fraction) / (1 + leverage * fee_rate)
-
-        capital_allocated = self.balance * fraction
-        fee_multiplier = 1 + (self.leverage * self.transaction_fee)
-        margin_required = capital_allocated / fee_multiplier
-
-        # Calculate notional value with leverage
-        notional_value = margin_required * self.leverage
-
-        # Calculate position size
-        position_qty = notional_value / current_price
-
-        # Apply direction
-        position_size = position_qty * direction
-        side = "long" if direction > 0 else "short"
-
-        return position_size, notional_value, side
+        params = PositionCalculationParams(
+            balance=self.balance,
+            action_value=action_value,
+            current_price=current_price,
+            leverage=self.leverage,
+            transaction_fee=self.transaction_fee,
+            allow_short=True
+        )
+        return calculate_fractional_position(params)
 
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""

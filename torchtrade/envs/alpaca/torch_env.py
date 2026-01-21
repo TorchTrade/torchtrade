@@ -9,6 +9,10 @@ from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass, TradeMode
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 from torchtrade.envs.alpaca.base import AlpacaBaseTorchTradingEnv
+from torchtrade.envs.fractional_sizing import (
+    build_default_action_levels,
+    validate_position_sizing_mode,
+)
 
 @dataclass
 class AlpacaTradingEnvConfig:
@@ -40,17 +44,21 @@ class AlpacaTradingEnvConfig:
             self.execute_on, self.time_frames, self.window_sizes
         )
 
-        # Set default action levels if not provided
+        # Validate and build default action levels using shared utility
+        validate_position_sizing_mode(self.position_sizing_mode)
+
         if self.action_levels is None:
+            # Note: For Alpaca long-only, we use the same defaults as offline but only use non-negative
+            # The legacy fixed mode still uses [-1, 0, 1] for backward compatibility
             if self.position_sizing_mode == "fractional":
-                # New default: fractional sizing with neutral at 0
-                # Long-only: only non-negative actions
-                self.action_levels = [0.0, 0.5, 1.0]  # 0% = cash, 50% = half invested, 100% = all-in
+                self.action_levels = [0.0, 0.5, 1.0]  # Long-only fractional
             else:
-                # Legacy mode: maintain backward compatibility
-                self.action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Hold, Buy-all
-                if not self.include_hold_action:
-                    self.action_levels = [level for level in self.action_levels if level != 0.0]
+                self.action_levels = build_default_action_levels(
+                    position_sizing_mode=self.position_sizing_mode,
+                    include_hold_action=self.include_hold_action,
+                    include_close_action=False,
+                    allow_short=False
+                )
 
 class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
     """

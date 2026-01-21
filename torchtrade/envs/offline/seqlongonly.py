@@ -11,6 +11,12 @@ import pandas as pd
 
 from torchtrade.envs.offline.base import TorchTradeOfflineEnv
 from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
+from torchtrade.envs.fractional_sizing import (
+    build_default_action_levels,
+    validate_position_sizing_mode,
+    calculate_fractional_position,
+    PositionCalculationParams,
+)
 
 @dataclass
 class SeqLongOnlyEnvConfig:
@@ -42,21 +48,16 @@ class SeqLongOnlyEnvConfig:
             self.execute_on, self.time_frames, self.window_sizes
         )
 
-        # Set default action levels based on position sizing mode
-        if self.action_levels is None:
-            if self.position_sizing_mode == "fractional":
-                # New default: fractional sizing with neutral at 0
-                self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]
-            else:
-                # Legacy mode: maintain backward compatibility
-                if self.include_hold_action:
-                    self.action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Hold, Buy-all
-                else:
-                    self.action_levels = [-1.0, 1.0]  # Sell-all, Buy-all
+        # Validate and build default action levels using shared utility
+        validate_position_sizing_mode(self.position_sizing_mode)
 
-        # Validate position_sizing_mode
-        if self.position_sizing_mode not in ["fractional", "fixed"]:
-            raise ValueError(f"position_sizing_mode must be 'fractional' or 'fixed', got '{self.position_sizing_mode}'")
+        if self.action_levels is None:
+            self.action_levels = build_default_action_levels(
+                position_sizing_mode=self.position_sizing_mode,
+                include_hold_action=self.include_hold_action,
+                include_close_action=False,  # Long-only doesn't use close action
+                allow_short=False  # Long-only environment
+            )
 
 class SeqLongOnlyEnv(TorchTradeOfflineEnv):
     """Sequential long-only trading environment for backtesting.
@@ -199,56 +200,35 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
     ) -> Tuple[float, float, str]:
         """Calculate position size from fractional action value for long-only env.
 
-        For long-only environments:
-        - Positive actions allocate cash to long positions
-        - Negative actions reduce positions (sell)
-        - Zero closes all positions (go to cash)
+        Uses shared utility function for consistent position sizing.
+        For long-only: negative actions are handled as sells in _execute_fractional_action.
 
         Args:
-            action_value: Action from [-1.0, 1.0] representing allocation
-                         - Positive: fraction of cash to allocate to long
-                         - Negative: fraction of position to sell
-                         - Zero: close all (go to cash)
+            action_value: Action from [-1.0, 1.0]
             current_price: Current market price
 
         Returns:
-            Tuple of (position_size, notional_value, side):
-            - position_size: Quantity in base currency (always >= 0 for long-only)
-            - notional_value: Value in quote currency (USD)
-            - side: "buy", "sell", or "flat"
+            Tuple of (position_size, notional_value, side)
         """
-        # Handle neutral case
-        if action_value == 0.0:
-            return 0.0, 0.0, "flat"
+        # For long-only, we only use the shared utility for positive actions
+        # Negative actions are handled as position reductions in execution logic
+        if action_value <= 0:
+            return 0.0, 0.0, "flat" if action_value == 0 else "sell"
 
-        if action_value > 0:
-            # Buy: allocate fraction of cash, accounting for fees
-            # Formula: cost + fee = balance * fraction
-            # Where: fee = cost * fee_rate
-            # So: cost * (1 + fee_rate) = balance * fraction
-            # Therefore: cost = (balance * fraction) / (1 + fee_rate)
+        params = PositionCalculationParams(
+            balance=self.balance,
+            action_value=action_value,
+            current_price=current_price,
+            leverage=1,  # Long-only has no leverage
+            transaction_fee=self.transaction_fee,
+            allow_short=False
+        )
+        position_size, notional_value, side = calculate_fractional_position(params)
 
-            fraction = abs(action_value)
-            capital_allocated = self.balance * fraction
-            fee_multiplier = 1 + self.transaction_fee
-            capital_after_fee = capital_allocated / fee_multiplier
+        # For long-only, convert "long" to "buy" for clarity
+        side = "buy" if side == "long" else side
 
-            # Calculate position size (no leverage for spot trading)
-            position_qty = capital_after_fee / current_price
-
-            return position_qty, capital_after_fee, "buy"
-
-        else:
-            # Sell: reduce position by fraction
-            # For now, simplified: negative action = sell all
-            # (Could be extended to partial sells in the future)
-            if self.position.position_size > 0:
-                position_qty = 0.0  # Target flat
-                notional_value = self.position.position_size * current_price
-                return position_qty, notional_value, "sell"
-            else:
-                # No position to sell
-                return 0.0, 0.0, "flat"
+        return position_size, notional_value, side
 
     def _execute_trade_if_needed(self, desired_position: float, base_price: float = None) -> Dict:
         """Execute trade if position change is needed.
