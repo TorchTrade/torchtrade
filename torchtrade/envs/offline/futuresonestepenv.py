@@ -95,6 +95,7 @@ class FuturesOneStepEnvConfig:
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
     include_hold_action: bool = True  # Include HOLD action (index 0) in action space
+    include_close_action: bool = True  # Include CLOSE action to exit positions (default: enabled)
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
@@ -172,6 +173,7 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
             self.stoploss_levels,
             self.takeprofit_levels,
             include_hold_action=config.include_hold_action,
+            include_close_action=config.include_close_action,
             include_short_positions=True
         )
         self.action_spec = Categorical(len(self.action_map))
@@ -467,17 +469,24 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
 
         # Record step history
         trade_action = 0
+        action_type = "hold"  # Default
         if trade_info["executed"]:
             if trade_info["side"] == "long":
                 trade_action = 1
+                action_type = "long"
             elif trade_info["side"] == "short":
                 trade_action = -1
+                action_type = "short"
+            elif trade_info["side"] == "close":
+                trade_action = 0
+                action_type = "close"
         self.history.record_step(
             price=cached_price,
             action=trade_action,
             reward=reward,
             portfolio_value=old_portfolio_value,
-            position=self.position.position_size
+            position=self.position.position_size,
+            action_type=action_type
         )
 
         next_tensordict.set("reward", reward)
@@ -661,6 +670,19 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
             logger.debug("Hold action - no trade")
             return trade_info
 
+        # CLOSE action - exit current position
+        if side == "close":
+            if self.position.current_position == 0:
+                logger.debug("CLOSE ignored - already in cash")
+                return trade_info
+
+            # Get base price
+            if base_price is None:
+                base_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+
+            # Close position at current price
+            return self._trigger_close(trade_info, base_price)
+
         # Check if already in same position (ignore duplicate actions)
         position_map = {"long": 1, "short": -1}
         if side in position_map and self.position.current_position == position_map[side]:
@@ -771,6 +793,104 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
             action_history=self.history.actions,
             periods_per_year=periods_per_year,
         )
+
+    def render_history(self, return_fig=False):
+        """Render the trading history with action markers.
+
+        Visualizes price history, actions (long/short/close), portfolio value,
+        and position history over the episode.
+
+        Args:
+            return_fig: If True, return the figure instead of showing it
+        """
+        import matplotlib.pyplot as plt
+
+        history_dict = self.history.to_dict()
+        price_history = history_dict['base_prices']
+        time_indices = list(range(len(price_history)))
+        portfolio_value_history = history_dict['portfolio_values']
+        position_history = history_dict['positions']
+        action_types = history_dict.get('action_types', [])
+
+        # Calculate buy-and-hold balance
+        initial_balance = portfolio_value_history[0] if portfolio_value_history else self.initial_portfolio_value
+        initial_price = price_history[0] if price_history else 0
+        units_held = initial_balance / initial_price if initial_price > 0 else 0
+        buy_and_hold_balance = [units_held * price for price in price_history]
+
+        # Create subplots
+        fig, axes = plt.subplots(
+            3, 1, figsize=(12, 10), sharex=True,
+            gridspec_kw={'height_ratios': [3, 2, 1]}
+        )
+        ax1, ax2, ax3 = axes
+
+        # Plot price history
+        ax1.plot(
+            time_indices, price_history,
+            label='Price History', color='blue', linewidth=1.5
+        )
+
+        # Plot action markers using action_types
+        if action_types:
+            long_indices = [i for i, atype in enumerate(action_types) if atype == "long"]
+            short_indices = [i for i, atype in enumerate(action_types) if atype == "short"]
+            close_indices = [i for i, atype in enumerate(action_types) if atype == "close"]
+
+            long_prices = [price_history[i] for i in long_indices]
+            short_prices = [price_history[i] for i in short_indices]
+            close_prices = [price_history[i] for i in close_indices]
+
+            ax1.scatter(
+                long_indices, long_prices,
+                marker='^', color='green', s=100, label='Long', zorder=5
+            )
+            ax1.scatter(
+                short_indices, short_prices,
+                marker='v', color='red', s=100, label='Short', zorder=5
+            )
+            ax1.scatter(
+                close_indices, close_prices,
+                marker='x', color='blue', s=150, linewidths=3, label='Close', zorder=6
+            )
+
+        ax1.set_ylabel('Price (USD)')
+        ax1.set_title('Price History with Actions')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+        # Plot portfolio value
+        ax2.plot(
+            time_indices, portfolio_value_history,
+            label='Portfolio Value', color='purple', linewidth=1.5
+        )
+        ax2.plot(
+            time_indices, buy_and_hold_balance,
+            label='Buy & Hold', color='orange', linestyle='--', linewidth=1.5
+        )
+        ax2.set_ylabel('Portfolio Value (USD)')
+        ax2.set_title('Portfolio Value vs Buy & Hold')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+
+        # Plot position history
+        ax3.plot(
+            time_indices, position_history,
+            label='Position Size', color='green', linewidth=1.5
+        )
+        ax3.axhline(y=0, color='black', linestyle='--', linewidth=0.8)
+        ax3.set_xlabel('Time Step')
+        ax3.set_ylabel('Position Size')
+        ax3.set_title('Position History (Positive=Long, Negative=Short)')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        if return_fig:
+            return fig
+        else:
+            plt.show()
 
 
 if __name__ == "__main__":

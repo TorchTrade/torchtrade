@@ -80,6 +80,7 @@ class SeqFuturesSLTPEnvConfig:
     reward_scaling: float = 1.0
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     include_hold_action: bool = True  # Include HOLD action (index 0) in action space
+    include_close_action: bool = True  # Include CLOSE action to exit positions (default: enabled)
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
@@ -166,6 +167,7 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
             self.stoploss_levels,
             self.takeprofit_levels,
             include_hold_action=config.include_hold_action,
+            include_close_action=config.include_close_action,
             include_short_positions=True
         )
         # PERF: Convert action_map to tuple for O(1) indexed lookup (faster than dict hashing)
@@ -524,11 +526,17 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
 
         # Record history
         trade_action = 0
+        action_type = "hold"  # Default
         if trade_info["executed"]:
             if trade_info["side"] == "long":
                 trade_action = 1
+                action_type = "long"
             elif trade_info["side"] == "short":
                 trade_action = -1
+                action_type = "short"
+            elif trade_info["side"] == "close":
+                trade_action = 0
+                action_type = "close"
 
         # Get updated state
         next_tensordict = self._get_observation()
@@ -549,7 +557,8 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
             action=trade_action,
             reward=reward,
             portfolio_value=old_portfolio_value,
-            position=self.position.position_size
+            position=self.position.position_size,
+            action_type=action_type
         )
 
         # Check termination
@@ -648,13 +657,15 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         price_noise = np.random.uniform(1 - self.slippage, 1 + self.slippage)
 
         if side is None:
-            # Hold or close action
-            if self.position.position_size != 0:
-                # Close existing position
-                trade_info = self._close_position(current_price, price_noise)
-            # Update hold counter if still holding
+            # Hold action - do nothing
             if self.position.position_size != 0:
                 self.position.hold_counter += 1
+            return trade_info
+
+        if side == "close":
+            # Close action - explicitly exit position
+            if self.position.position_size != 0:
+                trade_info = self._close_position(current_price, price_noise)
             return trade_info
 
         # Opening a new position
@@ -868,20 +879,44 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
             label='Price History', color='blue', linewidth=1.5
         )
 
-        # Plot buy/sell actions
-        long_indices = [i for i, action in enumerate(action_history) if action == 1]
-        long_prices = [price_history[i] for i in long_indices]
-        short_indices = [i for i, action in enumerate(action_history) if action == -1]
-        short_prices = [price_history[i] for i in short_indices]
+        # Plot buy/sell actions using action_types if available
+        action_types = history_dict.get('action_types', [])
+        if action_types:
+            long_indices = [i for i, atype in enumerate(action_types) if atype == "long"]
+            short_indices = [i for i, atype in enumerate(action_types) if atype == "short"]
+            close_indices = [i for i, atype in enumerate(action_types) if atype == "close"]
 
-        ax1.scatter(
-            long_indices, long_prices,
-            marker='^', color='green', s=80, label='Long', zorder=5
-        )
-        ax1.scatter(
-            short_indices, short_prices,
-            marker='v', color='red', s=80, label='Short', zorder=5
-        )
+            long_prices = [price_history[i] for i in long_indices]
+            short_prices = [price_history[i] for i in short_indices]
+            close_prices = [price_history[i] for i in close_indices]
+
+            ax1.scatter(
+                long_indices, long_prices,
+                marker='^', color='green', s=100, label='Long', zorder=5
+            )
+            ax1.scatter(
+                short_indices, short_prices,
+                marker='v', color='red', s=100, label='Short', zorder=5
+            )
+            ax1.scatter(
+                close_indices, close_prices,
+                marker='x', color='blue', s=150, linewidths=3, label='Close', zorder=6
+            )
+        else:
+            # Fallback to old action_history based visualization
+            long_indices = [i for i, action in enumerate(action_history) if action == 1]
+            long_prices = [price_history[i] for i in long_indices]
+            short_indices = [i for i, action in enumerate(action_history) if action == -1]
+            short_prices = [price_history[i] for i in short_indices]
+
+            ax1.scatter(
+                long_indices, long_prices,
+                marker='^', color='green', s=80, label='Long', zorder=5
+            )
+            ax1.scatter(
+                short_indices, short_prices,
+                marker='v', color='red', s=80, label='Short', zorder=5
+            )
 
         ax1.set_ylabel('Price (USD)')
         ax1.set_title('Price History with Long/Short Actions')

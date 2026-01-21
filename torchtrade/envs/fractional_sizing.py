@@ -64,21 +64,17 @@ def calculate_fractional_position(params: PositionCalculationParams) -> Tuple[fl
     # Allocate fraction of balance
     capital_allocated = params.balance * fraction
 
-    # Account for fees in margin calculation (for futures)
-    if params.leverage > 1:
-        # Fee is charged on notional value
-        # We need to reserve: margin + fee
-        # margin = notional / leverage
-        # fee = notional × fee_rate
-        # total = notional / leverage + notional × fee_rate
-        # total = notional × (1/leverage + fee_rate)
-        # notional = total / (1/leverage + fee_rate)
-        fee_multiplier = 1 + (params.leverage * params.transaction_fee)
-        margin_required = capital_allocated / fee_multiplier
-        notional_value = margin_required * params.leverage
-    else:
-        # For spot/long-only, simpler calculation
-        notional_value = capital_allocated * params.leverage
+    # Account for fees in margin calculation
+    # Fee is charged on notional value
+    # We need to reserve: margin + fee
+    # margin = notional / leverage
+    # fee = notional × fee_rate
+    # total = notional / leverage + notional × fee_rate
+    # total = notional × (1/leverage + fee_rate)
+    # notional = total / (1/leverage + fee_rate)
+    fee_multiplier = 1 + (params.leverage * params.transaction_fee)
+    margin_required = capital_allocated / fee_multiplier
+    notional_value = margin_required * params.leverage
 
     # Convert to position size
     position_qty = notional_value / params.current_price

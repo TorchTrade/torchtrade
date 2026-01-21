@@ -47,6 +47,7 @@ class LongOnlyOneStepEnvConfig:
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
     include_hold_action: bool = True  # Include HOLD action (index 0) in action space
+    include_close_action: bool = True  # Include CLOSE action to exit positions (default: enabled)
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
@@ -84,6 +85,7 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
             self.stoploss_levels,
             self.takeprofit_levels,
             include_hold_action=config.include_hold_action,
+            include_close_action=config.include_close_action,
             include_short_positions=False
         )
         self.action_spec = Categorical(len(self.action_map))
@@ -294,6 +296,46 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
         if action_tuple == (None, None):
             # No action
             logger.debug("No action")
+            return trade_info
+
+        # CLOSE action - exit current position
+        if action_tuple == ("close", None):
+            if self.position.current_position == 0:
+                logger.debug("CLOSE ignored - already in cash")
+                return trade_info
+
+            # Get base price
+            if base_price is None:
+                base_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+
+            # Sell position at current price
+            position_value = self.position.position_size * base_price
+            fee_paid = position_value * self.transaction_fee
+            effective_amount = position_value - fee_paid
+
+            # Update balance
+            self.balance += effective_amount
+
+            # Reset position
+            self.position.position_size = 0.0
+            self.position.entry_price = 0.0
+            self.position.hold_counter = 0
+            self.position.position_value = 0.0
+            self.position.unrealized_pnlpc = 0.0
+            self.position.current_position = 0.0
+            self.stop_loss = 0.0
+            self.take_profit = 0.0
+
+            logger.debug(f"CLOSE: Sold position for {effective_amount:.2f} (fee: {fee_paid:.2f})")
+
+            trade_info.update({
+                "executed": True,
+                "amount": effective_amount,
+                "side": "close",
+                "success": True,
+                "fee_paid": fee_paid
+            })
+
             return trade_info
 
         # Check if already long (ignore duplicate long actions)

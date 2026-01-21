@@ -35,6 +35,7 @@ class SeqLongOnlySLTPEnvConfig:
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
     include_hold_action: bool = True  # Include HOLD action (index 0) in action space
+    include_close_action: bool = True  # Include CLOSE action to exit positions (default: enabled)
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
@@ -69,6 +70,7 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
             self.stoploss_levels,
             self.takeprofit_levels,
             include_hold_action=config.include_hold_action,
+            include_close_action=config.include_close_action,
             include_short_positions=False
         )
         self.action_spec = Categorical(len(self.action_map))
@@ -210,16 +212,27 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
             elif close_price > self.take_profit:
                 return self.trigger_sell(trade_info, close_price)
 
-        # If holding position or no change in position, do nothing
-        if self.position.current_position == 1 or action_tuple == (None, None):
-            # Compute unrealized PnL, add hold counter update last_portfolio_value
+        # CLOSE action - explicitly exit position
+        if action_tuple == ("close", None):
             if self.position.position_size > 0:
-                self.position.hold_counter += 1
-
+                close_price = ohlcv_base_values["close"]
+                trade_info = self.trigger_sell(trade_info, close_price)
             return trade_info
 
-        # Determine trade details
-        if self.position.position_size == 0 and self.position.current_position == 0 and action_tuple != (None, None):
+        # HOLD action - do nothing
+        if action_tuple == (None, None):
+            if self.position.position_size > 0:
+                self.position.hold_counter += 1
+            return trade_info
+
+        # If already in position, do nothing (ignore duplicate long actions)
+        if self.position.current_position == 1:
+            if self.position.position_size > 0:
+                self.position.hold_counter += 1
+            return trade_info
+
+        # Determine trade details - open new position
+        if self.position.position_size == 0 and self.position.current_position == 0:
             side = "buy"
             amount = self._calculate_trade_amount(side)
 
