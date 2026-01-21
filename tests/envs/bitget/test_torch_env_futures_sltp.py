@@ -431,3 +431,174 @@ class TestBitgetFuturesSLTPTorchTradingEnvIntegration:
         action_td = TensorDict({"action": torch.tensor(0)}, batch_size=())
         next_td = env.step(action_td)
         assert "reward" in next_td["next"].keys()
+
+
+class TestDuplicateActionPrevention:
+    """Test duplicate action prevention and position switch logic (PR #XXX)."""
+
+    @pytest.fixture
+    def env_with_mocks(self):
+        """Create environment for duplicate action testing."""
+        from torchtrade.envs.bitget.torch_env_futures_sltp import (
+            BitgetFuturesSLTPTorchTradingEnv,
+            BitgetFuturesSLTPTradingEnvConfig,
+        )
+
+        mock_observer = MagicMock()
+        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
+
+        def mock_get_observations(return_base_ohlc=False):
+            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
+            if return_base_ohlc:
+                obs["base_features"] = np.array(
+                    [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
+                )
+            return obs
+
+        mock_observer.get_observations = MagicMock(side_effect=mock_get_observations)
+        mock_observer.intervals = ["1m"]
+        mock_observer.window_sizes = [10]
+
+        mock_trader = MagicMock()
+        mock_trader.cancel_open_orders = MagicMock(return_value=True)
+        mock_trader.close_position = MagicMock(return_value=True)
+        mock_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0,
+            "available_balance": 900.0,
+            "total_margin_balance": 1000.0,
+        })
+        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
+        mock_trader.get_status = MagicMock(return_value={"position_status": None})
+        mock_trader.trade = MagicMock(return_value=True)
+
+        config = BitgetFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_short_positions=True,
+        )
+
+        with patch("time.sleep"):
+            with patch.object(BitgetFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+                env = BitgetFuturesSLTPTorchTradingEnv(
+                    config=config,
+                    observer=mock_observer,
+                    trader=mock_trader,
+                )
+                return env, mock_trader
+
+    def test_long_to_long_ignored(self, env_with_mocks):
+        """Test that Long → Long duplicate action is ignored."""
+        env, mock_trader = env_with_mocks
+        env.reset()
+        mock_trader.reset_mock()
+
+        # Open a long position (action 1 = long)
+        env.position.current_position = 1
+
+        # Try to open another long
+        action_tuple = ("long", -0.02, 0.03)
+        trade_info = env._execute_trade_if_needed(action_tuple)
+
+        # Trade should NOT be executed (duplicate action)
+        assert trade_info["executed"] is False
+        mock_trader.trade.assert_not_called()
+        mock_trader.close_position.assert_not_called()
+
+    def test_short_to_short_ignored(self, env_with_mocks):
+        """Test that Short → Short duplicate action is ignored."""
+        env, mock_trader = env_with_mocks
+        env.reset()
+        mock_trader.reset_mock()
+
+        # Open a short position
+        env.position.current_position = -1
+
+        # Try to open another short
+        action_tuple = ("short", 0.03, -0.02)
+        trade_info = env._execute_trade_if_needed(action_tuple)
+
+        # Trade should NOT be executed (duplicate action)
+        assert trade_info["executed"] is False
+        mock_trader.trade.assert_not_called()
+        mock_trader.close_position.assert_not_called()
+
+    def test_long_to_short_switches_position(self, env_with_mocks):
+        """Test that Long → Short switches position (closes long, opens short)."""
+        env, mock_trader = env_with_mocks
+        env.reset()
+        mock_trader.reset_mock()
+
+        # Start with long position
+        env.position.current_position = 1
+
+        # Switch to short
+        action_tuple = ("short", 0.03, -0.02)
+        trade_info = env._execute_trade_if_needed(action_tuple)
+
+        # Should close existing position
+        mock_trader.close_position.assert_called_once()
+        # Should open new short position
+        mock_trader.trade.assert_called_once()
+        call_kwargs = mock_trader.trade.call_args.kwargs
+        assert call_kwargs["side"] == "sell"
+
+    def test_short_to_long_switches_position(self, env_with_mocks):
+        """Test that Short → Long switches position (closes short, opens long)."""
+        env, mock_trader = env_with_mocks
+        env.reset()
+        mock_trader.reset_mock()
+
+        # Start with short position
+        env.position.current_position = -1
+
+        # Switch to long
+        action_tuple = ("long", -0.02, 0.03)
+        trade_info = env._execute_trade_if_needed(action_tuple)
+
+        # Should close existing position
+        mock_trader.close_position.assert_called_once()
+        # Should open new long position
+        mock_trader.trade.assert_called_once()
+        call_kwargs = mock_trader.trade.call_args.kwargs
+        assert call_kwargs["side"] == "buy"
+
+    def test_hold_action_with_no_position(self, env_with_mocks):
+        """Test that HOLD action does nothing when no position."""
+        env, mock_trader = env_with_mocks
+        env.reset()
+        mock_trader.reset_mock()
+
+        # No position
+        env.position.current_position = 0
+
+        # HOLD action
+        action_tuple = (None, None, None)
+        trade_info = env._execute_trade_if_needed(action_tuple)
+
+        # Should not execute any trade
+        assert trade_info["executed"] is False
+        mock_trader.trade.assert_not_called()
+        mock_trader.close_position.assert_not_called()
+
+    def test_hold_action_maintains_position(self, env_with_mocks):
+        """Test that HOLD action maintains existing position."""
+        env, mock_trader = env_with_mocks
+        env.reset()
+        mock_trader.reset_mock()
+
+        # Start with long position
+        env.position.current_position = 1
+
+        # HOLD action
+        action_tuple = (None, None, None)
+        trade_info = env._execute_trade_if_needed(action_tuple)
+
+        # Should not execute any trade or close position
+        assert trade_info["executed"] is False
+        mock_trader.trade.assert_not_called()
+        mock_trader.close_position.assert_not_called()
+        # Position should remain unchanged
+        assert env.position.current_position == 1
