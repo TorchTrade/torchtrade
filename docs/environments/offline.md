@@ -696,6 +696,15 @@ data = history.to_dict()
 
 See `torchtrade/envs/state.py:33-148` for implementation details.
 
+### Visualizing Episode History
+
+All offline environments support `render_history()` to visualize trading performance. The method automatically creates plots showing:
+
+- **Long-only environments**: Price + actions, portfolio vs buy-and-hold (2 subplots)
+- **Futures environments**: Price + actions, portfolio vs buy-and-hold, position history (3 subplots)
+
+**See [Visualization Guide](visualization.md)** for detailed usage, examples, and implementation details.
+
 ---
 
 ## Choosing the Right Environment
