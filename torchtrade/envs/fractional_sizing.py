@@ -15,6 +15,12 @@ class PositionCalculationParams:
     allow_short: bool = True
 
 
+# Position tolerance constants
+# Used to determine if a position is already close enough to target
+POSITION_TOLERANCE_PCT = 0.001  # 0.1% - relative tolerance as fraction of target position
+POSITION_TOLERANCE_ABS = 0.0001  # Absolute minimum tolerance for very small positions
+
+
 def calculate_fractional_position(params: PositionCalculationParams) -> Tuple[float, float, str]:
     """Calculate position size from fractional action value.
 

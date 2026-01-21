@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Callable
+import logging
 
 import torch
+
+logger = logging.getLogger(__name__)
 from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
@@ -241,6 +244,12 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
     ) -> tuple[float, float]:
         """Calculate target position value from fractional action.
 
+        Note: Alpaca uses a portfolio allocation model that differs from the shared
+        fractional_sizing utility. The shared utility is designed for balance allocation
+        with leverage (action represents fraction of balance for new position), while
+        Alpaca uses portfolio allocation (action represents target % of total portfolio).
+        This is more appropriate for spot long-only trading without leverage.
+
         Args:
             action_value: Action from [0.0, 1.0] representing fraction to invest
             current_price: Current market price
@@ -262,6 +271,11 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
 
         # Total portfolio value
         total_portfolio = cash + current_position_value
+
+        # Validate portfolio value
+        if total_portfolio <= 0:
+            logger.warning("No portfolio value available for fractional position sizing")
+            return 0.0, 0.0
 
         # Target position value based on action
         target_position_value = total_portfolio * action_value

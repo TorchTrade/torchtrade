@@ -299,8 +299,16 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
 
         return self._execute_market_order("SELL", self.config.quantity_per_trade)
 
+    # Exchange metadata helpers
+    # Note: These methods are Binance-specific (query Binance API structures and parse Binance filter formats).
+    # Other exchanges would need similar methods but with different implementations for their API structures.
+    # Not extracted to base class due to exchange-specific implementation details.
+
     def _get_symbol_info(self) -> Dict:
-        """Get exchange symbol information for precision and lot size."""
+        """Get exchange symbol information for precision and lot size.
+
+        Binance-specific implementation that queries futures_exchange_info() API.
+        """
         try:
             exchange_info = self.trader.client.futures_exchange_info()
             for symbol in exchange_info['symbols']:
@@ -333,13 +341,6 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
                 return float(filter_item.get('notional', 100))
         return 100.0  # Default fallback
 
-    def _round_to_step_size(self, quantity: float) -> float:
-        """Round quantity to exchange step size."""
-        step_size = self._get_step_size()
-        if step_size == 0:
-            return quantity
-        return round(quantity / step_size) * step_size
-
     def _calculate_fractional_position(
         self,
         action_value: float,
@@ -347,8 +348,8 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
     ) -> tuple[float, float, str]:
         """Calculate position size from fractional action value for live trading.
 
-        This implementation queries actual balance from exchange and accounts
-        for exchange rounding constraints.
+        Uses shared utility function for consistent position sizing across all environments.
+        Applies exchange-specific validation and rounding constraints.
 
         Args:
             action_value: Action from [-1.0, 1.0] representing fraction of balance
@@ -372,34 +373,32 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             logger.warning("No available balance for fractional position sizing")
             return 0.0, 0.0, "flat"
 
-        # Calculate fraction and direction
-        fraction = abs(action_value)
-        direction = 1 if action_value > 0 else -1
-
-        # Allocate fraction of balance, accounting for fees
-        capital_allocated = available_balance * fraction
+        # Use shared utility for core position calculation
         fee_rate = 0.0004  # Binance futures maker/taker fee
-        fee_multiplier = 1 + (self.config.leverage * fee_rate)
-        margin_required = capital_allocated / fee_multiplier
+        params = PositionCalculationParams(
+            balance=available_balance,
+            action_value=action_value,
+            current_price=current_price,
+            leverage=self.config.leverage,
+            transaction_fee=fee_rate,
+            allow_short=True
+        )
+        position_size, notional_value, side = calculate_fractional_position(params)
 
-        # Calculate notional value with leverage
-        notional_value = margin_required * self.config.leverage
-
+        # Apply exchange-specific validation
         # Check minimum notional
         min_notional = self._get_min_notional()
         if notional_value < min_notional:
             logger.warning(f"Notional {notional_value} below minimum {min_notional}")
             return 0.0, 0.0, "flat"
 
-        # Calculate position size
-        position_qty = notional_value / current_price
-
         # Round to exchange step size
-        position_qty = self._round_to_step_size(position_qty)
+        position_qty = abs(position_size)
+        position_qty = round_to_step_size(position_qty, self._get_step_size())
 
         # Apply direction
+        direction = 1 if position_size > 0 else -1
         position_size = position_qty * direction
-        side = "long" if direction > 0 else "short"
 
         return position_size, notional_value, side
 
@@ -447,7 +446,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             return self._create_trade_info(executed=False)  # Already close enough
 
         # 7. Round delta to step size
-        delta = self._round_to_step_size(delta)
+        delta = round_to_step_size(delta, self._get_step_size())
 
         # 8. Determine trade direction and execute
         if (current_qty > 0 and target_qty < 0) or (current_qty < 0 and target_qty > 0):

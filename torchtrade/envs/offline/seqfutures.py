@@ -19,6 +19,8 @@ from torchtrade.envs.fractional_sizing import (
     validate_position_sizing_mode,
     calculate_fractional_position,
     PositionCalculationParams,
+    POSITION_TOLERANCE_PCT,
+    POSITION_TOLERANCE_ABS,
 )
 
 
@@ -305,6 +307,19 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         )
         return calculate_fractional_position(params)
 
+    def _is_direction_switch(self, current_position: float, target_position: float) -> bool:
+        """Check if switching from long to short or vice versa.
+
+        Args:
+            current_position: Current position size (positive=long, negative=short)
+            target_position: Target position size (positive=long, negative=short)
+
+        Returns:
+            True if switching directions, False otherwise
+        """
+        return (current_position > 0 and target_position < 0) or \
+               (current_position < 0 and target_position > 0)
+
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
         # Get market data (scaffold sets current_timestamp, truncated, and caches base features)
@@ -573,8 +588,8 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
             self._calculate_fractional_position(action_value, execution_price)
         )
 
-        # Tolerance for position comparison (0.1% of target position, or absolute 0.0001 for very small positions)
-        tolerance = max(abs(target_position_size) * 0.001, 0.0001)
+        # Tolerance for position comparison (0.1% of target position, or absolute minimum for very small positions)
+        tolerance = max(abs(target_position_size) * POSITION_TOLERANCE_PCT, POSITION_TOLERANCE_ABS)
 
         # If target matches current position, do nothing (implicit HOLD)
         if abs(target_position_size - self.position.position_size) < tolerance:
@@ -596,8 +611,7 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
                 target_side, target_position_size, target_notional, execution_price
             )
 
-        elif (self.position.position_size > 0 and target_position_size < 0) or \
-             (self.position.position_size < 0 and target_position_size > 0):
+        elif self._is_direction_switch(self.position.position_size, target_position_size):
             # Direction switch: close current, open opposite
             self._close_position(execution_price, 1.0)
             # Recalculate target position after closing (balance may have changed)
@@ -702,7 +716,7 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         delta_position = target_position_size - self.position.position_size
         delta_notional = abs(delta_position * execution_price)
 
-        if abs(delta_position) < 0.0001:  # Negligible difference
+        if abs(delta_position) < POSITION_TOLERANCE_ABS:  # Negligible difference
             trade_info["executed"] = False
             return trade_info
 

@@ -16,6 +16,8 @@ from torchtrade.envs.fractional_sizing import (
     validate_position_sizing_mode,
     calculate_fractional_position,
     PositionCalculationParams,
+    POSITION_TOLERANCE_PCT,
+    POSITION_TOLERANCE_ABS,
 )
 
 @dataclass
@@ -331,8 +333,8 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
             self._calculate_fractional_position(action_value, execution_price)
         )
 
-        # Tolerance for position comparison (0.1% of target position, or absolute 0.0001 for very small positions)
-        tolerance = max(abs(target_position_size) * 0.001, 0.0001)
+        # Tolerance for position comparison (0.1% of target position, or absolute minimum for very small positions)
+        tolerance = max(abs(target_position_size) * POSITION_TOLERANCE_PCT, POSITION_TOLERANCE_ABS)
 
         # If target matches current position, do nothing (implicit HOLD)
         if abs(target_position_size - self.position.position_size) < tolerance:

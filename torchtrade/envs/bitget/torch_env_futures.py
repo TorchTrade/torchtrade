@@ -17,6 +17,9 @@ from torchtrade.envs.bitget.base import BitgetBaseTorchTradingEnv
 from torchtrade.envs.fractional_sizing import (
     build_default_action_levels,
     validate_position_sizing_mode,
+    calculate_fractional_position,
+    PositionCalculationParams,
+    round_to_step_size,
 )
 
 
@@ -292,33 +295,46 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
 
         return self._execute_market_order("sell", self.config.quantity_per_trade)
 
-    def _calculate_fractional_position(self, action_value: float, current_price: float) -> float:
+    def _calculate_fractional_position(self, action_value: float, current_price: float) -> tuple[float, float, str]:
         """Calculate target position size from fractional action.
+
+        Uses shared utility function for consistent position sizing across all environments.
+        This fixes the fee calculation bug in the previous implementation.
 
         Args:
             action_value: Action from [-1.0, 1.0] representing fraction of balance
             current_price: Current market price
 
         Returns:
-            target_qty: Target position quantity (positive=long, negative=short, 0=flat)
+            Tuple of (position_size, notional_value, side):
+            - position_size: Target position quantity (positive=long, negative=short, 0=flat)
+            - notional_value: Absolute value in quote currency
+            - side: "long", "short", or "flat"
         """
         if action_value == 0.0:
-            return 0.0
+            return 0.0, 0.0, "flat"
 
         # Get actual balance from exchange
         balance_info = self.trader.get_account_balance()
         available_balance = balance_info.get('available_balance', 0.0)
 
-        # Calculate fraction and direction
-        fraction = abs(action_value)
-        direction = 1 if action_value > 0 else -1
+        if available_balance <= 0:
+            logger.warning("No available balance for fractional position sizing")
+            return 0.0, 0.0, "flat"
 
-        # Calculate position size with leverage
-        capital_allocated = available_balance * fraction
-        notional_value = capital_allocated * self.config.leverage
-        target_qty = (notional_value / current_price) * direction
+        # Use shared utility for core position calculation
+        fee_rate = 0.0002  # Bitget futures maker/taker fee
+        params = PositionCalculationParams(
+            balance=available_balance,
+            action_value=action_value,
+            current_price=current_price,
+            leverage=self.config.leverage,
+            transaction_fee=fee_rate,
+            allow_short=True
+        )
+        position_size, notional_value, side = calculate_fractional_position(params)
 
-        return target_qty
+        return position_size, notional_value, side
 
     def _execute_fractional_action(self, action_value: float) -> Dict:
         """Execute action using fractional position sizing.
@@ -341,13 +357,15 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
                 return self._create_trade_info(executed=False)
 
         # Calculate target position
-        target_qty = self._calculate_fractional_position(action_value, current_price)
+        target_qty, _, _ = self._calculate_fractional_position(action_value, current_price)
 
         # Calculate delta (what we need to trade)
         delta_qty = target_qty - current_qty
 
         # Tolerance check
-        min_qty = 0.001  # Minimum tradeable quantity
+        # TODO: Query actual minimum quantity from Bitget exchange info instead of hardcoding
+        # Consider adding similar methods to Binance's _get_symbol_info(), _get_step_size(), _get_min_notional()
+        min_qty = 0.001  # Minimum tradeable quantity (hardcoded)
         if abs(delta_qty) < min_qty:
             # Already at target
             return self._create_trade_info(executed=False)
@@ -361,6 +379,9 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
             # Need to sell
             side = "sell"
             amount = abs(delta_qty)
+
+        # TODO: Consider rounding amount to exchange step size to avoid order rejection
+        # (similar to Binance's implementation using round_to_step_size())
 
         # Execute market order
         return self._execute_market_order(side, amount)
