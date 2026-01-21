@@ -23,6 +23,120 @@ TorchTrade provides 6 live trading environments across these exchanges:
 | **BitgetFuturesTorchTradingEnv** | Bitget | Crypto | ✅ | ✅ | ❌ |
 | **BitgetFuturesSLTPTorchTradingEnv** | Bitget | Crypto | ✅ | ✅ | ✅ |
 
+## Fractional Position Sizing
+
+**Non-SLTP live environments** (`AlpacaTorchTradingEnv`, `BinanceFuturesTorchTradingEnv`, `BitgetFuturesTorchTradingEnv`) support **fractional position sizing** where action values represent the fraction of balance to allocate.
+
+### How It Works
+
+**Action Interpretation:**
+- Action values range from **-1.0 to 1.0** (futures) or **0.0 to 1.0** (long-only)
+- **Magnitude** = fraction of balance to allocate (0.5 = 50%, 1.0 = 100%)
+- **Sign** = direction (positive = long, negative = short)
+- **Zero** = market neutral (close all positions, stay in cash)
+
+**Key Feature**: When adjusting positions (e.g., 100% → 50%), the environment **only trades the delta** (50%), reducing transaction fees.
+
+**Examples:**
+
+```python
+# Binance Futures - 5x leverage, $10k balance
+from torchtrade.envs.binance import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
+
+config = BinanceFuturesTradingEnvConfig(
+    symbol="BTCUSDT",
+    leverage=5,  # Fixed global leverage
+    action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # Custom levels
+    demo=True  # Use testnet
+)
+env = BinanceFuturesTorchTradingEnv(config, api_key="...", api_secret="...")
+
+# Action interpretation (similar to offline environments):
+# action = -1.0  → 100% short: (balance × 1.0 × 5) / price
+# action = -0.5  → 50% short
+# action =  0.0  → Market neutral (close all)
+# action =  0.5  → 50% long
+# action =  1.0  → 100% long
+```
+
+```python
+# Alpaca - Long-only, no leverage
+from torchtrade.envs.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+
+config = AlpacaTradingEnvConfig(
+    symbol="BTC/USD",
+    action_levels=[0.0, 0.5, 1.0],  # Only long positions
+    paper=True
+)
+env = AlpacaTorchTradingEnv(config, api_key="...", api_secret="...")
+
+# Action interpretation:
+# action = 0.0  → 0% invested (all cash)
+# action = 0.5  → 50% of portfolio invested
+# action = 1.0  → 100% of portfolio invested
+```
+
+### Customizing Action Levels
+
+Same flexibility as offline environments - any list of values in [-1.0, 1.0]:
+
+```python
+# Fine-grained (9 actions)
+action_levels = [-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0]
+
+# More precision near neutral (asymmetric)
+action_levels = [-1.0, -0.3, -0.1, 0.0, 0.1, 0.3, 1.0]
+
+# Conservative
+action_levels = [-0.5, -0.25, 0.0, 0.25, 0.5]
+
+# Long-only with fine control
+action_levels = [0.0, 0.25, 0.5, 0.75, 1.0]
+```
+
+**Default Values:**
+- Binance/Bitget Futures: `[-1.0, -0.5, 0.0, 0.5, 1.0]`
+- Alpaca (long-only): `[0.0, 0.5, 1.0]`
+
+### Query-First Pattern
+
+Live environments use a **query-first pattern** for reliability:
+
+1. **Query actual position** from exchange (source of truth)
+2. **Calculate target position** based on action and actual balance
+3. **Round to exchange constraints** (lot size, step size, min notional)
+4. **Trade only the delta** between current and target
+5. **Use exchange close APIs** for flat (action=0.0)
+
+This ensures positions stay synchronized with exchange state even if network issues occur.
+
+### Leverage Design (Futures Environments)
+
+For futures environments (`BinanceFuturesTorchTradingEnv`, `BitgetFuturesTorchTradingEnv`), **leverage is a fixed global parameter**, not part of the action space.
+
+**Design Philosophy:**
+- **Leverage** = "How much risk?" (configuration/risk management)
+- **Action** = "How much to deploy?" (learned policy)
+
+**Benefits:**
+1. **Simpler learning**: Smaller action space
+2. **Better risk control**: Global leverage constraint
+3. **Matches trader workflows**: Set leverage once, size positions with actions
+
+**Dynamic Leverage (Not Currently Implemented):**
+
+Could be added as multi-dimensional actions:
+
+```python
+# Future extension (not currently available):
+action_space = {
+    "position_fraction": Categorical([-1, -0.5, 0, 0.5, 1]),
+    "leverage_multiplier": Categorical([1, 3, 5])
+}
+```
+
+However, **fixed leverage is recommended** for most use cases.
+
 !!! warning "Timeframe Format - Critical for Model Compatibility"
     When specifying `time_frames`, **always use canonical forms**:
 

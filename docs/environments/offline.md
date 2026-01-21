@@ -29,6 +29,157 @@ All environments support the `include_hold_action` parameter (default: `True`):
 
 **Use Case**: Set to `False` when you want to ensure the agent is always actively trading rather than holding neutral positions. Useful for testing aggressive strategies or ensuring the agent explores trading actions.
 
+### Fractional Position Sizing
+
+**Non-SLTP environments** (`SeqLongOnlyEnv`, `SeqFuturesEnv`) support **fractional position sizing** where action values directly represent the fraction of balance to allocate to positions.
+
+#### How It Works
+
+**Action Interpretation:**
+- Action values range from **-1.0 to 1.0**
+- **Magnitude** = fraction of balance to allocate (0.5 = 50%, 1.0 = 100%)
+- **Sign** = direction (positive = long, negative = short)
+- **Zero** = market neutral (close all positions, stay in cash)
+
+**Position Sizing Formula:**
+```python
+# For futures environments with leverage:
+position_size = (balance × |action| × leverage) / price
+
+# For long-only environments (no leverage):
+position_size = (balance × action) / price
+```
+
+**Examples:**
+
+=== "Futures (SeqFuturesEnv)"
+    ```python
+    from torchtrade.envs.offline import SeqFuturesEnv, SeqFuturesEnvConfig
+
+    config = SeqFuturesEnvConfig(
+        leverage=5,  # Fixed 5x leverage
+        action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # 5 discrete actions
+        initial_cash=10000
+    )
+    env = SeqFuturesEnv(df, config)
+
+    # Action interpretation with $10k balance, 5x leverage, $50k BTC price:
+    # action = -1.0  → 100% short: (10k × 1.0 × 5) / 50k = -1.0 BTC short
+    # action = -0.5  → 50% short:  (10k × 0.5 × 5) / 50k = -0.5 BTC short
+    # action =  0.0  → Market neutral: 0 BTC (flat, all cash)
+    # action =  0.5  → 50% long:   (10k × 0.5 × 5) / 50k = 0.5 BTC long
+    # action =  1.0  → 100% long:  (10k × 1.0 × 5) / 50k = 1.0 BTC long
+    ```
+
+=== "Long-Only (SeqLongOnlyEnv)"
+    ```python
+    from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+
+    config = SeqLongOnlyEnvConfig(
+        action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # Long-only with sells
+        initial_cash=10000
+    )
+    env = SeqLongOnlyEnv(df, config)
+
+    # Action interpretation with $10k balance, $50k BTC price:
+    # action = -1.0  → Sell entire position (go to 100% cash)
+    # action = -0.5  → Sell half position (reduce by 50%)
+    # action =  0.0  → Market neutral (close all)
+    # action =  0.5  → 50% invested: 10k × 0.5 / 50k = 0.1 BTC
+    # action =  1.0  → 100% invested: 10k × 1.0 / 50k = 0.2 BTC
+    ```
+
+#### Customizing Action Levels
+
+Action levels are **fully customizable**. You can specify any list of values in [-1.0, 1.0]:
+
+```python
+# Fine-grained control (9 actions)
+action_levels = [-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0]
+
+# More precision near neutral (7 actions) - asymmetric
+action_levels = [-1.0, -0.3, -0.1, 0.0, 0.1, 0.3, 1.0]
+
+# Conservative (no full positions, 5 actions)
+action_levels = [-0.5, -0.25, 0.0, 0.25, 0.5]
+
+# Long-only (buy-focused, 5 actions)
+action_levels = [0.0, 0.25, 0.5, 0.75, 1.0]
+
+# Very coarse (3 actions)
+action_levels = [-1.0, 0.0, 1.0]
+```
+
+**Default Values:**
+- Futures: `[-1.0, -0.5, 0.0, 0.5, 1.0]` (5 actions)
+- Long-only: `[-1.0, -0.5, 0.0, 0.5, 1.0]` (5 actions)
+
+#### Efficient Partial Adjustments
+
+When adjusting position size (e.g., going from 100% to 50%), the environment **only trades the delta**:
+
+```python
+# Current position: 1.0 BTC long (100%)
+# New action: 0.5 (target 50% long)
+# Environment sells only 0.5 BTC (the delta)
+# ✅ Reduces fees by only trading what changed
+# ✅ Preserves entry price for remaining position
+```
+
+#### Legacy Fixed Mode
+
+For backward compatibility with existing trained models, set `position_sizing_mode="fixed"`:
+
+```python
+config = SeqFuturesEnvConfig(
+    position_sizing_mode="fixed",  # Use legacy behavior
+    quantity_per_trade=0.001,      # Fixed 0.001 BTC per trade
+    include_hold_action=True,
+    include_close_action=True,
+)
+```
+
+In legacy mode:
+- `action_levels = [-1.0, 0.0, 0.5, 1.0]` (if both hold and close enabled)
+- `-1.0` = short with fixed quantity
+- `0.0` = hold (do nothing)
+- `0.5` = close position
+- `1.0` = long with fixed quantity
+
+### Leverage Design (Futures Environments)
+
+For futures environments (`SeqFuturesEnv`, `SeqFuturesSLTPEnv`), **leverage is a fixed global parameter**, not part of the action space.
+
+**Design Philosophy:**
+- **Leverage** = "How much risk am I willing to take?" (configuration/risk management)
+- **Action** = "How much of my allocation should I deploy?" (learned policy)
+- These are fundamentally different questions and should be separated
+
+**Benefits of Fixed Leverage:**
+
+1. **Simpler Learning**: Smaller action space → faster convergence
+2. **Better Risk Control**: Easy to enforce global leverage constraints
+3. **Easier Tuning**: Sweep leverage independently of action granularity
+4. **Clear Semantics**: `action=0.5` always means "use 50% of capital" regardless of leverage
+5. **Matches Trader Workflows**: Most traders choose leverage once, then size positions
+
+**Dynamic Leverage (Not Currently Implemented):**
+
+If you need agents to dynamically choose leverage per trade, this could be implemented as multi-dimensional action spaces:
+
+```python
+# Future extension (not currently available):
+action_space = {
+    "position_fraction": Categorical([-1, -0.5, 0, 0.5, 1]),  # Position sizing
+    "leverage_multiplier": Categorical([1, 3, 5])              # Leverage choice
+}
+```
+
+However, **fixed leverage is recommended** for most use cases. Dynamic leverage:
+- Increases action space complexity (harder to learn)
+- Makes risk management harder (no global constraint)
+- Is rarely used in practice (traders typically fix leverage)
+
 !!! warning "Timeframe Format - Critical for Model Compatibility"
     When specifying `time_frames`, **always use canonical forms**:
 
