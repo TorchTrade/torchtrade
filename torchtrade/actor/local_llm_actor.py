@@ -234,8 +234,13 @@ At each step, you receive account state (including margin and liquidation info) 
             instructions = "Available actions:\n"
             for idx, (side, sl, tp) in self.action_map.items():
                 if side is None:
-                    instructions += f"  {idx}: Hold/Close position\n"
+                    # HOLD action: (None, None, None)
+                    instructions += f"  {idx}: Hold position\n"
+                elif side == "close":
+                    # CLOSE action: ("close", None, None)
+                    instructions += f"  {idx}: Close current position\n"
                 else:
+                    # Trade action: ("long"/"short", sl, tp)
                     instructions += f"  {idx}: {side.capitalize()} SL={sl*100:.1f}% TP={tp*100:.1f}%\n"
             instructions += "\nYou must choose exactly one action by number (e.g., 0, 1, 2, ...)."
             format_str = "action_number"
