@@ -102,6 +102,20 @@ class SeqFuturesEnvConfig:
                 include_close_action=self.include_close_action,
                 allow_short=True  # Futures allow short positions
             )
+        else:
+            # Validate custom action levels
+            if not all(-1.0 <= a <= 1.0 for a in self.action_levels):
+                raise ValueError(
+                    f"All action_levels must be in range [-1.0, 1.0], got {self.action_levels}"
+                )
+            if len(self.action_levels) != len(set(self.action_levels)):
+                raise ValueError(
+                    f"action_levels must not contain duplicates, got {self.action_levels}"
+                )
+            if len(self.action_levels) < 2:
+                raise ValueError(
+                    f"action_levels must contain at least 2 actions, got {len(self.action_levels)}"
+                )
 
 
 class SeqFuturesEnv(TorchTradeOfflineEnv):

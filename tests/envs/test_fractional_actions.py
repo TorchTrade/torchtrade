@@ -1,4 +1,12 @@
-"""Tests for fractional position sizing in non-SLTP environments."""
+"""Tests for fractional position sizing in non-SLTP environments.
+
+TODO: Add tests for live environments (Binance, Bitget, Alpaca) with mocked APIs
+    - Exchange-specific rounding and constraints (step size, min notional)
+    - Query-first pattern behavior
+    - Balance synchronization handling
+    - Direction switching edge cases
+    - Order rejection scenarios
+"""
 
 import pytest
 import pandas as pd

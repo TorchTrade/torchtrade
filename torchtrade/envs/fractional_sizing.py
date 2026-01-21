@@ -71,13 +71,27 @@ def calculate_fractional_position(params: PositionCalculationParams) -> Tuple[fl
     capital_allocated = params.balance * fraction
 
     # Account for fees in margin calculation
-    # Fee is charged on notional value
-    # We need to reserve: margin + fee
-    # margin = notional / leverage
-    # fee = notional × fee_rate
-    # total = notional / leverage + notional × fee_rate
-    # total = notional × (1/leverage + fee_rate)
-    # notional = total / (1/leverage + fee_rate)
+    # Goal: Allocate capital to cover both margin requirement and trading fees
+    #
+    # Given:
+    #   - capital_allocated (total available for this trade)
+    #   - leverage (position multiplier)
+    #   - transaction_fee (fee rate charged on notional value)
+    #
+    # Constraints:
+    #   margin + fee <= capital_allocated
+    #   where margin = notional / leverage
+    #   and fee = notional × transaction_fee
+    #
+    # Solving for notional:
+    #   notional / leverage + notional × transaction_fee <= capital_allocated
+    #   notional × (1/leverage + transaction_fee) <= capital_allocated
+    #   notional <= capital_allocated / (1/leverage + transaction_fee)
+    #
+    # Implementation (mathematically equivalent):
+    #   fee_multiplier = leverage × (1/leverage + transaction_fee) = 1 + leverage × transaction_fee
+    #   margin_required = capital_allocated / fee_multiplier
+    #   notional = margin_required × leverage
     fee_multiplier = 1 + (params.leverage * params.transaction_fee)
     margin_required = capital_allocated / fee_multiplier
     notional_value = margin_required * params.leverage

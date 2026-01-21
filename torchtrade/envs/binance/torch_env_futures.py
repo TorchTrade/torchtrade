@@ -386,10 +386,25 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         position_size, notional_value, side = calculate_fractional_position(params)
 
         # Apply exchange-specific validation
-        # Check minimum notional
+        # Check minimum notional requirement
+        #
+        # Edge case: If calculated position is below exchange minimum, we return "flat"
+        # instead of rounding up to minimum. This means:
+        #   - Agent selects small action (e.g., 0.1 = 10% allocation)
+        #   - Calculation results in notional < min_notional
+        #   - Position is NOT opened (returns flat)
+        #   - Agent receives warning in logs but no position state change
+        #
+        # Alternative approaches considered:
+        #   1. Round up to minimum notional → Could overallocate beyond action intent
+        #   2. Expose rejection in observation → Would require state schema change
+        #   3. Current: Fail gracefully with warning → Simple, predictable behavior
         min_notional = self._get_min_notional()
         if notional_value < min_notional:
-            logger.warning(f"Notional {notional_value} below minimum {min_notional}")
+            logger.warning(
+                f"Action {action_value} resulted in notional {notional_value:.2f} "
+                f"below exchange minimum {min_notional:.2f}. Position not opened."
+            )
             return 0.0, 0.0, "flat"
 
         # Round to exchange step size
@@ -451,8 +466,19 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # 8. Determine trade direction and execute
         if (current_qty > 0 and target_qty < 0) or (current_qty < 0 and target_qty > 0):
             # Direction switch: close current, then open opposite
+            #
+            # Edge case handling:
+            #   1. If close fails → Return early, don't open opposite position
+            #      This prevents doubling position size if close is rejected
+            #   2. If close succeeds but open fails → Agent ends up flat instead of target
+            #      Trade info will show close executed=True but may not reflect open failure
+            #   3. Between close and open, account balance changes (from PnL)
+            #      Target calculation uses current balance which may differ
+            #
+            # TODO: Consider tracking partial execution state for observation
             close_info = self._handle_close_action(current_qty)
             if not close_info["executed"]:
+                logger.warning("Direction switch failed: unable to close current position")
                 return close_info
 
             # Open new position in opposite direction

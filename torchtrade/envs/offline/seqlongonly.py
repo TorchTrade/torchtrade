@@ -60,27 +60,46 @@ class SeqLongOnlyEnvConfig:
                 include_close_action=False,  # Long-only doesn't use close action
                 allow_short=False  # Long-only environment
             )
+        else:
+            # Validate custom action levels
+            if not all(-1.0 <= a <= 1.0 for a in self.action_levels):
+                raise ValueError(
+                    f"All action_levels must be in range [-1.0, 1.0], got {self.action_levels}"
+                )
+            if len(self.action_levels) != len(set(self.action_levels)):
+                raise ValueError(
+                    f"action_levels must not contain duplicates, got {self.action_levels}"
+                )
+            if len(self.action_levels) < 2:
+                raise ValueError(
+                    f"action_levels must contain at least 2 actions, got {len(self.action_levels)}"
+                )
 
 class SeqLongOnlyEnv(TorchTradeOfflineEnv):
     """Sequential long-only trading environment for backtesting.
 
     Action Space (Fractional Mode - Default):
     --------------------------------------
-    Actions represent the fraction of total portfolio to have invested in the asset.
-    Action values in range [-1.0, 1.0] where negative values trigger sells:
+    Actions represent the fraction of available balance to allocate to the asset.
+    Action values in range [-1.0, 1.0]:
 
-    - action = -1.0: Sell entire position (go to 100% cash)
-    - action = -0.5: Sell to reduce position by 50%
-    - action = 0.0: Market neutral (close all, stay in cash)
-    - action = 0.5: Target 50% invested
-    - action = 1.0: Target 100% invested (all-in)
+    - action < 0: Sell entire position (go to 100% cash)
+      - action = -1.0: Sell all
+      - action = -0.5: Sell all (any negative value sells everything)
+    - action = 0.0: Neutral (close position if holding, otherwise stay in cash)
+    - action > 0: Buy/increase position targeting action × balance
+      - action = 0.5: Target 50% of balance invested
+      - action = 1.0: Target 100% of balance invested (all-in)
 
     Position sizing formula:
-        For positive actions: target = total_portfolio × action / price
-        For negative actions: reduce current position proportionally
+        For positive actions: target_notional = balance × action
+        For negative/zero actions: sell entire position
 
     Default action_levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
     Custom levels supported: e.g., [0, 0.25, 0.5, 0.75, 1.0] (buy-only)
+
+    Note: Unlike futures which support partial position reduction, long-only
+    environments treat any negative action as "sell everything" for simplicity.
 
     Note: Unlike futures environments, there is no leverage parameter since this
     is spot trading (1x leverage only).
