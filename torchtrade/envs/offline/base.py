@@ -1,7 +1,9 @@
 """Base class for offline trading environments."""
 
+from datetime import datetime
 from typing import Callable, List, Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
@@ -451,3 +453,162 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             raise ValueError(f"Unknown trade_mode: {self.config.trade_mode}")
 
         return position_qty, notional_value
+
+    def render_history(self, return_fig=False):
+        """
+        Render the history of the environment.
+
+        Creates visualization plots showing:
+        - For all environments: Price history with actions, Portfolio value vs Buy-and-Hold
+        - For futures environments: Additional position history plot
+
+        Args:
+            return_fig: If True, returns the matplotlib figure instead of showing it
+
+        Returns:
+            matplotlib.figure.Figure if return_fig=True, None otherwise
+        """
+        history_dict = self.history.to_dict()
+        price_history = history_dict['base_prices']
+        time_indices = list(range(len(price_history)))
+        action_history = history_dict['actions']
+        portfolio_value_history = history_dict['portfolio_values']
+
+        # Calculate buy-and-hold balance
+        initial_balance = portfolio_value_history[0]
+        initial_price = price_history[0]
+        units_held = initial_balance / initial_price
+        buy_and_hold_balance = [units_held * price for price in price_history]
+
+        # Check if this is a futures environment (has position history)
+        is_futures = 'positions' in history_dict
+
+        if is_futures:
+            # Futures environment: 3 subplots (price, portfolio, position)
+            position_history = history_dict['positions']
+            fig, axes = plt.subplots(
+                3, 1, figsize=(12, 10), sharex=True,
+                gridspec_kw={'height_ratios': [3, 2, 1]}
+            )
+            ax1, ax2, ax3 = axes
+
+            # Plot price history
+            ax1.plot(
+                time_indices, price_history,
+                label='Price History', color='blue', linewidth=1.5
+            )
+
+            # Plot long/short actions
+            long_indices = [i for i, action in enumerate(action_history) if action == 1]
+            long_prices = [price_history[i] for i in long_indices]
+            short_indices = [i for i, action in enumerate(action_history) if action == -1]
+            short_prices = [price_history[i] for i in short_indices]
+
+            ax1.scatter(
+                long_indices, long_prices,
+                marker='^', color='green', s=80, label='Long', zorder=5
+            )
+            ax1.scatter(
+                short_indices, short_prices,
+                marker='v', color='red', s=80, label='Short', zorder=5
+            )
+
+            ax1.set_ylabel('Price (USD)')
+            ax1.set_title('Price History with Long/Short Actions')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+
+            # Plot portfolio value
+            ax2.plot(
+                time_indices, portfolio_value_history,
+                label='Portfolio Value', color='green', linewidth=1.5
+            )
+            ax2.plot(
+                time_indices, buy_and_hold_balance,
+                label='Buy and Hold', color='purple', linestyle='--', linewidth=1.5
+            )
+            ax2.set_ylabel('Portfolio Value (USD)')
+            ax2.set_title('Portfolio Value vs Buy and Hold')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+
+            # Plot position history
+            ax3.fill_between(
+                time_indices, position_history, 0,
+                where=[p > 0 for p in position_history],
+                color='green', alpha=0.3, label='Long'
+            )
+            ax3.fill_between(
+                time_indices, position_history, 0,
+                where=[p < 0 for p in position_history],
+                color='red', alpha=0.3, label='Short'
+            )
+            ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+            ax3.set_xlabel('Time (Index)')
+            ax3.set_ylabel('Position Size')
+            ax3.set_title('Position History')
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+
+        else:
+            # Long-only environment: 2 subplots (price, portfolio)
+            fig, (ax1, ax2) = plt.subplots(
+                2, 1, figsize=(10, 8), sharex=True,
+                gridspec_kw={'height_ratios': [3, 2]}
+            )
+
+            # Plot price history
+            ax1.plot(
+                time_indices, price_history,
+                label='Price History', color='blue', linewidth=2
+            )
+
+            # Plot buy/sell actions
+            buy_indices = [i for i, action in enumerate(action_history) if action == 1]
+            buy_prices = [price_history[i] for i in buy_indices]
+            sell_indices = [i for i, action in enumerate(action_history) if action == -1]
+            sell_prices = [price_history[i] for i in sell_indices]
+
+            ax1.scatter(
+                buy_indices, buy_prices,
+                marker='^', color='green', s=100, label='Buy (1)'
+            )
+            ax1.scatter(
+                sell_indices, sell_prices,
+                marker='v', color='red', s=100, label='Sell (-1)'
+            )
+
+            ax1.set_ylabel('Price (USD)')
+            ax1.set_title('Price History with Buy/Sell Actions')
+            ax1.legend()
+            ax1.grid(True)
+
+            # Plot portfolio value
+            ax2.plot(
+                time_indices, portfolio_value_history,
+                label='Portfolio Value History', color='green', linestyle='-', linewidth=2
+            )
+            ax2.plot(
+                time_indices, buy_and_hold_balance,
+                label='Buy and Hold', color='purple', linestyle='-', linewidth=2
+            )
+
+            ax2.set_xlabel(
+                'Time (Index)' if not isinstance(time_indices[0], (str, datetime))
+                else 'Time'
+            )
+            ax2.set_ylabel('Portfolio Value (USD)')
+            ax2.set_title('Portfolio Value History vs Buy and Hold')
+            ax2.legend()
+            ax2.grid(True)
+
+            # Format x-axis for timestamps if provided
+            if isinstance(time_indices[0], (str, datetime)):
+                fig.autofmt_xdate()
+
+        plt.tight_layout()
+
+        if return_fig:
+            return fig
+        else:
+            plt.show()
