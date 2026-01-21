@@ -84,6 +84,7 @@ nav:
 
   - Environments:
       - Offline Environments: environments/offline.md
+      - Visualization: environments/visualization.md
       - Online Environments: environments/online.md
       - Offline RL: environments/offline-rl.md
       - Understanding the Sampler: guides/sampler.md
