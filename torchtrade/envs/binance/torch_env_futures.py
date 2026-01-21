@@ -1,8 +1,11 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union, Callable
+import logging
 import warnings
 
 import torch
+
+logger = logging.getLogger(__name__)
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical
 
@@ -21,8 +24,6 @@ class BinanceFuturesTradingEnvConfig:
     """Configuration for Binance Futures Trading Environment."""
 
     symbol: str = "BTCUSDT"
-    # Action levels: -1 = short, 0 = close/hold, 1 = long
-    action_levels: List[float] = field(default_factory=lambda: [-1.0, 0.0, 1.0])
     max_position: float = 1.0  # Maximum position size as fraction of balance
 
     # Timeframes and windows
@@ -33,8 +34,15 @@ class BinanceFuturesTradingEnvConfig:
     # Trading parameters
     leverage: int = 1  # Leverage (1-125)
     margin_type: MarginType = MarginType.ISOLATED
-    quantity_per_trade: float = 0.001  # Base quantity per trade
-    trade_mode: TradeMode = TradeMode.QUANTITY
+
+    # Action space configuration
+    position_sizing_mode: str = "fractional"  # "fractional" (new default) or "fixed" (legacy)
+    action_levels: List[float] = None  # Custom action levels, or None for defaults
+
+    # DEPRECATED: Only used in legacy "fixed" mode
+    quantity_per_trade: float = 0.001  # DEPRECATED - only used when position_sizing_mode="fixed"
+    trade_mode: TradeMode = TradeMode.QUANTITY  # DEPRECATED - only used in fixed mode
+    include_hold_action: bool = True  # DEPRECATED - only used when position_sizing_mode="fixed"
 
     # Reward settings
     reward_scaling: float = 1.0
@@ -48,20 +56,32 @@ class BinanceFuturesTradingEnvConfig:
     demo: bool = True  # Use demo/testnet for paper trading
     seed: Optional[int] = 42
     include_base_features: bool = False
-    include_hold_action: bool = True  # Include HOLD action (0.0) in action space
     close_position_on_reset: bool = False  # Whether to close positions on env.reset()
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
     def __post_init__(self):
-        """Normalize timeframe configuration."""
+        """Normalize timeframe configuration and build action levels."""
         from torchtrade.envs.binance.utils import normalize_binance_timeframe_config
 
         self.execute_on, self.time_frames, self.window_sizes = normalize_binance_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
-        # Filter out 0.0 (hold action) if include_hold_action is False
-        if not self.include_hold_action:
-            self.action_levels = [level for level in self.action_levels if level != 0.0]
+
+        # Set default action levels based on position sizing mode
+        if self.action_levels is None:
+            if self.position_sizing_mode == "fractional":
+                # New default: fractional sizing with neutral at 0
+                self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]
+            else:
+                # Legacy mode: maintain backward compatibility
+                if self.include_hold_action:
+                    self.action_levels = [-1.0, 0.0, 1.0]  # Short, Hold, Long
+                else:
+                    self.action_levels = [-1.0, 1.0]  # Short, Long
+
+        # Validate position_sizing_mode
+        if self.position_sizing_mode not in ["fractional", "fixed"]:
+            raise ValueError(f"position_sizing_mode must be 'fractional' or 'fixed', got '{self.position_sizing_mode}'")
 
 
 class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
@@ -253,16 +273,198 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
 
         return self._execute_market_order("SELL", self.config.quantity_per_trade)
 
+    def _get_symbol_info(self) -> Dict:
+        """Get exchange symbol information for precision and lot size."""
+        try:
+            exchange_info = self.trader.client.futures_exchange_info()
+            for symbol in exchange_info['symbols']:
+                if symbol['symbol'] == self.config.symbol:
+                    return symbol
+            raise ValueError(f"Symbol {self.config.symbol} not found in exchange info")
+        except Exception as e:
+            logger.error(f"Error getting symbol info: {e}")
+            # Return defaults if exchange query fails
+            return {
+                'filters': [
+                    {'filterType': 'LOT_SIZE', 'stepSize': '0.001'},
+                    {'filterType': 'MIN_NOTIONAL', 'notional': '100'}
+                ]
+            }
+
+    def _get_step_size(self) -> float:
+        """Get the step size (lot size) for the trading symbol."""
+        symbol_info = self._get_symbol_info()
+        for filter_item in symbol_info.get('filters', []):
+            if filter_item['filterType'] == 'LOT_SIZE':
+                return float(filter_item['stepSize'])
+        return 0.001  # Default fallback
+
+    def _get_min_notional(self) -> float:
+        """Get the minimum notional value for orders."""
+        symbol_info = self._get_symbol_info()
+        for filter_item in symbol_info.get('filters', []):
+            if filter_item['filterType'] == 'MIN_NOTIONAL':
+                return float(filter_item.get('notional', 100))
+        return 100.0  # Default fallback
+
+    def _round_to_step_size(self, quantity: float) -> float:
+        """Round quantity to exchange step size."""
+        step_size = self._get_step_size()
+        if step_size == 0:
+            return quantity
+        return round(quantity / step_size) * step_size
+
+    def _calculate_fractional_position(
+        self,
+        action_value: float,
+        current_price: float
+    ) -> tuple[float, float, str]:
+        """Calculate position size from fractional action value for live trading.
+
+        This implementation queries actual balance from exchange and accounts
+        for exchange rounding constraints.
+
+        Args:
+            action_value: Action from [-1.0, 1.0] representing fraction of balance
+            current_price: Current market price
+
+        Returns:
+            Tuple of (position_size, notional_value, side):
+            - position_size: Quantity rounded to exchange step size
+            - notional_value: Absolute value in quote currency
+            - side: "long", "short", or "flat"
+        """
+        # Handle neutral case
+        if action_value == 0.0:
+            return 0.0, 0.0, "flat"
+
+        # Query actual balance from exchange
+        balance_info = self.trader.get_account_balance()
+        available_balance = balance_info.get('available_balance', 0.0)
+
+        if available_balance <= 0:
+            logger.warning("No available balance for fractional position sizing")
+            return 0.0, 0.0, "flat"
+
+        # Calculate fraction and direction
+        fraction = abs(action_value)
+        direction = 1 if action_value > 0 else -1
+
+        # Allocate fraction of balance, accounting for fees
+        capital_allocated = available_balance * fraction
+        fee_rate = 0.0004  # Binance futures maker/taker fee
+        fee_multiplier = 1 + (self.config.leverage * fee_rate)
+        margin_required = capital_allocated / fee_multiplier
+
+        # Calculate notional value with leverage
+        notional_value = margin_required * self.config.leverage
+
+        # Check minimum notional
+        min_notional = self._get_min_notional()
+        if notional_value < min_notional:
+            logger.warning(f"Notional {notional_value} below minimum {min_notional}")
+            return 0.0, 0.0, "flat"
+
+        # Calculate position size
+        position_qty = notional_value / current_price
+
+        # Round to exchange step size
+        position_qty = self._round_to_step_size(position_qty)
+
+        # Apply direction
+        position_size = position_qty * direction
+        side = "long" if direction > 0 else "short"
+
+        return position_size, notional_value, side
+
+    def _execute_fractional_action(self, action_value: float) -> Dict:
+        """Execute action using fractional position sizing with query-first pattern.
+
+        This implementation:
+        1. Queries actual position from exchange (source of truth)
+        2. Calculates target based on actual balance
+        3. Rounds to exchange constraints
+        4. Only trades the delta
+        5. Uses exchange close_position() API for flat
+
+        Args:
+            action_value: Fractional action value in [-1.0, 1.0]
+
+        Returns:
+            trade_info: Dict with execution details
+        """
+        # 1. Query actual position from exchange (source of truth)
+        current_qty = self._get_current_position_quantity()
+        current_price = self.trader.get_mark_price()
+
+        # 2. Special case: Close to flat
+        if action_value == 0.0:
+            if abs(current_qty) > 0:
+                return self._handle_close_action(current_qty)
+            return self._create_trade_info(executed=False)
+
+        # 3. Calculate target position
+        target_qty, target_notional, target_side = self._calculate_fractional_position(
+            action_value, current_price
+        )
+
+        # 4. Check if target is achievable
+        if target_qty == 0.0:
+            return self._create_trade_info(executed=False)
+
+        # 5. Calculate delta
+        delta = target_qty - current_qty
+
+        # 6. Check if delta is significant enough to trade
+        step_size = self._get_step_size()
+        if abs(delta) < step_size:
+            return self._create_trade_info(executed=False)  # Already close enough
+
+        # 7. Round delta to step size
+        delta = self._round_to_step_size(delta)
+
+        # 8. Determine trade direction and execute
+        if (current_qty > 0 and target_qty < 0) or (current_qty < 0 and target_qty > 0):
+            # Direction switch: close current, then open opposite
+            close_info = self._handle_close_action(current_qty)
+            if not close_info["executed"]:
+                return close_info
+
+            # Open new position in opposite direction
+            side = "BUY" if target_qty > 0 else "SELL"
+            return self._execute_market_order(side, abs(target_qty))
+
+        elif delta > 0:
+            # Increasing position (or opening long from flat)
+            return self._execute_market_order("BUY", abs(delta))
+
+        elif delta < 0:
+            # Decreasing position (or opening short from flat)
+            return self._execute_market_order("SELL", abs(delta))
+
+        return self._create_trade_info(executed=False)
+
     def _execute_trade_if_needed(self, desired_action: float) -> Dict:
         """
         Execute trade if position change is needed.
 
+        Routes to fractional or fixed position sizing based on config.
+
         Args:
-            desired_action: Action level (-1.0 = short, 0.0 = close/hold, 1.0 = long)
+            desired_action: Action level
 
         Returns:
             Dict with trade execution info
         """
+        if self.config.position_sizing_mode == "fractional":
+            # NEW: Fractional position sizing
+            return self._execute_fractional_action(desired_action)
+        else:
+            # LEGACY: Fixed position sizing
+            return self._execute_fixed_action(desired_action)
+
+    def _execute_fixed_action(self, desired_action: float) -> Dict:
+        """Execute action using fixed position sizing (legacy mode)."""
         current_qty = self._get_current_position_quantity()
 
         if desired_action == 0:
