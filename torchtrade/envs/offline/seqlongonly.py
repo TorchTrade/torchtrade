@@ -61,7 +61,32 @@ class SeqLongOnlyEnvConfig:
 class SeqLongOnlyEnv(TorchTradeOfflineEnv):
     """Sequential long-only trading environment for backtesting.
 
-    Supports 3 discrete actions: Sell-all (-1), Hold (0), Buy-all (1).
+    Action Space (Fractional Mode - Default):
+    --------------------------------------
+    Actions represent the fraction of total portfolio to have invested in the asset.
+    Action values in range [-1.0, 1.0] where negative values trigger sells:
+
+    - action = -1.0: Sell entire position (go to 100% cash)
+    - action = -0.5: Sell to reduce position by 50%
+    - action = 0.0: Market neutral (close all, stay in cash)
+    - action = 0.5: Target 50% invested
+    - action = 1.0: Target 100% invested (all-in)
+
+    Position sizing formula:
+        For positive actions: target = total_portfolio × action / price
+        For negative actions: reduce current position proportionally
+
+    Default action_levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
+    Custom levels supported: e.g., [0, 0.25, 0.5, 0.75, 1.0] (buy-only)
+
+    Note: Unlike futures environments, there is no leverage parameter since this
+    is spot trading (1x leverage only).
+
+    **Dynamic Position Sizing** (not currently implemented):
+    Similar to futures environments, action levels control position fractions
+    rather than dynamic leverage. For more complex position sizing strategies,
+    you could extend this to multi-dimensional actions, but the current design
+    is recommended for simplicity and ease of learning.
     """
 
     def __init__(

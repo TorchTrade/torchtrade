@@ -53,7 +53,39 @@ class AlpacaTradingEnvConfig:
                     self.action_levels = [level for level in self.action_levels if level != 0.0]
 
 class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
-    """Live trading environment with 3-action discrete action space (sell/hold/buy)."""
+    """
+    TorchRL environment for Alpaca live spot trading (long-only).
+
+    Supports:
+    - Long positions only (no shorting)
+    - Paper trading via Alpaca paper account
+    - Multiple timeframe observations
+    - Query-first pattern for reliable position tracking
+
+    Action Space (Fractional Mode - Default):
+    --------------------------------------
+    Actions represent the fraction of total portfolio to have invested in the asset.
+    Action values in range [0.0, 1.0] (long-only, no shorting):
+
+    - action = 0.0: 0% invested (all cash, no position)
+    - action = 0.5: 50% invested (half portfolio in asset, half cash)
+    - action = 1.0: 100% invested (all-in, no cash)
+
+    Position sizing formula:
+        target_position_value = total_portfolio × action
+        position_qty = target_position_value / price
+
+    Default action_levels: [0.0, 0.5, 1.0]
+    Custom levels supported: e.g., [0, 0.25, 0.5, 0.75, 1.0]
+
+    Note: This is spot trading (no leverage). Unlike futures environments,
+    there is no leverage parameter (implicitly 1x).
+
+    **Dynamic Position Sizing** (not currently implemented):
+    Similar to futures environments, action levels control position fractions.
+    For more complex strategies, multi-dimensional actions could be added,
+    but the current design is recommended for simplicity.
+    """
 
     def __init__(
         self,

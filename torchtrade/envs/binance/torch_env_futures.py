@@ -86,20 +86,44 @@ class BinanceFuturesTradingEnvConfig:
 
 class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
     """
-    TorchRL environment for Binance Futures trading.
+    TorchRL environment for Binance Futures live trading.
 
     Supports:
     - Long and short positions
-    - Configurable leverage
+    - Configurable leverage (1x-125x)
     - Multiple timeframe observations
     - Demo (paper) trading via Binance testnet
+    - Query-first pattern for reliable position tracking
 
-    Action Space (default):
-    - Action 0: Go Short (or increase short position)
-    - Action 1: Close position / Hold (do nothing)
-    - Action 2: Go Long (or increase long position)
+    Action Space (Fractional Mode - Default):
+    --------------------------------------
+    Actions represent the fraction of available balance to allocate to a position.
+    Action values in range [-1.0, 1.0]:
+
+    - action = -1.0: 100% short (all-in short)
+    - action = -0.5: 50% short
+    - action = 0.0: Market neutral (close all positions, stay in cash)
+    - action = 0.5: 50% long
+    - action = 1.0: 100% long (all-in long)
+
+    Position sizing formula:
+        position_size = (balance × |action| × leverage) / price
+        (rounded to exchange step size)
+
+    Default action_levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
+    Custom levels supported: e.g., [-1, -0.3, -0.1, 0, 0.1, 0.3, 1]
+
+    Leverage Design:
+    ----------------
+    Leverage is a **fixed global parameter** (not part of action space).
+    See SeqFuturesEnv documentation for rationale on fixed vs dynamic leverage.
+
+    **Dynamic Leverage** (not currently implemented):
+    Could be implemented as multi-dimensional actions if needed, but fixed
+    leverage is recommended for most use cases.
 
     Account State (10 elements):
+    ---------------------------
     [cash, position_size, position_value, entry_price, current_price,
      unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
     """

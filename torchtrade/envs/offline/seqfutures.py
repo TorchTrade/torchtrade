@@ -112,12 +112,48 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
     Supports long and short positions with leverage, similar to the
     BinanceFuturesTorchTradingEnv but for offline/backtesting use.
 
-    Action Space:
-    - Action 0: Go Short (or close long and open short)
-    - Action 1: Hold / Close position
-    - Action 2: Go Long (or close short and open long)
+    Action Space (Fractional Mode - Default):
+    --------------------------------------
+    Actions represent the fraction of available balance to allocate to a position.
+    Action values in range [-1.0, 1.0]:
+
+    - action = -1.0: 100% short (all-in short)
+    - action = -0.5: 50% short
+    - action = 0.0: Market neutral (close all positions, stay in cash)
+    - action = 0.5: 50% long
+    - action = 1.0: 100% long (all-in long)
+
+    Position sizing formula:
+        position_size = (balance × |action| × leverage) / price
+
+    Default action_levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
+    Custom levels supported: e.g., [-1, -0.3, -0.1, 0, 0.1, 0.3, 1]
+
+    Leverage Design:
+    ----------------
+    Leverage is a **fixed global parameter** (not part of action space).
+    This design separates risk management (leverage) from position sizing (actions):
+
+    - Leverage = "How much risk am I willing to take?" (configuration)
+    - Action = "How much of my allocation should I deploy?" (learned policy)
+
+    **Dynamic Leverage** (not currently implemented):
+    If you need the agent to dynamically choose leverage per trade, this could be
+    implemented as a multi-dimensional action space:
+
+        action_space = {
+            "position_fraction": Categorical([-1, -0.5, 0, 0.5, 1]),
+            "leverage_multiplier": Categorical([1, 3, 5])
+        }
+
+    However, fixed leverage is recommended for most use cases as it:
+    - Simplifies learning (smaller action space)
+    - Provides better risk control
+    - Matches how traders typically operate
+    - Makes hyperparameter tuning easier
 
     Account State (10 elements, matching live futures env):
+    -------------------------------------------------------
     [cash, position_size, position_value, entry_price, current_price,
      unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
 
