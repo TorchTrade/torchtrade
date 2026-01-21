@@ -1,0 +1,66 @@
+env:
+  name: SeqFuturesEnv
+  symbol: "BTC/USD"
+  time_frames: ["15Min"]
+  window_sizes: [10]
+  execute_on: "15Min"
+  initial_cash: [800, 1200]
+  transaction_fee: 0.0006  # 0.04% typical futures fee
+  slippage: 0.001
+  bankrupt_threshold: 0.1
+  leverage: 6  # 6x leverage
+  exp_name: ${logger.exp_name}
+  seed: 0
+  train_envs: 5
+  eval_envs: 1
+  data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
+  test_split_start: "2025-01-01"
+
+# collector
+collector:
+  device:
+  frames_per_batch: 5
+  total_frames: 1_000_000
+  init_random_frames: 10_000  # Start training after random exploration
+  eps_start: 1.0              # Initial epsilon for epsilon-greedy
+  eps_end: 0.05               # Final epsilon for epsilon-greedy
+  annealing_frames: 100_000   # Frames over which to anneal epsilon
+
+# replay buffer
+buffer:
+  buffer_size: 100_000
+  batch_size: 128
+
+# logger
+logger:
+  mode: online
+  backend: wandb
+  project_name: TorchTrade-Futures
+  group_name: ${env.name}
+  exp_name: dqn_futures
+  test_interval: 500_000
+  num_test_episodes: 1
+
+# model
+model:
+  network_type: tdqn        # "dqn" or "tdqn" (Trading DQN with position awareness)
+  activation: relu
+  hidden_size: 128          # Hidden layer size for TDQN
+  dropout: 0.2              # Dropout rate for TDQN
+
+# optimization
+optim:
+  lr: 2.5e-4
+  max_grad_norm: 10
+  device:
+
+# loss
+loss:
+  gamma: 0.4
+  hard_update_freq: 1000     # Hard update target network every N updates
+  num_updates: 5         # Number of gradient updates per data collection
+
+compile:
+  compile: False
+  compile_mode:
+  cudagraphs: False
