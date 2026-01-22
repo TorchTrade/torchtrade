@@ -9,7 +9,7 @@ def create_sltp_action_map(
     takeprofit_levels: List[float],
     include_short_positions: bool = False,
     include_hold_action: bool = True,
-    include_close_action: bool = True,
+    include_close_action: bool = False,  # Changed default to False for SLTP envs
 ) -> Dict[int, Tuple[Optional[str], Optional[float], Optional[float]]]:
     """Create a mapping from action indices to (side, stop_loss_pct, take_profit_pct) tuples.
 
@@ -28,7 +28,7 @@ def create_sltp_action_map(
         takeprofit_levels: List of take-profit percentages (typically positive, e.g., 0.05 = 5%)
         include_short_positions: If True, include short position actions with swapped SL/TP
         include_hold_action: If True, action 0 = HOLD (default: True)
-        include_close_action: If True, add CLOSE action to exit positions (default: True)
+        include_close_action: If True, add CLOSE action to exit positions (default: False for SLTP)
 
     Returns:
         Dict mapping action index to (side, stop_loss_pct, take_profit_pct) tuple where:
@@ -36,17 +36,15 @@ def create_sltp_action_map(
         - stop_loss_pct and take_profit_pct are the percentage levels (None for CLOSE)
 
     Examples:
-        >>> # Long-only environment (Alpaca) with CLOSE
+        >>> # Long-only environment (Alpaca) WITHOUT CLOSE (default)
         >>> action_map = create_sltp_action_map([-0.02, -0.05], [0.03, 0.06])
         >>> action_map[0]  # HOLD
         (None, None, None)
-        >>> action_map[1]  # CLOSE
-        ('close', None, None)
-        >>> action_map[2]  # Long with SL=-2%, TP=3%
+        >>> action_map[1]  # Long with SL=-2%, TP=3%
         ('long', -0.02, 0.03)
 
-        >>> # Long/short environment (Binance) with CLOSE
-        >>> action_map = create_sltp_action_map([-0.02], [0.03], include_short_positions=True)
+        >>> # Long/short environment (Binance) with CLOSE enabled
+        >>> action_map = create_sltp_action_map([-0.02], [0.03], include_short_positions=True, include_close_action=True)
         >>> action_map[1]  # CLOSE
         ('close', None, None)
         >>> action_map[2]  # Long
