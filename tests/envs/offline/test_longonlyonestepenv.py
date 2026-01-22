@@ -21,7 +21,12 @@ from torchtrade.envs.offline.utils import (
 
 def combinatory_action_map(stoploss_levels, takeprofit_levels):
     """Wrapper for backward compatibility in tests."""
-    return build_sltp_action_map(stoploss_levels, takeprofit_levels, include_short_positions=False)
+    return build_sltp_action_map(
+        stoploss_levels,
+        takeprofit_levels,
+        include_close_action=False,  # OneStep environments don't have CLOSE action
+        include_short_positions=False
+    )
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:

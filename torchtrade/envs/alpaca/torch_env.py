@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union, Callable
+import logging
 
 import torch
+
+logger = logging.getLogger(__name__)
 from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
@@ -13,8 +16,7 @@ from torchtrade.envs.alpaca.base import AlpacaBaseTorchTradingEnv
 @dataclass
 class AlpacaTradingEnvConfig:
     symbol: str = "BTC/USD"
-    action_levels = [-1.0, 0.0, 1.0]  # Sell-all, Do-Nothing, Buy-all
-    max_position: float = 1.0  # Maximum position size as a fraction of balance
+    action_levels: Optional[List[float]] = None  # Custom action levels (defaults based on mode)
     time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Min"
     window_sizes: Union[List[int], int] = 10
     execute_on: Union[str, TimeFrame] = "1Min"  # On which timeframe to execute trades
@@ -26,19 +28,51 @@ class AlpacaTradingEnvConfig:
     trade_mode: TradeMode = TradeMode.NOTIONAL
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
-    include_hold_action: bool = True  # Include HOLD action (0.0) in action space
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = normalize_alpaca_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
-        # Filter out 0.0 (hold action) if include_hold_action is False
-        if not self.include_hold_action:
-            self.action_levels = [level for level in self.action_levels if level != 0.0]
+
+        # Build default action levels for fractional mode
+        if self.action_levels is None:
+            self.action_levels = [0.0, 0.5, 1.0]  # Long-only fractional
 
 class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
-    """Live trading environment with 3-action discrete action space (sell/hold/buy)."""
+    """
+    TorchRL environment for Alpaca live spot trading (long-only).
+
+    Supports:
+    - Long positions only (no shorting)
+    - Paper trading via Alpaca paper account
+    - Multiple timeframe observations
+    - Query-first pattern for reliable position tracking
+
+    Action Space (Fractional Mode - Default):
+    --------------------------------------
+    Actions represent the fraction of total portfolio to have invested in the asset.
+    Action values in range [0.0, 1.0] (long-only, no shorting):
+
+    - action = 0.0: 0% invested (all cash, no position)
+    - action = 0.5: 50% invested (half portfolio in asset, half cash)
+    - action = 1.0: 100% invested (all-in, no cash)
+
+    Position sizing formula:
+        target_position_value = total_portfolio × action
+        position_qty = target_position_value / price
+
+    Default action_levels: [0.0, 0.5, 1.0]
+    Custom levels supported: e.g., [0, 0.25, 0.5, 0.75, 1.0]
+
+    Note: This is spot trading (no leverage). Unlike futures environments,
+    there is no leverage parameter (implicitly 1x).
+
+    **Dynamic Position Sizing** (not currently implemented):
+    Similar to futures environments, action levels control position fractions.
+    For more complex strategies, multi-dimensional actions could be added,
+    but the current design is recommended for simplicity.
+    """
 
     def __init__(
         self,
@@ -121,19 +155,122 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         return next_tensordict
 
 
-    def _execute_trade_if_needed(self, desired_position: float) -> Dict:
-        """Execute trade if position change is needed."""
+    def _execute_trade_if_needed(self, desired_action: float) -> Dict:
+        """Execute trade based on desired action value.
+
+        Args:
+            desired_action: Action value (interpretation depends on mode)
+
+        Returns:
+            trade_info: Dict with execution details
+        """
+        # Execute fractional action
+        return self._execute_fractional_action(desired_action)
+
+    def _calculate_fractional_position(
+        self, action_value: float, current_price: float
+    ) -> tuple[float, float]:
+        """Calculate target position value from fractional action.
+
+        Note: Alpaca uses a portfolio allocation model that differs from the shared
+        fractional_sizing utility. The shared utility is designed for balance allocation
+        with leverage (action represents fraction of balance for new position), while
+        Alpaca uses portfolio allocation (action represents target % of total portfolio).
+        This is more appropriate for spot long-only trading without leverage.
+
+        Args:
+            action_value: Action from [0.0, 1.0] representing fraction to invest
+            current_price: Current market price
+
+        Returns:
+            (target_value, target_qty): Target position value in USD and quantity
+        """
+        # For long-only: action represents fraction of total portfolio to have invested
+        # action=0.0 → 0% invested (all cash)
+        # action=1.0 → 100% invested (all in position)
+
+        # Get actual balance from exchange (source of truth)
+        account = self.trader.client.get_account()
+        cash = float(account.cash)
+
+        # Get current position value
+        position_status = self.trader.get_status().get("position_status", None)
+        current_position_value = float(position_status.market_value) if position_status else 0.0
+
+        # Total portfolio value
+        total_portfolio = cash + current_position_value
+
+        # Validate portfolio value
+        if total_portfolio <= 0:
+            logger.warning("No portfolio value available for fractional position sizing")
+            return 0.0, 0.0
+
+        # Target position value based on action
+        target_position_value = total_portfolio * action_value
+
+        # Convert to quantity
+        target_qty = target_position_value / current_price if current_price > 0 else 0.0
+
+        return target_position_value, target_qty
+
+    def _execute_fractional_action(self, action_value: float) -> Dict:
+        """Execute action using fractional position sizing.
+
+        Args:
+            action_value: Fractional action value in [0.0, 1.0]
+
+        Returns:
+            trade_info: Dict with execution details
+        """
         trade_info = {"executed": False, "amount": 0, "side": None, "success": None}
-        
-        
-        # If holding position or no change in position, do nothing
-        if desired_position == 0 or desired_position == self.position.current_position:
+
+        # Get current position and price from exchange
+        position_status = self.trader.get_status().get("position_status", None)
+        current_qty = float(position_status.qty) if position_status else 0.0
+        current_price = position_status.current_price if position_status else 0.0
+
+        # Fallback: if no position, try to get price from trader's current_price attribute (for mocks)
+        if current_price <= 0 and hasattr(self.trader, 'current_price'):
+            current_price = self.trader.current_price
+
+        if current_price <= 0:
+            logger.error(
+                f"Cannot execute trade: invalid or missing price data. "
+                f"price={current_price}, has_position={position_status is not None}, "
+                f"has_trader_price={hasattr(self.trader, 'current_price')}"
+            )
             return trade_info
-        
-        # Determine trade details
-        side = "buy" if desired_position > 0 else "sell"
-        amount = self._calculate_trade_amount(side)
-        
+
+        # Calculate target position
+        target_value, target_qty = self._calculate_fractional_position(action_value, current_price)
+
+        # Calculate delta (what we need to trade)
+        delta_qty = target_qty - current_qty
+
+        # Tolerance check to avoid tiny trades
+        min_trade_value = 1.0  # $1 minimum trade
+        delta_value = abs(delta_qty * current_price)
+
+        if delta_value < min_trade_value:
+            # Already at target position (within tolerance)
+            return trade_info
+
+        # Determine trade side and amount
+        if delta_qty > 0:
+            # Need to buy
+            side = "buy"
+            amount = delta_qty * current_price  # Dollar amount to buy
+        else:
+            # Need to sell
+            side = "sell"
+            if action_value == 0.0:
+                # Special case: close entire position
+                amount = -1  # Alpaca's special value for "sell all"
+            else:
+                # Partial sell
+                amount = abs(delta_qty)  # Quantity to sell
+
+        # Execute trade
         try:
             success = self.trader.trade(side=side, amount=amount, order_type="market")
             trade_info.update({
@@ -143,27 +280,23 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
                 "success": success
             })
         except Exception as e:
-            print(f"Trade failed: {side} ${amount:.2f} - {str(e)}")
+            logger.error(
+                f"Trade execution failed: {side} ${amount:.2f} - {str(e)}",
+                exc_info=True
+            )
             trade_info["success"] = False
-        
+
         return trade_info
 
     def _calculate_trade_amount(self, side: str) -> float:
-        """Calculate the dollar amount to trade."""
-        if self.config.trade_mode == TradeMode.QUANTITY:
-            raise NotImplementedError
-
-        # NOTIONAL mode
-        if side == "buy":
-            return self.balance  # Buy with all available cash
-        else:  # sell
-            return -1  # Special value: sell entire position
+        """Calculate the dollar amount to trade (not used in fractional mode)."""
+        raise NotImplementedError("_calculate_trade_amount is not used in fractional mode")
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""
         if not self.config.done_on_bankruptcy:
             return False
-        
+
         bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
         return portfolio_value < bankruptcy_threshold
 

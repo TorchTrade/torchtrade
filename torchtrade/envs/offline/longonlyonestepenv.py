@@ -79,11 +79,12 @@ class LongOnlyOneStepEnv(TorchTradeOfflineEnv):
             self.execute_on_unit, self.execute_on_value
         )
 
-        # Define action and observation spaces
+        # Define action and observation spaces (no CLOSE action for OneStep environments)
         self.action_map = build_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
             include_hold_action=config.include_hold_action,
+            include_close_action=False,  # OneStep envs have internal rollouts, no mid-position exit
             include_short_positions=False
         )
         self.action_spec = Categorical(len(self.action_map))

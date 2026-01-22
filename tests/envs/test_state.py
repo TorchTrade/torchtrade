@@ -230,7 +230,8 @@ class TestFuturesHistoryTracker:
             'actions': [1.0, 0.0, -1.0],
             'rewards': [0.05, 0.02, -0.04],
             'portfolio_values': [5000.0, 5100.0, 4900.0],
-            'positions': [0.5, 0.5, -0.3]
+            'positions': [0.5, 0.5, -0.3],
+            'action_types': ['hold', 'hold', 'hold']
         }
 
     def test_to_dict_empty(self):
@@ -243,7 +244,8 @@ class TestFuturesHistoryTracker:
             'actions': [],
             'rewards': [],
             'portfolio_values': [],
-            'positions': []
+            'positions': [],
+            'action_types': []
         }
 
     def test_inheritance(self):

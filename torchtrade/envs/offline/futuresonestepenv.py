@@ -167,11 +167,12 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         self.stoploss_levels = list(config.stoploss_levels) if not isinstance(config.stoploss_levels, list) else config.stoploss_levels
         self.takeprofit_levels = list(config.takeprofit_levels) if not isinstance(config.takeprofit_levels, list) else config.takeprofit_levels
 
-        # Create action map
+        # Create action map (no CLOSE action for OneStep environments)
         self.action_map = build_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
             include_hold_action=config.include_hold_action,
+            include_close_action=False,  # OneStep envs have internal rollouts, no mid-position exit
             include_short_positions=True
         )
         self.action_spec = Categorical(len(self.action_map))
@@ -467,17 +468,21 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
 
         # Record step history
         trade_action = 0
+        action_type = "hold"  # Default
         if trade_info["executed"]:
             if trade_info["side"] == "long":
                 trade_action = 1
+                action_type = "long"
             elif trade_info["side"] == "short":
                 trade_action = -1
+                action_type = "short"
         self.history.record_step(
             price=cached_price,
             action=trade_action,
             reward=reward,
             portfolio_value=old_portfolio_value,
-            position=self.position.position_size
+            position=self.position.position_size,
+            action_type=action_type
         )
 
         next_tensordict.set("reward", reward)
@@ -771,6 +776,104 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
             action_history=self.history.actions,
             periods_per_year=periods_per_year,
         )
+
+    def render_history(self, return_fig=False):
+        """Render the trading history with action markers.
+
+        Visualizes price history, actions (long/short/close), portfolio value,
+        and position history over the episode.
+
+        Args:
+            return_fig: If True, return the figure instead of showing it
+        """
+        import matplotlib.pyplot as plt
+
+        history_dict = self.history.to_dict()
+        price_history = history_dict['base_prices']
+        time_indices = list(range(len(price_history)))
+        portfolio_value_history = history_dict['portfolio_values']
+        position_history = history_dict['positions']
+        action_types = history_dict.get('action_types', [])
+
+        # Calculate buy-and-hold balance
+        initial_balance = portfolio_value_history[0] if portfolio_value_history else self.initial_portfolio_value
+        initial_price = price_history[0] if price_history else 0
+        units_held = initial_balance / initial_price if initial_price > 0 else 0
+        buy_and_hold_balance = [units_held * price for price in price_history]
+
+        # Create subplots
+        fig, axes = plt.subplots(
+            3, 1, figsize=(12, 10), sharex=True,
+            gridspec_kw={'height_ratios': [3, 2, 1]}
+        )
+        ax1, ax2, ax3 = axes
+
+        # Plot price history
+        ax1.plot(
+            time_indices, price_history,
+            label='Price History', color='blue', linewidth=1.5
+        )
+
+        # Plot action markers using action_types
+        if action_types:
+            long_indices = [i for i, atype in enumerate(action_types) if atype == "long"]
+            short_indices = [i for i, atype in enumerate(action_types) if atype == "short"]
+            close_indices = [i for i, atype in enumerate(action_types) if atype == "close"]
+
+            long_prices = [price_history[i] for i in long_indices]
+            short_prices = [price_history[i] for i in short_indices]
+            close_prices = [price_history[i] for i in close_indices]
+
+            ax1.scatter(
+                long_indices, long_prices,
+                marker='^', color='green', s=100, label='Long', zorder=5
+            )
+            ax1.scatter(
+                short_indices, short_prices,
+                marker='v', color='red', s=100, label='Short', zorder=5
+            )
+            ax1.scatter(
+                close_indices, close_prices,
+                marker='x', color='blue', s=150, linewidths=3, label='Close', zorder=6
+            )
+
+        ax1.set_ylabel('Price (USD)')
+        ax1.set_title('Price History with Actions')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+        # Plot portfolio value
+        ax2.plot(
+            time_indices, portfolio_value_history,
+            label='Portfolio Value', color='purple', linewidth=1.5
+        )
+        ax2.plot(
+            time_indices, buy_and_hold_balance,
+            label='Buy & Hold', color='orange', linestyle='--', linewidth=1.5
+        )
+        ax2.set_ylabel('Portfolio Value (USD)')
+        ax2.set_title('Portfolio Value vs Buy & Hold')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+
+        # Plot position history
+        ax3.plot(
+            time_indices, position_history,
+            label='Position Size', color='green', linewidth=1.5
+        )
+        ax3.axhline(y=0, color='black', linestyle='--', linewidth=0.8)
+        ax3.set_xlabel('Time Step')
+        ax3.set_ylabel('Position Size')
+        ax3.set_title('Position History (Positive=Long, Negative=Short)')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        if return_fig:
+            return fig
+        else:
+            plt.show()
 
 
 if __name__ == "__main__":

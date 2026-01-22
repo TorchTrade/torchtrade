@@ -110,21 +110,24 @@ class FuturesHistoryTracker(HistoryTracker):
 
     Attributes:
         positions: List of position sizes at each step (positive for long, negative for short)
+        action_types: List of action types at each step ("hold", "close", "long", "short")
 
     Example:
         >>> history = FuturesHistoryTracker()
-        >>> history.record_step(price=50000.0, action=1.0, reward=0.05, portfolio_value=5000.0, position=0.5)
+        >>> history.record_step(price=50000.0, action=1.0, reward=0.05, portfolio_value=5000.0, position=0.5, action_type="long")
         >>> history.to_dict()
         {'base_prices': [50000.0], 'actions': [1.0], 'rewards': [0.05],
-         'portfolio_values': [5000.0], 'positions': [0.5]}
+         'portfolio_values': [5000.0], 'positions': [0.5], 'action_types': ['long']}
     """
 
     positions: List[float] = field(default_factory=list)
+    action_types: List[str] = field(default_factory=list)
 
     def reset(self) -> None:
         """Clear all history arrays including position history."""
         super().reset()
         self.positions.clear()
+        self.action_types.clear()
 
     def record_step(
         self,
@@ -132,7 +135,8 @@ class FuturesHistoryTracker(HistoryTracker):
         action: Union[int, float],
         reward: Union[int, float],
         portfolio_value: Union[int, float],
-        position: Union[int, float]
+        position: Union[int, float],
+        action_type: str = "hold"
     ) -> None:
         """Record a single step's history including position.
 
@@ -142,6 +146,8 @@ class FuturesHistoryTracker(HistoryTracker):
             reward: Reward received at this step
             portfolio_value: Total portfolio value at this step
             position: Position size at this step (positive=long, negative=short)
+            action_type: Type of action taken ("hold", "close", "long", "short")
         """
         super().record_step(price, action, reward, portfolio_value)
         self.positions.append(position)
+        self.action_types.append(action_type)

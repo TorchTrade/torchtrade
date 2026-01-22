@@ -29,6 +29,7 @@ dependencies = [
     "matplotlib",
     "ta",
     "datasets",
+    "scikit-learn",  # Used by example training scripts for StandardScaler
 ]
 
 [project.optional-dependencies]

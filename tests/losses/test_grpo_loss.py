@@ -21,6 +21,13 @@ class TestGRPOLoss:
     ACTION_DIM = 3
     BATCH_SIZE = 10
 
+    @pytest.fixture(autouse=True)
+    def set_random_seed(self):
+        """Set random seed for reproducibility before each test."""
+        torch.manual_seed(42)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(42)
+
     @pytest.fixture
     def actor_network(self):
         """Create a simple actor network for testing."""
@@ -106,9 +113,9 @@ class TestGRPOLoss:
         loss = GRPOLoss(actor_network=actor_network, entropy_bonus=True)
         output = loss(sample_data)
 
-        assert output["loss_objective"]
-        assert output["entropy"]
-        assert output["loss_entropy"]
+        assert "loss_objective" in output.keys()
+        assert "entropy" in output.keys()
+        assert "loss_entropy" in output.keys()
         assert output["entropy"].shape == torch.Size([])
         assert output["loss_entropy"].requires_grad
 
@@ -117,7 +124,7 @@ class TestGRPOLoss:
         loss = GRPOLoss(actor_network=actor_network, entropy_bonus=False)
         output = loss(sample_data)
 
-        assert output["loss_objective"]
+        assert "loss_objective" in output.keys()
         assert "entropy" not in output.keys()
         assert "loss_entropy" not in output.keys()
 
@@ -188,8 +195,9 @@ class TestGRPOLoss:
         output = loss(sample_data)
 
         # Advantage should be in the output for logging
-        assert output["advantage"]
+        assert "advantage" in output.keys()
         assert output["advantage"].shape == torch.Size([])
+        assert torch.isfinite(output["advantage"])
 
     def test_loss_kl_approximation(self, actor_network, sample_data):
         """Test that KL approximation is computed and logged."""
@@ -197,8 +205,9 @@ class TestGRPOLoss:
         output = loss(sample_data)
 
         # KL approximation should be in the output
-        assert output["kl_approx"]
+        assert "kl_approx" in output.keys()
         assert output["kl_approx"].shape == torch.Size([])
+        assert torch.isfinite(output["kl_approx"])
 
     def test_entropy_coeff_scalar(self, actor_network):
         """Test entropy coefficient as scalar value."""
@@ -305,7 +314,7 @@ class TestGRPOLoss:
             entropy_bonus=True,
         )
         output = loss(sample_data)
-        assert output["entropy"]
+        assert "entropy" in output.keys()
         assert torch.isfinite(output["entropy"])
 
     def test_loss_log_explained_variance(self, actor_network):
