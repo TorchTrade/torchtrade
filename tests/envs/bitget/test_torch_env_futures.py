@@ -340,7 +340,7 @@ class TestBitgetFuturesTorchTradingEnv:
             # Action 0.0 means close position, so if qty != 0, it should close
 
     def test_long_from_short(self, env, mock_trader):
-        """Test going long from short position closes short first."""
+        """Test going long from short position executes correct trade."""
         from torchtrade.envs.bitget.futures_order_executor import PositionStatus
 
         # Mock existing short position
@@ -361,13 +361,16 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            # Go long (should close short first)
+            # Go long (should buy to flip from short to long)
             action_td = TensorDict({"action": torch.tensor(4)}, batch_size=())  # Long (1.0)
             env._step(action_td)
 
-            # Should call close_position and then trade
-            mock_trader.close_position.assert_called()
+            # With fractional sizing, it should call trade() with the delta amount to flip position
+            # No need to call close_position() separately - just execute one trade
             mock_trader.trade.assert_called()
+            # Verify it's a buy order (to flip from short to long)
+            call_kwargs = mock_trader.trade.call_args[1]
+            assert call_kwargs["side"] == "buy"
 
     def test_config_post_init(self):
         """Test config post_init normalization."""
