@@ -227,7 +227,10 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
                     "take_profit": take_profit_price,
                 })
             except Exception as e:
-                print(f"Trade failed: buy ${amount:.2f} with SL={stop_loss_price:.2f}, TP={take_profit_price:.2f} - {str(e)}")
+                logger.error(
+                    f"SLTP trade execution failed: buy ${amount:.2f} with SL={stop_loss_price:.2f}, TP={take_profit_price:.2f} - {str(e)}",
+                    exc_info=True
+                )
                 trade_info["success"] = False
 
         return trade_info

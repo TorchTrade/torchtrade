@@ -235,7 +235,11 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
             current_price = self.trader.current_price
 
         if current_price <= 0:
-            print("Cannot execute trade: invalid price")
+            logger.error(
+                f"Cannot execute trade: invalid or missing price data. "
+                f"price={current_price}, has_position={position_status is not None}, "
+                f"has_trader_price={hasattr(self.trader, 'current_price')}"
+            )
             return trade_info
 
         # Calculate target position
@@ -277,7 +281,10 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
                 "success": success
             })
         except Exception as e:
-            print(f"Trade failed: {side} ${amount:.2f} - {str(e)}")
+            logger.error(
+                f"Trade execution failed: {side} ${amount:.2f} - {str(e)}",
+                exc_info=True
+            )
             trade_info["success"] = False
 
         return trade_info

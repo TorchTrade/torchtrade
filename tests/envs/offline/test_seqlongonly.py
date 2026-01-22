@@ -205,9 +205,8 @@ class TestSeqLongOnlyEnvStep:
         assert len(env.history.rewards) == 1
         assert len(env.history.portfolio_values) == 1
 
-    @pytest.mark.skip(reason="Random actions can cause bankruptcy with fractional sizing")
     def test_full_episode_completes(self, env):
-        """Full episode should complete without errors."""
+        """Full episode should complete without errors (may terminate early on bankruptcy)."""
         td = env.reset()
         steps = 0
         max_steps = env.max_traj_length
@@ -220,13 +219,14 @@ class TestSeqLongOnlyEnvStep:
             steps += 1
 
             if td.get("done", False):
+                # Early termination is valid (e.g., bankruptcy with random actions)
                 break
 
+        # Should complete at least one step without errors
         assert steps > 0
 
-    @pytest.mark.skip(reason="Random actions can cause bankruptcy with fractional sizing")
     def test_portfolio_value_never_nan(self, env):
-        """Portfolio value should never be NaN during episode."""
+        """Portfolio value should never be NaN during episode (even with bankruptcy)."""
         td = env.reset()
 
         for _ in range(50):
@@ -236,7 +236,11 @@ class TestSeqLongOnlyEnvStep:
             td = result["next"]
 
             portfolio_value = env._get_portfolio_value()
-            assert not np.isnan(portfolio_value)
+            assert not np.isnan(portfolio_value), "Portfolio value should never be NaN"
+
+            # Stop if episode terminated (e.g., bankruptcy)
+            if td.get("done", False):
+                break
 
             if td.get("done", False):
                 break
@@ -320,16 +324,6 @@ class TestSeqLongOnlyEnvTradeExecution:
         assert env.balance == initial_balance
         assert env.position.position_size == 0.0
 
-    @pytest.mark.skip(reason="Fractional actions have different semantics - targeting same allocation may cause rebalancing")
-    def test_cannot_buy_when_already_holding(self, env):
-        """DEPRECATED: This test is for discrete actions only."""
-        pass
-
-    @pytest.mark.skip(reason="Fractional actions have different hold semantics")
-    def test_hold_increments_counter_when_holding(self, env):
-        """DEPRECATED: Hold counter semantics changed with fractional actions."""
-        pass
-
     def test_entry_price_recorded_on_buy(self, env):
         """Entry price should be recorded correctly on buy."""
         td = env.reset()
@@ -384,9 +378,8 @@ class TestSeqLongOnlyEnvReward:
             if td.get("done", False):
                 break
 
-    @pytest.mark.skip(reason="Random actions can cause bankruptcy with fractional sizing")
     def test_reward_not_inf(self, env):
-        """Reward should never be infinite."""
+        """Reward should never be infinite (even with bankruptcy)."""
         td = env.reset()
 
         for _ in range(50):
@@ -396,9 +389,10 @@ class TestSeqLongOnlyEnvReward:
             td = result["next"]
 
             reward = td["reward"]
-            assert not torch.isinf(reward).any()
+            assert not torch.isinf(reward).any(), "Reward should never be infinite"
 
             if td.get("done", False):
+                # Early termination is valid (e.g., bankruptcy with random actions)
                 break
 
     def test_dense_reward_clipped(self, env):
