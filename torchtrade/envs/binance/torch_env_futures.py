@@ -30,7 +30,6 @@ class BinanceFuturesTradingEnvConfig:
     """Configuration for Binance Futures Trading Environment."""
 
     symbol: str = "BTCUSDT"
-    max_position: float = 1.0  # Maximum position size as fraction of balance
 
     # Timeframes and windows
     time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Min"

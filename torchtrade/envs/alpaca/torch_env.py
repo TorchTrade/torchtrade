@@ -17,7 +17,6 @@ from torchtrade.envs.alpaca.base import AlpacaBaseTorchTradingEnv
 class AlpacaTradingEnvConfig:
     symbol: str = "BTC/USD"
     action_levels: Optional[List[float]] = None  # Custom action levels (defaults based on mode)
-    max_position: float = 1.0  # Maximum position size as a fraction of balance
     time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Min"
     window_sizes: Union[List[int], int] = 10
     execute_on: Union[str, TimeFrame] = "1Min"  # On which timeframe to execute trades
