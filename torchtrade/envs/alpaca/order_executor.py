@@ -1,3 +1,4 @@
+import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
@@ -17,6 +18,8 @@ from alpaca.trading.requests import (
 from dotenv import load_dotenv
 
 from torchtrade.envs.common import TradeMode
+
+logger = logging.getLogger(__name__)
 
 
 # Common Time in Force Options:
@@ -188,12 +191,12 @@ class AlpacaOrderClass:
 
             # Submit the order
             response = self.client.submit_order(request)
-            print("Order response: ", response)
+            logger.info(f"Order submitted: {response.id}, side={side}, amount={amount}, type={order_type}")
             self.last_order_id = response.id
             return True
 
         except Exception as e:
-            print(f"Error executing trade: {str(e)}")
+            logger.error(f"Error executing trade: {str(e)}", exc_info=True)
             return False
         
     def get_clock(self) -> Dict:
@@ -248,13 +251,13 @@ class AlpacaOrderClass:
                     current_price=float(position.current_price),
                 )
             except Exception as e:
-                print(f"Error getting position status: {str(e)}")
+                logger.warning(f"Error getting position status: {str(e)}")
                 status["position_status"] = None  # No open position
 
             return status
 
         except Exception as e:
-            print(f"Error getting status: {str(e)}")
+            logger.error(f"Error getting status: {str(e)}", exc_info=True)
             return {}
 
     def get_open_orders(self) -> List[Dict]:
@@ -270,7 +273,7 @@ class AlpacaOrderClass:
             )
             return self.client.get_orders(request)
         except Exception as e:
-            print(f"Error getting open orders: {str(e)}")
+            logger.error(f"Error getting open orders: {str(e)}", exc_info=True)
             return []
         
     def cancel_open_orders(self) -> bool:
@@ -283,14 +286,14 @@ class AlpacaOrderClass:
         try:
             open_orders = self.get_open_orders()
             if not open_orders:
-                print("No open orders to cancel")
+                logger.info("No open orders to cancel")
                 return True
             else:
                 self.client.cancel_orders()
-                print("Open orders cancelled")
+                logger.info("Open orders cancelled")
                 return True
         except Exception as e:
-            print(f"Error cancelling open orders: {str(e)}")
+            logger.error(f"Error cancelling open orders: {str(e)}", exc_info=True)
             return False
 
     def close_position(self, qty: Optional[float] = None) -> bool:
@@ -315,7 +318,7 @@ class AlpacaOrderClass:
                 self.client.close_position(symbol_or_asset_id=self.symbol)
             return True
         except Exception as e:
-            print(f"Error closing position: {str(e)}")
+            logger.error(f"Error closing position: {str(e)}", exc_info=True)
             return False
 
     def close_all_positions(self) -> Dict[str, bool]:
@@ -334,12 +337,12 @@ class AlpacaOrderClass:
                     self.client.close_position(symbol_or_asset_id=position.symbol)
                     results[position.symbol] = True
                 except Exception as e:
-                    print(f"Error closing position for {position.symbol}: {str(e)}")
+                    logger.error(f"Error closing position for {position.symbol}: {str(e)}")
                     results[position.symbol] = False
 
             return results
         except Exception as e:
-            print(f"Error getting positions: {str(e)}")
+            logger.error(f"Error getting positions: {str(e)}", exc_info=True)
             return {}
 
 

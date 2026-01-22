@@ -14,6 +14,11 @@ from torchtrade.envs.bitget.futures_order_executor import (
     PositionMode,
 )
 from torchtrade.envs.bitget.base import BitgetBaseTorchTradingEnv
+from torchtrade.envs.fractional_sizing import (
+    calculate_fractional_position,
+    PositionCalculationParams,
+    round_to_step_size,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -24,7 +29,6 @@ class BitgetFuturesTradingEnvConfig:
     """Configuration for Bitget Futures Trading Environment."""
 
     symbol: str = "BTCUSDT"
-    action_levels: List[float] = None  # Default set in __post_init__
 
     # Timeframes and windows
     time_frames: Union[List[Union[str, "TimeFrame"]], Union[str, "TimeFrame"]] = "1Min"
@@ -36,8 +40,9 @@ class BitgetFuturesTradingEnvConfig:
     leverage: int = 1  # Leverage (1-125)
     margin_mode: MarginMode = MarginMode.ISOLATED
     position_mode: PositionMode = PositionMode.ONE_WAY  # ONE_WAY or HEDGE
-    quantity_per_trade: float = 0.001  # Base quantity per trade
-    trade_mode: TradeMode = TradeMode.QUANTITY
+
+    # Action space configuration
+    action_levels: List[float] = None  # Custom action levels, or None for defaults
 
     # Reward settings
     reward_scaling: float = 1.0
@@ -51,37 +56,60 @@ class BitgetFuturesTradingEnvConfig:
     demo: bool = True  # Use testnet for demo
     seed: Optional[int] = 42
     include_base_features: bool = False
-    include_hold_action: bool = True  # Include HOLD action (0.0) in action space
     close_position_on_reset: bool = False  # Whether to close positions on env.reset()
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
     def __post_init__(self):
-        # Set default action levels if not provided
-        if self.action_levels is None:
-            self.action_levels = [-1.0, 0.0, 1.0]  # short, hold, long
-
         # Normalize timeframes using utility function
         from torchtrade.envs.bitget.utils import normalize_bitget_timeframe_config
         self.execute_on, self.time_frames, self.window_sizes = normalize_bitget_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
-        # Filter out 0.0 (hold action) if include_hold_action is False
-        if not self.include_hold_action:
-            self.action_levels = [level for level in self.action_levels if level != 0.0]
+
+        # Build default action levels for fractional mode
+        if self.action_levels is None:
+            self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]  # Standard fractional with long/short
 
 
 class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
     """
-    Bitget Futures trading environment with 3-action discrete space.
+    TorchRL environment for Bitget Futures live trading.
 
-    This environment supports long and short positions with a simple action space:
-    - Action 0 (-1.0): Go SHORT (or close if in position)
-    - Action 1 (0.0): HOLD current position (do nothing)
-    - Action 2 (1.0): Go LONG (or close if in position)
+    Supports:
+    - Long and short positions
+    - Configurable leverage (1x-125x)
+    - Multiple timeframe observations
+    - Demo (testnet) trading
+    - Query-first pattern for reliable position tracking
 
-    The environment uses market orders for execution and supports configurable leverage.
+    Action Space (Fractional Mode - Default):
+    --------------------------------------
+    Actions represent the fraction of available balance to allocate to a position.
+    Action values in range [-1.0, 1.0]:
+
+    - action = -1.0: 100% short (all-in short)
+    - action = -0.5: 50% short
+    - action = 0.0: Market neutral (close all positions, stay in cash)
+    - action = 0.5: 50% long
+    - action = 1.0: 100% long (all-in long)
+
+    Position sizing formula:
+        position_size = (balance × |action| × leverage) / price
+
+    Default action_levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
+    Custom levels supported: e.g., [-1, -0.3, -0.1, 0, 0.1, 0.3, 1]
+
+    Leverage Design:
+    ----------------
+    Leverage is a **fixed global parameter** (not part of action space).
+    See SeqFuturesEnv documentation for rationale on fixed vs dynamic leverage.
+
+    **Dynamic Leverage** (not currently implemented):
+    Could be implemented as multi-dimensional actions if needed, but fixed
+    leverage is recommended for most use cases.
 
     Account State (10 elements):
+    ---------------------------
     [cash, position_size, position_value, entry_price, current_price,
      unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
     """
@@ -228,51 +256,109 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
             closed_position=True,
         )
 
-    def _handle_long_action(self, current_qty: float) -> Dict:
-        """Handle go long action."""
-        # Close short position if necessary
-        if current_qty < 0:
-            self.trader.close_position()
 
-        # Only execute if not already long
-        if current_qty > 0:
-            return self._create_trade_info(executed=False)
+    def _calculate_fractional_position(self, action_value: float, current_price: float) -> tuple[float, float, str]:
+        """Calculate target position size from fractional action.
 
-        return self._execute_market_order("buy", self.config.quantity_per_trade)
-
-    def _handle_short_action(self, current_qty: float) -> Dict:
-        """Handle go short action."""
-        # Close long position if necessary
-        if current_qty > 0:
-            self.trader.close_position()
-
-        # Only execute if not already short
-        if current_qty < 0:
-            return self._create_trade_info(executed=False)
-
-        return self._execute_market_order("sell", self.config.quantity_per_trade)
-
-    def _execute_trade_if_needed(self, desired_action: float) -> Dict:
-        """
-        Execute trade if position change is needed.
+        Uses shared utility function for consistent position sizing across all environments.
+        This fixes the fee calculation bug in the previous implementation.
 
         Args:
-            desired_action: Action level (-1.0 = short, 0.0 = hold, 1.0 = long)
+            action_value: Action from [-1.0, 1.0] representing fraction of balance
+            current_price: Current market price
 
         Returns:
-            Dict with trade execution info
+            Tuple of (position_size, notional_value, side):
+            - position_size: Target position quantity (positive=long, negative=short, 0=flat)
+            - notional_value: Absolute value in quote currency
+            - side: "long", "short", or "flat"
         """
-        current_qty = self._get_current_position_quantity()
+        if action_value == 0.0:
+            return 0.0, 0.0, "flat"
 
-        if desired_action == 0:
-            # HOLD action: maintain current position (do nothing)
+        # Get actual balance from exchange
+        balance_info = self.trader.get_account_balance()
+        available_balance = balance_info.get('available_balance', 0.0)
+
+        if available_balance <= 0:
+            logger.warning("No available balance for fractional position sizing")
+            return 0.0, 0.0, "flat"
+
+        # Use shared utility for core position calculation
+        fee_rate = 0.0002  # Bitget futures maker/taker fee
+        params = PositionCalculationParams(
+            balance=available_balance,
+            action_value=action_value,
+            current_price=current_price,
+            leverage=self.config.leverage,
+            transaction_fee=fee_rate,
+            allow_short=True
+        )
+        position_size, notional_value, side = calculate_fractional_position(params)
+
+        return position_size, notional_value, side
+
+    def _execute_fractional_action(self, action_value: float) -> Dict:
+        """Execute action using fractional position sizing.
+
+        Args:
+            action_value: Fractional action value in [-1.0, 1.0]
+
+        Returns:
+            trade_info: Dict with execution details
+        """
+        # Get current position and price from exchange
+        current_qty = self._get_current_position_quantity()
+        current_price = self.trader.get_mark_price()
+
+        # Special case: Close to flat
+        if action_value == 0.0:
+            if abs(current_qty) > 0:
+                return self._handle_close_action(current_qty)
+            else:
+                return self._create_trade_info(executed=False)
+
+        # Calculate target position
+        target_qty, _, _ = self._calculate_fractional_position(action_value, current_price)
+
+        # Calculate delta (what we need to trade)
+        delta_qty = target_qty - current_qty
+
+        # Tolerance check
+        # TODO: Query actual minimum quantity from Bitget exchange info instead of hardcoding
+        # Consider adding similar methods to Binance's _get_symbol_info(), _get_step_size(), _get_min_notional()
+        min_qty = 0.001  # Minimum tradeable quantity (hardcoded)
+        if abs(delta_qty) < min_qty:
+            # Already at target
             return self._create_trade_info(executed=False)
-        elif desired_action == 1:
-            return self._handle_long_action(current_qty)
-        elif desired_action == -1:
-            return self._handle_short_action(current_qty)
+
+        # Determine side and amount
+        if delta_qty > 0:
+            # Need to buy
+            side = "buy"
+            amount = abs(delta_qty)
         else:
-            return self._create_trade_info(executed=False)
+            # Need to sell
+            side = "sell"
+            amount = abs(delta_qty)
+
+        # TODO: Consider rounding amount to exchange step size to avoid order rejection
+        # (similar to Binance's implementation using round_to_step_size())
+
+        # Execute market order
+        return self._execute_market_order(side, amount)
+
+    def _execute_trade_if_needed(self, desired_action: float) -> Dict:
+        """Execute trade based on desired action value.
+
+        Args:
+            desired_action: Fractional action value in [-1.0, 1.0]
+
+        Returns:
+            trade_info: Dict with execution details
+        """
+        return self._execute_fractional_action(desired_action)
+
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""
@@ -296,7 +382,7 @@ if __name__ == "__main__":
         window_sizes=[10],
         execute_on="1m",
         leverage=5,
-        quantity_per_trade=0.002,  # Adjust based on Bitget minimums
+        action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # Fractional position sizing
         include_base_features=False,
     )
 

@@ -49,6 +49,8 @@ class BitgetFuturesSLTPTradingEnvConfig:
     include_short_positions: bool = True
     # Include HOLD action (index 0) in action space
     include_hold_action: bool = True
+    # Include CLOSE action for manual position exit (default: False for SLTP)
+    include_close_action: bool = False
 
     # Reward settings
     reward_scaling: float = 1.0
@@ -131,7 +133,8 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
             self.stoploss_levels,
             self.takeprofit_levels,
             include_short_positions=config.include_short_positions,
-            include_hold_action=config.include_hold_action
+            include_hold_action=config.include_hold_action,
+            include_close_action=config.include_close_action
         )
 
         # Categorical action spec: 0=HOLD, 1..N = (side, SL, TP) combinations

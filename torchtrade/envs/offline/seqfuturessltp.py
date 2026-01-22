@@ -80,6 +80,7 @@ class SeqFuturesSLTPEnvConfig:
     reward_scaling: float = 1.0
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     include_hold_action: bool = True  # Include HOLD action (index 0) in action space
+    include_close_action: bool = False  # Include CLOSE action for manual position exit (default: False for SLTP)
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
@@ -166,6 +167,7 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
             self.stoploss_levels,
             self.takeprofit_levels,
             include_hold_action=config.include_hold_action,
+            include_close_action=config.include_close_action,
             include_short_positions=True
         )
         # PERF: Convert action_map to tuple for O(1) indexed lookup (faster than dict hashing)
@@ -524,11 +526,17 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
 
         # Record history
         trade_action = 0
+        action_type = "hold"  # Default
         if trade_info["executed"]:
             if trade_info["side"] == "long":
                 trade_action = 1
+                action_type = "long"
             elif trade_info["side"] == "short":
                 trade_action = -1
+                action_type = "short"
+            elif trade_info["side"] == "close":
+                trade_action = 0
+                action_type = "close"
 
         # Get updated state
         next_tensordict = self._get_observation()
@@ -549,7 +557,8 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
             action=trade_action,
             reward=reward,
             portfolio_value=old_portfolio_value,
-            position=self.position.position_size
+            position=self.position.position_size,
+            action_type=action_type
         )
 
         # Check termination
@@ -648,13 +657,15 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         price_noise = np.random.uniform(1 - self.slippage, 1 + self.slippage)
 
         if side is None:
-            # Hold or close action
-            if self.position.position_size != 0:
-                # Close existing position
-                trade_info = self._close_position(current_price, price_noise)
-            # Update hold counter if still holding
+            # Hold action - do nothing
             if self.position.position_size != 0:
                 self.position.hold_counter += 1
+            return trade_info
+
+        if side == "close":
+            # Close action - explicitly exit position
+            if self.position.position_size != 0:
+                trade_info = self._close_position(current_price, price_noise)
             return trade_info
 
         # Opening a new position
@@ -839,6 +850,7 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
             action_history=self.history.actions,
             periods_per_year=periods_per_year,
         )
+
 
 if __name__ == "__main__":
     time_frames = [

@@ -64,6 +64,7 @@ def build_sltp_action_map(
     stoploss_levels: List[float],
     takeprofit_levels: List[float],
     include_hold_action: bool = True,
+    include_close_action: bool = True,
     include_short_positions: bool = False,
 ) -> Dict[int, Union[Tuple[Optional[float], Optional[float]], Tuple[Optional[str], Optional[float], Optional[float]]]]:
     """
@@ -76,6 +77,7 @@ def build_sltp_action_map(
         stoploss_levels: List of stop-loss percentages (e.g., [-0.025, -0.05, -0.1])
         takeprofit_levels: List of take-profit percentages (e.g., [0.05, 0.1, 0.2])
         include_hold_action: If True, action 0 is HOLD. If False, starts at index 0 with first position
+        include_close_action: If True, add CLOSE action to exit positions (default: True)
         include_short_positions: If True, creates actions for both long and short positions (futures).
                                  If False, only creates long positions (long-only)
 
@@ -84,15 +86,17 @@ def build_sltp_action_map(
 
         **Long-only mode (include_short_positions=False):**
         - Returns: (sl, tp) tuples
-        - If include_hold_action=True: {0: (None, None), 1: (sl1, tp1), 2: (sl1, tp2), ...}
+        - If include_hold_action=True and include_close_action=True:
+            {0: (None, None) - HOLD, 1: (None, None) - CLOSE, 2: (sl1, tp1), 3: (sl1, tp2), ...}
         - If include_hold_action=False: {0: (sl1, tp1), 1: (sl1, tp2), ...}
 
         **Futures mode (include_short_positions=True):**
-        - Returns: (side, sl, tp) tuples where side is None, "long", or "short"
-        - If include_hold_action=True:
-            - 0: (None, None, None) - HOLD/Close
-            - 1 to N: ("long", sl, tp) - Long positions with all SL/TP combinations
-            - N+1 to 2N: ("short", sl, tp) - Short positions with all SL/TP combinations
+        - Returns: (side, sl, tp) tuples where side is None, "close", "long", or "short"
+        - If include_hold_action=True and include_close_action=True:
+            - 0: (None, None, None) - HOLD
+            - 1: ("close", None, None) - CLOSE
+            - 2 to N+1: ("long", sl, tp) - Long positions with all SL/TP combinations
+            - N+2 to 2N+1: ("short", sl, tp) - Short positions with all SL/TP combinations
         - If include_hold_action=False:
             - 0 to N-1: ("long", sl, tp) - Long positions
             - N to 2N-1: ("short", sl, tp) - Short positions
@@ -100,11 +104,11 @@ def build_sltp_action_map(
     Example:
         >>> # Long-only with 2 SL levels, 2 TP levels
         >>> build_sltp_action_map([-0.05, -0.1], [0.05, 0.1], include_short_positions=False)
-        {0: (None, None), 1: (-0.05, 0.05), 2: (-0.05, 0.1), 3: (-0.1, 0.05), 4: (-0.1, 0.1)}
+        {0: (None, None), 1: (None, None), 2: (-0.05, 0.05), 3: (-0.05, 0.1), 4: (-0.1, 0.05), 5: (-0.1, 0.1)}
 
         >>> # Futures with same levels
         >>> build_sltp_action_map([-0.05, -0.1], [0.05, 0.1], include_short_positions=True)
-        {0: (None, None, None), 1: ("long", -0.05, 0.05), ..., 5: ("short", -0.05, 0.05), ...}
+        {0: (None, None, None), 1: ("close", None, None), 2: ("long", -0.05, 0.05), ..., 6: ("short", -0.05, 0.05), ...}
     """
     action_map = {}
     idx = 0
@@ -116,6 +120,14 @@ def build_sltp_action_map(
         else:
             action_map[0] = (None, None)
         idx = 1
+
+    # Add CLOSE action if requested
+    if include_close_action:
+        if include_short_positions:
+            action_map[idx] = ("close", None, None)
+        else:
+            action_map[idx] = ("close", None)  # Long-only CLOSE marker
+        idx += 1
 
     # Long positions
     for sl, tp in product(stoploss_levels, takeprofit_levels):

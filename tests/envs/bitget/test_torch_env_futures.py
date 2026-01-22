@@ -100,11 +100,11 @@ class TestBitgetFuturesTorchTradingEnv:
 
     def test_action_spec(self, env):
         """Test action spec is correctly defined."""
-        assert env.action_spec.n == 3  # short, hold, long
+        assert env.action_spec.n == 5  # fractional: -1.0, -0.5, 0.0, 0.5, 1.0
 
     def test_action_levels(self, env):
         """Test action levels are correctly set."""
-        assert env.action_levels == [-1.0, 0.0, 1.0]
+        assert env.action_levels == [-1.0, -0.5, 0.0, 0.5, 1.0]
 
     def test_observation_spec(self, env):
         """Test observation spec contains expected keys."""
@@ -142,7 +142,7 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())  # Hold
+            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # Hold/Close (0.0)
             next_td = env.step(action_td)
 
             # TorchRL step returns results under "next" key
@@ -155,7 +155,7 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # Long
+            action_td = TensorDict({"action": torch.tensor(4)}, batch_size=())  # Long (1.0)
             next_td = env.step(action_td)
 
             # Trade should have been attempted
@@ -176,7 +176,7 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
+            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
             next_td = env.step(action_td)
 
             reward = next_td["next"]["reward"]
@@ -188,7 +188,7 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
+            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
             next_td = env.step(action_td)
 
             done = next_td["next"]["done"]
@@ -273,7 +273,7 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
+            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
             next_td = env.step(action_td)
 
             done = next_td["next"]["done"]
@@ -304,7 +304,7 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
+            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
             next_td = env.step(action_td)
 
             done = next_td["next"]["done"]
@@ -332,20 +332,15 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            # Action 1 with level 0.0 should close position
-            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
+            # Action index 2 maps to level 0.0, which should close position
+            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())
             env._step(action_td)  # Use _step to test internal logic
 
-            # Should NOT have called trade or close (because action is 0.0, not closing)
-            # But if qty != 0 and action is 0, it SHOULD close
-            # Let me check the action_levels mapping again
-            # Action 0 = -1.0 (short), Action 1 = 0.0 (close/hold), Action 2 = 1.0 (long)
-
-            # Actually, looking at the implementation, action 0.0 means close position
-            # So with action index 1 (which maps to level 0.0), if there's a position, it should close
+            # Fractional action levels: [0=-1.0, 1=-0.5, 2=0.0, 3=0.5, 4=1.0]
+            # Action 0.0 means close position, so if qty != 0, it should close
 
     def test_long_from_short(self, env, mock_trader):
-        """Test going long from short position closes short first."""
+        """Test going long from short position executes correct trade."""
         from torchtrade.envs.bitget.futures_order_executor import PositionStatus
 
         # Mock existing short position
@@ -366,13 +361,16 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            # Go long (should close short first)
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # Long
+            # Go long (should buy to flip from short to long)
+            action_td = TensorDict({"action": torch.tensor(4)}, batch_size=())  # Long (1.0)
             env._step(action_td)
 
-            # Should call close_position and then trade
-            mock_trader.close_position.assert_called()
+            # With fractional sizing, it should call trade() with the delta amount to flip position
+            # No need to call close_position() separately - just execute one trade
             mock_trader.trade.assert_called()
+            # Verify it's a buy order (to flip from short to long)
+            call_kwargs = mock_trader.trade.call_args[1]
+            assert call_kwargs["side"] == "buy"
 
     def test_config_post_init(self):
         """Test config post_init normalization."""
@@ -422,6 +420,6 @@ class TestBitgetFuturesTorchTradingEnvIntegration:
         td = env.reset()
         assert "account_state" in td.keys()
 
-        action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
+        action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
         next_td = env.step(action_td)
         assert "reward" in next_td["next"].keys()

@@ -80,9 +80,9 @@ class TestFuturesOnestepActionMap:
         tp = [0.1, 0.2]
         action_map = futures_onestep_action_map(sl, tp)
 
-        # Check long actions (1-4)
+        # Check long actions (2-5, since 0=HOLD, 1=CLOSE)
         long_actions = [(action_map[i][0], action_map[i][1], action_map[i][2])
-                        for i in range(1, 5)]
+                        for i in range(2, 6)]
         for side, _, _ in long_actions:
             assert side == "long"
 
@@ -92,9 +92,9 @@ class TestFuturesOnestepActionMap:
         tp = [0.1, 0.2]
         action_map = futures_onestep_action_map(sl, tp)
 
-        # Check short actions (5-8)
+        # Check short actions (6-9, since 0=HOLD, 1=CLOSE, 2-5=long)
         short_actions = [(action_map[i][0], action_map[i][1], action_map[i][2])
-                         for i in range(5, 9)]
+                         for i in range(6, 10)]
         for side, _, _ in short_actions:
             assert side == "short"
 
@@ -104,8 +104,8 @@ class TestFuturesOnestepActionMap:
         tp = [0.1, 0.2]
         action_map = futures_onestep_action_map(sl, tp)
 
-        # 1 hold + 4 long + 4 short = 9
-        assert len(action_map) == 9
+        # 1 hold + 1 close + 4 long + 4 short = 10
+        assert len(action_map) == 10
 
 
 class TestInitialBalanceSamplerFutures:
@@ -141,7 +141,7 @@ class TestFuturesOneStepEnvInitialization:
 
     def test_action_spec_size(self, env):
         """Action spec should match action map size."""
-        # 1 hold + (2 SL * 2 TP) long + (2 SL * 2 TP) short = 9
+        # 1 hold + (2 SL * 2 TP) long + (2 SL * 2 TP) short = 9 (no CLOSE for OneStep)
         assert env.action_spec.n == 9
 
     def test_periods_per_year_calculated(self, env):
@@ -241,7 +241,7 @@ class TestFuturesOneStepEnvStep:
         """Each step should set done=True (one-step env)."""
         td = env.reset()
 
-        td.set("action", torch.tensor(1))  # Long with SL/TP
+        td.set("action", torch.tensor(2))  # Long with SL/TP (0=HOLD, 1=CLOSE, 2=first long)
         result = env.step(td)
 
         assert result["next"]["done"].item() == True
@@ -250,7 +250,7 @@ class TestFuturesOneStepEnvStep:
         """Each step should set terminated=True."""
         td = env.reset()
 
-        td.set("action", torch.tensor(1))
+        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
         result = env.step(td)
 
         assert result["next"]["terminated"].item() == True
@@ -268,7 +268,7 @@ class TestFuturesOneStepEnvStep:
         """Long action should trigger rollout and accumulate returns."""
         td = env.reset()
 
-        td.set("action", torch.tensor(1))  # Long
+        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
         env.step(td)
 
         # Rollout should have accumulated some returns
@@ -278,9 +278,9 @@ class TestFuturesOneStepEnvStep:
         """Short action should trigger rollout and accumulate returns."""
         td = env.reset()
 
-        # Short action index = 1 + num_long_combinations
+        # Short action index = 2 + num_long_combinations (0=HOLD, 1=CLOSE)
         num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        td.set("action", torch.tensor(1 + num_long))  # Short
+        td.set("action", torch.tensor(2 + num_long))  # Short
         env.step(td)
 
         assert len(env.rollout_returns) > 0
@@ -303,8 +303,8 @@ class TestFuturesOneStepEnvLongPosition:
         """Long should set positive position size."""
         td = env.reset()
 
-        td.set("action", torch.tensor(1))  # Long
-        env._execute_trade_if_needed(env.action_map[1])
+        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
+        env._execute_trade_if_needed(env.action_map[2])
 
         assert env.position.position_size > 0
         assert env.position.current_position == 1
@@ -314,8 +314,8 @@ class TestFuturesOneStepEnvLongPosition:
         td = env.reset()
         entry_price = env._cached_base_features.close  # PERF: namedtuple attribute access
 
-        td.set("action", torch.tensor(1))
-        env._execute_trade_if_needed(env.action_map[1])
+        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
+        env._execute_trade_if_needed(env.action_map[2])
 
         assert env.stop_loss_price < entry_price
 
@@ -324,8 +324,8 @@ class TestFuturesOneStepEnvLongPosition:
         td = env.reset()
         entry_price = env._cached_base_features.close  # PERF: namedtuple attribute access
 
-        td.set("action", torch.tensor(1))
-        env._execute_trade_if_needed(env.action_map[1])
+        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
+        env._execute_trade_if_needed(env.action_map[2])
 
         assert env.take_profit_price > entry_price
 
@@ -333,8 +333,8 @@ class TestFuturesOneStepEnvLongPosition:
         """Long should set liquidation price below entry."""
         td = env.reset()
 
-        td.set("action", torch.tensor(1))
-        env._execute_trade_if_needed(env.action_map[1])
+        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
+        env._execute_trade_if_needed(env.action_map[2])
 
         assert env.liquidation_price > 0
         assert env.liquidation_price < env.position.entry_price
@@ -348,7 +348,7 @@ class TestFuturesOneStepEnvShortPosition:
         td = env.reset()
 
         num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        short_action = 1 + num_long  # First short action
+        short_action = 2 + num_long  # First short action (0=HOLD, 1=CLOSE, 2+=long)
         env._execute_trade_if_needed(env.action_map[short_action])
 
         assert env.position.position_size < 0
@@ -360,7 +360,7 @@ class TestFuturesOneStepEnvShortPosition:
         entry_price = env._cached_base_features.close  # PERF: namedtuple attribute access
 
         num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        short_action = 1 + num_long
+        short_action = 2 + num_long
         env._execute_trade_if_needed(env.action_map[short_action])
 
         assert env.stop_loss_price > entry_price
@@ -371,7 +371,7 @@ class TestFuturesOneStepEnvShortPosition:
         entry_price = env._cached_base_features.close  # PERF: namedtuple attribute access
 
         num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        short_action = 1 + num_long
+        short_action = 2 + num_long
         env._execute_trade_if_needed(env.action_map[short_action])
 
         assert env.take_profit_price < entry_price
@@ -381,7 +381,7 @@ class TestFuturesOneStepEnvShortPosition:
         td = env.reset()
 
         num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        short_action = 1 + num_long
+        short_action = 2 + num_long
         env._execute_trade_if_needed(env.action_map[short_action])
 
         assert env.liquidation_price > 0
@@ -407,7 +407,7 @@ class TestFuturesOneStepEnvRollout:
         env = FuturesOneStepEnv(trending_down_df, config, simple_feature_fn)
 
         td = env.reset()
-        td.set("action", torch.tensor(1))  # Long
+        td.set("action", torch.tensor(1))  # Long (0=HOLD, 1=first long) - no CLOSE for OneStep
         env.step(td)
 
         # Position should be closed after rollout
@@ -429,7 +429,7 @@ class TestFuturesOneStepEnvRollout:
         env = FuturesOneStepEnv(trending_up_df, config, simple_feature_fn)
 
         td = env.reset()
-        td.set("action", torch.tensor(1))  # Long
+        td.set("action", torch.tensor(1))  # Long (0=HOLD, 1=first long) - no CLOSE for OneStep
         env.step(td)
 
         # Position should be closed after rollout
@@ -451,7 +451,7 @@ class TestFuturesOneStepEnvRollout:
         env = FuturesOneStepEnv(trending_up_df, config, simple_feature_fn)
 
         td = env.reset()
-        # Short action
+        # Short action (0=HOLD, 1-N=long, N+1+=short) - no CLOSE for OneStep
         num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
         td.set("action", torch.tensor(1 + num_long))  # Short
         env.step(td)
@@ -476,7 +476,7 @@ class TestFuturesOneStepEnvRollout:
 
         td = env.reset()
         num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        td.set("action", torch.tensor(1 + num_long))  # Short
+        td.set("action", torch.tensor(1 + num_long))  # Short (0=HOLD, 1+=long) - no CLOSE for OneStep
         env.step(td)
 
         # Position should be closed after rollout
@@ -486,7 +486,7 @@ class TestFuturesOneStepEnvRollout:
         """Rollout should accumulate log returns."""
         td = env.reset()
 
-        td.set("action", torch.tensor(1))  # Long
+        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
         env.step(td)
 
         # Should have returns from rollout
@@ -549,7 +549,7 @@ class TestFuturesOneStepEnvReward:
         """Reward should be a numeric type."""
         td = env.reset()
 
-        td.set("action", torch.tensor(1))
+        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
         result = env.step(td)
 
         reward = result["next"]["reward"].item()
@@ -570,7 +570,7 @@ class TestFuturesOneStepEnvReward:
         """Reward should be clipped to [-10, 10]."""
         td = env.reset()
 
-        td.set("action", torch.tensor(1))
+        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
         result = env.step(td)
 
         reward = result["next"]["reward"].item()
@@ -599,7 +599,7 @@ class TestFuturesOneStepEnvReward:
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
         td = env.reset()
-        td.set("action", torch.tensor(1))  # Long
+        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
         result = env.step(td)
 
         # If truncated, reward should be 0
@@ -686,7 +686,7 @@ class TestFuturesOneStepEnvMultipleEpisodes:
         """Each episode should have isolated state."""
         # Episode 1: Long
         td = env.reset()
-        td.set("action", torch.tensor(1))
+        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
         result1 = env.step(td)
         returns1 = len(env.rollout_returns)
 
@@ -716,11 +716,11 @@ class TestFuturesOneStepEnvEdgeCases:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Should have 3 actions: hold, 1 long, 1 short
+        # Should have 3 actions: hold, 1 long, 1 short (no CLOSE for OneStep)
         assert env.action_spec.n == 3
 
         td = env.reset()
-        td.set("action", torch.tensor(1))
+        td.set("action", torch.tensor(1))  # Action 1 = first long (0=HOLD)
         result = env.step(td)
 
         assert result is not None
@@ -738,7 +738,7 @@ class TestFuturesOneStepEnvEdgeCases:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # 1 + 16 long + 16 short = 33 actions
+        # 1 hold + 16 long + 16 short = 33 actions (no CLOSE for OneStep)
         assert env.action_spec.n == 33
 
     def test_high_leverage(self, sample_ohlcv_df):
@@ -753,7 +753,7 @@ class TestFuturesOneStepEnvEdgeCases:
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
         td = env.reset()
-        td.set("action", torch.tensor(1))
+        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
         result = env.step(td)
 
         assert not torch.isnan(result["next"]["reward"]).any()
@@ -772,7 +772,7 @@ class TestFuturesOneStepEnvEdgeCases:
         td = env.reset()
         assert env.balance == 1.0
 
-        td.set("action", torch.tensor(1))
+        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
         result = env.step(td)
 
         assert not torch.isnan(result["next"]["reward"]).any()
@@ -790,7 +790,7 @@ class TestFuturesOneStepEnvEdgeCases:
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
         td = env.reset()
-        td.set("action", torch.tensor(1))
+        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
         result = env.step(td)
 
         assert result is not None
@@ -822,8 +822,8 @@ class TestFuturesOneStepEnvLeverage:
         env_low.reset()
         env_high.reset()
 
-        env_low._execute_trade_if_needed(env_low.action_map[1])
-        env_high._execute_trade_if_needed(env_high.action_map[1])
+        env_low._execute_trade_if_needed(env_low.action_map[2])  # Long (0=HOLD, 1=CLOSE, 2=first long)
+        env_high._execute_trade_if_needed(env_high.action_map[2])
 
         # With QUANTITY mode, position size is the same regardless of leverage
         assert abs(env_high.position.position_size) == abs(env_low.position.position_size)
@@ -858,8 +858,8 @@ class TestFuturesOneStepEnvLeverage:
         env_low.reset()
         env_high.reset()
 
-        env_low._execute_trade_if_needed(env_low.action_map[1])
-        env_high._execute_trade_if_needed(env_high.action_map[1])
+        env_low._execute_trade_if_needed(env_low.action_map[2])  # Long (0=HOLD, 1=CLOSE, 2=first long)
+        env_high._execute_trade_if_needed(env_high.action_map[2])
 
         # Distance from entry to liquidation
         dist_low = abs(env_low.position.entry_price - env_low.liquidation_price) / env_low.position.entry_price
@@ -876,8 +876,8 @@ class TestFuturesOneStepEnvDuplicateActions:
         """Taking long action when already long should be ignored."""
         env.reset()
 
-        # First long action - should execute
-        trade_info1 = env._execute_trade_if_needed(env.action_map[1])
+        # First long action - should execute (0=HOLD, 1=CLOSE, 2=first long)
+        trade_info1 = env._execute_trade_if_needed(env.action_map[2])
         assert trade_info1["executed"] == True
         assert trade_info1["side"] == "long"
         assert env.position.current_position == 1
@@ -885,7 +885,7 @@ class TestFuturesOneStepEnvDuplicateActions:
         balance_after_first = env.balance
 
         # Second long action - should be ignored
-        trade_info2 = env._execute_trade_if_needed(env.action_map[1])
+        trade_info2 = env._execute_trade_if_needed(env.action_map[2])
         assert trade_info2["executed"] == False
         assert trade_info2["side"] is None
         assert env.position.current_position == 1  # Still long
@@ -899,7 +899,7 @@ class TestFuturesOneStepEnvDuplicateActions:
 
         # First short action
         num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        short_action = 1 + num_long
+        short_action = 2 + num_long
         trade_info1 = env._execute_trade_if_needed(env.action_map[short_action])
         assert trade_info1["executed"] == True
         assert trade_info1["side"] == "short"
@@ -919,15 +919,15 @@ class TestFuturesOneStepEnvDuplicateActions:
         """Long with different SL/TP when already long should be ignored."""
         env.reset()
 
-        # Long with first SL/TP combination
-        trade_info1 = env._execute_trade_if_needed(env.action_map[1])
+        # Long with first SL/TP combination (0=HOLD, 1=CLOSE, 2=first long)
+        trade_info1 = env._execute_trade_if_needed(env.action_map[2])
         assert trade_info1["executed"] == True
         entry_1 = env.position.entry_price
         sl_1 = env.stop_loss_price
         tp_1 = env.take_profit_price
 
         # Long with different SL/TP combination - should be ignored
-        trade_info2 = env._execute_trade_if_needed(env.action_map[2])
+        trade_info2 = env._execute_trade_if_needed(env.action_map[3])
         assert trade_info2["executed"] == False
         # SL/TP should not change
         assert env.stop_loss_price == sl_1
@@ -950,8 +950,8 @@ class TestFuturesOneStepEnvDuplicateActions:
         """Hold action when already long should not close position."""
         env.reset()
 
-        # Open long position
-        env._execute_trade_if_needed(env.action_map[1])
+        # Open long position (0=HOLD, 1=CLOSE, 2=first long)
+        env._execute_trade_if_needed(env.action_map[2])
         assert env.position.current_position == 1
         position_size = env.position.position_size
         balance_after_long = env.balance
@@ -969,7 +969,7 @@ class TestFuturesOneStepEnvDuplicateActions:
 
         # Open short position
         num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        short_action = 1 + num_long
+        short_action = 2 + num_long
         env._execute_trade_if_needed(env.action_map[short_action])
         assert env.position.current_position == -1
         position_size = env.position.position_size
@@ -986,11 +986,12 @@ class TestFuturesOneStepEnvDuplicateActions:
         """History should record ignored duplicate actions as no trade (0)."""
         td = env.reset()
 
-        # First long action
-        td.set("action", torch.tensor(1))
+        # First long action (0=HOLD, 1=CLOSE, 2=first long)
+        td.set("action", torch.tensor(2))
         result1 = env.step(td)
-        # Check that the last action in history is 1 (long was executed)
-        assert env.history.actions[-1] == 1
+        # In one-step env, after rollout completes, the position is closed
+        # So the last action in history is CLOSE (1), not the initial LONG (2)
+        assert env.history.actions[-1] == 1  # CLOSE action after rollout
 
         # Reset for next episode
         td = env.reset()
@@ -1002,7 +1003,7 @@ class TestFuturesOneStepEnvDuplicateActions:
 
         # Take long action again (duplicate) - using direct _step flow
         old_action_count = len(env.history.actions)
-        td.set("action", torch.tensor(1))
+        td.set("action", torch.tensor(2))  # Long action (0=HOLD, 1=CLOSE, 2=first long)
         result2 = env.step(td)
 
         # History should record 0 (no trade executed) for duplicate action
@@ -1026,9 +1027,11 @@ class TestFuturesOneStepEnvIncludeHoldAction:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 1 SL and 1 TP: 1 hold + 1 long + 1 short = 3 actions
+        # With 1 SL and 1 TP: 1 hold + 1 long + 1 short = 3 actions (no CLOSE for OneStep)
         assert env.action_spec.n == 3
         assert env.action_map[0] == (None, None, None), "Action 0 should be HOLD"
+        assert env.action_map[1][0] == "long", "Action 1 should be long trade"
+        assert env.action_map[2][0] == "short", "Action 2 should be short trade"
 
     def test_include_hold_action_true_explicit(self, sample_ohlcv_df):
         """Should include HOLD action when explicitly set to True."""
@@ -1044,10 +1047,11 @@ class TestFuturesOneStepEnvIncludeHoldAction:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 2 SL and 2 TP: 1 hold + 4 longs + 4 shorts = 9 actions
+        # With 2 SL and 2 TP: 1 hold + 4 longs + 4 shorts = 9 actions (no CLOSE for OneStep)
         assert env.action_spec.n == 9
         assert env.action_map[0] == (None, None, None), "Action 0 should be HOLD"
-        assert env.action_map[1] != (None, None, None), "Action 1 should be a trade"
+        assert env.action_map[1][0] == "long", "Action 1 should be first long trade"
+        assert env.action_map[5][0] == "short", "Action 5 should be first short trade"
 
     def test_include_hold_action_false(self, sample_ohlcv_df):
         """Should exclude HOLD action when set to False."""
@@ -1063,10 +1067,10 @@ class TestFuturesOneStepEnvIncludeHoldAction:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 1 SL and 1 TP, no hold: 1 long + 1 short = 2 actions
+        # With 1 SL and 1 TP, no hold, no close: 1 long + 1 short = 2 actions
         assert env.action_spec.n == 2
-        assert env.action_map[0] != (None, None, None), "Action 0 should NOT be HOLD"
-        assert env.action_map[0][0] is not None, "Action 0 should be a trade"
+        assert env.action_map[0][0] == "long", "Action 0 should be long (no hold)"
+        assert env.action_map[1][0] == "short", "Action 1 should be short"
 
     def test_include_hold_action_false_multiple_sltp(self, sample_ohlcv_df):
         """Should have correct action count without HOLD with multiple SL/TP."""
@@ -1082,12 +1086,11 @@ class TestFuturesOneStepEnvIncludeHoldAction:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 2 SL and 2 TP, no hold: 4 longs + 4 shorts = 8 actions
+        # With 2 SL and 2 TP, no hold, no close: 4 longs + 4 shorts = 8 actions
         assert env.action_spec.n == 8
-        # Verify all actions are trades (no None, None, None)
+        # Verify all actions are trades (no hold, no close)
         for i in range(env.action_spec.n):
-            assert env.action_map[i] != (None, None, None), f"Action {i} should be a trade"
-            assert env.action_map[i][0] is not None, f"Action {i} should have side"
+            assert env.action_map[i][0] in ["long", "short"], f"Action {i} should be long or short"
 
     def test_env_works_without_hold_action(self, sample_ohlcv_df):
         """Environment should function correctly without HOLD action."""
@@ -1117,7 +1120,7 @@ class TestFuturesOneStepEnvIncludeHoldAction:
         assert not torch.isnan(result["next"]["reward"]).any()
 
     def test_action_mapping_without_hold(self, sample_ohlcv_df):
-        """Verify action mapping starts with long positions when no hold."""
+        """Verify action mapping starts with trades when no hold (no CLOSE for OneStep)."""
         config = FuturesOneStepEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
@@ -1130,7 +1133,7 @@ class TestFuturesOneStepEnvIncludeHoldAction:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Action 0 should be the first long position
+        # Action 0 should be the first long position (no hold, no close for OneStep)
         assert env.action_map[0][0] == "long", "First action should be long"
         # Action 1 should be the first short position
         assert env.action_map[1][0] == "short", "Second action should be short"
