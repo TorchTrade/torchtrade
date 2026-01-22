@@ -1,3 +1,4 @@
+import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
@@ -17,6 +18,8 @@ from alpaca.trading.requests import (
 from dotenv import load_dotenv
 
 from torchtrade.envs.common import TradeMode
+
+logger = logging.getLogger(__name__)
 
 
 # Common Time in Force Options:
@@ -188,7 +191,7 @@ class AlpacaOrderClass:
 
             # Submit the order
             response = self.client.submit_order(request)
-            logger.info(f"Order submitted: {response.id}, side={side}, qty={quantity}, type={order_type}")
+            logger.info(f"Order submitted: {response.id}, side={side}, amount={amount}, type={order_type}")
             self.last_order_id = response.id
             return True
 
