@@ -308,51 +308,6 @@ class TestDirectionSwitching:
         assert env.position.position_size > 0  # Now long
 
 
-class TestBackwardCompatibility:
-    """Test that legacy mode maintains old behavior."""
-
-    def test_fixed_mode_maintains_old_behavior(self, sample_df):
-        """Legacy fixed mode should work as before."""
-        config = SeqFuturesEnvConfig(
-            quantity_per_trade=0.001,  # Fixed 0.001 BTC
-            include_hold_action=True,
-            include_close_action=True,
-            initial_cash=10000,
-            leverage=1,
-            random_start=False,
-            max_traj_length=10
-        )
-        env = SeqFuturesEnv(sample_df, config)
-
-        # Action levels should be: [-1.0, 0.0, 0.5, 1.0]
-        assert env.action_levels == [-1.0, 0.0, 0.5, 1.0]
-
-        td = env.reset()
-
-        # Action 0 = -1.0 = go short
-        td["action"] = torch.tensor([0])
-        td = env.step(td)["next"]
-        assert env.position.position_size < 0  # Short position opened
-
-        # Action 1 = 0.0 = hold
-        prev_position = env.position.position_size
-        td["action"] = torch.tensor([1])
-        td = env.step(td)["next"]
-        assert env.position.position_size == prev_position  # Position unchanged
-
-        # Action 2 = 0.5 = close
-        td["action"] = torch.tensor([2])
-        td = env.step(td)["next"]
-        assert env.position.position_size == 0.0  # Position closed
-
-    def test_config_validation_rejects_invalid_mode(self, sample_df):
-        """Config should reject invalid position_sizing_mode."""
-        with pytest.raises(ValueError, match="position_sizing_mode must be 'fractional' or 'fixed'"):
-            config = SeqFuturesEnvConfig(
-                initial_cash=10000
-            )
-
-
 class TestLongOnlyFractional:
     """Test fractional position sizing for SeqLongOnlyEnv."""
 

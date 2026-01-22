@@ -18,9 +18,13 @@ from torchtrade.envs.offline.utils import (
 )
 
 
-def futures_sltp_action_map(stoploss_levels, takeprofit_levels):
-    """Wrapper for backward compatibility in tests."""
-    return build_sltp_action_map(stoploss_levels, takeprofit_levels, include_short_positions=True)
+def futures_sltp_action_map(stoploss_levels, takeprofit_levels, include_close_action=False):
+    """Wrapper for backward compatibility in tests.
+
+    Note: include_close_action defaults to False to match SLTP environment defaults.
+    SLTP environments use bracket orders that auto-close positions, so manual CLOSE is not needed by default.
+    """
+    return build_sltp_action_map(stoploss_levels, takeprofit_levels, include_short_positions=True, include_close_action=include_close_action)
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
@@ -74,12 +78,12 @@ class TestFuturesSLTPActionMap:
         assert action_map[0] == (None, None, None)
 
     def test_action_map_size(self):
-        """Action map size should be 1 hold + 1 close + 2*(num_sl * num_tp)."""
+        """Action map size should be 1 hold + 2*(num_sl * num_tp)."""
         sl_levels = [-0.05, -0.1]
         tp_levels = [0.05, 0.1, 0.15]
         action_map = futures_sltp_action_map(sl_levels, tp_levels)
-        # 1 hold + 1 close + 6 long combinations + 6 short combinations = 14
-        expected_size = 2 + 2 * len(sl_levels) * len(tp_levels)
+        # 1 hold + 6 long combinations + 6 short combinations = 13 (no CLOSE by default)
+        expected_size = 1 + 2 * len(sl_levels) * len(tp_levels)
         assert len(action_map) == expected_size
 
     def test_action_map_contains_long_positions(self):
@@ -113,10 +117,10 @@ class TestFuturesSLTPActionMap:
     def test_action_map_single_levels(self):
         """Should work with single SL and TP level."""
         action_map = futures_sltp_action_map([-0.05], [0.1])
-        # 1 hold + 1 close + 1 long + 1 short = 4
-        assert len(action_map) == 4
-        assert action_map[2] == ("long", -0.05, 0.1)  # First long (0=HOLD, 1=CLOSE)
-        assert action_map[3] == ("short", -0.05, 0.1)  # First short
+        # 1 hold + 1 long + 1 short = 3 (no CLOSE by default)
+        assert len(action_map) == 3
+        assert action_map[1] == ("long", -0.05, 0.1)  # First long (0=HOLD)
+        assert action_map[2] == ("short", -0.05, 0.1)  # First short
 
 
 class TestSeqFuturesSLTPEnvInitialization:
@@ -128,8 +132,8 @@ class TestSeqFuturesSLTPEnvInitialization:
 
     def test_action_spec_size(self, env):
         """Action spec should match action map size."""
-        # 1 hold + 1 close + 4 long (2 SL * 2 TP) + 4 short = 10
-        expected_size = 2 + 2 * 2 * 2
+        # 1 hold + 4 long (2 SL * 2 TP) + 4 short = 9 (no CLOSE by default)
+        expected_size = 1 + 2 * 2 * 2
         assert env.action_spec.n == expected_size
 
     def test_action_map_created(self, env):
@@ -204,7 +208,7 @@ class TestSeqFuturesSLTPEnvLongWithSLTP:
         td = env.reset()
 
         # Action 1 should be first long SL/TP combination
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         env.step(td)
 
         assert env.stop_loss > 0
@@ -214,7 +218,7 @@ class TestSeqFuturesSLTPEnvLongWithSLTP:
         """Long action should set take profit level."""
         td = env.reset()
 
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         env.step(td)
 
         assert env.take_profit > 0
@@ -224,7 +228,7 @@ class TestSeqFuturesSLTPEnvLongWithSLTP:
         """Long position should have positive position_size."""
         td = env.reset()
 
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         env.step(td)
 
         assert env.position.position_size > 0
@@ -235,9 +239,9 @@ class TestSeqFuturesSLTPEnvLongWithSLTP:
         td = env.reset()
 
         # Get the SL/TP percentages for action 1
-        _, sl_pct, tp_pct = env.action_map[2]  # First long
+        _, sl_pct, tp_pct = env.action_map[1]  # First long
 
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         env.step(td)
 
         expected_sl = env.position.entry_price * (1 + sl_pct)
@@ -256,7 +260,7 @@ class TestSeqFuturesSLTPEnvShortWithSLTP:
 
         # First short action is at index 5 (1 hold + 4 long)
         num_long_actions = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        short_action = 2 + num_long_actions  # 0=HOLD, 1=CLOSE, 2+=long
+        short_action = 1 + num_long_actions  # 0=HOLD, 1+=long (no CLOSE)
 
         td.set("action", torch.tensor(short_action))
         env.step(td)
@@ -269,7 +273,7 @@ class TestSeqFuturesSLTPEnvShortWithSLTP:
         td = env.reset()
 
         num_long_actions = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        short_action = 2 + num_long_actions  # 0=HOLD, 1=CLOSE, 2+=long
+        short_action = 1 + num_long_actions  # 0=HOLD, 1+=long (no CLOSE)
 
         td.set("action", torch.tensor(short_action))
         env.step(td)
@@ -282,7 +286,7 @@ class TestSeqFuturesSLTPEnvShortWithSLTP:
         td = env.reset()
 
         num_long_actions = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        short_action = 2 + num_long_actions  # 0=HOLD, 1=CLOSE, 2+=long
+        short_action = 1 + num_long_actions  # 0=HOLD, 1+=long (no CLOSE)
 
         td.set("action", torch.tensor(short_action))
         env.step(td)
@@ -314,7 +318,7 @@ class TestSeqFuturesSLTPEnvTriggers:
         td = env.reset()
 
         # Open long position
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         result = env.step(td)
         td = result["next"]
 
@@ -357,7 +361,7 @@ class TestSeqFuturesSLTPEnvTriggers:
         td = env.reset()
 
         # Open long position
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         result = env.step(td)
         td = result["next"]
 
@@ -399,8 +403,8 @@ class TestSeqFuturesSLTPEnvTriggers:
 
         td = env.reset()
 
-        # Open short position (0=HOLD, 1=CLOSE, 2=first long, 3=first short)
-        td.set("action", torch.tensor(3))  # First short action
+        # Open short position (0=HOLD, 1=first long, 2=first short)
+        td.set("action", torch.tensor(2))  # First short action
         result = env.step(td)
         td = result["next"]
 
@@ -443,7 +447,7 @@ class TestSeqFuturesSLTPEnvTriggers:
         td = env.reset()
 
         # Open short position (action 2 = first short action)
-        td.set("action", torch.tensor(3))  # First short action
+        td.set("action", torch.tensor(2))  # First short action
         result = env.step(td)
         td = result["next"]
 
@@ -486,7 +490,7 @@ class TestSeqFuturesSLTPEnvTriggers:
         td = env.reset()
 
         # Open long
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         result = env.step(td)
         td = result["next"]
 
@@ -531,7 +535,7 @@ class TestSeqFuturesSLTPEnvLiquidation:
         td = env.reset()
 
         # Open long position
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         result = env.step(td)
         td = result["next"]
 
@@ -578,7 +582,7 @@ class TestSeqFuturesSLTPEnvLiquidation:
         td = env.reset()
 
         # Open long position
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         result = env.step(td)
         td = result["next"]
 
@@ -622,7 +626,7 @@ class TestSeqFuturesSLTPEnvReward:
         td = env.reset()
 
         # Open a position
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         result = env.step(td)
         td = result["next"]
 
@@ -651,31 +655,33 @@ class TestSeqFuturesSLTPEnvStep:
         assert env.stop_loss == 0.0
         assert env.take_profit == 0.0
 
-    def test_hold_closes_existing_position(self, env):
-        """CLOSE action should close existing position."""
+    def test_hold_does_not_close_existing_position(self, env):
+        """HOLD action should not close existing position (CLOSE is disabled by default in SLTP)."""
         td = env.reset()
 
         # Open long
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         result = env.step(td)
         td = result["next"]
 
         assert env.position.position_size > 0
+        initial_position_size = env.position.position_size
 
-        # CLOSE should close position
-        td.set("action", torch.tensor(1))  # CLOSE action
+        # HOLD should NOT close position
+        td.set("action", torch.tensor(0))  # HOLD action
         result = env.step(td)
 
-        assert env.position.position_size == 0.0
-        assert env.stop_loss == 0.0
-        assert env.take_profit == 0.0
+        # Position should remain open (SLTP envs use bracket orders for exit)
+        assert env.position.position_size == initial_position_size
+        assert env.stop_loss > 0.0
+        assert env.take_profit > 0.0
 
     def test_flip_from_long_to_short(self, env):
         """Should be able to flip from long to short position."""
         td = env.reset()
 
         # Open long
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         result = env.step(td)
         td = result["next"]
 
@@ -683,7 +689,7 @@ class TestSeqFuturesSLTPEnvStep:
 
         # Open short (close long first internally)
         num_long_actions = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        short_action = 2 + num_long_actions  # 0=HOLD, 1=CLOSE, 2+=long
+        short_action = 1 + num_long_actions  # 0=HOLD, 1+=long (no CLOSE)
 
         td.set("action", torch.tensor(short_action))
         result = env.step(td)
@@ -698,7 +704,7 @@ class TestSeqFuturesSLTPEnvStep:
 
         # Open short
         num_long_actions = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        short_action = 2 + num_long_actions  # 0=HOLD, 1=CLOSE, 2+=long
+        short_action = 1 + num_long_actions  # 0=HOLD, 1+=long (no CLOSE)
 
         td.set("action", torch.tensor(short_action))
         result = env.step(td)
@@ -707,7 +713,7 @@ class TestSeqFuturesSLTPEnvStep:
         assert env.position.position_size < 0
 
         # Open long (close short first internally)
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         result = env.step(td)
         td = result["next"]
 
@@ -750,11 +756,11 @@ class TestSeqFuturesSLTPEnvEdgeCases:
         )
         env = SeqFuturesSLTPEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Should have 3 actions: hold, long, short
-        assert env.action_spec.n == 4  # 1 hold + 1 close + 2 combinations
+        # Should have 3 actions: hold, long, short (no CLOSE by default)
+        assert env.action_spec.n == 3  # 1 hold + 1 long + 1 short
 
         td = env.reset()
-        td.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # First long (0=HOLD)
         result = env.step(td)
 
         assert result is not None
@@ -774,8 +780,8 @@ class TestSeqFuturesSLTPEnvEdgeCases:
         )
         env = SeqFuturesSLTPEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Should have 1 + 16 long + 16 short = 33 actions
-        assert env.action_spec.n == 34  # 1 hold + 1 close + 32 combinations
+        # Should have 1 + 16 long + 16 short = 33 actions (no CLOSE by default)
+        assert env.action_spec.n == 33  # 1 hold + 16 long + 16 short
 
     def test_multiple_episodes(self, env):
         """Should work correctly across multiple episodes."""
@@ -830,10 +836,10 @@ class TestSeqFuturesSLTPEnvEdgeCases:
         td_low = env_low.reset()
         td_high = env_high.reset()
 
-        td_low.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td_low.set("action", torch.tensor(1))  # First long (0=HOLD)
         env_low.step(td_low)
 
-        td_high.set("action", torch.tensor(2))  # First long (0=HOLD, 1=CLOSE)
+        td_high.set("action", torch.tensor(1))  # First long (0=HOLD)
         env_high.step(td_high)
 
         # With QUANTITY mode, position sizes should be equal

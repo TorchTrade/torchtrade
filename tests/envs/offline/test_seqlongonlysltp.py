@@ -18,9 +18,12 @@ from torchtrade.envs.offline.utils import (
 )
 
 
-def combinatory_action_map(stoploss_levels, takeprofit_levels):
-    """Wrapper for backward compatibility in tests."""
-    return build_sltp_action_map(stoploss_levels, takeprofit_levels, include_short_positions=False)
+def combinatory_action_map(stoploss_levels, takeprofit_levels, include_close_action=False):
+    """Wrapper for backward compatibility in tests.
+
+    Note: include_close_action defaults to False to match SLTP environment defaults.
+    """
+    return build_sltp_action_map(stoploss_levels, takeprofit_levels, include_short_positions=False, include_close_action=include_close_action)
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
@@ -73,11 +76,11 @@ class TestCombinatoryActionMap:
         assert action_map[0] == (None, None)
 
     def test_action_map_size(self):
-        """Action map size should be 1 hold + 1 close + (num_sl * num_tp)."""
+        """Action map size should be 1 hold + (num_sl * num_tp)."""
         sl_levels = [-0.05, -0.1]
         tp_levels = [0.05, 0.1, 0.15]
         action_map = combinatory_action_map(sl_levels, tp_levels)
-        expected_size = 1 + 1 + len(sl_levels) * len(tp_levels)  # 1 hold + 1 close + 6 combinations
+        expected_size = 1 + len(sl_levels) * len(tp_levels)  # 1 hold + 6 combinations (no CLOSE by default)
         assert len(action_map) == expected_size
 
     def test_action_map_contains_all_combinations(self):
@@ -97,8 +100,8 @@ class TestCombinatoryActionMap:
     def test_action_map_single_levels(self):
         """Should work with single SL and TP level."""
         action_map = combinatory_action_map([-0.05], [0.1])
-        assert len(action_map) == 3  # hold + close + 1 combination
-        assert action_map[2] == (-0.05, 0.1)  # First trade action is at index 2 (0=HOLD, 1=CLOSE)
+        assert len(action_map) == 2  # hold + 1 combination (no CLOSE by default)
+        assert action_map[1] == (-0.05, 0.1)  # First trade action is at index 1 (0=HOLD)
 
 
 class TestSeqLongOnlySLTPEnvInitialization:
@@ -110,7 +113,7 @@ class TestSeqLongOnlySLTPEnvInitialization:
 
     def test_action_spec_size(self, env):
         """Action spec should match action map size."""
-        expected_size = 1 + 1 + 2 * 2  # hold + close + (2 SL * 2 TP)
+        expected_size = 1 + 2 * 2  # hold + (2 SL * 2 TP) - no CLOSE by default
         assert env.action_spec.n == expected_size
 
     def test_action_map_created(self, env):
@@ -158,7 +161,7 @@ class TestSeqLongOnlySLTPEnvBuyWithSLTP:
         td = env.reset()
 
         # Action 2 is the first buy (0=HOLD, 1=CLOSE)
-        td.set("action", torch.tensor(2))  # Buy action (0=HOLD, 1=CLOSE, 2=first buy)
+        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
         env.step(td)
 
         assert env.stop_loss > 0
@@ -168,7 +171,7 @@ class TestSeqLongOnlySLTPEnvBuyWithSLTP:
         """Buy action should set take profit level."""
         td = env.reset()
 
-        td.set("action", torch.tensor(2))  # Buy action (0=HOLD, 1=CLOSE, 2=first buy)
+        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
         env.step(td)
 
         assert env.take_profit > 0
@@ -178,10 +181,10 @@ class TestSeqLongOnlySLTPEnvBuyWithSLTP:
         """SL/TP should be calculated as percentages of entry price."""
         td = env.reset()
 
-        # Get the SL/TP percentages for action 2 (first buy)
-        sl_pct, tp_pct = env.action_map[2]
+        # Get the SL/TP percentages for action 1 (first buy)
+        sl_pct, tp_pct = env.action_map[1]
 
-        td.set("action", torch.tensor(2))  # Buy action (0=HOLD, 1=CLOSE, 2=first buy)
+        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
         env.step(td)
 
         expected_sl = env.position.entry_price * (1 + sl_pct)
@@ -223,7 +226,7 @@ class TestSeqLongOnlySLTPEnvTriggers:
         td = env.reset()
 
         # Buy with SL/TP
-        td.set("action", torch.tensor(2))  # Buy action (0=HOLD, 1=CLOSE, 2=first buy)
+        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
         result = env.step(td)
         td = result["next"]
 
@@ -265,7 +268,7 @@ class TestSeqLongOnlySLTPEnvTriggers:
         td = env.reset()
 
         # Buy with SL/TP
-        td.set("action", torch.tensor(2))  # Buy action (0=HOLD, 1=CLOSE, 2=first buy)
+        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
         result = env.step(td)
         td = result["next"]
 
@@ -307,7 +310,7 @@ class TestSeqLongOnlySLTPEnvTriggers:
         td = env.reset()
 
         # Buy
-        td.set("action", torch.tensor(2))  # Buy action (0=HOLD, 1=CLOSE, 2=first buy)
+        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
         result = env.step(td)
         td = result["next"]
 
@@ -393,7 +396,7 @@ class TestSeqLongOnlySLTPEnvStep:
         td = env.reset()
 
         # First buy
-        td.set("action", torch.tensor(2))  # Buy action (0=HOLD, 1=CLOSE, 2=first buy)
+        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
         result = env.step(td)
         td = result["next"]
 
@@ -413,7 +416,7 @@ class TestSeqLongOnlySLTPEnvStep:
         td = env.reset()
 
         # Buy first
-        td.set("action", torch.tensor(2))  # Buy action (0=HOLD, 1=CLOSE, 2=first buy)
+        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
         result = env.step(td)
         td = result["next"]
 
@@ -461,11 +464,11 @@ class TestSeqLongOnlySLTPEnvEdgeCases:
         )
         env = SeqLongOnlySLTPEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Should have 3 actions: hold, close, and buy
-        assert env.action_spec.n == 3
+        # Should have 2 actions: hold and buy (no CLOSE by default)
+        assert env.action_spec.n == 2
 
         td = env.reset()
-        td.set("action", torch.tensor(2))  # Buy action (0=HOLD, 1=CLOSE, 2=buy)
+        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=buy)
         result = env.step(td)
 
         assert result is not None
@@ -484,8 +487,8 @@ class TestSeqLongOnlySLTPEnvEdgeCases:
         )
         env = SeqLongOnlySLTPEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Should have 1 hold + 1 close + 16 = 18 actions
-        assert env.action_spec.n == 18
+        # Should have 1 hold + 16 combinations = 17 actions (no CLOSE by default)
+        assert env.action_spec.n == 17
 
     def test_multiple_episodes(self, env):
         """Should work correctly across multiple episodes."""
@@ -524,7 +527,7 @@ class TestSeqLongOnlySLTPEnvEdgeCases:
         td = env.reset()
 
         # Buy with SL/TP
-        td.set("action", torch.tensor(2))  # Buy action (0=HOLD, 1=CLOSE, 2=first buy)
+        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
         result = env.step(td)
         td = result["next"]
 
