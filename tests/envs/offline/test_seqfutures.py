@@ -39,6 +39,8 @@ def default_config():
         max_traj_length=100,
         random_start=False,
         bankrupt_threshold=0.1,
+        position_sizing_mode="fixed",  # Use legacy fixed mode for these tests
+        include_close_action=False,  # Original behavior: only short, hold, long
     )
 
 
@@ -293,6 +295,8 @@ class TestSeqFuturesEnvLongTrades:
             slippage=0.0,
             max_traj_length=100,
             random_start=False,
+            position_sizing_mode="fixed",
+            include_close_action=False,
         )
         env = SeqFuturesEnv(trending_up_df, config, simple_feature_fn)
 
@@ -607,6 +611,8 @@ class TestSeqFuturesEnvLeverage:
             slippage=0.0,
             max_traj_length=50,
             random_start=False,
+            position_sizing_mode="fixed",
+            include_close_action=False,
         )
         config_high = SeqFuturesEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
@@ -618,6 +624,8 @@ class TestSeqFuturesEnvLeverage:
             slippage=0.0,
             max_traj_length=50,
             random_start=False,
+            position_sizing_mode="fixed",
+            include_close_action=False,
         )
 
         env_low = SeqFuturesEnv(sample_ohlcv_df, config_low, simple_feature_fn)
@@ -680,6 +688,8 @@ class TestSeqFuturesEnvLiquidation:
             slippage=0.0,
             max_traj_length=500,
             random_start=False,
+            position_sizing_mode="fixed",
+            include_close_action=False,
         )
         env = SeqFuturesEnv(trending_down_df, config, simple_feature_fn)
 
@@ -918,16 +928,19 @@ class TestSeqFuturesEnvPositionSizing:
             slippage=0.0,
             max_traj_length=200,
             random_start=False,
+            position_sizing_mode="fixed",
+            include_close_action=True,  # Need CLOSE action for this test
         )
         env = SeqFuturesEnv(sample_ohlcv_df, config, simple_feature_fn)
 
         td = env.reset()
 
         # Execute many trades to reduce balance through fees
+        # Action indices: 0=short, 1=hold, 2=close, 3=long
         positions_opened = 0
         for i in range(100):
             # Open position
-            td.set("action", torch.tensor(2))  # long
+            td.set("action", torch.tensor(3))  # long
             result = env.step(td)
             td = result["next"]
 
@@ -938,7 +951,7 @@ class TestSeqFuturesEnvPositionSizing:
                 break
 
             # Close position
-            td.set("action", torch.tensor(1))  # close
+            td.set("action", torch.tensor(2))  # close
             result = env.step(td)
             td = result["next"]
 
@@ -967,6 +980,8 @@ class TestSeqFuturesEnvPositionSizing:
             slippage=0.0,
             max_traj_length=50,
             random_start=False,
+            position_sizing_mode="fixed",
+            include_close_action=False,
         )
         env = SeqFuturesEnv(sample_ohlcv_df, config, simple_feature_fn)
 
@@ -999,6 +1014,8 @@ class TestSeqFuturesEnvPnLCalculations:
             slippage=0.0,
             max_traj_length=100,
             random_start=False,
+            position_sizing_mode="fixed",
+            include_close_action=False,
         )
         env = SeqFuturesEnv(trending_up_df, config, simple_feature_fn)
 
@@ -1131,6 +1148,8 @@ class TestSeqFuturesEnvMetrics:
             slippage=0.0,
             max_traj_length=100,
             random_start=False,
+            position_sizing_mode="fixed",
+            include_close_action=False,
         )
         env = SeqFuturesEnv(trending_up_df, config, simple_feature_fn)
 
@@ -1161,6 +1180,8 @@ class TestSeqFuturesEnvMetrics:
             slippage=0.0,
             max_traj_length=100,
             random_start=False,
+            position_sizing_mode="fixed",
+            include_close_action=False,
         )
         env = SeqFuturesEnv(trending_down_df, config, simple_feature_fn)
 
