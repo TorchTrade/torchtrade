@@ -119,7 +119,7 @@ def build_default_action_levels(
 
         >>> # Fractional long-only (default)
         >>> build_default_action_levels("fractional", allow_short=False)
-        [-1.0, -0.5, 0.0, 0.5, 1.0]
+        [0.0, 0.5, 1.0]
 
         >>> # Legacy fixed mode with hold and close
         >>> build_default_action_levels("fixed", True, True, True)
@@ -130,10 +130,13 @@ def build_default_action_levels(
         [-1.0, 0.0, 1.0]
     """
     if position_sizing_mode == "fractional":
-        # New default: fractional sizing with neutral at 0
-        # Same default for both futures and long-only
-        # (long-only environments handle negative actions as sells/reductions)
-        return [-1.0, -0.5, 0.0, 0.5, 1.0]
+        # Fractional sizing with neutral at 0
+        if allow_short:
+            # Futures: allow both long and short positions
+            return [-1.0, -0.5, 0.0, 0.5, 1.0]
+        else:
+            # Long-only: only non-negative actions (0 = close, positive = buy)
+            return [0.0, 0.5, 1.0]
 
     else:  # "fixed" - legacy mode
         # Build legacy action levels based on flags

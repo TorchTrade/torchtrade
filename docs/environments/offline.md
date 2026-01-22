@@ -76,17 +76,18 @@ position_size = (balance × action) / price
     from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 
     config = SeqLongOnlyEnvConfig(
-        action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # Long-only with sells
+        action_levels=[0.0, 0.5, 1.0],  # Default: close, 50%, 100%
         initial_cash=10000
     )
     env = SeqLongOnlyEnv(df, config)
 
     # Action interpretation with $10k balance, $50k BTC price:
-    # action = -1.0  → Sell entire position (go to 100% cash)
-    # action = -0.5  → Sell half position (reduce by 50%)
-    # action =  0.0  → Market neutral (close all)
+    # action =  0.0  → Close position (go to 100% cash)
     # action =  0.5  → 50% invested: 10k × 0.5 / 50k = 0.1 BTC
     # action =  1.0  → 100% invested: 10k × 1.0 / 50k = 0.2 BTC
+
+    # Note: Negative actions are technically supported for backwards compatibility
+    # but are not recommended as they add redundancy (behave same as action=0)
     ```
 
 #### Customizing Action Levels
@@ -111,10 +112,10 @@ action_levels = [-1.0, 0.0, 1.0]
 ```
 
 **Default Values:**
-- Futures: `[-1.0, -0.5, 0.0, 0.5, 1.0]` (5 actions: short/reduce/neutral/long)
-- Long-only: `[-1.0, -0.5, 0.0, 0.5, 1.0]` (5 actions: negative values = reduce/close position, positive = long)
+- Futures: `[-1.0, -0.5, 0.0, 0.5, 1.0]` (5 actions: short/neutral/long)
+- Long-only: `[0.0, 0.5, 1.0]` (3 actions: close/half/full invested)
 
-Note: For long-only, negative action values mean "reduce position" or "go to cash", NOT short positions.
+Note: For long-only, action=0.0 closes the position. Negative actions are technically supported for backwards compatibility but not recommended (they behave identically to action=0.0, adding redundancy to the action space).
 
 #### Efficient Partial Adjustments
 

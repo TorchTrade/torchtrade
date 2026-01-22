@@ -316,6 +316,25 @@ class TestDirectionSwitching:
 class TestLongOnlyFractional:
     """Test fractional position sizing for SeqLongOnlyEnv."""
 
+    def test_long_only_default_action_levels_no_negatives(self, sample_df):
+        """Long-only env default action levels should not include negative values."""
+        config = SeqLongOnlyEnvConfig(
+            initial_cash=10000,
+            transaction_fee=0.0,
+            slippage=0.0,
+            random_start=False,
+            max_traj_length=10
+        )
+        env = SeqLongOnlyEnv(sample_df, config)
+
+        # Default action levels should be non-negative
+        assert all(level >= 0 for level in env.action_levels), \
+            f"Long-only default action_levels should be non-negative, got {env.action_levels}"
+
+        # Should have at least close (0.0) and one positive action
+        assert 0.0 in env.action_levels, "Should have action 0.0 for closing positions"
+        assert any(level > 0 for level in env.action_levels), "Should have at least one positive action"
+
     def test_long_only_fractional_buy(self, sample_df):
         """Long-only env should correctly size buy positions."""
         config = SeqLongOnlyEnvConfig(
@@ -343,9 +362,9 @@ class TestLongOnlyFractional:
         assert abs(actual_value - expected_value) / expected_value < BALANCE_TOLERANCE
 
     def test_long_only_fractional_sell(self, sample_df):
-        """Long-only env should correctly close positions with negative actions."""
+        """Long-only env should correctly close positions with action=0."""
         config = SeqLongOnlyEnvConfig(
-            action_levels=[-1.0, 0.0, 1.0],
+            action_levels=[0.0, 0.5, 1.0],
             initial_cash=10000,
             transaction_fee=0.0,
             slippage=0.0,
@@ -361,10 +380,32 @@ class TestLongOnlyFractional:
         td = env.step(td)["next"]
         assert env.position.position_size > 0
 
-        # Sell all with negative action
-        td["action"] = torch.tensor([0])  # -1.0 = sell all
+        # Sell all with action=0
+        td["action"] = torch.tensor([0])  # 0.0 = close position
         td = env.step(td)["next"]
         assert env.position.position_size == 0.0
+
+    def test_long_only_negative_actions_trigger_warning(self, sample_df):
+        """Long-only env should warn when negative actions are used."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+
+            config = SeqLongOnlyEnvConfig(
+                action_levels=[-1.0, 0.0, 1.0],  # Includes negative action
+                initial_cash=10000,
+                transaction_fee=0.0,
+                slippage=0.0,
+                random_start=False,
+                max_traj_length=10
+            )
+
+            # Should trigger a warning about negative actions
+            assert len(w) == 1
+            assert issubclass(w[0].category, UserWarning)
+            assert "negative action_levels" in str(w[0].message).lower()
+            assert "redundancy" in str(w[0].message).lower()
 
 
 class TestPartialPositionAdjustment:

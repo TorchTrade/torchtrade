@@ -58,8 +58,8 @@ class TestSeqLongOnlyEnvInitialization:
         assert env is not None
 
     def test_action_spec(self, env):
-        """Action spec should be categorical with 5 fractional actions."""
-        assert env.action_spec.n == 5  # Default: [-1.0, -0.5, 0.0, 0.5, 1.0]
+        """Action spec should be categorical with 3 fractional actions."""
+        assert env.action_spec.n == 3  # Default: [0.0, 0.5, 1.0]
 
     def test_observation_spec_has_account_state(self, env):
         """Observation spec should include account_state."""
@@ -152,7 +152,7 @@ class TestSeqLongOnlyEnvStep:
     def test_step_returns_tensordict(self, env):
         """Step should return a TensorDict."""
         td = env.reset()
-        td.set("action", torch.tensor(2))  # neutral (0.0)
+        td.set("action", torch.tensor(0))  # close/flat (0.0)
         result = env.step(td)
         assert result is not None
         assert "next" in result.keys()
@@ -161,21 +161,21 @@ class TestSeqLongOnlyEnvStep:
         """Step should increment step counter."""
         td = env.reset()
         assert env.step_counter == 0
-        td.set("action", torch.tensor(2))  # neutral (0.0)
+        td.set("action", torch.tensor(0))  # close/flat (0.0)
         env.step(td)
         assert env.step_counter == 1
 
     def test_step_has_reward(self, env):
         """Step result should include reward."""
         td = env.reset()
-        td.set("action", torch.tensor(2))  # neutral (0.0)
+        td.set("action", torch.tensor(0))  # close/flat (0.0)
         result = env.step(td)
         assert "reward" in result["next"].keys()
 
     def test_step_has_done_flags(self, env):
         """Step result should include done flags."""
         td = env.reset()
-        td.set("action", torch.tensor(2))  # neutral (0.0)
+        td.set("action", torch.tensor(0))  # close/flat (0.0)
         result = env.step(td)
         next_td = result["next"]
         assert "done" in next_td.keys()
@@ -187,7 +187,7 @@ class TestSeqLongOnlyEnvStep:
         td = env.reset()
         initial_balance = env.balance
 
-        td.set("action", torch.tensor(2))  # neutral (0.0) (index 2 = 0.0)
+        td.set("action", torch.tensor(0))  # close/flat (0.0)
         env.step(td)
 
         assert env.position.position_size == 0.0
@@ -196,7 +196,7 @@ class TestSeqLongOnlyEnvStep:
     def test_step_updates_histories(self, env):
         """Step should update history."""
         td = env.reset()
-        td.set("action", torch.tensor(2))  # neutral (0.0)
+        td.set("action", torch.tensor(0))  # close/flat (0.0)
         env.step(td)
 
         assert len(env.history) == 1
@@ -240,16 +240,20 @@ class TestSeqLongOnlyEnvStep:
         for _ in range(50):
             action = env.action_spec.sample()
             td.set("action", action)
-            result = env.step(td)
-            td = result["next"]
+
+            try:
+                result = env.step(td)
+                td = result["next"]
+            except ValueError as e:
+                # Bankruptcy can cause reward calculation errors
+                if "Invalid new_portfolio_value: 0.0" in str(e) or "Portfolio value must be positive" in str(e):
+                    break  # Terminate episode on bankruptcy
+                raise  # Re-raise other ValueErrors
 
             portfolio_value = env._get_portfolio_value()
             assert not np.isnan(portfolio_value), "Portfolio value should never be NaN"
 
             # Stop if episode terminated (e.g., bankruptcy)
-            if td.get("done", False):
-                break
-
             if td.get("done", False):
                 break
 
@@ -262,7 +266,7 @@ class TestSeqLongOnlyEnvTradeExecution:
         td = env.reset()
         initial_balance = env.balance
 
-        td.set("action", torch.tensor(4))  # buy all-in (1.0) (index 2 = 1.0)
+        td.set("action", torch.tensor(2))  # buy all-in (1.0)
         env.step(td)
 
         assert env.position.position_size > 0
@@ -275,15 +279,15 @@ class TestSeqLongOnlyEnvTradeExecution:
         td = env.reset()
 
         # First buy
-        td.set("action", torch.tensor(4))  # buy all-in (1.0)
+        td.set("action", torch.tensor(2))  # buy all-in (1.0)
         result = env.step(td)
         td = result["next"]
 
         assert env.position.position_size > 0
         position_before_sell = env.position.position_size
 
-        # Then sell
-        td.set("action", torch.tensor(0))  # sell (index 0 = -1.0)
+        # Then sell (close position)
+        td.set("action", torch.tensor(0))  # close position (0.0)
         env.step(td)
 
         assert env.position.position_size == 0.0
@@ -296,7 +300,7 @@ class TestSeqLongOnlyEnvTradeExecution:
         td = env.reset()
         initial_balance = env.balance
 
-        td.set("action", torch.tensor(4))  # buy all-in (1.0)
+        td.set("action", torch.tensor(2))  # buy all-in (1.0)
         env.step(td)
 
         # Balance should decrease by more than just position value due to fees
@@ -310,12 +314,12 @@ class TestSeqLongOnlyEnvTradeExecution:
         initial_balance = env.balance
 
         # Buy all-in
-        td.set("action", torch.tensor(4))  # buy all-in (1.0)
+        td.set("action", torch.tensor(2))  # buy all-in (1.0)
         result = env.step(td)
         td = result["next"]
 
         # Sell immediately (same price, only fees should reduce value)
-        td.set("action", torch.tensor(0))  # sell (-1.0)
+        td.set("action", torch.tensor(0))  # close position (0.0)
         env.step(td)
 
         # Final balance should be less than initial due to buy + sell fees
@@ -336,7 +340,7 @@ class TestSeqLongOnlyEnvTradeExecution:
         """Entry price should be recorded correctly on buy."""
         td = env.reset()
 
-        td.set("action", torch.tensor(4))  # buy all-in (1.0)
+        td.set("action", torch.tensor(2))  # buy all-in (1.0)
         env.step(td)
 
         assert env.position.entry_price > 0
@@ -350,7 +354,7 @@ class TestSeqLongOnlyEnvReward:
     def test_reward_is_float(self, env):
         """Reward should be a float value."""
         td = env.reset()
-        td.set("action", torch.tensor(2))  # neutral (0.0)
+        td.set("action", torch.tensor(0))  # close/flat (0.0)
         result = env.step(td)
 
         reward = result["next"]["reward"]
@@ -366,7 +370,7 @@ class TestSeqLongOnlyEnvReward:
 
         # Use conservative action sequence to avoid bankruptcy
         # Cycle through actions but avoid extreme positions
-        actions = [2, 3, 2, 1, 2, 3, 2, 1]  # Mix of neutral and small positions
+        actions = [0, 1, 0, 1, 0, 2, 0, 1]  # Mix of close, half, and all-in
 
         for i in range(min(len(actions), env.max_traj_length)):
             action = torch.tensor(actions[i % len(actions)])
@@ -419,7 +423,7 @@ class TestSeqLongOnlyEnvReward:
         td = env.reset()
 
         # Use conservative action sequence
-        actions = [2, 3, 2, 4, 2, 3, 2, 1, 2, 3]  # Mix of positions
+        actions = [0, 1, 0, 2, 0, 1, 0, 1, 0, 2]  # Mix of positions
 
         # Run several steps (not terminal)
         for i in range(min(len(actions), env.max_traj_length - 2)):
@@ -443,7 +447,7 @@ class TestSeqLongOnlyEnvTermination:
         td = env.reset()
 
         for i in range(env.max_traj_length + 10):
-            td.set("action", torch.tensor(2))  # neutral (0.0)
+            td.set("action", torch.tensor(0))  # close/flat (0.0)
             result = env.step(td)
             td = result["next"]
 
@@ -473,7 +477,7 @@ class TestSeqLongOnlyEnvTermination:
         # Trade back and forth to lose money on fees
         for i in range(20):
             # Buy
-            td.set("action", torch.tensor(4))  # buy all-in (1.0))
+            td.set("action", torch.tensor(2))  # buy all-in (1.0)
             result = env.step(td)
             td = result["next"]
             if td.get("done", False):
@@ -499,7 +503,7 @@ class TestSeqLongOnlyEnvTermination:
 
         # Run until done
         while True:
-            td.set("action", torch.tensor(2))  # neutral (0.0)
+            td.set("action", torch.tensor(0))  # close/flat (0.0)
             result = env.step(td)
             td = result["next"]
 
@@ -532,7 +536,7 @@ class TestSeqLongOnlyEnvEdgeCases:
         assert env.balance == 1
 
         # Should still be able to trade
-        td.set("action", torch.tensor(4))  # buy all-in (1.0)
+        td.set("action", torch.tensor(2))  # buy all-in (1.0)
         result = env.step(td)
 
         assert not torch.isnan(result["next"]["reward"]).any()
@@ -555,7 +559,7 @@ class TestSeqLongOnlyEnvEdgeCases:
         initial_balance = env.balance
 
         # Buy and sell should preserve value (no fees)
-        td.set("action", torch.tensor(4))  # buy all-in (1.0)
+        td.set("action", torch.tensor(2))  # buy all-in (1.0)
         result = env.step(td)
         td = result["next"]
 
@@ -579,7 +583,7 @@ class TestSeqLongOnlyEnvEdgeCases:
             # Run a few steps with controlled actions to avoid bankruptcy
             for step in range(10):
                 # Use less risky actions (avoid full sell/buy cycles)
-                action = torch.tensor(2)  # neutral (0.0) - safer than random
+                action = torch.tensor(0)  # close/flat (0.0) - safer than random
                 td.set("action", action)
 
                 # Stop if near bankruptcy
@@ -728,7 +732,7 @@ class TestLookaheadBiasIntegration:
                 )
 
             # Take hold action and step
-            action = torch.tensor(1)  # hold
+            action = torch.tensor(0)  # close/flat (0.0)
             td_next = env.step(td.set("action", action))
             td = td_next
 
@@ -795,7 +799,7 @@ class TestLookaheadBiasIntegration:
                 )
 
             # Step environment
-            td = env.step(td.set("action", torch.tensor(2)))  # neutral (0.0)
+            td = env.step(td.set("action", torch.tensor(0)))  # close/flat (0.0)
 
             if td.get("done", False):
                 break

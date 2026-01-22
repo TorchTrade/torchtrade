@@ -69,31 +69,39 @@ class SeqLongOnlyEnvConfig:
                     f"action_levels must contain at least 2 actions, got {len(self.action_levels)}"
                 )
 
+            # Warn if using negative actions (redundant for long-only)
+            if any(a < 0 for a in self.action_levels):
+                import warnings
+                warnings.warn(
+                    f"Long-only environment has negative action_levels {self.action_levels}. "
+                    "Negative actions behave the same as action=0 (close position), adding "
+                    "unnecessary redundancy. Consider using only non-negative actions like [0.0, 0.5, 1.0].",
+                    UserWarning
+                )
+
 class SeqLongOnlyEnv(TorchTradeOfflineEnv):
     """Sequential long-only trading environment for backtesting.
 
     Action Space (Fractional Mode - Default):
     --------------------------------------
     Actions represent the fraction of available balance to allocate to the asset.
-    Action values in range [-1.0, 1.0]:
+    Action values in range [0.0, 1.0]:
 
-    - action < 0: Sell entire position (go to 100% cash)
-      - action = -1.0: Sell all
-      - action = -0.5: Sell all (any negative value sells everything)
-    - action = 0.0: Neutral (close position if holding, otherwise stay in cash)
+    - action = 0.0: Close position (go to 100% cash)
     - action > 0: Buy/increase position targeting action × balance
       - action = 0.5: Target 50% of balance invested
       - action = 1.0: Target 100% of balance invested (all-in)
 
     Position sizing formula:
         For positive actions: target_notional = balance × action
-        For negative/zero actions: sell entire position
+        For action = 0: sell entire position
 
-    Default action_levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
-    Custom levels supported: e.g., [0, 0.25, 0.5, 0.75, 1.0] (buy-only)
+    Default action_levels: [0.0, 0.5, 1.0]
+    Custom levels supported: e.g., [0.0, 0.25, 0.5, 0.75, 1.0] for finer control
 
-    Note: Unlike futures which support partial position reduction, long-only
-    environments treat any negative action as "sell everything" for simplicity.
+    Note: Negative actions are technically supported for backwards compatibility
+    (they behave the same as action=0, closing the position), but are not recommended
+    as they add unnecessary redundancy to the action space.
 
     Note: Unlike futures environments, there is no leverage parameter since this
     is spot trading (1x leverage only).
