@@ -12,10 +12,6 @@ from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass, TradeMode
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 from torchtrade.envs.alpaca.base import AlpacaBaseTorchTradingEnv
-from torchtrade.envs.fractional_sizing import (
-    build_default_action_levels,
-    validate_position_sizing_mode,
-)
 
 @dataclass
 class AlpacaTradingEnvConfig:
@@ -33,13 +29,6 @@ class AlpacaTradingEnvConfig:
     trade_mode: TradeMode = TradeMode.NOTIONAL
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
-
-    # NEW: Position sizing mode
-    position_sizing_mode: str = "fractional"  # "fractional" (new default) or "fixed" (legacy)
-
-    # DEPRECATED: Only used in legacy "fixed" mode
-    include_hold_action: bool = True  # Include HOLD action (0.0) in action space
-
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
     def __post_init__(self):
@@ -47,21 +36,9 @@ class AlpacaTradingEnvConfig:
             self.execute_on, self.time_frames, self.window_sizes
         )
 
-        # Validate and build default action levels using shared utility
-        validate_position_sizing_mode(self.position_sizing_mode)
-
+        # Build default action levels for fractional mode
         if self.action_levels is None:
-            # Note: For Alpaca long-only, we use the same defaults as offline but only use non-negative
-            # The legacy fixed mode still uses [-1, 0, 1] for backward compatibility
-            if self.position_sizing_mode == "fractional":
-                self.action_levels = [0.0, 0.5, 1.0]  # Long-only fractional
-            else:
-                self.action_levels = build_default_action_levels(
-                    position_sizing_mode=self.position_sizing_mode,
-                    include_hold_action=self.include_hold_action,
-                    include_close_action=False,
-                    allow_short=False
-                )
+            self.action_levels = [0.0, 0.5, 1.0]  # Long-only fractional
 
 class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
     """
@@ -188,56 +165,8 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         Returns:
             trade_info: Dict with execution details
         """
-        if self.config.position_sizing_mode == "fractional":
-            # NEW: Fractional position sizing
-            return self._execute_fractional_action(desired_action)
-        else:
-            # LEGACY: Fixed position sizing (backward compatibility)
-            return self._execute_fixed_action(desired_action)
-
-    def _execute_fixed_action(self, desired_position: float) -> Dict:
-        """Execute trade using legacy fixed position sizing.
-
-        Args:
-            desired_position: Legacy action value (-1=sell all, 0=hold, 1=buy all)
-
-        Returns:
-            trade_info: Dict with execution details
-        """
-        trade_info = {"executed": False, "amount": 0, "side": None, "success": None}
-
-        # If holding position or no change in position, do nothing
-        if desired_position == 0 or desired_position == self.position.current_position:
-            return trade_info
-
-        # Determine trade details
-        side = "buy" if desired_position > 0 else "sell"
-        amount = self._calculate_trade_amount(side)
-
-        try:
-            success = self.trader.trade(side=side, amount=amount, order_type="market")
-            trade_info.update({
-                "executed": True,
-                "amount": amount,
-                "side": side,
-                "success": success
-            })
-        except Exception as e:
-            print(f"Trade failed: {side} ${amount:.2f} - {str(e)}")
-            trade_info["success"] = False
-
-        return trade_info
-
-    def _calculate_trade_amount(self, side: str) -> float:
-        """Calculate the dollar amount to trade (legacy fixed mode only)."""
-        if self.config.trade_mode == TradeMode.QUANTITY:
-            raise NotImplementedError
-
-        # NOTIONAL mode
-        if side == "buy":
-            return self.balance  # Buy with all available cash
-        else:  # sell
-            return -1  # Special value: sell entire position
+        # Execute fractional action
+        return self._execute_fractional_action(desired_action)
 
     def _calculate_fractional_position(
         self, action_value: float, current_price: float

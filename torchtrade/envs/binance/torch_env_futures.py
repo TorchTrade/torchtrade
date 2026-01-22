@@ -19,7 +19,6 @@ from torchtrade.envs.binance.futures_order_executor import (
 from torchtrade.envs.binance.base import BinanceBaseTorchTradingEnv
 from torchtrade.envs.fractional_sizing import (
     build_default_action_levels,
-    validate_position_sizing_mode,
     calculate_fractional_position,
     PositionCalculationParams,
     round_to_step_size,
@@ -42,14 +41,8 @@ class BinanceFuturesTradingEnvConfig:
     leverage: int = 1  # Leverage (1-125)
     margin_type: MarginType = MarginType.ISOLATED
 
-    # Action space configuration
-    position_sizing_mode: str = "fractional"  # "fractional" (new default) or "fixed" (legacy)
+    # Action space configuration (fractional mode only)
     action_levels: List[float] = None  # Custom action levels, or None for defaults
-
-    # DEPRECATED: Only used in legacy "fixed" mode
-    quantity_per_trade: float = 0.001  # DEPRECATED - only used when position_sizing_mode="fixed"
-    trade_mode: TradeMode = TradeMode.QUANTITY  # DEPRECATED - only used in fixed mode
-    include_hold_action: bool = True  # DEPRECATED - only used when position_sizing_mode="fixed"
 
     # Reward settings
     reward_scaling: float = 1.0
@@ -74,13 +67,11 @@ class BinanceFuturesTradingEnvConfig:
             self.execute_on, self.time_frames, self.window_sizes
         )
 
-        # Validate and build default action levels using shared utility
-        validate_position_sizing_mode(self.position_sizing_mode)
-
+        # Build default action levels for fractional mode
         if self.action_levels is None:
             self.action_levels = build_default_action_levels(
-                position_sizing_mode=self.position_sizing_mode,
-                include_hold_action=self.include_hold_action,
+                position_sizing_mode="fractional",
+                include_hold_action=True,
                 include_close_action=False,  # Binance futures doesn't use close action
                 allow_short=True  # Futures allow short positions
             )
@@ -507,25 +498,8 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         Returns:
             Dict with trade execution info
         """
-        if self.config.position_sizing_mode == "fractional":
-            # NEW: Fractional position sizing
-            return self._execute_fractional_action(desired_action)
-        else:
-            # LEGACY: Fixed position sizing
-            return self._execute_fixed_action(desired_action)
-
-    def _execute_fixed_action(self, desired_action: float) -> Dict:
-        """Execute action using fixed position sizing (legacy mode)."""
-        current_qty = self._get_current_position_quantity()
-
-        if desired_action == 0:
-            return self._handle_close_action(current_qty)
-        elif desired_action == 1:
-            return self._handle_long_action(current_qty)
-        elif desired_action == -1:
-            return self._handle_short_action(current_qty)
-        else:
-            return self._create_trade_info(executed=False)
+        # Execute fractional action
+        return self._execute_fractional_action(desired_action)
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""
@@ -550,7 +524,7 @@ if __name__ == "__main__":
         window_sizes=[10, 10],
         execute_on="1m",
         leverage=5,
-        quantity_per_trade=0.002,  # ~$190 notional to meet $100 minimum
+        action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # Fractional position sizing
         include_base_features=False,
     )
 

@@ -111,8 +111,10 @@ action_levels = [-1.0, 0.0, 1.0]
 ```
 
 **Default Values:**
-- Futures: `[-1.0, -0.5, 0.0, 0.5, 1.0]` (5 actions)
-- Long-only: `[-1.0, -0.5, 0.0, 0.5, 1.0]` (5 actions)
+- Futures: `[-1.0, -0.5, 0.0, 0.5, 1.0]` (5 actions: short/reduce/neutral/long)
+- Long-only: `[-1.0, -0.5, 0.0, 0.5, 1.0]` (5 actions: negative values = reduce/close position, positive = long)
+
+Note: For long-only, negative action values mean "reduce position" or "go to cash", NOT short positions.
 
 #### Efficient Partial Adjustments
 
@@ -126,16 +128,13 @@ When adjusting position size (e.g., going from 100% to 50%), the environment **o
 # ✅ Preserves entry price for remaining position
 ```
 
-#### Legacy Fixed Mode
+#### Custom Action Levels Example
 
-For backward compatibility with existing trained models, set `position_sizing_mode="fixed"`:
+You can customize action levels for your specific use case:
 
 ```python
 config = SeqFuturesEnvConfig(
-    position_sizing_mode="fixed",  # Use legacy behavior
-    quantity_per_trade=0.001,      # Fixed 0.001 BTC per trade
-    include_hold_action=True,
-    include_close_action=True,
+    action_levels=[-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0],  # Dynamic leverage scaling
 )
 ```
 

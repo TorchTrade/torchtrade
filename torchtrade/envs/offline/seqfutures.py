@@ -143,15 +143,6 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
     - Leverage = "How much risk am I willing to take?" (configuration)
     - Action = "How much of my allocation should I deploy?" (learned policy)
 
-    **Dynamic Leverage** (not currently implemented):
-    If you need the agent to dynamically choose leverage per trade, this could be
-    implemented as a multi-dimensional action space:
-
-        action_space = {
-            "position_fraction": Categorical([-1, -0.5, 0, 0.5, 1]),
-            "leverage_multiplier": Categorical([1, 3, 5])
-        }
-
     However, fixed leverage is recommended for most use cases as it:
     - Simplifies learning (smaller action space)
     - Provides better risk control
