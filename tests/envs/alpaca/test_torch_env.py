@@ -265,9 +265,9 @@ class TestAlpacaTorchTradingEnvStep:
         assert env.position.current_position == 0
 
     def test_step_hold_action(self, env):
-        """Test hold action (action=1)."""
+        """Test hold action (action=0 -> 0.0, close/neutral)."""
         env.reset()
-        td_in = TensorDict({"action": torch.tensor(1)}, batch_size=())
+        td_in = TensorDict({"action": torch.tensor(0)}, batch_size=())
         env._step(td_in)
 
         assert env.position.current_position == 0
@@ -518,8 +518,8 @@ class TestAlpacaTorchTradingEnvPositionTracking:
         td_buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
         td_out1 = env._step(td_buy)
 
-        # Hold
-        td_hold = TensorDict({"action": torch.tensor(1)}, batch_size=())
+        # Hold (maintain 100% position)
+        td_hold = TensorDict({"action": torch.tensor(2)}, batch_size=())
         td_out2 = env._step(td_hold)
 
         # Account state: [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpc, holding_time]

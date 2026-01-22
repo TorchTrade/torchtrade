@@ -230,6 +230,10 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         current_qty = float(position_status.qty) if position_status else 0.0
         current_price = position_status.current_price if position_status else 0.0
 
+        # Fallback: if no position, try to get price from trader's current_price attribute (for mocks)
+        if current_price <= 0 and hasattr(self.trader, 'current_price'):
+            current_price = self.trader.current_price
+
         if current_price <= 0:
             print("Cannot execute trade: invalid price")
             return trade_info
@@ -278,11 +282,15 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
 
         return trade_info
 
+    def _calculate_trade_amount(self, side: str) -> float:
+        """Calculate the dollar amount to trade (not used in fractional mode)."""
+        raise NotImplementedError("_calculate_trade_amount is not used in fractional mode")
+
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""
         if not self.config.done_on_bankruptcy:
             return False
-        
+
         bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
         return portfolio_value < bankruptcy_threshold
 

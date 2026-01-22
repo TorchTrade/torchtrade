@@ -29,6 +29,7 @@ class AlpacaSLTPTradingEnvConfig:
     # Take profit levels as percentages (positive values, e.g., 0.05 = 5%)
     takeprofit_levels: Tuple[float, ...] = (0.05, 0.1, 0.2)
     include_hold_action: bool = True  # Include HOLD action (index 0) in action space
+    include_close_action: bool = False  # Include CLOSE action for manual position exit (default: False for SLTP)
     reward_scaling: float = 1.0
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
@@ -87,7 +88,8 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         self.action_map = create_alpaca_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
-            include_hold_action=config.include_hold_action
+            include_hold_action=config.include_hold_action,
+            include_close_action=config.include_close_action
         )
 
         # Categorical action spec: 0=HOLD (if included), 1..N = SL/TP combinations

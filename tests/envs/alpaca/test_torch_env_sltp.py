@@ -86,11 +86,11 @@ class TestCombinatorActionMap:
         stoploss_levels = [-0.05, -0.1]
         takeprofit_levels = [0.05, 0.1]
 
-        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels)
+        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels, include_close_action=False)
 
         # Action 0 should be HOLD
         assert action_map[0] == (None, None)
-        # Should have 1 + (2 * 2) = 5 actions
+        # Should have 1 + (2 * 2) = 5 actions (HOLD + 4 SL/TP combinations)
         assert len(action_map) == 5
 
     def test_action_map_single_level(self):
@@ -98,9 +98,9 @@ class TestCombinatorActionMap:
         stoploss_levels = [-0.05]
         takeprofit_levels = [0.1]
 
-        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels)
+        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels, include_close_action=False)
 
-        assert len(action_map) == 2
+        assert len(action_map) == 2  # HOLD + 1 SL/TP combination
         assert action_map[0] == (None, None)
         assert action_map[1] == (-0.05, 0.1)
 

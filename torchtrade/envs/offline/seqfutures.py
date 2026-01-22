@@ -812,6 +812,29 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
             periods_per_year=periods_per_year,
         )
 
+    def _open_position(self, side: str, current_price: float, price_noise: float = 0.0):
+        """Testing helper method to directly open a position.
+
+        This method is provided for testing purposes only (e.g., liquidation price tests).
+        Normal trading should use the step() method with actions.
+
+        Args:
+            side: "long" or "short"
+            current_price: Entry price
+            price_noise: Price noise to apply (for testing)
+        """
+        # Calculate position size for full balance allocation (action_value = 1.0 or -1.0)
+        action_value = 1.0 if side == "long" else -1.0
+        position_size, notional_value, _ = self._calculate_fractional_position(
+            action_value, current_price
+        )
+
+        # Apply price noise
+        execution_price = current_price * (1 + price_noise * (1 if side == "long" else -1))
+
+        # Open the position
+        self._open_fractional_position(side, abs(position_size), notional_value, execution_price)
+
 if __name__ == "__main__":
     import pandas as pd
 

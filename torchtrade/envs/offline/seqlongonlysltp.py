@@ -35,7 +35,7 @@ class SeqLongOnlySLTPEnvConfig:
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
     include_hold_action: bool = True  # Include HOLD action (index 0) in action space
-    include_close_action: bool = True  # Include CLOSE action to exit positions (default: enabled)
+    include_close_action: bool = False  # Include CLOSE action for manual position exit (default: False for SLTP)
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
