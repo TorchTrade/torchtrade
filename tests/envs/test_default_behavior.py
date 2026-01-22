@@ -3,7 +3,6 @@ Tests for default environment behavior (fractional position sizing + CLOSE actio
 
 This test file validates that the new default behavior works correctly.
 All environments now default to:
-- position_sizing_mode="fractional"
 - include_close_action=True (for SLTP environments)
 
 These tests ensure the default configurations work end-to-end without errors

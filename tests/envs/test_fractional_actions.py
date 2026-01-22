@@ -42,7 +42,6 @@ class TestFractionalActionMapping:
     def test_action_1_0_maps_to_100_percent_long(self, sample_df):
         """Action 1.0 should create a position worth 100% of balance * leverage."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],
             leverage=1,
             initial_cash=10000,
@@ -71,7 +70,6 @@ class TestFractionalActionMapping:
     def test_action_0_5_maps_to_50_percent_long(self, sample_df):
         """Action 0.5 should create a position worth 50% of balance * leverage."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],
             leverage=1,
             initial_cash=10000,
@@ -98,7 +96,6 @@ class TestFractionalActionMapping:
     def test_action_0_0_closes_position(self, sample_df):
         """Action 0.0 should close all positions (market neutral)."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],
             leverage=1,
             initial_cash=10000,
@@ -126,7 +123,6 @@ class TestFractionalActionMapping:
     def test_action_negative_0_5_maps_to_50_percent_short(self, sample_df):
         """Action -0.5 should create a short position worth 50% of balance * leverage."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],
             leverage=1,
             initial_cash=10000,
@@ -154,7 +150,6 @@ class TestFractionalActionMapping:
     def test_action_negative_1_0_maps_to_100_percent_short(self, sample_df):
         """Action -1.0 should create a short position worth 100% of balance * leverage."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],
             leverage=1,
             initial_cash=10000,
@@ -186,7 +181,6 @@ class TestBalanceScaling:
     def test_position_scales_with_balance(self, sample_df):
         """Position size should scale proportionally with balance."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[0.0, 0.5, 1.0],
             leverage=1,
             transaction_fee=0.0,
@@ -223,7 +217,6 @@ class TestLeverageApplication:
     def test_5x_leverage_amplifies_position(self, sample_df):
         """5x leverage should create a position 5x larger than 1x leverage."""
         config_1x = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[0.0, 1.0],
             leverage=1,
             initial_cash=10000,
@@ -234,7 +227,6 @@ class TestLeverageApplication:
         )
 
         config_5x = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[0.0, 1.0],
             leverage=5,
             initial_cash=10000,
@@ -268,7 +260,6 @@ class TestDirectionSwitching:
     def test_long_to_short_switch(self, sample_df):
         """Switching from long to short should close long and open short."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[-1.0, 0.0, 1.0],
             leverage=1,
             initial_cash=10000,
@@ -294,7 +285,6 @@ class TestDirectionSwitching:
     def test_short_to_long_switch(self, sample_df):
         """Switching from short to long should close short and open long."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[-1.0, 0.0, 1.0],
             leverage=1,
             initial_cash=10000,
@@ -324,7 +314,6 @@ class TestBackwardCompatibility:
     def test_fixed_mode_maintains_old_behavior(self, sample_df):
         """Legacy fixed mode should work as before."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fixed",
             quantity_per_trade=0.001,  # Fixed 0.001 BTC
             include_hold_action=True,
             include_close_action=True,
@@ -360,7 +349,6 @@ class TestBackwardCompatibility:
         """Config should reject invalid position_sizing_mode."""
         with pytest.raises(ValueError, match="position_sizing_mode must be 'fractional' or 'fixed'"):
             config = SeqFuturesEnvConfig(
-                position_sizing_mode="invalid_mode",
                 initial_cash=10000
             )
 
@@ -371,7 +359,6 @@ class TestLongOnlyFractional:
     def test_long_only_fractional_buy(self, sample_df):
         """Long-only env should correctly size buy positions."""
         config = SeqLongOnlyEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[0.0, 0.5, 1.0],
             initial_cash=10000,
             transaction_fee=0.0,
@@ -398,7 +385,6 @@ class TestLongOnlyFractional:
     def test_long_only_fractional_sell(self, sample_df):
         """Long-only env should correctly close positions with negative actions."""
         config = SeqLongOnlyEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[-1.0, 0.0, 1.0],
             initial_cash=10000,
             transaction_fee=0.0,
@@ -427,7 +413,6 @@ class TestPartialPositionAdjustment:
     def test_reduce_position_from_100_to_50_percent(self, sample_df):
         """Reducing from 100% to 50% should only close 50% of position."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[0.0, 0.5, 1.0],
             leverage=1,
             initial_cash=10000,
@@ -464,7 +449,6 @@ class TestPartialPositionAdjustment:
     def test_increase_position_from_50_to_100_percent(self, sample_df):
         """Increasing from 50% to 100% should add to position with weighted average entry."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[0.0, 0.5, 1.0],
             leverage=1,
             initial_cash=10000,
@@ -500,7 +484,6 @@ class TestPartialPositionAdjustment:
     def test_only_trades_difference_fees(self, sample_df):
         """Verify that only the difference is traded by checking fees."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[0.0, 0.5, 1.0],
             leverage=1,
             initial_cash=10000,
@@ -540,7 +523,6 @@ class TestEdgeCases:
     def test_very_small_fraction(self, sample_df):
         """Test that very small fractions (0.01) work correctly."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[0.0, 0.01, 1.0],
             leverage=1,
             initial_cash=10000,
@@ -567,7 +549,6 @@ class TestEdgeCases:
     def test_implicit_hold_does_not_trade(self, sample_df):
         """Test that selecting the same action twice does not trade (implicit hold)."""
         config = SeqFuturesEnvConfig(
-            position_sizing_mode="fractional",
             action_levels=[0.0, 0.5, 1.0],
             leverage=1,
             initial_cash=10000,
