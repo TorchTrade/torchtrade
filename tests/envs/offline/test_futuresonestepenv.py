@@ -7,12 +7,12 @@ import pandas as pd
 import pytest
 import torch
 
-from torchtrade.envs.offline.futuresonestepenv import (
+from torchtrade.envs.offline.futures.onestep import (
     FuturesOneStepEnv,
     FuturesOneStepEnvConfig,
     MarginType,
 )
-from torchtrade.envs.offline.utils import (
+from torchtrade.envs.offline.infrastructure.utils import (
     TimeFrame,
     TimeFrameUnit,
     InitialBalanceSampler,

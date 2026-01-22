@@ -7,11 +7,11 @@ import pandas as pd
 import pytest
 import torch
 
-from torchtrade.envs.offline.seqfuturessltp import (
+from torchtrade.envs.offline.futures.sequential_sltp import (
     SeqFuturesSLTPEnv,
     SeqFuturesSLTPEnvConfig,
 )
-from torchtrade.envs.offline.utils import (
+from torchtrade.envs.offline.infrastructure.utils import (
     TimeFrame,
     TimeFrameUnit,
     build_sltp_action_map,

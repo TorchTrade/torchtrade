@@ -19,8 +19,8 @@ import torch
 
 from torchtrade.actor import LocalLLMActor
 from torchtrade.envs.offline import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
-from torchtrade.envs.offline.seqfuturessltp import futures_sltp_action_map
-from torchtrade.envs.offline.infrastructure.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.futures.sequential_sltp import futures_sltp_action_map
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
 def preprocessing_with_features(df: pd.DataFrame) -> pd.DataFrame:

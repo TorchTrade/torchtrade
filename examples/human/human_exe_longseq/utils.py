@@ -13,7 +13,7 @@ from torchrl.envs import (
 )
 from torchrl.collectors import SyncDataCollector
 
-from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 import pandas as pd
 
 # ====================================================================

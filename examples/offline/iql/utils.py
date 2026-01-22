@@ -40,7 +40,7 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 import numpy as np
 import ta
-from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 # ====================================================================
 # Environment utils
 # -----------------

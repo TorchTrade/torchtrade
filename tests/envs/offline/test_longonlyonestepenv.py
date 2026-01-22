@@ -7,11 +7,11 @@ import pandas as pd
 import pytest
 import torch
 
-from torchtrade.envs.offline.longonlyonestepenv import (
+from torchtrade.envs.offline.longonly.onestep import (
     LongOnlyOneStepEnv,
     LongOnlyOneStepEnvConfig,
 )
-from torchtrade.envs.offline.utils import (
+from torchtrade.envs.offline.infrastructure.utils import (
     TimeFrame,
     TimeFrameUnit,
     InitialBalanceSampler,

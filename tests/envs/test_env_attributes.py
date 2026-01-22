@@ -10,13 +10,13 @@ have the necessary attributes for LLM actor integration:
 import pandas as pd
 import pytest
 
-from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.seqlongonlysltp import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
-from torchtrade.envs.offline.longonlyonestepenv import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig
-from torchtrade.envs.offline.seqfutures import SeqFuturesEnv, SeqFuturesEnvConfig
-from torchtrade.envs.offline.seqfuturessltp import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
-from torchtrade.envs.offline.futuresonestepenv import FuturesOneStepEnv, FuturesOneStepEnvConfig
-from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline.longonly.sequential_sltp import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
+from torchtrade.envs.offline.longonly.onestep import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig
+from torchtrade.envs.offline.futures.sequential import SeqFuturesEnv, SeqFuturesEnvConfig
+from torchtrade.envs.offline.futures.sequential_sltp import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
+from torchtrade.envs.offline.futures.onestep import FuturesOneStepEnv, FuturesOneStepEnvConfig
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
@@ -248,7 +248,7 @@ class TestAlpacaEnvironmentAttributes:
         """Test AlpacaTorchTradingEnv has account_state and market_data_keys."""
         # Note: We can't easily instantiate Alpaca envs without API credentials,
         # but we can import and check the class structure
-        from torchtrade.envs.alpaca.torch_env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+        from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 
         # Check that the config exists (at minimum)
         assert AlpacaTorchTradingEnv is not None
@@ -258,7 +258,7 @@ class TestAlpacaEnvironmentAttributes:
 
     def test_alpaca_sltp_torch_env_has_attributes(self):
         """Test AlpacaSLTPTorchTradingEnv has account_state and market_data_keys."""
-        from torchtrade.envs.alpaca.torch_env_sltp import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
+        from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
 
         assert AlpacaSLTPTorchTradingEnv is not None
         assert AlpacaSLTPTradingEnvConfig is not None
@@ -271,7 +271,7 @@ class TestBinanceEnvironmentAttributes:
 
     def test_binance_futures_env_has_attributes(self):
         """Test BinanceFuturesTorchTradingEnv has account_state and market_data_keys."""
-        from torchtrade.envs.binance.torch_env_futures import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
+        from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 
         assert BinanceFuturesTorchTradingEnv is not None
         assert BinanceFuturesTradingEnvConfig is not None

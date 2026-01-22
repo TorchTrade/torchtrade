@@ -33,7 +33,7 @@ from tqdm import tqdm
 
 from torchtrade.actor.rulebased.meanreversion.actor import MeanReversionActor
 from torchtrade.envs import SeqFuturesEnv, SeqFuturesEnvConfig
-from torchtrade.envs.offline.infrastructure.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
 # ============================================================================

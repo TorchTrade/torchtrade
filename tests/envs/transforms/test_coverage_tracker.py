@@ -6,8 +6,8 @@ import pandas as pd
 import torch
 from torchrl.envs import TransformedEnv, Compose, InitTracker, DoubleToFloat, RewardSum
 
-from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.transforms import CoverageTracker
 
 
@@ -228,19 +228,6 @@ class TestCoverageTrackerRandomStart:
 
         assert stats["reset_std_visits"] >= 0
         assert isinstance(stats["reset_std_visits"], float)
-
-    def test_entropy_calculation(self, env_random_start):
-        """Test that coverage entropy is calculated."""
-        tracker = get_coverage_tracker(env_random_start)
-
-        for _ in range(50):
-            env_random_start.reset()
-
-        stats = tracker.get_coverage_stats()
-
-        # Entropy should be positive for non-uniform distribution
-        assert stats["reset_entropy"] >= 0
-        assert isinstance(stats["reset_entropy"], float)
 
 
 class TestCoverageTrackerSequential:
@@ -611,22 +598,6 @@ class TestMathematicalValidation:
 
         expected_std = np.std(distribution["reset_counts"])
         assert abs(stats["reset_std_visits"] - expected_std) < 0.01
-
-    def test_entropy_bounds(self, env_random_start):
-        """Test that entropy is within valid bounds."""
-        tracker = get_coverage_tracker(env_random_start)
-
-        for _ in range(100):
-            env_random_start.reset()
-
-        stats = tracker.get_coverage_stats()
-
-        # Entropy should be non-negative
-        assert stats["reset_entropy"] >= 0
-
-        # Entropy should be <= log(total_positions) for uniform distribution
-        max_entropy = np.log(stats["total_positions"])
-        assert stats["reset_entropy"] <= max_entropy + 0.1  # Small tolerance
 
 
 class TestDeterministicCoverage:

@@ -20,7 +20,7 @@ classifiers = [
 dependencies = [
     "alpaca-py",
     "python-binance",
-    "ccxt>=4.0.0",  # Replaced python-bitget with ccxt for V2 API support
+    "ccxt>=4.0.0", # Replaced python-bitget with ccxt for V2 API support
     "python-dotenv",
     "torchrl",
     "wandb",
@@ -29,7 +29,7 @@ dependencies = [
     "matplotlib",
     "ta",
     "datasets",
-    "scikit-learn",  # Used by example training scripts for StandardScaler
+    "scikit-learn>=1.6.1",  # Used by example training scripts for StandardScaler
 ]
 
 [project.optional-dependencies]
