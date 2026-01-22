@@ -1,7 +1,7 @@
 """Utility functions for Alpaca environments."""
 from typing import Any, List, Union, Tuple
 import warnings
-from torchtrade.envs.utils.timeframe import (
+from torchtrade.envs.timeframe import (
     TimeFrame,
     TimeFrameUnit,
     parse_timeframe_string,

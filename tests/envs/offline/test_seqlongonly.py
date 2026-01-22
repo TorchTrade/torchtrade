@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.infrastructure.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:

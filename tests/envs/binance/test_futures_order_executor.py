@@ -5,7 +5,7 @@ Inherits common tests from BaseOrderExecutorTests.
 
 import pytest
 from unittest.mock import MagicMock
-from torchtrade.envs.live.binance.order_executor import (
+from torchtrade.envs.binance.futures_order_executor import (
     BinanceFuturesOrderClass,
     TradeMode,
     PositionStatus,

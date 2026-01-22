@@ -8,7 +8,7 @@ import torch
 import numpy as np
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
-from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
+from torchtrade.envs.binance.torch_env_futures import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 from tests.envs.base_exchange_tests import BaseEnvTests
 
 
@@ -90,7 +90,7 @@ class TestBinanceFuturesTorchTradingEnv(BaseEnvTests):
 
     def test_leverage_in_account_state(self, mock_observer, mock_trader):
         """Test that leverage is included in account state."""
-        from torchtrade.envs.live.binance.order_executor import PositionStatus
+        from torchtrade.envs.binance.futures_order_executor import PositionStatus
 
         mock_trader.get_status = MagicMock(return_value={
             "position_status": PositionStatus(

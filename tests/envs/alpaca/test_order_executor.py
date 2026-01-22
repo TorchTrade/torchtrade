@@ -8,7 +8,7 @@ Inherits common tests from BaseOrderExecutorTests.
 import pytest
 import warnings
 
-from torchtrade.envs.live.alpaca.order_executor import (
+from torchtrade.envs.alpaca.order_executor import (
     AlpacaOrderClass,
     TradeMode,
     OrderStatus,

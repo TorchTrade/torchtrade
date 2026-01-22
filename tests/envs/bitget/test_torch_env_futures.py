@@ -6,7 +6,7 @@ Inherits common tests from BaseEnvTests.
 import pytest
 import numpy as np
 from unittest.mock import MagicMock, patch
-from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig
+from torchtrade.envs.bitget.torch_env_futures import BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig
 from tests.envs.base_exchange_tests import BaseEnvTests
 from tests.mocks.bitget import mock_ccxt_client
 

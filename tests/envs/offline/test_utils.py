@@ -5,7 +5,7 @@ Tests for torchtrade.envs.offline.utils module.
 import pandas as pd
 import pytest
 
-from torchtrade.envs.offline.infrastructure.utils import (
+from torchtrade.envs.offline.utils import (
     TimeFrame,
     TimeFrameUnit,
     tf_to_timedelta,

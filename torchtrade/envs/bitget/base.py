@@ -8,11 +8,11 @@ from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Bounded
 from torchrl.data.tensor_specs import Composite
 
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-from torchtrade.envs.live.bitget.observation import BitgetObservationClass
-from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
-from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import FuturesHistoryTracker, PositionState
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.bitget.obs_class import BitgetObservationClass
+from torchtrade.envs.bitget.futures_order_executor import BitgetFuturesOrderClass
+from torchtrade.envs.live import TorchTradeLiveEnv
+from torchtrade.envs.state import FuturesHistoryTracker, PositionState
 
 
 class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):

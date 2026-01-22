@@ -11,7 +11,7 @@ from torchtrade.envs.offline.seqlongonlysltp import (
     SeqLongOnlySLTPEnv,
     SeqLongOnlySLTPEnvConfig,
 )
-from torchtrade.envs.offline.infrastructure.utils import (
+from torchtrade.envs.offline.utils import (
     TimeFrame,
     TimeFrameUnit,
     build_sltp_action_map,

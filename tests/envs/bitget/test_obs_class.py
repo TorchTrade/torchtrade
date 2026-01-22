@@ -6,8 +6,8 @@ Inherits common tests from BaseObservationClassTests.
 import pytest
 import numpy as np
 from unittest.mock import MagicMock, patch
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-from torchtrade.envs.live.bitget.observation import BitgetObservationClass
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.bitget.obs_class import BitgetObservationClass
 from tests.envs.base_exchange_tests import BaseObservationClassTests
 from tests.mocks.bitget import mock_ccxt_client
 

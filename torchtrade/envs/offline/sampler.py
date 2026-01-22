@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta
 
 # PERF: NamedTuple is faster than dict for attribute access
 OHLCV = namedtuple('OHLCV', ['open', 'high', 'low', 'close', 'volume'])

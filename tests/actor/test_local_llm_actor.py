@@ -5,7 +5,7 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from torchtrade.envs.offline.infrastructure.utils import build_sltp_action_map
+from torchtrade.envs.offline.utils import build_sltp_action_map
 
 
 def futures_sltp_action_map(stoploss_levels, takeprofit_levels):

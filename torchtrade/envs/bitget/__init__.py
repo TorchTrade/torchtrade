@@ -1,5 +1,5 @@
-from torchtrade.envs.live.bitget.observation import BitgetObservationClass
-from torchtrade.envs.live.bitget.order_executor import (
+from torchtrade.envs.bitget.obs_class import BitgetObservationClass
+from torchtrade.envs.bitget.futures_order_executor import (
     BitgetFuturesOrderClass,
     TradeMode,
     MarginMode,
@@ -7,11 +7,11 @@ from torchtrade.envs.live.bitget.order_executor import (
     OrderStatus,
     PositionStatus,
 )
-from torchtrade.envs.live.bitget.env import (
+from torchtrade.envs.bitget.torch_env_futures import (
     BitgetFuturesTorchTradingEnv,
     BitgetFuturesTradingEnvConfig,
 )
-from torchtrade.envs.live.bitget.env_sltp import (
+from torchtrade.envs.bitget.torch_env_futures_sltp import (
     BitgetFuturesSLTPTorchTradingEnv,
     BitgetFuturesSLTPTradingEnvConfig,
 )

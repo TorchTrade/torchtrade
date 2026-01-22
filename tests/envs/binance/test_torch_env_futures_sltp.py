@@ -8,7 +8,7 @@ import torch
 import numpy as np
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
-from torchtrade.envs.live.binance.env_sltp import (
+from torchtrade.envs.binance.torch_env_futures_sltp import (
     BinanceFuturesSLTPTorchTradingEnv,
     BinanceFuturesSLTPTradingEnvConfig,
 )

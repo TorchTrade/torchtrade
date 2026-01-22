@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import warnings
 
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, timeframe_to_binance
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, timeframe_to_binance
 
 
 class BinanceObservationClass:

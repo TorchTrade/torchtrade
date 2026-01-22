@@ -37,7 +37,7 @@ class TestOnlineExamplesWithMocks:
 
     def test_alpaca_env_with_mocks(self):
         """Test that AlpacaTorchTradingEnv works with mocks."""
-        from torchtrade.envs.live.alpaca.env import (
+        from torchtrade.envs.alpaca.env import (
             AlpacaTorchTradingEnv,
             AlpacaTradingEnvConfig,
         )
@@ -77,7 +77,7 @@ class TestOnlineExamplesWithMocks:
 
     def test_mock_environment_rollout(self):
         """Test running a rollout with mocked environment."""
-        from torchtrade.envs.live.alpaca.env import (
+        from torchtrade.envs.alpaca.env import (
             AlpacaTorchTradingEnv,
             AlpacaTradingEnvConfig,
         )
@@ -173,7 +173,7 @@ class TestOfflineEnvironments:
     def test_seqlongonly_env_creation(self, sample_df):
         """Test SeqLongOnlyEnv can be created with synthetic data."""
         from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-        from torchtrade.envs.offline.infrastructure.utils import TimeFrame, TimeFrameUnit
+        from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 
         config = SeqLongOnlyEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
@@ -192,7 +192,7 @@ class TestOfflineEnvironments:
     def test_seqlongonlysltp_env_creation(self, sample_df):
         """Test SeqLongOnlySLTPEnv can be created with synthetic data."""
         from torchtrade.envs import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
-        from torchtrade.envs.offline.infrastructure.utils import TimeFrame, TimeFrameUnit
+        from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 
         config = SeqLongOnlySLTPEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
@@ -212,7 +212,7 @@ class TestOfflineEnvironments:
     def test_offline_env_step_loop(self, sample_df):
         """Test running steps on offline environment."""
         from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-        from torchtrade.envs.offline.infrastructure.utils import TimeFrame, TimeFrameUnit
+        from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 
         config = SeqLongOnlyEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
@@ -599,15 +599,15 @@ class TestExampleImports:
 
     def test_import_alpaca_envs(self):
         """Test importing Alpaca environments."""
-        from torchtrade.envs.live.alpaca.env import (
+        from torchtrade.envs.alpaca.env import (
             AlpacaTorchTradingEnv,
             AlpacaTradingEnvConfig,
         )
-        from torchtrade.envs.live.alpaca.order_executor import (
+        from torchtrade.envs.alpaca.order_executor import (
             AlpacaOrderClass,
             TradeMode,
         )
-        from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
+        from torchtrade.envs.alpaca.observation import AlpacaObservationClass
 
         assert AlpacaTorchTradingEnv is not None
         assert AlpacaOrderClass is not None
@@ -615,15 +615,17 @@ class TestExampleImports:
 
     def test_import_sampler(self):
         """Test importing the data sampler."""
-        from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservationSampler
+        from torchtrade.envs.offline.sampler import MarketDataObservationSampler
         assert MarketDataObservationSampler is not None
 
     def test_import_utils(self):
         """Test importing utility functions."""
-        from torchtrade.envs.offline.infrastructure.utils import (
+        from torchtrade.envs.timeframe import (
             TimeFrame,
             TimeFrameUnit,
             tf_to_timedelta,
+        )
+        from torchtrade.envs.offline.utils import (
             compute_periods_per_year_crypto,
         )
         assert TimeFrame is not None

@@ -17,7 +17,7 @@ from alpaca.trading.requests import (
 )
 from dotenv import load_dotenv
 
-from torchtrade.envs.core.common import TradeMode
+from torchtrade.envs.common import TradeMode
 
 logger = logging.getLogger(__name__)
 

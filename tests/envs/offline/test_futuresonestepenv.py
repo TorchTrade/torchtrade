@@ -12,7 +12,7 @@ from torchtrade.envs.offline.futuresonestepenv import (
     FuturesOneStepEnvConfig,
     MarginType,
 )
-from torchtrade.envs.offline.infrastructure.utils import (
+from torchtrade.envs.offline.utils import (
     TimeFrame,
     TimeFrameUnit,
     InitialBalanceSampler,

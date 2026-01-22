@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from torchtrade.envs.offline.infrastructure.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
 
 
 # Fix MKL threading issue for ParallelEnv tests

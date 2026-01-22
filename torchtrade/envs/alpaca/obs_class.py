@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, timeframe_to_alpaca
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, timeframe_to_alpaca
 from alpaca.data.requests import CryptoBarsRequest
 from alpaca.data.historical.crypto import CryptoHistoricalDataClient
 

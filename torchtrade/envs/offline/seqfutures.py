@@ -10,11 +10,11 @@ from tensordict import TensorDict, TensorDictBase
 import torch
 from torchrl.data import Categorical
 import pandas as pd
-from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
-from torchtrade.envs.core.state import FuturesHistoryTracker
-from torchtrade.envs.core.common import TradeMode, validate_quantity_per_trade
-from torchtrade.envs.utils.fractional_sizing import (
+from torchtrade.envs.offline.base import TorchTradeOfflineEnv
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
+from torchtrade.envs.state import FuturesHistoryTracker
+from torchtrade.envs.common import TradeMode, validate_quantity_per_trade
+from torchtrade.envs.fractional_sizing import (
     build_default_action_levels,
     validate_action_levels,
     calculate_fractional_position,

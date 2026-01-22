@@ -6,7 +6,7 @@ Inherits common tests from BaseSLTPTests.
 import pytest
 import numpy as np
 from unittest.mock import MagicMock, patch
-from torchtrade.envs.live.bitget.env_sltp import (
+from torchtrade.envs.bitget.torch_env_futures_sltp import (
     BitgetFuturesSLTPTorchTradingEnv,
     BitgetFuturesSLTPTradingEnvConfig,
 )

@@ -5,8 +5,8 @@ from typing import Dict, List, Optional, Union
 
 import ccxt
 
-from torchtrade.envs.live.bitget.utils import normalize_symbol
-from torchtrade.envs.core.common import TradeMode
+from torchtrade.envs.bitget.utils import normalize_symbol
+from torchtrade.envs.common import TradeMode
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ import warnings
 import os
 from dotenv import load_dotenv
 
-from torchtrade.envs.core.common import TradeMode
+from torchtrade.envs.common import TradeMode
 
 load_dotenv()
 

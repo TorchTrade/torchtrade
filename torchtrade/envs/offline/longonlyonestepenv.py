@@ -7,9 +7,9 @@ from tensordict import TensorDict, TensorDictBase
 import torch
 from torchrl.data import Categorical
 import pandas as pd
-from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta, normalize_timeframe_config
-from torchtrade.envs.offline.infrastructure.utils import compute_periods_per_year_crypto, build_sltp_action_map
+from torchtrade.envs.offline.base import TorchTradeOfflineEnv
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta, normalize_timeframe_config
+from torchtrade.envs.offline.utils import compute_periods_per_year_crypto, build_sltp_action_map
 import logging
 import sys
 

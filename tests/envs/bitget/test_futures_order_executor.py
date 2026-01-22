@@ -5,7 +5,7 @@ Inherits common tests from BaseOrderExecutorTests.
 
 import pytest
 from unittest.mock import MagicMock, patch
-from torchtrade.envs.live.bitget.order_executor import (
+from torchtrade.envs.bitget.futures_order_executor import (
     BitgetFuturesOrderClass,
     TradeMode,
     PositionMode,

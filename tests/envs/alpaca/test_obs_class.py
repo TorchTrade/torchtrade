@@ -8,9 +8,9 @@ Inherits common tests from BaseObservationClassTests.
 import pytest
 import numpy as np
 import pandas as pd
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 
-from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
+from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
 from tests.mocks.alpaca import MockCryptoHistoricalDataClient
 from tests.envs.base_exchange_tests import BaseObservationClassTests
 

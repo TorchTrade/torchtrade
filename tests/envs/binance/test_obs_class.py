@@ -6,8 +6,8 @@ Inherits common tests from BaseObservationClassTests.
 import pytest
 import numpy as np
 from unittest.mock import MagicMock
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-from torchtrade.envs.live.binance.observation import BinanceObservationClass
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.binance.obs_class import BinanceObservationClass
 from tests.envs.base_exchange_tests import BaseObservationClassTests
 
 

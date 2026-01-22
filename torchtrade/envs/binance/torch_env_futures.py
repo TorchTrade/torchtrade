@@ -9,15 +9,15 @@ logger = logging.getLogger(__name__)
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-from torchtrade.envs.live.binance.observation import BinanceObservationClass
-from torchtrade.envs.live.binance.order_executor import (
+from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.binance.obs_class import BinanceObservationClass
+from torchtrade.envs.binance.futures_order_executor import (
     BinanceFuturesOrderClass,
     TradeMode,
     MarginType,
 )
-from torchtrade.envs.live.binance.base import BinanceBaseTorchTradingEnv
-from torchtrade.envs.utils.fractional_sizing import (
+from torchtrade.envs.binance.base import BinanceBaseTorchTradingEnv
+from torchtrade.envs.fractional_sizing import (
     build_default_action_levels,
     calculate_fractional_position,
     PositionCalculationParams,
@@ -60,7 +60,7 @@ class BinanceFuturesTradingEnvConfig:
 
     def __post_init__(self):
         """Normalize timeframe configuration and build action levels."""
-        from torchtrade.envs.live.binance.utils import normalize_binance_timeframe_config
+        from torchtrade.envs.binance.utils import normalize_binance_timeframe_config
 
         self.execute_on, self.time_frames, self.window_sizes = normalize_binance_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
