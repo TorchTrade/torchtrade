@@ -16,7 +16,6 @@ from torchtrade.envs.state import FuturesHistoryTracker
 from torchtrade.envs.common import TradeMode, validate_quantity_per_trade
 from torchtrade.envs.fractional_sizing import (
     build_default_action_levels,
-    validate_position_sizing_mode,
     validate_action_levels,
     calculate_fractional_position,
     PositionCalculationParams,
@@ -88,12 +87,9 @@ class SeqFuturesEnvConfig:
 
         validate_quantity_per_trade(self.quantity_per_trade)
 
-        # Build default action levels for fractional mode
+        # Build default action levels
         if self.action_levels is None:
             self.action_levels = build_default_action_levels(
-                position_sizing_mode="fractional",
-                include_hold_action=True,
-                include_close_action=True,
                 allow_short=True  # Futures allow short positions
             )
         else:

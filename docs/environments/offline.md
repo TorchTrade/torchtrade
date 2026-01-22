@@ -131,20 +131,20 @@ When adjusting position size (e.g., going from 100% to 50%), the environment **o
 
 #### Custom Action Levels Example
 
-You can customize action levels for your specific use case:
+You can customize action levels for finer control over position sizing:
 
 ```python
+# Example: More granular position control
 config = SeqFuturesEnvConfig(
-    action_levels=[-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0],  # Dynamic leverage scaling
+    action_levels=[-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0],
+    leverage=5,
 )
+# Each action level controls the fraction of balance to allocate
+# Action values must be in range [-1.0, 1.0]
+# Leverage is set separately and applies to all positions
 ```
 
-In legacy mode:
-- `action_levels = [-1.0, 0.0, 0.5, 1.0]` (if both hold and close enabled)
-- `-1.0` = short with fixed quantity
-- `0.0` = hold (do nothing)
-- `0.5` = close position
-- `1.0` = long with fixed quantity
+**Important**: Action levels must be in range `[-1.0, 1.0]`. Values outside this range will fail validation. To adjust position sizes, modify the `leverage` parameter instead of using values outside the valid range
 
 ### Leverage Design (Futures Environments)
 

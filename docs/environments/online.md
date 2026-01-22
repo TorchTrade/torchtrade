@@ -123,20 +123,22 @@ For futures environments (`BinanceFuturesTorchTradingEnv`, `BitgetFuturesTorchTr
 2. **Better risk control**: Global leverage constraint
 3. **Matches trader workflows**: Set leverage once, size positions with actions
 
-**Custom Action Levels for Dynamic Leverage:**
+**Custom Action Levels:**
 
-You can use custom action levels to implement dynamic leverage scaling:
+You can customize action levels for finer position control:
 
 ```python
-# Example: Dynamic leverage through action values
+# Example: More granular position sizing
 config = BinanceFuturesTorchTradingEnvConfig(
-    action_levels=[-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0],  # Values outside [-1,1] for dynamic leverage
-    leverage=10,  # Base leverage
+    action_levels=[-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0],
+    leverage=10,
 )
-# Action value 2.0 with leverage 10 = 20x effective leverage
+# Each action level controls the fraction of balance to allocate
+# Action values must be in range [-1.0, 1.0]
+# Leverage is set separately and applies uniformly to all positions
 ```
 
-However, **fixed leverage with fractional positions is recommended** for most use cases as it provides better risk control.
+**Important**: Action levels must be in range `[-1.0, 1.0]`. Values outside this range will fail validation. The `leverage` parameter controls position sizing, not action values.
 
 !!! warning "Timeframe Format - Critical for Model Compatibility"
     When specifying `time_frames`, **always use canonical forms**:

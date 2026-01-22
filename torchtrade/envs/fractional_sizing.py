@@ -96,81 +96,31 @@ def calculate_fractional_position(params: PositionCalculationParams) -> Tuple[fl
 
 
 def build_default_action_levels(
-    position_sizing_mode: str,
-    include_hold_action: bool = True,
-    include_close_action: bool = False,
     allow_short: bool = True
 ) -> list[float]:
-    """Build default action levels based on environment configuration.
+    """Build default action levels for fractional position sizing.
 
     Args:
-        position_sizing_mode: "fractional" or "fixed"
-        include_hold_action: Include HOLD action (only used in fixed mode)
-        include_close_action: Include CLOSE action (only used in fixed mode for futures)
         allow_short: Allow short positions (futures vs long-only)
 
     Returns:
-        List of action level values
+        List of action level values in range [-1.0, 1.0]
 
     Examples:
-        >>> # Fractional futures (default)
-        >>> build_default_action_levels("fractional", allow_short=True)
+        >>> # Futures (default)
+        >>> build_default_action_levels(allow_short=True)
         [-1.0, -0.5, 0.0, 0.5, 1.0]
 
-        >>> # Fractional long-only (default)
-        >>> build_default_action_levels("fractional", allow_short=False)
+        >>> # Long-only
+        >>> build_default_action_levels(allow_short=False)
         [0.0, 0.5, 1.0]
-
-        >>> # Legacy fixed mode with hold and close
-        >>> build_default_action_levels("fixed", True, True, True)
-        [-1.0, 0.0, 0.5, 1.0]
-
-        >>> # Legacy fixed mode with only hold
-        >>> build_default_action_levels("fixed", True, False, True)
-        [-1.0, 0.0, 1.0]
     """
-    if position_sizing_mode == "fractional":
-        # Fractional sizing with neutral at 0
-        if allow_short:
-            # Futures: allow both long and short positions
-            return [-1.0, -0.5, 0.0, 0.5, 1.0]
-        else:
-            # Long-only: only non-negative actions (0 = close, positive = buy)
-            return [0.0, 0.5, 1.0]
-
-    else:  # "fixed" - legacy mode
-        # Build legacy action levels based on flags
-        if allow_short:
-            # Futures legacy mode
-            if include_hold_action and include_close_action:
-                return [-1.0, 0.0, 0.5, 1.0]  # Short, Hold, Close, Long
-            elif include_hold_action:
-                return [-1.0, 0.0, 1.0]  # Short, Hold, Long
-            elif include_close_action:
-                return [-1.0, 0.5, 1.0]  # Short, Close, Long
-            else:
-                return [-1.0, 1.0]  # Short, Long
-        else:
-            # Long-only legacy mode
-            if include_hold_action:
-                return [-1.0, 0.0, 1.0]  # Sell-all, Hold, Buy-all
-            else:
-                return [-1.0, 1.0]  # Sell-all, Buy-all
-
-
-def validate_position_sizing_mode(mode: str) -> None:
-    """Validate position sizing mode parameter.
-
-    Args:
-        mode: Position sizing mode string
-
-    Raises:
-        ValueError: If mode is not "fractional" or "fixed"
-    """
-    if mode not in ["fractional", "fixed"]:
-        raise ValueError(
-            f"position_sizing_mode must be 'fractional' or 'fixed', got '{mode}'"
-        )
+    if allow_short:
+        # Futures: allow both long and short positions
+        return [-1.0, -0.5, 0.0, 0.5, 1.0]
+    else:
+        # Long-only: only non-negative actions (0 = close, positive = buy)
+        return [0.0, 0.5, 1.0]
 
 
 def validate_action_levels(action_levels: list[float]) -> None:

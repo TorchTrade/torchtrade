@@ -13,7 +13,6 @@ from torchtrade.envs.offline.base import TorchTradeOfflineEnv
 from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
 from torchtrade.envs.fractional_sizing import (
     build_default_action_levels,
-    validate_position_sizing_mode,
     calculate_fractional_position,
     PositionCalculationParams,
     POSITION_TOLERANCE_PCT,
@@ -46,12 +45,9 @@ class SeqLongOnlyEnvConfig:
             self.execute_on, self.time_frames, self.window_sizes
         )
 
-        # Build default action levels for fractional mode
+        # Build default action levels
         if self.action_levels is None:
             self.action_levels = build_default_action_levels(
-                position_sizing_mode="fractional",
-                include_hold_action=True,
-                include_close_action=False,  # Long-only doesn't use close action
                 allow_short=False  # Long-only environment
             )
         else:
