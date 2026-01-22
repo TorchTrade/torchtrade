@@ -8901,7 +8901,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "python-binance" },
     { name = "python-dotenv" },
-    { name = "scikit-learn" },
+    { name = "scikit-learn", specifier = ">=1.6.1" },
     { name = "ta" },
     { name = "torchrl" },
     { name = "tqdm" },

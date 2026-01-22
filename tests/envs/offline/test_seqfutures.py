@@ -45,11 +45,14 @@ def default_config():
 @pytest.fixture
 def env(sample_ohlcv_df, default_config):
     """Create a SeqFuturesEnv instance for testing."""
-    return SeqFuturesEnv(
+    env_instance = SeqFuturesEnv(
         df=sample_ohlcv_df,
         config=default_config,
         feature_preprocessing_fn=simple_feature_fn,
     )
+    yield env_instance
+    # Cleanup: ensure environment is properly closed
+    env_instance.close()
 
 
 class TestSeqFuturesEnvInitialization:
@@ -876,6 +879,7 @@ class TestSeqFuturesEnvEdgeCases:
 
         finally:
             env.close()
+
     def test_different_margin_types(self, sample_ohlcv_df):
         """Environment should accept different margin types."""
         try:
@@ -978,6 +982,7 @@ class TestSeqFuturesEnvPositionSizing:
 
         finally:
             env.close()
+
     def test_position_opens_with_exact_balance_for_margin(self, sample_ohlcv_df):
         """
         Test that a position can be opened when balance exactly covers
@@ -1051,6 +1056,7 @@ class TestSeqFuturesEnvPnLCalculations:
 
         finally:
             env.close()
+
     def test_unrealized_pnl_positive_for_profitable_short(self, env, trending_down_df):
         """Unrealized PnL should be positive for profitable short position."""
         try:
@@ -1187,6 +1193,7 @@ class TestSeqFuturesEnvMetrics:
 
         finally:
             env.close()
+
     def test_get_metrics_total_return_negative_on_losses(self, trending_down_df):
         """Total return should be negative for unprofitable trading."""
         try:
@@ -1220,6 +1227,7 @@ class TestSeqFuturesEnvMetrics:
 
         finally:
             env.close()
+
     def test_get_metrics_num_trades_counts_correctly(self, env):
         """num_trades should count only non-hold actions."""
         td = env.reset()

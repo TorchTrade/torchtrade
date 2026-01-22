@@ -43,11 +43,14 @@ def default_config():
 @pytest.fixture
 def env(sample_ohlcv_df, default_config):
     """Create a SeqLongOnlyEnv instance for testing."""
-    return SeqLongOnlyEnv(
+    env_instance = SeqLongOnlyEnv(
         df=sample_ohlcv_df,
         config=default_config,
         feature_preprocessing_fn=simple_feature_fn,
     )
+    yield env_instance
+    # Cleanup: ensure environment is properly closed
+    env_instance.close()
 
 
 class TestSeqLongOnlyEnvInitialization:
@@ -219,10 +222,16 @@ class TestSeqLongOnlyEnvStep:
                 result = env.step(td)
                 td = result["next"]
             except ValueError as e:
-                # Bankruptcy can cause reward calculation errors
-                if "Invalid new_portfolio_value: 0.0" in str(e) or "Portfolio value must be positive" in str(e):
-                    break  # Terminate episode on bankruptcy
-                raise  # Re-raise other ValueErrors
+                # Handle bankruptcy-related errors from reward calculation
+                # TODO: Replace with specific BankruptcyError exception type in future
+                # String matching is brittle but necessary until custom exception is implemented
+                error_msg = str(e)
+                if "Invalid new_portfolio_value" in error_msg or "Portfolio value must be positive" in error_msg:
+                    # Expected: Episode terminates when portfolio goes bankrupt
+                    print(f"Test episode terminated due to bankruptcy at step {steps}: {error_msg}")
+                    break
+                # Unexpected ValueError - re-raise for debugging
+                raise
 
             steps += 1
 
@@ -245,10 +254,16 @@ class TestSeqLongOnlyEnvStep:
                 result = env.step(td)
                 td = result["next"]
             except ValueError as e:
-                # Bankruptcy can cause reward calculation errors
-                if "Invalid new_portfolio_value: 0.0" in str(e) or "Portfolio value must be positive" in str(e):
-                    break  # Terminate episode on bankruptcy
-                raise  # Re-raise other ValueErrors
+                # Handle bankruptcy-related errors from reward calculation
+                # TODO: Replace with specific BankruptcyError exception type in future
+                # String matching is brittle but necessary until custom exception is implemented
+                error_msg = str(e)
+                if "Invalid new_portfolio_value" in error_msg or "Portfolio value must be positive" in error_msg:
+                    # Expected: Episode terminates when portfolio goes bankrupt
+                    print(f"Test episode terminated due to bankruptcy at step {steps}: {error_msg}")
+                    break
+                # Unexpected ValueError - re-raise for debugging
+                raise
 
             portfolio_value = env._get_portfolio_value()
             assert not np.isnan(portfolio_value), "Portfolio value should never be NaN"
@@ -394,7 +409,7 @@ class TestSeqLongOnlyEnvReward:
         """Reward should never be infinite (even with bankruptcy)."""
         td = env.reset()
 
-        for _ in range(50):
+        for step_idx in range(50):
             action = env.action_spec.sample()
             td.set("action", action)
 
@@ -402,10 +417,16 @@ class TestSeqLongOnlyEnvReward:
                 result = env.step(td)
                 td = result["next"]
             except ValueError as e:
-                # Bankruptcy can cause reward calculation errors
-                if "Invalid new_portfolio_value: 0.0" in str(e) or "Portfolio value must be positive" in str(e):
-                    break  # Terminate episode on bankruptcy
-                raise  # Re-raise other ValueErrors
+                # Handle bankruptcy-related errors from reward calculation
+                # TODO: Replace with specific BankruptcyError exception type in future
+                # String matching is brittle but necessary until custom exception is implemented
+                error_msg = str(e)
+                if "Invalid new_portfolio_value" in error_msg or "Portfolio value must be positive" in error_msg:
+                    # Expected: Episode terminates when portfolio goes bankrupt
+                    print(f"Test episode terminated due to bankruptcy at step {step_idx}: {error_msg}")
+                    break
+                # Unexpected ValueError - re-raise for debugging
+                raise
 
             reward = td["reward"]
             assert not torch.isinf(reward).any(), "Reward should never be infinite"

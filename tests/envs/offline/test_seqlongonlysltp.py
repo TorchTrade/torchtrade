@@ -60,11 +60,14 @@ def default_config():
 @pytest.fixture
 def env(sample_ohlcv_df, default_config):
     """Create a SeqLongOnlySLTPEnv instance for testing."""
-    return SeqLongOnlySLTPEnv(
+    env_instance = SeqLongOnlySLTPEnv(
         df=sample_ohlcv_df,
         config=default_config,
         feature_preprocessing_fn=simple_feature_fn,
     )
+    yield env_instance
+    # Cleanup: ensure environment is properly closed
+    env_instance.close()
 
 
 class TestCombinatoryActionMap:
@@ -252,6 +255,7 @@ class TestSeqLongOnlySLTPEnvTriggers:
 
         finally:
             env.close()
+
     def test_position_exits_on_tp_trigger(self, trending_up_df):
         """Position should exit when take profit is triggered."""
         try:
@@ -297,6 +301,7 @@ class TestSeqLongOnlySLTPEnvTriggers:
 
         finally:
             env.close()
+
     def test_sl_tp_cleared_after_trigger(self, trending_down_df):
         """SL/TP should be cleared after position exits."""
         try:
@@ -485,6 +490,7 @@ class TestSeqLongOnlySLTPEnvEdgeCases:
 
         finally:
             env.close()
+
     def test_many_sl_tp_levels(self, sample_ohlcv_df):
         """Should work with many SL/TP levels."""
         try:
@@ -505,6 +511,7 @@ class TestSeqLongOnlySLTPEnvEdgeCases:
 
         finally:
             env.close()
+
     def test_multiple_episodes(self, env):
         """Should work correctly across multiple episodes."""
         for episode in range(3):

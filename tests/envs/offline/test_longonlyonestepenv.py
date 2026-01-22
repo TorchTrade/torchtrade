@@ -62,11 +62,14 @@ def default_config():
 @pytest.fixture
 def env(sample_ohlcv_df, default_config):
     """Create a LongOnlyOneStepEnv instance for testing."""
-    return LongOnlyOneStepEnv(
+    env_instance = LongOnlyOneStepEnv(
         df=sample_ohlcv_df,
         config=default_config,
         feature_preprocessing_fn=simple_feature_fn,
     )
+    yield env_instance
+    # Cleanup: ensure environment is properly closed
+    env_instance.close()
 
 
 class TestInitialBalanceSampler:
@@ -277,6 +280,7 @@ class TestLongOnlyOneStepEnvRollout:
 
         finally:
             env.close()
+
     def test_rollout_terminates_on_tp(self, trending_up_df):
         """Rollout should terminate when take profit is hit."""
         try:
@@ -301,6 +305,7 @@ class TestLongOnlyOneStepEnvRollout:
 
         finally:
             env.close()
+
     def test_rollout_accumulates_returns(self, env):
         """Rollout should accumulate log returns."""
         td = env.reset()
@@ -548,6 +553,7 @@ class TestLongOnlyOneStepEnvEdgeCases:
 
         finally:
             env.close()
+
     def test_many_sl_tp_levels(self, sample_ohlcv_df):
         """Should work with many SL/TP levels."""
         try:
@@ -566,6 +572,7 @@ class TestLongOnlyOneStepEnvEdgeCases:
 
         finally:
             env.close()
+
     def test_small_initial_cash(self, sample_ohlcv_df):
         """Should work with small initial cash."""
         try:
@@ -587,6 +594,7 @@ class TestLongOnlyOneStepEnvEdgeCases:
 
         finally:
             env.close()
+
     def test_zero_transaction_fee(self, sample_ohlcv_df):
         """Should work with zero transaction fee."""
         try:
@@ -721,6 +729,7 @@ class TestLongOnlyOneStepEnvIncludeHoldAction:
 
         finally:
             env.close()
+
     def test_include_hold_action_true_explicit(self, sample_ohlcv_df):
         """Should include HOLD action when explicitly set to True."""
         try:
@@ -742,6 +751,7 @@ class TestLongOnlyOneStepEnvIncludeHoldAction:
 
         finally:
             env.close()
+
     def test_include_hold_action_false(self, sample_ohlcv_df):
         """Should exclude HOLD action when set to False."""
         try:
@@ -763,6 +773,7 @@ class TestLongOnlyOneStepEnvIncludeHoldAction:
 
         finally:
             env.close()
+
     def test_include_hold_action_false_multiple_sltp(self, sample_ohlcv_df):
         """Should have correct action count without HOLD with multiple SL/TP."""
         try:
@@ -786,6 +797,7 @@ class TestLongOnlyOneStepEnvIncludeHoldAction:
 
         finally:
             env.close()
+
     def test_env_works_without_hold_action(self, sample_ohlcv_df):
         """Environment should function correctly without HOLD action."""
         try:

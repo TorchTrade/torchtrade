@@ -59,11 +59,14 @@ def default_config():
 @pytest.fixture
 def env(sample_ohlcv_df, default_config):
     """Create a FuturesOneStepEnv instance for testing."""
-    return FuturesOneStepEnv(
+    env_instance = FuturesOneStepEnv(
         df=sample_ohlcv_df,
         config=default_config,
         feature_preprocessing_fn=simple_feature_fn,
     )
+    yield env_instance
+    # Cleanup: ensure environment is properly closed
+    env_instance.close()
 
 
 class TestFuturesOnestepActionMap:
@@ -419,6 +422,7 @@ class TestFuturesOneStepEnvRollout:
 
         finally:
             env.close()
+
     def test_rollout_terminates_on_long_tp(self, trending_up_df):
         """Rollout should terminate when long take profit is hit."""
         try:
@@ -444,6 +448,7 @@ class TestFuturesOneStepEnvRollout:
 
         finally:
             env.close()
+
     def test_rollout_terminates_on_short_sl(self, trending_up_df):
         """Rollout should terminate when short stop loss is hit."""
         try:
@@ -471,6 +476,7 @@ class TestFuturesOneStepEnvRollout:
 
         finally:
             env.close()
+
     def test_rollout_terminates_on_short_tp(self, trending_down_df):
         """Rollout should terminate when short take profit is hit."""
         try:
@@ -497,6 +503,7 @@ class TestFuturesOneStepEnvRollout:
 
         finally:
             env.close()
+
     def test_rollout_accumulates_returns(self, env):
         """Rollout should accumulate log returns."""
         td = env.reset()
@@ -746,6 +753,7 @@ class TestFuturesOneStepEnvEdgeCases:
 
         finally:
             env.close()
+
     def test_many_sl_tp_levels(self, sample_ohlcv_df):
         """Should work with many SL/TP levels."""
         try:
@@ -765,6 +773,7 @@ class TestFuturesOneStepEnvEdgeCases:
 
         finally:
             env.close()
+
     def test_high_leverage(self, sample_ohlcv_df):
         """Should work with high leverage."""
         try:
@@ -785,6 +794,7 @@ class TestFuturesOneStepEnvEdgeCases:
 
         finally:
             env.close()
+
     def test_small_initial_cash(self, sample_ohlcv_df):
         """Should work with small initial cash."""
         try:
@@ -807,6 +817,7 @@ class TestFuturesOneStepEnvEdgeCases:
 
         finally:
             env.close()
+
     def test_zero_transaction_fee(self, sample_ohlcv_df):
         """Should work with zero transaction fee."""
         try:
@@ -1077,6 +1088,7 @@ class TestFuturesOneStepEnvIncludeHoldAction:
 
         finally:
             env.close()
+
     def test_include_hold_action_true_explicit(self, sample_ohlcv_df):
         """Should include HOLD action when explicitly set to True."""
         try:
@@ -1100,6 +1112,7 @@ class TestFuturesOneStepEnvIncludeHoldAction:
 
         finally:
             env.close()
+
     def test_include_hold_action_false(self, sample_ohlcv_df):
         """Should exclude HOLD action when set to False."""
         try:
@@ -1122,6 +1135,7 @@ class TestFuturesOneStepEnvIncludeHoldAction:
 
         finally:
             env.close()
+
     def test_include_hold_action_false_multiple_sltp(self, sample_ohlcv_df):
         """Should have correct action count without HOLD with multiple SL/TP."""
         try:
@@ -1145,6 +1159,7 @@ class TestFuturesOneStepEnvIncludeHoldAction:
 
         finally:
             env.close()
+
     def test_env_works_without_hold_action(self, sample_ohlcv_df):
         """Environment should function correctly without HOLD action."""
         try:
@@ -1175,6 +1190,7 @@ class TestFuturesOneStepEnvIncludeHoldAction:
 
         finally:
             env.close()
+
     def test_action_mapping_without_hold(self, sample_ohlcv_df):
         """Verify action mapping starts with trades when no hold (no CLOSE for OneStep)."""
         try:
