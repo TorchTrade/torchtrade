@@ -5,17 +5,17 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.bitget.obs_class import BitgetObservationClass
-from torchtrade.envs.bitget.futures_order_executor import (
+from torchtrade.envs.live.bitget.observation import BitgetObservationClass
+from torchtrade.envs.live.bitget.order_executor import (
     BitgetFuturesOrderClass,
     TradeMode,
     MarginMode,
     PositionMode,
 )
-from torchtrade.envs.bitget.base import BitgetBaseTorchTradingEnv
-from torchtrade.envs.action_maps import create_sltp_action_map
-from torchtrade.envs.sltp_mixin import SLTPMixin
-from torchtrade.envs.sltp_helpers import calculate_bracket_prices
+from torchtrade.envs.live.bitget.base import BitgetBaseTorchTradingEnv
+from torchtrade.envs.utils.action_maps import create_sltp_action_map
+from torchtrade.envs.utils.sltp_mixin import SLTPMixin
+from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
 
 
 @dataclass
@@ -68,7 +68,7 @@ class BitgetFuturesSLTPTradingEnvConfig:
 
     def __post_init__(self):
         # Normalize timeframes using utility function
-        from torchtrade.envs.bitget.utils import normalize_bitget_timeframe_config
+        from torchtrade.envs.live.bitget.utils import normalize_bitget_timeframe_config
         self.execute_on, self.time_frames, self.window_sizes = normalize_bitget_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )

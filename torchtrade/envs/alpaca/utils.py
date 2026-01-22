@@ -1,7 +1,7 @@
 """Utility functions for Alpaca environments."""
 from typing import Any, List, Union, Tuple
 import warnings
-from torchtrade.envs.timeframe import (
+from torchtrade.envs.utils.timeframe import (
     TimeFrame,
     TimeFrameUnit,
     parse_timeframe_string,
@@ -55,7 +55,7 @@ def normalize_alpaca_timeframe_config(
         >>> execute_on, tfs, ws = normalize_alpaca_timeframe_config("5Min", ["1Min", "5Min"], 10)
 
         >>> # Using custom TimeFrame
-        >>> from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
+        >>> from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
         >>> tf = TimeFrame(5, TimeFrameUnit.Minute)
         >>> execute_on, tfs, ws = normalize_alpaca_timeframe_config(tf, [tf], 10)
 

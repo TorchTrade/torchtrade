@@ -11,11 +11,11 @@ from tensordict import TensorDictBase
 from torchrl.data import Bounded
 from torchrl.data.tensor_specs import CompositeSpec, Unbounded
 
-from torchtrade.envs.base import TorchTradeBaseEnv
-from torchtrade.envs.common import TradeMode
-from torchtrade.envs.offline.sampler import MarketDataObservationSampler
-from torchtrade.envs.offline.utils import InitialBalanceSampler
-from torchtrade.envs.state import HistoryTracker, PositionState
+from torchtrade.envs.core.base import TorchTradeBaseEnv
+from torchtrade.envs.core.common import TradeMode
+from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservationSampler
+from torchtrade.envs.offline.infrastructure.utils import InitialBalanceSampler
+from torchtrade.envs.core.state import HistoryTracker, PositionState
 
 
 class TorchTradeOfflineEnv(TorchTradeBaseEnv):

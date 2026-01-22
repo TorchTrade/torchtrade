@@ -9,7 +9,7 @@ import torch
 from torchrl.data import Bounded
 from torchrl.envs import EnvBase
 
-from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
+from torchtrade.envs.core.reward import build_reward_context, default_log_return, validate_reward_function
 
 logger = logging.getLogger(__name__)
 

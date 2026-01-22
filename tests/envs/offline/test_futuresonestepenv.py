@@ -12,7 +12,7 @@ from torchtrade.envs.offline.futuresonestepenv import (
     FuturesOneStepEnvConfig,
     MarginType,
 )
-from torchtrade.envs.offline.utils import (
+from torchtrade.envs.offline.infrastructure.utils import (
     TimeFrame,
     TimeFrameUnit,
     InitialBalanceSampler,
@@ -217,23 +217,26 @@ class TestFuturesOneStepEnvReset:
 
     def test_reset_with_random_balance(self, sample_ohlcv_df):
         """Reset should sample random balance when range given."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=(500, 1500),
-            max_traj_length=50,
-        )
-        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=(500, 1500),
+                max_traj_length=50,
+            )
+            env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        balances = []
-        for _ in range(5):
-            env.reset()
-            balances.append(env.balance)
+            balances = []
+            for _ in range(5):
+                env.reset()
+                balances.append(env.balance)
 
-        # Should have some variation
-        assert len(set(balances)) >= 1
+            # Should have some variation
+            assert len(set(balances)) >= 1
 
 
+        finally:
+            env.close()
 class TestFuturesOneStepEnvStep:
     """Tests for step functionality."""
 
@@ -393,95 +396,107 @@ class TestFuturesOneStepEnvRollout:
 
     def test_rollout_terminates_on_long_sl(self, trending_down_df):
         """Rollout should terminate when long stop loss is hit."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            transaction_fee=0.0004,
-            stoploss_levels=[-0.02],  # 2% SL
-            takeprofit_levels=[0.5],  # 50% TP (won't hit)
-            leverage=5,
-            slippage=0.0,
-            max_traj_length=200,
-        )
-        env = FuturesOneStepEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                transaction_fee=0.0004,
+                stoploss_levels=[-0.02],  # 2% SL
+                takeprofit_levels=[0.5],  # 50% TP (won't hit)
+                leverage=5,
+                slippage=0.0,
+                max_traj_length=200,
+            )
+            env = FuturesOneStepEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
-        td.set("action", torch.tensor(1))  # Long (0=HOLD, 1=first long) - no CLOSE for OneStep
-        env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(1))  # Long (0=HOLD, 1=first long) - no CLOSE for OneStep
+            env.step(td)
 
-        # Position should be closed after rollout
-        assert env.position.position_size == 0.0
+            # Position should be closed after rollout
+            assert env.position.position_size == 0.0
 
+        finally:
+            env.close()
     def test_rollout_terminates_on_long_tp(self, trending_up_df):
         """Rollout should terminate when long take profit is hit."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            transaction_fee=0.0004,
-            stoploss_levels=[-0.5],  # 50% SL (won't hit)
-            takeprofit_levels=[0.02],  # 2% TP
-            leverage=5,
-            slippage=0.0,
-            max_traj_length=200,
-        )
-        env = FuturesOneStepEnv(trending_up_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                transaction_fee=0.0004,
+                stoploss_levels=[-0.5],  # 50% SL (won't hit)
+                takeprofit_levels=[0.02],  # 2% TP
+                leverage=5,
+                slippage=0.0,
+                max_traj_length=200,
+            )
+            env = FuturesOneStepEnv(trending_up_df, config, simple_feature_fn)
 
-        td = env.reset()
-        td.set("action", torch.tensor(1))  # Long (0=HOLD, 1=first long) - no CLOSE for OneStep
-        env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(1))  # Long (0=HOLD, 1=first long) - no CLOSE for OneStep
+            env.step(td)
 
-        # Position should be closed after rollout
-        assert env.position.position_size == 0.0
+            # Position should be closed after rollout
+            assert env.position.position_size == 0.0
 
+        finally:
+            env.close()
     def test_rollout_terminates_on_short_sl(self, trending_up_df):
         """Rollout should terminate when short stop loss is hit."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            transaction_fee=0.0004,
-            stoploss_levels=[-0.02],  # 2% SL
-            takeprofit_levels=[0.5],  # 50% TP (won't hit)
-            leverage=5,
-            slippage=0.0,
-            max_traj_length=200,
-        )
-        env = FuturesOneStepEnv(trending_up_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                transaction_fee=0.0004,
+                stoploss_levels=[-0.02],  # 2% SL
+                takeprofit_levels=[0.5],  # 50% TP (won't hit)
+                leverage=5,
+                slippage=0.0,
+                max_traj_length=200,
+            )
+            env = FuturesOneStepEnv(trending_up_df, config, simple_feature_fn)
 
-        td = env.reset()
-        # Short action (0=HOLD, 1-N=long, N+1+=short) - no CLOSE for OneStep
-        num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        td.set("action", torch.tensor(1 + num_long))  # Short
-        env.step(td)
+            td = env.reset()
+            # Short action (0=HOLD, 1-N=long, N+1+=short) - no CLOSE for OneStep
+            num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
+            td.set("action", torch.tensor(1 + num_long))  # Short
+            env.step(td)
 
-        # Position should be closed after rollout
-        assert env.position.position_size == 0.0
+            # Position should be closed after rollout
+            assert env.position.position_size == 0.0
 
+        finally:
+            env.close()
     def test_rollout_terminates_on_short_tp(self, trending_down_df):
         """Rollout should terminate when short take profit is hit."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            transaction_fee=0.0004,
-            stoploss_levels=[-0.5],  # 50% SL (won't hit)
-            takeprofit_levels=[0.02],  # 2% TP
-            leverage=5,
-            slippage=0.0,
-            max_traj_length=200,
-        )
-        env = FuturesOneStepEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                transaction_fee=0.0004,
+                stoploss_levels=[-0.5],  # 50% SL (won't hit)
+                takeprofit_levels=[0.02],  # 2% TP
+                leverage=5,
+                slippage=0.0,
+                max_traj_length=200,
+            )
+            env = FuturesOneStepEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
-        num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        td.set("action", torch.tensor(1 + num_long))  # Short (0=HOLD, 1+=long) - no CLOSE for OneStep
-        env.step(td)
+            td = env.reset()
+            num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
+            td.set("action", torch.tensor(1 + num_long))  # Short (0=HOLD, 1+=long) - no CLOSE for OneStep
+            env.step(td)
 
-        # Position should be closed after rollout
-        assert env.position.position_size == 0.0
+            # Position should be closed after rollout
+            assert env.position.position_size == 0.0
 
+        finally:
+            env.close()
     def test_rollout_accumulates_returns(self, env):
         """Rollout should accumulate log returns."""
         td = env.reset()
@@ -587,26 +602,29 @@ class TestFuturesOneStepEnvReward:
 
     def test_truncated_reward_zero(self, sample_ohlcv_df):
         """Truncated episodes should have zero reward."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.5],  # Won't trigger
-            takeprofit_levels=[0.5],  # Won't trigger
-            leverage=5,
-            max_traj_length=15,  # Very short
-        )
-        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.5],  # Won't trigger
+                takeprofit_levels=[0.5],  # Won't trigger
+                leverage=5,
+                max_traj_length=15,  # Very short
+            )
+            env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        td = env.reset()
-        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
-        result = env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
+            result = env.step(td)
 
-        # If truncated, reward should be 0
-        if result["next"]["truncated"].item():
-            assert result["next"]["reward"].item() == 0.0
+            # If truncated, reward should be 0
+            if result["next"]["truncated"].item():
+                assert result["next"]["reward"].item() == 0.0
 
 
+        finally:
+            env.close()
 class TestFuturesOneStepEnvPnLCalculation:
     """Tests for PnL calculation."""
 
@@ -705,170 +723,193 @@ class TestFuturesOneStepEnvEdgeCases:
 
     def test_single_sl_tp_level(self, sample_ohlcv_df):
         """Should work with single SL/TP level."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05],
-            takeprofit_levels=[0.1],
-            leverage=5,
-            max_traj_length=50,
-        )
-        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05],
+                takeprofit_levels=[0.1],
+                leverage=5,
+                max_traj_length=50,
+            )
+            env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Should have 3 actions: hold, 1 long, 1 short (no CLOSE for OneStep)
-        assert env.action_spec.n == 3
+            # Should have 3 actions: hold, 1 long, 1 short (no CLOSE for OneStep)
+            assert env.action_spec.n == 3
 
-        td = env.reset()
-        td.set("action", torch.tensor(1))  # Action 1 = first long (0=HOLD)
-        result = env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(1))  # Action 1 = first long (0=HOLD)
+            result = env.step(td)
 
-        assert result is not None
+            assert result is not None
 
+        finally:
+            env.close()
     def test_many_sl_tp_levels(self, sample_ohlcv_df):
         """Should work with many SL/TP levels."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.01, -0.02, -0.05, -0.1],
-            takeprofit_levels=[0.01, 0.02, 0.05, 0.1],
-            leverage=5,
-            max_traj_length=50,
-        )
-        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.01, -0.02, -0.05, -0.1],
+                takeprofit_levels=[0.01, 0.02, 0.05, 0.1],
+                leverage=5,
+                max_traj_length=50,
+            )
+            env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # 1 hold + 16 long + 16 short = 33 actions (no CLOSE for OneStep)
-        assert env.action_spec.n == 33
+            # 1 hold + 16 long + 16 short = 33 actions (no CLOSE for OneStep)
+            assert env.action_spec.n == 33
 
+        finally:
+            env.close()
     def test_high_leverage(self, sample_ohlcv_df):
         """Should work with high leverage."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            leverage=100,
-            max_traj_length=50,
-        )
-        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                leverage=100,
+                max_traj_length=50,
+            )
+            env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        td = env.reset()
-        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
-        result = env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
+            result = env.step(td)
 
-        assert not torch.isnan(result["next"]["reward"]).any()
+            assert not torch.isnan(result["next"]["reward"]).any()
 
+        finally:
+            env.close()
     def test_small_initial_cash(self, sample_ohlcv_df):
         """Should work with small initial cash."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1,
-            leverage=5,
-            max_traj_length=50,
-        )
-        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1,
+                leverage=5,
+                max_traj_length=50,
+            )
+            env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        td = env.reset()
-        assert env.balance == 1.0
+            td = env.reset()
+            assert env.balance == 1.0
 
-        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
-        result = env.step(td)
+            td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
+            result = env.step(td)
 
-        assert not torch.isnan(result["next"]["reward"]).any()
+            assert not torch.isnan(result["next"]["reward"]).any()
 
+        finally:
+            env.close()
     def test_zero_transaction_fee(self, sample_ohlcv_df):
         """Should work with zero transaction fee."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            transaction_fee=0.0,
-            leverage=5,
-            max_traj_length=50,
-        )
-        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                transaction_fee=0.0,
+                leverage=5,
+                max_traj_length=50,
+            )
+            env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        td = env.reset()
-        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
-        result = env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
+            result = env.step(td)
 
-        assert result is not None
+            assert result is not None
 
 
+        finally:
+            env.close()
 class TestFuturesOneStepEnvLeverage:
     """Tests for leverage functionality."""
 
     def test_leverage_affects_position_size(self, sample_ohlcv_df):
         """Leverage affects liquidation risk, not position size (with QUANTITY mode)."""
-        config_low = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            leverage=1,
-            max_traj_length=50,
-        )
-        config_high = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            leverage=10,
-            max_traj_length=50,
-        )
+        try:
+            config_low = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                leverage=1,
+                max_traj_length=50,
+            )
+            config_high = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                leverage=10,
+                max_traj_length=50,
+            )
 
-        env_low = FuturesOneStepEnv(sample_ohlcv_df, config_low, simple_feature_fn)
-        env_high = FuturesOneStepEnv(sample_ohlcv_df, config_high, simple_feature_fn)
+            env_low = FuturesOneStepEnv(sample_ohlcv_df, config_low, simple_feature_fn)
+            env_high = FuturesOneStepEnv(sample_ohlcv_df, config_high, simple_feature_fn)
 
-        env_low.reset()
-        env_high.reset()
+            env_low.reset()
+            env_high.reset()
 
-        env_low._execute_trade_if_needed(env_low.action_map[2])  # Long (0=HOLD, 1=CLOSE, 2=first long)
-        env_high._execute_trade_if_needed(env_high.action_map[2])
+            env_low._execute_trade_if_needed(env_low.action_map[2])  # Long (0=HOLD, 1=CLOSE, 2=first long)
+            env_high._execute_trade_if_needed(env_high.action_map[2])
 
-        # With QUANTITY mode, position size is the same regardless of leverage
-        assert abs(env_high.position.position_size) == abs(env_low.position.position_size)
+            # With QUANTITY mode, position size is the same regardless of leverage
+            assert abs(env_high.position.position_size) == abs(env_low.position.position_size)
 
-        # But higher leverage means liquidation price is closer to entry
-        entry_price_low = env_low.position.entry_price
-        entry_price_high = env_high.position.entry_price
-        liq_distance_low = abs(entry_price_low - env_low.liquidation_price)
-        liq_distance_high = abs(entry_price_high - env_high.liquidation_price)
-        assert liq_distance_high < liq_distance_low
+            # But higher leverage means liquidation price is closer to entry
+            entry_price_low = env_low.position.entry_price
+            entry_price_high = env_high.position.entry_price
+            liq_distance_low = abs(entry_price_low - env_low.liquidation_price)
+            liq_distance_high = abs(entry_price_high - env_high.liquidation_price)
+            assert liq_distance_high < liq_distance_low
 
+        finally:
+            env_high.close()
+            env_low.close()
     def test_leverage_affects_liquidation_distance(self, sample_ohlcv_df):
         """Higher leverage should have closer liquidation price."""
-        config_low = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            leverage=2,
-            max_traj_length=50,
-        )
-        config_high = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            leverage=20,
-            max_traj_length=50,
-        )
+        try:
+            config_low = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                leverage=2,
+                max_traj_length=50,
+            )
+            config_high = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                leverage=20,
+                max_traj_length=50,
+            )
 
-        env_low = FuturesOneStepEnv(sample_ohlcv_df, config_low, simple_feature_fn)
-        env_high = FuturesOneStepEnv(sample_ohlcv_df, config_high, simple_feature_fn)
+            env_low = FuturesOneStepEnv(sample_ohlcv_df, config_low, simple_feature_fn)
+            env_high = FuturesOneStepEnv(sample_ohlcv_df, config_high, simple_feature_fn)
 
-        env_low.reset()
-        env_high.reset()
+            env_low.reset()
+            env_high.reset()
 
-        env_low._execute_trade_if_needed(env_low.action_map[2])  # Long (0=HOLD, 1=CLOSE, 2=first long)
-        env_high._execute_trade_if_needed(env_high.action_map[2])
+            env_low._execute_trade_if_needed(env_low.action_map[2])  # Long (0=HOLD, 1=CLOSE, 2=first long)
+            env_high._execute_trade_if_needed(env_high.action_map[2])
 
-        # Distance from entry to liquidation
-        dist_low = abs(env_low.position.entry_price - env_low.liquidation_price) / env_low.position.entry_price
-        dist_high = abs(env_high.position.entry_price - env_high.liquidation_price) / env_high.position.entry_price
+            # Distance from entry to liquidation
+            dist_low = abs(env_low.position.entry_price - env_low.liquidation_price) / env_low.position.entry_price
+            dist_high = abs(env_high.position.entry_price - env_high.liquidation_price) / env_high.position.entry_price
 
-        # Higher leverage should have smaller distance (closer to liquidation)
-        assert dist_high < dist_low
+            # Higher leverage should have smaller distance (closer to liquidation)
+            assert dist_high < dist_low
 
 
+        finally:
+            env_high.close()
+            env_low.close()
 class TestFuturesOneStepEnvDuplicateActions:
     """Tests for duplicate action validation."""
 
@@ -1016,124 +1057,142 @@ class TestFuturesOneStepEnvIncludeHoldAction:
 
     def test_include_hold_action_true_default(self, sample_ohlcv_df):
         """Should include HOLD action by default."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05],
-            takeprofit_levels=[0.05],
-            leverage=1,
-            max_traj_length=50,
-        )
-        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05],
+                takeprofit_levels=[0.05],
+                leverage=1,
+                max_traj_length=50,
+            )
+            env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 1 SL and 1 TP: 1 hold + 1 long + 1 short = 3 actions (no CLOSE for OneStep)
-        assert env.action_spec.n == 3
-        assert env.action_map[0] == (None, None, None), "Action 0 should be HOLD"
-        assert env.action_map[1][0] == "long", "Action 1 should be long trade"
-        assert env.action_map[2][0] == "short", "Action 2 should be short trade"
+            # With 1 SL and 1 TP: 1 hold + 1 long + 1 short = 3 actions (no CLOSE for OneStep)
+            assert env.action_spec.n == 3
+            assert env.action_map[0] == (None, None, None), "Action 0 should be HOLD"
+            assert env.action_map[1][0] == "long", "Action 1 should be long trade"
+            assert env.action_map[2][0] == "short", "Action 2 should be short trade"
 
+        finally:
+            env.close()
     def test_include_hold_action_true_explicit(self, sample_ohlcv_df):
         """Should include HOLD action when explicitly set to True."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05, -0.1],
-            takeprofit_levels=[0.05, 0.1],
-            include_hold_action=True,
-            leverage=1,
-            max_traj_length=50,
-        )
-        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05, -0.1],
+                takeprofit_levels=[0.05, 0.1],
+                include_hold_action=True,
+                leverage=1,
+                max_traj_length=50,
+            )
+            env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 2 SL and 2 TP: 1 hold + 4 longs + 4 shorts = 9 actions (no CLOSE for OneStep)
-        assert env.action_spec.n == 9
-        assert env.action_map[0] == (None, None, None), "Action 0 should be HOLD"
-        assert env.action_map[1][0] == "long", "Action 1 should be first long trade"
-        assert env.action_map[5][0] == "short", "Action 5 should be first short trade"
+            # With 2 SL and 2 TP: 1 hold + 4 longs + 4 shorts = 9 actions (no CLOSE for OneStep)
+            assert env.action_spec.n == 9
+            assert env.action_map[0] == (None, None, None), "Action 0 should be HOLD"
+            assert env.action_map[1][0] == "long", "Action 1 should be first long trade"
+            assert env.action_map[5][0] == "short", "Action 5 should be first short trade"
 
+        finally:
+            env.close()
     def test_include_hold_action_false(self, sample_ohlcv_df):
         """Should exclude HOLD action when set to False."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05],
-            takeprofit_levels=[0.05],
-            include_hold_action=False,
-            leverage=1,
-            max_traj_length=50,
-        )
-        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05],
+                takeprofit_levels=[0.05],
+                include_hold_action=False,
+                leverage=1,
+                max_traj_length=50,
+            )
+            env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 1 SL and 1 TP, no hold, no close: 1 long + 1 short = 2 actions
-        assert env.action_spec.n == 2
-        assert env.action_map[0][0] == "long", "Action 0 should be long (no hold)"
-        assert env.action_map[1][0] == "short", "Action 1 should be short"
+            # With 1 SL and 1 TP, no hold, no close: 1 long + 1 short = 2 actions
+            assert env.action_spec.n == 2
+            assert env.action_map[0][0] == "long", "Action 0 should be long (no hold)"
+            assert env.action_map[1][0] == "short", "Action 1 should be short"
 
+        finally:
+            env.close()
     def test_include_hold_action_false_multiple_sltp(self, sample_ohlcv_df):
         """Should have correct action count without HOLD with multiple SL/TP."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05, -0.1],
-            takeprofit_levels=[0.05, 0.1],
-            include_hold_action=False,
-            leverage=1,
-            max_traj_length=50,
-        )
-        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05, -0.1],
+                takeprofit_levels=[0.05, 0.1],
+                include_hold_action=False,
+                leverage=1,
+                max_traj_length=50,
+            )
+            env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 2 SL and 2 TP, no hold, no close: 4 longs + 4 shorts = 8 actions
-        assert env.action_spec.n == 8
-        # Verify all actions are trades (no hold, no close)
-        for i in range(env.action_spec.n):
-            assert env.action_map[i][0] in ["long", "short"], f"Action {i} should be long or short"
+            # With 2 SL and 2 TP, no hold, no close: 4 longs + 4 shorts = 8 actions
+            assert env.action_spec.n == 8
+            # Verify all actions are trades (no hold, no close)
+            for i in range(env.action_spec.n):
+                assert env.action_map[i][0] in ["long", "short"], f"Action {i} should be long or short"
 
+        finally:
+            env.close()
     def test_env_works_without_hold_action(self, sample_ohlcv_df):
         """Environment should function correctly without HOLD action."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05],
-            takeprofit_levels=[0.05],
-            include_hold_action=False,
-            leverage=1,
-            max_traj_length=50,
-        )
-        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05],
+                takeprofit_levels=[0.05],
+                include_hold_action=False,
+                leverage=1,
+                max_traj_length=50,
+            )
+            env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Reset and step
-        td = env.reset()
-        assert td is not None
+            # Reset and step
+            td = env.reset()
+            assert td is not None
 
-        # Take action 0 (which is now a trade, not hold)
-        td.set("action", torch.tensor(0))
-        result = env.step(td)
+            # Take action 0 (which is now a trade, not hold)
+            td.set("action", torch.tensor(0))
+            result = env.step(td)
 
-        assert result is not None
-        assert "reward" in result["next"].keys()
-        # Verify reward is numeric and not NaN
-        assert not torch.isnan(result["next"]["reward"]).any()
+            assert result is not None
+            assert "reward" in result["next"].keys()
+            # Verify reward is numeric and not NaN
+            assert not torch.isnan(result["next"]["reward"]).any()
 
+        finally:
+            env.close()
     def test_action_mapping_without_hold(self, sample_ohlcv_df):
         """Verify action mapping starts with trades when no hold (no CLOSE for OneStep)."""
-        config = FuturesOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05],
-            takeprofit_levels=[0.05],
-            include_hold_action=False,
-            leverage=1,
-            max_traj_length=50,
-        )
-        env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = FuturesOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05],
+                takeprofit_levels=[0.05],
+                include_hold_action=False,
+                leverage=1,
+                max_traj_length=50,
+            )
+            env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Action 0 should be the first long position (no hold, no close for OneStep)
-        assert env.action_map[0][0] == "long", "First action should be long"
-        # Action 1 should be the first short position
-        assert env.action_map[1][0] == "short", "Second action should be short"
+            # Action 0 should be the first long position (no hold, no close for OneStep)
+            assert env.action_map[0][0] == "long", "First action should be long"
+            # Action 1 should be the first short position
+            assert env.action_map[1][0] == "short", "Second action should be short"
+        finally:
+            env.close()

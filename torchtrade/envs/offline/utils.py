@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 # Import TimeFrame infrastructure from shared module
-from torchtrade.envs.timeframe import (
+from torchtrade.envs.utils.timeframe import (
     TimeFrame,
     TimeFrameUnit,
     parse_timeframe_string,

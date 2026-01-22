@@ -13,7 +13,7 @@ import ta
 from tensordict import TensorDict
 
 from torchtrade.actor.rulebased.base import RuleBasedActor
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.infrastructure.utils import TimeFrame, TimeFrameUnit
 
 
 class MeanReversionActor(RuleBasedActor):

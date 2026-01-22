@@ -11,7 +11,7 @@ Examples:
         >>> env = SeqLongOnlyEnv(config)  # Uses default reward
 
     Using custom reward function:
-        >>> from torchtrade.envs.reward import sharpe_ratio_reward
+        >>> from torchtrade.envs.core.reward import sharpe_ratio_reward
         >>> config = SeqLongOnlyEnvConfig(
         ...     symbol="BTC/USD",
         ...     reward_function=sharpe_ratio_reward

@@ -2,7 +2,7 @@
 from functools import partial
 from typing import List, Union, Tuple
 
-from torchtrade.envs.timeframe import (
+from torchtrade.envs.utils.timeframe import (
     TimeFrame,
     TimeFrameUnit,
     normalize_timeframe_config,

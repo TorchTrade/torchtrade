@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 
 from torchtrade.envs.offline import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.infrastructure.utils import TimeFrame, TimeFrameUnit
 
 
 def generate_synthetic_ohlcv(n_rows: int = 100000, seed: int = 42) -> pd.DataFrame:

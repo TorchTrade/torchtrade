@@ -8,10 +8,10 @@ from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Bounded
 from torchrl.data.tensor_specs import CompositeSpec
 
-from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
-from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass
-from torchtrade.envs.live import TorchTradeLiveEnv
-from torchtrade.envs.state import HistoryTracker, PositionState
+from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
+from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
+from torchtrade.envs.core.live import TorchTradeLiveEnv
+from torchtrade.envs.core.state import HistoryTracker, PositionState
 
 
 class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):

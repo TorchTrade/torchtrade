@@ -8,8 +8,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from tensordict import TensorDictBase
 
-from torchtrade.envs.base import TorchTradeBaseEnv
-from torchtrade.envs.state import PositionState
+from torchtrade.envs.core.base import TorchTradeBaseEnv
+from torchtrade.envs.core.state import PositionState
 
 
 class TorchTradeLiveEnv(TorchTradeBaseEnv):

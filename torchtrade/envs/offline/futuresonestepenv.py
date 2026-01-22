@@ -11,18 +11,18 @@ from enum import Enum
 import math
 
 import numpy as np
-from torchtrade.envs.offline.sampler import MarketDataObservationSampler
+from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservationSampler
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data.tensor_specs import CompositeSpec
-from torchtrade.envs.offline.base import TorchTradeOfflineEnv
+from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
-from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta, normalize_timeframe_config
-from torchtrade.envs.offline.utils import compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map
-from torchtrade.envs.reward import build_reward_context, default_log_return, validate_reward_function
-from torchtrade.envs.state import FuturesHistoryTracker
-from torchtrade.envs.common import TradeMode, validate_quantity_per_trade
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta, normalize_timeframe_config
+from torchtrade.envs.offline.infrastructure.utils import compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map
+from torchtrade.envs.core.reward import build_reward_context, default_log_return, validate_reward_function
+from torchtrade.envs.core.state import FuturesHistoryTracker
+from torchtrade.envs.core.common import TradeMode, validate_quantity_per_trade
 import logging
 import sys
 
@@ -757,7 +757,7 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
                 - profit_factor: Ratio of total wins to total losses
         """
         from torchtrade.metrics import compute_all_metrics
-        from torchtrade.envs.offline.utils import compute_periods_per_year_crypto
+        from torchtrade.envs.offline.infrastructure.utils import compute_periods_per_year_crypto
 
         # Convert histories to tensors
         portfolio_values = torch.tensor(self.history.portfolio_values, dtype=torch.float32)

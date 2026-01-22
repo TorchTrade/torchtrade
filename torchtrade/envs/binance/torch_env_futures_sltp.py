@@ -6,16 +6,16 @@ import torch
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
-from torchtrade.envs.binance.obs_class import BinanceObservationClass
-from torchtrade.envs.binance.futures_order_executor import (
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.live.binance.observation import BinanceObservationClass
+from torchtrade.envs.live.binance.order_executor import (
     BinanceFuturesOrderClass,
     TradeMode,
     MarginType,
 )
-from torchtrade.envs.binance.base import BinanceBaseTorchTradingEnv
-from torchtrade.envs.action_maps import create_sltp_action_map
-from torchtrade.envs.sltp_mixin import SLTPMixin
+from torchtrade.envs.live.binance.base import BinanceBaseTorchTradingEnv
+from torchtrade.envs.utils.action_maps import create_sltp_action_map
+from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 
 
 @dataclass
@@ -66,7 +66,7 @@ class BinanceFuturesSLTPTradingEnvConfig:
 
     def __post_init__(self):
         """Normalize timeframe configuration."""
-        from torchtrade.envs.binance.utils import normalize_binance_timeframe_config
+        from torchtrade.envs.live.binance.utils import normalize_binance_timeframe_config
 
         self.execute_on, self.time_frames, self.window_sizes = normalize_binance_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes

@@ -12,9 +12,9 @@ from tensordict import TensorDict, TensorDictBase
 import torch
 from torchrl.data import Categorical
 import pandas as pd
-from torchtrade.envs.offline.base import TorchTradeOfflineEnv
-from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta, normalize_timeframe_config
-from torchtrade.envs.offline.utils import build_sltp_action_map
+from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta, normalize_timeframe_config
+from torchtrade.envs.offline.infrastructure.utils import build_sltp_action_map
 
 @dataclass
 class SeqLongOnlySLTPEnvConfig:

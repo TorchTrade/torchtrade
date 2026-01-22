@@ -5,7 +5,7 @@ from typing import List, Union, Callable, Dict, Optional
 import numpy as np
 import pandas as pd
 
-from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
 class BaseFuturesObservationClass(ABC):

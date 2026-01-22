@@ -7,7 +7,7 @@ import torch
 from torchrl.envs import TransformedEnv, Compose, InitTracker, DoubleToFloat, RewardSum
 
 from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.infrastructure.utils import TimeFrame, TimeFrameUnit
 from torchtrade.envs.transforms import CoverageTracker
 
 

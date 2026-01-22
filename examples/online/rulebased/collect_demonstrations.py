@@ -27,7 +27,7 @@ from tqdm import tqdm
 
 from torchtrade.actor import MomentumActor, MeanReversionActor, BreakoutActor, create_expert_ensemble
 from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.infrastructure.utils import TimeFrame, TimeFrameUnit
 
 
 def create_env(df: pd.DataFrame, config_overrides: Optional[dict] = None) -> SeqLongOnlyEnv:

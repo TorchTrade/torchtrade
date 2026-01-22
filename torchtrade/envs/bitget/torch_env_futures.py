@@ -6,15 +6,15 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.bitget.obs_class import BitgetObservationClass
-from torchtrade.envs.bitget.futures_order_executor import (
+from torchtrade.envs.live.bitget.observation import BitgetObservationClass
+from torchtrade.envs.live.bitget.order_executor import (
     BitgetFuturesOrderClass,
     TradeMode,
     MarginMode,
     PositionMode,
 )
-from torchtrade.envs.bitget.base import BitgetBaseTorchTradingEnv
-from torchtrade.envs.fractional_sizing import (
+from torchtrade.envs.live.bitget.base import BitgetBaseTorchTradingEnv
+from torchtrade.envs.utils.fractional_sizing import (
     calculate_fractional_position,
     PositionCalculationParams,
     round_to_step_size,
@@ -61,7 +61,7 @@ class BitgetFuturesTradingEnvConfig:
 
     def __post_init__(self):
         # Normalize timeframes using utility function
-        from torchtrade.envs.bitget.utils import normalize_bitget_timeframe_config
+        from torchtrade.envs.live.bitget.utils import normalize_bitget_timeframe_config
         self.execute_on, self.time_frames, self.window_sizes = normalize_bitget_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )

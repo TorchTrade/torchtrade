@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from torchtrade.envs.offline.seqfutures import SeqFuturesEnv, SeqFuturesEnvConfig, MarginType
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.infrastructure.utils import TimeFrame, TimeFrameUnit
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
@@ -283,39 +283,42 @@ class TestSeqFuturesEnvLongTrades:
 
     def test_long_pnl_positive_on_price_increase(self, env, trending_up_df):
         """Long position should have positive PnL when price increases."""
-        config = SeqFuturesEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            transaction_fee=0.0,  # No fees for cleaner test
-            slippage=0.0,
-            max_traj_length=100,
-            random_start=False,
-        )
-        env = SeqFuturesEnv(trending_up_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                transaction_fee=0.0,  # No fees for cleaner test
+                slippage=0.0,
+                max_traj_length=100,
+                random_start=False,
+            )
+            env = SeqFuturesEnv(trending_up_df, config, simple_feature_fn)
 
-        td = env.reset()
-        initial_balance = env.balance
+            td = env.reset()
+            initial_balance = env.balance
 
-        # Open long at the beginning
-        td.set("action", torch.tensor(4))  # Full long (1.0)
-        result = env.step(td)
-        td = result["next"]
-
-        # Run a few steps with same action to keep position open
-        for _ in range(20):
-            td.set("action", torch.tensor(4))  # Keep full long position
+            # Open long at the beginning
+            td.set("action", torch.tensor(4))  # Full long (1.0)
             result = env.step(td)
             td = result["next"]
 
-        # Position should still be open with unrealized profit
-        assert env.position.position_size > 0
-        # Note: Balance doesn't change until position is closed or liquidated
-        # This test verifies the position remains open during repeated same actions
+            # Run a few steps with same action to keep position open
+            for _ in range(20):
+                td.set("action", torch.tensor(4))  # Keep full long position
+                result = env.step(td)
+                td = result["next"]
+
+            # Position should still be open with unrealized profit
+            assert env.position.position_size > 0
+            # Note: Balance doesn't change until position is closed or liquidated
+            # This test verifies the position remains open during repeated same actions
 
 
+        finally:
+            env.close()
 class TestSeqFuturesEnvShortTrades:
     """Tests for short position execution."""
 
@@ -350,39 +353,42 @@ class TestSeqFuturesEnvShortTrades:
 
     def test_short_pnl_positive_on_price_decrease(self, env, trending_down_df):
         """Short position should have positive PnL when price decreases."""
-        config = SeqFuturesEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            transaction_fee=0.0,  # No fees for cleaner test
-            slippage=0.0,
-            max_traj_length=100,
-            random_start=False,
-        )
-        env = SeqFuturesEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                transaction_fee=0.0,  # No fees for cleaner test
+                slippage=0.0,
+                max_traj_length=100,
+                random_start=False,
+            )
+            env = SeqFuturesEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
-        initial_balance = env.balance
+            td = env.reset()
+            initial_balance = env.balance
 
-        # Open short at the beginning
-        td.set("action", torch.tensor(0))
-        result = env.step(td)
-        td = result["next"]
-
-        # Run a few steps with hold action to let price decrease
-        for _ in range(20):
-            td.set("action", torch.tensor(1))  # Hold (keep position open)
+            # Open short at the beginning
+            td.set("action", torch.tensor(0))
             result = env.step(td)
             td = result["next"]
 
-        # Position should still be open with unrealized profit
-        assert env.position.position_size < 0
-        # Note: Balance doesn't change until position is closed or liquidated
-        # This test verifies the position remains open during holds
+            # Run a few steps with hold action to let price decrease
+            for _ in range(20):
+                td.set("action", torch.tensor(1))  # Hold (keep position open)
+                result = env.step(td)
+                td = result["next"]
+
+            # Position should still be open with unrealized profit
+            assert env.position.position_size < 0
+            # Note: Balance doesn't change until position is closed or liquidated
+            # This test verifies the position remains open during holds
 
 
+        finally:
+            env.close()
 class TestSeqFuturesEnvPositionFlipping:
     """Tests for flipping between long and short positions."""
 
@@ -595,51 +601,55 @@ class TestSeqFuturesEnvLeverage:
 
     def test_leverage_increases_position_size(self, sample_ohlcv_df):
         """Higher leverage affects liquidation risk, not position size (with QUANTITY mode)."""
-        config_low = SeqFuturesEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=5,
-            transaction_fee=0.0,
-            slippage=0.0,
-            max_traj_length=50,
-            random_start=False,
-        )
-        config_high = SeqFuturesEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=20,
-            transaction_fee=0.0,
-            slippage=0.0,
-            max_traj_length=50,
-            random_start=False,
-        )
+        try:
+            config_low = SeqFuturesEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=5,
+                transaction_fee=0.0,
+                slippage=0.0,
+                max_traj_length=50,
+                random_start=False,
+            )
+            config_high = SeqFuturesEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=20,
+                transaction_fee=0.0,
+                slippage=0.0,
+                max_traj_length=50,
+                random_start=False,
+            )
 
-        env_low = SeqFuturesEnv(sample_ohlcv_df, config_low, simple_feature_fn)
-        env_high = SeqFuturesEnv(sample_ohlcv_df, config_high, simple_feature_fn)
+            env_low = SeqFuturesEnv(sample_ohlcv_df, config_low, simple_feature_fn)
+            env_high = SeqFuturesEnv(sample_ohlcv_df, config_high, simple_feature_fn)
 
-        td_low = env_low.reset()
-        td_high = env_high.reset()
+            td_low = env_low.reset()
+            td_high = env_high.reset()
 
-        td_low.set("action", torch.tensor(4))  # Full long (1.0)
-        td_high.set("action", torch.tensor(4))  # Full long (1.0)
+            td_low.set("action", torch.tensor(4))  # Full long (1.0)
+            td_high.set("action", torch.tensor(4))  # Full long (1.0)
 
-        env_low.step(td_low)
-        env_high.step(td_high)
+            env_low.step(td_low)
+            env_high.step(td_high)
 
-        # With fractional mode, leverage affects position size
-        # Higher leverage = more position size for same balance fraction
-        assert abs(env_high.position.position_size) > abs(env_low.position.position_size)
+            # With fractional mode, leverage affects position size
+            # Higher leverage = more position size for same balance fraction
+            assert abs(env_high.position.position_size) > abs(env_low.position.position_size)
 
-        # But higher leverage means liquidation price is closer to entry
-        entry_price = env_low.position.entry_price
-        liq_distance_low = abs(entry_price - env_low.liquidation_price)
-        liq_distance_high = abs(entry_price - env_high.liquidation_price)
-        assert liq_distance_high < liq_distance_low
+            # But higher leverage means liquidation price is closer to entry
+            entry_price = env_low.position.entry_price
+            liq_distance_low = abs(entry_price - env_low.liquidation_price)
+            liq_distance_high = abs(entry_price - env_high.liquidation_price)
+            assert liq_distance_high < liq_distance_low
 
+        finally:
+            env_high.close()
+            env_low.close()
     def test_leverage_stored_in_account_state(self, env):
         """Leverage should be stored in account state."""
         td = env.reset()
@@ -668,42 +678,45 @@ class TestSeqFuturesEnvLiquidation:
 
     def test_liquidation_clears_position(self, sample_ohlcv_df, trending_down_df):
         """Liquidation should clear position and realize loss."""
-        # Use high leverage to make liquidation more likely
-        config = SeqFuturesEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=50,  # High leverage for faster liquidation
-            transaction_fee=0.0,
-            slippage=0.0,
-            max_traj_length=500,
-            random_start=False,
-        )
-        env = SeqFuturesEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            # Use high leverage to make liquidation more likely
+            config = SeqFuturesEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=50,  # High leverage for faster liquidation
+                transaction_fee=0.0,
+                slippage=0.0,
+                max_traj_length=500,
+                random_start=False,
+            )
+            env = SeqFuturesEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
-        initial_balance = env.balance
+            td = env.reset()
+            initial_balance = env.balance
 
-        # Open long position (will lose money as price trends down)
-        td.set("action", torch.tensor(2))
-        result = env.step(td)
-        td = result["next"]
-
-        # Run until liquidation or end of data
-        for _ in range(300):
-            td.set("action", torch.tensor(4))  # Try to stay long (1.0)
+            # Open long position (will lose money as price trends down)
+            td.set("action", torch.tensor(2))
             result = env.step(td)
             td = result["next"]
 
-            if td.get("done", False):
-                break
+            # Run until liquidation or end of data
+            for _ in range(300):
+                td.set("action", torch.tensor(4))  # Try to stay long (1.0)
+                result = env.step(td)
+                td = result["next"]
 
-        # Either got liquidated or episode ended
-        # If liquidated, balance should be significantly reduced
-        assert env.balance < initial_balance or td.get("done", False)
+                if td.get("done", False):
+                    break
+
+            # Either got liquidated or episode ended
+            # If liquidated, balance should be significantly reduced
+            assert env.balance < initial_balance or td.get("done", False)
 
 
+        finally:
+            env.close()
 class TestSeqFuturesEnvReward:
     """Tests for reward calculation."""
 
@@ -774,45 +787,48 @@ class TestSeqFuturesEnvTermination:
 
     def test_terminates_on_bankruptcy(self, sample_ohlcv_df):
         """Episode should terminate when portfolio value drops below threshold."""
-        # High leverage and trending down to cause losses
-        config = SeqFuturesEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=100,
-            leverage=50,
-            transaction_fee=0.1,  # High fees to accelerate losses
-            slippage=0.0,
-            max_traj_length=100,
-            random_start=False,
-            bankrupt_threshold=0.5,  # 50% threshold
-        )
-        env = SeqFuturesEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            # High leverage and trending down to cause losses
+            config = SeqFuturesEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=100,
+                leverage=50,
+                transaction_fee=0.1,  # High fees to accelerate losses
+                slippage=0.0,
+                max_traj_length=100,
+                random_start=False,
+                bankrupt_threshold=0.5,  # 50% threshold
+            )
+            env = SeqFuturesEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Trade to lose money
-        for _ in range(50):
-            # Alternate between long and short to pay fees
-            td.set("action", torch.tensor(2))
-            result = env.step(td)
-            td = result["next"]
-            if td.get("done", False):
-                break
+            # Trade to lose money
+            for _ in range(50):
+                # Alternate between long and short to pay fees
+                td.set("action", torch.tensor(2))
+                result = env.step(td)
+                td = result["next"]
+                if td.get("done", False):
+                    break
 
-            td.set("action", torch.tensor(0))
-            result = env.step(td)
-            td = result["next"]
-            if td.get("done", False):
-                break
+                td.set("action", torch.tensor(0))
+                result = env.step(td)
+                td = result["next"]
+                if td.get("done", False):
+                    break
 
-        # Should have terminated due to bankruptcy or completed
-        portfolio_value = env._get_portfolio_value()
-        bankruptcy_threshold = config.bankrupt_threshold * env.initial_portfolio_value
+            # Should have terminated due to bankruptcy or completed
+            portfolio_value = env._get_portfolio_value()
+            bankruptcy_threshold = config.bankrupt_threshold * env.initial_portfolio_value
 
-        assert td.get("done", False) or portfolio_value >= bankruptcy_threshold
+            assert td.get("done", False) or portfolio_value >= bankruptcy_threshold
 
 
+        finally:
+            env.close()
 class TestSeqFuturesEnvEdgeCases:
     """Tests for edge cases."""
 
@@ -838,42 +854,49 @@ class TestSeqFuturesEnvEdgeCases:
 
     def test_zero_transaction_fee(self, sample_ohlcv_df):
         """Environment should work with zero transaction fees."""
-        config = SeqFuturesEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            transaction_fee=0.0,
-            slippage=0.0,
-            max_traj_length=20,
-            random_start=False,
-        )
-        env = SeqFuturesEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                transaction_fee=0.0,
+                slippage=0.0,
+                max_traj_length=20,
+                random_start=False,
+            )
+            env = SeqFuturesEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        td = env.reset()
-        td.set("action", torch.tensor(4))  # long (1.0)
-        result = env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(4))  # long (1.0)
+            result = env.step(td)
 
-        assert not np.isnan(result["next"]["reward"])
+            assert not np.isnan(result["next"]["reward"])
 
+        finally:
+            env.close()
     def test_different_margin_types(self, sample_ohlcv_df):
         """Environment should accept different margin types."""
-        config_isolated = SeqFuturesEnvConfig(
-            margin_type=MarginType.ISOLATED,
-            max_traj_length=20,
-        )
-        config_crossed = SeqFuturesEnvConfig(
-            margin_type=MarginType.CROSSED,
-            max_traj_length=20,
-        )
+        try:
+            config_isolated = SeqFuturesEnvConfig(
+                margin_type=MarginType.ISOLATED,
+                max_traj_length=20,
+            )
+            config_crossed = SeqFuturesEnvConfig(
+                margin_type=MarginType.CROSSED,
+                max_traj_length=20,
+            )
 
-        env_isolated = SeqFuturesEnv(sample_ohlcv_df, config_isolated, simple_feature_fn)
-        env_crossed = SeqFuturesEnv(sample_ohlcv_df, config_crossed, simple_feature_fn)
+            env_isolated = SeqFuturesEnv(sample_ohlcv_df, config_isolated, simple_feature_fn)
+            env_crossed = SeqFuturesEnv(sample_ohlcv_df, config_crossed, simple_feature_fn)
 
-        assert env_isolated.margin_type == MarginType.ISOLATED
-        assert env_crossed.margin_type == MarginType.CROSSED
+            assert env_isolated.margin_type == MarginType.ISOLATED
+            assert env_crossed.margin_type == MarginType.CROSSED
 
+        finally:
+            env_crossed.close()
+            env_isolated.close()
     def test_position_value_calculation(self, env):
         """Position value should be correctly calculated."""
         td = env.reset()
@@ -907,151 +930,163 @@ class TestSeqFuturesEnvPositionSizing:
         This test verifies that positions can still be opened even when
         the balance is at the edge of what's needed for a trade.
         """
-        config = SeqFuturesEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            transaction_fee=0.0004,
-            slippage=0.0,
-            max_traj_length=200,
-            random_start=False,
-        )
-        env = SeqFuturesEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                transaction_fee=0.0004,
+                slippage=0.0,
+                max_traj_length=200,
+                random_start=False,
+            )
+            env = SeqFuturesEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Execute many trades to reduce balance through fees
-        # Action indices: 0=short, 1=hold, 2=close, 3=long
-        positions_opened = 0
-        for i in range(100):
-            # Open position
-            td.set("action", torch.tensor(3))  # long
-            result = env.step(td)
-            td = result["next"]
+            # Execute many trades to reduce balance through fees
+            # Action indices: 0=short, 1=hold, 2=close, 3=long
+            positions_opened = 0
+            for i in range(100):
+                # Open position
+                td.set("action", torch.tensor(3))  # long
+                result = env.step(td)
+                td = result["next"]
 
-            if env.position.position_size > 0:
-                positions_opened += 1
+                if env.position.position_size > 0:
+                    positions_opened += 1
 
-            if td.get("done", False):
-                break
+                if td.get("done", False):
+                    break
 
-            # Close position
-            td.set("action", torch.tensor(2))  # close (0.0 = neutral)
-            result = env.step(td)
-            td = result["next"]
+                # Close position
+                td.set("action", torch.tensor(2))  # close (0.0 = neutral)
+                result = env.step(td)
+                td = result["next"]
 
-            if td.get("done", False):
-                break
+                if td.get("done", False):
+                    break
 
-        # Should have been able to open positions throughout
-        # Without the fix, positions would stop opening after balance gets low
-        assert positions_opened > 50, (
-            f"Only opened {positions_opened} positions. "
-            "Floating-point precision may be blocking trades."
-        )
+            # Should have been able to open positions throughout
+            # Without the fix, positions would stop opening after balance gets low
+            assert positions_opened > 50, (
+                f"Only opened {positions_opened} positions. "
+                "Floating-point precision may be blocking trades."
+            )
 
+        finally:
+            env.close()
     def test_position_opens_with_exact_balance_for_margin(self, sample_ohlcv_df):
         """
         Test that a position can be opened when balance exactly covers
         margin requirement plus fees (within floating-point tolerance).
         """
-        config = SeqFuturesEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=100,  # Small balance
-            leverage=10,
-            transaction_fee=0.0004,
-            slippage=0.0,
-            max_traj_length=50,
-            random_start=False,
-        )
-        env = SeqFuturesEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=100,  # Small balance
+                leverage=10,
+                transaction_fee=0.0004,
+                slippage=0.0,
+                max_traj_length=50,
+                random_start=False,
+            )
+            env = SeqFuturesEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        td = env.reset()
-        initial_balance = env.balance
+            td = env.reset()
+            initial_balance = env.balance
 
-        # Open a position
-        td.set("action", torch.tensor(4))  # long (1.0)
-        env.step(td)
+            # Open a position
+            td.set("action", torch.tensor(4))  # long (1.0)
+            env.step(td)
 
-        # Position should have been opened
-        assert env.position.position_size > 0, "Failed to open position with available balance"
+            # Position should have been opened
+            assert env.position.position_size > 0, "Failed to open position with available balance"
 
-        # Fee should have been deducted
-        assert env.balance < initial_balance
+            # Fee should have been deducted
+            assert env.balance < initial_balance
 
 
+        finally:
+            env.close()
 class TestSeqFuturesEnvPnLCalculations:
     """Tests for PnL calculations."""
 
     def test_unrealized_pnl_positive_for_profitable_long(self, env, trending_up_df):
         """Unrealized PnL should be positive for profitable long position."""
-        config = SeqFuturesEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            transaction_fee=0.0,
-            slippage=0.0,
-            max_traj_length=100,
-            random_start=False,
-        )
-        env = SeqFuturesEnv(trending_up_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                transaction_fee=0.0,
+                slippage=0.0,
+                max_traj_length=100,
+                random_start=False,
+            )
+            env = SeqFuturesEnv(trending_up_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Open long
-        td.set("action", torch.tensor(2))
-        result = env.step(td)
-        td = result["next"]
-
-        # Let price increase
-        for _ in range(20):
-            td.set("action", torch.tensor(4))  # Hold long (1.0)
+            # Open long
+            td.set("action", torch.tensor(2))
             result = env.step(td)
             td = result["next"]
 
-        # Unrealized PnL should be positive
-        unrealized_pnl_pct = td["account_state"][5].item()
-        assert unrealized_pnl_pct > 0
+            # Let price increase
+            for _ in range(20):
+                td.set("action", torch.tensor(4))  # Hold long (1.0)
+                result = env.step(td)
+                td = result["next"]
 
+            # Unrealized PnL should be positive
+            unrealized_pnl_pct = td["account_state"][5].item()
+            assert unrealized_pnl_pct > 0
+
+        finally:
+            env.close()
     def test_unrealized_pnl_positive_for_profitable_short(self, env, trending_down_df):
         """Unrealized PnL should be positive for profitable short position."""
-        config = SeqFuturesEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            transaction_fee=0.0,
-            slippage=0.0,
-            max_traj_length=100,
-            random_start=False,
-        )
-        env = SeqFuturesEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                transaction_fee=0.0,
+                slippage=0.0,
+                max_traj_length=100,
+                random_start=False,
+            )
+            env = SeqFuturesEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Open short
-        td.set("action", torch.tensor(0))
-        result = env.step(td)
-        td = result["next"]
-
-        # Let price decrease
-        for _ in range(20):
-            td.set("action", torch.tensor(0))  # Hold short
+            # Open short
+            td.set("action", torch.tensor(0))
             result = env.step(td)
             td = result["next"]
 
-        # Unrealized PnL should be positive
-        unrealized_pnl_pct = td["account_state"][5].item()
-        assert unrealized_pnl_pct > 0
+            # Let price decrease
+            for _ in range(20):
+                td.set("action", torch.tensor(0))  # Hold short
+                result = env.step(td)
+                td = result["next"]
+
+            # Unrealized PnL should be positive
+            unrealized_pnl_pct = td["account_state"][5].item()
+            assert unrealized_pnl_pct > 0
 
 
+        finally:
+            env.close()
 class TestSeqFuturesEnvMetrics:
     """Tests for get_metrics() method."""
 
@@ -1121,64 +1156,70 @@ class TestSeqFuturesEnvMetrics:
 
     def test_get_metrics_total_return_positive_trending_up(self, trending_up_df):
         """Total return should be positive for profitable trading in uptrend."""
-        config = SeqFuturesEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            transaction_fee=0.0,  # No fees
-            slippage=0.0,
-            max_traj_length=100,
-            random_start=False,
-        )
-        env = SeqFuturesEnv(trending_up_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                transaction_fee=0.0,  # No fees
+                slippage=0.0,
+                max_traj_length=100,
+                random_start=False,
+            )
+            env = SeqFuturesEnv(trending_up_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Go long and stay long
-        for i in range(50):
-            td.set("action", torch.tensor(4))  # long (1.0)
-            result = env.step(td)
-            td = result["next"]
-            if td.get("done", False):
-                break
+            # Go long and stay long
+            for i in range(50):
+                td.set("action", torch.tensor(4))  # long (1.0)
+                result = env.step(td)
+                td = result["next"]
+                if td.get("done", False):
+                    break
 
-        metrics = env.get_metrics()
+            metrics = env.get_metrics()
 
-        # Should have positive return
-        assert metrics['total_return'] > 0, "Should have profit from long position in uptrend"
+            # Should have positive return
+            assert metrics['total_return'] > 0, "Should have profit from long position in uptrend"
 
+        finally:
+            env.close()
     def test_get_metrics_total_return_negative_on_losses(self, trending_down_df):
         """Total return should be negative for unprofitable trading."""
-        config = SeqFuturesEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            transaction_fee=0.0,
-            slippage=0.0,
-            max_traj_length=100,
-            random_start=False,
-        )
-        env = SeqFuturesEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                transaction_fee=0.0,
+                slippage=0.0,
+                max_traj_length=100,
+                random_start=False,
+            )
+            env = SeqFuturesEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Go long in downtrend (should lose money)
-        for i in range(50):
-            td.set("action", torch.tensor(4))  # long (1.0)
-            result = env.step(td)
-            td = result["next"]
-            if td.get("done", False):
-                break
+            # Go long in downtrend (should lose money)
+            for i in range(50):
+                td.set("action", torch.tensor(4))  # long (1.0)
+                result = env.step(td)
+                td = result["next"]
+                if td.get("done", False):
+                    break
 
-        metrics = env.get_metrics()
+            metrics = env.get_metrics()
 
-        # Should have negative return
-        assert metrics['total_return'] < 0, "Should have loss from long position in downtrend"
+            # Should have negative return
+            assert metrics['total_return'] < 0, "Should have loss from long position in downtrend"
 
+        finally:
+            env.close()
     def test_get_metrics_num_trades_counts_correctly(self, env):
         """num_trades should count only non-hold actions."""
         td = env.reset()

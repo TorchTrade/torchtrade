@@ -5,13 +5,13 @@ import logging
 import torch
 
 logger = logging.getLogger(__name__)
-from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
-from torchtrade.envs.alpaca.utils import normalize_alpaca_timeframe_config
-from torchtrade.envs.alpaca.obs_class import AlpacaObservationClass
-from torchtrade.envs.alpaca.order_executor import AlpacaOrderClass, TradeMode
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.live.alpaca.utils import normalize_alpaca_timeframe_config
+from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
+from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass, TradeMode
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
-from torchtrade.envs.alpaca.base import AlpacaBaseTorchTradingEnv
+from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
 
 @dataclass
 class AlpacaTradingEnvConfig:

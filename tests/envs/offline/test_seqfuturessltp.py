@@ -11,7 +11,7 @@ from torchtrade.envs.offline.seqfuturessltp import (
     SeqFuturesSLTPEnv,
     SeqFuturesSLTPEnvConfig,
 )
-from torchtrade.envs.offline.utils import (
+from torchtrade.envs.offline.infrastructure.utils import (
     TimeFrame,
     TimeFrameUnit,
     build_sltp_action_map,
@@ -311,309 +311,330 @@ class TestSeqFuturesSLTPEnvTriggers:
 
     def test_long_position_exits_on_sl_trigger(self, trending_down_df):
         """Long position should exit when stop loss is triggered."""
-        config = SeqFuturesSLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            transaction_fee=0.001,
-            stoploss_levels=[-0.02],  # 2% stop loss - should trigger in downtrend
-            takeprofit_levels=[0.5],   # 50% TP - won't trigger
-            slippage=0.0,
-            max_traj_length=200,
-            random_start=False,
-        )
-        env = SeqFuturesSLTPEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesSLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                transaction_fee=0.001,
+                stoploss_levels=[-0.02],  # 2% stop loss - should trigger in downtrend
+                takeprofit_levels=[0.5],   # 50% TP - won't trigger
+                slippage=0.0,
+                max_traj_length=200,
+                random_start=False,
+            )
+            env = SeqFuturesSLTPEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Open long position
-        td.set("action", torch.tensor(1))  # First long (0=HOLD)
-        result = env.step(td)
-        td = result["next"]
-
-        assert env.position.position_size > 0
-        initial_position = env.position.position_size
-
-        # Continue stepping - SL should trigger
-        sl_triggered = False
-        for _ in range(150):
-            td.set("action", torch.tensor(0))  # hold
+            # Open long position
+            td.set("action", torch.tensor(1))  # First long (0=HOLD)
             result = env.step(td)
             td = result["next"]
 
-            if env.position.position_size == 0 and initial_position > 0:
-                sl_triggered = True
-                break
+            assert env.position.position_size > 0
+            initial_position = env.position.position_size
 
-            if td.get("done", False):
-                break
+            # Continue stepping - SL should trigger
+            sl_triggered = False
+            for _ in range(150):
+                td.set("action", torch.tensor(0))  # hold
+                result = env.step(td)
+                td = result["next"]
 
-        assert sl_triggered, "Stop loss should have triggered in downtrend"
+                if env.position.position_size == 0 and initial_position > 0:
+                    sl_triggered = True
+                    break
 
+                if td.get("done", False):
+                    break
+
+            assert sl_triggered, "Stop loss should have triggered in downtrend"
+
+        finally:
+            env.close()
     def test_long_position_exits_on_tp_trigger(self, trending_up_df):
         """Long position should exit when take profit is triggered."""
-        config = SeqFuturesSLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            transaction_fee=0.001,
-            stoploss_levels=[-0.5],   # 50% SL - won't trigger
-            takeprofit_levels=[0.02],  # 2% TP - should trigger in uptrend
-            slippage=0.0,
-            max_traj_length=200,
-            random_start=False,
-        )
-        env = SeqFuturesSLTPEnv(trending_up_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesSLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                transaction_fee=0.001,
+                stoploss_levels=[-0.5],   # 50% SL - won't trigger
+                takeprofit_levels=[0.02],  # 2% TP - should trigger in uptrend
+                slippage=0.0,
+                max_traj_length=200,
+                random_start=False,
+            )
+            env = SeqFuturesSLTPEnv(trending_up_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Open long position
-        td.set("action", torch.tensor(1))  # First long (0=HOLD)
-        result = env.step(td)
-        td = result["next"]
-
-        assert env.position.position_size > 0
-        initial_position = env.position.position_size
-
-        # Continue stepping - TP should trigger
-        tp_triggered = False
-        for _ in range(150):
-            td.set("action", torch.tensor(0))  # hold
+            # Open long position
+            td.set("action", torch.tensor(1))  # First long (0=HOLD)
             result = env.step(td)
             td = result["next"]
 
-            if env.position.position_size == 0 and initial_position > 0:
-                tp_triggered = True
-                break
+            assert env.position.position_size > 0
+            initial_position = env.position.position_size
 
-            if td.get("done", False):
-                break
+            # Continue stepping - TP should trigger
+            tp_triggered = False
+            for _ in range(150):
+                td.set("action", torch.tensor(0))  # hold
+                result = env.step(td)
+                td = result["next"]
 
-        assert tp_triggered, "Take profit should have triggered in uptrend"
+                if env.position.position_size == 0 and initial_position > 0:
+                    tp_triggered = True
+                    break
 
+                if td.get("done", False):
+                    break
+
+            assert tp_triggered, "Take profit should have triggered in uptrend"
+
+        finally:
+            env.close()
     def test_short_position_exits_on_sl_trigger(self, trending_up_df):
         """Short position should exit when stop loss is triggered (price goes up)."""
-        config = SeqFuturesSLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            transaction_fee=0.001,
-            stoploss_levels=[-0.02],  # 2% stop loss - should trigger in uptrend for short
-            takeprofit_levels=[0.5],   # 50% TP - won't trigger
-            slippage=0.0,
-            max_traj_length=200,
-            random_start=False,
-        )
-        env = SeqFuturesSLTPEnv(trending_up_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesSLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                transaction_fee=0.001,
+                stoploss_levels=[-0.02],  # 2% stop loss - should trigger in uptrend for short
+                takeprofit_levels=[0.5],   # 50% TP - won't trigger
+                slippage=0.0,
+                max_traj_length=200,
+                random_start=False,
+            )
+            env = SeqFuturesSLTPEnv(trending_up_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Open short position (0=HOLD, 1=first long, 2=first short)
-        td.set("action", torch.tensor(2))  # First short action
-        result = env.step(td)
-        td = result["next"]
-
-        assert env.position.position_size < 0
-        initial_position = env.position.position_size
-
-        # Continue stepping - SL should trigger
-        sl_triggered = False
-        for _ in range(150):
-            td.set("action", torch.tensor(0))  # hold
+            # Open short position (0=HOLD, 1=first long, 2=first short)
+            td.set("action", torch.tensor(2))  # First short action
             result = env.step(td)
             td = result["next"]
 
-            if env.position.position_size == 0 and initial_position < 0:
-                sl_triggered = True
-                break
+            assert env.position.position_size < 0
+            initial_position = env.position.position_size
 
-            if td.get("done", False):
-                break
+            # Continue stepping - SL should trigger
+            sl_triggered = False
+            for _ in range(150):
+                td.set("action", torch.tensor(0))  # hold
+                result = env.step(td)
+                td = result["next"]
 
-        assert sl_triggered, "Stop loss should have triggered for short in uptrend"
+                if env.position.position_size == 0 and initial_position < 0:
+                    sl_triggered = True
+                    break
 
+                if td.get("done", False):
+                    break
+
+            assert sl_triggered, "Stop loss should have triggered for short in uptrend"
+
+        finally:
+            env.close()
     def test_short_position_exits_on_tp_trigger(self, trending_down_df):
         """Short position should exit when take profit is triggered (price goes down)."""
-        config = SeqFuturesSLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            transaction_fee=0.001,
-            stoploss_levels=[-0.5],   # 50% SL - won't trigger
-            takeprofit_levels=[0.02],  # 2% TP - should trigger in downtrend
-            slippage=0.0,
-            max_traj_length=200,
-            random_start=False,
-        )
-        env = SeqFuturesSLTPEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesSLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                transaction_fee=0.001,
+                stoploss_levels=[-0.5],   # 50% SL - won't trigger
+                takeprofit_levels=[0.02],  # 2% TP - should trigger in downtrend
+                slippage=0.0,
+                max_traj_length=200,
+                random_start=False,
+            )
+            env = SeqFuturesSLTPEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Open short position (action 2 = first short action)
-        td.set("action", torch.tensor(2))  # First short action
-        result = env.step(td)
-        td = result["next"]
-
-        assert env.position.position_size < 0
-        initial_position = env.position.position_size
-
-        # Continue stepping - TP should trigger
-        tp_triggered = False
-        for _ in range(150):
-            td.set("action", torch.tensor(0))  # hold
+            # Open short position (action 2 = first short action)
+            td.set("action", torch.tensor(2))  # First short action
             result = env.step(td)
             td = result["next"]
 
-            if env.position.position_size == 0 and initial_position < 0:
-                tp_triggered = True
-                break
+            assert env.position.position_size < 0
+            initial_position = env.position.position_size
 
-            if td.get("done", False):
-                break
+            # Continue stepping - TP should trigger
+            tp_triggered = False
+            for _ in range(150):
+                td.set("action", torch.tensor(0))  # hold
+                result = env.step(td)
+                td = result["next"]
 
-        assert tp_triggered, "Take profit should have triggered for short in downtrend"
+                if env.position.position_size == 0 and initial_position < 0:
+                    tp_triggered = True
+                    break
 
+                if td.get("done", False):
+                    break
+
+            assert tp_triggered, "Take profit should have triggered for short in downtrend"
+
+        finally:
+            env.close()
     def test_sl_tp_cleared_after_trigger(self, trending_down_df):
         """SL/TP should be cleared after position exits."""
-        config = SeqFuturesSLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            transaction_fee=0.001,
-            stoploss_levels=[-0.01],  # 1% SL
-            takeprofit_levels=[0.5],
-            slippage=0.0,
-            max_traj_length=100,
-            random_start=False,
-        )
-        env = SeqFuturesSLTPEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesSLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                transaction_fee=0.001,
+                stoploss_levels=[-0.01],  # 1% SL
+                takeprofit_levels=[0.5],
+                slippage=0.0,
+                max_traj_length=100,
+                random_start=False,
+            )
+            env = SeqFuturesSLTPEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Open long
-        td.set("action", torch.tensor(1))  # First long (0=HOLD)
-        result = env.step(td)
-        td = result["next"]
-
-        # Wait for SL to trigger
-        for _ in range(50):
-            td.set("action", torch.tensor(0))
+            # Open long
+            td.set("action", torch.tensor(1))  # First long (0=HOLD)
             result = env.step(td)
             td = result["next"]
 
-            if env.position.position_size == 0:
-                # Position exited - check SL/TP cleared
-                assert env.stop_loss == 0.0
-                assert env.take_profit == 0.0
-                assert env.position.entry_price == 0.0
-                break
+            # Wait for SL to trigger
+            for _ in range(50):
+                td.set("action", torch.tensor(0))
+                result = env.step(td)
+                td = result["next"]
 
-            if td.get("done", False):
-                break
+                if env.position.position_size == 0:
+                    # Position exited - check SL/TP cleared
+                    assert env.stop_loss == 0.0
+                    assert env.take_profit == 0.0
+                    assert env.position.entry_price == 0.0
+                    break
+
+                if td.get("done", False):
+                    break
 
 
+        finally:
+            env.close()
 class TestSeqFuturesSLTPEnvLiquidation:
     """Tests for liquidation functionality."""
 
     def test_long_liquidation_on_price_drop(self, trending_down_df):
         """Long position should be liquidated if price drops below liquidation price."""
-        config = SeqFuturesSLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=50,  # High leverage for faster liquidation
-            transaction_fee=0.001,
-            stoploss_levels=[-0.5],   # Wide SL so liquidation happens first
-            takeprofit_levels=[0.5],
-            slippage=0.0,
-            max_traj_length=200,
-            random_start=False,
-            maintenance_margin_rate=0.004,
-        )
-        env = SeqFuturesSLTPEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesSLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=50,  # High leverage for faster liquidation
+                transaction_fee=0.001,
+                stoploss_levels=[-0.5],   # Wide SL so liquidation happens first
+                takeprofit_levels=[0.5],
+                slippage=0.0,
+                max_traj_length=200,
+                random_start=False,
+                maintenance_margin_rate=0.004,
+            )
+            env = SeqFuturesSLTPEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Open long position
-        td.set("action", torch.tensor(1))  # First long (0=HOLD)
-        result = env.step(td)
-        td = result["next"]
-
-        assert env.position.position_size > 0
-        assert env.liquidation_price > 0
-
-        # Track if liquidation happens
-        was_liquidated = False
-        initial_position = env.position.position_size
-
-        for _ in range(100):
-            td.set("action", torch.tensor(0))  # hold
+            # Open long position
+            td.set("action", torch.tensor(1))  # First long (0=HOLD)
             result = env.step(td)
             td = result["next"]
 
-            # Check if liquidation occurred
-            if env.position.position_size == 0 and initial_position > 0:
-                was_liquidated = True
-                break
+            assert env.position.position_size > 0
+            assert env.liquidation_price > 0
 
-            if td.get("done", False):
-                break
+            # Track if liquidation happens
+            was_liquidated = False
+            initial_position = env.position.position_size
 
-        # Either liquidated or hit SL (both are valid exits)
-        assert was_liquidated or env.position.position_size == 0
+            for _ in range(100):
+                td.set("action", torch.tensor(0))  # hold
+                result = env.step(td)
+                td = result["next"]
 
+                # Check if liquidation occurred
+                if env.position.position_size == 0 and initial_position > 0:
+                    was_liquidated = True
+                    break
+
+                if td.get("done", False):
+                    break
+
+            # Either liquidated or hit SL (both are valid exits)
+            assert was_liquidated or env.position.position_size == 0
+
+        finally:
+            env.close()
     def test_liquidation_clears_sltp(self, trending_down_df):
         """Liquidation should clear SL/TP levels."""
-        config = SeqFuturesSLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=50,
-            transaction_fee=0.001,
-            stoploss_levels=[-0.5],   # Wide SL
-            takeprofit_levels=[0.5],
-            slippage=0.0,
-            max_traj_length=200,
-            random_start=False,
-        )
-        env = SeqFuturesSLTPEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesSLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=50,
+                transaction_fee=0.001,
+                stoploss_levels=[-0.5],   # Wide SL
+                takeprofit_levels=[0.5],
+                slippage=0.0,
+                max_traj_length=200,
+                random_start=False,
+            )
+            env = SeqFuturesSLTPEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Open long position
-        td.set("action", torch.tensor(1))  # First long (0=HOLD)
-        result = env.step(td)
-        td = result["next"]
-
-        initial_position = env.position.position_size
-
-        for _ in range(100):
-            td.set("action", torch.tensor(0))
+            # Open long position
+            td.set("action", torch.tensor(1))  # First long (0=HOLD)
             result = env.step(td)
             td = result["next"]
 
-            if env.position.position_size == 0 and initial_position > 0:
-                # Position was closed - SL/TP should be cleared
-                assert env.stop_loss == 0.0
-                assert env.take_profit == 0.0
-                break
+            initial_position = env.position.position_size
 
-            if td.get("done", False):
-                break
+            for _ in range(100):
+                td.set("action", torch.tensor(0))
+                result = env.step(td)
+                td = result["next"]
+
+                if env.position.position_size == 0 and initial_position > 0:
+                    # Position was closed - SL/TP should be cleared
+                    assert env.stop_loss == 0.0
+                    assert env.take_profit == 0.0
+                    break
+
+                if td.get("done", False):
+                    break
 
 
+        finally:
+            env.close()
 class TestSeqFuturesSLTPEnvReward:
     """Tests for reward calculation."""
 
@@ -754,46 +775,52 @@ class TestSeqFuturesSLTPEnvEdgeCases:
 
     def test_single_sl_tp_level(self, sample_ohlcv_df):
         """Should work with single SL and TP level."""
-        config = SeqFuturesSLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            stoploss_levels=[-0.05],
-            takeprofit_levels=[0.1],
-            max_traj_length=50,
-            random_start=False,
-        )
-        env = SeqFuturesSLTPEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesSLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                stoploss_levels=[-0.05],
+                takeprofit_levels=[0.1],
+                max_traj_length=50,
+                random_start=False,
+            )
+            env = SeqFuturesSLTPEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Should have 3 actions: hold, long, short (no CLOSE by default)
-        assert env.action_spec.n == 3  # 1 hold + 1 long + 1 short
+            # Should have 3 actions: hold, long, short (no CLOSE by default)
+            assert env.action_spec.n == 3  # 1 hold + 1 long + 1 short
 
-        td = env.reset()
-        td.set("action", torch.tensor(1))  # First long (0=HOLD)
-        result = env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(1))  # First long (0=HOLD)
+            result = env.step(td)
 
-        assert result is not None
+            assert result is not None
 
+        finally:
+            env.close()
     def test_many_sl_tp_levels(self, sample_ohlcv_df):
         """Should work with many SL/TP levels."""
-        config = SeqFuturesSLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            leverage=10,
-            stoploss_levels=[-0.01, -0.02, -0.05, -0.1],
-            takeprofit_levels=[0.01, 0.02, 0.05, 0.1],
-            max_traj_length=50,
-            random_start=False,
-        )
-        env = SeqFuturesSLTPEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = SeqFuturesSLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                leverage=10,
+                stoploss_levels=[-0.01, -0.02, -0.05, -0.1],
+                takeprofit_levels=[0.01, 0.02, 0.05, 0.1],
+                max_traj_length=50,
+                random_start=False,
+            )
+            env = SeqFuturesSLTPEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Should have 1 + 16 long + 16 short = 33 actions (no CLOSE by default)
-        assert env.action_spec.n == 33  # 1 hold + 16 long + 16 short
+            # Should have 1 + 16 long + 16 short = 33 actions (no CLOSE by default)
+            assert env.action_spec.n == 33  # 1 hold + 16 long + 16 short
 
+        finally:
+            env.close()
     def test_multiple_episodes(self, env):
         """Should work correctly across multiple episodes."""
         for episode in range(3):
@@ -818,51 +845,55 @@ class TestSeqFuturesSLTPEnvEdgeCases:
         With QUANTITY mode, leverage doesn't affect position size.
         It only affects liquidation risk (higher leverage = closer liquidation price).
         """
-        config_low = SeqFuturesSLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            leverage=5,
-            stoploss_levels=[-0.05],
-            takeprofit_levels=[0.1],
-            slippage=0.0,
-            max_traj_length=50,
-            random_start=False,
-        )
-        config_high = SeqFuturesSLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            leverage=20,
-            stoploss_levels=[-0.05],
-            takeprofit_levels=[0.1],
-            slippage=0.0,
-            max_traj_length=50,
-            random_start=False,
-        )
+        try:
+            config_low = SeqFuturesSLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                leverage=5,
+                stoploss_levels=[-0.05],
+                takeprofit_levels=[0.1],
+                slippage=0.0,
+                max_traj_length=50,
+                random_start=False,
+            )
+            config_high = SeqFuturesSLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                leverage=20,
+                stoploss_levels=[-0.05],
+                takeprofit_levels=[0.1],
+                slippage=0.0,
+                max_traj_length=50,
+                random_start=False,
+            )
 
-        env_low = SeqFuturesSLTPEnv(sample_ohlcv_df, config_low, simple_feature_fn)
-        env_high = SeqFuturesSLTPEnv(sample_ohlcv_df, config_high, simple_feature_fn)
+            env_low = SeqFuturesSLTPEnv(sample_ohlcv_df, config_low, simple_feature_fn)
+            env_high = SeqFuturesSLTPEnv(sample_ohlcv_df, config_high, simple_feature_fn)
 
-        td_low = env_low.reset()
-        td_high = env_high.reset()
+            td_low = env_low.reset()
+            td_high = env_high.reset()
 
-        td_low.set("action", torch.tensor(1))  # First long (0=HOLD)
-        env_low.step(td_low)
+            td_low.set("action", torch.tensor(1))  # First long (0=HOLD)
+            env_low.step(td_low)
 
-        td_high.set("action", torch.tensor(1))  # First long (0=HOLD)
-        env_high.step(td_high)
+            td_high.set("action", torch.tensor(1))  # First long (0=HOLD)
+            env_high.step(td_high)
 
-        # With QUANTITY mode, position sizes should be equal
-        assert abs(env_high.position.position_size) == abs(env_low.position.position_size)
+            # With QUANTITY mode, position sizes should be equal
+            assert abs(env_high.position.position_size) == abs(env_low.position.position_size)
 
-        # But liquidation risk differs - higher leverage = closer liquidation price
-        entry_price = env_low.position.entry_price
-        liq_distance_low = abs(entry_price - env_low.liquidation_price)
-        liq_distance_high = abs(entry_price - env_high.liquidation_price)
-        assert liq_distance_high < liq_distance_low
+            # But liquidation risk differs - higher leverage = closer liquidation price
+            entry_price = env_low.position.entry_price
+            liq_distance_low = abs(entry_price - env_low.liquidation_price)
+            liq_distance_high = abs(entry_price - env_high.liquidation_price)
+            assert liq_distance_high < liq_distance_low
 
 
+        finally:
+            env_high.close()
+            env_low.close()
 class TestSeqFuturesSLTPEnvMetrics:
     """Tests for get_metrics() method."""
 

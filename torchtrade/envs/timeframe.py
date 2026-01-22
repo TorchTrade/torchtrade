@@ -385,7 +385,7 @@ def timeframe_to_alpaca(tf: TimeFrame):
         Alpaca TimeFrame object
 
     Examples:
-        >>> from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
+        >>> from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
         >>> tf = TimeFrame(5, TimeFrameUnit.Minute)
         >>> alpaca_tf = timeframe_to_alpaca(tf)
         >>> alpaca_tf.amount

@@ -1,5 +1,5 @@
-from torchtrade.envs.binance.obs_class import BinanceObservationClass
-from torchtrade.envs.binance.futures_order_executor import (
+from torchtrade.envs.live.binance.observation import BinanceObservationClass
+from torchtrade.envs.live.binance.order_executor import (
     BinanceFuturesOrderClass,
     TradeMode,
     MarginType,
@@ -7,11 +7,11 @@ from torchtrade.envs.binance.futures_order_executor import (
     OrderStatus,
     PositionStatus,
 )
-from torchtrade.envs.binance.torch_env_futures import (
+from torchtrade.envs.live.binance.env import (
     BinanceFuturesTorchTradingEnv,
     BinanceFuturesTradingEnvConfig,
 )
-from torchtrade.envs.binance.torch_env_futures_sltp import (
+from torchtrade.envs.live.binance.env_sltp import (
     BinanceFuturesSLTPTorchTradingEnv,
     BinanceFuturesSLTPTradingEnvConfig,
 )

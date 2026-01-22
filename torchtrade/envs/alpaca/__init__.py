@@ -1,2 +1,2 @@
-from torchtrade.envs.alpaca.torch_env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
-from torchtrade.envs.alpaca.torch_env_sltp import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
+from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig

@@ -2,9 +2,9 @@ from typing import Union, List, Optional, Callable
 import pandas as pd
 import ccxt
 
-from torchtrade.envs.futures.obs_class import BaseFuturesObservationClass
-from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
-from torchtrade.envs.bitget.utils import timeframe_to_bitget, BITGET_INTERVAL_MAP, normalize_symbol
+from torchtrade.envs.live.shared.futures_base_obs import BaseFuturesObservationClass
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.live.bitget.utils import timeframe_to_bitget, BITGET_INTERVAL_MAP, normalize_symbol
 
 
 class BitgetObservationClass(BaseFuturesObservationClass):

@@ -9,9 +9,9 @@ import torch
 from torchrl.data import Categorical
 import pandas as pd
 
-from torchtrade.envs.offline.base import TorchTradeOfflineEnv
-from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
-from torchtrade.envs.fractional_sizing import (
+from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
+from torchtrade.envs.utils.fractional_sizing import (
     build_default_action_levels,
     calculate_fractional_position,
     PositionCalculationParams,
