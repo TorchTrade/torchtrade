@@ -67,7 +67,7 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
     @pytest.fixture
     def env_config(self):
         """Create environment configuration."""
-        from torchtrade.envs.bitget.torch_env_futures_sltp import BitgetFuturesSLTPTradingEnvConfig
+        from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTradingEnvConfig
 
         return BitgetFuturesSLTPTradingEnvConfig(
             symbol="BTCUSDT",
@@ -85,7 +85,7 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
     @pytest.fixture
     def env(self, env_config, mock_observer, mock_trader):
         """Create environment with mocks."""
-        from torchtrade.envs.bitget.torch_env_futures_sltp import BitgetFuturesSLTPTorchTradingEnv
+        from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTorchTradingEnv
 
         # Patch time.sleep to avoid waiting
         with patch("time.sleep"):
@@ -138,7 +138,7 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
 
     def test_action_spec_long_only(self, env_config, mock_observer, mock_trader):
         """Test action spec when short positions disabled."""
-        from torchtrade.envs.bitget.torch_env_futures_sltp import BitgetFuturesSLTPTorchTradingEnv
+        from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTorchTradingEnv
 
         env_config.include_short_positions = False
 
@@ -267,7 +267,7 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
 
     def test_position_closed_resets_sltp(self, env, mock_trader):
         """Test that position closure resets SL/TP tracking."""
-        from torchtrade.envs.bitget.futures_order_executor import PositionStatus
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
@@ -345,7 +345,7 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
 
     def test_no_trade_when_position_exists(self, env, mock_trader):
         """Test that no trade is placed when position already exists."""
-        from torchtrade.envs.bitget.futures_order_executor import PositionStatus
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
 
         # Mock existing position
         mock_trader.get_status = MagicMock(return_value={
@@ -375,7 +375,7 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
 
     def test_config_post_init(self):
         """Test config post_init normalization."""
-        from torchtrade.envs.bitget.torch_env_futures_sltp import BitgetFuturesSLTPTradingEnvConfig
+        from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTradingEnvConfig
 
         config = BitgetFuturesSLTPTradingEnvConfig(
             symbol="BTCUSDT",
@@ -402,7 +402,7 @@ class TestBitgetFuturesSLTPTorchTradingEnvIntegration:
     def test_live_environment(self):
         """Test environment with live Bitget testnet."""
         import os
-        from torchtrade.envs.bitget.torch_env_futures_sltp import (
+        from torchtrade.envs.live.bitget.env_sltp import (
             BitgetFuturesSLTPTorchTradingEnv,
             BitgetFuturesSLTPTradingEnvConfig,
         )
@@ -439,7 +439,7 @@ class TestDuplicateActionPrevention:
     @pytest.fixture
     def env_with_mocks(self):
         """Create environment for duplicate action testing."""
-        from torchtrade.envs.bitget.torch_env_futures_sltp import (
+        from torchtrade.envs.live.bitget.env_sltp import (
             BitgetFuturesSLTPTorchTradingEnv,
             BitgetFuturesSLTPTradingEnvConfig,
         )

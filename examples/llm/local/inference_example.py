@@ -19,7 +19,7 @@ import torch
 
 from torchtrade.actor import LocalLLMActor
 from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
 def simple_preprocessing(df: pd.DataFrame) -> pd.DataFrame:

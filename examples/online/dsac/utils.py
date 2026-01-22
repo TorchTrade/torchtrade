@@ -32,7 +32,7 @@ from torchrl.modules import MLP, SafeModule, SafeSequential
 from torchrl.modules.tensordict_module.actors import ProbabilisticActor
 from torchrl.objectives import SoftUpdate
 from torchrl.objectives.sac import DiscreteSACLoss
-from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from torchrl.trainers.helpers.models import ACTIVATIONS
 from torchtrade.models.simple_encoders import SimpleCNNEncoder
 import copy

@@ -6,7 +6,7 @@ import torch
 from tensordict import TensorDict
 
 from torchtrade.actor import MeanReversionActor
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
 # ============================================================================

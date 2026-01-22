@@ -7,7 +7,7 @@ import torch
 import tqdm
 from torchrl._utils import timeit
 torch.set_float32_matmul_precision("high")
-from torchtrade.envs.alpaca.torch_env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 import torch
 import os

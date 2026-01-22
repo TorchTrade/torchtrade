@@ -9,12 +9,12 @@ import numpy as np
 import torch
 from tensordict import TensorDict
 
-from torchtrade.envs.alpaca.torch_env_sltp import (
+from torchtrade.envs.live.alpaca.env_sltp import (
     AlpacaSLTPTorchTradingEnv,
     AlpacaSLTPTradingEnvConfig,
 )
-from torchtrade.envs.action_maps import create_alpaca_sltp_action_map as combinatory_action_map
-from torchtrade.envs.alpaca.order_executor import TradeMode
+from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map as combinatory_action_map
+from torchtrade.envs.live.alpaca.order_executor import TradeMode
 from .mocks import MockObserver, MockTrader, PositionStatus
 
 

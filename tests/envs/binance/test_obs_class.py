@@ -4,7 +4,7 @@ import pytest
 import numpy as np
 import pandas as pd
 from unittest.mock import MagicMock, patch
-from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
 class TestBinanceObservationClass:
@@ -42,7 +42,7 @@ class TestBinanceObservationClass:
     @pytest.fixture
     def observer_single(self, mock_client):
         """Create observer with single timeframe."""
-        from torchtrade.envs.binance.obs_class import BinanceObservationClass
+        from torchtrade.envs.live.binance.observation import BinanceObservationClass
 
         return BinanceObservationClass(
             symbol="BTCUSDT",
@@ -54,7 +54,7 @@ class TestBinanceObservationClass:
     @pytest.fixture
     def observer_multi(self, mock_client):
         """Create observer with multiple timeframes."""
-        from torchtrade.envs.binance.obs_class import BinanceObservationClass
+        from torchtrade.envs.live.binance.observation import BinanceObservationClass
 
         return BinanceObservationClass(
             symbol="BTCUSDT",
@@ -86,7 +86,7 @@ class TestBinanceObservationClass:
 
     def test_symbol_normalization(self, mock_client):
         """Test that symbol with slash is normalized."""
-        from torchtrade.envs.binance.obs_class import BinanceObservationClass
+        from torchtrade.envs.live.binance.observation import BinanceObservationClass
 
         observer = BinanceObservationClass(
             symbol="BTC/USDT",
@@ -98,7 +98,7 @@ class TestBinanceObservationClass:
 
     def test_invalid_interval_raises_error(self, mock_client):
         """Test that invalid timeframe raises ValueError."""
-        from torchtrade.envs.binance.obs_class import BinanceObservationClass
+        from torchtrade.envs.live.binance.observation import BinanceObservationClass
 
         # TimeFrame with 2 minutes is valid (converts to "2m" which is invalid for Binance)
         # This test should fail when trying to fetch data, not on init
@@ -107,7 +107,7 @@ class TestBinanceObservationClass:
 
     def test_mismatched_lengths_raises_error(self, mock_client):
         """Test that mismatched time_frames and window_sizes raises error."""
-        from torchtrade.envs.binance.obs_class import BinanceObservationClass
+        from torchtrade.envs.live.binance.observation import BinanceObservationClass
 
         with pytest.raises(ValueError, match="same length"):
             BinanceObservationClass(
@@ -162,7 +162,7 @@ class TestBinanceObservationClass:
 
     def test_custom_preprocessing(self, mock_client):
         """Test custom preprocessing function."""
-        from torchtrade.envs.binance.obs_class import BinanceObservationClass
+        from torchtrade.envs.live.binance.observation import BinanceObservationClass
 
         def custom_preprocessing(df):
             df = df.copy()
@@ -205,7 +205,7 @@ class TestBinanceObservationClassIntegration:
     @pytest.mark.skip(reason="Requires live Binance API connection")
     def test_live_data_fetch(self):
         """Test fetching live data from Binance."""
-        from torchtrade.envs.binance.obs_class import BinanceObservationClass
+        from torchtrade.envs.live.binance.observation import BinanceObservationClass
 
         observer = BinanceObservationClass(
             symbol="BTCUSDT",

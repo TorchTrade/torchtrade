@@ -66,7 +66,7 @@ class TestBitgetFuturesTorchTradingEnv:
     @pytest.fixture
     def env_config(self):
         """Create environment configuration."""
-        from torchtrade.envs.bitget.torch_env_futures import BitgetFuturesTradingEnvConfig
+        from torchtrade.envs.live.bitget.env import BitgetFuturesTradingEnvConfig
 
         return BitgetFuturesTradingEnvConfig(
             symbol="BTCUSDT",
@@ -80,7 +80,7 @@ class TestBitgetFuturesTorchTradingEnv:
     @pytest.fixture
     def env(self, env_config, mock_observer, mock_trader):
         """Create environment with mocks."""
-        from torchtrade.envs.bitget.torch_env_futures import BitgetFuturesTorchTradingEnv
+        from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv
 
         # Patch time.sleep to avoid waiting
         with patch("time.sleep"):
@@ -202,7 +202,7 @@ class TestBitgetFuturesTorchTradingEnv:
 
     def test_account_state_with_position(self, env, mock_trader):
         """Test account state when there's an open position."""
-        from torchtrade.envs.bitget.futures_order_executor import PositionStatus
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
 
         # Mock a position
         mock_trader.get_status = MagicMock(return_value={
@@ -239,7 +239,7 @@ class TestBitgetFuturesTorchTradingEnv:
 
     def test_account_state_short_position(self, env, mock_trader):
         """Test account state with short position (negative qty)."""
-        from torchtrade.envs.bitget.futures_order_executor import PositionStatus
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
 
         mock_trader.get_status = MagicMock(return_value={
             "position_status": PositionStatus(
@@ -281,7 +281,7 @@ class TestBitgetFuturesTorchTradingEnv:
 
     def test_no_bankruptcy_when_disabled(self, env_config, mock_observer, mock_trader):
         """Test that bankruptcy check can be disabled."""
-        from torchtrade.envs.bitget.torch_env_futures import BitgetFuturesTorchTradingEnv
+        from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv
 
         env_config.done_on_bankruptcy = False
 
@@ -312,7 +312,7 @@ class TestBitgetFuturesTorchTradingEnv:
 
     def test_close_position_action(self, env, mock_trader):
         """Test that action 1 (hold/close) closes existing position."""
-        from torchtrade.envs.bitget.futures_order_executor import PositionStatus
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
 
         # Mock existing long position
         mock_trader.get_status = MagicMock(return_value={
@@ -341,7 +341,7 @@ class TestBitgetFuturesTorchTradingEnv:
 
     def test_long_from_short(self, env, mock_trader):
         """Test going long from short position executes correct trade."""
-        from torchtrade.envs.bitget.futures_order_executor import PositionStatus
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
 
         # Mock existing short position
         mock_trader.get_status = MagicMock(return_value={
@@ -374,7 +374,7 @@ class TestBitgetFuturesTorchTradingEnv:
 
     def test_config_post_init(self):
         """Test config post_init normalization."""
-        from torchtrade.envs.bitget.torch_env_futures import BitgetFuturesTradingEnvConfig
+        from torchtrade.envs.live.bitget.env import BitgetFuturesTradingEnvConfig
 
         config = BitgetFuturesTradingEnvConfig(
             symbol="BTCUSDT",
@@ -396,7 +396,7 @@ class TestBitgetFuturesTorchTradingEnvIntegration:
     def test_live_environment(self):
         """Test environment with live Bitget testnet."""
         import os
-        from torchtrade.envs.bitget.torch_env_futures import (
+        from torchtrade.envs.live.bitget.env import (
             BitgetFuturesTorchTradingEnv,
             BitgetFuturesTradingEnvConfig,
         )

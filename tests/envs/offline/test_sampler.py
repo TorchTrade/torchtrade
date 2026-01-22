@@ -7,8 +7,8 @@ import pandas as pd
 import pytest
 import torch
 
-from torchtrade.envs.offline.sampler import MarketDataObservationSampler
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservationSampler
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:

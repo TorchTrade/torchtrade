@@ -1,7 +1,7 @@
 """Tests for state management dataclasses."""
 
 import pytest
-from torchtrade.envs.state import HistoryTracker, FuturesHistoryTracker
+from torchtrade.envs.core.state import HistoryTracker, FuturesHistoryTracker
 
 
 class TestHistoryTracker:

@@ -6,8 +6,8 @@ import pandas as pd
 import torch
 from torchrl.envs import TransformedEnv, Compose, InitTracker, DoubleToFloat, RewardSum
 
-from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.transforms import CoverageTracker
 
 
