@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from abc import ABC, abstractmethod
 from tensordict import TensorDict
-from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
 # ============================================================================
