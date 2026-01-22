@@ -95,7 +95,6 @@ class FuturesOneStepEnvConfig:
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
     include_hold_action: bool = True  # Include HOLD action (index 0) in action space
-    include_close_action: bool = True  # Include CLOSE action to exit positions (default: enabled)
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
@@ -168,12 +167,12 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         self.stoploss_levels = list(config.stoploss_levels) if not isinstance(config.stoploss_levels, list) else config.stoploss_levels
         self.takeprofit_levels = list(config.takeprofit_levels) if not isinstance(config.takeprofit_levels, list) else config.takeprofit_levels
 
-        # Create action map
+        # Create action map (no CLOSE action for OneStep environments)
         self.action_map = build_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
             include_hold_action=config.include_hold_action,
-            include_close_action=config.include_close_action,
+            include_close_action=False,  # OneStep envs have internal rollouts, no mid-position exit
             include_short_positions=True
         )
         self.action_spec = Categorical(len(self.action_map))
@@ -477,9 +476,6 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
             elif trade_info["side"] == "short":
                 trade_action = -1
                 action_type = "short"
-            elif trade_info["side"] == "close":
-                trade_action = 0
-                action_type = "close"
         self.history.record_step(
             price=cached_price,
             action=trade_action,
@@ -669,19 +665,6 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
             # Hold action - no trade
             logger.debug("Hold action - no trade")
             return trade_info
-
-        # CLOSE action - exit current position
-        if side == "close":
-            if self.position.current_position == 0:
-                logger.debug("CLOSE ignored - already in cash")
-                return trade_info
-
-            # Get base price
-            if base_price is None:
-                base_price = self.sampler.get_base_features(self.current_timestamp)["close"]
-
-            # Close position at current price
-            return self._trigger_close(trade_info, base_price)
 
         # Check if already in same position (ignore duplicate actions)
         position_map = {"long": 1, "short": -1}

@@ -50,8 +50,6 @@ class TestDefaultSeqFuturesEnv:
         env = SeqFuturesEnv(sample_ohlcv_df, config, simple_feature_fn)
 
         assert env is not None
-        assert env.config.position_sizing_mode == "fractional"
-        assert env.config.include_close_action == True
         # Default fractional levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
         assert env.action_spec.n == 5
 
@@ -287,7 +285,6 @@ class TestDefaultSeqLongOnlyEnv:
         )
         env = SeqLongOnlyEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        assert env.config.position_sizing_mode == "fractional"
         # Default long-only fractional levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
         # (negative values mean sell/reduce, not short)
         assert env.action_spec.n == 5

@@ -141,8 +141,8 @@ class TestFuturesOneStepEnvInitialization:
 
     def test_action_spec_size(self, env):
         """Action spec should match action map size."""
-        # 1 hold + 1 close + (2 SL * 2 TP) long + (2 SL * 2 TP) short = 10
-        assert env.action_spec.n == 10
+        # 1 hold + (2 SL * 2 TP) long + (2 SL * 2 TP) short = 9 (no CLOSE for OneStep)
+        assert env.action_spec.n == 9
 
     def test_periods_per_year_calculated(self, env):
         """Periods per year should be calculated for Sharpe."""
@@ -407,7 +407,7 @@ class TestFuturesOneStepEnvRollout:
         env = FuturesOneStepEnv(trending_down_df, config, simple_feature_fn)
 
         td = env.reset()
-        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
+        td.set("action", torch.tensor(1))  # Long (0=HOLD, 1=first long) - no CLOSE for OneStep
         env.step(td)
 
         # Position should be closed after rollout
@@ -429,7 +429,7 @@ class TestFuturesOneStepEnvRollout:
         env = FuturesOneStepEnv(trending_up_df, config, simple_feature_fn)
 
         td = env.reset()
-        td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
+        td.set("action", torch.tensor(1))  # Long (0=HOLD, 1=first long) - no CLOSE for OneStep
         env.step(td)
 
         # Position should be closed after rollout
@@ -451,9 +451,9 @@ class TestFuturesOneStepEnvRollout:
         env = FuturesOneStepEnv(trending_up_df, config, simple_feature_fn)
 
         td = env.reset()
-        # Short action (0=HOLD, 1=CLOSE, 2-N=long, N+1+=short)
+        # Short action (0=HOLD, 1-N=long, N+1+=short) - no CLOSE for OneStep
         num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        td.set("action", torch.tensor(2 + num_long))  # Short
+        td.set("action", torch.tensor(1 + num_long))  # Short
         env.step(td)
 
         # Position should be closed after rollout
@@ -476,7 +476,7 @@ class TestFuturesOneStepEnvRollout:
 
         td = env.reset()
         num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
-        td.set("action", torch.tensor(2 + num_long))  # Short (0=HOLD, 1=CLOSE, 2+=long)
+        td.set("action", torch.tensor(1 + num_long))  # Short (0=HOLD, 1+=long) - no CLOSE for OneStep
         env.step(td)
 
         # Position should be closed after rollout
@@ -716,11 +716,11 @@ class TestFuturesOneStepEnvEdgeCases:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Should have 4 actions: hold, close, 1 long, 1 short
-        assert env.action_spec.n == 4
+        # Should have 3 actions: hold, 1 long, 1 short (no CLOSE for OneStep)
+        assert env.action_spec.n == 3
 
         td = env.reset()
-        td.set("action", torch.tensor(2))  # Action 2 = first long (0=HOLD, 1=CLOSE)
+        td.set("action", torch.tensor(1))  # Action 1 = first long (0=HOLD)
         result = env.step(td)
 
         assert result is not None
@@ -738,8 +738,8 @@ class TestFuturesOneStepEnvEdgeCases:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # 1 hold + 1 close + 16 long + 16 short = 34 actions
-        assert env.action_spec.n == 34
+        # 1 hold + 16 long + 16 short = 33 actions (no CLOSE for OneStep)
+        assert env.action_spec.n == 33
 
     def test_high_leverage(self, sample_ohlcv_df):
         """Should work with high leverage."""
@@ -1027,10 +1027,11 @@ class TestFuturesOneStepEnvIncludeHoldAction:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 1 SL and 1 TP: 1 hold + 1 close + 1 long + 1 short = 4 actions
-        assert env.action_spec.n == 4
+        # With 1 SL and 1 TP: 1 hold + 1 long + 1 short = 3 actions (no CLOSE for OneStep)
+        assert env.action_spec.n == 3
         assert env.action_map[0] == (None, None, None), "Action 0 should be HOLD"
-        assert env.action_map[1] == ("close", None, None), "Action 1 should be CLOSE"
+        assert env.action_map[1][0] == "long", "Action 1 should be long trade"
+        assert env.action_map[2][0] == "short", "Action 2 should be short trade"
 
     def test_include_hold_action_true_explicit(self, sample_ohlcv_df):
         """Should include HOLD action when explicitly set to True."""
@@ -1046,11 +1047,11 @@ class TestFuturesOneStepEnvIncludeHoldAction:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 2 SL and 2 TP: 1 hold + 1 close + 4 longs + 4 shorts = 10 actions
-        assert env.action_spec.n == 10
+        # With 2 SL and 2 TP: 1 hold + 4 longs + 4 shorts = 9 actions (no CLOSE for OneStep)
+        assert env.action_spec.n == 9
         assert env.action_map[0] == (None, None, None), "Action 0 should be HOLD"
-        assert env.action_map[1] == ("close", None, None), "Action 1 should be CLOSE"
-        assert env.action_map[2][0] == "long", "Action 2 should be first long trade"
+        assert env.action_map[1][0] == "long", "Action 1 should be first long trade"
+        assert env.action_map[5][0] == "short", "Action 5 should be first short trade"
 
     def test_include_hold_action_false(self, sample_ohlcv_df):
         """Should exclude HOLD action when set to False."""
@@ -1066,11 +1067,10 @@ class TestFuturesOneStepEnvIncludeHoldAction:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 1 SL and 1 TP, no hold but with close: 1 close + 1 long + 1 short = 3 actions
-        assert env.action_spec.n == 3
-        assert env.action_map[0] == ("close", None, None), "Action 0 should be CLOSE (no hold)"
-        assert env.action_map[1][0] == "long", "Action 1 should be long"
-        assert env.action_map[2][0] == "short", "Action 2 should be short"
+        # With 1 SL and 1 TP, no hold, no close: 1 long + 1 short = 2 actions
+        assert env.action_spec.n == 2
+        assert env.action_map[0][0] == "long", "Action 0 should be long (no hold)"
+        assert env.action_map[1][0] == "short", "Action 1 should be short"
 
     def test_include_hold_action_false_multiple_sltp(self, sample_ohlcv_df):
         """Should have correct action count without HOLD with multiple SL/TP."""
@@ -1086,12 +1086,10 @@ class TestFuturesOneStepEnvIncludeHoldAction:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 2 SL and 2 TP, no hold but with close: 1 close + 4 longs + 4 shorts = 9 actions
-        assert env.action_spec.n == 9
-        # First action should be close
-        assert env.action_map[0] == ("close", None, None), "Action 0 should be CLOSE (no hold)"
-        # Verify remaining actions are trades
-        for i in range(1, env.action_spec.n):
+        # With 2 SL and 2 TP, no hold, no close: 4 longs + 4 shorts = 8 actions
+        assert env.action_spec.n == 8
+        # Verify all actions are trades (no hold, no close)
+        for i in range(env.action_spec.n):
             assert env.action_map[i][0] in ["long", "short"], f"Action {i} should be long or short"
 
     def test_env_works_without_hold_action(self, sample_ohlcv_df):
@@ -1122,7 +1120,7 @@ class TestFuturesOneStepEnvIncludeHoldAction:
         assert not torch.isnan(result["next"]["reward"]).any()
 
     def test_action_mapping_without_hold(self, sample_ohlcv_df):
-        """Verify action mapping starts with close then trades when no hold."""
+        """Verify action mapping starts with trades when no hold (no CLOSE for OneStep)."""
         config = FuturesOneStepEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
@@ -1135,9 +1133,7 @@ class TestFuturesOneStepEnvIncludeHoldAction:
         )
         env = FuturesOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Action 0 should be close (still included by default)
-        assert env.action_map[0] == ("close", None, None), "First action should be close"
-        # Action 1 should be the first long position
-        assert env.action_map[1][0] == "long", "Second action should be long"
-        # Action 2 should be the first short position
-        assert env.action_map[2][0] == "short", "Third action should be short"
+        # Action 0 should be the first long position (no hold, no close for OneStep)
+        assert env.action_map[0][0] == "long", "First action should be long"
+        # Action 1 should be the first short position
+        assert env.action_map[1][0] == "short", "Second action should be short"

@@ -24,8 +24,8 @@ def combinatory_action_map(stoploss_levels, takeprofit_levels):
     return build_sltp_action_map(
         stoploss_levels,
         takeprofit_levels,
-        include_short_positions=False,
-        include_close_action=False  # Original behavior without CLOSE action
+        include_close_action=False,  # OneStep environments don't have CLOSE action
+        include_short_positions=False
     )
 
 
@@ -56,7 +56,6 @@ def default_config():
         slippage=0.0,
         seed=42,
         max_traj_length=100,
-        include_close_action=False,  # Original behavior without CLOSE action
     )
 
 
@@ -415,7 +414,6 @@ class TestLongOnlyOneStepEnvSLTPPlacement:
             takeprofit_levels=[0.10],  # 10% above
             slippage=0.0,  # Disable slippage for deterministic test
             max_traj_length=50,
-            include_close_action=False,
         )
         env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
@@ -520,7 +518,6 @@ class TestLongOnlyOneStepEnvEdgeCases:
             stoploss_levels=[-0.05],
             takeprofit_levels=[0.1],
             max_traj_length=50,
-            include_close_action=False,
         )
         env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
@@ -542,7 +539,6 @@ class TestLongOnlyOneStepEnvEdgeCases:
             stoploss_levels=[-0.01, -0.02, -0.05, -0.1],
             takeprofit_levels=[0.01, 0.02, 0.05, 0.1],
             max_traj_length=50,
-            include_close_action=False,
         )
         env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
@@ -688,7 +684,6 @@ class TestLongOnlyOneStepEnvIncludeHoldAction:
             stoploss_levels=[-0.05],
             takeprofit_levels=[0.05],
             max_traj_length=50,
-            include_close_action=False,  # Test HOLD without CLOSE for simpler validation
         )
         env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
@@ -705,7 +700,6 @@ class TestLongOnlyOneStepEnvIncludeHoldAction:
             stoploss_levels=[-0.05, -0.1],
             takeprofit_levels=[0.05, 0.1],
             include_hold_action=True,
-            include_close_action=False,  # Test HOLD without CLOSE for simpler validation
             max_traj_length=50,
         )
         env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
@@ -724,7 +718,6 @@ class TestLongOnlyOneStepEnvIncludeHoldAction:
             stoploss_levels=[-0.05],
             takeprofit_levels=[0.05],
             include_hold_action=False,
-            include_close_action=False,  # Test without HOLD or CLOSE for simpler validation
             max_traj_length=50,
         )
         env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
@@ -743,7 +736,6 @@ class TestLongOnlyOneStepEnvIncludeHoldAction:
             stoploss_levels=[-0.05, -0.1],
             takeprofit_levels=[0.05, 0.1],
             include_hold_action=False,
-            include_close_action=False,  # Test without HOLD or CLOSE for simpler validation
             max_traj_length=50,
         )
         env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)

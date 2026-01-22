@@ -37,12 +37,8 @@ class SeqLongOnlyEnvConfig:
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
 
-    # Action space configuration
-    position_sizing_mode: str = "fractional"  # "fractional" (new default) or "fixed" (legacy)
+    # Action space configuration (fractional mode only)
     action_levels: List[float] = None  # Custom action levels, or None for defaults
-
-    # DEPRECATED: Only used in legacy "fixed" mode
-    include_hold_action: bool = True  # DEPRECATED - only used when position_sizing_mode="fixed"
 
     def __post_init__(self):
         """Normalize timeframe configuration and build action levels."""
@@ -50,13 +46,11 @@ class SeqLongOnlyEnvConfig:
             self.execute_on, self.time_frames, self.window_sizes
         )
 
-        # Validate and build default action levels using shared utility
-        validate_position_sizing_mode(self.position_sizing_mode)
-
+        # Build default action levels for fractional mode
         if self.action_levels is None:
             self.action_levels = build_default_action_levels(
-                position_sizing_mode=self.position_sizing_mode,
-                include_hold_action=self.include_hold_action,
+                position_sizing_mode="fractional",
+                include_hold_action=True,
                 include_close_action=False,  # Long-only doesn't use close action
                 allow_short=False  # Long-only environment
             )
@@ -252,10 +246,7 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         return position_size, notional_value, side
 
     def _execute_trade_if_needed(self, desired_position: float, base_price: float = None) -> Dict:
-        """Execute trade if position change is needed.
-
-        Routes to either fractional or fixed position sizing based on config.
-        """
+        """Execute trade using fractional position sizing."""
         if base_price is None:
             base_price = self.sampler.get_base_features(self.current_timestamp)["close"]
 
@@ -263,70 +254,8 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         price_noise_factor = torch.empty(1,).uniform_(1 - self.slippage, 1 + self.slippage).item()
         execution_price = base_price * price_noise_factor
 
-        if self.config.position_sizing_mode == "fractional":
-            # NEW: Fractional position sizing
-            return self._execute_fractional_action(desired_position, execution_price)
-        else:
-            # LEGACY: Fixed position sizing (backward compatibility)
-            return self._execute_fixed_action(desired_position, base_price, price_noise_factor)
-
-    def _execute_fixed_action(self, desired_position: float, base_price: float, price_noise_factor: float) -> Dict:
-        """Execute action using fixed position sizing (legacy mode)."""
-        trade_info = {"executed": False, "amount": 0, "side": None, "success": None, "price_noise": 0.0, "fee_paid": 0.0}
-
-        # No action requested (hold)
-        if desired_position == 0:
-            if self.position.position_size > 0:
-                self.position.hold_counter += 1
-            return trade_info
-
-        # Already at desired position
-        if desired_position == self.position.current_position:
-            if self.position.position_size > 0:
-                self.position.hold_counter += 1
-            return trade_info
-
-        # Determine trade details
-        side = "buy" if desired_position > 0 else "sell"
-        amount = self._calculate_trade_amount(side)
-
-        execution_price = base_price * price_noise_factor
-
-        if side == "buy":
-            fee_paid = amount * self.transaction_fee
-            effective_amount = amount - fee_paid
-            self.balance -= amount
-            self.position.position_size = round(effective_amount / execution_price, 3)
-            self.position.entry_price = execution_price
-            self.position.hold_counter = 0
-            self.position.position_value = round(self.position.position_size * execution_price, 3)
-            self.position.unrealized_pnlpc = 0.0
-            self.position.current_position = 1.0
-
-        else:
-            # Sell all available position
-            sell_amount = self.position.position_size
-            # Calculate proceeds and fee based on noisy execution price
-            proceeds = sell_amount * execution_price
-            fee_paid = proceeds * self.transaction_fee
-            self.balance += round(proceeds - fee_paid, 3)
-            self.position.position_size = 0.0
-            self.position.hold_counter = 0
-            self.position.position_value = 0.0
-            self.position.unrealized_pnlpc = 0.0
-            self.position.entry_price = 0.0
-            self.position.current_position = 0.0
-
-        trade_info.update({
-            "executed": True,
-            "amount": amount if side == "buy" else sell_amount,
-            "side": side,
-            "success": True,
-            "price_noise": price_noise_factor,
-            "fee_paid": fee_paid
-        })
-
-        return trade_info
+        # Execute fractional action
+        return self._execute_fractional_action(desired_position, execution_price)
 
     def _execute_fractional_action(self, action_value: float, execution_price: float) -> Dict:
         """Execute action using fractional position sizing.
@@ -426,17 +355,6 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
             self.position.hold_counter += 1
 
         return trade_info
-
-    def _calculate_trade_amount(self, side: str) -> float:
-        """Calculate the dollar amount to trade."""
-        
-        if side == "buy":
-            # add some noise as we probably wont buy to the exact price
-            amount = self.balance - np.random.uniform(0, self.balance * 0.015)
-            return amount
-        else:
-            # sell all available
-            return -1
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""
