@@ -45,6 +45,7 @@ def env_random_start(simple_df):
         random_start=True,
         max_traj_length=50,  # Short trajectories for testing
         seed=42,
+        done_on_bankruptcy=False,  # Disable bankruptcy for coverage tests
     )
 
     env = SeqLongOnlyEnv(simple_df, config)

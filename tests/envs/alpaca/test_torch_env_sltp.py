@@ -109,9 +109,9 @@ class TestCombinatorActionMap:
         stoploss_levels = [-0.025, -0.05, -0.1]
         takeprofit_levels = [0.05, 0.1, 0.2]
 
-        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels)
+        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels, include_close_action=False)
 
-        # 1 HOLD + 3*3 combinations = 10 actions
+        # 1 HOLD + 3*3 combinations = 10 actions (no CLOSE)
         assert len(action_map) == 10
 
 
