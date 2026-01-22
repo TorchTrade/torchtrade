@@ -92,7 +92,7 @@ def compute_sharpe_ratio(
         - > 3.0: Excellent
     """
     # Import here to avoid circular dependency
-    from torchtrade.envs.utils import compute_sharpe_torch
+    from torchtrade.envs.utils.metrics import compute_sharpe_torch
 
     return compute_sharpe_torch(returns, periods_per_year, rf_annual).item()
 

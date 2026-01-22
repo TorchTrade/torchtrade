@@ -9,8 +9,8 @@ import numpy as np
 import torch
 from tensordict import TensorDict
 
-from torchtrade.envs.alpaca.torch_env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
-from torchtrade.envs.alpaca.order_executor import TradeMode
+from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+from torchtrade.envs.live.alpaca.order_executor import TradeMode
 from .mocks import MockObserver, MockTrader
 
 

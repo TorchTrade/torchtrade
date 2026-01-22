@@ -65,7 +65,7 @@ class TestBinanceFuturesTorchTradingEnv:
     @pytest.fixture
     def env_config(self):
         """Create environment configuration."""
-        from torchtrade.envs.binance.torch_env_futures import BinanceFuturesTradingEnvConfig
+        from torchtrade.envs.live.binance.env import BinanceFuturesTradingEnvConfig
 
         return BinanceFuturesTradingEnvConfig(
             symbol="BTCUSDT",
@@ -79,11 +79,11 @@ class TestBinanceFuturesTorchTradingEnv:
     @pytest.fixture
     def env(self, env_config, mock_observer, mock_trader):
         """Create environment with mocks."""
-        from torchtrade.envs.binance.torch_env_futures import BinanceFuturesTorchTradingEnv
+        from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv
 
         # Patch time.sleep to avoid waiting
         with patch("time.sleep"):
-            with patch("torchtrade.envs.binance.torch_env_futures.BinanceFuturesTorchTradingEnv._wait_for_next_timestamp"):
+            with patch("torchtrade.envs.live.binance.env.BinanceFuturesTorchTradingEnv._wait_for_next_timestamp"):
                 env = BinanceFuturesTorchTradingEnv(
                     config=env_config,
                     observer=mock_observer,
@@ -202,7 +202,7 @@ class TestBinanceFuturesTorchTradingEnv:
 
     def test_account_state_with_position(self, env, mock_trader):
         """Test account state when there's an open position."""
-        from torchtrade.envs.binance.futures_order_executor import PositionStatus
+        from torchtrade.envs.live.binance.order_executor import PositionStatus
 
         # Mock a position
         mock_trader.get_status = MagicMock(return_value={
@@ -303,7 +303,7 @@ class TestBinanceFuturesTradingEnvConfig:
 
     def test_default_config(self):
         """Test default configuration values."""
-        from torchtrade.envs.binance.torch_env_futures import BinanceFuturesTradingEnvConfig
+        from torchtrade.envs.live.binance.env import BinanceFuturesTradingEnvConfig
 
         config = BinanceFuturesTradingEnvConfig()
 
@@ -315,8 +315,8 @@ class TestBinanceFuturesTradingEnvConfig:
 
     def test_custom_config(self):
         """Test custom configuration."""
-        from torchtrade.envs.binance.torch_env_futures import BinanceFuturesTradingEnvConfig
-        from torchtrade.envs.binance.futures_order_executor import MarginType
+        from torchtrade.envs.live.binance.env import BinanceFuturesTradingEnvConfig
+        from torchtrade.envs.live.binance.order_executor import MarginType
 
         config = BinanceFuturesTradingEnvConfig(
             symbol="ETHUSDT",
@@ -337,7 +337,7 @@ class TestMultipleSteps:
     @pytest.fixture
     def env_with_mocks(self):
         """Create environment for multi-step testing."""
-        from torchtrade.envs.binance.torch_env_futures import (
+        from torchtrade.envs.live.binance.env import (
             BinanceFuturesTorchTradingEnv,
             BinanceFuturesTradingEnvConfig,
         )

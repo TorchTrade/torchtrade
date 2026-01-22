@@ -10,14 +10,14 @@ class TestBitgetFuturesOrderClass:
     @pytest.fixture
     def order_executor(self, mock_ccxt_client):
         """Create order executor with mock CCXT client."""
-        from torchtrade.envs.bitget.futures_order_executor import (
+        from torchtrade.envs.live.bitget.order_executor import (
             BitgetFuturesOrderClass,
             TradeMode,
             MarginMode,
             PositionMode,
         )
 
-        with patch('torchtrade.envs.bitget.futures_order_executor.ccxt.bitget', return_value=mock_ccxt_client):
+        with patch('torchtrade.envs.live.bitget.order_executor.ccxt.bitget', return_value=mock_ccxt_client):
             executor = BitgetFuturesOrderClass(
                 symbol="BTC/USDT:USDT",
                 trade_mode=TradeMode.QUANTITY,
@@ -41,12 +41,12 @@ class TestBitgetFuturesOrderClass:
 
     def test_symbol_normalization(self, mock_ccxt_client):
         """Test that symbol formats are accepted."""
-        from torchtrade.envs.bitget.futures_order_executor import (
+        from torchtrade.envs.live.bitget.order_executor import (
             BitgetFuturesOrderClass,
             TradeMode,
         )
 
-        with patch('torchtrade.envs.bitget.futures_order_executor.ccxt.bitget', return_value=mock_ccxt_client):
+        with patch('torchtrade.envs.live.bitget.order_executor.ccxt.bitget', return_value=mock_ccxt_client):
             # CCXT format should work
             executor = BitgetFuturesOrderClass(
                 symbol="BTC/USDT:USDT",
@@ -60,12 +60,12 @@ class TestBitgetFuturesOrderClass:
 
     def test_product_type_demo(self, mock_ccxt_client):
         """Test that demo=True uses USDT-FUTURES product type."""
-        from torchtrade.envs.bitget.futures_order_executor import (
+        from torchtrade.envs.live.bitget.order_executor import (
             BitgetFuturesOrderClass,
             TradeMode,
         )
 
-        with patch('torchtrade.envs.bitget.futures_order_executor.ccxt.bitget', return_value=mock_ccxt_client):
+        with patch('torchtrade.envs.live.bitget.order_executor.ccxt.bitget', return_value=mock_ccxt_client):
             executor = BitgetFuturesOrderClass(
                 symbol="BTC/USDT:USDT",
                 product_type="USDT-FUTURES",
@@ -281,7 +281,7 @@ class TestBitgetFuturesOrderClass:
 
     def test_set_margin_mode(self, order_executor, mock_ccxt_client):
         """Test changing margin mode."""
-        from torchtrade.envs.bitget.futures_order_executor import MarginMode
+        from torchtrade.envs.live.bitget.order_executor import MarginMode
 
         success = order_executor.set_margin_mode(MarginMode.CROSSED)
 
@@ -306,21 +306,21 @@ class TestBitgetFuturesOrderClass:
 
     def test_position_mode_enum(self):
         """Test PositionMode enum values."""
-        from torchtrade.envs.bitget.futures_order_executor import PositionMode
+        from torchtrade.envs.live.bitget.order_executor import PositionMode
 
         assert PositionMode.ONE_WAY.value == "one_way_mode"
         assert PositionMode.HEDGE.value == "hedge_mode"
 
     def test_margin_mode_enum(self):
         """Test MarginMode enum values."""
-        from torchtrade.envs.bitget.futures_order_executor import MarginMode
+        from torchtrade.envs.live.bitget.order_executor import MarginMode
 
         assert MarginMode.ISOLATED.value == "isolated"
         assert MarginMode.CROSSED.value == "crossed"
 
     def test_trade_mode_enum(self):
         """Test TradeMode enum values."""
-        from torchtrade.envs.bitget.futures_order_executor import TradeMode
+        from torchtrade.envs.live.bitget.order_executor import TradeMode
 
         assert TradeMode.QUANTITY.value == "quantity"
         assert TradeMode.NOTIONAL.value == "notional"
@@ -333,7 +333,7 @@ class TestBitgetFuturesOrderClassIntegration:
     def test_live_order_placement(self):
         """Test placing a real order on Bitget testnet."""
         import os
-        from torchtrade.envs.bitget.futures_order_executor import (
+        from torchtrade.envs.live.bitget.order_executor import (
             BitgetFuturesOrderClass,
             TradeMode,
         )

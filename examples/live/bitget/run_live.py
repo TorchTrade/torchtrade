@@ -42,7 +42,7 @@ from torchrl.envs.transforms import (
     StepCounter,
 )
 
-from torchtrade.envs.bitget.futures_order_executor import (
+from torchtrade.envs.live.bitget.order_executor import (
     MarginMode,
     PositionMode,
 )

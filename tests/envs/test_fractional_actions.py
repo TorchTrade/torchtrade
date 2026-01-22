@@ -13,9 +13,9 @@ import pandas as pd
 import numpy as np
 import torch
 
-from torchtrade.envs.offline.seqfutures import SeqFuturesEnv, SeqFuturesEnvConfig
-from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.futures.sequential import SeqFuturesEnv, SeqFuturesEnvConfig
+from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 # Test tolerance constants
 POSITION_TOLERANCE = 0.001  # 0.1% tolerance for position size comparisons

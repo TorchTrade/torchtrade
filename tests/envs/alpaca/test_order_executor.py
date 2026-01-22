@@ -7,7 +7,7 @@ Tests order execution, position management, and error handling using mock client
 import pytest
 import warnings
 
-from torchtrade.envs.alpaca.order_executor import (
+from torchtrade.envs.live.alpaca.order_executor import (
     AlpacaOrderClass,
     TradeMode,
     OrderStatus,

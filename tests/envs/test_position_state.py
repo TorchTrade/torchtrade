@@ -1,7 +1,7 @@
 """Tests for PositionState dataclass."""
 
 import pytest
-from torchtrade.envs.state import PositionState
+from torchtrade.envs.core.state import PositionState
 
 
 class TestPositionStateInitialization:
