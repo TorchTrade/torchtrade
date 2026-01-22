@@ -229,10 +229,8 @@ def main(cfg: DictConfig):  # noqa: F821
             if coverage_stats["enabled"]:
                 # Reset coverage (episode start diversity)
                 metrics_to_log["train/reset_coverage"] = coverage_stats["reset_coverage"]
-                metrics_to_log["train/reset_entropy"] = coverage_stats["reset_entropy"]
                 # State coverage (full trajectory coverage)
                 metrics_to_log["train/state_coverage"] = coverage_stats["state_coverage"]
-                metrics_to_log["train/state_entropy"] = coverage_stats["state_entropy"]
 
         if logger is not None:
             time_dict = timeit.todict(prefix="time")
