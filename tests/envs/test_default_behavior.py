@@ -216,9 +216,9 @@ class TestDefaultSeqLongOnlyEnv:
         )
         env = SeqLongOnlyEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Default long-only fractional levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
-        # (negative values mean sell/reduce, not short)
-        assert env.action_spec.n == 5
+        # Default long-only fractional levels: [0.0, 0.5, 1.0]
+        # No negative values (no redundant sell actions)
+        assert env.action_spec.n == 3
 
     def test_default_handles_long_only_positions(self, sample_ohlcv_df):
         """Fractional mode should handle long-only positions correctly."""
@@ -237,8 +237,8 @@ class TestDefaultSeqLongOnlyEnv:
 
         td = env.reset()
 
-        # Action 4 = 1.0 (100% long)
-        td.set("action", torch.tensor(4))
+        # Action 2 = 1.0 (100% long)
+        td.set("action", torch.tensor(2))
         result = env.step(td)
         position_100 = env.position.position_size
 
@@ -247,16 +247,16 @@ class TestDefaultSeqLongOnlyEnv:
 
         td = result["next"]
 
-        # Action 2 = 0.0 (exit) - should close position
-        td.set("action", torch.tensor(2))
+        # Action 0 = 0.0 (exit) - should close position
+        td.set("action", torch.tensor(0))
         result = env.step(td)
 
         assert abs(env.position.position_size) < 0.01, f"Should close position, got {env.position.position_size}"
 
         td = result["next"]
 
-        # Action 3 = 0.5 (50% long) - should open smaller position
-        td.set("action", torch.tensor(3))
+        # Action 1 = 0.5 (50% long) - should open smaller position
+        td.set("action", torch.tensor(1))
         result = env.step(td)
         position_50 = env.position.position_size
 

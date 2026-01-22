@@ -67,12 +67,9 @@ class BinanceFuturesTradingEnvConfig:
             self.execute_on, self.time_frames, self.window_sizes
         )
 
-        # Build default action levels for fractional mode
+        # Build default action levels
         if self.action_levels is None:
             self.action_levels = build_default_action_levels(
-                position_sizing_mode="fractional",
-                include_hold_action=True,
-                include_close_action=False,  # Binance futures doesn't use close action
                 allow_short=True  # Futures allow short positions
             )
 
