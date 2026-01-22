@@ -71,27 +71,16 @@ def calculate_fractional_position(params: PositionCalculationParams) -> Tuple[fl
     capital_allocated = params.balance * fraction
 
     # Account for fees in margin calculation
-    # Goal: Allocate capital to cover both margin requirement and trading fees
-    #
-    # Given:
-    #   - capital_allocated (total available for this trade)
-    #   - leverage (position multiplier)
-    #   - transaction_fee (fee rate charged on notional value)
-    #
-    # Constraints:
-    #   margin + fee <= capital_allocated
-    #   where margin = notional / leverage
-    #   and fee = notional × transaction_fee
+    # We need to ensure: margin + fee <= capital_allocated
+    # Where: margin = notional / leverage, fee = notional × transaction_fee
     #
     # Solving for notional:
-    #   notional / leverage + notional × transaction_fee <= capital_allocated
     #   notional × (1/leverage + transaction_fee) <= capital_allocated
     #   notional <= capital_allocated / (1/leverage + transaction_fee)
     #
-    # Implementation (mathematically equivalent):
-    #   fee_multiplier = leverage × (1/leverage + transaction_fee) = 1 + leverage × transaction_fee
-    #   margin_required = capital_allocated / fee_multiplier
-    #   notional = margin_required × leverage
+    # Simplified form (multiply numerator and denominator by leverage):
+    #   fee_multiplier = 1 + (leverage × transaction_fee)
+    #   notional = (capital_allocated / fee_multiplier) × leverage
     fee_multiplier = 1 + (params.leverage * params.transaction_fee)
     margin_required = capital_allocated / fee_multiplier
     notional_value = margin_required * params.leverage
@@ -178,6 +167,31 @@ def validate_position_sizing_mode(mode: str) -> None:
     if mode not in ["fractional", "fixed"]:
         raise ValueError(
             f"position_sizing_mode must be 'fractional' or 'fixed', got '{mode}'"
+        )
+
+
+def validate_action_levels(action_levels: list[float]) -> None:
+    """Validate custom action levels.
+
+    Args:
+        action_levels: List of action level values
+
+    Raises:
+        ValueError: If action levels are invalid
+    """
+    if not all(-1.0 <= a <= 1.0 for a in action_levels):
+        raise ValueError(
+            f"All action_levels must be in range [-1.0, 1.0], got {action_levels}"
+        )
+
+    if len(action_levels) != len(set(action_levels)):
+        raise ValueError(
+            f"action_levels must not contain duplicates, got {action_levels}"
+        )
+
+    if len(action_levels) < 2:
+        raise ValueError(
+            f"action_levels must contain at least 2 actions, got {len(action_levels)}"
         )
 
 

@@ -19,12 +19,23 @@ from torchtrade.envs.offline.utils import (
 
 
 def futures_sltp_action_map(stoploss_levels, takeprofit_levels, include_close_action=False):
-    """Wrapper for backward compatibility in tests.
+    """Build action map for futures SLTP environment tests.
 
-    Note: include_close_action defaults to False to match SLTP environment defaults.
-    SLTP environments use bracket orders that auto-close positions, so manual CLOSE is not needed by default.
+    Args:
+        stoploss_levels: List of stop loss percentage levels (e.g., [-0.05, -0.1])
+        takeprofit_levels: List of take profit percentage levels (e.g., [0.05, 0.1])
+        include_close_action: Include manual CLOSE action (default False)
+
+    Note:
+        SLTP environments use bracket orders that auto-close via SL/TP triggers,
+        so manual CLOSE action is typically not needed.
     """
-    return build_sltp_action_map(stoploss_levels, takeprofit_levels, include_short_positions=True, include_close_action=include_close_action)
+    return build_sltp_action_map(
+        stoploss_levels,
+        takeprofit_levels,
+        include_short_positions=True,
+        include_close_action=include_close_action
+    )
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:

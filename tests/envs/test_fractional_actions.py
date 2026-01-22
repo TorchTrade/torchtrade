@@ -17,6 +17,11 @@ from torchtrade.envs.offline.seqfutures import SeqFuturesEnv, SeqFuturesEnvConfi
 from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from torchtrade.envs.timeframe import TimeFrame, TimeFrameUnit
 
+# Test tolerance constants
+POSITION_TOLERANCE = 0.001  # 0.1% tolerance for position size comparisons
+BALANCE_TOLERANCE = 0.01    # 1% tolerance for balance/value comparisons
+PRICE_TOLERANCE = 0.02      # 2% tolerance for price/ratio comparisons (accounts for fees)
+
 
 @pytest.fixture
 def sample_df():
@@ -65,7 +70,7 @@ class TestFractionalActionMapping:
         actual_position = env.position.position_size
 
         # Should be very close (allowing for minor floating point differences)
-        assert abs(actual_position - expected_position) / expected_position < 0.001
+        assert abs(actual_position - expected_position) / expected_position < POSITION_TOLERANCE
 
     def test_action_0_5_maps_to_50_percent_long(self, sample_df):
         """Action 0.5 should create a position worth 50% of balance * leverage."""
@@ -91,7 +96,7 @@ class TestFractionalActionMapping:
         expected_position = (initial_balance * 0.5 * 1) / current_price
         actual_position = env.position.position_size
 
-        assert abs(actual_position - expected_position) / expected_position < 0.001
+        assert abs(actual_position - expected_position) / expected_position < POSITION_TOLERANCE
 
     def test_action_0_0_closes_position(self, sample_df):
         """Action 0.0 should close all positions (market neutral)."""
@@ -144,7 +149,7 @@ class TestFractionalActionMapping:
         expected_position = -(initial_balance * 0.5 * 1) / current_price
         actual_position = env.position.position_size
 
-        assert abs(actual_position - expected_position) / abs(expected_position) < 0.001
+        assert abs(actual_position - expected_position) / abs(expected_position) < POSITION_TOLERANCE
         assert actual_position < 0  # Should be negative (short)
 
     def test_action_negative_1_0_maps_to_100_percent_short(self, sample_df):
@@ -171,7 +176,7 @@ class TestFractionalActionMapping:
         expected_position = -(initial_balance * 1.0 * 1) / current_price
         actual_position = env.position.position_size
 
-        assert abs(actual_position - expected_position) / abs(expected_position) < 0.001
+        assert abs(actual_position - expected_position) / abs(expected_position) < POSITION_TOLERANCE
         assert actual_position < 0  # Should be negative (short)
 
 
@@ -207,8 +212,8 @@ class TestBalanceScaling:
             positions.append(env.position.position_size * current_price)  # Notional value
 
         # Positions should scale proportionally with balance
-        assert abs(positions[1] / positions[0] - 2.0) < 0.01  # 10k / 5k = 2x
-        assert abs(positions[2] / positions[0] - 4.0) < 0.01  # 20k / 5k = 4x
+        assert abs(positions[1] / positions[0] - 2.0) < BALANCE_TOLERANCE  # 10k / 5k = 2x
+        assert abs(positions[2] / positions[0] - 4.0) < BALANCE_TOLERANCE  # 20k / 5k = 4x
 
 
 class TestLeverageApplication:
@@ -251,7 +256,7 @@ class TestLeverageApplication:
         position_5x = env_5x.position.position_size
 
         # Position with 5x leverage should be 5x larger
-        assert abs(position_5x / position_1x - 5.0) < 0.01
+        assert abs(position_5x / position_1x - 5.0) < BALANCE_TOLERANCE
 
 
 class TestDirectionSwitching:
@@ -335,7 +340,7 @@ class TestLongOnlyFractional:
         actual_value = env.position.position_size * current_price
 
         # Should be close (within 1% tolerance for fees/rounding)
-        assert abs(actual_value - expected_value) / expected_value < 0.01
+        assert abs(actual_value - expected_value) / expected_value < BALANCE_TOLERANCE
 
     def test_long_only_fractional_sell(self, sample_df):
         """Long-only env should correctly close positions with negative actions."""
@@ -396,10 +401,10 @@ class TestPartialPositionAdjustment:
         position_50 = env.position.position_size
 
         # Position should be approximately half
-        assert abs(position_50 - position_100 / 2) / (position_100 / 2) < 0.02
+        assert abs(position_50 - position_100 / 2) / (position_100 / 2) < PRICE_TOLERANCE
 
         # Entry price should remain the same (partial close doesn't change entry)
-        assert abs(env.position.entry_price - entry_price) / entry_price < 0.001
+        assert abs(env.position.entry_price - entry_price) / entry_price < POSITION_TOLERANCE
 
     def test_increase_position_from_50_to_100_percent(self, sample_df):
         """Increasing from 50% to 100% should add to position with weighted average entry."""
@@ -430,7 +435,7 @@ class TestPartialPositionAdjustment:
         position_100 = env.position.position_size
 
         # Position should be approximately double
-        assert abs(position_100 - position_50 * 2) / (position_50 * 2) < 0.02
+        assert abs(position_100 - position_50 * 2) / (position_50 * 2) < PRICE_TOLERANCE
 
         # Entry price should be weighted average (will be close to original if price hasn't changed much)
         # Just verify it's reasonable and not zero
@@ -469,7 +474,7 @@ class TestPartialPositionAdjustment:
         fee_for_50 = initial_balance_2 - balance_after_50
 
         # Fee for 50% should be approximately half the fee for 100%
-        assert abs(fee_for_50 - fee_for_100 / 2) / (fee_for_100 / 2) < 0.02
+        assert abs(fee_for_50 - fee_for_100 / 2) / (fee_for_100 / 2) < PRICE_TOLERANCE
 
 
 class TestEdgeCases:
@@ -499,7 +504,7 @@ class TestEdgeCases:
         expected_position = (initial_balance * 0.01 * 1) / current_price
         actual_position = env.position.position_size
 
-        assert abs(actual_position - expected_position) / expected_position < 0.01
+        assert abs(actual_position - expected_position) / expected_position < BALANCE_TOLERANCE
 
     def test_implicit_hold_does_not_trade(self, sample_df):
         """Test that selecting the same action twice does not trade (implicit hold)."""
