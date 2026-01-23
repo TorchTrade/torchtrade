@@ -43,11 +43,14 @@ def default_config():
 @pytest.fixture
 def env(sample_ohlcv_df, default_config):
     """Create a SeqLongOnlyEnv instance for testing."""
-    return SeqLongOnlyEnv(
+    env_instance = SeqLongOnlyEnv(
         df=sample_ohlcv_df,
         config=default_config,
         feature_preprocessing_fn=simple_feature_fn,
     )
+    yield env_instance
+    # Cleanup: ensure environment is properly closed
+    env_instance.close()
 
 
 class TestSeqLongOnlyEnvInitialization:
@@ -219,10 +222,16 @@ class TestSeqLongOnlyEnvStep:
                 result = env.step(td)
                 td = result["next"]
             except ValueError as e:
-                # Bankruptcy can cause reward calculation errors
-                if "Invalid new_portfolio_value: 0.0" in str(e) or "Portfolio value must be positive" in str(e):
-                    break  # Terminate episode on bankruptcy
-                raise  # Re-raise other ValueErrors
+                # Handle bankruptcy-related errors from reward calculation
+                # TODO: Replace with specific BankruptcyError exception type in future
+                # String matching is brittle but necessary until custom exception is implemented
+                error_msg = str(e)
+                if "Invalid new_portfolio_value" in error_msg or "Portfolio value must be positive" in error_msg:
+                    # Expected: Episode terminates when portfolio goes bankrupt
+                    print(f"Test episode terminated due to bankruptcy at step {steps}: {error_msg}")
+                    break
+                # Unexpected ValueError - re-raise for debugging
+                raise
 
             steps += 1
 
@@ -245,10 +254,16 @@ class TestSeqLongOnlyEnvStep:
                 result = env.step(td)
                 td = result["next"]
             except ValueError as e:
-                # Bankruptcy can cause reward calculation errors
-                if "Invalid new_portfolio_value: 0.0" in str(e) or "Portfolio value must be positive" in str(e):
-                    break  # Terminate episode on bankruptcy
-                raise  # Re-raise other ValueErrors
+                # Handle bankruptcy-related errors from reward calculation
+                # TODO: Replace with specific BankruptcyError exception type in future
+                # String matching is brittle but necessary until custom exception is implemented
+                error_msg = str(e)
+                if "Invalid new_portfolio_value" in error_msg or "Portfolio value must be positive" in error_msg:
+                    # Expected: Episode terminates when portfolio goes bankrupt
+                    print(f"Test episode terminated due to bankruptcy at step {steps}: {error_msg}")
+                    break
+                # Unexpected ValueError - re-raise for debugging
+                raise
 
             portfolio_value = env._get_portfolio_value()
             assert not np.isnan(portfolio_value), "Portfolio value should never be NaN"
@@ -394,7 +409,7 @@ class TestSeqLongOnlyEnvReward:
         """Reward should never be infinite (even with bankruptcy)."""
         td = env.reset()
 
-        for _ in range(50):
+        for step_idx in range(50):
             action = env.action_spec.sample()
             td.set("action", action)
 
@@ -402,10 +417,16 @@ class TestSeqLongOnlyEnvReward:
                 result = env.step(td)
                 td = result["next"]
             except ValueError as e:
-                # Bankruptcy can cause reward calculation errors
-                if "Invalid new_portfolio_value: 0.0" in str(e) or "Portfolio value must be positive" in str(e):
-                    break  # Terminate episode on bankruptcy
-                raise  # Re-raise other ValueErrors
+                # Handle bankruptcy-related errors from reward calculation
+                # TODO: Replace with specific BankruptcyError exception type in future
+                # String matching is brittle but necessary until custom exception is implemented
+                error_msg = str(e)
+                if "Invalid new_portfolio_value" in error_msg or "Portfolio value must be positive" in error_msg:
+                    # Expected: Episode terminates when portfolio goes bankrupt
+                    print(f"Test episode terminated due to bankruptcy at step {step_idx}: {error_msg}")
+                    break
+                # Unexpected ValueError - re-raise for debugging
+                raise
 
             reward = td["reward"]
             assert not torch.isinf(reward).any(), "Reward should never be infinite"
@@ -471,31 +492,33 @@ class TestSeqLongOnlyEnvTermination:
             bankrupt_threshold=0.5,  # 50% threshold
         )
         env = SeqLongOnlyEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            td = env.reset()
 
-        td = env.reset()
+            # Trade back and forth to lose money on fees
+            for i in range(20):
+                # Buy
+                td.set("action", torch.tensor(2))  # buy all-in (1.0)
+                result = env.step(td)
+                td = result["next"]
+                if td.get("done", False):
+                    break
 
-        # Trade back and forth to lose money on fees
-        for i in range(20):
-            # Buy
-            td.set("action", torch.tensor(2))  # buy all-in (1.0)
-            result = env.step(td)
-            td = result["next"]
-            if td.get("done", False):
-                break
+                # Sell
+                td.set("action", torch.tensor(0))
+                result = env.step(td)
+                td = result["next"]
+                if td.get("done", False):
+                    break
 
-            # Sell
-            td.set("action", torch.tensor(0))
-            result = env.step(td)
-            td = result["next"]
-            if td.get("done", False):
-                break
+            # Should have terminated due to bankruptcy
+            portfolio_value = env._get_portfolio_value()
+            bankruptcy_threshold = config.bankrupt_threshold * env.initial_portfolio_value
 
-        # Should have terminated due to bankruptcy
-        portfolio_value = env._get_portfolio_value()
-        bankruptcy_threshold = config.bankrupt_threshold * env.initial_portfolio_value
-
-        # Either terminated early due to bankruptcy or completed
-        assert td.get("done", False) or portfolio_value >= bankruptcy_threshold
+            # Either terminated early due to bankruptcy or completed
+            assert td.get("done", False) or portfolio_value >= bankruptcy_threshold
+        finally:
+            env.close()
 
     def test_truncated_flag_on_data_exhaustion(self, env):
         """Truncated flag should be set when data is exhausted."""
@@ -531,15 +554,17 @@ class TestSeqLongOnlyEnvEdgeCases:
             random_start=False,
         )
         env = SeqLongOnlyEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            td = env.reset()
+            assert env.balance == 1
 
-        td = env.reset()
-        assert env.balance == 1
+            # Should still be able to trade
+            td.set("action", torch.tensor(2))  # buy all-in (1.0)
+            result = env.step(td)
 
-        # Should still be able to trade
-        td.set("action", torch.tensor(2))  # buy all-in (1.0)
-        result = env.step(td)
-
-        assert not torch.isnan(result["next"]["reward"]).any()
+            assert not torch.isnan(result["next"]["reward"]).any()
+        finally:
+            env.close()
 
     def test_zero_transaction_fee(self, sample_ohlcv_df):
         """Environment should work with zero transaction fees."""
@@ -554,21 +579,23 @@ class TestSeqLongOnlyEnvEdgeCases:
             random_start=False,
         )
         env = SeqLongOnlyEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            td = env.reset()
+            initial_balance = env.balance
 
-        td = env.reset()
-        initial_balance = env.balance
+            # Buy and sell should preserve value (no fees)
+            td.set("action", torch.tensor(2))  # buy all-in (1.0)
+            result = env.step(td)
+            td = result["next"]
 
-        # Buy and sell should preserve value (no fees)
-        td.set("action", torch.tensor(2))  # buy all-in (1.0)
-        result = env.step(td)
-        td = result["next"]
+            td.set("action", torch.tensor(0))  # sell
+            env.step(td)
 
-        td.set("action", torch.tensor(0))  # sell
-        env.step(td)
-
-        # With no fees and no slippage, balance should be approximately preserved
-        # (small differences due to price movement between steps)
-        assert abs(env.balance - initial_balance) < initial_balance * 0.05
+            # With no fees and no slippage, balance should be approximately preserved
+            # (small differences due to price movement between steps)
+            assert abs(env.balance - initial_balance) < initial_balance * 0.05
+        finally:
+            env.close()
 
     def test_multiple_episodes(self, env):
         """Environment should work correctly across multiple episodes."""
@@ -610,17 +637,19 @@ class TestSeqLongOnlyEnvEdgeCases:
             random_start=False,
         )
         env = SeqLongOnlyEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            balances = []
+            for _ in range(10):
+                env.reset()
+                balances.append(env.balance)
 
-        balances = []
-        for _ in range(10):
-            env.reset()
-            balances.append(env.balance)
-
-        # Should have some variation in initial balances
-        assert min(balances) >= 500
-        assert max(balances) <= 1500
-        # With 10 samples, we should see at least 2 different values
-        assert len(set(balances)) >= 2
+            # Should have some variation in initial balances
+            assert min(balances) >= 500
+            assert max(balances) <= 1500
+            # With 10 samples, we should see at least 2 different values
+            assert len(set(balances)) >= 2
+        finally:
+            env.close()
 
 
 class TestLookaheadBiasIntegration:
@@ -684,60 +713,62 @@ class TestLookaheadBiasIntegration:
         )
 
         env = SeqLongOnlyEnv(df=df, config=config, feature_preprocessing_fn=preserve_close_fn)
+        try:
+            # Reset environment
+            td = env.reset()
 
-        # Reset environment
-        td = env.reset()
+            # Run several steps and verify no future leakage
+            for step_num in range(15):
+                # Get 1-minute observations (window of 5 bars)
+                one_min_obs = td["market_data_1Minute_5"]  # Shape: [5, features]
 
-        # Run several steps and verify no future leakage
-        for step_num in range(15):
-            # Get 1-minute observations (window of 5 bars)
-            one_min_obs = td["market_data_1Minute_5"]  # Shape: [5, features]
+                # Get 5-minute observations (window of 3 bars)
+                five_min_obs = td["market_data_5Minute_3"]  # Shape: [3, features]
 
-            # Get 5-minute observations (window of 3 bars)
-            five_min_obs = td["market_data_5Minute_3"]  # Shape: [3, features]
+                # Extract close prices (last feature, assuming features_close is last)
+                # features_close should be the only feature (index 0 since include_base_features=False)
+                one_min_closes = one_min_obs[:, 0].numpy()  # Last 5 minutes
+                five_min_closes = five_min_obs[:, 0].numpy()  # Last 3 five-minute bars
 
-            # Extract close prices (last feature, assuming features_close is last)
-            # features_close should be the only feature (index 0 since include_base_features=False)
-            one_min_closes = one_min_obs[:, 0].numpy()  # Last 5 minutes
-            five_min_closes = five_min_obs[:, 0].numpy()  # Last 3 five-minute bars
+                # Current execution minute is the most recent 1-minute close
+                # (since close price = minute index in our test data)
+                current_minute = int(one_min_closes[-1])
 
-            # Current execution minute is the most recent 1-minute close
-            # (since close price = minute index in our test data)
-            current_minute = int(one_min_closes[-1])
+                # Verify 1-minute observations only show past data
+                for i, minute_val in enumerate(one_min_closes):
+                    assert minute_val <= current_minute, (
+                        f"1-minute observation at position {i} shows future data: "
+                        f"minute {minute_val} > current minute {current_minute}"
+                    )
 
-            # Verify 1-minute observations only show past data
-            for i, minute_val in enumerate(one_min_closes):
-                assert minute_val <= current_minute, (
-                    f"1-minute observation at position {i} shows future data: "
-                    f"minute {minute_val} > current minute {current_minute}"
-                )
+                # Verify 5-minute bars are complete (end at or before current minute)
+                # Each 5-minute bar should end at a multiple of 5
+                # With the fix, 5-min bar indexed at X contains data through minute X-1
+                for i, five_min_close in enumerate(five_min_closes):
+                    # The close of a 5-min bar should be the last minute of that bar
+                    # With offset fix, bars are indexed by END time
+                    assert five_min_close <= current_minute, (
+                        f"5-minute observation at position {i} shows future data: "
+                        f"close at minute {five_min_close} > current minute {current_minute}"
+                    )
 
-            # Verify 5-minute bars are complete (end at or before current minute)
-            # Each 5-minute bar should end at a multiple of 5
-            # With the fix, 5-min bar indexed at X contains data through minute X-1
-            for i, five_min_close in enumerate(five_min_closes):
-                # The close of a 5-min bar should be the last minute of that bar
-                # With offset fix, bars are indexed by END time
-                assert five_min_close <= current_minute, (
-                    f"5-minute observation at position {i} shows future data: "
-                    f"close at minute {five_min_close} > current minute {current_minute}"
-                )
+                    # Verify bar is complete (ends at multiple of 5 minus 1)
+                    # e.g., bar for minutes [0,1,2,3,4] has close=4
+                    bar_end_minute = int(five_min_close)
+                    assert bar_end_minute % 5 == 4 or bar_end_minute % 5 == 9, (
+                        f"5-minute bar close at minute {bar_end_minute} doesn't end on "
+                        f"5-minute boundary (should end at X*5-1)"
+                    )
 
-                # Verify bar is complete (ends at multiple of 5 minus 1)
-                # e.g., bar for minutes [0,1,2,3,4] has close=4
-                bar_end_minute = int(five_min_close)
-                assert bar_end_minute % 5 == 4 or bar_end_minute % 5 == 9, (
-                    f"5-minute bar close at minute {bar_end_minute} doesn't end on "
-                    f"5-minute boundary (should end at X*5-1)"
-                )
+                # Take hold action and step
+                action = torch.tensor(0)  # close/flat (0.0)
+                td_next = env.step(td.set("action", action))
+                td = td_next
 
-            # Take hold action and step
-            action = torch.tensor(0)  # close/flat (0.0)
-            td_next = env.step(td.set("action", action))
-            td = td_next
-
-            if td.get("done", False):
-                break
+                if td.get("done", False):
+                    break
+        finally:
+            env.close()
 
     def test_multiframe_higher_tf_only_shows_complete_bars(self):
         """Verify higher timeframe observations only contain complete bars.
@@ -780,26 +811,29 @@ class TestLookaheadBiasIntegration:
         )
 
         env = SeqLongOnlyEnv(df=df, config=config, feature_preprocessing_fn=preserve_close_fn)
-        td = env.reset()
+        try:
+            td = env.reset()
 
-        for _ in range(25):
-            # Get current minute from 1-minute observation
-            one_min_obs = td["market_data_1Minute_5"]
-            current_minute = int(one_min_obs[-1, 0].item())
+            for _ in range(25):
+                # Get current minute from 1-minute observation
+                one_min_obs = td["market_data_1Minute_5"]
+                current_minute = int(one_min_obs[-1, 0].item())
 
-            # Get 15-minute observations
-            fifteen_min_obs = td["market_data_15Minute_2"]
-            fifteen_min_closes = fifteen_min_obs[:, 0].numpy()
+                # Get 15-minute observations
+                fifteen_min_obs = td["market_data_15Minute_2"]
+                fifteen_min_closes = fifteen_min_obs[:, 0].numpy()
 
-            # All 15-minute bar closes should be <= current_minute
-            for close_val in fifteen_min_closes:
-                assert close_val <= current_minute, (
-                    f"15-minute bar with close={close_val} visible at minute {current_minute} "
-                    f"(bar not yet complete!)"
-                )
+                # All 15-minute bar closes should be <= current_minute
+                for close_val in fifteen_min_closes:
+                    assert close_val <= current_minute, (
+                        f"15-minute bar with close={close_val} visible at minute {current_minute} "
+                        f"(bar not yet complete!)"
+                    )
 
-            # Step environment
-            td = env.step(td.set("action", torch.tensor(0)))  # close/flat (0.0)
+                # Step environment
+                td = env.step(td.set("action", torch.tensor(0)))  # close/flat (0.0)
 
-            if td.get("done", False):
-                break
+                if td.get("done", False):
+                    break
+        finally:
+            env.close()

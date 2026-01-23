@@ -62,11 +62,14 @@ def default_config():
 @pytest.fixture
 def env(sample_ohlcv_df, default_config):
     """Create a LongOnlyOneStepEnv instance for testing."""
-    return LongOnlyOneStepEnv(
+    env_instance = LongOnlyOneStepEnv(
         df=sample_ohlcv_df,
         config=default_config,
         feature_preprocessing_fn=simple_feature_fn,
     )
+    yield env_instance
+    # Cleanup: ensure environment is properly closed
+    env_instance.close()
 
 
 class TestInitialBalanceSampler:
@@ -179,23 +182,26 @@ class TestLongOnlyOneStepEnvReset:
 
     def test_reset_with_random_balance(self, sample_ohlcv_df):
         """Reset should sample random balance when range given."""
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=(500, 1500),
-            max_traj_length=50,
-        )
-        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=(500, 1500),
+                max_traj_length=50,
+            )
+            env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        balances = []
-        for _ in range(5):
-            env.reset()
-            balances.append(env.balance)
+            balances = []
+            for _ in range(5):
+                env.reset()
+                balances.append(env.balance)
 
-        # Should have some variation
-        assert len(set(balances)) >= 1  # At least one unique value
+            # Should have some variation
+            assert len(set(balances)) >= 1  # At least one unique value
 
 
+        finally:
+            env.close()
 class TestLongOnlyOneStepEnvStep:
     """Tests for step functionality."""
 
@@ -252,45 +258,53 @@ class TestLongOnlyOneStepEnvRollout:
 
     def test_rollout_terminates_on_sl(self, trending_down_df):
         """Rollout should terminate when stop loss is hit."""
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            transaction_fee=0.001,
-            stoploss_levels=[-0.02],  # 2% SL
-            takeprofit_levels=[0.5],   # 50% TP (won't hit)
-            slippage=0.0,
-            max_traj_length=200,
-        )
-        env = LongOnlyOneStepEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                transaction_fee=0.001,
+                stoploss_levels=[-0.02],  # 2% SL
+                takeprofit_levels=[0.5],   # 50% TP (won't hit)
+                slippage=0.0,
+                max_traj_length=200,
+            )
+            env = LongOnlyOneStepEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
-        td.set("action", torch.tensor(1))  # Buy
-        env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(1))  # Buy
+            env.step(td)
 
-        # Position should be closed after rollout
-        assert env.position.position_size == 0.0
+            # Position should be closed after rollout
+            assert env.position.position_size == 0.0
+
+        finally:
+            env.close()
 
     def test_rollout_terminates_on_tp(self, trending_up_df):
         """Rollout should terminate when take profit is hit."""
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            transaction_fee=0.001,
-            stoploss_levels=[-0.5],   # 50% SL (won't hit)
-            takeprofit_levels=[0.02],  # 2% TP
-            slippage=0.0,
-            max_traj_length=200,
-        )
-        env = LongOnlyOneStepEnv(trending_up_df, config, simple_feature_fn)
+        try:
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                transaction_fee=0.001,
+                stoploss_levels=[-0.5],   # 50% SL (won't hit)
+                takeprofit_levels=[0.02],  # 2% TP
+                slippage=0.0,
+                max_traj_length=200,
+            )
+            env = LongOnlyOneStepEnv(trending_up_df, config, simple_feature_fn)
 
-        td = env.reset()
-        td.set("action", torch.tensor(1))  # Buy
-        env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(1))  # Buy
+            env.step(td)
 
-        # Position should be closed after rollout
-        assert env.position.position_size == 0.0
+            # Position should be closed after rollout
+            assert env.position.position_size == 0.0
+
+        finally:
+            env.close()
 
     def test_rollout_accumulates_returns(self, env):
         """Rollout should accumulate log returns."""
@@ -362,26 +376,29 @@ class TestLongOnlyOneStepEnvReward:
 
     def test_truncated_reward_zero(self, sample_ohlcv_df):
         """Truncated episodes should have zero reward."""
-        # Use very short max_traj_length to force truncation
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.5],  # Won't trigger
-            takeprofit_levels=[0.5],  # Won't trigger
-            max_traj_length=15,  # Very short
-        )
-        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            # Use very short max_traj_length to force truncation
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.5],  # Won't trigger
+                takeprofit_levels=[0.5],  # Won't trigger
+                max_traj_length=15,  # Very short
+            )
+            env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        td = env.reset()
-        td.set("action", torch.tensor(1))  # Buy
-        result = env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(1))  # Buy
+            result = env.step(td)
 
-        # If truncated, reward should be 0
-        if result["next"]["truncated"].item():
-            assert result["next"]["reward"].item() == 0.0
+            # If truncated, reward should be 0
+            if result["next"]["truncated"].item():
+                assert result["next"]["reward"].item() == 0.0
 
 
+        finally:
+            env.close()
 class TestLongOnlyOneStepEnvSLTPPlacement:
     """Tests for SL/TP price placement."""
 
@@ -406,28 +423,31 @@ class TestLongOnlyOneStepEnvSLTPPlacement:
 
     def test_sl_tp_calculated_correctly(self, sample_ohlcv_df):
         """SL/TP prices should be calculated from percentages correctly."""
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05],  # 5% below
-            takeprofit_levels=[0.10],  # 10% above
-            slippage=0.0,  # Disable slippage for deterministic test
-            max_traj_length=50,
-        )
-        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05],  # 5% below
+                takeprofit_levels=[0.10],  # 10% above
+                slippage=0.0,  # Disable slippage for deterministic test
+                max_traj_length=50,
+            )
+            env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        td = env.reset()
-        entry_price = env._cached_base_features["close"]
-        env._execute_trade_if_needed(env.action_map[1], entry_price)
+            td = env.reset()
+            entry_price = env._cached_base_features["close"]
+            env._execute_trade_if_needed(env.action_map[1], entry_price)
 
-        expected_sl = entry_price * (1 - 0.05)  # 5% below
-        expected_tp = entry_price * (1 + 0.10)  # 10% above
+            expected_sl = entry_price * (1 - 0.05)  # 5% below
+            expected_tp = entry_price * (1 + 0.10)  # 10% above
 
-        assert abs(env.stop_loss - expected_sl) < 0.01, f"SL {env.stop_loss} != expected {expected_sl}"
-        assert abs(env.take_profit - expected_tp) < 0.01, f"TP {env.take_profit} != expected {expected_tp}"
+            assert abs(env.stop_loss - expected_sl) < 0.01, f"SL {env.stop_loss} != expected {expected_sl}"
+            assert abs(env.take_profit - expected_tp) < 0.01, f"TP {env.take_profit} != expected {expected_tp}"
 
 
+        finally:
+            env.close()
 class TestLongOnlyOneStepEnvTradeExecution:
     """Tests for trade execution."""
 
@@ -511,76 +531,91 @@ class TestLongOnlyOneStepEnvEdgeCases:
 
     def test_single_sl_tp_level(self, sample_ohlcv_df):
         """Should work with single SL/TP level."""
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05],
-            takeprofit_levels=[0.1],
-            max_traj_length=50,
-        )
-        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05],
+                takeprofit_levels=[0.1],
+                max_traj_length=50,
+            )
+            env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Should have 2 actions: hold and buy
-        assert env.action_spec.n == 2
+            # Should have 2 actions: hold and buy
+            assert env.action_spec.n == 2
 
-        td = env.reset()
-        td.set("action", torch.tensor(1))
-        result = env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(1))
+            result = env.step(td)
 
-        assert result is not None
+            assert result is not None
+
+        finally:
+            env.close()
 
     def test_many_sl_tp_levels(self, sample_ohlcv_df):
         """Should work with many SL/TP levels."""
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.01, -0.02, -0.05, -0.1],
-            takeprofit_levels=[0.01, 0.02, 0.05, 0.1],
-            max_traj_length=50,
-        )
-        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.01, -0.02, -0.05, -0.1],
+                takeprofit_levels=[0.01, 0.02, 0.05, 0.1],
+                max_traj_length=50,
+            )
+            env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # 1 + 16 = 17 actions
-        assert env.action_spec.n == 17
+            # 1 + 16 = 17 actions
+            assert env.action_spec.n == 17
+
+        finally:
+            env.close()
 
     def test_small_initial_cash(self, sample_ohlcv_df):
         """Should work with small initial cash."""
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1,
-            max_traj_length=50,
-        )
-        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1,
+                max_traj_length=50,
+            )
+            env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        td = env.reset()
-        assert env.balance == 1.0
+            td = env.reset()
+            assert env.balance == 1.0
 
-        td.set("action", torch.tensor(1))
-        result = env.step(td)
+            td.set("action", torch.tensor(1))
+            result = env.step(td)
 
-        assert not torch.isnan(result["next"]["reward"]).any()
+            assert not torch.isnan(result["next"]["reward"]).any()
+
+        finally:
+            env.close()
 
     def test_zero_transaction_fee(self, sample_ohlcv_df):
         """Should work with zero transaction fee."""
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            transaction_fee=0.0,
-            max_traj_length=50,
-        )
-        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                transaction_fee=0.0,
+                max_traj_length=50,
+            )
+            env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        td = env.reset()
-        td.set("action", torch.tensor(1))
-        result = env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(1))
+            result = env.step(td)
 
-        assert result is not None
+            assert result is not None
 
 
+        finally:
+            env.close()
 class TestLongOnlyOneStepEnvDuplicateActions:
     """Tests for duplicate action validation."""
 
@@ -677,98 +712,117 @@ class TestLongOnlyOneStepEnvIncludeHoldAction:
 
     def test_include_hold_action_true_default(self, sample_ohlcv_df):
         """Should include HOLD action by default."""
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05],
-            takeprofit_levels=[0.05],
-            max_traj_length=50,
-        )
-        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05],
+                takeprofit_levels=[0.05],
+                max_traj_length=50,
+            )
+            env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 1 SL and 1 TP: 1 hold + 1 trade = 2 actions
-        assert env.action_spec.n == 2
-        assert env.action_map[0] == (None, None), "Action 0 should be HOLD"
+            # With 1 SL and 1 TP: 1 hold + 1 trade = 2 actions
+            assert env.action_spec.n == 2
+            assert env.action_map[0] == (None, None), "Action 0 should be HOLD"
+
+        finally:
+            env.close()
 
     def test_include_hold_action_true_explicit(self, sample_ohlcv_df):
         """Should include HOLD action when explicitly set to True."""
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05, -0.1],
-            takeprofit_levels=[0.05, 0.1],
-            include_hold_action=True,
-            max_traj_length=50,
-        )
-        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05, -0.1],
+                takeprofit_levels=[0.05, 0.1],
+                include_hold_action=True,
+                max_traj_length=50,
+            )
+            env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 2 SL and 2 TP: 1 hold + 4 trades = 5 actions
-        assert env.action_spec.n == 5
-        assert env.action_map[0] == (None, None), "Action 0 should be HOLD"
-        assert env.action_map[1] != (None, None), "Action 1 should be a trade"
+            # With 2 SL and 2 TP: 1 hold + 4 trades = 5 actions
+            assert env.action_spec.n == 5
+            assert env.action_map[0] == (None, None), "Action 0 should be HOLD"
+            assert env.action_map[1] != (None, None), "Action 1 should be a trade"
+
+        finally:
+            env.close()
 
     def test_include_hold_action_false(self, sample_ohlcv_df):
         """Should exclude HOLD action when set to False."""
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05],
-            takeprofit_levels=[0.05],
-            include_hold_action=False,
-            max_traj_length=50,
-        )
-        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05],
+                takeprofit_levels=[0.05],
+                include_hold_action=False,
+                max_traj_length=50,
+            )
+            env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 1 SL and 1 TP, no hold: 1 trade action
-        assert env.action_spec.n == 1
-        assert env.action_map[0] != (None, None), "Action 0 should NOT be HOLD"
-        assert env.action_map[0][0] is not None, "Action 0 should be a trade"
+            # With 1 SL and 1 TP, no hold: 1 trade action
+            assert env.action_spec.n == 1
+            assert env.action_map[0] != (None, None), "Action 0 should NOT be HOLD"
+            assert env.action_map[0][0] is not None, "Action 0 should be a trade"
+
+        finally:
+            env.close()
 
     def test_include_hold_action_false_multiple_sltp(self, sample_ohlcv_df):
         """Should have correct action count without HOLD with multiple SL/TP."""
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05, -0.1],
-            takeprofit_levels=[0.05, 0.1],
-            include_hold_action=False,
-            max_traj_length=50,
-        )
-        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05, -0.1],
+                takeprofit_levels=[0.05, 0.1],
+                include_hold_action=False,
+                max_traj_length=50,
+            )
+            env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # With 2 SL and 2 TP, no hold: 4 trade actions
-        assert env.action_spec.n == 4
-        # Verify all actions are trades (no None, None)
-        for i in range(env.action_spec.n):
-            assert env.action_map[i] != (None, None), f"Action {i} should be a trade"
-            assert env.action_map[i][0] is not None, f"Action {i} should have stop loss"
+            # With 2 SL and 2 TP, no hold: 4 trade actions
+            assert env.action_spec.n == 4
+            # Verify all actions are trades (no None, None)
+            for i in range(env.action_spec.n):
+                assert env.action_map[i] != (None, None), f"Action {i} should be a trade"
+                assert env.action_map[i][0] is not None, f"Action {i} should have stop loss"
+
+        finally:
+            env.close()
 
     def test_env_works_without_hold_action(self, sample_ohlcv_df):
         """Environment should function correctly without HOLD action."""
-        config = LongOnlyOneStepEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            initial_cash=1000,
-            stoploss_levels=[-0.05],
-            takeprofit_levels=[0.05],
-            include_hold_action=False,
-            max_traj_length=50,
-        )
-        env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = LongOnlyOneStepEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                initial_cash=1000,
+                stoploss_levels=[-0.05],
+                takeprofit_levels=[0.05],
+                include_hold_action=False,
+                max_traj_length=50,
+            )
+            env = LongOnlyOneStepEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Reset and step
-        td = env.reset()
-        assert td is not None
+            # Reset and step
+            td = env.reset()
+            assert td is not None
 
-        # Take action 0 (which is now a trade, not hold)
-        td.set("action", torch.tensor(0))
-        result = env.step(td)
+            # Take action 0 (which is now a trade, not hold)
+            td.set("action", torch.tensor(0))
+            result = env.step(td)
 
-        assert result is not None
-        assert "reward" in result["next"].keys()
-        # Verify reward is numeric and not NaN
-        assert not torch.isnan(result["next"]["reward"]).any()
+            assert result is not None
+            assert "reward" in result["next"].keys()
+            # Verify reward is numeric and not NaN
+            assert not torch.isnan(result["next"]["reward"]).any()
+        finally:
+            env.close()

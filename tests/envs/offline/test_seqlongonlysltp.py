@@ -60,11 +60,14 @@ def default_config():
 @pytest.fixture
 def env(sample_ohlcv_df, default_config):
     """Create a SeqLongOnlySLTPEnv instance for testing."""
-    return SeqLongOnlySLTPEnv(
+    env_instance = SeqLongOnlySLTPEnv(
         df=sample_ohlcv_df,
         config=default_config,
         feature_preprocessing_fn=simple_feature_fn,
     )
+    yield env_instance
+    # Cleanup: ensure environment is properly closed
+    env_instance.close()
 
 
 class TestCombinatoryActionMap:
@@ -209,126 +212,137 @@ class TestSeqLongOnlySLTPEnvTriggers:
 
     def test_position_exits_on_sl_trigger(self, trending_down_df):
         """Position should exit when stop loss is triggered."""
-        config = SeqLongOnlySLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            transaction_fee=0.001,
-            stoploss_levels=[-0.02],  # 2% stop loss - should trigger in downtrend
-            takeprofit_levels=[0.5],   # 50% TP - won't trigger
-            slippage=0.0,
-            max_traj_length=200,
-            random_start=False,
-        )
-        env = SeqLongOnlySLTPEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            config = SeqLongOnlySLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                transaction_fee=0.001,
+                stoploss_levels=[-0.02],  # 2% stop loss - should trigger in downtrend
+                takeprofit_levels=[0.5],   # 50% TP - won't trigger
+                slippage=0.0,
+                max_traj_length=200,
+                random_start=False,
+            )
+            env = SeqLongOnlySLTPEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Buy with SL/TP
-        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
-        result = env.step(td)
-        td = result["next"]
-
-        assert env.position.position_size > 0
-        initial_position = env.position.position_size
-
-        # Continue stepping - SL should trigger
-        sl_triggered = False
-        for _ in range(150):
-            td.set("action", torch.tensor(0))  # hold
+            # Buy with SL/TP
+            td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
             result = env.step(td)
             td = result["next"]
 
-            if env.position.position_size == 0 and initial_position > 0:
-                sl_triggered = True
-                break
+            assert env.position.position_size > 0
+            initial_position = env.position.position_size
 
-            if td.get("done", False):
-                break
+            # Continue stepping - SL should trigger
+            sl_triggered = False
+            for _ in range(150):
+                td.set("action", torch.tensor(0))  # hold
+                result = env.step(td)
+                td = result["next"]
 
-        assert sl_triggered, "Stop loss should have triggered in downtrend"
+                if env.position.position_size == 0 and initial_position > 0:
+                    sl_triggered = True
+                    break
+
+                if td.get("done", False):
+                    break
+
+            assert sl_triggered, "Stop loss should have triggered in downtrend"
+
+        finally:
+            env.close()
 
     def test_position_exits_on_tp_trigger(self, trending_up_df):
         """Position should exit when take profit is triggered."""
-        config = SeqLongOnlySLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            transaction_fee=0.001,
-            stoploss_levels=[-0.5],   # 50% SL - won't trigger
-            takeprofit_levels=[0.02],  # 2% TP - should trigger in uptrend
-            slippage=0.0,
-            max_traj_length=200,
-            random_start=False,
-        )
-        env = SeqLongOnlySLTPEnv(trending_up_df, config, simple_feature_fn)
+        try:
+            config = SeqLongOnlySLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                transaction_fee=0.001,
+                stoploss_levels=[-0.5],   # 50% SL - won't trigger
+                takeprofit_levels=[0.02],  # 2% TP - should trigger in uptrend
+                slippage=0.0,
+                max_traj_length=200,
+                random_start=False,
+            )
+            env = SeqLongOnlySLTPEnv(trending_up_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Buy with SL/TP
-        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
-        result = env.step(td)
-        td = result["next"]
-
-        assert env.position.position_size > 0
-        initial_position = env.position.position_size
-
-        # Continue stepping - TP should trigger
-        tp_triggered = False
-        for _ in range(150):
-            td.set("action", torch.tensor(0))  # hold
+            # Buy with SL/TP
+            td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
             result = env.step(td)
             td = result["next"]
 
-            if env.position.position_size == 0 and initial_position > 0:
-                tp_triggered = True
-                break
+            assert env.position.position_size > 0
+            initial_position = env.position.position_size
 
-            if td.get("done", False):
-                break
+            # Continue stepping - TP should trigger
+            tp_triggered = False
+            for _ in range(150):
+                td.set("action", torch.tensor(0))  # hold
+                result = env.step(td)
+                td = result["next"]
 
-        assert tp_triggered, "Take profit should have triggered in uptrend"
+                if env.position.position_size == 0 and initial_position > 0:
+                    tp_triggered = True
+                    break
+
+                if td.get("done", False):
+                    break
+
+            assert tp_triggered, "Take profit should have triggered in uptrend"
+
+        finally:
+            env.close()
 
     def test_sl_tp_cleared_after_trigger(self, trending_down_df):
         """SL/TP should be cleared after position exits."""
-        config = SeqLongOnlySLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            transaction_fee=0.001,
-            stoploss_levels=[-0.01],  # 1% SL
-            takeprofit_levels=[0.5],
-            slippage=0.0,
-            max_traj_length=100,
-            random_start=False,
-        )
-        env = SeqLongOnlySLTPEnv(trending_down_df, config, simple_feature_fn)
+        try:
+            config = SeqLongOnlySLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                transaction_fee=0.001,
+                stoploss_levels=[-0.01],  # 1% SL
+                takeprofit_levels=[0.5],
+                slippage=0.0,
+                max_traj_length=100,
+                random_start=False,
+            )
+            env = SeqLongOnlySLTPEnv(trending_down_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Buy
-        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
-        result = env.step(td)
-        td = result["next"]
-
-        # Wait for SL to trigger
-        for _ in range(50):
-            td.set("action", torch.tensor(0))
+            # Buy
+            td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
             result = env.step(td)
             td = result["next"]
 
-            if env.position.position_size == 0:
-                # Position exited - check SL/TP cleared
-                assert env.position.entry_price == 0.0
-                break
+            # Wait for SL to trigger
+            for _ in range(50):
+                td.set("action", torch.tensor(0))
+                result = env.step(td)
+                td = result["next"]
 
-            if td.get("done", False):
-                break
+                if env.position.position_size == 0:
+                    # Position exited - check SL/TP cleared
+                    assert env.position.entry_price == 0.0
+                    break
+
+                if td.get("done", False):
+                    break
 
 
+        finally:
+            env.close()
 class TestSeqLongOnlySLTPEnvReward:
     """Tests for reward calculation.
 
@@ -452,43 +466,51 @@ class TestSeqLongOnlySLTPEnvEdgeCases:
 
     def test_single_sl_tp_level(self, sample_ohlcv_df):
         """Should work with single SL and TP level."""
-        config = SeqLongOnlySLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            stoploss_levels=[-0.05],
-            takeprofit_levels=[0.1],
-            max_traj_length=50,
-            random_start=False,
-        )
-        env = SeqLongOnlySLTPEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = SeqLongOnlySLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                stoploss_levels=[-0.05],
+                takeprofit_levels=[0.1],
+                max_traj_length=50,
+                random_start=False,
+            )
+            env = SeqLongOnlySLTPEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Should have 2 actions: hold and buy (no CLOSE by default)
-        assert env.action_spec.n == 2
+            # Should have 2 actions: hold and buy (no CLOSE by default)
+            assert env.action_spec.n == 2
 
-        td = env.reset()
-        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=buy)
-        result = env.step(td)
+            td = env.reset()
+            td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=buy)
+            result = env.step(td)
 
-        assert result is not None
+            assert result is not None
+
+        finally:
+            env.close()
 
     def test_many_sl_tp_levels(self, sample_ohlcv_df):
         """Should work with many SL/TP levels."""
-        config = SeqLongOnlySLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            stoploss_levels=[-0.01, -0.02, -0.05, -0.1],
-            takeprofit_levels=[0.01, 0.02, 0.05, 0.1],
-            max_traj_length=50,
-            random_start=False,
-        )
-        env = SeqLongOnlySLTPEnv(sample_ohlcv_df, config, simple_feature_fn)
+        try:
+            config = SeqLongOnlySLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                stoploss_levels=[-0.01, -0.02, -0.05, -0.1],
+                takeprofit_levels=[0.01, 0.02, 0.05, 0.1],
+                max_traj_length=50,
+                random_start=False,
+            )
+            env = SeqLongOnlySLTPEnv(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Should have 1 hold + 16 combinations = 17 actions (no CLOSE by default)
-        assert env.action_spec.n == 17
+            # Should have 1 hold + 16 combinations = 17 actions (no CLOSE by default)
+            assert env.action_spec.n == 17
+
+        finally:
+            env.close()
 
     def test_multiple_episodes(self, env):
         """Should work correctly across multiple episodes."""
@@ -510,43 +532,46 @@ class TestSeqLongOnlySLTPEnvEdgeCases:
 
     def test_price_gap_triggers_sl(self, price_gap_df):
         """SL should trigger even when price gaps past the threshold."""
-        config = SeqLongOnlySLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            transaction_fee=0.001,
-            stoploss_levels=[-0.05],  # 5% SL - price gap is 10%
-            takeprofit_levels=[0.5],   # 50% TP - won't trigger
-            slippage=0.0,
-            max_traj_length=100,
-            random_start=False,
-        )
-        env = SeqLongOnlySLTPEnv(price_gap_df, config, simple_feature_fn)
+        try:
+            config = SeqLongOnlySLTPEnvConfig(
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                initial_cash=1000,
+                transaction_fee=0.001,
+                stoploss_levels=[-0.05],  # 5% SL - price gap is 10%
+                takeprofit_levels=[0.5],   # 50% TP - won't trigger
+                slippage=0.0,
+                max_traj_length=100,
+                random_start=False,
+            )
+            env = SeqLongOnlySLTPEnv(price_gap_df, config, simple_feature_fn)
 
-        td = env.reset()
+            td = env.reset()
 
-        # Buy with SL/TP
-        td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
-        result = env.step(td)
-        td = result["next"]
+            # Buy with SL/TP
+            td.set("action", torch.tensor(1))  # Buy action (0=HOLD, 1=first buy)
+            result = env.step(td)
+            td = result["next"]
 
-        if env.position.position_size > 0:
-            initial_position = env.position.position_size
+            if env.position.position_size > 0:
+                initial_position = env.position.position_size
 
-            # Step through until gap-down triggers SL
-            sl_triggered = False
-            for _ in range(60):
-                td.set("action", torch.tensor(0))  # hold
-                result = env.step(td)
-                td = result["next"]
+                # Step through until gap-down triggers SL
+                sl_triggered = False
+                for _ in range(60):
+                    td.set("action", torch.tensor(0))  # hold
+                    result = env.step(td)
+                    td = result["next"]
 
-                if env.position.position_size == 0 and initial_position > 0:
-                    sl_triggered = True
-                    break
+                    if env.position.position_size == 0 and initial_position > 0:
+                        sl_triggered = True
+                        break
 
-                if td.get("done", False):
-                    break
+                    if td.get("done", False):
+                        break
 
-            # Either SL triggered or episode ended - both valid
-            assert sl_triggered or td.get("done", False)
+                # Either SL triggered or episode ended - both valid
+                assert sl_triggered or td.get("done", False)
+        finally:
+            env.close()
