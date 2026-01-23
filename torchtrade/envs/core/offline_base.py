@@ -459,7 +459,7 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         Render the history of the environment.
 
         Creates visualization plots showing:
-        - For all environments: Price history with actions, Portfolio value (optionally vs Buy-and-Hold)
+        - For all environments: Price history with actions, Portfolio value (with optional buy-and-hold baseline comparison)
         - For futures environments: Additional position history plot
 
         Args:
@@ -475,13 +475,14 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         action_history = history_dict['actions']
         portfolio_value_history = history_dict['portfolio_values']
 
-        # Calculate buy-and-hold balance if requested
-        buy_and_hold_balance = None
+        # Calculate buy-and-hold baseline if requested
         if plot_bh_baseline:
             initial_balance = portfolio_value_history[0]
             initial_price = price_history[0]
             units_held = initial_balance / initial_price
             buy_and_hold_balance = [units_held * price for price in price_history]
+        else:
+            buy_and_hold_balance = None
 
         # Check if this is a futures environment (has position history)
         is_futures = 'positions' in history_dict
@@ -531,9 +532,10 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
                     time_indices, buy_and_hold_balance,
                     label='Buy and Hold', color='purple', linestyle='--', linewidth=1.5
                 )
+                ax2.set_title('Portfolio Value vs Buy and Hold')
+            else:
+                ax2.set_title('Portfolio Value')
             ax2.set_ylabel('Portfolio Value (USD)')
-            title = 'Portfolio Value vs Buy and Hold' if plot_bh_baseline else 'Portfolio Value'
-            ax2.set_title(title)
             ax2.legend()
             ax2.grid(True, alpha=0.3)
 
@@ -598,14 +600,15 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
                     time_indices, buy_and_hold_balance,
                     label='Buy and Hold', color='purple', linestyle='-', linewidth=2
                 )
+                ax2.set_title('Portfolio Value History vs Buy and Hold')
+            else:
+                ax2.set_title('Portfolio Value History')
 
             ax2.set_xlabel(
                 'Time (Index)' if not isinstance(time_indices[0], (str, datetime))
                 else 'Time'
             )
             ax2.set_ylabel('Portfolio Value (USD)')
-            title = 'Portfolio Value History vs Buy and Hold' if plot_bh_baseline else 'Portfolio Value History'
-            ax2.set_title(title)
             ax2.legend()
             ax2.grid(True)
 
