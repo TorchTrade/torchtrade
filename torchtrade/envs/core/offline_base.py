@@ -117,6 +117,7 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             feature_processing_fn=feature_preprocessing_fn,
             features_start_with="features_",
             max_traj_length=self.config.max_traj_length,
+            seed=self.config.seed,
         )
 
     def _build_observation_specs(
