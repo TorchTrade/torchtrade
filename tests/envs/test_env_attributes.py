@@ -10,6 +10,8 @@ have the necessary attributes for LLM actor integration:
 import pandas as pd
 import pytest
 
+from torchrl.envs import TransformedEnv, Compose, RewardSum, StepCounter
+
 from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from torchtrade.envs.offline.longonly.sequential_sltp import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
 from torchtrade.envs.offline.longonly.onestep import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig
@@ -355,3 +357,116 @@ class TestMarketDataKeys:
         env = SeqLongOnlyEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
 
         assert len(env.market_data_keys) == 3, "Should have 3 market data keys for 3 timeframes"
+
+
+class TestWrappedEnvironmentIntrospection:
+    """
+    Test introspection methods work correctly with wrapped environments.
+
+    This is the PRIMARY documented use case - all training examples wrap environments
+    in TransformedEnv with RewardSum, StepCounter, etc.
+    """
+
+    def test_transformed_env_access_via_base_env(self, sample_ohlcv_df):
+        """Test helper methods accessible via .base_env on TransformedEnv (PRIMARY USE CASE)."""
+        config = SeqLongOnlyEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000.0,
+            transaction_fee=0.001,
+        )
+        base_env = SeqLongOnlyEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
+
+        # Wrap in TransformedEnv (as done in ALL examples)
+        wrapped = TransformedEnv(
+            base_env,
+            Compose(
+                RewardSum(),
+                StepCounter(max_steps=100),
+            )
+        )
+
+        # Should work via .base_env (this is how all examples access it)
+        market_keys_wrapped = wrapped.base_env.get_market_data_keys()
+        account_state_wrapped = wrapped.base_env.get_account_state()
+
+        # Should match unwrapped env
+        assert market_keys_wrapped == base_env.get_market_data_keys()
+        assert account_state_wrapped == base_env.get_account_state()
+
+        # Should be lists
+        assert isinstance(market_keys_wrapped, list)
+        assert isinstance(account_state_wrapped, list)
+
+        # Should not be empty
+        assert len(market_keys_wrapped) > 0
+        assert len(account_state_wrapped) > 0
+
+    def test_wrapped_env_multi_timeframe(self, sample_ohlcv_df):
+        """Test wrapped env with 3 timeframes (documented use case from README)."""
+        config = SeqLongOnlyEnvConfig(
+            symbol="BTC/USD",
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+                TimeFrame(15, TimeFrameUnit.Minute),
+            ],
+            window_sizes=[12, 8, 8],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000.0,
+            transaction_fee=0.001,
+        )
+        base_env = SeqLongOnlyEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
+        wrapped = TransformedEnv(base_env, RewardSum())
+
+        # Access via .base_env
+        market_keys = wrapped.base_env.get_market_data_keys()
+
+        # Should have 3 keys
+        assert len(market_keys) == 3, f"Expected 3 market data keys, got {len(market_keys)}"
+
+        # Should follow documented format
+        assert all(key.startswith("market_data_") for key in market_keys)
+
+    def test_wrapped_futures_env_returns_10_elements(self, sample_ohlcv_df):
+        """Test wrapped futures environments return 10-element account state."""
+        config = SeqFuturesEnvConfig(
+            symbol="BTC/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000.0,
+            transaction_fee=0.001,
+            leverage=10.0,
+        )
+        base_env = SeqFuturesEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
+        wrapped = TransformedEnv(base_env, RewardSum())
+
+        # Access via .base_env
+        account_state = wrapped.base_env.get_account_state()
+
+        # Futures envs should have 10 elements (including leverage, margin_ratio, liquidation_price)
+        assert len(account_state) == 10, f"Expected 10 elements for futures env, got {len(account_state)}"
+        assert account_state == FUTURES_ACCOUNT_STATE
+
+    def test_wrapped_env_attributes_populated(self, sample_ohlcv_df):
+        """Test that attributes are populated (non-empty) after wrapping."""
+        config = SeqLongOnlyEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000.0,
+            transaction_fee=0.001,
+        )
+        base_env = SeqLongOnlyEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
+        wrapped = TransformedEnv(base_env, RewardSum())
+
+        # Attributes should never be empty after successful initialization
+        market_keys = wrapped.base_env.get_market_data_keys()
+        account_state = wrapped.base_env.get_account_state()
+
+        assert len(market_keys) > 0, "market_data_keys should be populated after wrapping"
+        assert len(account_state) > 0, "account_state should be populated after wrapping"

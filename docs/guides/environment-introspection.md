@@ -11,6 +11,15 @@ All TorchTrade environments provide two methods for introspection:
 
 These methods allow you to dynamically adapt your code to different environment configurations without hardcoding observation structure.
 
+> **⚠️ Important for Wrapped Environments:**
+>
+> When using `ParallelEnv` or `TransformedEnv` (as done in all training examples), access introspection methods via `.base_env`:
+> ```python
+> market_keys = env.base_env.get_market_data_keys()
+> account_state = env.base_env.get_account_state()
+> ```
+> This ensures you access the underlying environment directly and avoid nested list returns from parallel workers.
+
 ## Methods
 
 ### get_market_data_keys()
@@ -62,37 +71,19 @@ print(env.get_account_state())
 
 ## Usage with Wrapped Environments
 
-**Important**: When using `ParallelEnv` or `TransformedEnv`, you must access the helper methods via `.base_env`:
+As noted above, wrapped environments require accessing methods via `.base_env`. Here's a complete example:
 
 ```python
-from torchrl.envs import ParallelEnv, TransformedEnv, Compose, RewardSum
+from torchrl.envs import TransformedEnv, Compose, RewardSum
 
-# Create base environment
+# Create and wrap environment
 base_env = SeqLongOnlyEnv(df, config)
+env = TransformedEnv(base_env, Compose(RewardSum()))
 
-# Wrap in TransformedEnv
-transformed_env = TransformedEnv(
-    base_env,
-    Compose(RewardSum())
-)
-
-# Access via .base_env
-market_data_keys = transformed_env.base_env.get_market_data_keys()
-account_state = transformed_env.base_env.get_account_state()
-
-# Same pattern for ParallelEnv
-parallel_env = ParallelEnv(4, lambda: SeqLongOnlyEnv(df, config))
-market_data_keys = parallel_env.base_env.get_market_data_keys()
+# Access via .base_env (see note above)
+market_data_keys = env.base_env.get_market_data_keys()
+account_state = env.base_env.get_account_state()
 ```
-
-### Why .base_env?
-
-TorchRL's wrapper environments (`ParallelEnv`, `TransformedEnv`) dispatch method calls to worker processes and aggregate results. For methods that return simple lists, this can cause issues:
-
-- **Attribute access** (e.g., `env.account_state`): Returns the attribute from the base environment
-- **Method calls** (e.g., `env.get_account_state()`): May return nested lists from all workers
-
-Using `.base_env` ensures you access the underlying environment directly and get the expected list output.
 
 ## Use Cases
 
@@ -202,7 +193,7 @@ Futures environments include 3 additional fields for margin trading:
 1. **Use for dynamic architectures**: When building networks that need to adapt to different timeframe configurations
 2. **Document assumptions**: If your code expects specific account state fields, document which environment types are supported
 3. **Validate in tests**: Test your code with different configurations to ensure it handles varying observation structures
-4. **Access via .base_env for wrapped environments**: Always use `.base_env` when the environment is wrapped
+4. **Remember `.base_env` pattern**: See the important note in the Overview section above
 
 ## Example: Complete Workflow
 
