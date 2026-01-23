@@ -10,6 +10,7 @@ from __future__ import annotations
 import wandb
 import warnings
 import pandas as pd
+import datasets
 import hydra
 import numpy as np
 import torch
@@ -64,7 +65,8 @@ def main(cfg: DictConfig):  # noqa: F821
     device = torch.device(device)
 
     # Creante env
-    df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
+    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
+    df = df["train"].to_pandas()
     test_df = df[0:(1440 * 14)] # 14 days
     train_df = df[(1440 * 14):]
 

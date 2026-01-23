@@ -7,6 +7,7 @@ from tensordict import TensorDict, TensorDictBase
 import torch
 from torchrl.data import Categorical
 import pandas as pd
+import datasets
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta, normalize_timeframe_config
 from torchtrade.envs.offline.infrastructure.utils import compute_periods_per_year_crypto, build_sltp_action_map
@@ -364,7 +365,8 @@ if __name__ == "__main__":
     window_sizes=[32]  # ~12m, 40m, 2h, 1d
     execute_on=TimeFrame(15, TimeFrameUnit.Minute) # Try 15min
 
-    df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
+    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
+    df = df["train"].to_pandas()
 
     config = LongOnlyOneStepEnvConfig(
         symbol="BTC/USD",

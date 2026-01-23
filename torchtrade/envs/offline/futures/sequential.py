@@ -10,6 +10,7 @@ from tensordict import TensorDict, TensorDictBase
 import torch
 from torchrl.data import Categorical
 import pandas as pd
+import datasets
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
 from torchtrade.envs.core.state import FuturesHistoryTracker
@@ -830,9 +831,8 @@ if __name__ == "__main__":
     execute_on = TimeFrame(5, TimeFrameUnit.Minute)
 
     # Load sample data
-    df = pd.read_csv(
-        "/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv"
-    )
+    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
+    df = df["train"].to_pandas()
 
     config = SeqFuturesEnvConfig(
         symbol="BTC/USD",

@@ -18,6 +18,7 @@ from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
+import datasets
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta, normalize_timeframe_config
 from torchtrade.envs.offline.infrastructure.utils import compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map
 from torchtrade.envs.core.reward import build_reward_context, default_log_return, validate_reward_function
@@ -192,10 +193,8 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         self.previous_portfolio_value = 0.0
         self.rollout_returns = []
 
-        # PERF: Pre-allocate account state tensor to avoid allocation each step
         self._account_state_buffer = torch.zeros(10, dtype=torch.float)
 
-        # PERF: Initialize portfolio value cache
         self._cached_portfolio_value = 0.0
         self._cached_portfolio_price = 0.0
 
@@ -295,7 +294,6 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
     def _get_observation(self, initial: bool = False) -> TensorDictBase:
         """Get the current observation state."""
         if initial or self.position.position_size == 0:
-            # PERF: Use combined method to avoid redundant searchsorted
             obs_dict, self.current_timestamp, self.truncated, self._cached_base_features = (
                 self.sampler.get_sequential_observation_with_ohlcv()
             )
@@ -304,7 +302,6 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
             # _rollout() updates _cached_base_features internally
             trade_info, obs_dict = self._rollout()
 
-        # Use cached base features (PERF: attribute access on namedtuple)
         current_price = self._cached_base_features.close
 
         # Calculate position value (absolute value of notional)
@@ -326,11 +323,9 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         total_balance = self.balance + self.unrealized_pnl
         margin_ratio = self.position.position_value / total_balance if total_balance > 0 else 0.0
 
-        # PERF: Cache portfolio value and price to avoid recalculation in _get_portfolio_value()
         self._cached_portfolio_value = total_balance
         self._cached_portfolio_price = current_price
 
-        # PERF: Update pre-allocated account state buffer in-place
         self._account_state_buffer[0] = self.balance
         self._account_state_buffer[1] = self.position.position_size  # Positive=long, Negative=short
         self._account_state_buffer[2] = self.position.position_value
@@ -399,14 +394,10 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
     def _get_portfolio_value(self, current_price: float = None) -> float:
-        """Calculate total portfolio value including unrealized PnL.
-
-        PERF: Uses cached value when price matches the last cached price from _get_observation().
-        """
+        """Calculate total portfolio value including unrealized PnL."""
         if current_price is None:
             current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
 
-        # PERF: Use cached portfolio value if price matches (avoids recalculating unrealized PnL)
         if hasattr(self, '_cached_portfolio_price') and current_price == self._cached_portfolio_price:
             return self._cached_portfolio_value
 
@@ -423,7 +414,6 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         """Execute one environment step."""
         self.step_counter += 1
 
-        # Cache base features (PERF: attribute access on namedtuple)
         cached_price = self._cached_base_features.close
 
         # Store old portfolio value
@@ -442,7 +432,6 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         # Get updated state (this advances timestamp and caches new base features)
         next_tensordict = self._get_observation()
 
-        # Use newly cached base features for new portfolio value (PERF: attribute access)
         new_price = self._cached_base_features.close
         new_portfolio_value = self._get_portfolio_value(new_price)
 
@@ -488,13 +477,8 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         return next_tensordict
 
     def compute_return(self, close_price: float) -> float:
-        """Compute log return for current step.
-
-        PERF: Returns float instead of tensor. Tensor conversion happens once
-        in _calculate_reward() to eliminate tensor allocation per rollout step.
-        """
+        """Compute log return for current step."""
         current_value = self._get_portfolio_value(close_price)
-        # PERF: Use math.log instead of creating tensors for each computation
         if self.previous_portfolio_value > 0:
             log_return = math.log(current_value / self.previous_portfolio_value)
         else:
@@ -595,21 +579,17 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
 
         future_rollout_steps = 1
         while not self.truncated:
-            # PERF: Get observation AND OHLCV in one call (avoids redundant searchsorted)
             obs_dict, self.current_timestamp, self.truncated, ohlcv = (
                 self.sampler.get_sequential_observation_with_ohlcv()
             )
             self._cached_base_features = ohlcv
 
-            # PERF: Use attribute access (namedtuple) instead of dict lookup
             open_price = ohlcv.open
             close_price = ohlcv.close
             high_price = ohlcv.high
             low_price = ohlcv.low
 
             self.rollout_returns.append(self.compute_return(close_price))
-
-            # PERF: Simplified trigger logic using cached locals
             # For long: low is min (check SL), high is max (check TP)
             # For short: high is max (check SL), low is min (check TP)
             if is_long:
@@ -640,7 +620,6 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
 
         # If loop never executed (truncated from start), get an observation
         if obs_dict is None:
-            # PERF: Use combined method to avoid redundant searchsorted
             obs_dict, self.current_timestamp, self.truncated, self._cached_base_features = (
                 self.sampler.get_sequential_observation_with_ohlcv()
             )
@@ -780,9 +759,8 @@ if __name__ == "__main__":
     window_sizes = [32]
     execute_on = TimeFrame(15, TimeFrameUnit.Minute)
 
-    df = pd.read_csv(
-        "/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv"
-    )
+    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
+    df = df["train"].to_pandas()
 
     config = FuturesOneStepEnvConfig(
         symbol="BTC/USD",

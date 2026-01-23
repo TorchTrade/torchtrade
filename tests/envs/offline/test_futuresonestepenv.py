@@ -318,7 +318,7 @@ class TestFuturesOneStepEnvLongPosition:
     def test_long_sets_sl_below_entry(self, env):
         """Long should set stop loss below entry price."""
         td = env.reset()
-        entry_price = env._cached_base_features.close  # PERF: namedtuple attribute access
+        entry_price = env._cached_base_features.close
 
         td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
         env._execute_trade_if_needed(env.action_map[2])
@@ -328,7 +328,7 @@ class TestFuturesOneStepEnvLongPosition:
     def test_long_sets_tp_above_entry(self, env):
         """Long should set take profit above entry price."""
         td = env.reset()
-        entry_price = env._cached_base_features.close  # PERF: namedtuple attribute access
+        entry_price = env._cached_base_features.close
 
         td.set("action", torch.tensor(2))  # Long (0=HOLD, 1=CLOSE, 2=first long)
         env._execute_trade_if_needed(env.action_map[2])
@@ -363,7 +363,7 @@ class TestFuturesOneStepEnvShortPosition:
     def test_short_sets_sl_above_entry(self, env):
         """Short should set stop loss above entry price."""
         td = env.reset()
-        entry_price = env._cached_base_features.close  # PERF: namedtuple attribute access
+        entry_price = env._cached_base_features.close
 
         num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
         short_action = 2 + num_long
@@ -374,7 +374,7 @@ class TestFuturesOneStepEnvShortPosition:
     def test_short_sets_tp_below_entry(self, env):
         """Short should set take profit below entry price."""
         td = env.reset()
-        entry_price = env._cached_base_features.close  # PERF: namedtuple attribute access
+        entry_price = env._cached_base_features.close
 
         num_long = len(env.stoploss_levels) * len(env.takeprofit_levels)
         short_action = 2 + num_long
@@ -513,7 +513,6 @@ class TestFuturesOneStepEnvRollout:
 
         # Should have returns from rollout
         assert len(env.rollout_returns) >= 1
-        # PERF: Returns are now floats (converted to tensor once in _calculate_reward)
         for ret in env.rollout_returns:
             assert isinstance(ret, float)
 
