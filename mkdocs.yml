@@ -13,6 +13,7 @@ theme:
     - navigation.top
     - navigation.expand
     - navigation.path
+    - navigation.footer
     - search.suggest
     - search.highlight
     - content.tabs.link
@@ -30,7 +31,7 @@ theme:
       toggle:
         icon: material/toggle-switch
         name: Switch to Light Mode
-      primary: grey
+      primary: black
       accent: orange
 
 extra:
