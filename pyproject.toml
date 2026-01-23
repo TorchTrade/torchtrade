@@ -57,9 +57,9 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 
 [project.urls]
-"Homepage" = "https://github.com/torchtrade/torchrl-alpaca-env"
-"Bug Reports" = "https://github.com/torchtrade/torchrl-alpaca-env/issues"
-"Source" = "https://github.com/torchtrade/torchrl-alpaca-env"
+"Homepage" = "https://github.com/TorchTrade/torchtrade"
+"Bug Reports" = "https://github.com/TorchTrade/torchtrade/issues"
+"Source" = "https://github.com/TorchTrade/torchtrade"
 
 [tool.hatch.metadata]
 allow-direct-references = true
