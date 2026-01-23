@@ -10,7 +10,7 @@ have the necessary attributes for LLM actor integration:
 import pandas as pd
 import pytest
 
-from torchrl.envs import TransformedEnv, Compose, RewardSum, StepCounter
+from torchrl.envs import TransformedEnv, Compose, RewardSum, StepCounter, ParallelEnv, EnvCreator
 
 from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from torchtrade.envs.offline.longonly.sequential_sltp import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig

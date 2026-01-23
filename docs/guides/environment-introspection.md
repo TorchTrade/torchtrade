@@ -13,12 +13,24 @@ These methods allow you to dynamically adapt your code to different environment 
 
 > **⚠️ Important for Wrapped Environments:**
 >
-> When using `ParallelEnv` or `TransformedEnv` (as done in all training examples), access introspection methods via `.base_env`:
+> When using `TransformedEnv`, access introspection methods via `.base_env`:
 > ```python
 > market_keys = env.base_env.get_market_data_keys()
 > account_state = env.base_env.get_account_state()
 > ```
-> This ensures you access the underlying environment directly and avoid nested list returns from parallel workers.
+>
+> **For `ParallelEnv`:** You must call `env.reset()` before accessing `.base_env`:
+> ```python
+> parallel_env = ParallelEnv(4, lambda: SeqLongOnlyEnv(df, config))
+> parallel_env.reset()  # Required!
+> market_keys = parallel_env.base_env.get_market_data_keys()
+> ```
+>
+> **For model building before reset:** Use observation_spec pattern:
+> ```python
+> # When building models before env.reset() with ParallelEnv
+> market_keys = [k for k in env.observation_spec.keys() if k.startswith("market_data")]
+> ```
 
 ## Methods
 
