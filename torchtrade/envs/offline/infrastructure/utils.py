@@ -45,8 +45,7 @@ class InitialBalanceSampler:
     """
     def __init__(self, initial_cash: Union[List[int], int], seed: Optional[int] = None):
         self.initial_cash = initial_cash
-        if seed is not None:
-            np.random.seed(seed)
+        self.np_rng = np.random.default_rng(seed)
 
     def sample(self) -> float:
         """Sample an initial balance value.
@@ -56,8 +55,8 @@ class InitialBalanceSampler:
         """
         if isinstance(self.initial_cash, int):
             return float(self.initial_cash)
-        else:
-            return float(np.random.randint(self.initial_cash[0], self.initial_cash[1]))
+
+        return float(self.np_rng.integers(self.initial_cash[0], self.initial_cash[1]))
 
 
 def build_sltp_action_map(
