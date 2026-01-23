@@ -91,6 +91,25 @@ uv run python examples/online/ppo/train.py \
 
 For detailed tutorials, see **[Getting Started Guide](https://torchtrade.github.io/torchtrade_envs/getting-started/)**.
 
+### Environment Introspection
+
+Programmatically understand your environment's observation structure:
+
+```python
+# Get account state fields
+print(f"Account state: {env.get_account_state()}")
+# ['cash', 'position_size', 'position_value', 'entry_price',
+#  'current_price', 'unrealized_pnlpct', 'holding_time']
+
+# Get market data keys
+print(f"Market data keys: {env.get_market_data_keys()}")
+# ['market_data_1Minute_12', 'market_data_5Minute_8', 'market_data_15Minute_8']
+```
+
+**Note:** For wrapped environments (ParallelEnv, TransformedEnv), use `env.base_env.get_market_data_keys()`.
+
+See **[Environment Introspection Guide](https://torchtrade.github.io/torchtrade_envs/guides/environment-introspection/)** for details.
+
 ---
 
 ## Live Environments

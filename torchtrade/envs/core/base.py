@@ -2,7 +2,7 @@
 
 import logging
 from abc import abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -42,6 +42,11 @@ class TorchTradeBaseEnv(EnvBase):
                    - reward_scaling: float
         """
         self.config = config
+
+        # Initialize observation introspection attributes
+        # These are populated by subclasses during initialization
+        self.account_state: List[str] = []
+        self.market_data_keys: List[str] = []
 
         # Validate custom reward function signature if provided
         reward_function = getattr(config, 'reward_function', None)
@@ -176,6 +181,54 @@ class TorchTradeBaseEnv(EnvBase):
 
         # Otherwise use default log return
         return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
+
+    def get_account_state(self) -> List[str]:
+        """
+        Get list of account state field names.
+
+        Used for programmatic introspection of the account state observation structure.
+        Useful for building neural networks, LLM actor integration, and understanding
+        what variables are available in the environment.
+
+        Returns:
+            List of account state field names (e.g., ["cash", "position_size", ...])
+
+        Example:
+            >>> env = SeqLongOnlyEnv(df, config)
+            >>> print(env.get_account_state())
+            ['cash', 'position_size', 'position_value', 'entry_price',
+             'current_price', 'unrealized_pnlpct', 'holding_time']
+
+        Note:
+            For environments wrapped in ParallelEnv or TransformedEnv, access via:
+            >>> account_state = env.base_env.get_account_state()
+        """
+        return self.account_state
+
+    def get_market_data_keys(self) -> List[str]:
+        """
+        Get list of market data observation keys.
+
+        Used for programmatic introspection of market data observation structure.
+        Returns the keys for all market data observations based on configured timeframes.
+
+        Returns:
+            List of market data keys in format "market_data_{timeframe}_{window_size}"
+
+        Example:
+            >>> config = SeqLongOnlyEnvConfig(
+            ...     time_frames=["1min", "5min", "15min"],
+            ...     window_sizes=[12, 8, 8]
+            ... )
+            >>> env = SeqLongOnlyEnv(df, config)
+            >>> print(env.get_market_data_keys())
+            ['market_data_1Minute_12', 'market_data_5Minute_8', 'market_data_15Minute_8']
+
+        Note:
+            For environments wrapped in ParallelEnv or TransformedEnv, access via:
+            >>> market_data_keys = env.base_env.get_market_data_keys()
+        """
+        return self.market_data_keys
 
     @abstractmethod
     def _get_portfolio_value(self, *args, **kwargs) -> float:

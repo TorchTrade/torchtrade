@@ -231,8 +231,7 @@ def make_discrete_grpo_model(cfg, env, device):
     """Make discrete GRPO agent encoder (same as PPO)."""
     activation = "tanh"
     action_spec = env.action_spec
-    market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
-    assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"
+    market_data_keys = env.base_env.get_market_data_keys()
     account_state_key = "account_state"
 
     time_frames = cfg.env.time_frames

@@ -177,6 +177,7 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
             dtype=torch.float
         )
         self.observation_spec.set(self.account_state_key, account_state_spec)
+        self.account_state = self.ACCOUNT_STATE  # Set instance variable for introspection
 
         # Market data specs (one per interval/timeframe)
         self.market_data_keys = []
@@ -342,14 +343,6 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         raise NotImplementedError(
             "Subclasses must implement _check_termination()"
         )
-
-    def get_market_data_keys(self) -> List[str]:
-        """Return the list of market data keys."""
-        return self.market_data_keys
-
-    def get_account_state(self) -> List[str]:
-        """Return the list of account state field names."""
-        return self.ACCOUNT_STATE
 
     def close(self):
         """Clean up resources.

@@ -651,6 +651,38 @@ For detailed documentation and examples, see:
 
 ---
 
+## Observation Introspection
+
+All live environments provide helper methods to understand their observation structure:
+
+```python
+from torchtrade.envs import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+
+env = AlpacaTorchTradingEnv(config)
+
+# Get market data keys
+print(env.get_market_data_keys())
+# ['market_data_1Minute_12', 'market_data_5Minute_8']
+
+# Get account state fields (7 elements for spot, 10 for futures)
+print(env.get_account_state())
+# Alpaca (spot): ['cash', 'position_size', 'position_value', 'entry_price',
+#                  'current_price', 'unrealized_pnlpct', 'holding_time']
+
+# Binance/Bitget (futures): Adds 'leverage', 'margin_ratio', 'liquidation_price'
+```
+
+**For wrapped environments** (ParallelEnv, TransformedEnv):
+```python
+# Use .base_env to access helper methods
+market_keys = env.base_env.get_market_data_keys()
+account_state = env.base_env.get_account_state()
+```
+
+**See [Environment Introspection Guide](../guides/environment-introspection.md)** for detailed usage examples and integration with LLM actors.
+
+---
+
 ## Safety and Best Practices
 
 ### Always Start with Paper/Testnet Trading

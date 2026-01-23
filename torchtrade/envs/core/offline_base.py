@@ -174,28 +174,6 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
                 Unbounded(shape=(), dtype=torch.long)
             )
 
-    def get_account_state(self) -> List[str]:
-        """
-        Get list of account state field names.
-
-        Used for LLM actor integration to understand account state structure.
-
-        Returns:
-            List of account state field names (e.g., ["cash", "position_size", ...])
-        """
-        return self.account_state
-
-    def get_market_data_keys(self) -> List[str]:
-        """
-        Get list of market data observation keys.
-
-        Used for LLM actor integration to understand market data structure.
-
-        Returns:
-            List of market data keys (e.g., ["market_data_1Minute_10", ...])
-        """
-        return self.market_data_keys
-
     def _reset_history(self):
         """Reset all history tracking to a new HistoryTracker instance.
 

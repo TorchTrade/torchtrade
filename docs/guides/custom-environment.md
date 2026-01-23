@@ -130,6 +130,36 @@ for _ in range(100):
         break
 ```
 
+### Adding Observation Introspection
+
+For compatibility with TorchTrade utilities and LLM actors, set `account_state` and `market_data_keys` attributes:
+
+```python
+class SimpleCustomEnv(EnvBase):
+    def __init__(self, prices: torch.Tensor, **kwargs):
+        super().__init__(**kwargs)
+        self.prices = prices
+
+        # Set introspection attributes
+        self.account_state = ["position", "entry_price", "current_price"]
+        self.market_data_keys = ["price"]
+
+        # Define specs...
+        self._observation_spec = CompositeSpec({
+            "price": UnboundedContinuousTensorSpec(shape=(1,)),
+            "position": UnboundedContinuousTensorSpec(shape=(1,)),
+        })
+        # ... rest of init
+```
+
+**Why set these attributes?**
+- Enables `env.get_account_state()` and `env.get_market_data_keys()` methods (inherited from base class)
+- Allows dynamic neural network construction
+- Required for LLM actor integration
+- Improves code introspection and debugging
+
+**See [Environment Introspection Guide](environment-introspection.md)** for usage examples.
+
 ---
 
 ## Example 2: Extending Existing Environments
