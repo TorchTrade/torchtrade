@@ -2,6 +2,58 @@
 
 Offline environments are designed for **training on historical data** (backtesting). These are not "offline RL" methods like CQL or IQL, but rather environments that use pre-collected market data instead of live exchange APIs.
 
+## Environment Types
+
+TorchTrade currently offers three main categories of offline environments, each designed for different trading strategies and learning paradigms:
+
+### Sequential Environments (Seq)
+
+**Environments**: `SeqLongOnlyEnv`, `SeqFuturesEnv`
+
+These are the foundational environments for step-by-step trading with **fractional position sizing**. The agent can continuously adapt its position at every timestep:
+
+- **Fractional actions**: Action values represent the fraction of capital to deploy (e.g., 0.5 = 50% allocation)
+- **Flexible position management**: Agent can adjust position size up or down at any time, or go completely market neutral (action = 0)
+- **Futures support**: `SeqFuturesEnv` adds leverage (1-125x), margin management, and liquidation mechanics
+- **No leverage**: `SeqLongOnlyEnv` uses spot trading without leverage (long-only positions)
+
+**Key characteristic**: Maximum flexibility - the agent can rebalance or exit positions freely at every decision point.
+
+### SL/TP Environments (Stop-Loss/Take-Profit)
+
+**Environments**: `SeqLongOnlySLTPEnv`, `SeqFuturesSLTPEnv`
+
+These environments extend sequential environments with **bracket order risk management**:
+
+- **Bracket orders**: Each trade includes configurable stop-loss and take-profit trigger levels
+- **Combinatorial action space**: Agent selects from combinations of SL/TP levels (e.g., SL=-2% with TP=+5%)
+- **Risk mitigation**: Automated exit triggers help limit downside and lock in profits
+- **Still flexible**: Agent can manually exit positions or switch directions before triggers are hit
+
+**Key characteristic**: Structured risk management with predefined exit conditions, but maintains flexibility for manual intervention.
+
+### OneStep Environments (Episodic Rollouts)
+
+**Environments**: `LongOnlyOneStepEnv`, `FuturesOneStepEnv`
+
+These environments are optimized for **fast episodic training** with algorithms like [GRPO](https://arxiv.org/abs/2402.03300):
+
+- **Single decision point**: Agent observes market state, takes one action, and episode completes
+- **Internal rollouts**: After action is taken, environment internally simulates the position until SL/TP triggers or max rollout length
+- **No mid-episode adjustments**: Unlike sequential environments, the agent cannot change position during the rollout
+- **Terminal rewards**: Returns cumulative PnL from the entire rollout as a single terminal reward
+
+**Key characteristic**: Optimized for fast iteration and contextual bandit-style learning. Policies can be deployed to sequential environments for step-by-step execution.
+
+---
+
+!!! note "Extensible Framework"
+    This is the **current base setup** of TorchTrade environments. The framework is designed to be extensible:
+
+    - We plan to add more environment variants based on user needs and research directions
+    - Users can create **custom environments** by inheriting from existing base classes or implementing new ones from scratch
+    - See [Building Custom Environments](../guides/custom-environment.md) for guidance on extending TorchTrade
+
 ## Overview
 
 TorchTrade provides 6 offline environments:

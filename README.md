@@ -6,7 +6,7 @@
 
 **A machine learning framework for algorithmic trading built on [TorchRL](https://github.com/pytorch/rl).**
 
-TorchTrade's goal is to provide accessible deployment of RL methods to trading. The framework supports various RL methodologies including **online RL**, **offline RL**, **model-based RL**, **contrastive learning**, and many more areas of reinforcement learning research. Beyond RL, TorchTrade integrates traditional trading methods such as **rule-based strategies** and **Kalman filters**, as well as modern approaches including **LLMs** (both local models and frontier model integrations) as trading actors.
+TorchTrade's goal is to provide accessible deployment of RL methods to trading. The framework supports various RL methodologies including **online RL**, **offline RL**, **model-based RL**, **contrastive learning**, and many more areas of reinforcement learning research. Beyond RL, TorchTrade integrates traditional trading methods such as **rule-based strategies**, as well as modern approaches including **LLMs** (both local models and frontier model integrations) as trading actors.
 
 TorchTrade provides modular environments for both live trading with major exchanges and offline backtesting. The framework supports:
 - 🎯 **Multi-Timeframe Observations** - Train on 1m, 5m, 15m, 1h bars simultaneously
@@ -148,7 +148,7 @@ TorchTrade is open-source and free to use. If you find it valuable for your rese
 
 - **Buy Me a Coffee**: [buymeacoffee.com/torchtrade](https://buymeacoffee.com/torchtrade)
 - ⭐ **Star the repo**: Help others discover TorchTrade on [GitHub](https://github.com/TorchTrade/torchtrade)
-- 🪙 **Use affiliate links**: Sign up for exchanges using the links above
+- 🪙 **Use affiliate links**: Sign up for exchanges using the links above to support the project at no extra cost to you
 
 Your support helps maintain the project, add new features, and keep documentation up-to-date!
 
