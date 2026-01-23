@@ -7,6 +7,7 @@ import ccxt
 
 from torchtrade.envs.live.bitget.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
+from torchtrade.envs.core.common_types import OrderStatus
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +46,6 @@ class MarginMode(Enum):
             'isolated' for ISOLATED, 'cross' for CROSSED
         """
         return 'isolated' if self == MarginMode.ISOLATED else 'cross'
-
-
-@dataclass
-class OrderStatus:
-    is_open: bool
-    order_id: Optional[str]
-    filled_qty: Optional[float]
-    filled_avg_price: Optional[float]
-    status: str
-    side: str
-    order_type: str
 
 
 @dataclass

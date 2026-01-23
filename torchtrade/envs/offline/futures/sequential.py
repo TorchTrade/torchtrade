@@ -22,12 +22,7 @@ from torchtrade.envs.utils.fractional_sizing import (
     POSITION_TOLERANCE_PCT,
     POSITION_TOLERANCE_ABS,
 )
-
-
-class MarginType(Enum):
-    """Margin type for futures trading."""
-    ISOLATED = "isolated"
-    CROSSED = "crossed"
+from torchtrade.envs.core.common_types import MarginType
 
 
 @dataclass

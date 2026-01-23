@@ -74,7 +74,6 @@ class MeanReversionActor(RuleBasedActor):
         stoch_d_window: int = 3,
         oversold_threshold: float = 20.0,
         overbought_threshold: float = 80.0,
-        volume_confirmation: float = 1.5,
         execute_timeframe: TimeFrame = TimeFrame(5, TimeFrameUnit.Minute),
         **kwargs
     ):
