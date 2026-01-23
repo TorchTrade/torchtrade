@@ -107,7 +107,7 @@ def apply_env_transforms(env, max_steps, cfg):
           to avoid VecNormV2 device issues.
     """
     # Get market data keys for Chronos embedding
-    market_data_keys = env.base_env.get_market_data_keys()[0]
+    market_data_keys = env.market_data_keys
 
     # Create Chronos transforms for each market data observation
     chronos_transforms = []

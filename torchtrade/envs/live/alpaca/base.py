@@ -149,10 +149,9 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             dtype=torch.float
         )
         self.observation_spec.set(self.account_state_key, account_state_spec)
-        self.account_state = self.ACCOUNT_STATE  # Set instance variable for introspection
+        self._account_state = self.ACCOUNT_STATE  # Set instance variable for introspection
 
         # Market data specs (one per timeframe)
-        self.market_data_keys = []
         window_sizes = self.config.window_sizes if isinstance(self.config.window_sizes, list) else [self.config.window_sizes]
         for i, market_data_name in enumerate(market_data_names):
             market_data_key = "market_data_" + market_data_name
@@ -164,7 +163,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
                 dtype=torch.float
             )
             self.observation_spec.set(market_data_key, market_data_spec)
-            self.market_data_keys.append(market_data_key)
 
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""

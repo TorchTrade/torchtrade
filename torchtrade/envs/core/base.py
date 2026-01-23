@@ -43,10 +43,9 @@ class TorchTradeBaseEnv(EnvBase):
         """
         self.config = config
 
-        # Initialize observation introspection attributes
-        # These are populated by subclasses during initialization
-        self.account_state: List[str] = []
-        self.market_data_keys: List[str] = []
+        # Initialize account state structure (used by property)
+        # Populated by subclasses during initialization
+        self._account_state: List[str] = []
 
         # Validate custom reward function signature if provided
         reward_function = getattr(config, 'reward_function', None)
@@ -182,41 +181,45 @@ class TorchTradeBaseEnv(EnvBase):
         # Otherwise use default log return
         return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
-    def get_account_state_keys(self) -> List[str]:
-        """
-        Get list of account state field names.
+    @property
+    def account_state(self):
+        """Account state specification with key and field names.
 
-        Used for programmatic introspection of the account state observation structure.
-        Useful for building neural networks, LLM actor integration, and understanding
-        what variables are available in the environment.
+        Returns a dict-like object containing:
+        - key: The observation spec key name ("account_state")
+        - values: List of account state field names
 
-        Returns:
-            List of account state field names (e.g., ["cash", "position_size", ...])
+        The field structure varies between environment types:
+        - Standard (7 elements): cash, position_size, position_value, entry_price,
+          current_price, unrealized_pnlpct, holding_time
+        - Futures (10 elements): adds leverage, margin_ratio, liquidation_price
 
         Example:
             >>> env = SeqLongOnlyEnv(df, config)
-            >>> print(env.get_account_state_keys())
+            >>> env.account_state.key
+            'account_state'
+            >>> list(env.account_state.values)
             ['cash', 'position_size', 'position_value', 'entry_price',
              'current_price', 'unrealized_pnlpct', 'holding_time']
 
         Note:
-            For environments wrapped in ParallelEnv or TransformedEnv, use [0] indexing
-            for batched environments (ParallelEnv, SerialEnv):
-            >>> account_state_keys = env.base_env.get_account_state_keys()[0]
-
-            No reset() is needed - attributes are populated during __init__.
+            Works seamlessly with ParallelEnv and TransformedEnv without reset().
         """
-        return self.account_state
+        class AccountStateSpec:
+            def __init__(self, key, values):
+                self.key = key
+                self.values = values
 
-    def get_market_data_keys(self) -> List[str]:
-        """
-        Get list of market data observation keys.
+        return AccountStateSpec("account_state", self._account_state)
 
-        Used for programmatic introspection of market data observation structure.
-        Returns the keys for all market data observations based on configured timeframes.
+    @property
+    def market_data_keys(self) -> List[str]:
+        """The market data observation keys.
 
-        Returns:
-            List of market data keys in format "market_data_{timeframe}_{window_size}"
+        Returns list of market data keys extracted from observation_spec.
+        Follows TorchRL convention similar to action_keys and state_keys.
+
+        Keys follow format: "market_data_{timeframe}_{window_size}"
 
         Example:
             >>> config = SeqLongOnlyEnvConfig(
@@ -224,17 +227,15 @@ class TorchTradeBaseEnv(EnvBase):
             ...     window_sizes=[12, 8, 8]
             ... )
             >>> env = SeqLongOnlyEnv(df, config)
-            >>> print(env.get_market_data_keys())
+            >>> print(env.market_data_keys)
             ['market_data_1Minute_12', 'market_data_5Minute_8', 'market_data_15Minute_8']
 
         Note:
-            For environments wrapped in ParallelEnv or TransformedEnv, use [0] indexing
-            for batched environments (ParallelEnv, SerialEnv):
-            >>> market_data_keys = env.base_env.get_market_data_keys()[0]
-
-            No reset() is needed - attributes are populated during __init__.
+            Works seamlessly with ParallelEnv and TransformedEnv without reset().
+            Derived from observation_spec which is always available.
         """
-        return self.market_data_keys
+        keys = [k for k in self.observation_spec.keys() if k.startswith("market_data")]
+        return sorted(keys)
 
     @abstractmethod
     def _get_portfolio_value(self, *args, **kwargs) -> float:

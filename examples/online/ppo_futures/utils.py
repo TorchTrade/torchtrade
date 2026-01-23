@@ -180,7 +180,7 @@ def make_discrete_ppo_model(cfg, env, device):
     activation = cfg.model.activation
     action_spec = env.action_spec
     # TODO: should use the get_market_data function of the env
-    market_data_keys = env.base_env.get_market_data_keys()[0] 
+    market_data_keys = env.market_data_keys 
     account_state_key = "account_state"
 
     time_frames = cfg.env.time_frames

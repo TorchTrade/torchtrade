@@ -135,7 +135,7 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
 
         # Account state spec
         self.account_state_key = "account_state"
-        self.account_state = account_state
+        self._account_state = account_state
         account_state_spec = Bounded(
             low=-torch.inf,
             high=torch.inf,
@@ -146,7 +146,6 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
 
         # Market data specs (one per timeframe)
         market_data_keys = self.sampler.get_observation_keys()
-        self.market_data_keys = []
 
         for i, market_data_name in enumerate(market_data_keys):
             market_data_key = (
@@ -159,7 +158,6 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
                 dtype=torch.float
             )
             self.observation_spec.set(market_data_key, market_data_spec)
-            self.market_data_keys.append(market_data_key)
 
         # Add coverage tracking indices (only when random_start=True)
         if self.random_start:

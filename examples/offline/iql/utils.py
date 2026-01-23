@@ -234,7 +234,7 @@ def make_offline_replay_buffer(rb_cfg):
 def make_discrete_iql_model(cfg, env, device):
     """Make discrete IQL agent."""
     # Define Actor Network
-    market_data_keys = env.base_env.get_market_data_keys()[0]
+    market_data_keys = env.market_data_keys
     account_state_key = "account_state"
     # Define Actor Network
     time_frames = cfg.env.time_frames
