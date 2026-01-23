@@ -98,9 +98,6 @@ def main(cfg: DictConfig):  # noqa: F821
                 compile_mode = "reduce-overhead"
 
     # Create models
-    # Reset environment so we can access .base_env for introspection
-    eval_env.reset()
-
     actor, critic = make_ppo_models(
         eval_env,
         device=device,

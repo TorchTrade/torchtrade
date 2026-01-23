@@ -84,9 +84,6 @@ def main(cfg: DictConfig):  # noqa: F821
     replay_buffer = make_offline_replay_buffer(cfg.replay_buffer)
 
     # Create agent
-    # Reset environment so we can access .base_env for introspection
-    eval_env.reset()
-
     model = make_discrete_iql_model(cfg, eval_env, device)
 
     # Create loss

@@ -105,9 +105,6 @@ def main(cfg: DictConfig):  # noqa: F821
     )
 
     # Create agent
-    # Reset environment so we can access .base_env for introspection
-    eval_env.reset()
-
     model = make_discrete_iql_model(cfg, train_env, device)
 
     # Create loss

@@ -85,9 +85,6 @@ def main(cfg: DictConfig):  # noqa: F821
             else:
                 compile_mode = "reduce-overhead"
 
-    # Reset environment so we can access .base_env for introspection
-    _ = eval_env.reset()
-
     # Create models (check utils_atari.py)
     actor, critic = make_ppo_models(
         eval_env,

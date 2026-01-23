@@ -200,11 +200,11 @@ class TorchTradeBaseEnv(EnvBase):
              'current_price', 'unrealized_pnlpct', 'holding_time']
 
         Note:
-            For environments wrapped in ParallelEnv or TransformedEnv:
-            1. Call env.reset() first
-            2. Use [0] indexing for batched environments (ParallelEnv, SerialEnv):
-            >>> env.reset()
+            For environments wrapped in ParallelEnv or TransformedEnv, use [0] indexing
+            for batched environments (ParallelEnv, SerialEnv):
             >>> account_state_keys = env.base_env.get_account_state_keys()[0]
+
+            No reset() is needed - attributes are populated during __init__.
         """
         return self.account_state
 
@@ -228,11 +228,11 @@ class TorchTradeBaseEnv(EnvBase):
             ['market_data_1Minute_12', 'market_data_5Minute_8', 'market_data_15Minute_8']
 
         Note:
-            For environments wrapped in ParallelEnv or TransformedEnv:
-            1. Call env.reset() first
-            2. Use [0] indexing for batched environments (ParallelEnv, SerialEnv):
-            >>> env.reset()
+            For environments wrapped in ParallelEnv or TransformedEnv, use [0] indexing
+            for batched environments (ParallelEnv, SerialEnv):
             >>> market_data_keys = env.base_env.get_market_data_keys()[0]
+
+            No reset() is needed - attributes are populated during __init__.
         """
         return self.market_data_keys
 

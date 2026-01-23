@@ -20,17 +20,16 @@ These methods allow you to dynamically adapt your code to different environment 
 > ```
 >
 > **For `ParallelEnv` or `SerialEnv` (batched environments):**
-> - You must call `env.reset()` before accessing `.base_env`
 > - Methods return batched results, so use `[0]` to get the first batch:
 >
 > ```python
 > parallel_env = ParallelEnv(4, lambda: SeqLongOnlyEnv(df, config))
-> parallel_env.reset()  # Required!
 > market_keys = parallel_env.base_env.get_market_data_keys()[0]  # Note the [0]
 > account_keys = parallel_env.base_env.get_account_state_keys()[0]
 > ```
 >
 > This is because batched environments return results from all workers as a list.
+> No `reset()` is needed - attributes are populated during `__init__`.
 
 ## Methods
 
@@ -229,10 +228,7 @@ from torchrl.envs import ParallelEnv, EnvCreator
 parallel_env = ParallelEnv(4, EnvCreator(lambda: base_env), serial_for_single=True)
 env = TransformedEnv(parallel_env, Compose(RewardSum()))
 
-# 3. Reset to enable .base_env access
-env.reset()
-
-# 4. Introspect observation structure (use .base_env with [0] for batched envs!)
+# 3. Introspect observation structure (use .base_env with [0] for batched envs!)
 market_data_keys = env.base_env.get_market_data_keys()[0]  # [0] for batched environments
 account_state_fields = env.base_env.get_account_state_keys()[0]
 
