@@ -440,3 +440,158 @@ class TestWrappedEnvironmentIntrospection:
 
         assert len(market_keys) > 0, "market_data_keys should be populated after wrapping"
         assert len(account_state) > 0, "account_state should be populated after wrapping"
+
+
+class TestCriticalPropertyBehavior:
+    """Critical tests for property-based API behavior (identified by pr-test-analyzer)."""
+
+    def test_observation_spec_available_without_reset(self, sample_ohlcv_df):
+        """Test observation_spec is available without reset (foundation for properties).
+
+        Criticality: 9/10 - Properties derive from observation_spec which must be available.
+
+        Note: This validates the key assumption that observation_spec.keys() is accessible
+        on wrapped environments (ParallelEnv, TransformedEnv) without calling reset(),
+        which is what makes the property-based API work seamlessly.
+        """
+        # Test with unwrapped env
+        config = SeqLongOnlyEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute)],
+            window_sizes=[10, 8],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000.0,
+            transaction_fee=0.001,
+        )
+        unwrapped_env = SeqLongOnlyEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
+
+        # observation_spec is available immediately
+        assert hasattr(unwrapped_env, "observation_spec")
+        assert len(list(unwrapped_env.observation_spec.keys())) > 0
+
+        # Test with TransformedEnv (most common production case)
+        wrapped_env = TransformedEnv(unwrapped_env, RewardSum())
+
+        # observation_spec is ALSO available on TransformedEnv without reset
+        assert hasattr(wrapped_env, "observation_spec")
+        obs_keys = list(wrapped_env.observation_spec.keys())
+        assert len(obs_keys) > 0
+
+        # Verify market_data keys can be extracted (this is what the property does)
+        market_keys = [k for k in obs_keys if k.startswith("market_data")]
+        assert len(market_keys) > 0, "Should find market_data keys in observation_spec"
+        assert len(market_keys) == 2, "Should match configured timeframes"
+
+    def test_account_state_property_structure(self, sample_ohlcv_df):
+        """Test account_state property returns correct structure with .key and .values.
+
+        Criticality: 8/10 - LLM actors and model builders depend on exact structure.
+        """
+        config = SeqLongOnlyEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000.0,
+            transaction_fee=0.001,
+        )
+        env = SeqLongOnlyEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
+
+        state = env.account_state
+
+        # Validate structure
+        assert state.key == "account_state", "account_state.key must be 'account_state'"
+        assert isinstance(state.values, (list, tuple)), "account_state.values must be iterable"
+        assert all(isinstance(field, str) for field in state.values), "All fields must be strings"
+
+        # Validate it's reusable across calls (idempotency)
+        state2 = env.account_state
+        assert state.key == state2.key, "Property should return consistent key across calls"
+        assert state.values == state2.values, "Property should return consistent values across calls"
+
+    def test_market_data_keys_requires_observation_spec(self, sample_ohlcv_df):
+        """Test market_data_keys correctly derives from observation_spec.
+
+        Criticality: 7/10 - Prevents silent failures in custom environments.
+        """
+        config = SeqLongOnlyEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute)],
+            window_sizes=[10, 8],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000.0,
+            transaction_fee=0.001,
+        )
+        env = SeqLongOnlyEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
+
+        # Verify observation_spec is populated
+        assert len(env.observation_spec.keys()) > 0, "observation_spec must be populated"
+
+        # Verify market_data_keys matches observation_spec filtering
+        expected_keys = sorted([k for k in env.observation_spec.keys() if k.startswith("market_data")])
+        assert env.market_data_keys == expected_keys, \
+            "market_data_keys must exactly match filtered observation_spec keys"
+
+    def test_standard_env_excludes_futures_fields(self, sample_ohlcv_df):
+        """Test standard envs don't include futures-only fields.
+
+        Criticality: 6/10 - Prevents model architecture mismatches.
+        """
+        config = SeqLongOnlyEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000.0,
+            transaction_fee=0.001,
+        )
+        env = SeqLongOnlyEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
+
+        futures_only = ["leverage", "margin_ratio", "liquidation_price"]
+        for field in futures_only:
+            assert field not in env.account_state.values, \
+                f"Standard env should not have futures field: {field}"
+
+    def test_futures_env_includes_all_futures_fields(self, sample_ohlcv_df):
+        """Test futures envs include all required futures fields.
+
+        Criticality: 6/10 - Ensures futures envs have complete state.
+        """
+        config = SeqFuturesEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000.0,
+            transaction_fee=0.001,
+            leverage=10.0,
+        )
+        env = SeqFuturesEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
+
+        futures_required = ["leverage", "margin_ratio", "liquidation_price"]
+        for field in futures_required:
+            assert field in env.account_state.values, \
+                f"Futures env missing required field: {field}"
+
+    def test_market_data_keys_are_sorted(self, sample_ohlcv_df):
+        """Test market_data_keys returns deterministically sorted keys.
+
+        Criticality: 5/10 - Ensures deterministic model building.
+        """
+        config = SeqLongOnlyEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[
+                TimeFrame(15, TimeFrameUnit.Minute),  # Out of order intentionally
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+            ],
+            window_sizes=[8, 12, 8],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000.0,
+            transaction_fee=0.001,
+        )
+        env = SeqLongOnlyEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
+
+        keys = env.market_data_keys
+        assert keys == sorted(keys), \
+            "market_data_keys must be sorted for deterministic model building"

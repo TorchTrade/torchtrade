@@ -205,11 +205,8 @@ class TorchTradeBaseEnv(EnvBase):
         Note:
             Works seamlessly with ParallelEnv and TransformedEnv without reset().
         """
-        class AccountStateSpec:
-            def __init__(self, key, values):
-                self.key = key
-                self.values = values
-
+        from collections import namedtuple
+        AccountStateSpec = namedtuple("AccountStateSpec", ["key", "values"])
         return AccountStateSpec("account_state", self._account_state)
 
     @property
