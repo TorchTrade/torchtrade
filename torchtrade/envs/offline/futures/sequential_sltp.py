@@ -20,7 +20,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservationSampler
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
-from torchtrade.envs.offline.infrastructure.utils import InitialBalanceSampler, build_sltp_action_map
+from torchtrade.envs.offline.infrastructure.utils import InitialBalanceSampler, build_sltp_action_map, load_torch_trade_dataset
 from torchtrade.envs.core.reward import build_reward_context, default_log_return, validate_reward_function
 from torchtrade.envs.core.state import FuturesHistoryTracker
 from torchtrade.envs.core.common import TradeMode, validate_quantity_per_trade
@@ -189,10 +189,8 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         self.stop_loss = 0.0
         self.take_profit = 0.0
 
-        # PERF: Pre-allocate account state buffer to avoid tensor creation per step
         self._account_state_buffer = torch.zeros(10, dtype=torch.float32)
 
-        # PERF: Initialize cached OHLCV (will be set on first observation)
         self._cached_ohlcv = None
 
         # PERF: Cache margin fractions to avoid division per liquidation calculation
@@ -200,10 +198,8 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         self._long_liq_factor = 1 - self._inv_leverage + self.maintenance_margin_rate
         self._short_liq_factor = 1 + self._inv_leverage - self.maintenance_margin_rate
 
-        # PERF: Cache leverage as float to avoid float() call per step
         self._leverage_float = float(self.leverage)
 
-        # PERF: Pre-allocate trade_info template to avoid dict creation per step
         self._trade_info_template = {
             "executed": False,
             "side": None,
@@ -241,7 +237,6 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         if position_size == 0:
             return 0.0
 
-        # PERF: Use cached factors instead of computing division per call
         if position_size > 0:
             # Long position - liquidated if price drops
             liquidation_price = entry_price * self._long_liq_factor
@@ -318,7 +313,6 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         if self.stop_loss == 0.0 and self.take_profit == 0.0:
             return None
 
-        # PERF: Use namedtuple attribute access instead of dict lookup
         open_price = ohlcv.open
         high_price = ohlcv.high
         low_price = ohlcv.low
@@ -367,12 +361,10 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
 
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
-        # PERF: Use combined method to get observation and OHLCV in one call
         obs_dict, self.current_timestamp, self.truncated, self._cached_ohlcv = (
             self.sampler.get_sequential_observation_with_ohlcv()
         )
 
-        # PERF: Use namedtuple attribute access instead of dict lookup
         current_price = self._cached_ohlcv.close
 
         # Calculate position value (absolute value of notional)
@@ -394,7 +386,6 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         total_balance = self.balance + self.unrealized_pnl
         margin_ratio = self.position.position_value / total_balance if total_balance > 0 else 0.0
 
-        # PERF: Update pre-allocated account state buffer in-place
         buf = self._account_state_buffer
         buf[0] = self.balance
         buf[1] = self.position.position_size  # Positive=long, Negative=short
@@ -402,7 +393,7 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         buf[3] = self.position.entry_price
         buf[4] = current_price
         buf[5] = self.unrealized_pnl_pct
-        buf[6] = self._leverage_float  # PERF: Use cached float instead of float() call
+        buf[6] = self._leverage_float
         buf[7] = margin_ratio
         buf[8] = self.liquidation_price
         buf[9] = float(self.position.hold_counter)
@@ -415,7 +406,6 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
 
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value including unrealized PnL."""
-        # PERF: Use cached OHLCV instead of calling get_base_features
         current_price = self._cached_ohlcv.close
         unrealized_pnl = self._calculate_unrealized_pnl(
             self.position.entry_price, current_price, self.position.position_size
@@ -494,15 +484,12 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()
-        # PERF: Use tuple for direct indexing instead of dict lookup
         action_tuple = self._action_tuple[action_idx]
         side, sl_pct, tp_pct = action_tuple
 
-        # PERF: Use cached OHLCV from _get_observation() instead of calling get_base_features
         ohlcv = self._cached_ohlcv
         current_price = ohlcv.close
 
-        # PERF: Use pre-allocated template copy instead of dict literal
         trade_info = self._trade_info_template.copy()
 
         # Priority order: Liquidation > SL/TP > New action
@@ -645,7 +632,6 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
             "sltp_triggered": None,
         }
 
-        # PERF: Use cached OHLCV instead of calling get_base_features
         current_price = self._cached_ohlcv.close
 
         # PERF: Use numpy random instead of torch.empty().uniform_() to avoid tensor allocation
@@ -855,10 +841,7 @@ if __name__ == "__main__":
     execute_on = TimeFrame(1, TimeFrameUnit.Minute)
 
     # Load sample data
-    df = pd.read_csv(
-        "/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/"
-        "binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv"
-    )
+    df = load_torch_trade_dataset()
 
     config = SeqFuturesSLTPEnvConfig(
         symbol="BTC/USD",

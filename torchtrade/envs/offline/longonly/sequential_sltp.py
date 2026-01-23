@@ -14,7 +14,7 @@ from torchrl.data import Categorical
 import pandas as pd
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta, normalize_timeframe_config
-from torchtrade.envs.offline.infrastructure.utils import build_sltp_action_map
+from torchtrade.envs.offline.infrastructure.utils import build_sltp_action_map, load_torch_trade_dataset
 
 @dataclass
 class SeqLongOnlySLTPEnvConfig:
@@ -296,7 +296,7 @@ if __name__ == "__main__":
     window_sizes=[32]  # ~12m, 40m, 2h, 1d
     execute_on=TimeFrame(15, TimeFrameUnit.Minute) # Try 15min
 
-    df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
+    df = load_torch_trade_dataset()
 
     config = SeqLongOnlySLTPEnvConfig(
         symbol="BTC/USD",

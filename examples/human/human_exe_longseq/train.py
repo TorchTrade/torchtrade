@@ -3,6 +3,7 @@ from __future__ import annotations
 import hydra
 import pandas as pd
 from torchtrade.actor.human import HumanActor
+from torchtrade.envs.offline.infrastructure.utils import load_torch_trade_dataset
 
 
 @hydra.main(config_path="", config_name="config", version_base="1.1")
@@ -14,7 +15,7 @@ def main(cfg: DictConfig):  # noqa: F821
     from utils import make_environment, make_collector, log_metrics
 
     # Creante env
-    df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
+    df = load_torch_trade_dataset()
     train_df = df[(1440 * 21):]
 
 

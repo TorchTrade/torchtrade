@@ -799,7 +799,7 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
                 - profit_factor: Ratio of total wins to total losses
         """
         from torchtrade.metrics import compute_all_metrics
-        from torchtrade.envs.offline.infrastructure.utils import compute_periods_per_year_crypto
+        from torchtrade.envs.offline.infrastructure.utils import compute_periods_per_year_crypto, load_torch_trade_dataset
 
         # Convert histories to tensors
         portfolio_values = torch.tensor(self.history.portfolio_values, dtype=torch.float32)
@@ -830,9 +830,7 @@ if __name__ == "__main__":
     execute_on = TimeFrame(5, TimeFrameUnit.Minute)
 
     # Load sample data
-    df = pd.read_csv(
-        "/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv"
-    )
+    df = load_torch_trade_dataset()
 
     config = SeqFuturesEnvConfig(
         symbol="BTC/USD",
