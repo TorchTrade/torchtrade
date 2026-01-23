@@ -777,7 +777,7 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
             periods_per_year=periods_per_year,
         )
 
-    def render_history(self, return_fig=False):
+    def render_history(self, return_fig=False, plot_bh_baseline=True):
         """Render the trading history with action markers.
 
         Visualizes price history, actions (long/short/close), portfolio value,
@@ -785,6 +785,7 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
 
         Args:
             return_fig: If True, return the figure instead of showing it
+            plot_bh_baseline: If True, plots the buy-and-hold baseline for comparison
         """
         import matplotlib.pyplot as plt
 
@@ -795,11 +796,13 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
         position_history = history_dict['positions']
         action_types = history_dict.get('action_types', [])
 
-        # Calculate buy-and-hold balance
-        initial_balance = portfolio_value_history[0] if portfolio_value_history else self.initial_portfolio_value
-        initial_price = price_history[0] if price_history else 0
-        units_held = initial_balance / initial_price if initial_price > 0 else 0
-        buy_and_hold_balance = [units_held * price for price in price_history]
+        # Calculate buy-and-hold balance if requested
+        buy_and_hold_balance = None
+        if plot_bh_baseline:
+            initial_balance = portfolio_value_history[0] if portfolio_value_history else self.initial_portfolio_value
+            initial_price = price_history[0] if price_history else 0
+            units_held = initial_balance / initial_price if initial_price > 0 else 0
+            buy_and_hold_balance = [units_held * price for price in price_history]
 
         # Create subplots
         fig, axes = plt.subplots(
@@ -847,12 +850,14 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
             time_indices, portfolio_value_history,
             label='Portfolio Value', color='purple', linewidth=1.5
         )
-        ax2.plot(
-            time_indices, buy_and_hold_balance,
-            label='Buy & Hold', color='orange', linestyle='--', linewidth=1.5
-        )
+        if plot_bh_baseline:
+            ax2.plot(
+                time_indices, buy_and_hold_balance,
+                label='Buy & Hold', color='orange', linestyle='--', linewidth=1.5
+            )
         ax2.set_ylabel('Portfolio Value (USD)')
-        ax2.set_title('Portfolio Value vs Buy & Hold')
+        title = 'Portfolio Value vs Buy & Hold' if plot_bh_baseline else 'Portfolio Value'
+        ax2.set_title(title)
         ax2.legend()
         ax2.grid(True, alpha=0.3)
 

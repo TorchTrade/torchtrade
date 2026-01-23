@@ -27,10 +27,13 @@ for _ in range(episode_length):
         break
 
 # Visualize the episode
-env.render_history()  # Display plots
+env.render_history()  # Display plots with buy-and-hold baseline
+
+# Without buy-and-hold baseline
+env.render_history(plot_bh_baseline=False)
 
 # Or save to a variable for later
-fig = env.render_history(return_fig=True)
+fig = env.render_history(return_fig=True, plot_bh_baseline=True)
 fig.savefig("episode_history.png")
 ```
 
@@ -72,9 +75,14 @@ The rendered plots automatically adapt based on environment type:
 
 - **Automatic detection**: Checks for `positions` key in history to determine environment type
 - **Matplotlib-based**: Requires `matplotlib` to be installed
-- **Buy-and-hold baseline**: Calculated from initial portfolio value (buys asset at t=0 and holds)
+- **Buy-and-hold baseline**: Calculated from initial portfolio value (buys asset at t=0 and holds). Can be disabled with `plot_bh_baseline=False`
 - **Action markers**: All actions are marked on the price chart for easy analysis
 - **Consistent API**: Same method works across all 6 offline environments
+
+## Parameters
+
+- **`return_fig`** (bool, default=False): If True, returns the matplotlib figure instead of displaying it
+- **`plot_bh_baseline`** (bool, default=True): If True, plots the buy-and-hold baseline for comparison. Set to False to show only portfolio value without the baseline
 
 ## Example with Different Environments
 
@@ -120,7 +128,7 @@ The method is implemented in `TorchTradeOfflineEnv` base class at `torchtrade/en
 ### Detection Logic
 
 ```python
-def render_history(self, return_fig=False):
+def render_history(self, return_fig=False, plot_bh_baseline=True):
     history_dict = self.history.to_dict()
 
     # Automatically detect environment type
