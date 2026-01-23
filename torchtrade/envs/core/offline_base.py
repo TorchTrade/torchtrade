@@ -454,16 +454,17 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
 
         return position_qty, notional_value
 
-    def render_history(self, return_fig=False):
+    def render_history(self, return_fig=False, plot_bh_baseline=True):
         """
         Render the history of the environment.
 
         Creates visualization plots showing:
-        - For all environments: Price history with actions, Portfolio value vs Buy-and-Hold
+        - For all environments: Price history with actions, Portfolio value (with optional buy-and-hold baseline comparison)
         - For futures environments: Additional position history plot
 
         Args:
             return_fig: If True, returns the matplotlib figure instead of showing it
+            plot_bh_baseline: If True, plots the buy-and-hold baseline for comparison
 
         Returns:
             matplotlib.figure.Figure if return_fig=True, None otherwise
@@ -474,11 +475,14 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         action_history = history_dict['actions']
         portfolio_value_history = history_dict['portfolio_values']
 
-        # Calculate buy-and-hold balance
-        initial_balance = portfolio_value_history[0]
-        initial_price = price_history[0]
-        units_held = initial_balance / initial_price
-        buy_and_hold_balance = [units_held * price for price in price_history]
+        # Calculate buy-and-hold baseline if requested
+        if plot_bh_baseline:
+            initial_balance = portfolio_value_history[0]
+            initial_price = price_history[0]
+            units_held = initial_balance / initial_price
+            buy_and_hold_balance = [units_held * price for price in price_history]
+        else:
+            buy_and_hold_balance = None
 
         # Check if this is a futures environment (has position history)
         is_futures = 'positions' in history_dict
@@ -523,12 +527,15 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
                 time_indices, portfolio_value_history,
                 label='Portfolio Value', color='green', linewidth=1.5
             )
-            ax2.plot(
-                time_indices, buy_and_hold_balance,
-                label='Buy and Hold', color='purple', linestyle='--', linewidth=1.5
-            )
+            if plot_bh_baseline:
+                ax2.plot(
+                    time_indices, buy_and_hold_balance,
+                    label='Buy and Hold', color='purple', linestyle='--', linewidth=1.5
+                )
+                ax2.set_title('Portfolio Value vs Buy and Hold')
+            else:
+                ax2.set_title('Portfolio Value')
             ax2.set_ylabel('Portfolio Value (USD)')
-            ax2.set_title('Portfolio Value vs Buy and Hold')
             ax2.legend()
             ax2.grid(True, alpha=0.3)
 
@@ -588,17 +595,20 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
                 time_indices, portfolio_value_history,
                 label='Portfolio Value History', color='green', linestyle='-', linewidth=2
             )
-            ax2.plot(
-                time_indices, buy_and_hold_balance,
-                label='Buy and Hold', color='purple', linestyle='-', linewidth=2
-            )
+            if plot_bh_baseline:
+                ax2.plot(
+                    time_indices, buy_and_hold_balance,
+                    label='Buy and Hold', color='purple', linestyle='-', linewidth=2
+                )
+                ax2.set_title('Portfolio Value History vs Buy and Hold')
+            else:
+                ax2.set_title('Portfolio Value History')
 
             ax2.set_xlabel(
                 'Time (Index)' if not isinstance(time_indices[0], (str, datetime))
                 else 'Time'
             )
             ax2.set_ylabel('Portfolio Value (USD)')
-            ax2.set_title('Portfolio Value History vs Buy and Hold')
             ax2.legend()
             ax2.grid(True)
 
