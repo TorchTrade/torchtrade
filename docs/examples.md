@@ -57,6 +57,97 @@ for batch in collector:
 
 ---
 
+## Example File Structure
+
+Each example in TorchTrade follows a consistent file organization pattern that separates configuration, utilities, and training logic:
+
+```
+examples/online/<algorithm>/
+├── config.yaml           # Main configuration file
+├── utils.py             # Helper functions (env creation, network setup, etc.)
+└── train.py            # Training script and main loop
+```
+
+### What Each Component Does
+
+**`config.yaml` - Configuration Management**
+
+The configuration file uses [Hydra](https://hydra.cc/) to manage all hyperparameters and settings. This includes:
+
+- **Environment settings**: Symbol, timeframes, initial cash, transaction fees, window sizes
+- **Network architecture**: Hidden dimensions, activation functions, layer configurations
+- **Training hyperparameters**: Learning rate, batch size, discount factor (gamma), entropy coefficient
+- **Collector settings**: Frames per batch, number of parallel environments
+- **Logging**: Wandb project name, experiment tracking settings
+
+By centralizing all parameters in YAML, you can easily experiment with different configurations without modifying code. Hydra also allows you to override any parameter from the command line:
+
+```bash
+# Override multiple parameters
+python train.py env.symbol="ETH/USD" optim.lr=1e-4 loss.gamma=0.95
+```
+
+**Example config.yaml:**
+```yaml
+env:
+  name: SeqLongOnlyEnv
+  symbol: "BTC/USD"
+  time_frames: ["5Min", "15Min"]
+  window_sizes: [10, 10]
+  execute_on: "15Min"
+  initial_cash: [1000, 5000]
+  transaction_fee: 0.0025
+  train_envs: 10
+  eval_envs: 2
+
+collector:
+  frames_per_batch: 100000
+  total_frames: 100_000_000
+
+optim:
+  lr: 2.5e-4
+  max_grad_norm: 0.5
+  anneal_lr: True
+
+loss:
+  gamma: 0.9
+  mini_batch_size: 33333
+  ppo_epochs: 3
+  clip_epsilon: 0.1
+  entropy_coef: 0.01
+
+logger:
+  backend: wandb
+  project_name: TorchTrade-Online
+  exp_name: ppo
+```
+
+**`utils.py` - Helper Functions**
+
+This file contains modular helper functions that handle setup tasks:
+
+- **`make_env()`**: Creates and configures the trading environment (offline or online)
+- **`make_actor()`**: Builds the policy network architecture (deterministic or stochastic)
+- **`make_critic()`**: Creates the value function network (if needed for the algorithm)
+- **`make_loss()`**: Initializes the loss module (PPO, SAC, IQL, etc.)
+- **`make_collector()`**: Sets up the data collection pipeline
+
+These utility functions keep the main training script clean and make it easy to swap components (e.g., changing from SeqLongOnlyEnv to SeqFuturesEnv requires only modifying `make_env()`).
+
+**`train.py` - Training Loop**
+
+The main training script orchestrates everything:
+
+1. **Hydra initialization**: Loads configuration from `config.yaml`
+2. **Component creation**: Uses `utils.py` functions to create env, actor, loss, optimizer
+3. **Training loop**: Collects data, computes losses, updates policy, logs metrics
+4. **Evaluation**: Periodically evaluates the policy on test environments
+5. **Checkpointing**: Saves model weights and training state
+
+This structure mirrors [TorchRL's SOTA implementations](https://github.com/pytorch/rl/tree/main/sota-implementations), making it familiar to TorchRL users and easy to adapt existing algorithms.
+
+---
+
 ## Available Examples
 
 The following examples demonstrate the flexibility of TorchTrade across different algorithms, environments, and use cases. These examples are meant to be starting points for further experimentation and adaptation - customize them according to your needs, ideas, and environments.

@@ -2,7 +2,7 @@
 
 Welcome to the TorchTrade documentation! TorchTrade is a machine learning framework for algorithmic trading built on TorchRL.
 
-TorchTrade's goal is to provide accessible deployment of RL methods to trading. The framework supports various RL methodologies including **online RL**, **offline RL**, **model-based RL**, **contrastive learning**, and many more areas of reinforcement learning research. Beyond RL, TorchTrade integrates traditional trading methods such as **rule-based strategies** and **Kalman filters**, as well as modern approaches including **LLMs** (both local models and frontier model integrations) as trading actors.
+TorchTrade's goal is to provide accessible deployment of RL methods to trading. The framework supports various RL methodologies including **online RL**, **offline RL**, **model-based RL**, **contrastive learning**, and many more areas of reinforcement learning research. Beyond RL, TorchTrade integrates traditional trading methods such as **rule-based strategies**, as well as modern approaches including **LLMs** (both local models and frontier model integrations) as trading actors.
 
 ## What is TorchTrade?
 
