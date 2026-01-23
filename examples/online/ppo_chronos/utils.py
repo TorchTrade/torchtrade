@@ -107,7 +107,7 @@ def apply_env_transforms(env, max_steps, cfg):
           to avoid VecNormV2 device issues.
     """
     # Get market data keys for Chronos embedding
-    market_data_keys = [k for k in env.observation_spec.keys() if k.startswith("market_data")]
+    market_data_keys = env.base_env.get_market_data_keys()[0]
 
     # Create Chronos transforms for each market data observation
     chronos_transforms = []
@@ -206,7 +206,6 @@ def make_discrete_ppo_chronos_model(cfg, env, device):
     chronos_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("chronos_embedding")]
     assert len(chronos_keys) > 0, "No chronos embedding keys found in observation spec"
 
-    assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"
     account_state_key = "account_state"
 
     # Calculate total input features

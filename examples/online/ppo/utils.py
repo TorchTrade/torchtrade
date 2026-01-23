@@ -162,8 +162,8 @@ def make_discrete_ppo_model(cfg, env, device):
     # Define Actor Network
     activation = "tanh"
     action_spec = env.action_spec
-    market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
-    assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"
+    # Extract market data keys from observation spec
+    market_data_keys = env.base_env.get_market_data_keys()[0]
     account_state_key = "account_state"
     # Define Actor Network
     time_frames = cfg.env.time_frames

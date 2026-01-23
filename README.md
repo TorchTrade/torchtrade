@@ -97,7 +97,7 @@ Programmatically understand your environment's observation structure:
 
 ```python
 # Get account state fields
-print(f"Account state: {env.get_account_state()}")
+print(f"Account state: {env.get_account_state_keys()}")
 # ['cash', 'position_size', 'position_value', 'entry_price',
 #  'current_price', 'unrealized_pnlpct', 'holding_time']
 

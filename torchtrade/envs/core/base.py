@@ -182,7 +182,7 @@ class TorchTradeBaseEnv(EnvBase):
         # Otherwise use default log return
         return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
 
-    def get_account_state(self) -> List[str]:
+    def get_account_state_keys(self) -> List[str]:
         """
         Get list of account state field names.
 
@@ -195,13 +195,16 @@ class TorchTradeBaseEnv(EnvBase):
 
         Example:
             >>> env = SeqLongOnlyEnv(df, config)
-            >>> print(env.get_account_state())
+            >>> print(env.get_account_state_keys())
             ['cash', 'position_size', 'position_value', 'entry_price',
              'current_price', 'unrealized_pnlpct', 'holding_time']
 
         Note:
-            For environments wrapped in ParallelEnv or TransformedEnv, access via:
-            >>> account_state = env.base_env.get_account_state()
+            For environments wrapped in ParallelEnv or TransformedEnv:
+            1. Call env.reset() first
+            2. Use [0] indexing for batched environments (ParallelEnv, SerialEnv):
+            >>> env.reset()
+            >>> account_state_keys = env.base_env.get_account_state_keys()[0]
         """
         return self.account_state
 
@@ -225,8 +228,11 @@ class TorchTradeBaseEnv(EnvBase):
             ['market_data_1Minute_12', 'market_data_5Minute_8', 'market_data_15Minute_8']
 
         Note:
-            For environments wrapped in ParallelEnv or TransformedEnv, access via:
-            >>> market_data_keys = env.base_env.get_market_data_keys()
+            For environments wrapped in ParallelEnv or TransformedEnv:
+            1. Call env.reset() first
+            2. Use [0] indexing for batched environments (ParallelEnv, SerialEnv):
+            >>> env.reset()
+            >>> market_data_keys = env.base_env.get_market_data_keys()[0]
         """
         return self.market_data_keys
 

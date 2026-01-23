@@ -153,7 +153,7 @@ class SimpleCustomEnv(EnvBase):
 ```
 
 **Why set these attributes?**
-- Enables `env.get_account_state()` and `env.get_market_data_keys()` methods (inherited from base class)
+- Enables `env.get_account_state_keys_keys()` and `env.get_market_data_keys()` methods (inherited from base class)
 - Allows dynamic neural network construction
 - Required for LLM actor integration
 - Improves code introspection and debugging

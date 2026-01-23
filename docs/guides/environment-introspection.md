@@ -7,7 +7,7 @@ TorchTrade environments expose helper methods to programmatically understand the
 All TorchTrade environments provide two methods for introspection:
 
 - **`get_market_data_keys()`**: Returns list of market data observation keys based on configured timeframes
-- **`get_account_state()`**: Returns list of account state field names
+- **`get_account_state_keys()`**: Returns list of account state field names
 
 These methods allow you to dynamically adapt your code to different environment configurations without hardcoding observation structure.
 
@@ -16,21 +16,21 @@ These methods allow you to dynamically adapt your code to different environment 
 > When using `TransformedEnv`, access introspection methods via `.base_env`:
 > ```python
 > market_keys = env.base_env.get_market_data_keys()
-> account_state = env.base_env.get_account_state()
+> account_state = env.base_env.get_account_state_keys()
 > ```
 >
-> **For `ParallelEnv`:** You must call `env.reset()` before accessing `.base_env`:
+> **For `ParallelEnv` or `SerialEnv` (batched environments):**
+> - You must call `env.reset()` before accessing `.base_env`
+> - Methods return batched results, so use `[0]` to get the first batch:
+>
 > ```python
 > parallel_env = ParallelEnv(4, lambda: SeqLongOnlyEnv(df, config))
 > parallel_env.reset()  # Required!
-> market_keys = parallel_env.base_env.get_market_data_keys()
+> market_keys = parallel_env.base_env.get_market_data_keys()[0]  # Note the [0]
+> account_keys = parallel_env.base_env.get_account_state_keys()[0]
 > ```
 >
-> **For model building before reset:** Use observation_spec pattern:
-> ```python
-> # When building models before env.reset() with ParallelEnv
-> market_keys = [k for k in env.observation_spec.keys() if k.startswith("market_data")]
-> ```
+> This is because batched environments return results from all workers as a list.
 
 ## Methods
 
@@ -56,7 +56,7 @@ print(env.get_market_data_keys())
 # Output: ['market_data_1Minute_12', 'market_data_5Minute_8', 'market_data_15Minute_8']
 ```
 
-### get_account_state()
+### get_account_state_keys()
 
 Returns a list of account state field names. The structure varies between environment types:
 
@@ -65,7 +65,7 @@ Returns a list of account state field names. The structure varies between enviro
 from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 
 env = SeqLongOnlyEnv(df, config)
-print(env.get_account_state())
+print(env.get_account_state_keys())
 # Output: ['cash', 'position_size', 'position_value', 'entry_price',
 #          'current_price', 'unrealized_pnlpct', 'holding_time']
 ```
@@ -75,7 +75,7 @@ print(env.get_account_state())
 from torchtrade.envs import SeqFuturesEnv, SeqFuturesEnvConfig
 
 env = SeqFuturesEnv(df, config)
-print(env.get_account_state())
+print(env.get_account_state_keys())
 # Output: ['cash', 'position_size', 'position_value', 'entry_price',
 #          'current_price', 'unrealized_pnlpct', 'leverage',
 #          'margin_ratio', 'liquidation_price', 'holding_time']
@@ -94,7 +94,7 @@ env = TransformedEnv(base_env, Compose(RewardSum()))
 
 # Access via .base_env (see note above)
 market_data_keys = env.base_env.get_market_data_keys()
-account_state = env.base_env.get_account_state()
+account_state = env.base_env.get_account_state_keys()
 ```
 
 ## Use Cases
@@ -117,7 +117,7 @@ def make_policy(env, device):
         encoders.append(encoder)
 
     # Account state encoder
-    account_state_size = len(env.get_account_state())
+    account_state_size = len(env.get_account_state_keys())
     account_encoder = MLP(in_features=account_state_size, out_features=64)
 
     return PolicyNetwork(encoders, account_encoder)
@@ -136,7 +136,7 @@ env = AlpacaTorchTradingEnv(config)
 actor = LLMTradingActor(
     api_key="...",
     market_data_keys=env.get_market_data_keys(),
-    account_state_fields=env.get_account_state(),
+    account_state_fields=env.get_account_state_keys(),
 )
 ```
 
@@ -152,7 +152,7 @@ def process_observation(tensordict, env):
         market_data[key] = tensordict[key]
 
     # Extract account state
-    account_state_fields = env.get_account_state()
+    account_state_fields = env.get_account_state_keys()
     account_state = tensordict["account_state"]
 
     # Create structured output
@@ -172,7 +172,7 @@ env = SeqFuturesSLTPEnv(df, config)
 print("Environment Observation Structure")
 print("=" * 50)
 print(f"Market Data Keys: {env.get_market_data_keys()}")
-print(f"Account State Fields: {env.get_account_state()}")
+print(f"Account State Fields: {env.get_account_state_keys()}")
 print(f"Total Observation Keys: {list(env.observation_spec.keys())}")
 ```
 
@@ -225,11 +225,16 @@ config = SeqLongOnlyEnvConfig(
 base_env = SeqLongOnlyEnv(df, config)
 
 # 2. Wrap environment for training
-env = TransformedEnv(base_env, Compose(RewardSum()))
+from torchrl.envs import ParallelEnv, EnvCreator
+parallel_env = ParallelEnv(4, EnvCreator(lambda: base_env), serial_for_single=True)
+env = TransformedEnv(parallel_env, Compose(RewardSum()))
 
-# 3. Introspect observation structure (use .base_env!)
-market_data_keys = env.base_env.get_market_data_keys()
-account_state_fields = env.base_env.get_account_state()
+# 3. Reset to enable .base_env access
+env.reset()
+
+# 4. Introspect observation structure (use .base_env with [0] for batched envs!)
+market_data_keys = env.base_env.get_market_data_keys()[0]  # [0] for batched environments
+account_state_fields = env.base_env.get_account_state_keys()[0]
 
 print(f"Market Data: {market_data_keys}")
 print(f"Account State: {account_state_fields}")
@@ -240,7 +245,7 @@ def make_policy(env):
     base = env.base_env if hasattr(env, 'base_env') else env
 
     market_keys = base.get_market_data_keys()
-    account_size = len(base.get_account_state())
+    account_size = len(base.get_account_state_keys())
 
     # Build architecture dynamically
     encoders = [build_encoder(env.observation_spec[k]) for k in market_keys]

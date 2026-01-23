@@ -872,7 +872,7 @@ print(env.get_market_data_keys())
 # ['market_data_1Minute_12', 'market_data_5Minute_8', 'market_data_15Minute_8']
 
 # Get account state fields
-print(env.get_account_state())
+print(env.get_account_state_keys())
 # ['cash', 'position_size', 'position_value', 'entry_price',
 #  'current_price', 'unrealized_pnlpct', 'holding_time']
 ```
@@ -884,7 +884,7 @@ from torchrl.envs import ParallelEnv, TransformedEnv
 # Use .base_env to access helper methods
 wrapped_env = TransformedEnv(env, transforms)
 market_keys = wrapped_env.base_env.get_market_data_keys()
-account_state = wrapped_env.base_env.get_account_state()
+account_state = wrapped_env.base_env.get_account_state_keys()
 ```
 
 **See [Environment Introspection Guide](../guides/environment-introspection.md)** for detailed usage examples, use cases with LLM actors, and dynamic neural network construction.

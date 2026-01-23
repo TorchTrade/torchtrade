@@ -73,19 +73,19 @@ class TestOfflineEnvironmentAttributes:
         assert len(env.market_data_keys) > 0, "market_data_keys should not be empty"
 
         # Check getter methods exist
-        assert hasattr(env, "get_account_state"), "SeqLongOnlyEnv missing get_account_state method"
+        assert hasattr(env, "get_account_state_keys"), "SeqLongOnlyEnv missing get_account_state method"
         assert hasattr(env, "get_market_data_keys"), "SeqLongOnlyEnv missing get_market_data_keys method"
 
         # Check getter methods are callable
-        assert callable(env.get_account_state), "get_account_state should be callable"
+        assert callable(env.get_account_state_keys), "get_account_state should be callable"
         assert callable(env.get_market_data_keys), "get_market_data_keys should be callable"
 
         # Check getter methods return correct values
-        assert env.get_account_state() == env.account_state, "get_account_state() should return same as attribute"
+        assert env.get_account_state_keys() == env.account_state, "get_account_state_keys() should return same as attribute"
         assert env.get_market_data_keys() == env.market_data_keys, "get_market_data_keys() should return same as attribute"
 
         # Check return types
-        assert isinstance(env.get_account_state(), list), "get_account_state() should return a list"
+        assert isinstance(env.get_account_state_keys(), list), "get_account_state_keys() should return a list"
         assert isinstance(env.get_market_data_keys(), list), "get_market_data_keys() should return a list"
 
     def test_seqlongonlysltp_has_attributes(self, sample_ohlcv_df):
@@ -110,13 +110,13 @@ class TestOfflineEnvironmentAttributes:
         assert len(env.market_data_keys) > 0
 
         # Check getter methods
-        assert hasattr(env, "get_account_state"), "SeqLongOnlySLTPEnv missing get_account_state method"
+        assert hasattr(env, "get_account_state_keys"), "SeqLongOnlySLTPEnv missing get_account_state method"
         assert hasattr(env, "get_market_data_keys"), "SeqLongOnlySLTPEnv missing get_market_data_keys method"
-        assert callable(env.get_account_state)
+        assert callable(env.get_account_state_keys)
         assert callable(env.get_market_data_keys)
-        assert env.get_account_state() == env.account_state
+        assert env.get_account_state_keys() == env.account_state
         assert env.get_market_data_keys() == env.market_data_keys
-        assert isinstance(env.get_account_state(), list)
+        assert isinstance(env.get_account_state_keys(), list)
         assert isinstance(env.get_market_data_keys(), list)
 
     def test_longonlyonestepenv_has_attributes(self, sample_ohlcv_df):
@@ -139,13 +139,13 @@ class TestOfflineEnvironmentAttributes:
         assert len(env.market_data_keys) > 0
 
         # Check getter methods
-        assert hasattr(env, "get_account_state"), "LongOnlyOneStepEnv missing get_account_state method"
+        assert hasattr(env, "get_account_state_keys"), "LongOnlyOneStepEnv missing get_account_state method"
         assert hasattr(env, "get_market_data_keys"), "LongOnlyOneStepEnv missing get_market_data_keys method"
-        assert callable(env.get_account_state)
+        assert callable(env.get_account_state_keys)
         assert callable(env.get_market_data_keys)
-        assert env.get_account_state() == env.account_state
+        assert env.get_account_state_keys() == env.account_state
         assert env.get_market_data_keys() == env.market_data_keys
-        assert isinstance(env.get_account_state(), list)
+        assert isinstance(env.get_account_state_keys(), list)
         assert isinstance(env.get_market_data_keys(), list)
 
     def test_seqfutures_has_attributes(self, sample_ohlcv_df):
@@ -169,13 +169,13 @@ class TestOfflineEnvironmentAttributes:
         assert len(env.market_data_keys) > 0
 
         # Check getter methods
-        assert hasattr(env, "get_account_state"), "SeqFuturesEnv missing get_account_state method"
+        assert hasattr(env, "get_account_state_keys"), "SeqFuturesEnv missing get_account_state method"
         assert hasattr(env, "get_market_data_keys"), "SeqFuturesEnv missing get_market_data_keys method"
-        assert callable(env.get_account_state)
+        assert callable(env.get_account_state_keys)
         assert callable(env.get_market_data_keys)
-        assert env.get_account_state() == env.account_state
+        assert env.get_account_state_keys() == env.account_state
         assert env.get_market_data_keys() == env.market_data_keys
-        assert isinstance(env.get_account_state(), list)
+        assert isinstance(env.get_account_state_keys(), list)
         assert isinstance(env.get_market_data_keys(), list)
 
     def test_seqfuturessltp_has_attributes(self, sample_ohlcv_df):
@@ -201,13 +201,13 @@ class TestOfflineEnvironmentAttributes:
         assert len(env.market_data_keys) > 0
 
         # Check getter methods
-        assert hasattr(env, "get_account_state"), "SeqFuturesSLTPEnv missing get_account_state method"
+        assert hasattr(env, "get_account_state_keys"), "SeqFuturesSLTPEnv missing get_account_state method"
         assert hasattr(env, "get_market_data_keys"), "SeqFuturesSLTPEnv missing get_market_data_keys method"
-        assert callable(env.get_account_state)
+        assert callable(env.get_account_state_keys)
         assert callable(env.get_market_data_keys)
-        assert env.get_account_state() == env.account_state
+        assert env.get_account_state_keys() == env.account_state
         assert env.get_market_data_keys() == env.market_data_keys
-        assert isinstance(env.get_account_state(), list)
+        assert isinstance(env.get_account_state_keys(), list)
         assert isinstance(env.get_market_data_keys(), list)
 
     def test_futuresonestepenv_has_attributes(self, sample_ohlcv_df):
@@ -233,13 +233,13 @@ class TestOfflineEnvironmentAttributes:
         assert len(env.market_data_keys) > 0
 
         # Check getter methods
-        assert hasattr(env, "get_account_state"), "FuturesOneStepEnv missing get_account_state method"
+        assert hasattr(env, "get_account_state_keys"), "FuturesOneStepEnv missing get_account_state method"
         assert hasattr(env, "get_market_data_keys"), "FuturesOneStepEnv missing get_market_data_keys method"
-        assert callable(env.get_account_state)
+        assert callable(env.get_account_state_keys)
         assert callable(env.get_market_data_keys)
-        assert env.get_account_state() == env.account_state
+        assert env.get_account_state_keys() == env.account_state
         assert env.get_market_data_keys() == env.market_data_keys
-        assert isinstance(env.get_account_state(), list)
+        assert isinstance(env.get_account_state_keys(), list)
         assert isinstance(env.get_market_data_keys(), list)
 
 
@@ -390,11 +390,11 @@ class TestWrappedEnvironmentIntrospection:
 
         # Should work via .base_env (this is how all examples access it)
         market_keys_wrapped = wrapped.base_env.get_market_data_keys()
-        account_state_wrapped = wrapped.base_env.get_account_state()
+        account_state_wrapped = wrapped.base_env.get_account_state_keys()
 
         # Should match unwrapped env
         assert market_keys_wrapped == base_env.get_market_data_keys()
-        assert account_state_wrapped == base_env.get_account_state()
+        assert account_state_wrapped == base_env.get_account_state_keys()
 
         # Should be lists
         assert isinstance(market_keys_wrapped, list)
@@ -445,7 +445,7 @@ class TestWrappedEnvironmentIntrospection:
         wrapped = TransformedEnv(base_env, RewardSum())
 
         # Access via .base_env
-        account_state = wrapped.base_env.get_account_state()
+        account_state = wrapped.base_env.get_account_state_keys()
 
         # Futures envs should have 10 elements (including leverage, margin_ratio, liquidation_price)
         assert len(account_state) == 10, f"Expected 10 elements for futures env, got {len(account_state)}"
@@ -466,7 +466,7 @@ class TestWrappedEnvironmentIntrospection:
 
         # Attributes should never be empty after successful initialization
         market_keys = wrapped.base_env.get_market_data_keys()
-        account_state = wrapped.base_env.get_account_state()
+        account_state = wrapped.base_env.get_account_state_keys()
 
         assert len(market_keys) > 0, "market_data_keys should be populated after wrapping"
         assert len(account_state) > 0, "account_state should be populated after wrapping"
