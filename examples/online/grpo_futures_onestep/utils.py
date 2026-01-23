@@ -2,7 +2,6 @@
 from __future__ import annotations
 import functools
 
-import numpy as np
 import torch.nn
 from torchrl.envs import (
     DoubleToFloat,
@@ -96,9 +95,12 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             bankrupt_threshold=cfg.env.bankrupt_threshold,
             seed=cfg.env.seed,
             leverage=cfg.env.leverage,
+            trade_mode=cfg.env.trade_mode,
+            quantity_per_trade=cfg.env.quantity_per_trade,
             stoploss_levels=cfg.env.stoploss_levels,
             takeprofit_levels=cfg.env.takeprofit_levels,
             max_traj_length=max_traj_length,
+            include_hold_action=cfg.env.include_hold_action,
         )
         return FuturesOneStepEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
     else:
@@ -116,6 +118,8 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             bankrupt_threshold=cfg.env.bankrupt_threshold,
             seed=cfg.env.seed,
             leverage=cfg.env.leverage,
+            quantity_per_trade=cfg.env.quantity_per_trade,
+            trade_mode=cfg.env.trade_mode,
             stoploss_levels=cfg.env.stoploss_levels,
             takeprofit_levels=cfg.env.takeprofit_levels,
             max_traj_length=max_traj_length,

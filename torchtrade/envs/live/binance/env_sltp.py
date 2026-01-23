@@ -37,7 +37,7 @@ class BinanceFuturesSLTPTradingEnvConfig:
     leverage: int = 1  # Leverage (1-125)
     margin_type: MarginType = MarginType.ISOLATED
     quantity_per_trade: float = 0.001  # Base quantity per trade
-    trade_mode: TradeMode = TradeMode.QUANTITY
+    trade_mode: TradeMode = "quantity"
 
     # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
     stoploss_levels: Tuple[float, ...] = (-0.025, -0.05, -0.1)

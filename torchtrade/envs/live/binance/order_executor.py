@@ -82,7 +82,7 @@ class BinanceFuturesOrderClass:
     def __init__(
         self,
         symbol: str,
-        trade_mode: TradeMode = TradeMode.QUANTITY,
+        trade_mode: TradeMode = "quantity",
         api_key: str = "",
         api_secret: str = "",
         demo: bool = True,
@@ -95,7 +95,7 @@ class BinanceFuturesOrderClass:
 
         Args:
             symbol: The trading symbol (e.g., "BTCUSDT")
-            trade_mode: TradeMode.QUANTITY for unit-based orders
+            trade_mode: "quantity" for unit-based orders
             api_key: Binance API key
             api_secret: Binance API secret
             demo: Whether to use demo trading (default: True for safety)
@@ -493,7 +493,7 @@ if __name__ == "__main__":
     # Initialize with demo mode
     order_manager = BinanceFuturesOrderClass(
         symbol="BTCUSDT",
-        trade_mode=TradeMode.QUANTITY,
+        trade_mode="quantity",
         api_key=os.getenv("BINANCE_API_KEY", ""),
         api_secret=os.getenv("BINANCE_SECRET", ""),
         demo=True,

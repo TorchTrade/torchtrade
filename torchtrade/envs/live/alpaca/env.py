@@ -25,7 +25,7 @@ class AlpacaTradingEnvConfig:
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
     paper: bool = True
-    trade_mode: TradeMode = TradeMode.NOTIONAL
+    trade_mode: TradeMode = "notional"
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)

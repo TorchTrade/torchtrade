@@ -11,7 +11,7 @@ from torchtrade.envs.core.reward import (
     sharpe_ratio_reward,
     realized_pnl_reward,
 )
-from torchtrade.envs.core.common import TradeMode
+from torchtrade.envs.core.common import TradeMode, validate_trade_mode
 
 __all__ = [
     "TorchTradeBaseEnv",
@@ -26,4 +26,5 @@ __all__ = [
     "sharpe_ratio_reward",
     "realized_pnl_reward",
     "TradeMode",
+    "validate_trade_mode",
 ]

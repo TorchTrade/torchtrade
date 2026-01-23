@@ -10,7 +10,6 @@ import warnings
 
 from torchtrade.envs.live.alpaca.order_executor import (
     AlpacaOrderClass,
-    TradeMode,
     OrderStatus,
     PositionStatus,
 )
@@ -38,10 +37,6 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
             client=mock_client,
         )
 
-    def get_trade_mode_enum(self):
-        """Get the TradeMode enum for Alpaca."""
-        return TradeMode
-
     # Alpaca-specific tests
 
     def test_symbol_slash_removal(self):
@@ -52,7 +47,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
             warnings.simplefilter("always")
             order_class = AlpacaOrderClass(
                 symbol="BTC/USD",
-                trade_mode=TradeMode.NOTIONAL,
+                trade_mode=notional,
                 client=mock_client,
             )
             assert len(w) == 1
@@ -65,18 +60,18 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient()
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.QUANTITY,
+            trade_mode=quantity,
             client=mock_client,
         )
 
-        assert order_class.trade_mode == TradeMode.QUANTITY
+        assert order_class.trade_mode == quantity
 
     def test_quantity_mode_trade(self):
         """Test trade in QUANTITY mode."""
         mock_client = MockTradingClient(initial_cash=10000.0, current_price=100000.0)
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.QUANTITY,
+            trade_mode=quantity,
             client=mock_client,
         )
 
@@ -93,7 +88,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient()
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -112,7 +107,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient()
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -130,7 +125,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient()
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -149,7 +144,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient(initial_cash=10000.0, current_price=100000.0)
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -168,7 +163,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient(initial_cash=10000.0, current_price=100000.0)
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -187,7 +182,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient()
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -202,7 +197,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient(initial_cash=10000.0, current_price=100000.0)
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -217,7 +212,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient(initial_cash=10000.0, current_price=100000.0)
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -235,7 +230,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient(initial_cash=10000.0, current_price=100000.0)
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -263,7 +258,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient(initial_cash=10000.0, current_price=100000.0)
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -279,7 +274,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient()
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -297,7 +292,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient()
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -315,7 +310,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient(current_price=100000.0)
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -332,7 +327,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient(initial_cash=1000000.0, current_price=100000.0)
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 
@@ -349,7 +344,7 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         mock_client = MockTradingClient(initial_cash=10000.0, current_price=100000.0)
         order_class = AlpacaOrderClass(
             symbol="BTCUSD",
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode=notional,
             client=mock_client,
         )
 

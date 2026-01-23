@@ -39,7 +39,7 @@ class BitgetFuturesSLTPTradingEnvConfig:
     margin_mode: MarginMode = MarginMode.ISOLATED
     position_mode: PositionMode = PositionMode.ONE_WAY  # ONE_WAY or HEDGE
     quantity_per_trade: float = 0.001  # Base quantity per trade
-    trade_mode: TradeMode = TradeMode.QUANTITY
+    trade_mode: TradeMode = "quantity"
 
     # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
     stoploss_levels: Tuple[float, ...] = (-0.025, -0.05, -0.1)

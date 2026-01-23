@@ -20,7 +20,7 @@ class TestBitgetFuturesOrderClass:
         with patch('torchtrade.envs.live.bitget.order_executor.ccxt.bitget', return_value=mock_ccxt_client):
             executor = BitgetFuturesOrderClass(
                 symbol="BTC/USDT:USDT",
-                trade_mode=TradeMode.QUANTITY,
+                trade_mode="quantity",
                 demo=True,
                 leverage=10,
                 margin_mode=MarginMode.ISOLATED,
@@ -50,7 +50,7 @@ class TestBitgetFuturesOrderClass:
             # CCXT format should work
             executor = BitgetFuturesOrderClass(
                 symbol="BTC/USDT:USDT",
-                trade_mode=TradeMode.QUANTITY,
+                trade_mode="quantity",
                 api_key="test_key",
                 api_secret="test_secret",
                 passphrase="test_pass",
@@ -318,12 +318,19 @@ class TestBitgetFuturesOrderClass:
         assert MarginMode.ISOLATED.value == "isolated"
         assert MarginMode.CROSSED.value == "crossed"
 
-    def test_trade_mode_enum(self):
-        """Test TradeMode enum values."""
-        from torchtrade.envs.live.bitget.order_executor import TradeMode
+    def test_trade_mode_values(self):
+        """Test TradeMode string literal values."""
+        from torchtrade.envs.core.common import validate_trade_mode
 
-        assert TradeMode.QUANTITY.value == "quantity"
-        assert TradeMode.NOTIONAL.value == "notional"
+        # Test that validation accepts valid values
+        assert validate_trade_mode("quantity") == "quantity"
+        assert validate_trade_mode("notional") == "notional"
+        assert validate_trade_mode("QUANTITY") == "quantity"  # Case-insensitive
+        assert validate_trade_mode("NOTIONAL") == "notional"  # Case-insensitive
+
+        # Test that validation rejects invalid values
+        with pytest.raises(ValueError):
+            validate_trade_mode("invalid")
 
 
 class TestBitgetFuturesOrderClassIntegration:
@@ -340,7 +347,7 @@ class TestBitgetFuturesOrderClassIntegration:
 
         executor = BitgetFuturesOrderClass(
             symbol="BTC/USDT:USDT",
-            trade_mode=TradeMode.QUANTITY,
+            trade_mode="quantity",
             api_key=os.getenv("BITGETACCESSAPIKEY"),
             api_secret=os.getenv("BITGETSECRETKEY"),
             passphrase=os.getenv("BITGETPASSPHRASE"),

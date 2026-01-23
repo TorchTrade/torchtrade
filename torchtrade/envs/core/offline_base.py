@@ -439,13 +439,13 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             ValueError: If trade_mode is unknown, quantity_per_trade is invalid,
                        or execution_price is non-positive in NOTIONAL mode
         """
-        if self.config.trade_mode == TradeMode.QUANTITY:
+        if self.config.trade_mode == "quantity":
             position_qty = self.config.quantity_per_trade
             notional_value = position_qty * execution_price
-        elif self.config.trade_mode == TradeMode.NOTIONAL:
+        elif self.config.trade_mode == "notional":
             if execution_price <= 0:
                 raise ValueError(
-                    f"execution_price must be positive for NOTIONAL mode, got {execution_price}"
+                    f"execution_price must be positive for notional mode, got {execution_price}"
                 )
             notional_value = self.config.quantity_per_trade
             position_qty = notional_value / execution_price

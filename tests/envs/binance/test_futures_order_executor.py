@@ -74,7 +74,7 @@ class TestBinanceFuturesOrderClass:
 
         return BinanceFuturesOrderClass(
             symbol="BTCUSDT",
-            trade_mode=TradeMode.QUANTITY,
+            trade_mode="quantity",
             demo=True,
             leverage=10,
             client=mock_client,
@@ -98,7 +98,7 @@ class TestBinanceFuturesOrderClass:
 
         executor = BinanceFuturesOrderClass(
             symbol="BTC/USDT",
-            trade_mode=TradeMode.QUANTITY,
+            trade_mode="quantity",
             client=mock_client,
         )
         assert executor.symbol == "BTCUSDT"
