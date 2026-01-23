@@ -138,7 +138,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="grey" data-md-color-accent="orange"  aria-label="Switch to Light Mode"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="orange"  aria-label="Switch to Light Mode"  type="radio" name="__palette" id="__palette_1">
     
       <label class="md-header__button md-icon" title="Switch to Light Mode" for="__palette_0" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 7H7a5 5 0 0 0-5 5 5 5 0 0 0 5 5h10a5 5 0 0 0 5-5 5 5 0 0 0-5-5m0 8a3 3 0 0 1-3-3 3 3 0 0 1 3-3 3 3 0 0 1 3 3 3 3 0 0 1-3 3"/></svg>
@@ -588,6 +588,56 @@
       Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#environment-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Environment Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sequential-environments-seq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sequential Environments (Seq)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sltp-environments-stop-losstake-profit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SL/TP Environments (Stop-Loss/Take-Profit)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#onestep-environments-episodic-rollouts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OneStep Environments (Episodic Rollouts)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
       
         <li class="md-nav__item">
   <a href="#overview" class="md-nav__link">
@@ -1672,6 +1722,56 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#environment-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Environment Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sequential-environments-seq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sequential Environments (Seq)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sltp-environments-stop-losstake-profit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SL/TP Environments (Stop-Loss/Take-Profit)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#onestep-environments-episodic-rollouts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OneStep Environments (Episodic Rollouts)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#overview" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2351,6 +2451,48 @@
 
 <h1 id="offline-environments">Offline Environments<a class="headerlink" href="#offline-environments" title="Permanent link">&para;</a></h1>
 <p>Offline environments are designed for <strong>training on historical data</strong> (backtesting). These are not "offline RL" methods like CQL or IQL, but rather environments that use pre-collected market data instead of live exchange APIs.</p>
+<h2 id="environment-types">Environment Types<a class="headerlink" href="#environment-types" title="Permanent link">&para;</a></h2>
+<p>TorchTrade currently offers three main categories of offline environments, each designed for different trading strategies and learning paradigms:</p>
+<h3 id="sequential-environments-seq">Sequential Environments (Seq)<a class="headerlink" href="#sequential-environments-seq" title="Permanent link">&para;</a></h3>
+<p><strong>Environments</strong>: <code>SeqLongOnlyEnv</code>, <code>SeqFuturesEnv</code></p>
+<p>These are the foundational environments for step-by-step trading with <strong>fractional position sizing</strong>. The agent can continuously adapt its position at every timestep:</p>
+<ul>
+<li><strong>Fractional actions</strong>: Action values represent the fraction of capital to deploy (e.g., 0.5 = 50% allocation)</li>
+<li><strong>Flexible position management</strong>: Agent can adjust position size up or down at any time, or go completely market neutral (action = 0)</li>
+<li><strong>Futures support</strong>: <code>SeqFuturesEnv</code> adds leverage (1-125x), margin management, and liquidation mechanics</li>
+<li><strong>No leverage</strong>: <code>SeqLongOnlyEnv</code> uses spot trading without leverage (long-only positions)</li>
+</ul>
+<p><strong>Key characteristic</strong>: Maximum flexibility - the agent can rebalance or exit positions freely at every decision point.</p>
+<h3 id="sltp-environments-stop-losstake-profit">SL/TP Environments (Stop-Loss/Take-Profit)<a class="headerlink" href="#sltp-environments-stop-losstake-profit" title="Permanent link">&para;</a></h3>
+<p><strong>Environments</strong>: <code>SeqLongOnlySLTPEnv</code>, <code>SeqFuturesSLTPEnv</code></p>
+<p>These environments extend sequential environments with <strong>bracket order risk management</strong>:</p>
+<ul>
+<li><strong>Bracket orders</strong>: Each trade includes configurable stop-loss and take-profit trigger levels</li>
+<li><strong>Combinatorial action space</strong>: Agent selects from combinations of SL/TP levels (e.g., SL=-2% with TP=+5%)</li>
+<li><strong>Risk mitigation</strong>: Automated exit triggers help limit downside and lock in profits</li>
+<li><strong>Still flexible</strong>: Agent can manually exit positions or switch directions before triggers are hit</li>
+</ul>
+<p><strong>Key characteristic</strong>: Structured risk management with predefined exit conditions, but maintains flexibility for manual intervention.</p>
+<h3 id="onestep-environments-episodic-rollouts">OneStep Environments (Episodic Rollouts)<a class="headerlink" href="#onestep-environments-episodic-rollouts" title="Permanent link">&para;</a></h3>
+<p><strong>Environments</strong>: <code>LongOnlyOneStepEnv</code>, <code>FuturesOneStepEnv</code></p>
+<p>These environments are optimized for <strong>fast episodic training</strong> with algorithms like <a href="https://arxiv.org/abs/2402.03300">GRPO</a>:</p>
+<ul>
+<li><strong>Single decision point</strong>: Agent observes market state, takes one action, and episode completes</li>
+<li><strong>Internal rollouts</strong>: After action is taken, environment internally simulates the position until SL/TP triggers or max rollout length</li>
+<li><strong>No mid-episode adjustments</strong>: Unlike sequential environments, the agent cannot change position during the rollout</li>
+<li><strong>Terminal rewards</strong>: Returns cumulative PnL from the entire rollout as a single terminal reward</li>
+</ul>
+<p><strong>Key characteristic</strong>: Optimized for fast iteration and contextual bandit-style learning. Policies can be deployed to sequential environments for step-by-step execution.</p>
+<hr />
+<div class="admonition note">
+<p class="admonition-title">Extensible Framework</p>
+<p>This is the <strong>current base setup</strong> of TorchTrade environments. The framework is designed to be extensible:</p>
+<ul>
+<li>We plan to add more environment variants based on user needs and research directions</li>
+<li>Users can create <strong>custom environments</strong> by inheriting from existing base classes or implementing new ones from scratch</li>
+<li>See <a href="../../guides/custom-environment/">Building Custom Environments</a> for guidance on extending TorchTrade</li>
+</ul>
+</div>
 <h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
 <p>TorchTrade provides 6 offline environments:</p>
 <table>
@@ -3199,6 +3341,46 @@
       
         <footer class="md-footer">
   
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../../examples/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Examples">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Examples
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../visualization/" class="md-footer__link md-footer__link--next" aria-label="Next: Visualization">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Visualization
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
   <div class="md-footer-meta md-typeset">
     <div class="md-footer-meta__inner md-grid">
       <div class="md-copyright">
@@ -3249,7 +3431,7 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tracking", "navigation.sections", "navigation.top", "navigation.expand", "navigation.path", "search.suggest", "search.highlight", "content.tabs.link", "content.code.annotation", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tracking", "navigation.sections", "navigation.top", "navigation.expand", "navigation.path", "navigation.footer", "search.suggest", "search.highlight", "content.tabs.link", "content.code.annotation", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
       <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
