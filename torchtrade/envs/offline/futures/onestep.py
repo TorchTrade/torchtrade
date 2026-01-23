@@ -18,9 +18,8 @@ from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 import torch
 from torchrl.data import Bounded, Categorical
 import pandas as pd
-import datasets
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta, normalize_timeframe_config
-from torchtrade.envs.offline.infrastructure.utils import compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map
+from torchtrade.envs.offline.infrastructure.utils import compute_periods_per_year_crypto, InitialBalanceSampler, build_sltp_action_map, load_torch_trade_dataset
 from torchtrade.envs.core.reward import build_reward_context, default_log_return, validate_reward_function
 from torchtrade.envs.core.state import FuturesHistoryTracker
 from torchtrade.envs.core.common import TradeMode, validate_quantity_per_trade
@@ -759,8 +758,7 @@ if __name__ == "__main__":
     window_sizes = [32]
     execute_on = TimeFrame(15, TimeFrameUnit.Minute)
 
-    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
-    df = df["train"].to_pandas()
+    df = load_torch_trade_dataset()
 
     config = FuturesOneStepEnvConfig(
         symbol="BTC/USD",

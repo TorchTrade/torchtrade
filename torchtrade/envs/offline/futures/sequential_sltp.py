@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-import datasets
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical, Bounded
 from torchrl.data.tensor_specs import CompositeSpec
@@ -21,7 +20,7 @@ from torchrl.data.tensor_specs import CompositeSpec
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservationSampler
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
-from torchtrade.envs.offline.infrastructure.utils import InitialBalanceSampler, build_sltp_action_map
+from torchtrade.envs.offline.infrastructure.utils import InitialBalanceSampler, build_sltp_action_map, load_torch_trade_dataset
 from torchtrade.envs.core.reward import build_reward_context, default_log_return, validate_reward_function
 from torchtrade.envs.core.state import FuturesHistoryTracker
 from torchtrade.envs.core.common import TradeMode, validate_quantity_per_trade
@@ -842,8 +841,7 @@ if __name__ == "__main__":
     execute_on = TimeFrame(1, TimeFrameUnit.Minute)
 
     # Load sample data
-    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
-    df = df["train"].to_pandas()
+    df = load_torch_trade_dataset()
 
     config = SeqFuturesSLTPEnvConfig(
         symbol="BTC/USD",

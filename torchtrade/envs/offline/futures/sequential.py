@@ -10,7 +10,6 @@ from tensordict import TensorDict, TensorDictBase
 import torch
 from torchrl.data import Categorical
 import pandas as pd
-import datasets
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
 from torchtrade.envs.core.state import FuturesHistoryTracker
@@ -800,7 +799,7 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
                 - profit_factor: Ratio of total wins to total losses
         """
         from torchtrade.metrics import compute_all_metrics
-        from torchtrade.envs.offline.infrastructure.utils import compute_periods_per_year_crypto
+        from torchtrade.envs.offline.infrastructure.utils import compute_periods_per_year_crypto, load_torch_trade_dataset
 
         # Convert histories to tensors
         portfolio_values = torch.tensor(self.history.portfolio_values, dtype=torch.float32)
@@ -831,8 +830,7 @@ if __name__ == "__main__":
     execute_on = TimeFrame(5, TimeFrameUnit.Minute)
 
     # Load sample data
-    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
-    df = df["train"].to_pandas()
+    df = load_torch_trade_dataset()
 
     config = SeqFuturesEnvConfig(
         symbol="BTC/USD",

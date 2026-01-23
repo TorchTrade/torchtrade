@@ -13,6 +13,28 @@ from torchtrade.envs.utils.timeframe import (
 )
 
 
+def load_torch_trade_dataset(
+    dataset_name: str = "Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025",
+    split: str = "train"
+) -> pd.DataFrame:
+    """Load TorchTrade dataset from HuggingFace.
+
+    Args:
+        dataset_name: HuggingFace dataset identifier
+        split: Dataset split to load (default: "train")
+
+    Returns:
+        DataFrame with OHLCV data (columns: timestamp, open, high, low, close, volume)
+
+    Example:
+        >>> df = load_torch_trade_dataset()
+        >>> df = load_torch_trade_dataset("Torch-Trade/ethusdt_spot_1m", split="test")
+    """
+    import datasets
+    dataset = datasets.load_dataset(dataset_name)
+    return dataset[split].to_pandas()
+
+
 def compute_periods_per_year_crypto(execute_on_unit: str, execute_on_value: float):
     """
     Compute periods per year for crypto trading (24/7).

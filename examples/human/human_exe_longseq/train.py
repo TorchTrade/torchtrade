@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hydra
 import pandas as pd
-import datasets
 from torchtrade.actor.human import HumanActor
+from torchtrade.envs.offline.infrastructure.utils import load_torch_trade_dataset
 
 
 @hydra.main(config_path="", config_name="config", version_base="1.1")
@@ -15,8 +15,7 @@ def main(cfg: DictConfig):  # noqa: F821
     from utils import make_environment, make_collector, log_metrics
 
     # Creante env
-    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
-    df = df["train"].to_pandas()
+    df = load_torch_trade_dataset()
     train_df = df[(1440 * 21):]
 
 

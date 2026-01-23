@@ -10,7 +10,6 @@ from __future__ import annotations
 import wandb
 import warnings
 import pandas as pd
-import datasets
 import hydra
 import numpy as np
 import torch
@@ -30,6 +29,7 @@ from utils import (
     make_replay_buffer,
     make_collector,
 )
+from torchtrade.envs.offline.infrastructure.utils import load_torch_trade_dataset
 
 torch.set_float32_matmul_precision("high")
 
@@ -65,8 +65,7 @@ def main(cfg: DictConfig):  # noqa: F821
     device = torch.device(device)
 
     # Creante env
-    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
-    df = df["train"].to_pandas()
+    df = load_torch_trade_dataset()
     test_df = df[0:(1440 * 14)] # 14 days
     train_df = df[(1440 * 14):]
 
