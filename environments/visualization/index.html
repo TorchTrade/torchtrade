@@ -729,6 +729,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parameters
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#example-with-different-environments" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1367,6 +1378,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parameters
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#example-with-different-environments" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1540,11 +1562,14 @@
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="k">break</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># Visualize the episode</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">env</span><span class="o">.</span><span class="n">render_history</span><span class="p">()</span>  <span class="c1"># Display plots</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">env</span><span class="o">.</span><span class="n">render_history</span><span class="p">()</span>  <span class="c1"># Display plots with buy-and-hold baseline</span>
 </span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># Or save to a variable for later</span>
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="n">fig</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">render_history</span><span class="p">(</span><span class="n">return_fig</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="n">fig</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s2">&quot;episode_history.png&quot;</span><span class="p">)</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># Without buy-and-hold baseline</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="n">env</span><span class="o">.</span><span class="n">render_history</span><span class="p">(</span><span class="n">plot_bh_baseline</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="c1"># Or save to a variable for later</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="n">fig</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">render_history</span><span class="p">(</span><span class="n">return_fig</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">plot_bh_baseline</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="n">fig</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s2">&quot;episode_history.png&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="visualization-types">Visualization Types<a class="headerlink" href="#visualization-types" title="Permanent link">&para;</a></h2>
 <p>The rendered plots automatically adapt based on environment type:</p>
@@ -1576,9 +1601,14 @@
 <ul>
 <li><strong>Automatic detection</strong>: Checks for <code>positions</code> key in history to determine environment type</li>
 <li><strong>Matplotlib-based</strong>: Requires <code>matplotlib</code> to be installed</li>
-<li><strong>Buy-and-hold baseline</strong>: Calculated from initial portfolio value (buys asset at t=0 and holds)</li>
+<li><strong>Buy-and-hold baseline</strong>: Calculated from initial portfolio value (buys asset at t=0 and holds). Can be disabled with <code>plot_bh_baseline=False</code></li>
 <li><strong>Action markers</strong>: All actions are marked on the price chart for easy analysis</li>
 <li><strong>Consistent API</strong>: Same method works across all 6 offline environments</li>
+</ul>
+<h2 id="parameters">Parameters<a class="headerlink" href="#parameters" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong><code>return_fig</code></strong> (bool, default=False): If True, returns the matplotlib figure instead of displaying it</li>
+<li><strong><code>plot_bh_baseline</code></strong> (bool, default=True): If True, plots the buy-and-hold baseline for comparison. Set to False to show only portfolio value without the baseline</li>
 </ul>
 <h2 id="example-with-different-environments">Example with Different Environments<a class="headerlink" href="#example-with-different-environments" title="Permanent link">&para;</a></h2>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
@@ -1616,7 +1646,7 @@
 <h3 id="base-class-implementation">Base Class Implementation<a class="headerlink" href="#base-class-implementation" title="Permanent link">&para;</a></h3>
 <p>The method is implemented in <code>TorchTradeOfflineEnv</code> base class at <code>torchtrade/envs/offline/base.py:457-614</code>.</p>
 <h3 id="detection-logic">Detection Logic<a class="headerlink" href="#detection-logic" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">render_history</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">return_fig</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">render_history</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">return_fig</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">plot_bh_baseline</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">history_dict</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">history</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="c1"># Automatically detect environment type</span>
