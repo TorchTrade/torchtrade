@@ -24,12 +24,7 @@ from torchtrade.envs.offline.infrastructure.utils import InitialBalanceSampler, 
 from torchtrade.envs.core.reward import build_reward_context, default_log_return, validate_reward_function
 from torchtrade.envs.core.state import FuturesHistoryTracker
 from torchtrade.envs.core.common import TradeMode, validate_quantity_per_trade
-
-
-class MarginType(Enum):
-    """Margin type for futures trading."""
-    ISOLATED = "isolated"
-    CROSSED = "crossed"
+from torchtrade.envs.core.common_types import MarginType
 
 
 @dataclass

@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import warnings
 from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import dataclass
 
 import torch

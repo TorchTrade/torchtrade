@@ -56,13 +56,6 @@ def calculate_fractional_position(params: PositionCalculationParams) -> Tuple[fl
     if params.action_value == 0.0:
         return 0.0, 0.0, "flat"
 
-    # Validate short positions if not allowed
-    if params.action_value < 0 and not params.allow_short:
-        # For long-only environments, negative actions mean "reduce/sell"
-        # But target calculation should be handled by caller
-        # Here we just validate the formula works for allowed range
-        pass
-
     # Calculate fraction and direction
     fraction = abs(params.action_value)
     direction = 1 if params.action_value > 0 else -1

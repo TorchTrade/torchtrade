@@ -18,6 +18,7 @@ from alpaca.trading.requests import (
 from dotenv import load_dotenv
 
 from torchtrade.envs.core.common import TradeMode
+from torchtrade.envs.core.common_types import OrderStatus
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +46,6 @@ Below are the descriptions of each TIF:
 - ioc: An Immediate Or Cancel (IOC) order requires all or part of the order to be executed immediately. Any unfilled portion of the order is canceled. Only available with API v2. Most market makers who receive IOC orders will attempt to fill the order on a principal basis only, and cancel any unfilled balance. On occasion, this can result in the entire order being cancelled if the market maker does not have any existing inventory of the security in question.
 - fok: A Fill or Kill (FOK) order is only executed if the entire order quantity can be filled, otherwise the order is canceled. Only available with API v2.
 """
-
-
-@dataclass
-class OrderStatus:
-    is_open: bool
-    order_id: Optional[str]
-    filled_qty: Optional[float]
-    filled_avg_price: Optional[float]
-    status: str
-    side: str
-    order_type: str
 
 
 @dataclass

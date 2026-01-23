@@ -7,6 +7,7 @@ import os
 from dotenv import load_dotenv
 
 from torchtrade.envs.core.common import TradeMode
+from torchtrade.envs.core.common_types import MarginType, OrderStatus
 
 load_dotenv()
 
@@ -24,30 +25,6 @@ class PositionSide(Enum):
     LONG = "LONG"    # Hedge mode: explicit long position
     SHORT = "SHORT"  # Hedge mode: explicit short position
     BOTH = "BOTH"    # One-way mode: single net position (default)
-
-
-class MarginType(Enum):
-    """
-    Margin type for Binance Futures positions.
-
-    - ISOLATED: Margin is isolated per position. Losses are limited to
-      that position's margin. Lower risk but requires more capital.
-    - CROSSED: Margin is shared across all positions. Entire account
-      balance can be used to prevent liquidation. Higher risk.
-    """
-    ISOLATED = "ISOLATED"
-    CROSSED = "CROSSED"
-
-
-@dataclass
-class OrderStatus:
-    is_open: bool
-    order_id: Optional[str]
-    filled_qty: Optional[float]
-    filled_avg_price: Optional[float]
-    status: str
-    side: str
-    order_type: str
 
 
 @dataclass

@@ -23,6 +23,7 @@ from torchtrade.envs.offline.infrastructure.utils import compute_periods_per_yea
 from torchtrade.envs.core.reward import build_reward_context, default_log_return, validate_reward_function
 from torchtrade.envs.core.state import FuturesHistoryTracker
 from torchtrade.envs.core.common import TradeMode, validate_quantity_per_trade
+from torchtrade.envs.core.common_types import MarginType
 import logging
 import sys
 
@@ -39,12 +40,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-
-class MarginType(Enum):
-    """Margin type for futures trading."""
-    ISOLATED = "isolated"
-    CROSSED = "crossed"
 
 
 @dataclass

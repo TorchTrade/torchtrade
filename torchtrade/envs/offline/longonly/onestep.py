@@ -366,8 +366,6 @@ if __name__ == "__main__":
 
     df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
 
-    #df = df[0:(1440 * 7)] # 1440 minutes = 1 day
-
     config = LongOnlyOneStepEnvConfig(
         symbol="BTC/USD",
         time_frames=time_frames,
