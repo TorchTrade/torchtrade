@@ -21,6 +21,8 @@ TorchTrade provides modular environments for both live trading with major exchan
 
 > **Note:** TorchTrade currently focuses on single-asset trading environments (one symbol per environment). Multi-asset portfolio optimization and cross-asset trading environments are planned for future releases.
 
+> **⚠️ Work in Progress:** TorchTrade is under active development. We continuously add new features, improvements, and optimizations. Expect API changes, new environments, and enhanced functionality in future releases.
+
 ---
 
 ## 📚 Full Documentation
