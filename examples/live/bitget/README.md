@@ -90,7 +90,7 @@ config = BitgetFuturesTradingEnvConfig(
     product_type="USDT-FUTURES",     # V2 API: USDT-FUTURES, COIN-FUTURES, USDC-FUTURES
     leverage=5,                       # Leverage (1-125)
     quantity_per_trade=0.002,        # Base quantity per trade
-    trade_mode=TradeMode.QUANTITY,   # QUANTITY or CASH mode
+    trade_mode="quantity",            # "quantity" or "notional" mode
 
     # Margin mode
     margin_mode=MarginMode.ISOLATED,  # ISOLATED or CROSSED

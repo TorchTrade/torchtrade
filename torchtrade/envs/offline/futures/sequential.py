@@ -49,8 +49,8 @@ class SeqFuturesEnvConfig:
     initial_cash: Union[Tuple[int, int], int] = (1000, 5000)
 
     # Position sizing
-    trade_mode: TradeMode = TradeMode.QUANTITY  # Match live environment default
-    quantity_per_trade: float = 0.001  # BTC for QUANTITY, USD for NOTIONAL
+    trade_mode: TradeMode = "quantity"  # Match live environment default
+    quantity_per_trade: float = 0.001  # BTC for quantity mode, USD for notional mode
 
     # Leverage and margin settings
     leverage: int = 1  # 1x to 125x

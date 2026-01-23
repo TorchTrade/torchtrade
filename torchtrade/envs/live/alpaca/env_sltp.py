@@ -37,7 +37,7 @@ class AlpacaSLTPTradingEnvConfig:
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
     paper: bool = True
-    trade_mode: TradeMode = TradeMode.NOTIONAL
+    trade_mode: TradeMode = "notional"
     seed: Optional[int] = 42
     include_base_features: bool = False
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
@@ -240,8 +240,8 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
 
     def _calculate_trade_amount(self, side: str) -> float:
         """Calculate the dollar amount to trade."""
-        if self.config.trade_mode == TradeMode.QUANTITY:
-            raise NotImplementedError("QUANTITY trade mode not implemented for SLTP env")
+        if self.config.trade_mode == "quantity":
+            raise NotImplementedError("quantity trade mode not implemented for SLTP env")
 
         if side == "buy":
             return self.balance

@@ -87,7 +87,7 @@ class BitgetFuturesOrderClass:
         self,
         symbol: str,
         product_type: str = "USDT-FUTURES",  # V2 API: USDT-FUTURES, COIN-FUTURES, USDC-FUTURES
-        trade_mode: TradeMode = TradeMode.QUANTITY,
+        trade_mode: TradeMode = "quantity",
         api_key: str = "",
         api_secret: str = "",
         passphrase: str = "",
@@ -103,7 +103,7 @@ class BitgetFuturesOrderClass:
         Args:
             symbol: The trading symbol (e.g., "BTC/USDT:USDT")
             product_type: Product type for V2 API (USDT-FUTURES, COIN-FUTURES, USDC-FUTURES)
-            trade_mode: TradeMode.QUANTITY for unit-based orders
+            trade_mode: "quantity" for unit-based orders
             api_key: Bitget API key
             api_secret: Bitget API secret
             passphrase: Bitget API passphrase (required!)
@@ -747,7 +747,7 @@ if __name__ == "__main__":
     try:
         order_manager = BitgetFuturesOrderClass(
             symbol="BTC/USDT:USDT",  # CCXT perpetual swap format
-            trade_mode=TradeMode.QUANTITY,
+            trade_mode="quantity",
             api_key=os.getenv("BITGETACCESSAPIKEY", ""),
             api_secret=os.getenv("BITGETSECRETKEY", ""),
             passphrase=os.getenv("BITGETPASSPHRASE", ""),

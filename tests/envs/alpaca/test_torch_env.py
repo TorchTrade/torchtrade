@@ -10,7 +10,6 @@ import torch
 from tensordict import TensorDict
 
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
-from torchtrade.envs.live.alpaca.order_executor import TradeMode
 from .mocks import MockObserver, MockTrader
 
 
@@ -431,7 +430,7 @@ class TestAlpacaTorchTradingEnvTradeExecution:
         config = AlpacaTradingEnvConfig(
             symbol="BTC/USD",
             window_sizes=[10],
-            trade_mode=TradeMode.NOTIONAL,
+            trade_mode="notional",
         )
         mock_observer = MockObserver(window_sizes=[10])
         mock_trader = MockTrader(initial_cash=10000.0)

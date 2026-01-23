@@ -84,7 +84,7 @@ class AlpacaOrderClass:
 
         Args:
             symbol: The trading symbol (e.g., "BTC/USD")
-            trade_mode: TradeMode.NOTIONAL for dollar-based orders or TradeMode.QUANTITY for unit-based orders
+            trade_mode: "notional" for dollar-based orders or "quantity" for unit-based orders
             api_key: Alpaca API key (not required if client is provided)
             api_secret: Alpaca API secret (not required if client is provided)
             paper: Whether to use paper trading (default: True)
@@ -154,7 +154,7 @@ class AlpacaOrderClass:
                 order_params["stop_loss"] = StopLossRequest(stop_price=stop_loss)
 
             # Add amount based on trade mode
-            if self.trade_mode == TradeMode.NOTIONAL:
+            if self.trade_mode == "notional":
                 if side.lower() == "buy":
                     order_params["notional"] = amount
                 else:
@@ -354,7 +354,7 @@ if __name__ == "__main__":
     # Initialize the order class
     order_manager = AlpacaOrderClass(
         symbol="BTC/USD",
-        trade_mode=TradeMode.NOTIONAL,
+        trade_mode="notional",
         api_key=os.getenv("API_KEY"),
         api_secret=os.getenv("SECRET_KEY"),
         paper=True,

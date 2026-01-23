@@ -14,7 +14,6 @@ from torchtrade.envs.live.alpaca.env_sltp import (
     AlpacaSLTPTradingEnvConfig,
 )
 from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map as combinatory_action_map
-from torchtrade.envs.live.alpaca.order_executor import TradeMode
 from .mocks import MockObserver, MockTrader, PositionStatus
 
 
