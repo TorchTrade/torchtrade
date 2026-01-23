@@ -1642,6 +1642,10 @@
 <hr />
 <h2 id="available-examples">Available Examples<a class="headerlink" href="#available-examples" title="Permanent link">&para;</a></h2>
 <p>The following examples demonstrate the flexibility of TorchTrade across different algorithms, environments, and use cases. These examples are meant to be starting points for further experimentation and adaptation - customize them according to your needs, ideas, and environments.</p>
+<div class="admonition warning">
+<p class="admonition-title">Hyperparameters Not Tuned</p>
+<p><strong>All hyperparameters in our examples are NOT tuned.</strong> The configurations provided are starting points for experimentation, not optimized settings. You should tune hyperparameters (learning rates, network architectures, reward functions, etc.) according to your specific trading environment, market conditions, and objectives.</p>
+</div>
 <h3 id="online-rl-offline-backtesting-environments">Online RL (Offline Backtesting Environments)<a class="headerlink" href="#online-rl-offline-backtesting-environments" title="Permanent link">&para;</a></h3>
 <p>These examples use online RL algorithms (learning from interaction as it happens) with historical market data for backtesting. This allows you to train policies on past data before deploying them to live trading environments. We typically split the training data into training and test environments to evaluate the generalization performance of learned policies on unseen market conditions.</p>
 <p>Located in <code>examples/online/</code>:</p>
