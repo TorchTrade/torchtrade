@@ -26,7 +26,8 @@ class _LLMModule(nn.Module):
 
         # Set defaults if not provided
         if feature_keys is None:
-            feature_keys = ["close", "open", "high", "low", "volume"]
+            self.feature_keys = ["close", "open", "high", "low", "volume"]
+
         if execute_on is None:
             execute_on = "5Minute"
         if symbol is None:
