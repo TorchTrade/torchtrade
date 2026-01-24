@@ -6,7 +6,7 @@ from typing import Callable, List, Optional
 import torch
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Bounded
-from torchrl.data.tensor_specs import CompositeSpec
+from torchrl.data import Composite
 
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, timeframe_to_seconds
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
@@ -149,7 +149,7 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         window_sizes = self.config.window_sizes if isinstance(self.config.window_sizes, list) else [self.config.window_sizes]
 
         # Create composite observation spec
-        self.observation_spec = CompositeSpec(shape=())
+        self.observation_spec = Composite(shape=())
         self.market_data_key = "market_data"
         self.account_state_key = "account_state"
 

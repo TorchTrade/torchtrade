@@ -69,12 +69,13 @@ def main(cfg: DictConfig):  # noqa: F821
     # Create environments
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
-    # Split data by date
+
+    # Convert timestamp column to datetime for proper filtering
     df['0'] = pd.to_datetime(df['0'])
     test_split_date = pd.to_datetime(cfg.env.test_split_start)
 
     train_df = df[df['0'] < test_split_date]
-    test_df = df[df['0'] >= test_split_date]
+    test_df  = df[df['0'] >= test_split_date]
 
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
     max_eval_traj_length = len(test_df)
@@ -88,12 +89,14 @@ def main(cfg: DictConfig):  # noqa: F821
     print(f"Test date range: {test_df['0'].min()} to {test_df['0'].max()}")
     print(f"Max train traj length: {max_train_traj_length}")
     print("="*80)
-    train_env, eval_env = make_environment(
+    train_env, eval_env, coverage_tracker = make_environment(
         train_df,
         test_df,
         cfg,
         train_num_envs=cfg.env.train_envs,
         eval_num_envs=cfg.env.eval_envs,
+        max_train_traj_length=max_train_traj_length,
+        max_eval_traj_length=max_eval_traj_length,
     )
 
     # Create agent
@@ -157,7 +160,8 @@ def main(cfg: DictConfig):  # noqa: F821
 
     # Create off-policy collector
     collector = make_collector(
-        cfg, train_env, actor_model_explore=model[0], compile_mode=compile_mode
+        cfg, train_env, actor_model_explore=model[0], compile_mode=compile_mode,
+        postproc=coverage_tracker,
     )
 
     # Main loop
@@ -181,7 +185,6 @@ def main(cfg: DictConfig):  # noqa: F821
         # Update weights of the inference policy
         collector.update_policy_weights_()
         
-
         pbar.update(current_frames)
 
         collected_data = collected_data.reshape(-1)
@@ -247,7 +250,7 @@ def main(cfg: DictConfig):  # noqa: F821
                 eval_rollout.squeeze()
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
-                fig = eval_env.base_env.render_history(return_fig=True)
+                fig = eval_env.base_env.render_history(return_fig=True, plot_bh_baseline=False)
                 eval_env.reset()
                 if logger is not None and fig is not None:
                     metrics_to_log["eval/history"] = wandb.Image(fig[0])

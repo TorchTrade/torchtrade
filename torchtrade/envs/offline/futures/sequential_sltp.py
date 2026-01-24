@@ -15,7 +15,7 @@ import pandas as pd
 import torch
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical, Bounded
-from torchrl.data.tensor_specs import CompositeSpec
+from torchrl.data import Composite
 
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservationSampler

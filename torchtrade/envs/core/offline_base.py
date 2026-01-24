@@ -9,7 +9,7 @@ import pandas as pd
 import torch
 from tensordict import TensorDictBase
 from torchrl.data import Bounded
-from torchrl.data.tensor_specs import CompositeSpec, Unbounded
+from torchrl.data import Composite, Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.common import TradeMode
@@ -132,7 +132,7 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             account_state: List of account state field names
             num_features: Number of features per observation window
         """
-        self.observation_spec = CompositeSpec(shape=())
+        self.observation_spec = Composite(shape=())
 
         # Account state spec
         self.account_state_key = "account_state"

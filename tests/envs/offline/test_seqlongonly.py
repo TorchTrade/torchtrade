@@ -837,3 +837,494 @@ class TestLookaheadBiasIntegration:
                     break
         finally:
             env.close()
+
+
+def create_constant_price_data(num_rows=100, price=100.0):
+    """Create OHLCV data with constant price for deterministic testing.
+
+    This allows testing trading logic in isolation from price movements.
+    Portfolio value changes should only come from fees and trading bugs.
+    """
+    dates = pd.date_range('2024-01-01', periods=num_rows, freq='1min')
+    df = pd.DataFrame({
+        'timestamp': dates,
+        'open': price,
+        'high': price,
+        'low': price,
+        'close': price,
+        'volume': 100.0
+    })
+    return df
+
+
+class TestSeqLongOnlyEnvRegressionTests:
+    """Regression tests for critical bugs in SeqLongOnlyEnv.
+
+    These tests prevent regression of 7 critical bugs that caused portfolio value
+    to drop to $0 during training:
+
+    1. Floating point precision (balance going slightly negative)
+    2. Bankruptcy crash (reward function killing workers)
+    3. Forced trading bug (using balance instead of portfolio_value)
+    4. Missing partial sell logic (no rebalancing down)
+    5. Tolerance too tight (causing churn)
+    6. Buy logic destroying portfolio (using total instead of delta)
+    7. Buy logic replacing position instead of adding
+
+    All tests use constant price data to isolate trading logic from price movements.
+    """
+
+    @pytest.fixture
+    def constant_price_df(self):
+        """DataFrame with constant price for deterministic testing."""
+        return create_constant_price_data(num_rows=200, price=100.0)
+
+    @pytest.fixture
+    def constant_price_config(self):
+        """Config with low fees and no slippage for cleaner testing."""
+        return SeqLongOnlyEnvConfig(
+            symbol='TEST/USD',
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=1000,
+            transaction_fee=0.001,  # 0.1% - low for clearer math
+            slippage=0.0,  # No slippage for deterministic results
+            bankrupt_threshold=0.1,
+            seed=42,
+            random_start=False,
+            max_traj_length=100,
+        )
+
+    @pytest.fixture
+    def constant_price_env(self, constant_price_df, constant_price_config):
+        """Environment with constant price for deterministic testing."""
+        env = SeqLongOnlyEnv(
+            constant_price_df,
+            constant_price_config,
+            simple_feature_fn
+        )
+        yield env
+        env.close()
+
+    def test_buy_and_hold_no_forced_trading(self, constant_price_env):
+        """REGRESSION: Bug #4 - Forced trading after going all-in.
+
+        After buying 100%, balance=0. If position sizing uses balance instead of
+        portfolio_value, subsequent hold actions will try to close position.
+
+        This test verifies position stays constant during holds.
+        """
+        env = constant_price_env
+        td = env.reset()
+
+        # Buy 100%
+        td.set('action', torch.tensor(2))  # action_value = 1.0
+        td = env.step(td)
+
+        initial_position = env.position.position_size
+        assert initial_position > 0, "Should have opened position"
+        assert env.balance < 10, "Balance should be nearly $0 after all-in"
+
+        # Hold for 20 steps - position should NOT change
+        for step in range(20):
+            old_position = env.position.position_size
+
+            td.set('action', torch.tensor(2))  # Hold at 100%
+            td = env.step(td)
+
+            new_position = env.position.position_size
+
+            # Position should be identical (no trading happened)
+            # Allow tiny tolerance for floating point (but should be exact)
+            position_change_pct = abs(new_position - old_position) / old_position
+            assert position_change_pct < 0.0001, (
+                f"Step {step}: Position changed {position_change_pct:.6%} during hold "
+                f"({old_position:.8f} → {new_position:.8f}). "
+                "This indicates forced trading bug!"
+            )
+
+            if td.get('done', False):
+                break
+
+        # Final position should match initial (no unwanted trades)
+        final_position = env.position.position_size
+        assert abs(final_position - initial_position) / initial_position < 0.0001
+
+    def test_portfolio_value_conservation_during_holds(self, constant_price_env):
+        """REGRESSION: All bugs - Portfolio value should not drop during holds.
+
+        With constant price and no trading, portfolio value should stay constant
+        during hold actions. Any drop indicates a bug in trading logic.
+        """
+        env = constant_price_env
+        td = env.reset()
+
+        # Buy 50%
+        td.set('action', torch.tensor(1))  # action_value = 0.5
+        td = env.step(td)
+
+        portfolio_before = env.balance + env.position.position_size * 100.0
+
+        # Hold for 20 steps
+        for step in range(20):
+            td.set('action', torch.tensor(1))  # Hold at 50%
+            td = env.step(td)
+
+            portfolio_after = env.balance + env.position.position_size * 100.0
+
+            # Portfolio value should be exactly preserved (constant price, no trades)
+            portfolio_change = portfolio_after - portfolio_before
+            assert abs(portfolio_change) < 0.01, (
+                f"Step {step}: Portfolio value changed ${portfolio_change:.2f} during hold "
+                f"(${portfolio_before:.2f} → ${portfolio_after:.2f}). "
+                "Should stay constant with no trades and constant price!"
+            )
+
+            if td.get('done', False):
+                break
+
+    def test_rebalancing_down_partial_sell(self, constant_price_env):
+        """REGRESSION: Bug #5 - Missing partial sell logic for rebalancing down.
+
+        Code had no logic to handle reducing position from 100% to 50%.
+        It would try to BUY with $0 balance and destroy portfolio.
+        """
+        env = constant_price_env
+        td = env.reset()
+        price = 100.0
+
+        # Buy 100%
+        td.set('action', torch.tensor(2))  # action_value = 1.0
+        td = env.step(td)
+
+        portfolio_before = env.balance + env.position.position_size * price
+        position_before = env.position.position_size
+
+        # Rebalance down to 50%
+        td.set('action', torch.tensor(1))  # action_value = 0.5
+        td = env.step(td)
+
+        portfolio_after = env.balance + env.position.position_size * price
+        position_after = env.position.position_size
+
+        # Position should have decreased
+        assert position_after < position_before, (
+            f"Position should decrease when rebalancing down: "
+            f"{position_before:.8f} → {position_after:.8f}"
+        )
+
+        # Position should be roughly half of what it was
+        target_position = (portfolio_before * 0.5) / price
+        position_error_pct = abs(position_after - target_position) / target_position
+        assert position_error_pct < 0.05, (
+            f"Position should be ~50% of portfolio: "
+            f"expected {target_position:.8f}, got {position_after:.8f}"
+        )
+
+        # Portfolio value should only decrease by fees (not be destroyed)
+        expected_fee = (position_before - position_after) * price * env.transaction_fee
+        portfolio_loss = portfolio_before - portfolio_after
+        assert abs(portfolio_loss - expected_fee) < 1.0, (
+            f"Portfolio loss ${portfolio_loss:.2f} should equal fees ${expected_fee:.2f}. "
+            "Large discrepancy indicates bug!"
+        )
+
+    def test_rebalancing_up_adds_to_position(self, constant_price_env):
+        """REGRESSION: Bug #7 - Buy logic destroying portfolio when increasing position.
+
+        When increasing from 50% to 100%, code used total target instead of delta
+        and REPLACED position instead of ADDING to it. This destroyed portfolio value.
+        """
+        env = constant_price_env
+        td = env.reset()
+        price = 100.0
+
+        # Buy 50%
+        td.set('action', torch.tensor(1))  # action_value = 0.5
+        td = env.step(td)
+
+        portfolio_before = env.balance + env.position.position_size * price
+        position_before = env.position.position_size
+        balance_before = env.balance
+
+        # Increase to 100%
+        td.set('action', torch.tensor(2))  # action_value = 1.0
+        td = env.step(td)
+
+        portfolio_after = env.balance + env.position.position_size * price
+        position_after = env.position.position_size
+
+        # Position should have INCREASED (not replaced)
+        assert position_after > position_before, (
+            f"Position should increase when rebalancing up: "
+            f"{position_before:.8f} → {position_after:.8f}"
+        )
+
+        # Position should be roughly double what it was
+        target_position = (portfolio_before * 1.0) / price
+        position_error_pct = abs(position_after - target_position) / target_position
+        assert position_error_pct < 0.05, (
+            f"Position should be ~100% of portfolio: "
+            f"expected {target_position:.8f}, got {position_after:.8f}"
+        )
+
+        # Balance should be nearly $0 after going all-in
+        assert env.balance < 5.0, (
+            f"Balance should be nearly $0 after all-in, got ${env.balance:.2f}"
+        )
+
+        # Portfolio value should only decrease by fees (not be destroyed)
+        expected_fee = balance_before * env.transaction_fee
+        portfolio_loss = portfolio_before - portfolio_after
+        assert abs(portfolio_loss - expected_fee) < 1.0, (
+            f"Portfolio loss ${portfolio_loss:.2f} should equal fees ${expected_fee:.2f}. "
+            f"If portfolio dropped by ${portfolio_loss:.2f}, buy logic destroyed value!"
+        )
+
+    def test_weighted_average_entry_price_when_adding_to_position(self, constant_price_env):
+        """REGRESSION: Bug #7 - Entry price should be weighted average when adding to position.
+
+        When buying more, entry price should be weighted average of old and new positions,
+        not replaced with new price.
+        """
+        env = constant_price_env
+        td = env.reset()
+        price = 100.0
+
+        # Buy 50% at price 100
+        td.set('action', torch.tensor(1))
+        td = env.step(td)
+
+        entry_price_after_first_buy = env.position.entry_price
+        position_after_first_buy = env.position.position_size
+
+        # Entry price should be close to 100 (with small slippage/fees effect)
+        assert 99 < entry_price_after_first_buy < 101, (
+            f"Entry price after first buy should be ~100, got {entry_price_after_first_buy:.2f}"
+        )
+
+        # Buy more (increase to 100%)
+        td.set('action', torch.tensor(2))
+        td = env.step(td)
+
+        entry_price_after_second_buy = env.position.entry_price
+        position_after_second_buy = env.position.position_size
+
+        # Position should have roughly doubled
+        assert position_after_second_buy > position_after_first_buy * 1.8, (
+            "Position should roughly double when going from 50% to 100%"
+        )
+
+        # Entry price should still be close to 100 (weighted average of two buys at ~100)
+        assert 99 < entry_price_after_second_buy < 101, (
+            f"Entry price after second buy should still be ~100, got {entry_price_after_second_buy:.2f}"
+        )
+
+    def test_tolerance_prevents_churn_from_price_fluctuations(self):
+        """REGRESSION: Bug #6 - Tolerance too tight causing churn.
+
+        With 0.1% tolerance, normal 0.2% price fluctuations caused constant rebalancing.
+        Tolerance increased to 2% to prevent this.
+
+        This test uses slightly varying prices to simulate normal market conditions.
+        """
+        # Create data with small price fluctuations (±0.5%)
+        dates = pd.date_range('2024-01-01', periods=100, freq='1min')
+        base_price = 100.0
+        prices = base_price + np.random.uniform(-0.5, 0.5, 100)  # ±0.5% fluctuation
+
+        df = pd.DataFrame({
+            'timestamp': dates,
+            'open': prices,
+            'high': prices + 0.1,
+            'low': prices - 0.1,
+            'close': prices,
+            'volume': 100.0
+        })
+
+        config = SeqLongOnlyEnvConfig(
+            symbol='TEST/USD',
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=1000,
+            transaction_fee=0.001,
+            slippage=0.0,
+            bankrupt_threshold=0.1,
+            seed=42,
+            random_start=False,
+            max_traj_length=50,
+        )
+
+        env = SeqLongOnlyEnv(df, config, simple_feature_fn)
+        try:
+            td = env.reset()
+
+            # Buy 100%
+            td.set('action', torch.tensor(2))
+            td = env.step(td)
+
+            initial_position = env.position.position_size
+            trades_detected = 0
+
+            # Hold for 30 steps with small price fluctuations
+            for step in range(30):
+                old_position = env.position.position_size
+
+                td.set('action', torch.tensor(2))  # Hold at 100%
+                td = env.step(td)
+
+                new_position = env.position.position_size
+
+                # Detect if unwanted trading happened
+                if abs(new_position - old_position) / old_position > 0.01:  # 1% threshold
+                    trades_detected += 1
+
+                if td.get('done', False):
+                    break
+
+            # Should have very few or no trades (tolerance should prevent churn)
+            # With 2% tolerance, 0.5% price fluctuations shouldn't trigger trades
+            assert trades_detected <= 2, (
+                f"Detected {trades_detected} unwanted trades during hold with small price fluctuations. "
+                "Tolerance may be too tight, causing churn!"
+            )
+        finally:
+            env.close()
+
+    def test_balance_never_goes_negative(self, constant_price_env):
+        """REGRESSION: Bug #1 - Floating point precision causing negative balance.
+
+        Balance could become slightly negative (~-1e-13) due to floating point arithmetic.
+        Should be clamped to 0.
+        """
+        env = constant_price_env
+        td = env.reset()
+
+        # Do several trades that might trigger floating point errors
+        actions = [2, 0, 2, 0, 2, 1, 2, 0]  # Various buy/sell combinations
+
+        for action in actions:
+            td.set('action', torch.tensor(action))
+            td = env.step(td)
+
+            # Balance should NEVER be negative (even slightly)
+            assert env.balance >= 0.0, (
+                f"Balance is negative: ${env.balance:.15f}. "
+                "Floating point error not handled!"
+            )
+
+            if td.get('done', False):
+                break
+
+    def test_bankruptcy_does_not_crash_environment(self, constant_price_env):
+        """REGRESSION: Bug #2 - Bankruptcy causing reward function to crash.
+
+        When portfolio value ≤ 0, reward function raised ValueError instead of
+        returning large negative reward. This killed ParallelEnv workers.
+        """
+        env = constant_price_env
+
+        # Use high fees to quickly bankrupt
+        env.transaction_fee = 0.4  # 40% fees
+
+        td = env.reset()
+
+        # Trade back and forth to lose money on fees
+        for i in range(20):
+            # Buy
+            td.set('action', torch.tensor(2))
+            td = env.step(td)
+
+            # Check if near bankruptcy
+            portfolio_value = env.balance + env.position.position_size * 100.0
+
+            # Even if bankrupt, should not crash - just get large negative reward
+            if portfolio_value <= 0:
+                reward = td['next']['reward'].item()
+                assert not np.isnan(reward), "Reward should not be NaN on bankruptcy"
+                assert not np.isinf(reward), "Reward should not be infinite on bankruptcy"
+                assert reward < 0, "Reward should be negative on bankruptcy"
+                break
+
+            # Sell
+            td.set('action', torch.tensor(0))
+            td = env.step(td)
+
+            if td.get('done', False):
+                break
+
+    def test_realistic_trading_sequence_preserves_portfolio_value(self, constant_price_env):
+        """Integration test: Realistic sequence should preserve portfolio value (minus fees).
+
+        This is the test that would have caught all 7 bugs in one go.
+        """
+        env = constant_price_env
+        td = env.reset()
+        price = 100.0
+
+        initial_portfolio = env.balance + env.position.position_size * price
+
+        # Realistic sequence: 0% → 50% → hold → 100% → hold → 50% → 0%
+        sequence = [
+            (1, "Buy 50%"),
+            (1, "Hold 50%"),
+            (1, "Hold 50%"),
+            (1, "Hold 50%"),
+            (1, "Hold 50%"),
+            (2, "Increase to 100%"),
+            (2, "Hold 100%"),
+            (2, "Hold 100%"),
+            (2, "Hold 100%"),
+            (2, "Hold 100%"),
+            (1, "Reduce to 50%"),
+            (1, "Hold 50%"),
+            (1, "Hold 50%"),
+            (0, "Close position"),
+        ]
+
+        total_fees_paid = 0.0
+
+        for action_idx, description in sequence:
+            old_portfolio = env.balance + env.position.position_size * price
+
+            td.set('action', torch.tensor(action_idx))
+            td = env.step(td)
+
+            new_portfolio = env.balance + env.position.position_size * price
+            portfolio_change = old_portfolio - new_portfolio
+
+            # Estimate fees for this action
+            if "Buy" in description or "Increase" in description or "Reduce" in description or "Close" in description:
+                # Trade happened - portfolio should decrease by fees
+                # For simplicity, just accumulate actual portfolio loss
+                total_fees_paid += portfolio_change
+            else:
+                # Hold - portfolio should stay constant
+                assert abs(portfolio_change) < 0.01, (
+                    f"{description}: Portfolio changed ${portfolio_change:.2f} during hold. "
+                    "Should stay constant!"
+                )
+
+            if td.get('done', False):
+                break
+
+        final_portfolio = env.balance + env.position.position_size * price
+        total_loss = initial_portfolio - final_portfolio
+
+        # Total loss should be roughly equal to fees paid (2-5% of initial)
+        # With 0.1% fees and 4 trades, expect ~0.4% loss
+        expected_loss_pct = 0.004  # 0.4%
+        actual_loss_pct = total_loss / initial_portfolio
+
+        assert actual_loss_pct < 0.02, (
+            f"Portfolio lost {actual_loss_pct:.2%} (${total_loss:.2f}). "
+            f"Expected ~{expected_loss_pct:.2%} from fees. Large loss indicates bug!"
+        )
+
+        # Final portfolio should be close to initial (minus fees)
+        assert final_portfolio > initial_portfolio * 0.98, (
+            f"Final portfolio ${final_portfolio:.2f} is much less than initial ${initial_portfolio:.2f}. "
+            "Should only lose ~0.4% to fees!"
+        )

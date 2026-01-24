@@ -222,6 +222,10 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         Uses shared utility function for consistent position sizing.
         For long-only: negative actions are handled as sells in _execute_fractional_action.
 
+        IMPORTANT: Uses portfolio value (balance + position value) instead of just balance
+        to avoid forced trading after going all-in. This ensures action represents
+        fraction of total portfolio to invest, not just free cash.
+
         Args:
             action_value: Action from [-1.0, 1.0]
             current_price: Current market price
@@ -234,8 +238,12 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         if action_value <= 0:
             return 0.0, 0.0, "flat" if action_value == 0 else "sell"
 
+        # Use portfolio value instead of balance to avoid forced trading
+        # When fully invested, balance=0 but portfolio_value > 0
+        portfolio_value = self.balance + self.position.position_size * current_price
+
         params = PositionCalculationParams(
-            balance=self.balance,
+            balance=portfolio_value,  # Use portfolio value, not just cash balance
             action_value=action_value,
             current_price=current_price,
             leverage=1,  # Long-only has no leverage
@@ -320,39 +328,84 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
                 })
 
         elif target_side == "buy":
-            # Buy position
-            # Calculate actual capital to use (accounting for fees)
-            capital_to_use = target_notional
-            fee_paid = capital_to_use * self.transaction_fee
-            total_cost = capital_to_use + fee_paid
+            # Check if we need to reduce position first (rebalancing down)
+            if target_position_size < self.position.position_size:
+                # Sell part of position to reach target
+                sell_amount = self.position.position_size - target_position_size
+                proceeds = sell_amount * execution_price
+                fee_paid = proceeds * self.transaction_fee
+                self.balance += proceeds - fee_paid
 
-            if total_cost > self.balance:
-                # Not enough balance - cap at what we can afford
-                capital_to_use = self.balance / (1 + self.transaction_fee)
+                # Update position (keeping partial position)
+                self.position.position_size = target_position_size
+                self.position.position_value = target_position_size * execution_price
+                # Keep entry price from original purchase
+                self.position.unrealized_pnlpc = (
+                    (execution_price - self.position.entry_price) / self.position.entry_price
+                    if self.position.entry_price > 0 else 0.0
+                )
+                # Don't reset hold counter - still holding a position
+
+                trade_info.update({
+                    "executed": True,
+                    "amount": sell_amount,
+                    "side": "sell",
+                    "success": True,
+                    "fee_paid": fee_paid
+                })
+
+            elif target_position_size > self.position.position_size:
+                # Increase position - buy the DELTA between target and current
+                delta_position = target_position_size - self.position.position_size
+                delta_notional = delta_position * execution_price
+
+                # Calculate actual capital to use (accounting for fees)
+                capital_to_use = delta_notional
                 fee_paid = capital_to_use * self.transaction_fee
                 total_cost = capital_to_use + fee_paid
 
-            if total_cost < self.balance * 0.01:  # Minimum trade threshold
-                return trade_info
+                if total_cost > self.balance:
+                    # Not enough balance - cap at what we can afford
+                    capital_to_use = self.balance / (1 + self.transaction_fee)
+                    fee_paid = capital_to_use * self.transaction_fee
+                    total_cost = capital_to_use + fee_paid
 
-            # Execute buy
-            self.balance -= total_cost
-            position_qty = capital_to_use / execution_price
+                if total_cost < self.balance * 0.01:  # Minimum trade threshold
+                    return trade_info
 
-            self.position.position_size = position_qty
-            self.position.entry_price = execution_price
-            self.position.position_value = position_qty * execution_price
-            self.position.unrealized_pnlpc = 0.0
-            self.position.current_position = 1.0
-            self.position.hold_counter = 0
+                # Execute buy
+                self.balance -= total_cost
+                # Clamp balance to zero to avoid floating point errors creating slightly negative balance
+                self.balance = max(0.0, self.balance)
+                position_qty = capital_to_use / execution_price
 
-            trade_info.update({
-                "executed": True,
-                "amount": capital_to_use,
-                "side": "buy",
-                "success": True,
-                "fee_paid": fee_paid
-            })
+                # ADD to existing position (don't replace!)
+                old_position_value = self.position.position_size * self.position.entry_price if self.position.position_size > 0 else 0
+                new_position_value = position_qty * execution_price
+                total_position_value = old_position_value + new_position_value
+
+                self.position.position_size += position_qty  # ADD, not replace
+                # Calculate weighted average entry price
+                if self.position.position_size > 0:
+                    self.position.entry_price = total_position_value / self.position.position_size
+                else:
+                    self.position.entry_price = execution_price
+
+                self.position.position_value = self.position.position_size * execution_price
+                self.position.unrealized_pnlpc = (
+                    (execution_price - self.position.entry_price) / self.position.entry_price
+                    if self.position.entry_price > 0 else 0.0
+                )
+                self.position.current_position = 1.0
+                # Don't reset hold counter when adding to position
+
+                trade_info.update({
+                    "executed": True,
+                    "amount": capital_to_use,
+                    "side": "buy",
+                    "success": True,
+                    "fee_paid": fee_paid
+                })
 
         # Update hold counter
         if self.position.position_size > 0:
