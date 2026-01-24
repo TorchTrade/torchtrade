@@ -129,6 +129,12 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
             "Minute": "minutes",
             "Hour": "hours",
             "Day": "days",
+            # Pandas frequency codes (from TimeFrameUnit enum values)
+            "Min": "minutes",
+            "H": "hours",
+            "D": "days",
+            # Binance uses seconds-based intervals
+            "seconds": "seconds",
         }
 
         if self.execute_on_unit not in unit_to_timedelta:
