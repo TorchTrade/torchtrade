@@ -195,12 +195,18 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         # Calculate reward and check termination
         reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, desired_action, trade_info)
 
+        # Determine action_type and binarize action for history
+        action_type = trade_info.get("side") or "hold"
+        from torchtrade.envs.core.state import binarize_action_type
+        binarized_action = binarize_action_type(action_type)
+
         # Record step history
         self.history.record_step(
             price=cached_price,
-            action=desired_action,
+            action=binarized_action,
             reward=reward,
-            portfolio_value=old_portfolio_value
+            portfolio_value=old_portfolio_value,
+            action_type=action_type
         )
 
         done = self._check_termination(new_portfolio_value)

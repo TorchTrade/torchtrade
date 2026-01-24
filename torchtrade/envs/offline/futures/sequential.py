@@ -426,7 +426,8 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
             action=trade_action,
             reward=reward,
             portfolio_value=old_portfolio_value,
-            position=self.position.position_size
+            position=self.position.position_size,
+            action_type=trade_info.get("side", "hold") or "hold"
         )
 
         # Check termination

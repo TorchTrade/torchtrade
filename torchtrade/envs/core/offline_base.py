@@ -504,9 +504,18 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             )
 
             # Plot long/short actions
-            long_indices = [i for i, action in enumerate(action_history) if action == 1]
+            # Get action types if available (backward compatibility)
+            action_types = history_dict.get('action_types', [])
+            if action_types:
+                # Use action_types for accurate classification
+                long_indices = [i for i, atype in enumerate(action_types) if atype == "long"]
+                short_indices = [i for i, atype in enumerate(action_types) if atype == "short"]
+            else:
+                # Fallback to legacy action value checks
+                long_indices = [i for i, action in enumerate(action_history) if action == 1]
+                short_indices = [i for i, action in enumerate(action_history) if action == -1]
+
             long_prices = [price_history[i] for i in long_indices]
-            short_indices = [i for i, action in enumerate(action_history) if action == -1]
             short_prices = [price_history[i] for i in short_indices]
 
             ax1.scatter(
@@ -572,9 +581,18 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             )
 
             # Plot buy/sell actions
-            buy_indices = [i for i, action in enumerate(action_history) if action == 1]
+            # Get action types if available (backward compatibility)
+            action_types = history_dict.get('action_types', [])
+            if action_types:
+                # Use action_types for accurate classification
+                buy_indices = [i for i, atype in enumerate(action_types) if atype == "buy"]
+                sell_indices = [i for i, atype in enumerate(action_types) if atype == "sell"]
+            else:
+                # Fallback to legacy action value checks
+                buy_indices = [i for i, action in enumerate(action_history) if action == 1]
+                sell_indices = [i for i, action in enumerate(action_history) if action == -1]
+
             buy_prices = [price_history[i] for i in buy_indices]
-            sell_indices = [i for i, action in enumerate(action_history) if action == -1]
             sell_prices = [price_history[i] for i in sell_indices]
 
             ax1.scatter(

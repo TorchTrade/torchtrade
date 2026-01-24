@@ -519,6 +519,9 @@ class SeqFuturesSLTPEnv(TorchTradeOfflineEnv):
             elif trade_info["side"] == "close":
                 trade_action = 0
                 action_type = "close"
+            elif trade_info["side"] == "liquidation":
+                trade_action = 0
+                action_type = "liquidation"
 
         # Get updated state
         next_tensordict = self._get_observation()
