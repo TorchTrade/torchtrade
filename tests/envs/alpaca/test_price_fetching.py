@@ -445,8 +445,8 @@ class TestPriceFetchingIntegration:
         mock_account.cash = 5000.0
         mock_account.portfolio_value = 30500.0
 
-        # Mock _get_portfolio_value to return a float
-        env._get_portfolio_value = Mock(return_value=30500.0)
+        # Mock trader.client.get_account() for portfolio value calculation
+        env.trader.client.get_account = Mock(return_value=mock_account)
 
         env.trader.get_status = Mock(return_value={
             "position_status": mock_position,
@@ -461,7 +461,8 @@ class TestPriceFetchingIntegration:
         mock_account2.cash = 30500.0
         mock_account2.portfolio_value = 30500.0
 
-        env._get_portfolio_value = Mock(return_value=30500.0)
+        # Mock trader.client.get_account() for portfolio value calculation
+        env.trader.client.get_account = Mock(return_value=mock_account2)
 
         env.trader.get_status = Mock(return_value={
             "position_status": None,
