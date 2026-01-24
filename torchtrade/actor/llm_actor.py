@@ -1,16 +1,155 @@
 from openai import OpenAI
-from dotenv import dotenv_values   # <-- returns a dict
+from dotenv import dotenv_values
 import re
+import torch
+from torch import nn
+from torchrl.modules import Actor
 
 
-class LLMActor():
+class _LLMModule(nn.Module):
+    """Internal module that wraps LLM API calls for TorchRL compatibility."""
+
+    def __init__(
+        self,
+        market_data_keys,
+        account_state,
+        model="gpt-5-nano",
+        debug=False,
+        feature_keys=None,
+        execute_on=None,
+        symbol=None,
+        action_dict=None,
+    ):
+        super().__init__()
+
+        # Set defaults if not provided
+        if feature_keys is None:
+            feature_keys = ["close", "open", "high", "low", "volume"]
+        if execute_on is None:
+            execute_on = "5Minute"
+        if symbol is None:
+            symbol = "BTC/USD"
+        if action_dict is None:
+            action_dict = {"buy": 2, "sell": 0, "hold": 1}
+
+        self.account_state = account_state
+        self.market_data_keys = market_data_keys
+        self.features_keys = feature_keys
+        self.execute_on = execute_on
+        self.symbol = symbol
+        self.action_dict = action_dict
+        self.debug = debug
+        self.model = model
+
+        # Generate system prompt dynamically based on action_dict
+        available_actions = ", ".join(self.action_dict.keys())
+        action_examples = ", ".join([f"<answer>{action}</answer>" for action in self.action_dict.keys()])
+
+        self.system_prompt = f"""
+You are a disciplined trading agent for {{symbol}} on the {{execute_on}} timeframe.
+At each step, you receive the latest account state and market data.
+You must choose exactly one action from: {available_actions}.
+
+- Base your decision on the provided data.
+- Think step-by-step inside <think></think>.
+- Output your final action in exact format: {action_examples}.
+        """
+
+        # Load OpenAI API key from .env
+        env = dotenv_values(".env")
+        open_ai_key = env.get("OPENAI_API_KEY")
+        self.llm = OpenAI(api_key=open_ai_key)
+
+    def construct_prompt(self, *inputs):
+        """Construct prompt from market data and account state inputs."""
+        # inputs are passed in order of market_data_keys + account_state
+        account_state_tensor = inputs[-1]  # Last input is account_state
+        market_data_tensors = inputs[:-1]  # All others are market data
+
+        # Construct account state text
+        assert account_state_tensor.shape[-1] == len(self.account_state), \
+            f"Expected account state shape (..., {len(self.account_state)}), got {account_state_tensor.shape}"
+
+        account_state_text = "Current account state: \n"
+        for idx, state in enumerate(self.account_state):
+            account_state_text += f"{state}: {round(account_state_tensor[..., idx].item(), 2)}\n"
+        account_state_text += "\n---\n"
+
+        # Construct market data text
+        market_data_text = "Current market data:\n\n"
+        for market_data_key, data_tensor in zip(self.market_data_keys, market_data_tensors):
+            data = data_tensor.cpu().numpy().squeeze()  # Shape: (N, 5)
+            assert len(data.shape) == 2 and data.shape[1] == 5, \
+                f"Expected market data shape (N, 5), got {data.shape}"
+            N = data.shape[0]
+
+            market_data_text += f"{market_data_key}:\n\n"
+            header = f" {'close':>7} | {'open':>8} | {'high':>8} | {'low':>8} | {'volume':>8}"
+            market_data_text += header + "\n\n"
+
+            for t in range(N):
+                row = data[t]
+                market_data_text += f"{row[1]:8.1f} | {row[1]:8.1f} | {row[2]:8.1f} | {row[3]:8.1f} | {row[4]:8.1f}\n"
+
+            market_data_text += "\n"
+
+        return account_state_text + market_data_text
+
+    def extract_action(self, response):
+        """Extract action from LLM response."""
+        answer_pattern = "<answer>(.*?)</answer>"
+        match = re.search(answer_pattern, response)
+        if match:
+            return match.group(1)
+        else:
+            print("No answer found in response")
+            return "hold"
+
+    def forward(self, *inputs):
+        """Forward pass: generate LLM response and extract action + thinking."""
+        prompt = self.construct_prompt(*inputs)
+
+        if self.debug:
+            print("SYSTEM PROMPT:\n")
+            print(self.system_prompt)
+            print("\nPROMPT:\n")
+            print(prompt)
+
+        # Query LLM
+        response = self.llm.responses.create(
+            model=self.model,
+            instructions=self.system_prompt.format(symbol=self.symbol, execute_on=self.execute_on),
+            input=prompt,
+        )
+        response_text = response.output_text
+
+        if self.debug:
+            print("\nRESPONSE:\n")
+            print(response_text)
+
+        # Extract action
+        action_name = self.extract_action(response_text)
+        action_idx = self.action_dict[action_name]
+
+        # Return action as tensor and full response as thinking trace
+        action_tensor = torch.tensor([action_idx], dtype=torch.long)
+
+        return action_tensor, response_text
+
+
+class LLMActor(Actor):
     """
     LLM-based trading actor that uses language models to make trading decisions.
 
-    This actor constructs prompts from market data and account state, queries an LLM,
-    and extracts trading actions from the model's response. The actor expects responses
-    in a structured format with reasoning enclosed in <think></think> tags and final
-    actions in <answer></answer> tags.
+    This actor inherits from TorchRL's Actor class and wraps LLM API calls for trading.
+    It constructs prompts from market data and account state, queries an LLM, and extracts
+    trading actions from the model's response. The actor expects responses in a structured
+    format with reasoning enclosed in <think></think> tags and final actions in
+    <answer></answer> tags.
+
+    The actor outputs two keys to the TensorDict:
+    - "action": The trading action index (int)
+    - "thinking": The full LLM response text including reasoning
 
     Parameters
     ----------
@@ -24,13 +163,6 @@ class LLMActor():
         **Note:** This can be obtained directly from any TorchTrade environment instance
         via `env.market_data_keys`.
 
-    model : str, optional
-        OpenAI model identifier to use for action generation. Default is "gpt-5-nano".
-
-    debug : bool, optional
-        If True, prints the system prompt, constructed prompt, and LLM response to stdout
-        for debugging purposes. Default is False.
-
     account_state : list of str
         **Required.** List of account state variable names that define the structure of the
         account_state tensor. The order must match the account_state tensor dimensions in the
@@ -41,6 +173,13 @@ class LLMActor():
 
         **Note:** This can be obtained directly from any TorchTrade environment instance
         via `env.account_state`.
+
+    model : str, optional
+        OpenAI model identifier to use for action generation. Default is "gpt-5-nano".
+
+    debug : bool, optional
+        If True, prints the system prompt, constructed prompt, and LLM response to stdout
+        for debugging purposes. Default is False.
 
     feature_keys : list of str, optional
         List of feature column names present in the market data tensors. Default is
@@ -63,15 +202,6 @@ class LLMActor():
         the corresponding action indices that will be set in the output TensorDict.
         Custom action spaces can be defined for different trading strategies
         (e.g., {"close": 0, "hold": 1, "buy_sl1_tp1": 2, "buy_sl2_tp2": 3}).
-
-    Attributes
-    ----------
-    llm : OpenAI
-        OpenAI client instance initialized with API key from .env file.
-
-    system_prompt : str
-        Dynamically generated system prompt that instructs the LLM on available actions,
-        response format, and trading context (symbol, timeframe).
 
     Examples
     --------
@@ -111,6 +241,7 @@ class LLMActor():
 
     >>> output_td = actor(tensordict)  # Returns tensordict with "action" and "thinking" keys
     """
+
     def __init__(
         self,
         market_data_keys,
@@ -120,159 +251,29 @@ class LLMActor():
         feature_keys=None,
         execute_on=None,
         symbol=None,
-        action_dict=None
+        action_dict=None,
     ):
-        super().__init__()
-
-        # Set defaults if not provided
-        if feature_keys is None:
-            feature_keys = ["close", "open", "high", "low", "volume"]
-        if execute_on is None:
-            execute_on = "5Minute"
-        if symbol is None:
-            symbol = "BTC/USD"
-        if action_dict is None:
-            action_dict = {"buy": 2, "sell": 0, "hold": 1}
-
-        self.account_state = account_state
-        self.market_data_keys = market_data_keys
-        self.features_keys = feature_keys
-        self.execute_on = execute_on
-        self.symbol = symbol
-        self.action_dict = action_dict
-        self.debug = debug
-        self.model = model
-
-        # Generate system prompt dynamically based on action_dict
-        available_actions = ", ".join(self.action_dict.keys())
-        action_examples = ", ".join([f"<answer>{action}</answer>" for action in self.action_dict.keys()])
-
-        self.system_prompt = f"""
-You are a disciplined trading agent for {{symbol}} on the {{execute_on}} timeframe.
-At each step, you receive the latest account state and market data.
-You must choose exactly one action from: {available_actions}.
-
-- Base your decision on the provided data.
-- Think step-by-step inside <think></think>.
-- Output your final action in exact format: {action_examples}.
-        """
-
-        # Load *all* variables from .env into a dict
-        env = dotenv_values(".env")        # you can give a different path if needed
-
-        # Grab just the one you care about
-        open_ai_key = env.get("OPENAI_API_KEY")
-        self.llm = OpenAI(
-                api_key=open_ai_key
-            )
-    def construct_prompt(self, tensordict):
-        account_state = self.construct_account_state(tensordict)
-        market_data = self.construct_market_data(tensordict)
-        return account_state + market_data
-
-    def construct_account_state(self, tensordict):
-        account_state = tensordict.get("account_state")
-        assert account_state.shape == (1, len(self.account_state)), f"Expected account state shape (1, {len(self.account_state)}), got {account_state.shape}"
-        out = """Current account state: \n"""
-        for idx, state in enumerate(self.account_state):
-            out += f"{state}: {round(account_state[0, idx].item(), 2)}\n"
-        out += "\n---\n"
-        return out
-
-    def construct_market_data(self, tensordict):
-        """
-        Example output:
-
-        Current market data:
-
-        market_data_1Minute_12:
-
-        close |     open |     high |      low |   volume
-
-        101950.9 | 101950.9 | 101980.5 | 101936.0 |      0.0
-        101977.0 | 101977.0 | 102026.7 | 101963.2 |      0.0
-        102017.6 | 102017.6 | 102092.8 | 101953.7 |      0.0
-        101963.3 | 101963.3 | 102027.3 | 101963.3 |      0.0
-        102028.9 | 102028.9 | 102068.4 | 102000.9 |      0.0
-        102045.4 | 102045.4 | 102045.4 | 101974.2 |      0.0
-        101986.1 | 101986.1 | 102013.8 | 101954.7 |      0.0
-        101985.4 | 101985.4 | 102028.0 | 101877.9 |      0.0
-        101921.4 | 101921.4 | 101941.5 | 101898.6 |      0.0
-        101931.1 | 101931.1 | 101931.1 | 101828.4 |      0.0
-        101875.6 | 101875.6 | 101875.6 | 101694.1 |      0.0
-        101707.6 | 101707.6 | 101804.4 | 101707.6 |      0.0
-
-        market_data_5Minute_8:
-
-        close |     open |     high |      low |   volume
-
-        101986.0 | 101986.0 | 102018.0 | 101944.7 |      0.0
-        101979.9 | 101979.9 | 102035.2 | 101950.3 |      0.0
-        ...
-
-        """
-        out = "Current market data:\n\n"
-
-        for market_data_key in self.market_data_keys:
-            data = tensordict[market_data_key].numpy().squeeze()  # Shape: (N, 5)
-            assert len(data.shape) == 2 and data.shape[1] == 5, f"Expected market data shape (N, 5), got {data.shape}"
-            N = data.shape[0]
-            
-            # Header
-            out += f"{market_data_key}:\n\n"
-            
-            # Table header
-            header = f" {'close':>7} | {'open':>8} | {'high':>8} | {'low':>8} | {'volume':>8}"
-            out += header + "\n\n"
-            
-            # Rows
-            for t in range(N):
-                row = data[t]
-                out += f"{row[1]:8.1f} | {row[1]:8.1f} | {row[2]:8.1f} | {row[3]:8.1f} | {row[4]:8.1f}\n"
-            
-            out += "\n"
-        return out
-        
-
-    def extract_action(self, response):
-        answer_pattern = "<answer>(.*?)</answer>"
-        match = re.search(answer_pattern, response)
-        if match:
-            return match.group(1)
-        else:
-            print("No answer found in response")
-            return "hold"
-
-    def generate(self, prompt):
-        response = self.llm.responses.create(
-            model=self.model,
-            instructions=self.system_prompt.format(symbol=self.symbol, execute_on=self.execute_on),
-            input=prompt,
+        # Create the internal LLM module
+        module = _LLMModule(
+            market_data_keys=market_data_keys,
+            account_state=account_state,
+            model=model,
+            debug=debug,
+            feature_keys=feature_keys,
+            execute_on=execute_on,
+            symbol=symbol,
+            action_dict=action_dict,
         )
-        
-        return response.output_text
 
-    def __call__(self, tensordict):
-        return self.forward(tensordict)
-    
-    def forward(self, tensordict):
-        prompt = self.construct_prompt(tensordict)
-        if self.debug:
-            print("SYSTEM PROMPT:\n")
-            print(self.system_prompt)
-            print("PROMPT:\n")
-            print(prompt)
-        response = self.generate(prompt)
-        if self.debug:
-            print("RESPONSE:\n")
-            print(response)
-        action = self.extract_action(response)
-        float_action = self.action_dict[action]
-        tensordict.set("action", float_action)
-        # Add thinking
-        thinking_pattern = "<think>(.*?)</think>"
-        match = re.search(thinking_pattern, response)
-        if match:
-            thinking = match.group(1)
-            tensordict.set("thinking", thinking)
-        return tensordict
+        # Define input keys: market data keys + account_state
+        in_keys = list(market_data_keys) + ["account_state"]
+
+        # Define output keys: action and thinking trace
+        out_keys = ["action", "thinking"]
+
+        # Initialize Actor parent class
+        super().__init__(
+            module=module,
+            in_keys=in_keys,
+            out_keys=out_keys,
+        )
