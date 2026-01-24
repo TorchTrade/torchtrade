@@ -115,6 +115,13 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         position_status = status.get("position_status", None)
         current_price = position_status.current_price if position_status else 0.0
 
+        # Fallback: fetch from market data if no position
+        if current_price <= 0:
+            try:
+                current_price = self.observer.get_current_price()
+            except Exception as e:
+                logger.warning(f"Could not fetch current price: {e}")
+
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
 
@@ -229,9 +236,17 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         current_qty = float(position_status.qty) if position_status else 0.0
         current_price = position_status.current_price if position_status else 0.0
 
-        # Fallback: if no position, try to get price from trader's current_price attribute (for mocks)
+        # Fallback 1: if no position, try to get price from trader's current_price attribute (for mocks)
         if current_price <= 0 and hasattr(self.trader, 'current_price'):
             current_price = self.trader.current_price
+
+        # Fallback 2: if still no price, fetch from market data (for initial trades when no position exists)
+        if current_price <= 0:
+            try:
+                current_price = self.observer.get_current_price()
+                logger.info(f"Fetched current price from market data: {current_price}")
+            except Exception as e:
+                logger.error(f"Failed to fetch current price: {e}")
 
         if current_price <= 0:
             logger.error(
