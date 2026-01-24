@@ -52,6 +52,12 @@ git clone https://github.com/TorchTrade/torchtrade.git
 cd torchtrade
 uv sync
 source .venv/bin/activate  # On Unix/macOS
+
+# Optional: Install with extra features
+uv sync --extra llm              # OpenAI API support for LLMActor
+uv sync --extra llm_local        # Local LLM inference (vLLM, transformers)
+uv sync --extra chronos          # Chronos forecasting transforms
+uv sync --all-extras             # Install all optional dependencies
 ```
 
 ### 2. Your First Environment
@@ -230,17 +236,19 @@ cd torchtrade
 # 3. Install dependencies
 uv sync
 
-# 4. Install development dependencies (optional)
-uv sync --extra dev
+# Optional: Install with extra features
+# uv sync --extra llm              # OpenAI API support for LLMActor
+# uv sync --extra llm_local        # Local LLM inference (vLLM, transformers)
+# uv sync --extra chronos          # Chronos forecasting transforms
+# uv sync --extra dev              # Development/testing tools
+# uv sync --extra docs             # Documentation building
+# uv sync --all-extras             # Install all optional dependencies
 
-# 5. Install documentation dependencies (optional)
-uv sync --extra docs
-
-# 6. Activate virtual environment
+# 4. Activate virtual environment
 source .venv/bin/activate  # Unix/macOS
 # .venv\Scripts\activate  # Windows
 
-# 7. For live trading, create .env file
+# 5. For live trading, create .env file
 cat > .env << EOF
 API_KEY=your_alpaca_api_key
 SECRET_KEY=your_alpaca_secret_key
@@ -248,7 +256,7 @@ BINANCE_API_KEY=your_binance_api_key
 BINANCE_SECRET_KEY=your_binance_secret_key
 EOF
 
-# 8. Verify installation
+# 6. Verify installation
 uv run pytest tests/ -v
 ```
 

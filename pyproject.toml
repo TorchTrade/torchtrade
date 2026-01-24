@@ -46,6 +46,9 @@ llm_local = [
     "accelerate>=0.20.0",
     "bitsandbytes>=0.41.0",
 ]
+llm = [
+    "openai>=1.0.0",
+]
 chronos = [
     "chronos-forecasting",
 ]
