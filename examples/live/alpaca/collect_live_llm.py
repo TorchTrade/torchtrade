@@ -127,7 +127,7 @@ def main():
     device = torch.device("cpu")
 
     total_farming_steps = 10000
-    save_buffer_every = 3
+    save_buffer_every = 4
     max_rollout_steps = 360
 
     torch.manual_seed(42)
@@ -137,9 +137,9 @@ def main():
     config = AlpacaTradingEnvConfig(
         symbol="BTC/USD",
         paper=True,
-        time_frames=["10Min"],
-        window_sizes=[12],
-        execute_on="10Min",
+        time_frames=["15Min"],
+        window_sizes=[16],
+        execute_on="15Min",
         include_base_features=True,
     )
 
@@ -203,7 +203,7 @@ def main():
         debug=True,
         symbol=config.symbol,
         feature_keys=["open", "high", "low", "close", "volume"],
-        execute_on="10Minute",
+        execute_on="15Minute",
     )
     policy_type = "gpt5mini"
 
