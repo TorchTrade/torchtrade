@@ -438,19 +438,34 @@ class TestPriceFetchingIntegration:
         mock_position = MagicMock()
         mock_position.qty = 0.5
         mock_position.current_price = 51000.0
+        mock_position.market_value = 25500.0
+
+        # Create account status mock that returns proper floats
+        mock_account = MagicMock()
+        mock_account.cash = 5000.0
+        mock_account.portfolio_value = 30500.0
+
+        # Mock _get_portfolio_value to return a float
+        env._get_portfolio_value = Mock(return_value=30500.0)
 
         env.trader.get_status = Mock(return_value={
             "position_status": mock_position,
-            "account_status": MagicMock(cash=5000.0, portfolio_value=30500.0)
+            "account_status": mock_account
         })
 
         td_in = TensorDict({"action": torch.tensor(1)}, batch_size=())
         env._step(td_in)
 
         # Step 2: Sold everything, no position
+        mock_account2 = MagicMock()
+        mock_account2.cash = 30500.0
+        mock_account2.portfolio_value = 30500.0
+
+        env._get_portfolio_value = Mock(return_value=30500.0)
+
         env.trader.get_status = Mock(return_value={
             "position_status": None,
-            "account_status": MagicMock(cash=30500.0, portfolio_value=30500.0)
+            "account_status": mock_account2
         })
 
         if hasattr(env.trader, 'current_price'):

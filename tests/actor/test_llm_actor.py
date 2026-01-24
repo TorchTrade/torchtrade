@@ -517,7 +517,7 @@ class TestLLMActorMultipleMarketData:
             account_state=['cash', 'position']
         )
 
-        assert actor.out_keys == ['action', 'thinking']
+        assert actor.out_keys == ['action', 'thinking', 'system_prompt', 'user_prompt']
 
 
 # ============================================================================
