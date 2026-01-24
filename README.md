@@ -140,17 +140,12 @@ Start live trading with these supported platforms:
 - **Best for:** US markets, algorithmic trading
 - **Get Started:** [Sign up for Alpaca](https://alpaca.markets/signup)
 
-**Note:** Some platform links may be affiliate links. Using them helps support TorchTrade development at no extra cost to you.
-
 ---
 
 ## Support TorchTrade Development
 
-TorchTrade is open-source and free to use. If you find it valuable for your research or trading, consider supporting development:
-
 - **Buy Me a Coffee**: [buymeacoffee.com/torchtrade](https://buymeacoffee.com/torchtrade)
 - ⭐ **Star the repo**: Help others discover TorchTrade on [GitHub](https://github.com/TorchTrade/torchtrade)
-- 🪙 **Use affiliate links**: Sign up for exchanges using the links above to support the project at no extra cost to you
 
 Your support helps maintain the project, add new features, and keep documentation up-to-date!
 
