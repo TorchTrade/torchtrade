@@ -166,6 +166,28 @@ class AlpacaObservationClass:
 
         return observations
 
+    def get_current_price(self) -> float:
+        """
+        Get the most recent close price for the symbol.
+
+        This is useful for determining the current market price when there's no position.
+        Uses the first timeframe's most recent close price.
+
+        Returns:
+            float: Most recent close price from the first timeframe
+        """
+        if not self.timeframes:
+            raise ValueError("No timeframes configured")
+
+        # Fetch data from the first timeframe
+        df = self._fetch_single_timeframe(self.timeframes[0])
+
+        if df.empty:
+            raise ValueError(f"No data available for {self.symbol}")
+
+        # Return the most recent close price
+        return float(df['close'].iloc[-1])
+
 
 # Example usage:
 if __name__ == "__main__":

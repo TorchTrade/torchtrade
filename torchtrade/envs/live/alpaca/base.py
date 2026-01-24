@@ -189,9 +189,13 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             position_size = 0.0
             position_value = 0.0
             entry_price = 0.0
-            current_price = 0.0
             unrealized_pnlpc = 0.0
             holding_time = 0.0
+            # Get current market price even when no position
+            try:
+                current_price = self.observer.get_current_price()
+            except Exception:
+                current_price = 0.0
         else:
             position_size = position_status.qty
             position_value = position_status.market_value

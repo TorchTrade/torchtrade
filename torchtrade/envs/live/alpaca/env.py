@@ -110,17 +110,16 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         # Get desired action and current position
         desired_action = self.action_levels[tensordict.get("action", 0)]
 
-        # Get current price from trader status (avoids redundant observation call)
+        # Get current price
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        current_price = position_status.current_price if position_status else 0.0
+        current_price = self._get_current_price(position_status)
 
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
 
         if trade_info["executed"]:
             self.position.current_position = 1 if trade_info["side"] == "buy" else 0
-
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -166,6 +165,40 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         """
         # Execute fractional action
         return self._execute_fractional_action(desired_action)
+
+    def _get_current_price(self, position_status=None) -> float:
+        """Get current market price with fallback chain.
+
+        Tries multiple sources in order:
+        1. Position status (if provided or fetched)
+        2. Trader's current_price attribute (for mocks)
+        3. Observer's get_current_price() (fetches from market data)
+
+        Args:
+            position_status: Optional position status to avoid redundant queries
+
+        Returns:
+            Current price, or 0.0 if unavailable
+        """
+        # Try position status first
+        if position_status is None:
+            position_status = self.trader.get_status().get("position_status", None)
+
+        current_price = position_status.current_price if position_status else 0.0
+
+        # Fallback 1: trader's current_price attribute (for mocks)
+        if current_price <= 0 and hasattr(self.trader, 'current_price'):
+            current_price = self.trader.current_price
+
+        # Fallback 2: fetch from market data
+        if current_price <= 0:
+            try:
+                current_price = self.observer.get_current_price()
+                logger.info(f"Fetched current price from market data: {current_price}")
+            except Exception as e:
+                logger.warning(f"Could not fetch current price: {e}")
+
+        return current_price
 
     def _calculate_fractional_position(
         self, action_value: float, current_price: float
@@ -227,11 +260,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         # Get current position and price from exchange
         position_status = self.trader.get_status().get("position_status", None)
         current_qty = float(position_status.qty) if position_status else 0.0
-        current_price = position_status.current_price if position_status else 0.0
-
-        # Fallback: if no position, try to get price from trader's current_price attribute (for mocks)
-        if current_price <= 0 and hasattr(self.trader, 'current_price'):
-            current_price = self.trader.current_price
+        current_price = self._get_current_price(position_status)
 
         if current_price <= 0:
             logger.error(
