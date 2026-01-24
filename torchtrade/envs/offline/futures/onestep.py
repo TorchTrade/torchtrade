@@ -459,6 +459,9 @@ class FuturesOneStepEnv(TorchTradeOfflineEnv):
             elif trade_info["side"] == "short":
                 trade_action = -1
                 action_type = "short"
+            elif trade_info["side"] == "liquidation":
+                trade_action = 0
+                action_type = "liquidation"
         self.history.record_step(
             price=cached_price,
             action=trade_action,

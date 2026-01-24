@@ -132,9 +132,13 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
 
         # Calculate and execute trade if needed (pass cached base features)
         trade_info = self._execute_trade_if_needed(action_tuple, cached_base)
-        trade_action = 0
+
+        # Determine action_type and binarize action for history
+        action_type = trade_info.get("side") or "hold"
+        from torchtrade.envs.core.state import binarize_action_type
+        trade_action = binarize_action_type(action_type)
+
         if trade_info["executed"]:
-            trade_action = 1 if trade_info["side"] == "buy" else -1
             self.position.current_position = 1 if trade_info["side"] == "buy" else 0
 
         # Get updated state (this advances timestamp and caches new base features)
@@ -155,7 +159,8 @@ class SeqLongOnlySLTPEnv(TorchTradeOfflineEnv):
             price=cached_price,
             action=trade_action,
             reward=reward,
-            portfolio_value=old_portfolio_value
+            portfolio_value=old_portfolio_value,
+            action_type=action_type
         )
 
         done = self._check_termination(new_portfolio_value)
