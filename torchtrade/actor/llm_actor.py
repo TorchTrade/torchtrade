@@ -4,6 +4,7 @@ import re
 import torch
 from torch import nn
 from torchrl.modules import Actor
+from torchrl.data import Categorical, Composite, Unbounded
 
 
 class _LLMModule(nn.Module):
@@ -19,6 +20,7 @@ class _LLMModule(nn.Module):
         execute_on=None,
         symbol=None,
         action_dict=None,
+        initial_action=None,
     ):
         super().__init__()
 
@@ -30,7 +32,12 @@ class _LLMModule(nn.Module):
         if symbol is None:
             symbol = "BTC/USD"
         if action_dict is None:
-            action_dict = {"buy": 2, "sell": 0, "hold": 1}
+            # Default for fractional action_levels = [0.0, 0.5, 1.0]
+            action_dict = {
+                "all_cash": 0,      # Target 0% invested
+                "half_invested": 1, # Target 50% invested
+                "fully_invested": 2 # Target 100% invested
+            }
 
         self.account_state = account_state
         self.market_data_keys = market_data_keys
@@ -40,6 +47,10 @@ class _LLMModule(nn.Module):
         self.action_dict = action_dict
         self.debug = debug
         self.model = model
+
+        # Track last action for fallback when extraction fails
+        # Default to "all_cash" (0% invested) if not specified
+        self.last_action = initial_action if initial_action is not None else "all_cash"
 
         # Generate system prompt dynamically based on action_dict
         available_actions = ", ".join(self.action_dict.keys())
@@ -79,12 +90,12 @@ You must choose exactly one action from: {available_actions}.
         market_data_text = "Current market data:\n\n"
         for market_data_key, data_tensor in zip(self.market_data_keys, market_data_tensors):
             data = data_tensor.cpu().numpy().squeeze()  # Shape: (N, 5)
-            assert len(data.shape) == 2 and data.shape[1] == 5, \
-                f"Expected market data shape (N, 5), got {data.shape}"
+            assert len(data.shape) == 2 and data.shape[1] == len(self.feature_keys), \
+                f"Expected market data shape (N, {len(self.feature_keys)}), got {data.shape}"
             N = data.shape[0]
 
             market_data_text += f"{market_data_key}:\n\n"
-            header = f" {'close':>7} | {'open':>8} | {'high':>8} | {'low':>8} | {'volume':>8}"
+            header = " | " + " | ".join([f"{key:>8}" for key in self.feature_keys])
             market_data_text += header + "\n\n"
 
             for t in range(N):
@@ -100,10 +111,17 @@ You must choose exactly one action from: {available_actions}.
         answer_pattern = "<answer>(.*?)</answer>"
         match = re.search(answer_pattern, response)
         if match:
-            return match.group(1)
+            action = match.group(1)
+            # Update last_action for future fallback
+            self.last_action = action
+            return action
         else:
-            print("No answer found in response")
-            return "hold"
+            import warnings
+            warnings.warn(
+                f"Failed to extract action from LLM response. "
+                f"Maintaining previous position: {self.last_action}"
+            )
+            return self.last_action
 
     def forward(self, *inputs):
         """Forward pass: generate LLM response and extract action + thinking."""
@@ -197,11 +215,17 @@ class LLMActor(Actor):
 
     action_dict : dict, optional
         Mapping from action names (str) to action indices (int) that defines the available
-        actions and their numerical encodings. Default is {"buy": 2, "sell": 0, "hold": 1}.
+        actions and their numerical encodings. Default is {"all_cash": 0, "half_invested": 1,
+        "fully_invested": 2} for fractional long-only environments with action_levels = [0.0, 0.5, 1.0].
         The keys determine what actions the LLM can choose from, and the values specify
         the corresponding action indices that will be set in the output TensorDict.
         Custom action spaces can be defined for different trading strategies
         (e.g., {"close": 0, "hold": 1, "buy_sl1_tp1": 2, "buy_sl2_tp2": 3}).
+
+    initial_action : str, optional
+        Initial action to use as fallback when LLM response extraction fails. Default is "all_cash"
+        (0% invested). This action is maintained whenever the LLM fails to provide a valid response
+        in the expected <answer></answer> format.
 
     Examples
     --------
@@ -225,7 +249,7 @@ class LLMActor(Actor):
     ...     execute_on=config.execute_on
     ... )
 
-    Custom configuration for ETH trading with SLTP actions:
+    Custom configuration for ETH trading with custom fractional levels:
 
     >>> actor = LLMActor(
     ...     market_data_keys=["market_data_1Minute_20"],
@@ -233,7 +257,7 @@ class LLMActor(Actor):
     ...                    "current_price", "unrealized_pnlpct", "holding_time"],
     ...     symbol="ETH/USD",
     ...     execute_on="1Minute",
-    ...     action_dict={"hold": 0, "close": 1, "buy_conservative": 2, "buy_aggressive": 3},
+    ...     action_dict={"all_cash": 0, "quarter_invested": 1, "half_invested": 2, "fully_invested": 3},
     ...     debug=True
     ... )
 
@@ -252,7 +276,17 @@ class LLMActor(Actor):
         execute_on=None,
         symbol=None,
         action_dict=None,
+        initial_action=None,
     ):
+        # Set default action_dict if not provided
+        if action_dict is None:
+            # Default for fractional action_levels = [0.0, 0.5, 1.0]
+            action_dict = {
+                "all_cash": 0,      # Target 0% invested
+                "half_invested": 1, # Target 50% invested
+                "fully_invested": 2 # Target 100% invested
+            }
+
         # Create the internal LLM module
         module = _LLMModule(
             market_data_keys=market_data_keys,
@@ -263,6 +297,7 @@ class LLMActor(Actor):
             execute_on=execute_on,
             symbol=symbol,
             action_dict=action_dict,
+            initial_action=initial_action,
         )
 
         # Define input keys: market data keys + account_state
@@ -271,9 +306,25 @@ class LLMActor(Actor):
         # Define output keys: action and thinking trace
         out_keys = ["action", "thinking"]
 
+        # Create output specs for TorchRL collector compatibility
+        # Action spec: Categorical with n actions
+        n_actions = len(action_dict)
+        action_spec = Categorical(n_actions, shape=torch.Size([1]))
+
+        # Thinking spec: Unbounded as placeholder
+        # (actual output will be a string, which TorchDict handles gracefully)
+        thinking_spec = Unbounded(shape=torch.Size([]))
+
+        # Combine into Composite spec
+        spec = Composite({
+            "action": action_spec,
+            "thinking": thinking_spec,
+        }, shape=torch.Size([]))
+
         # Initialize Actor parent class
         super().__init__(
             module=module,
             in_keys=in_keys,
             out_keys=out_keys,
+            spec=spec,
         )

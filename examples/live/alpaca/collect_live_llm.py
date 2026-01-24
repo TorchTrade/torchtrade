@@ -127,8 +127,8 @@ def main():
     device = torch.device("cpu")
 
     total_farming_steps = 10000
-    save_buffer_every = 10
-    max_rollout_steps = 360  # 360 steps @ 1min -> 6h per episode -> 4 episodes per day
+    save_buffer_every = 3
+    max_rollout_steps = 360
 
     torch.manual_seed(42)
     np.random.seed(42)
@@ -137,9 +137,9 @@ def main():
     config = AlpacaTradingEnvConfig(
         symbol="BTC/USD",
         paper=True,
-        time_frames=["1Min"],
+        time_frames=["10Min"],
         window_sizes=[12],
-        execute_on="1Min",
+        execute_on="10Min",
         include_base_features=True,
     )
 
@@ -174,8 +174,9 @@ def main():
     env = apply_env_transforms(env, max_rollout_steps)
 
     # Unwrap TransformedEnv to access base environment
-    base_env = env.env
-    transform_keys = base_env.market_data_keys + ["account_state"]
+    market_data_keys = env.base_env.market_data_keys
+    account_state = env.base_env.account_state_key
+    transform_keys = market_data_keys + [account_state]
 
     # Configure replay buffer storage
     scratch_dir = None
@@ -196,12 +197,13 @@ def main():
 
     # Initialize LLM-based policy
     policy = LLMActor(
-        market_data_keys=base_env.market_data_keys,
-        account_state=base_env.account_state,
+        market_data_keys=market_data_keys,
+        account_state=env.base_env.ACCOUNT_STATE,
         model="gpt-5-mini",
         debug=True,
         symbol=config.symbol,
-        execute_on="1Minute",
+        feature_keys=["open", "high", "low", "close", "volume"],
+        execute_on="10Minute",
     )
     policy_type = "gpt5mini"
 

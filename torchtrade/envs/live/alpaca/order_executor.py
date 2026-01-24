@@ -146,7 +146,7 @@ class AlpacaOrderClass:
             # Add amount based on trade mode
             if self.trade_mode == "notional":
                 if side.lower() == "buy":
-                    order_params["notional"] = amount
+                    order_params["notional"] = round(amount, 2)  # Alpaca requires 2 decimal places
                 else:
                     self.close_position() # For now we close the full position
                     return True
