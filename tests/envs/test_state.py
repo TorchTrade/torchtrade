@@ -14,6 +14,7 @@ class TestHistoryTracker:
         assert history.actions == []
         assert history.rewards == []
         assert history.portfolio_values == []
+        assert history.action_types == []
         assert len(history) == 0
 
     def test_record_step(self):
@@ -31,6 +32,7 @@ class TestHistoryTracker:
         assert history.actions == [1.0]
         assert history.rewards == [0.05]
         assert history.portfolio_values == [5000.0]
+        assert history.action_types == ['hold']
 
     def test_record_multiple_steps(self):
         """Test recording multiple steps."""
@@ -65,6 +67,7 @@ class TestHistoryTracker:
         assert history.actions == [1.0, 0.0, -1.0]
         assert history.rewards == [0.05, 0.02, -0.04]
         assert history.portfolio_values == [5000.0, 5100.0, 4900.0]
+        assert history.action_types == ['hold', 'hold', 'hold']
 
     def test_reset(self):
         """Test resetting history."""
@@ -83,6 +86,7 @@ class TestHistoryTracker:
         assert history.actions == []
         assert history.rewards == []
         assert history.portfolio_values == []
+        assert history.action_types == []
 
     def test_to_dict(self):
         """Test exporting history as dictionary."""
@@ -99,7 +103,8 @@ class TestHistoryTracker:
             'base_prices': [50000.0, 51000.0],
             'actions': [1.0, 0.0],
             'rewards': [0.05, 0.02],
-            'portfolio_values': [5000.0, 5100.0]
+            'portfolio_values': [5000.0, 5100.0],
+            'action_types': ['hold', 'hold']
         }
 
     def test_to_dict_empty(self):
@@ -111,7 +116,8 @@ class TestHistoryTracker:
             'base_prices': [],
             'actions': [],
             'rewards': [],
-            'portfolio_values': []
+            'portfolio_values': [],
+            'action_types': []
         }
 
     def test_len(self):
@@ -140,6 +146,7 @@ class TestFuturesHistoryTracker:
         assert history.rewards == []
         assert history.portfolio_values == []
         assert history.positions == []
+        assert history.action_types == []
         assert len(history) == 0
 
     def test_record_step_with_position(self):
@@ -212,6 +219,7 @@ class TestFuturesHistoryTracker:
         assert history.rewards == []
         assert history.portfolio_values == []
         assert history.positions == []
+        assert history.action_types == []
 
     def test_to_dict(self):
         """Test exporting futures history as dictionary."""
