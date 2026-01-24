@@ -161,6 +161,9 @@ class TestInitialTradeWithoutPosition:
         """Test that first buy action correctly fetches price when no position exists."""
         env.reset()
 
+        # Mock wait to avoid time.sleep in tests
+        env._wait_for_next_timestamp = Mock()
+
         # Ensure no position exists
         env.trader.get_status = Mock(return_value={
             "position_status": None,
@@ -307,6 +310,9 @@ class TestTradeExecutionPriceValidation:
         """Test that step with price=0 doesn't crash, just skips trade."""
         env.reset()
 
+        # Mock wait to avoid time.sleep in tests
+        env._wait_for_next_timestamp = Mock()
+
         # All price sources return 0
         env.trader.get_status = Mock(return_value={
             "position_status": None,
@@ -383,6 +389,9 @@ class TestPriceFetchingIntegration:
         """Test full step cycle when position exists (normal trading)."""
         env.reset()
 
+        # Mock wait to avoid time.sleep in tests
+        env._wait_for_next_timestamp = Mock()
+
         # Position exists with valid price
         mock_position = MagicMock()
         mock_position.qty = 0.5
@@ -407,6 +416,9 @@ class TestPriceFetchingIntegration:
     def test_full_step_cycle_without_position_first_trade(self, env):
         """Test full step cycle for first trade when no position exists."""
         env.reset()
+
+        # Mock wait to avoid time.sleep in tests
+        env._wait_for_next_timestamp = Mock()
 
         # No position, need to fetch price from observer
         env.trader.get_status = Mock(return_value={
@@ -433,6 +445,9 @@ class TestPriceFetchingIntegration:
     def test_transition_from_position_to_no_position(self, env):
         """Test price fetching when transitioning from having position to no position."""
         env.reset()
+
+        # Mock wait to avoid time.sleep in tests
+        env._wait_for_next_timestamp = Mock()
 
         # Step 1: Have position
         mock_position = MagicMock()
