@@ -33,7 +33,7 @@ class SeqLongOnlyEnvConfig:
     random_start: bool = True
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
-    action_levels: List[float] = (0.0, 1.0)
+    action_levels: List[float] = (0.0, 0.5, 1.0)
 
     def __post_init__(self):
         """Normalize timeframe configuration."""
