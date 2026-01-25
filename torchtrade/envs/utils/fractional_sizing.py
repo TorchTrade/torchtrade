@@ -1,6 +1,6 @@
 """Shared utilities for fractional position sizing across environments."""
 
-from typing import Tuple, Optional
+from typing import Tuple
 from dataclasses import dataclass
 
 

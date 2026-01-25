@@ -11,7 +11,6 @@ from torchtrade.envs.core.state import binarize_action_type
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
 from torchtrade.envs.utils.fractional_sizing import (
-    build_default_action_levels,
     calculate_fractional_position,
     PositionCalculationParams,
     POSITION_TOLERANCE_PCT,
@@ -209,12 +208,11 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         if action_value <= 0:
             return 0.0, 0.0, "flat" if action_value == 0 else "sell"
 
-        # Use portfolio value instead of balance to avoid forced trading
         # When fully invested, balance=0 but portfolio_value > 0
         portfolio_value = self.balance + self.position.position_size * current_price
 
         params = PositionCalculationParams(
-            balance=portfolio_value,  # Use portfolio value, not just cash balance
+            balance=portfolio_value,
             action_value=action_value,
             current_price=current_price,
             leverage=1,  # Long-only has no leverage
