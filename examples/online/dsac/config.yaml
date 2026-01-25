@@ -3,12 +3,13 @@
 env:
   name: SeqLongOnlyEnv
   symbol: "BTC/USD"
-  time_frames: ["15Min"]
-  window_sizes: [10]
-  execute_on: "15Min"
+  time_frames: ["1Hour"]
+  window_sizes: [48]
+  execute_on: "1Hour"
   initial_cash: [1000, 5000]
-  transaction_fee: 0.0006  # 0.04% typical futures fee
-  slippage: 0.001
+  action_levels: [0.0, 1.0]
+  transaction_fee: 0.0
+  slippage: 0.0
   bankrupt_threshold: 0.1
   exp_name: ${logger.exp_name}
   seed: 0
@@ -19,7 +20,7 @@ env:
 
 # collector
 collector:
-  device: cpu
+  device: gpu
   init_random_frames: 10000
   frames_per_batch: 5000
   max_frames_per_traj: 100000
@@ -64,7 +65,6 @@ logger:
   exp_name: dSAC
   mode: online
   eval_iter: 20000
-  video: False
 
 # Hydra configuration - saves outputs in example directory
 hydra:

@@ -89,6 +89,7 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
         random_start=random_start,
         max_traj_length=max_traj_length,
         seed=cfg.env.seed,
+        action_levels=cfg.env.action_levels,
     )
     return SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
 

@@ -99,6 +99,9 @@ def main(cfg: DictConfig):  # noqa: F821
         max_eval_traj_length=max_eval_traj_length,
     )
 
+    train_env = train_env.to(device)
+    eval_env = eval_env.to(device)
+
     # Create agent
     model = make_sac_agent(cfg, eval_env, device)
 
@@ -239,14 +242,11 @@ def main(cfg: DictConfig):  # noqa: F821
             with set_exploration_type(
                 ExplorationType.DETERMINISTIC
             ), torch.no_grad(), timeit("eval"):
-                # Keep eval_env on CPU, move actor to CPU temporarily for eval
                 eval_rollout = eval_env.rollout(
                     max_eval_traj_length,
-                    model[0].to("cpu"),
-                    auto_cast_to_device=False,
+                    model[0],
                     break_when_any_done=True,
                 )
-                model[0].to(device)  # Move actor back to device for training
                 eval_rollout.squeeze()
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward

@@ -33,7 +33,7 @@ class SeqLongOnlyEnvConfig:
     random_start: bool = True
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
-    action_levels: List[float] = (0.0, 0.5, 1.0)
+    action_levels: List[float] = (0.0, 1.0)
 
     def __post_init__(self):
         """Normalize timeframe configuration."""
@@ -131,12 +131,13 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         # Cache base features once for current timestamp
         cached_base = self._cached_base_features
         cached_price = cached_base["close"]
+        #print("Old Price: ", cached_price)
 
         # Store old portfolio value for reward calculation
         old_portfolio_value = self._get_portfolio_value(cached_price)
 
         # Get desired action and current position
-        desired_action = self.action_levels[tensordict.get("action", 0)]
+        desired_action = self.action_levels[tensordict.get("action", 0).item()]
 
         # Calculate and execute trade if needed (pass cached price)
         trade_info = self._execute_trade_if_needed(desired_action, cached_price)
@@ -152,7 +153,9 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         # Use newly cached base features for new portfolio value
         new_price = self._cached_base_features["close"]
         new_portfolio_value = self._get_portfolio_value(new_price)
-
+        # print("New Price: ", new_price)
+        # print("Exposure:", self.position.position_value / new_portfolio_value)
+        
         # Add state_index for coverage tracking (only during training with random_start)
         if self.random_start:
             next_tensordict.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
@@ -166,10 +169,10 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
 
         # Record step history
         self.history.record_step(
-            price=cached_price,
+            price=new_price,
             action=binarized_action,
             reward=reward,
-            portfolio_value=old_portfolio_value,
+            portfolio_value=new_portfolio_value,
             action_type=action_type
         )
 
@@ -394,14 +397,15 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
 
 if __name__ == "__main__":
     import datasets
+    import numpy as np
     df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
     df = df["train"].to_pandas()
     # Convert timestamp column to datetime for proper filtering
     df['0'] = pd.to_datetime(df['0'])
-    config = SeqLongOnlyEnvConfig()
+    config = SeqLongOnlyEnvConfig(execute_on="1Hour", time_frames="1Hour")
     env = SeqLongOnlyEnv(df, config)
     td = env.reset()
-    for i in range(20):
+    for i in range(2000):
         print(f"\nStep {i}")
         print("Account state:")
         acc_state = ""
@@ -409,8 +413,12 @@ if __name__ == "__main__":
             acc_state += f"{key}: {value}\n"
         print(acc_state)
         action = env.action_spec.rand()
+        action = np.random.choice([0, 1], p=[0.95, 0.05])
         print("Action:", action , "\n")
         td["action"] = action
         td = env.step(td)
         td = td["next"]
+
+    env.render_history(return_fig=False)
+    
     env.close()
