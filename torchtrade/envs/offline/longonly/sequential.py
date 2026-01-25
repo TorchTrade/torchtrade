@@ -1,13 +1,12 @@
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Dict, List, Optional, Union, Callable, Tuple
 
-import matplotlib.pyplot as plt
-import numpy as np
-from tensordict import TensorDict, TensorDictBase
+from tensordict import TensorDictBase
 import torch
 from torchrl.data import Categorical
 import pandas as pd
+from torchtrade.envs.core.state import binarize_action_type
+
 
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
@@ -26,54 +25,23 @@ class SeqLongOnlyEnvConfig:
     window_sizes: Union[List[int], int] = 10
     execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute) # On which timeframe to execute trades
     initial_cash: Union[List[int], int] = (1000, 5000)
-    transaction_fee: float = 0.025
+    transaction_fee: float = 0.0
     bankrupt_threshold: float = 0.1  # 10% of initial balance
-    slippage: float = 0.01
+    slippage: float = 0.0
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
     max_traj_length: Optional[int] = None
     random_start: bool = True
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
-
-    # Action space configuration (fractional mode only)
-    action_levels: List[float] = None  # Custom action levels, or None for defaults
+    action_levels: List[float] = (0.0, 0.5, 1.0)
 
     def __post_init__(self):
-        """Normalize timeframe configuration and build action levels."""
+        """Normalize timeframe configuration."""
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
 
-        # Build default action levels
-        if self.action_levels is None:
-            self.action_levels = build_default_action_levels(
-                allow_short=False  # Long-only environment
-            )
-        else:
-            # Validate custom action levels
-            if not all(-1.0 <= a <= 1.0 for a in self.action_levels):
-                raise ValueError(
-                    f"All action_levels must be in range [-1.0, 1.0], got {self.action_levels}"
-                )
-            if len(self.action_levels) != len(set(self.action_levels)):
-                raise ValueError(
-                    f"action_levels must not contain duplicates, got {self.action_levels}"
-                )
-            if len(self.action_levels) < 2:
-                raise ValueError(
-                    f"action_levels must contain at least 2 actions, got {len(self.action_levels)}"
-                )
-
-            # Warn if using negative actions (redundant for long-only)
-            if any(a < 0 for a in self.action_levels):
-                import warnings
-                warnings.warn(
-                    f"Long-only environment has negative action_levels {self.action_levels}. "
-                    "Negative actions behave the same as action=0 (close position), adding "
-                    "unnecessary redundancy. Consider using only non-negative actions like [0.0, 0.5, 1.0].",
-                    UserWarning
-                )
 
 class SeqLongOnlyEnv(TorchTradeOfflineEnv):
     """Sequential long-only trading environment for backtesting.
@@ -102,11 +70,6 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
     Note: Unlike futures environments, there is no leverage parameter since this
     is spot trading (1x leverage only).
 
-    **Dynamic Position Sizing** (not currently implemented):
-    Similar to futures environments, action levels control position fractions
-    rather than dynamic leverage. For more complex position sizing strategies,
-    you could extend this to multi-dimensional actions, but the current design
-    is recommended for simplicity and ease of learning.
     """
 
     def __init__(
@@ -166,7 +129,7 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         """Execute one environment step."""
         self.step_counter += 1
 
-        # Cache base features once for current timestamp (avoids 4+ redundant get_base_features calls)
+        # Cache base features once for current timestamp
         cached_base = self._cached_base_features
         cached_price = cached_base["close"]
 
@@ -180,8 +143,11 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         trade_info = self._execute_trade_if_needed(desired_action, cached_price)
 
         if trade_info["executed"]:
-            self.position.current_position = 1 if trade_info["side"] == "buy" else 0
-
+            # only out of position if we sell all
+            self.position.current_position = int(
+                not (trade_info["side"] == "sell" and desired_action <= 0)
+            )
+        
         # Get updated state (this advances timestamp and caches new base features)
         next_tensordict = self._get_observation()
         # Use newly cached base features for new portfolio value
@@ -197,7 +163,6 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
 
         # Determine action_type and binarize action for history
         action_type = trade_info.get("side") or "hold"
-        from torchtrade.envs.core.state import binarize_action_type
         binarized_action = binarize_action_type(action_type)
 
         # Record step history
@@ -426,3 +391,28 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
 
     def close(self):
         """Clean up resources."""
+
+
+
+if __name__ == "__main__":
+    import datasets
+    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
+    df = df["train"].to_pandas()
+    # Convert timestamp column to datetime for proper filtering
+    df['0'] = pd.to_datetime(df['0'])
+    config = SeqLongOnlyEnvConfig()
+    env = SeqLongOnlyEnv(df, config)
+    td = env.reset()
+    for i in range(20):
+        print(f"\nStep {i}")
+        print("Account state:")
+        acc_state = ""
+        for key, value in zip(env.account_state, td["account_state"],):
+            acc_state += f"{key}: {value}\n"
+        print(acc_state)
+        action = env.action_spec.rand()
+        print("Action:", action , "\n")
+        td["action"] = action
+        td = env.step(td)
+        td = td["next"]
+    env.close()
