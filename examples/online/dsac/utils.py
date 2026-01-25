@@ -282,7 +282,7 @@ def make_sac_agent(cfg, env, device):
     # Define the actor
     actor_net = MLP(
         num_cells=cfg.network.hidden_sizes,
-        out_features=3,
+        out_features=action_spec.n,
         activation_class=ACTIVATIONS[cfg.network.activation],
         device=device,
     )
@@ -299,7 +299,7 @@ def make_sac_agent(cfg, env, device):
         module=full_actor,
         in_keys=["logits"],
         out_keys=["action"],
-        distribution_class=Categorical, #Categorical, OneHotCategorical
+        distribution_class=Categorical,
         distribution_kwargs={},
         default_interaction_type=InteractionType.RANDOM,
         return_log_prob=False,
@@ -308,7 +308,7 @@ def make_sac_agent(cfg, env, device):
     # Define Critic Network
     qvalue_net = MLP(
         num_cells=cfg.network.hidden_sizes,
-        out_features=3,
+        out_features=action_spec.n,
         activation_class=ACTIVATIONS[cfg.network.activation],
         device=device,
     )
