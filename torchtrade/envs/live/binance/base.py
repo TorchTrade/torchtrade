@@ -12,7 +12,7 @@ from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, timeframe_
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import FuturesHistoryTracker, PositionState
+from torchtrade.envs.core.state import HistoryTracker, PositionState
 
 
 class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -104,8 +104,8 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Initialize position state
         self.position = PositionState()  # current_position: 0=no position, 1=long, -1=short
 
-        # Initialize history tracking (futures environments use FuturesHistoryTracker)
-        self.history = FuturesHistoryTracker()
+        # Initialize history tracking (futures environments use HistoryTracker)
+        self.history = HistoryTracker()
 
     def _init_trading_clients(
         self,

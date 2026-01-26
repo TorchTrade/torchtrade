@@ -201,12 +201,8 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
     def _reset_history(self):
         """Reset all history tracking to a new HistoryTracker instance.
 
-        Subclasses supporting futures trading should override this method
-        to instantiate FuturesHistoryTracker instead:
-
-        Example:
-            def _reset_history(self):
-                self.history = FuturesHistoryTracker()
+        HistoryTracker supports position tracking for all environment types.
+        Use the position parameter in record_step() to track position size.
         """
         self.history = HistoryTracker()
 

@@ -22,7 +22,7 @@ from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical
 
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
-from torchtrade.envs.core.state import FuturesHistoryTracker, binarize_action_type
+from torchtrade.envs.core.state import HistoryTracker, binarize_action_type
 from torchtrade.envs.core.default_rewards import log_return_reward
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
 from torchtrade.envs.utils.fractional_sizing import (
@@ -210,8 +210,8 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
     def _reset_history(self):
         """Reset history tracking."""
-        # Use FuturesHistoryTracker for both modes (it has position tracking)
-        self.history = FuturesHistoryTracker()
+        # Use HistoryTracker for both modes (it has position tracking)
+        self.history = HistoryTracker()
 
     def _calculate_liquidation_price(self, entry_price: float, position_size: float) -> float:
         """Calculate liquidation price for a position.
