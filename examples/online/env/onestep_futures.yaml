@@ -4,10 +4,6 @@ symbol: "BTC/USD"
 time_frames: ["5Min", "15Min"]
 window_sizes: [10, 10]
 execute_on: "15Min"
-initial_cash: [1000, 5000]
-transaction_fee: 0.0004
-slippage: 0.001
-bankrupt_threshold: 0.1
 leverage: 5  # Futures mode with liquidation
 stoploss_levels: [-0.02]
 takeprofit_levels: [0.04, 0.06, 0.08]
