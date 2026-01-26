@@ -1,0 +1,20 @@
+# @package env
+name: SequentialTradingEnvSLTP
+symbol: "BTC/USD"
+time_frames: ["5Min", "15Min"]
+window_sizes: [10, 10]
+execute_on: "15Min"
+initial_cash: [1000, 5000]
+transaction_fee: 0.0004
+slippage: 0.001
+bankrupt_threshold: 0.1
+leverage: 5  # Futures mode with liquidation
+stoploss_levels: [-0.02, -0.05, -0.1]
+takeprofit_levels: [0.05, 0.1, 0.2]
+include_hold_action: true
+exp_name: ${logger.exp_name}
+seed: 0
+train_envs: 5
+eval_envs: 1
+data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
+test_split_start: "2025-01-01"
