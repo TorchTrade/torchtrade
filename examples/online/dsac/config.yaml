@@ -7,9 +7,6 @@ env:
   time_frames: ["1Hour"]
   window_sizes: [48]
   execute_on: "1Hour"
-  action_levels: [0.0, 1.0]
-  transaction_fee: 0.0
-  slippage: 0.0
   train_envs: 1
   eval_envs: 1
 

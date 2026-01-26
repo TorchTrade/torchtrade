@@ -7,6 +7,8 @@ env:
   initial_cash: 1000
   transaction_fee: 0.015
   slippage: 0.01
+  train_envs: 1
+  eval_envs: 1
 
 # Logger
 logger:
