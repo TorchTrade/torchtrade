@@ -26,6 +26,7 @@ from torchtrade.envs.offline.sequential_sltp import (
     SequentialTradingEnvSLTP,
     SequentialTradingEnvSLTPConfig,
 )
+from torchtrade.envs.core.state import binarize_action_type
 
 
 @dataclass
@@ -133,6 +134,7 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         df: pd.DataFrame,
         config: OneStepTradingEnvConfig,
         feature_preprocessing_fn: Optional[Callable] = None,
+        reward_function: Optional[Callable] = None,
     ):
         """Initialize the one-step trading environment.
 
@@ -140,9 +142,10 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
             df: OHLCV DataFrame for backtesting
             config: Environment configuration with one-step parameters
             feature_preprocessing_fn: Optional function to preprocess features
+            reward_function: Optional reward function (default: log_return_reward)
         """
         # Initialize parent class (SequentialTradingEnvSLTP)
-        super().__init__(df, config, feature_preprocessing_fn)
+        super().__init__(df, config, feature_preprocessing_fn, reward_function)
 
         # Initialize one-step specific state
         self.previous_portfolio_value = 0.0
@@ -206,7 +209,7 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
 
         # Calculate portfolio value and exposure
         portfolio_value = self._get_portfolio_value(current_price)
-        exposure_pct = self._calculate_exposure_pct(self.position.position_value, portfolio_value)
+        exposure_pct = self.position.position_value / portfolio_value if portfolio_value > 0 else 0.0
 
         # Calculate position direction (-1, 0, +1)
         position_direction = float(
@@ -259,40 +262,27 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         cached_base = self._cached_base_features
         cached_price = cached_base["close"]
 
-        # Store old portfolio value for reward calculation
-        old_portfolio_value = self._get_portfolio_value(cached_price)
-
         # Get desired action
-        action_idx = tensordict.get("action", 0)
+        action_idx = tensordict["action"]
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()
         action_tuple = self._action_tuple[action_idx]
         side, sl_pct, tp_pct = action_tuple
 
-        # Initialize trade info
-        trade_info = {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
-
         # Execute action (only HOLD or open position - no closing in one-step)
-        # Priority 1: Check for liquidation (futures only)
         if self._check_liquidation(cached_price):
-            trade_info = self._execute_liquidation(cached_price)
-        # Priority 2: Execute new action
+            trade_info = self._execute_liquidation()
         else:
             trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
 
-        # Update position flag
+        # Update position flag based on actual position size
         if trade_info["executed"]:
-            if self.trading_mode == "spot":
-                # Spot: only in position if we opened long
-                self.position.current_position = 1 if side == "long" else 0
+            if self.position.position_size > 0:
+                self.position.current_position = 1  # Long
+            elif self.position.position_size < 0:
+                self.position.current_position = -1  # Short
             else:
-                # Futures: track direction (1=long, -1=short, 0=flat)
-                if side == "long":
-                    self.position.current_position = 1
-                elif side == "short":
-                    self.position.current_position = -1
-                elif side in ("close", "sltp_sl", "sltp_tp", "liquidation"):
-                    self.position.current_position = 0
+                self.position.current_position = 0  # Flat
 
         # Get updated state (advances timestamp and triggers rollout if position opened)
         # This is where the magic happens - _get_observation() will call _rollout()
@@ -305,40 +295,29 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         if self.random_start:
             next_tensordict.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
 
-        # Calculate terminal reward (accumulated over rollout)
-        reward = self._calculate_reward(
-            old_portfolio_value, new_portfolio_value, action_tuple, trade_info
+        # Determine action_type and binarize action for history
+        action_type = trade_info.get("side") or "hold"
+        binarized_action = binarize_action_type(action_type)
+
+        # Record step history FIRST (reward function needs updated history!)
+        self.history.record_step(
+            price=cached_price,
+            action=binarized_action,
+            reward=0.0,  # Placeholder, will be set after reward calculation
+            portfolio_value=new_portfolio_value,
+            position=self.position.position_size,
+            action_type=action_type
         )
+
+        # Calculate terminal reward (accumulated over rollout) using UPDATED history tracker
+        reward = float(self.reward_function(self.history))
 
         # If truncated without trigger, set reward to 0 (no reward for incomplete episodes)
         if self.truncated and not trade_info.get("executed"):
             reward = 0.0
 
-        # Determine action_type for history tracking
-        action_type = trade_info.get("side") or "hold"
-        from torchtrade.envs.core.state import binarize_action_type
-
-        if self.trading_mode == "spot":
-            # Spot mode: convert side to binarized action
-            if action_type == "long":
-                binarized_action = 1
-            elif action_type in ("close", "sltp_sl", "sltp_tp"):
-                binarized_action = -1
-            else:
-                binarized_action = 0
-        else:
-            # Futures mode: use binarize_action_type utility
-            binarized_action = binarize_action_type(action_type)
-
-        # Record step history (minimal for one-step - just initial state)
-        self.history.record_step(
-            price=cached_price,
-            action=binarized_action,
-            reward=reward,
-            portfolio_value=old_portfolio_value,
-            position=self.position.position_size,
-            action_type=action_type
-        )
+        # Update the reward in history
+        self.history.rewards[-1] = reward
 
         # Check termination (always done for one-step environments)
         done = True  # One-step environment - always done after single action
@@ -430,7 +409,7 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
             self.rollout_returns.append(self.compute_return(close_price))
 
             # Mode-aware trigger detection
-            if self.trading_mode == "futures":
+            if self.leverage > 1:
                 # Futures: check liquidation first (highest priority)
                 if trigger_result := self._check_liquidation_in_rollout(ohlcv_base_values):
                     return trigger_result, obs_dict
@@ -459,7 +438,7 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         Returns:
             trade_info dict if liquidation triggered, None otherwise
         """
-        if self.trading_mode == "spot":
+        if self.leverage == 1:
             return None
 
         if self.position.position_size == 0:
@@ -475,13 +454,13 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
             if (open_price <= self.liquidation_price or
                 low_price <= self.liquidation_price or
                 close_price <= self.liquidation_price):
-                return self._execute_liquidation(self.liquidation_price)
+                return self._execute_liquidation()
         else:
             # Short position - liquidated if price rises to liquidation price
             if (open_price >= self.liquidation_price or
                 high_price >= self.liquidation_price or
                 close_price >= self.liquidation_price):
-                return self._execute_liquidation(self.liquidation_price)
+                return self._execute_liquidation()
 
         return None
 
@@ -559,7 +538,7 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         """
         # HOLD action
         if side is None:
-            return self._create_trade_info()
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # CLOSE action (shouldn't happen in one-step, but handle for safety)
         if side == "close":
@@ -568,14 +547,14 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
                 price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage).item()
                 execution_price = base_price * price_noise
                 return self._close_position(execution_price)
-            return self._create_trade_info()
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Opening new position (long or short)
         # Check if already in same direction - if so, hold (ignore duplicate action)
         if side == "long" and self.position.position_size > 0:
-            return self._create_trade_info()
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
         if side == "short" and self.position.position_size < 0:
-            return self._create_trade_info()
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # If switching direction, close existing position first
         if self.position.position_size != 0:
@@ -598,3 +577,80 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
     def close(self):
         """Clean up resources."""
         pass
+
+
+if __name__ == "__main__":
+    import datasets
+    import numpy as np
+
+    # Load sample data
+    print("Loading dataset...")
+    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
+    df = df["train"].to_pandas()
+    df['0'] = pd.to_datetime(df['0'])
+    print(f"Dataset loaded: {len(df)} rows\n")
+
+    # Create environment
+    config = OneStepTradingEnvConfig(
+        execute_on="1Hour",
+        time_frames="1Hour",
+        initial_cash=10000,
+        transaction_fee=0.0,
+        slippage=0.0,
+        stoploss_levels=(-0.025, -0.05, -0.1),
+        takeprofit_levels=(0.05, 0.1, 0.2),
+        include_hold_action=True,
+        random_start=True,
+    )
+    env = OneStepTradingEnv(df, config)
+    print(f"Environment created (One-Step mode)")
+    print(f"Action map size: {len(env.action_map)}")
+    print(f"Action space size: {env.action_spec.n}")
+    print(f"Sample actions:")
+    for i in range(min(5, len(env.action_map))):
+        print(f"  {i}: {env.action_map[i]}")
+    print()
+
+    # Run multiple episodes (one-step per episode)
+    print("Running episodes (one decision per episode)...\n")
+    episode_rewards = []
+
+    for episode in range(50):
+        td = env.reset()
+        print(f"Episode {episode}")
+        print("Initial account state:")
+        acc_state = ""
+        for key, value in zip(env.account_state, td["account_state"]):
+            acc_state += f"  {key}: {value:.6f}\n"
+        print(acc_state)
+
+        # Random action (mostly hold, occasionally take position)
+        action = np.random.choice(
+            range(len(env.action_map)),
+            p=[0.50] + [0.50 / (len(env.action_map) - 1)] * (len(env.action_map) - 1)
+        )
+        print(f"Action: {action} {env.action_map[action]}")
+
+        td["action"] = action
+        td = env.step(td)
+
+        # Extract terminal reward
+        reward = td["next"]["reward"].item()
+        episode_rewards.append(reward)
+        print(f"Terminal reward: {reward:.6f}")
+        print(f"Done: {td['next']['done'].item()}\n")
+
+    # Statistics
+    print("\nEpisode Statistics:")
+    print(f"  Total episodes: {len(episode_rewards)}")
+    print(f"  Mean reward: {np.mean(episode_rewards):.6f}")
+    print(f"  Std reward: {np.std(episode_rewards):.6f}")
+    print(f"  Min reward: {np.min(episode_rewards):.6f}")
+    print(f"  Max reward: {np.max(episode_rewards):.6f}")
+
+    # Render history (last episode)
+    print("\nRendering last episode history...")
+    env.render_history(return_fig=False)
+
+    env.close()
+    print("\nDone!")

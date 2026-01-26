@@ -782,3 +782,59 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
     def close(self):
         """Clean up resources."""
         pass
+
+
+if __name__ == "__main__":
+    import datasets
+    import numpy as np
+
+    # Load sample data
+    print("Loading dataset...")
+    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
+    df = df["train"].to_pandas()
+    df['0'] = pd.to_datetime(df['0'])
+    print(f"Dataset loaded: {len(df)} rows\n")
+
+    # Create environment
+    config = SequentialTradingEnvConfig(
+        execute_on="1Hour",
+        time_frames="1Hour",
+        initial_cash=10000,
+        transaction_fee=0.0,
+        slippage=0.0,
+    )
+    env = SequentialTradingEnv(df, config)
+    print(f"Environment created")
+    print(f"Action levels: {env.action_levels}")
+    print(f"Action space size: {env.action_spec.n}\n")
+
+    # Run episode
+    td = env.reset()
+    print("Starting episode...\n")
+
+    for i in range(2000):
+        print(f"Step {i}")
+        print("Account state:")
+        acc_state = ""
+        for key, value in zip(env.account_state, td["account_state"]):
+            acc_state += f"  {key}: {value:.6f}\n"
+        print(acc_state)
+
+        # Random action (mostly hold, occasionally trade)
+        action = np.random.choice([0, 1, 2], p=[0.80, 0.10, 0.10])  # 80% hold, 10% short, 10% long
+        print(f"Action: {action} ({env.action_levels[action]})\n")
+
+        td["action"] = action
+        td = env.step(td)
+        td = td["next"]
+
+        if td["done"].item():
+            print("Episode terminated!")
+            break
+
+    # Render history
+    print("\nRendering history...")
+    env.render_history(return_fig=False)
+
+    env.close()
+    print("\nDone!")

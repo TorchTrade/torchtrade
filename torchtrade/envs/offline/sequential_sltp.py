@@ -26,6 +26,7 @@ from torchtrade.envs.offline.sequential import (
     SequentialTradingEnv,
     SequentialTradingEnvConfig,
 )
+from torchtrade.envs.core.state import binarize_action_type
 from torchtrade.envs.utils.sltp_helpers import (
     calculate_long_bracket_prices,
     calculate_short_bracket_prices,
@@ -112,6 +113,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         df: pd.DataFrame,
         config: SequentialTradingEnvSLTPConfig,
         feature_preprocessing_fn: Optional[Callable] = None,
+        reward_function: Optional[Callable] = None,
     ):
         """Initialize the sequential SLTP environment.
 
@@ -119,6 +121,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
             df: OHLCV DataFrame for backtesting
             config: Environment configuration with SLTP parameters
             feature_preprocessing_fn: Optional function to preprocess features
+            reward_function: Optional reward function (default: log_return_reward)
         """
         # Store SLTP configuration before initializing parent
         self.stoploss_levels = config.stoploss_levels
@@ -132,7 +135,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
             config.takeprofit_levels,
             config.include_hold_action,
             config.include_close_action,
-            allow_short=(config.trading_mode == "futures"),
+            allow_short=(config.leverage > 1),  # Futures mode: leverage > 1
         )
 
         # Temporarily set action_levels to a dummy list for parent initialization
@@ -141,7 +144,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         config.action_levels = [0.0]  # Dummy value, will be overridden
 
         # Initialize parent class (sets up base SequentialTradingEnv)
-        super().__init__(df, config, feature_preprocessing_fn)
+        super().__init__(df, config, feature_preprocessing_fn, reward_function)
 
         # Restore original action_levels
         config.action_levels = original_action_levels
@@ -302,7 +305,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
             Trade info dictionary with execution details
         """
         if self.position.position_size == 0:
-            return self._create_trade_info(executed=False)
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Calculate PnL
         pnl = self._calculate_unrealized_pnl(
@@ -327,11 +330,12 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         self.stop_loss = 0.0
         self.take_profit = 0.0
 
-        return self._create_trade_info(
-            executed=True,
-            side=f"sltp_{trigger_type}",  # "sltp_sl" or "sltp_tp"
-            fee_paid=fee,
-        )
+        return {
+            "executed": True,
+            "side": f"sltp_{trigger_type}",  # "sltp_sl" or "sltp_tp"
+            "fee_paid": fee,
+            "liquidated": False
+        }
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step with SLTP logic.
@@ -352,22 +356,16 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         cached_base = self._cached_base_features
         cached_price = cached_base["close"]
 
-        # Store old portfolio value for reward calculation
-        old_portfolio_value = self._get_portfolio_value(cached_price)
-
         # Get desired action
-        action_idx = tensordict.get("action", 0)
+        action_idx = tensordict["action"]
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()
         action_tuple = self._action_tuple[action_idx]
         side, sl_pct, tp_pct = action_tuple
 
-        # Initialize trade info
-        trade_info = {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
-
         # Priority 1: Check for liquidation (futures only)
         if self._check_liquidation(cached_price):
-            trade_info = self._execute_liquidation(cached_price)
+            trade_info = self._execute_liquidation()
 
         # Priority 2: Check for SL/TP trigger (if not liquidated)
         elif self.position.position_size != 0:
@@ -379,24 +377,22 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
                 else:  # "tp"
                     execution_price = self.take_profit
                 trade_info = self._execute_sltp_close(execution_price, sltp_trigger)
+            else:
+                # No trigger, execute new action
+                trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
 
-        # Priority 3: Execute new action (if no position closed)
-        if not trade_info["executed"]:
+        # Priority 3: Execute new action (if no liquidation or trigger)
+        else:
             trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
 
-        # Update position flag
+        # Update position flag based on actual position size
         if trade_info["executed"]:
-            if self.trading_mode == "spot":
-                # Spot: only in position if we opened long
-                self.position.current_position = 1 if side == "long" else 0
+            if self.position.position_size > 0:
+                self.position.current_position = 1  # Long
+            elif self.position.position_size < 0:
+                self.position.current_position = -1  # Short
             else:
-                # Futures: track direction (1=long, -1=short, 0=flat)
-                if side == "long":
-                    self.position.current_position = 1
-                elif side == "short":
-                    self.position.current_position = -1
-                elif side in ("close", "sltp_sl", "sltp_tp"):
-                    self.position.current_position = 0
+                self.position.current_position = 0  # Flat
 
         # Get updated state (advances timestamp and caches new base features)
         next_tensordict = self._get_observation()
@@ -407,36 +403,25 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         if self.random_start:
             next_tensordict.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
 
-        # Calculate reward
-        reward = self._calculate_reward(
-            old_portfolio_value, new_portfolio_value, action_tuple, trade_info
-        )
-
-        # Determine action_type for history tracking
+        # Determine action_type and binarize action for history
         action_type = trade_info.get("side") or "hold"
-        from torchtrade.envs.core.state import binarize_action_type
+        binarized_action = binarize_action_type(action_type)
 
-        if self.trading_mode == "spot":
-            # Spot mode: convert side to binarized action
-            if action_type == "long":
-                binarized_action = 1
-            elif action_type in ("close", "sltp_sl", "sltp_tp"):
-                binarized_action = -1
-            else:
-                binarized_action = 0
-        else:
-            # Futures mode: use binarize_action_type utility
-            binarized_action = binarize_action_type(action_type)
-
-        # Record step history
+        # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(
             price=new_price,
             action=binarized_action,
-            reward=reward,
+            reward=0.0,  # Placeholder, will be set after reward calculation
             portfolio_value=new_portfolio_value,
             position=self.position.position_size,
             action_type=action_type
         )
+
+        # Calculate reward using UPDATED history tracker
+        reward = float(self.reward_function(self.history))
+
+        # Update the reward in history
+        self.history.rewards[-1] = reward
 
         # Check termination
         done = self._check_termination(new_portfolio_value)
@@ -466,7 +451,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         if side is None:
             if self.position.position_size != 0:
                 self.position.hold_counter += 1
-            return self._create_trade_info()
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # CLOSE action
         if side == "close":
@@ -475,7 +460,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
                 price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage).item()
                 execution_price = base_price * price_noise
                 return self._close_position(execution_price)
-            return self._create_trade_info()
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Opening new position (long or short)
         # Apply slippage
@@ -485,10 +470,10 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         # Check if already in same direction - if so, hold (ignore duplicate action)
         if side == "long" and self.position.position_size > 0:
             self.position.hold_counter += 1
-            return self._create_trade_info()
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
         if side == "short" and self.position.position_size < 0:
             self.position.hold_counter += 1
-            return self._create_trade_info()
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # If switching direction, close existing position first
         if self.position.position_size != 0:
@@ -514,7 +499,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         # Use fractional sizing from parent class
         # For spot mode, action_value represents fraction of portfolio to invest
         # For futures mode, action_value represents leverage-adjusted position
-        if self.trading_mode == "spot":
+        if self.leverage == 1:
             # Spot: invest 100% of portfolio (all-in strategy for SLTP)
             action_value = 1.0
         else:
@@ -544,7 +529,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         # Check if sufficient balance
         if margin_required + fee > self.balance:
-            return self._create_trade_info()
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Deduct fee
         self.balance -= fee
@@ -557,7 +542,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         self.position.hold_counter = 0
 
         # Set position direction
-        if self.trading_mode == "spot":
+        if self.leverage == 1:
             self.position.current_position = 1  # Always long
         else:
             self.position.current_position = 1 if side == "long" else -1
@@ -575,8 +560,74 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
                 execution_price, sl_pct, tp_pct
             )
 
-        return self._create_trade_info(executed=True, side=side, fee_paid=fee)
+        return {"executed": True, "side": side, "fee_paid": fee, "liquidated": False}
 
     def close(self):
         """Clean up resources."""
         pass
+
+
+if __name__ == "__main__":
+    import datasets
+    import numpy as np
+
+    # Load sample data
+    print("Loading dataset...")
+    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
+    df = df["train"].to_pandas()
+    df['0'] = pd.to_datetime(df['0'])
+    print(f"Dataset loaded: {len(df)} rows\n")
+
+    # Create environment
+    config = SequentialTradingEnvSLTPConfig(
+        execute_on="1Hour",
+        time_frames="1Hour",
+        initial_cash=10000,
+        transaction_fee=0.0,
+        slippage=0.0,
+        stoploss_levels=(-0.025, -0.05, -0.1),
+        takeprofit_levels=(0.05, 0.1, 0.2),
+        include_hold_action=True,
+    )
+    env = SequentialTradingEnvSLTP(df, config)
+    print(f"Environment created")
+    print(f"Action map size: {len(env.action_map)}")
+    print(f"Action space size: {env.action_spec.n}")
+    print(f"Sample actions:")
+    for i in range(min(5, len(env.action_map))):
+        print(f"  {i}: {env.action_map[i]}")
+    print()
+
+    # Run episode
+    td = env.reset()
+    print("Starting episode...\n")
+
+    for i in range(2000):
+        print(f"Step {i}")
+        print("Account state:")
+        acc_state = ""
+        for key, value in zip(env.account_state, td["account_state"]):
+            acc_state += f"  {key}: {value:.6f}\n"
+        print(acc_state)
+
+        # Random action (mostly hold, occasionally take position)
+        action = np.random.choice(
+            range(len(env.action_map)),
+            p=[0.95] + [0.05 / (len(env.action_map) - 1)] * (len(env.action_map) - 1)
+        )
+        print(f"Action: {action} {env.action_map[action]}\n")
+
+        td["action"] = action
+        td = env.step(td)
+        td = td["next"]
+
+        if td["done"].item():
+            print("Episode terminated!")
+            break
+
+    # Render history
+    print("\nRendering history...")
+    env.render_history(return_fig=False)
+
+    env.close()
+    print("\nDone!")
