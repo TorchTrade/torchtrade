@@ -1,17 +1,18 @@
-"""Sequential Trading Environment supporting both spot and futures modes.
+"""Sequential Trading Environment with automatic mode detection.
 
-A TorchRL-compatible environment for algorithmic trading that supports both
-spot (long-only) and futures (leverage + short) trading via a `trading_mode` parameter.
+A TorchRL-compatible environment for algorithmic trading that automatically
+adapts based on leverage and action_levels configuration.
 
 Key Features:
-    - 6-element account state for both modes (improved generalization)
-    - Spot mode: no leverage, no liquidation, no short positions
-    - Futures mode: full leverage, liquidation mechanics, bidirectional positions
-    - Mode-aware action space: spot defaults to 3 actions, futures to 5
+    - 6-element account state for all configurations
+    - leverage > 1: Enables liquidation mechanics
+    - leverage == 1: No liquidation (spot-like)
+    - negative action_levels: Allows short positions
+    - all positive action_levels: Long-only
     - Fractional position sizing with configurable action levels
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union, Callable, Literal
 import warnings
 
@@ -22,6 +23,7 @@ from torchrl.data import Categorical
 
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.core.state import FuturesHistoryTracker, binarize_action_type
+from torchtrade.envs.core.default_rewards import log_return_reward
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
 from torchtrade.envs.utils.fractional_sizing import (
     calculate_fractional_position,
@@ -38,19 +40,19 @@ from torchtrade.envs.core.common_types import MarginType
 class SequentialTradingEnvConfig:
     """Configuration for sequential trading environment.
 
-    Supports both spot (long-only) and futures (leverage + short) trading modes.
+    Trading behavior is automatically determined by parameters:
+    - leverage > 1: Enables futures mode (liquidation mechanics)
+    - negative action_levels: Enables short positions
+    - leverage == 1 and no negative actions: Spot mode (long-only, no liquidation)
     """
-    # Trading mode selection
-    trading_mode: Literal["spot", "futures"] = "spot"
-
     # Common parameters
     symbol: str = "BTC/USD"
-    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Min"
+    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Hour"
     window_sizes: Union[List[int], int] = 10
-    execute_on: Union[str, TimeFrame] = "1Min"
-    initial_cash: Union[Tuple[int, int], int] = (1000, 5000)
-    transaction_fee: float = 0.0004
-    slippage: float = 0.001
+    execute_on: Union[str, TimeFrame] = "1Hour"
+    initial_cash: Union[Tuple[int, int], int] = 10000
+    transaction_fee: float = 0.0
+    slippage: float = 0.0
     bankrupt_threshold: float = 0.1
 
     # Environment settings
@@ -59,14 +61,12 @@ class SequentialTradingEnvConfig:
     max_traj_length: Optional[int] = None
     random_start: bool = True
 
-    # Reward settings
-    reward_scaling: float = 1.0
-    reward_function: Optional[Callable] = None
-
     # Action space configuration
-    action_levels: Optional[List[float]] = None
+    action_levels: Optional[List[float]] = field(default_factory=lambda: [-1, 0, 1])
 
-    # Futures-specific parameters
+    # Trading parameters
+    # leverage > 1: Enables futures mode with liquidation mechanics
+    # leverage == 1: Spot mode (no liquidation)
     leverage: int = 1
     margin_type: MarginType = MarginType.ISOLATED
     maintenance_margin_rate: float = 0.004
@@ -78,58 +78,38 @@ class SequentialTradingEnvConfig:
             self.execute_on, self.time_frames, self.window_sizes
         )
 
-        # Validate leverage for spot mode
-        if self.trading_mode == "spot" and self.leverage != 1:
+        # Validate leverage
+        if not (1 <= self.leverage <= 125):
             raise ValueError(
-                f"Spot trading mode must have leverage=1, got leverage={self.leverage}. "
-                "Spot trading does not support leverage."
+                f"Leverage must be between 1 and 125, got {self.leverage}"
             )
 
-        # Validate leverage for futures mode
-        if self.trading_mode == "futures" and not (1 <= self.leverage <= 125):
-            raise ValueError(
-                f"Futures leverage must be between 1 and 125, got {self.leverage}"
-            )
-
-        # Build default action levels based on trading mode
-        if self.action_levels is None:
-            self.action_levels = build_default_action_levels(
-                allow_short=(self.trading_mode == "futures")
-            )
-        else:
-            validate_action_levels(self.action_levels)
-
-            # Warn about negative actions in spot mode
-            if self.trading_mode == "spot":
-                negative_actions = [a for a in self.action_levels if a < 0]
-                if negative_actions:
-                    warnings.warn(
-                        f"Spot trading mode has negative action levels {negative_actions}. "
-                        f"Negative actions will be clipped to 0.0 (close position). "
-                        f"Consider using only non-negative actions for spot mode."
-                    )
+        # Validate action levels
+        validate_action_levels(self.action_levels)
 
 
 class SequentialTradingEnv(TorchTradeOfflineEnv):
-    """Sequential trading environment for both spot and futures trading.
+    """Sequential trading environment with automatic mode detection.
 
-    This environment supports two trading modes controlled by the `trading_mode` parameter:
+    Trading behavior is automatically determined:
+    - leverage > 1: Futures mode with liquidation mechanics
+    - leverage == 1: Spot mode without liquidation
+    - negative action_levels: Allows short positions
+    - all action_levels >= 0: Long-only
 
-    Spot Mode (trading_mode="spot"):
-    --------------------------------
-    - Long-only positions (no short selling)
-    - No leverage (1x only)
-    - No liquidation risk
-    - Action space: typically [0.0, 0.5, 1.0] (flat, 50% invested, 100% invested)
-    - Account state: 10 elements with leverage=1.0, liquidation_price=0.0
+    Examples:
+    ---------
+    Spot (long-only):
+        leverage=1, action_levels=[0, 1]  # Default: flat, long
+        No liquidation, no shorts
 
-    Futures Mode (trading_mode="futures"):
-    --------------------------------------
-    - Long and short positions
-    - Configurable leverage (1x - 125x)
-    - Liquidation mechanics based on margin
-    - Action space: typically [-1.0, -0.5, 0.0, 0.5, 1.0] (short→flat→long)
-    - Account state: 10 elements with actual leverage and liquidation price
+    Leveraged long-only:
+        leverage=10, action_levels=[0, 1]
+        Has liquidation, but no shorts
+
+    Futures (bidirectional):
+        leverage=10, action_levels=[-1, 0, 1]  # Default: short, flat, long
+        Has liquidation and shorts
 
     Universal Account State (6 elements for both modes):
     ----------------------------------------------------
@@ -179,6 +159,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         df: pd.DataFrame,
         config: SequentialTradingEnvConfig,
         feature_preprocessing_fn: Optional[Callable] = None,
+        reward_function: Optional[Callable] = None,
     ):
         """Initialize the sequential trading environment.
 
@@ -186,12 +167,15 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             df: OHLCV DataFrame for backtesting
             config: Environment configuration
             feature_preprocessing_fn: Optional function to preprocess features
+            reward_function: Optional reward function (default: log_return_reward)
         """
         # Initialize base class (handles sampler, history, balance, etc.)
         super().__init__(df, config, feature_preprocessing_fn)
 
-        # Store trading mode and configuration
-        self.trading_mode = config.trading_mode
+        # Set reward function (default to log return reward)
+        self.reward_function = reward_function or log_return_reward
+
+        # Store configuration
         self.action_levels = config.action_levels
         self.leverage = config.leverage
         self.margin_type = config.margin_type
@@ -214,6 +198,16 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self.unrealized_pnl_pct = 0.0  # Percentage unrealized PnL
         self.liquidation_price = 0.0  # Liquidation price
 
+    @property
+    def has_liquidation(self) -> bool:
+        """Check if liquidation mechanics are enabled (leverage > 1)."""
+        return self.leverage > 1
+
+    @property
+    def allows_short(self) -> bool:
+        """Check if short positions are allowed (any negative action levels)."""
+        return any(a < 0 for a in self.action_levels)
+
     def _reset_history(self):
         """Reset history tracking."""
         # Use FuturesHistoryTracker for both modes (it has position tracking)
@@ -222,14 +216,14 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
     def _calculate_liquidation_price(self, entry_price: float, position_size: float) -> float:
         """Calculate liquidation price for a position.
 
-        Spot mode: Always returns 0.0 (no liquidation)
-        Futures mode: Calculates based on leverage and margin type
+        No liquidation (leverage=1): Always returns 0.0
+        With liquidation (leverage>1): Calculates based on leverage and margin type
 
         For ISOLATED margin:
         - Long: liquidation_price = entry_price * (1 - 1/leverage + maintenance_margin_rate)
         - Short: liquidation_price = entry_price * (1 + 1/leverage - maintenance_margin_rate)
         """
-        if self.trading_mode == "spot":
+        if not self.has_liquidation:
             return 0.0
 
         if position_size == 0:
@@ -249,10 +243,10 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
     def _check_liquidation(self, current_price: float) -> bool:
         """Check if current position should be liquidated.
 
-        Spot mode: Always returns False (no liquidation)
-        Futures mode: Checks if price crossed liquidation threshold
+        No liquidation (leverage=1): Always returns False
+        With liquidation (leverage>1): Checks if price crossed liquidation threshold
         """
-        if self.trading_mode == "spot":
+        if not self.has_liquidation:
             return False
 
         if self.position.position_size == 0:
@@ -298,40 +292,24 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             return (entry_price - current_price) / entry_price
         return 0.0
 
-    def _calculate_exposure_pct(self, position_value: float, portfolio_value: float) -> float:
-        """Calculate exposure percentage (position_value / portfolio_value).
-
-        Returns value from 0.0 (no position) to 1.0+ (with leverage).
-
-        Args:
-            position_value: Absolute notional value of position
-            portfolio_value: Total portfolio value (balance + unrealized PnL)
-
-        Returns:
-            Exposure percentage (can exceed 1.0 with leverage)
-        """
-        if portfolio_value <= 0:
-            return 0.0
-        return position_value / portfolio_value
-
     def _calculate_distance_to_liquidation(
         self, current_price: float, liquidation_price: float, position_size: float
     ) -> float:
         """Calculate normalized distance to liquidation price.
 
-        Returns 1.0 for spot mode or no position (no liquidation risk).
-        For futures, returns distance as fraction of current price.
+        Returns 1.0 when liquidation is disabled or no position (no liquidation risk).
+        When liquidation is enabled, returns distance as fraction of current price.
 
         Args:
             current_price: Current market price
-            liquidation_price: Liquidation price (0.0 for spot)
+            liquidation_price: Liquidation price (0.0 when liquidation disabled)
             position_size: Current position size (signed)
 
         Returns:
             Distance to liquidation (1.0 = no risk, 0.0 = at liquidation)
         """
-        # Spot mode or no position: no liquidation risk
-        if self.trading_mode == "spot" or position_size == 0:
+        # No liquidation or no position: no liquidation risk
+        if not self.has_liquidation or position_size == 0:
             return 1.0
 
         if current_price == 0:
@@ -385,7 +363,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         # Calculate portfolio value and exposure
         portfolio_value = self._get_portfolio_value(current_price)
-        exposure_pct = self._calculate_exposure_pct(self.position.position_value, portfolio_value)
+        exposure_pct = self.position.position_value / portfolio_value if portfolio_value > 0 else 0.0
 
         # Calculate position direction (-1, 0, +1)
         position_direction = float(
@@ -432,38 +410,26 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         # Cache base features and get current price
         cached_price = self._cached_base_features["close"]
 
-        # Store old portfolio value for reward calculation
-        old_portfolio_value = self._get_portfolio_value(cached_price)
-
         # Get desired action
-        action_idx = tensordict.get("action", 0)
+        action_idx = tensordict["action"]
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()
         desired_action = self.action_levels[action_idx]
 
-        # Check for liquidation (futures only)
-        trade_info = {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
-
+        # Check for liquidation or execute trade
         if self._check_liquidation(cached_price):
-            trade_info = self._execute_liquidation(cached_price)
+            trade_info = self._execute_liquidation()
         else:
             trade_info = self._execute_trade_if_needed(desired_action, cached_price)
 
-        # Update position flag
+        # Update position flag based on actual position size
         if trade_info["executed"]:
-            if self.trading_mode == "spot":
-                # Spot: only out of position if we sell all
-                self.position.current_position = int(
-                    not (trade_info["side"] == "sell" and desired_action <= 0)
-                )
+            if self.position.position_size > 0:
+                self.position.current_position = 1  # Long
+            elif self.position.position_size < 0:
+                self.position.current_position = -1  # Short
             else:
-                # Futures: track direction (1=long, -1=short, 0=flat)
-                if trade_info["side"] == "long":
-                    self.position.current_position = 1
-                elif trade_info["side"] == "short":
-                    self.position.current_position = -1
-                elif trade_info["side"] in ("flat", "close", "liquidation"):
-                    self.position.current_position = 0
+                self.position.current_position = 0  # Flat
 
         # Get updated state (advances timestamp and caches new base features)
         next_tensordict = self._get_observation()
@@ -474,35 +440,25 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         if self.random_start:
             next_tensordict.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
 
-        # Calculate reward
-        reward = self._calculate_reward(
-            old_portfolio_value, new_portfolio_value, desired_action, trade_info
-        )
-
         # Determine action_type and binarize action for history
         action_type = trade_info.get("side") or "hold"
+        binarized_action = binarize_action_type(action_type)
 
-        if self.trading_mode == "spot":
-            # Spot mode: convert side to action type
-            if action_type == "buy":
-                binarized_action = 1
-            elif action_type == "sell":
-                binarized_action = -1
-            else:
-                binarized_action = 0
-        else:
-            # Futures mode: use binarize_action_type utility
-            binarized_action = binarize_action_type(action_type)
-
-        # Record step history
+        # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(
             price=new_price,
             action=binarized_action,
-            reward=reward,
+            reward=0.0,  # Placeholder, will be set after reward calculation
             portfolio_value=new_portfolio_value,
             position=self.position.position_size,
             action_type=action_type
         )
+
+        # Calculate reward using UPDATED history tracker
+        reward = float(self.reward_function(self.history))
+
+        # Update the reward in history
+        self.history.rewards[-1] = reward
 
         # Check termination
         done = self._check_termination(new_portfolio_value)
@@ -521,22 +477,22 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         Uses shared utility function for consistent position sizing.
 
-        Spot mode: Clips negative actions to 0.0 (close position)
-        Futures mode: Supports full bidirectional trading
+        If shorts not allowed: Clips negative actions to 0.0 (close position)
+        If shorts allowed: Supports full bidirectional trading
 
         IMPORTANT: Uses portfolio value (balance + unrealized PnL) instead of just balance
         to avoid forced trading after opening positions. With leverage or full investment,
         balance can be near zero but portfolio value stays constant.
 
         Args:
-            action_value: Action from [-1.0, 1.0] (or [0.0, 1.0] for spot)
+            action_value: Action from [-1.0, 1.0] (or [0.0, 1.0] if no shorts)
             current_price: Current market price
 
         Returns:
             Tuple of (position_size, notional_value, side)
         """
-        # Spot mode: clip negative actions to 0.0
-        if self.trading_mode == "spot" and action_value < 0:
+        # Clip negative actions if shorts not allowed
+        if not self.allows_short and action_value < 0:
             action_value = 0.0
 
         # Use portfolio value instead of balance to avoid forced trading
@@ -548,12 +504,12 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             current_price=current_price,
             leverage=self.leverage,
             transaction_fee=self.transaction_fee,
-            allow_short=(self.trading_mode == "futures")
+            allow_short=self.allows_short
         )
         position_size, notional_value, side = calculate_fractional_position(params)
 
-        # Spot mode: convert "long" to "buy" for clarity
-        if self.trading_mode == "spot" and side == "long":
+        # Convert "long" to "buy" for clarity when shorts not allowed
+        if not self.allows_short and side == "long":
             side = "buy"
 
         return position_size, notional_value, side
@@ -599,57 +555,37 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         if abs(target_position_size - self.position.position_size) < tolerance:
             if self.position.position_size != 0:
                 self.position.hold_counter += 1
-            return self._create_trade_info()
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Execute appropriate position change
         if target_position_size == 0.0:
             # Close to neutral
-            return self._handle_close_to_neutral(execution_price)
+            if self.position.position_size == 0:
+                return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
+
+            trade_info = self._close_position(execution_price)
+            trade_info["side"] = "sell" if not self.allows_short else "flat"
+            return trade_info
 
         if self.position.position_size == 0.0:
             # Open new position
             return self._open_position(target_side, target_position_size, target_notional, execution_price)
 
         # Check for direction switch (futures only - spot can't switch)
-        if self._is_direction_switch(self.position.position_size, target_position_size):
-            return self._handle_direction_switch(
-                action_value, target_side, target_position_size, target_notional, execution_price
+        if ((self.position.position_size > 0 and target_position_size < 0) or
+            (self.position.position_size < 0 and target_position_size > 0)):
+            # Close current position then open opposite
+            self._close_position(execution_price)
+
+            # Recalculate target position after closing (balance may have changed)
+            target_position_size, target_notional, target_side = (
+                self._calculate_fractional_position(action_value, execution_price)
             )
+
+            return self._open_position(target_side, target_position_size, target_notional, execution_price)
 
         # Adjust position size in same direction
         return self._adjust_position_size(target_position_size, target_notional, execution_price)
-
-    def _is_direction_switch(self, current_position: float, target_position: float) -> bool:
-        """Check if switching from long to short or vice versa."""
-        return (current_position > 0 and target_position < 0) or \
-               (current_position < 0 and target_position > 0)
-
-    def _handle_close_to_neutral(self, execution_price: float) -> Dict:
-        """Handle closing position to go neutral."""
-        if self.position.position_size == 0:
-            return self._create_trade_info()
-
-        trade_info = self._close_position(execution_price)
-        trade_info["side"] = "sell" if self.trading_mode == "spot" else "flat"
-        return trade_info
-
-    def _handle_direction_switch(
-        self,
-        action_value: float,
-        target_side: str,
-        target_position_size: float,
-        target_notional: float,
-        execution_price: float
-    ) -> Dict:
-        """Handle switching from long to short or vice versa (futures only)."""
-        self._close_position(execution_price)
-
-        # Recalculate target position after closing (balance may have changed)
-        target_position_size, target_notional, target_side = (
-            self._calculate_fractional_position(action_value, execution_price)
-        )
-
-        return self._open_position(target_side, target_position_size, target_notional, execution_price)
 
     def _open_position(
         self, side: str, position_size: float, notional_value: float, execution_price: float
@@ -661,7 +597,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         # Check if sufficient balance
         if margin_required + fee > self.balance:
-            return self._create_trade_info()
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Deduct fee
         self.balance -= fee
@@ -674,15 +610,15 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self.position.hold_counter = 0
 
         # Set position direction
-        if self.trading_mode == "spot":
+        if not self.allows_short:
             self.position.current_position = 1  # Always long
         else:
-            self.position.current_position = 1 if side == "long" else -1
+            self.position.current_position = 1 if side in ("buy", "long") else -1
 
         # Calculate liquidation price (futures only)
         self.liquidation_price = self._calculate_liquidation_price(execution_price, position_size)
 
-        return self._create_trade_info(executed=True, side=side, fee_paid=fee)
+        return {"executed": True, "side": side, "fee_paid": fee, "liquidated": False}
 
     def _adjust_position_size(
         self, target_position_size: float, target_notional: float, execution_price: float
@@ -693,7 +629,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         # Check if delta is negligible
         if abs(delta_position) < POSITION_TOLERANCE_ABS:
-            return self._create_trade_info()
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Determine if increasing or decreasing
         is_increasing = abs(target_position_size) > abs(self.position.position_size)
@@ -719,7 +655,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         # Check sufficient balance
         if margin_required + fee > self.balance:
-            return self._create_trade_info()
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Execute trade
         self.balance -= fee
@@ -744,8 +680,8 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             self.position.entry_price, self.position.position_size
         )
 
-        side = "buy" if self.trading_mode == "spot" else ("long" if delta_position > 0 else "short")
-        return self._create_trade_info(executed=True, side=side, fee_paid=fee)
+        side = "buy" if not self.allows_short else ("long" if delta_position > 0 else "short")
+        return {"executed": True, "side": side, "fee_paid": fee, "liquidated": False}
 
     def _decrease_position_size(
         self, target_position_size: float, target_notional: float, execution_price: float
@@ -776,13 +712,13 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             self.position.entry_price, self.position.position_size
         )
 
-        side = "sell" if self.trading_mode == "spot" else "close_partial"
-        return self._create_trade_info(executed=True, side=side, fee_paid=fee)
+        side = "sell" if not self.allows_short else "close_partial"
+        return {"executed": True, "side": side, "fee_paid": fee, "liquidated": False}
 
     def _close_position(self, execution_price: float) -> Dict:
         """Close existing position."""
         if self.position.position_size == 0:
-            return self._create_trade_info(executed=False)
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Calculate PnL and fee
         pnl = self._calculate_unrealized_pnl(
@@ -803,9 +739,9 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self.position.current_position = 0
         self.position.hold_counter = 0
 
-        return self._create_trade_info(executed=True, side="close", fee_paid=fee)
+        return {"executed": True, "side": "close", "fee_paid": fee, "liquidated": False}
 
-    def _execute_liquidation(self, current_price: float) -> Dict:
+    def _execute_liquidation(self) -> Dict:
         """Execute forced liquidation of position (futures only)."""
         trade_info = {
             "executed": True,
@@ -837,17 +773,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self.position.hold_counter = 0
 
         return trade_info
-
-    def _create_trade_info(
-        self, executed: bool = False, side: str = None, fee_paid: float = 0.0, liquidated: bool = False
-    ) -> Dict:
-        """Create a standardized trade info dictionary."""
-        return {
-            "executed": executed,
-            "side": side,
-            "fee_paid": fee_paid,
-            "liquidated": liquidated,
-        }
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""
