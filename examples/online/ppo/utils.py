@@ -215,9 +215,12 @@ def make_discrete_ppo_model(cfg, env, device):
         ).to(device))
 
 
+    # Get account state dimension from environment
+    account_state_dim = env.observation_spec[account_state_key].shape[-1]
+
     account_encoder_model = SimpleMLPEncoder(
-        input_shape=(1, 7),  # 7 account state features, single timestep
-        output_shape=(1, 14),  # Match embedding_dim output
+        input_shape=(1, account_state_dim),
+        output_shape=(1, 14),
         hidden_sizes=(32, 32),
         activation="gelu",
         dropout=0.1,

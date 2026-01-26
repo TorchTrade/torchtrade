@@ -293,6 +293,7 @@ def make_sac_agent(cfg, env, device):
 
     # Get number of features from environment observation spec
     num_features = env.observation_spec[market_data_keys[0]].shape[-1]
+    account_state_dim = env.observation_spec[account_state_key].shape[-1]
 
     # Build the encoder
     for key, t, w in zip(market_data_keys, time_frames, window_sizes):
@@ -312,6 +313,7 @@ def make_sac_agent(cfg, env, device):
 
     account_state_encoder = SafeModule(
         module=MLP(
+            in_features=account_state_dim,
             num_cells=[32],
             out_features=14,
             activation_class=ACTIVATIONS[cfg.network.activation],
