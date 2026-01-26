@@ -36,7 +36,7 @@ import wandb
 torch.set_float32_matmul_precision("high")
 
 
-@hydra.main(version_base="1.1", config_path="", config_name="config")
+@hydra.main(version_base="1.1", config_path=".", config_name="config")
 def main(cfg: DictConfig):  # noqa: F821
     device = cfg.network.device
     if device in ("", None):

@@ -8,7 +8,7 @@ from torchrl._utils import compile_with_warmup
 import datasets
 
 
-@hydra.main(config_path="", config_name="config", version_base="1.1")
+@hydra.main(config_path=".", config_name="config", version_base="1.1")
 def main(cfg: DictConfig):  # noqa: F821
 
     import torch.optim

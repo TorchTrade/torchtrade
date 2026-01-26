@@ -1,7 +1,14 @@
-"""PPO training example for SequentialTradingEnv.
+"""GRPO training example for OneStepTradingEnv.
 
-This script demonstrates PPO training on the SequentialTradingEnv environment
-for futures trading with leverage support.
+This script demonstrates GRPO training on the OneStepTradingEnv environment
+for both spot and futures trading with stop-loss and take-profit support.
+
+Usage:
+    # Futures trading (default)
+    python train.py
+
+    # Spot trading
+    python train.py env=onestep_spot
 """
 from __future__ import annotations
 
@@ -11,25 +18,21 @@ import hydra
 import pandas as pd
 from torchrl._utils import compile_with_warmup
 import datasets
+from torchtrade.losses import GRPOLoss
 
 
-@hydra.main(config_path="", config_name="config", version_base="1.1")
+@hydra.main(config_path=".", config_name="config", version_base="1.1")
 def main(cfg: DictConfig):  # noqa: F821
 
     import torch.optim
     import tqdm
     import wandb
-    from tensordict import TensorDict
     from tensordict.nn import CudaGraphModule
 
     from torchrl._utils import timeit
-    from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
-    from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
     from torchrl.envs import ExplorationType, set_exploration_type
-    from torchrl.objectives import ClipPPOLoss
-    from torchrl.objectives.value.advantages import GAE
     from torchrl.record.loggers import generate_exp_name, get_logger
-    from utils import make_environment, make_ppo_models, make_collector, log_metrics
+    from utils import make_environment, make_grpo_policy, make_collector, log_metrics
 
     torch.set_float32_matmul_precision("high")
 
@@ -54,6 +57,7 @@ def main(cfg: DictConfig):  # noqa: F821
     test_df  = df[df['0'] >= test_split_date]
 
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.train_envs
+    # TODO: possibly wrong as the test_df is in 1min freq
     max_eval_traj_length = len(test_df)
 
     print("="*80)
@@ -76,8 +80,6 @@ def main(cfg: DictConfig):  # noqa: F821
     )
 
     total_frames = cfg.collector.total_frames
-    frames_per_batch = cfg.collector.frames_per_batch
-    mini_batch_size = cfg.loss.mini_batch_size
     test_interval = cfg.logger.test_interval
 
     compile_mode = None
@@ -89,8 +91,8 @@ def main(cfg: DictConfig):  # noqa: F821
             else:
                 compile_mode = "reduce-overhead"
 
-    # Create models
-    actor, critic = make_ppo_models(
+    # Create policy
+    actor = make_grpo_policy(
         eval_env,
         device=device,
         cfg=cfg,
@@ -105,52 +107,25 @@ def main(cfg: DictConfig):  # noqa: F821
         postproc=coverage_tracker,
     )
 
-    # Create data buffer
-    sampler = SamplerWithoutReplacement(drop_last=True)
-    data_buffer = TensorDictReplayBuffer(
-        storage=LazyTensorStorage(
-            frames_per_batch, compilable=cfg.compile.compile, device=device
-        ),
-        sampler=sampler,
-        batch_size=mini_batch_size,
-        compilable=cfg.compile.compile,
-    )
-
-    # Create loss and advantage modules
-    adv_module = GAE(
-        gamma=cfg.loss.gamma,
-        lmbda=cfg.loss.gae_lambda,
-        value_network=critic,
-        average_gae=False,
-        device=device,
-        time_dim=-3,
-        vectorized=not cfg.compile.compile,
-    )
-    loss_module = ClipPPOLoss(
+    # Create loss module
+    loss_module = GRPOLoss(
         actor_network=actor,
-        critic_network=critic,
-        clip_epsilon=cfg.loss.clip_epsilon,
-        loss_critic_type=cfg.loss.loss_critic_type,
-        entropy_coef=cfg.loss.entropy_coef,
-        critic_coef=cfg.loss.critic_coef,
-        normalize_advantage=True,
+        entropy_coeff=cfg.loss.entropy_coef,
     )
 
     # Create optimizer
     optim = torch.optim.Adam(
         loss_module.parameters(),
         lr=cfg.optim.lr,
-        weight_decay=cfg.optim.weight_decay,
-        eps=cfg.optim.eps,
     )
 
     # Create logger
     logger = None
     if cfg.logger.backend:
-        exp_name = generate_exp_name("TorchTrade-Futures-PPO", cfg.logger.exp_name)
+        exp_name = generate_exp_name("TorchTrade-FuturesOneStep-GRPO", cfg.logger.exp_name)
         logger = get_logger(
             cfg.logger.backend,
-            logger_name="ppo_futures_logging",
+            logger_name="grpo_futures_logging",
             experiment_name=exp_name,
             wandb_kwargs={
                 "mode": cfg.logger.mode,
@@ -162,42 +137,23 @@ def main(cfg: DictConfig):  # noqa: F821
 
     # Main loop
     collected_frames = 0
-    num_network_updates = torch.zeros((), dtype=torch.int64, device=device)
     pbar = tqdm.tqdm(total=total_frames)
-    num_mini_batches = frames_per_batch // mini_batch_size
-    total_network_updates = (
-        (total_frames // frames_per_batch) * cfg.loss.ppo_epochs * num_mini_batches
-    )
 
-    def update(batch, num_network_updates):
+    def update(batch):
         optim.zero_grad(set_to_none=True)
-        alpha = torch.ones((), device=device)
-        if cfg_optim_anneal_lr:
-            alpha = 1 - (num_network_updates / total_network_updates)
-            for group in optim.param_groups:
-                group["lr"] = cfg_optim_lr * alpha
-        if cfg_loss_anneal_clip_eps:
-            loss_module.clip_epsilon.copy_(cfg_loss_clip_epsilon * alpha)
 
-        batch = batch.to(device, non_blocking=True)
-
-        # Forward pass PPO loss
-        loss = loss_module(batch)
-        loss_sum = loss["loss_critic"] + loss["loss_objective"] + loss["loss_entropy"]
-
+        # Forward pass GRPO loss
+        loss_td = loss_module(batch)
+        loss = loss_td["loss_objective"] + loss_td["loss_entropy"]
         # Backward pass
-        loss_sum.backward()
-        torch.nn.utils.clip_grad_norm_(
-            loss_module.parameters(), max_norm=cfg_optim_max_grad_norm
-        )
+        loss.backward()
 
         # Update the networks
         optim.step()
-        return loss.detach().set("alpha", alpha), num_network_updates
+        return loss_td.detach()
 
     if cfg.compile.compile:
         update = compile_with_warmup(update, mode=compile_mode, warmup=1)
-        adv_module = compile_with_warmup(adv_module, mode=compile_mode, warmup=1)
 
     if cfg.compile.cudagraphs:
         warnings.warn(
@@ -205,17 +161,6 @@ def main(cfg: DictConfig):  # noqa: F821
             category=UserWarning,
         )
         update = CudaGraphModule(update, in_keys=[], out_keys=[], warmup=5)
-        adv_module = CudaGraphModule(adv_module)
-
-    # Extract cfg variables
-    cfg_loss_ppo_epochs = cfg.loss.ppo_epochs
-    cfg_optim_anneal_lr = cfg.optim.anneal_lr
-    cfg_optim_lr = cfg.optim.lr
-    cfg_loss_anneal_clip_eps = cfg.loss.anneal_clip_epsilon
-    cfg_loss_clip_epsilon = cfg.loss.clip_epsilon
-    cfg_optim_max_grad_norm = cfg.optim.max_grad_norm
-    cfg.loss.clip_epsilon = cfg_loss_clip_epsilon
-    losses = TensorDict(batch_size=[cfg_loss_ppo_epochs, num_mini_batches])
 
     collector_iter = iter(collector)
     total_iter = len(collector)
@@ -223,61 +168,28 @@ def main(cfg: DictConfig):  # noqa: F821
         timeit.printevery(1000, total_iter, erase=True)
 
         with timeit("collecting"):
-            data = next(collector_iter).to(device)
+            data = next(collector_iter).to(device, non_blocking=True)
 
         metrics_to_log = {}
         frames_in_batch = data.numel()
-        metrics_to_log["train/action_std"] = data["action"].float().std().item()
         collected_frames += frames_in_batch
         pbar.update(frames_in_batch)
 
         # Get training rewards and episode lengths
-        episode_rewards = data["next", "episode_reward"][data["next", "terminated"]]
-        if len(episode_rewards) > 0:
-            episode_length = data["next", "step_count"][data["next", "terminated"]]
-            metrics_to_log.update(
-                {
-                    "train/reward": episode_rewards.mean().item(),
-                    "train/episode_length": episode_length.sum().item()
-                    / len(episode_length),
-                }
-            )
+        batch_reward = data["next", "reward"].mean()
+        # These will be logged later, so we compute them but don't block
+        action_std = data["action"].float().std()
+        metrics_to_log.update({"train/reward": batch_reward, "train/action_std": action_std})
 
         with timeit("training"):
-            for j in range(cfg_loss_ppo_epochs):
-                # Compute GAE
-                with torch.no_grad(), timeit("adv"):
-                    torch.compiler.cudagraph_mark_step_begin()
-                    data = adv_module(data)
-                    if compile_mode:
-                        data = data.clone()
-                with timeit("rb - extend"):
-                    # Update the data buffer
-                    data_reshape = data.reshape(-1)
-                    data_buffer.extend(data_reshape)
-
-                for k, batch in enumerate(data_buffer):
-                    with timeit("update"):
-                        torch.compiler.cudagraph_mark_step_begin()
-                        loss, num_network_updates = update(
-                            batch, num_network_updates=num_network_updates
-                        )
-                    loss = loss.clone()
-                    num_network_updates = num_network_updates.clone()
-                    losses[j, k] = loss.select(
-                        "loss_critic", "loss_entropy", "loss_objective"
-                    )
+            with timeit("update"):
+                torch.compiler.cudagraph_mark_step_begin()
+                loss = update(data)
+            loss = loss.clone()
 
         # Get training losses and times
-        losses_mean = losses.apply(lambda x: x.float().mean(), batch_size=[])
-        for key, value in losses_mean.items():
+        for key, value in loss.items():
             metrics_to_log.update({f"train/{key}": value.item()})
-        metrics_to_log.update(
-            {
-                "train/lr": loss["alpha"] * cfg_optim_lr,
-                "train/clip_epsilon": loss["alpha"] * cfg_loss_clip_epsilon,
-            }
-        )
 
         # Evaluation
         with torch.no_grad(), set_exploration_type(
@@ -287,16 +199,14 @@ def main(cfg: DictConfig):  # noqa: F821
                 i * frames_in_batch
             ) // test_interval:
                 actor.eval()
-                # Don't move eval_env - keep it on CPU
-                # Use auto_cast_to_device=False to keep actor and env on same device
+                # Keep eval_env on CPU, move actor to CPU temporarily for eval
                 eval_rollout = eval_env.rollout(
                     max_eval_traj_length,
-                    actor.to("cpu"),  # Move actor to CPU temporarily for eval
+                    actor.to("cpu"),
                     auto_cast_to_device=False,
                     break_when_any_done=True,
                 )
-                # Move actor back to device for training
-                actor.to(device)
+                actor.to(device)  # Move actor back to device for training
                 eval_rollout.squeeze()
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
@@ -313,14 +223,11 @@ def main(cfg: DictConfig):  # noqa: F821
                     print(f"Warning: Could not compute metrics: {e}")
                     print(traceback.format_exc())
 
-                # Render history - this works because base_env provides a render_history method
-                # that delegates to the underlying environment
+                # Render history (available in SequentialTradingEnvSLTP for eval)
                 fig = eval_env.base_env.render_history(return_fig=True)
                 eval_env.reset()
                 if fig is not None and logger is not None:
-                    # render_history returns a figure directly for SequentialTradingEnv
                     metrics_to_log["eval/history"] = wandb.Image(fig[0])
-                torch.save(actor.state_dict(), f"ppo_futures_policy_{i}.pth")
                 actor.train()
 
         # Log dual coverage metrics (if available and enabled)
