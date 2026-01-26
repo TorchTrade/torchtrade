@@ -9,11 +9,12 @@ import pandas as pd
 import torch
 from tensordict import TensorDictBase
 from torchrl.data import Bounded
-from torchrl.data.tensor_specs import CompositeSpec, Unbounded
+from torchrl.data import Composite, Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
-from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.state import HistoryTracker, PositionState
+from tensordict import TensorDict
+import torch
 
 
 class TorchTradeOfflineEnv(TorchTradeBaseEnv):
@@ -132,7 +133,7 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             account_state: List of account state field names
             num_features: Number of features per observation window
         """
-        self.observation_spec = CompositeSpec(shape=())
+        self.observation_spec = Composite(shape=())
 
         # Account state spec
         self.account_state_key = "account_state"
@@ -352,11 +353,9 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         Args:
             current_price: Current asset price
         """
-        self.position.position_value = round(self.position.position_size * current_price, 3)
+        self.position.position_value = self.position.position_size * current_price
         if self.position.position_size > 0:
-            self.position.unrealized_pnlpc = round(
-                (current_price - self.position.entry_price) / self.position.entry_price, 4
-            )
+            self.position.unrealized_pnlpc = (current_price - self.position.entry_price) / self.position.entry_price
         else:
             self.position.unrealized_pnlpc = 0.0
 
@@ -377,9 +376,6 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         Returns:
             TensorDict with combined observation
         """
-        from tensordict import TensorDict
-        import torch
-
         account_state = torch.tensor(account_state_values, dtype=torch.float)
         obs_data = {self.account_state_key: account_state}
         obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))

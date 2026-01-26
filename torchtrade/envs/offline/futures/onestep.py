@@ -13,7 +13,7 @@ import math
 import numpy as np
 from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservationSampler
 from tensordict import TensorDict, TensorDictBase
-from torchrl.data.tensor_specs import CompositeSpec
+from torchrl.data import Composite
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 import torch
 from torchrl.data import Bounded, Categorical

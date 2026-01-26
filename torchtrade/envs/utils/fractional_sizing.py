@@ -1,6 +1,6 @@
 """Shared utilities for fractional position sizing across environments."""
 
-from typing import Tuple, Optional
+from typing import Tuple
 from dataclasses import dataclass
 
 
@@ -17,8 +17,10 @@ class PositionCalculationParams:
 
 # Position tolerance constants
 # Used to determine if a position is already close enough to target
-POSITION_TOLERANCE_PCT = 0.001  # 0.1% - relative tolerance as fraction of target position
-POSITION_TOLERANCE_ABS = 0.0001  # Absolute minimum tolerance for very small positions
+# Tolerance needs to be large enough to avoid churn from normal price fluctuations
+# When using portfolio_value for position sizing, small price changes cause target to drift
+POSITION_TOLERANCE_PCT = 0.02  # 2% - relative tolerance as fraction of target position
+POSITION_TOLERANCE_ABS = 0.001  # Absolute minimum tolerance for very small positions
 
 
 def calculate_fractional_position(params: PositionCalculationParams) -> Tuple[float, float, str]:

@@ -1,18 +1,16 @@
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Dict, List, Optional, Union, Callable, Tuple
 
-import matplotlib.pyplot as plt
-import numpy as np
-from tensordict import TensorDict, TensorDictBase
+from tensordict import TensorDictBase
 import torch
 from torchrl.data import Categorical
 import pandas as pd
+from torchtrade.envs.core.state import binarize_action_type
+
 
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
 from torchtrade.envs.utils.fractional_sizing import (
-    build_default_action_levels,
     calculate_fractional_position,
     PositionCalculationParams,
     POSITION_TOLERANCE_PCT,
@@ -26,54 +24,23 @@ class SeqLongOnlyEnvConfig:
     window_sizes: Union[List[int], int] = 10
     execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute) # On which timeframe to execute trades
     initial_cash: Union[List[int], int] = (1000, 5000)
-    transaction_fee: float = 0.025
+    transaction_fee: float = 0.0
     bankrupt_threshold: float = 0.1  # 10% of initial balance
-    slippage: float = 0.01
+    slippage: float = 0.0
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
     max_traj_length: Optional[int] = None
     random_start: bool = True
     reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
     reward_scaling: float = 1.0
-
-    # Action space configuration (fractional mode only)
-    action_levels: List[float] = None  # Custom action levels, or None for defaults
+    action_levels: List[float] = (0.0, 0.5, 1.0)
 
     def __post_init__(self):
-        """Normalize timeframe configuration and build action levels."""
+        """Normalize timeframe configuration."""
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
 
-        # Build default action levels
-        if self.action_levels is None:
-            self.action_levels = build_default_action_levels(
-                allow_short=False  # Long-only environment
-            )
-        else:
-            # Validate custom action levels
-            if not all(-1.0 <= a <= 1.0 for a in self.action_levels):
-                raise ValueError(
-                    f"All action_levels must be in range [-1.0, 1.0], got {self.action_levels}"
-                )
-            if len(self.action_levels) != len(set(self.action_levels)):
-                raise ValueError(
-                    f"action_levels must not contain duplicates, got {self.action_levels}"
-                )
-            if len(self.action_levels) < 2:
-                raise ValueError(
-                    f"action_levels must contain at least 2 actions, got {len(self.action_levels)}"
-                )
-
-            # Warn if using negative actions (redundant for long-only)
-            if any(a < 0 for a in self.action_levels):
-                import warnings
-                warnings.warn(
-                    f"Long-only environment has negative action_levels {self.action_levels}. "
-                    "Negative actions behave the same as action=0 (close position), adding "
-                    "unnecessary redundancy. Consider using only non-negative actions like [0.0, 0.5, 1.0].",
-                    UserWarning
-                )
 
 class SeqLongOnlyEnv(TorchTradeOfflineEnv):
     """Sequential long-only trading environment for backtesting.
@@ -102,11 +69,6 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
     Note: Unlike futures environments, there is no leverage parameter since this
     is spot trading (1x leverage only).
 
-    **Dynamic Position Sizing** (not currently implemented):
-    Similar to futures environments, action levels control position fractions
-    rather than dynamic leverage. For more complex position sizing strategies,
-    you could extend this to multi-dimensional actions, but the current design
-    is recommended for simplicity and ease of learning.
     """
 
     def __init__(
@@ -166,28 +128,34 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         """Execute one environment step."""
         self.step_counter += 1
 
-        # Cache base features once for current timestamp (avoids 4+ redundant get_base_features calls)
+        # Cache base features once for current timestamp
         cached_base = self._cached_base_features
         cached_price = cached_base["close"]
+        #print("Old Price: ", cached_price)
 
         # Store old portfolio value for reward calculation
         old_portfolio_value = self._get_portfolio_value(cached_price)
 
         # Get desired action and current position
-        desired_action = self.action_levels[tensordict.get("action", 0)]
+        desired_action = self.action_levels[tensordict.get("action", 0).item()]
 
         # Calculate and execute trade if needed (pass cached price)
         trade_info = self._execute_trade_if_needed(desired_action, cached_price)
 
         if trade_info["executed"]:
-            self.position.current_position = 1 if trade_info["side"] == "buy" else 0
-
+            # only out of position if we sell all
+            self.position.current_position = int(
+                not (trade_info["side"] == "sell" and desired_action <= 0)
+            )
+        
         # Get updated state (this advances timestamp and caches new base features)
         next_tensordict = self._get_observation()
         # Use newly cached base features for new portfolio value
         new_price = self._cached_base_features["close"]
         new_portfolio_value = self._get_portfolio_value(new_price)
-
+        # print("New Price: ", new_price)
+        # print("Exposure:", self.position.position_value / new_portfolio_value)
+        
         # Add state_index for coverage tracking (only during training with random_start)
         if self.random_start:
             next_tensordict.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
@@ -197,15 +165,14 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
 
         # Determine action_type and binarize action for history
         action_type = trade_info.get("side") or "hold"
-        from torchtrade.envs.core.state import binarize_action_type
         binarized_action = binarize_action_type(action_type)
 
         # Record step history
         self.history.record_step(
-            price=cached_price,
+            price=new_price,
             action=binarized_action,
             reward=reward,
-            portfolio_value=old_portfolio_value,
+            portfolio_value=new_portfolio_value,
             action_type=action_type
         )
 
@@ -228,6 +195,10 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         Uses shared utility function for consistent position sizing.
         For long-only: negative actions are handled as sells in _execute_fractional_action.
 
+        IMPORTANT: Uses portfolio value (balance + position value) instead of just balance
+        to avoid forced trading after going all-in. This ensures action represents
+        fraction of total portfolio to invest, not just free cash.
+
         Args:
             action_value: Action from [-1.0, 1.0]
             current_price: Current market price
@@ -240,8 +211,11 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
         if action_value <= 0:
             return 0.0, 0.0, "flat" if action_value == 0 else "sell"
 
+        # When fully invested, balance=0 but portfolio_value > 0
+        portfolio_value = self.balance + self.position.position_size * current_price
+
         params = PositionCalculationParams(
-            balance=self.balance,
+            balance=portfolio_value,
             action_value=action_value,
             current_price=current_price,
             leverage=1,  # Long-only has no leverage
@@ -326,39 +300,84 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
                 })
 
         elif target_side == "buy":
-            # Buy position
-            # Calculate actual capital to use (accounting for fees)
-            capital_to_use = target_notional
-            fee_paid = capital_to_use * self.transaction_fee
-            total_cost = capital_to_use + fee_paid
+            # Check if we need to reduce position first (rebalancing down)
+            if target_position_size < self.position.position_size:
+                # Sell part of position to reach target
+                sell_amount = self.position.position_size - target_position_size
+                proceeds = sell_amount * execution_price
+                fee_paid = proceeds * self.transaction_fee
+                self.balance += proceeds - fee_paid
 
-            if total_cost > self.balance:
-                # Not enough balance - cap at what we can afford
-                capital_to_use = self.balance / (1 + self.transaction_fee)
+                # Update position (keeping partial position)
+                self.position.position_size = target_position_size
+                self.position.position_value = target_position_size * execution_price
+                # Keep entry price from original purchase
+                self.position.unrealized_pnlpc = (
+                    (execution_price - self.position.entry_price) / self.position.entry_price
+                    if self.position.entry_price > 0 else 0.0
+                )
+                # Don't reset hold counter - still holding a position
+
+                trade_info.update({
+                    "executed": True,
+                    "amount": sell_amount,
+                    "side": "sell",
+                    "success": True,
+                    "fee_paid": fee_paid
+                })
+
+            elif target_position_size > self.position.position_size:
+                # Increase position - buy the DELTA between target and current
+                delta_position = target_position_size - self.position.position_size
+                delta_notional = delta_position * execution_price
+
+                # Calculate actual capital to use (accounting for fees)
+                capital_to_use = delta_notional
                 fee_paid = capital_to_use * self.transaction_fee
                 total_cost = capital_to_use + fee_paid
 
-            if total_cost < self.balance * 0.01:  # Minimum trade threshold
-                return trade_info
+                if total_cost > self.balance:
+                    # Not enough balance - cap at what we can afford
+                    capital_to_use = self.balance / (1 + self.transaction_fee)
+                    fee_paid = capital_to_use * self.transaction_fee
+                    total_cost = capital_to_use + fee_paid
 
-            # Execute buy
-            self.balance -= total_cost
-            position_qty = capital_to_use / execution_price
+                if total_cost < self.balance * 0.01:  # Minimum trade threshold
+                    return trade_info
 
-            self.position.position_size = position_qty
-            self.position.entry_price = execution_price
-            self.position.position_value = position_qty * execution_price
-            self.position.unrealized_pnlpc = 0.0
-            self.position.current_position = 1.0
-            self.position.hold_counter = 0
+                # Execute buy
+                self.balance -= total_cost
+                # Clamp balance to zero to avoid floating point errors creating slightly negative balance
+                self.balance = max(0.0, self.balance)
+                position_qty = capital_to_use / execution_price
 
-            trade_info.update({
-                "executed": True,
-                "amount": capital_to_use,
-                "side": "buy",
-                "success": True,
-                "fee_paid": fee_paid
-            })
+                # ADD to existing position (don't replace!)
+                old_position_value = self.position.position_size * self.position.entry_price if self.position.position_size > 0 else 0
+                new_position_value = position_qty * execution_price
+                total_position_value = old_position_value + new_position_value
+
+                self.position.position_size += position_qty  # ADD, not replace
+                # Calculate weighted average entry price
+                if self.position.position_size > 0:
+                    self.position.entry_price = total_position_value / self.position.position_size
+                else:
+                    self.position.entry_price = execution_price
+
+                self.position.position_value = self.position.position_size * execution_price
+                self.position.unrealized_pnlpc = (
+                    (execution_price - self.position.entry_price) / self.position.entry_price
+                    if self.position.entry_price > 0 else 0.0
+                )
+                self.position.current_position = 1.0
+                # Don't reset hold counter when adding to position
+
+                trade_info.update({
+                    "executed": True,
+                    "amount": capital_to_use,
+                    "side": "buy",
+                    "success": True,
+                    "fee_paid": fee_paid
+                })
 
         # Update hold counter
         if self.position.position_size > 0:
@@ -373,3 +392,33 @@ class SeqLongOnlyEnv(TorchTradeOfflineEnv):
 
     def close(self):
         """Clean up resources."""
+
+
+
+if __name__ == "__main__":
+    import datasets
+    import numpy as np
+    df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
+    df = df["train"].to_pandas()
+    # Convert timestamp column to datetime for proper filtering
+    df['0'] = pd.to_datetime(df['0'])
+    config = SeqLongOnlyEnvConfig(execute_on="1Hour", time_frames="1Hour")
+    env = SeqLongOnlyEnv(df, config)
+    td = env.reset()
+    for i in range(2000):
+        print(f"\nStep {i}")
+        print("Account state:")
+        acc_state = ""
+        for key, value in zip(env.account_state, td["account_state"],):
+            acc_state += f"{key}: {value}\n"
+        print(acc_state)
+        action = env.action_spec.rand()
+        action = np.random.choice([0, 1], p=[0.95, 0.05])
+        print("Action:", action , "\n")
+        td["action"] = action
+        td = env.step(td)
+        td = td["next"]
+
+    env.render_history(return_fig=False)
+    
+    env.close()

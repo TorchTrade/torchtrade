@@ -6,7 +6,7 @@ from typing import Callable, List, Optional
 import torch
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Bounded
-from torchrl.data.tensor_specs import CompositeSpec
+from torchrl.data import Composite
 
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
@@ -137,7 +137,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         market_data_names = self.observer.get_keys()
 
         # Create composite observation spec
-        self.observation_spec = CompositeSpec(shape=())
+        self.observation_spec = Composite(shape=())
         self.market_data_key = "market_data"
         self.account_state_key = "account_state"
 

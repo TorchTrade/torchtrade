@@ -232,17 +232,18 @@ def default_log_return(old_portfolio_value: float, new_portfolio_value: float) -
     - Is symmetric (equal magnitude for +10% and -10% returns)
     - Naturally handles compounding
     - Is scale-invariant (works for any portfolio size)
+    - Handles bankruptcy gracefully (returns large negative reward)
 
     Args:
         old_portfolio_value: Portfolio value before action
         new_portfolio_value: Portfolio value after action
 
     Returns:
-        Log return reward
+        Log return reward, or -10.0 if bankrupt (new_portfolio_value <= 0)
 
     Raises:
-        ValueError: If either portfolio value is invalid (<= 0), which indicates
-                   bankruptcy, data corruption, or a calculation error
+        ValueError: If old_portfolio_value <= 0, which indicates a calculation
+                   error (the previous state was already invalid)
 
     Note:
         This function doesn't require a RewardContext, making it more efficient
@@ -251,13 +252,14 @@ def default_log_return(old_portfolio_value: float, new_portfolio_value: float) -
     if old_portfolio_value <= 0:
         raise ValueError(
             f"Invalid old_portfolio_value: {old_portfolio_value}. "
-            f"Portfolio value must be positive. This indicates bankruptcy or a calculation error."
+            f"Portfolio value must be positive. This indicates a calculation error in the previous step."
         )
+
+    # Handle bankruptcy gracefully: return large negative reward instead of crashing
+    # The environment will terminate in the next step via _check_termination
     if new_portfolio_value <= 0:
-        raise ValueError(
-            f"Invalid new_portfolio_value: {new_portfolio_value}. "
-            f"Portfolio value must be positive. This indicates bankruptcy or a calculation error."
-        )
+        return -10.0  # Severe penalty for bankruptcy (log(0.01) ≈ -4.6, so -10 is ~99% loss)
+
     return float(np.log(new_portfolio_value / old_portfolio_value))
 
 

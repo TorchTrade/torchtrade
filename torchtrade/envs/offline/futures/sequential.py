@@ -268,6 +268,10 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
 
         Uses shared utility function for consistent position sizing across all environments.
 
+        IMPORTANT: Uses portfolio value (balance + unrealized PnL) instead of just balance
+        to avoid forced trading after opening positions with leverage. With high leverage,
+        balance can be near zero after opening a position, but portfolio value stays constant.
+
         Args:
             action_value: Action from [-1.0, 1.0] representing fraction of balance to allocate
             current_price: Current market price for position sizing calculation
@@ -275,8 +279,12 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         Returns:
             Tuple of (position_size, notional_value, side)
         """
+        # Use portfolio value instead of balance to avoid forced trading
+        # When fully invested with leverage, balance can be nearly 0 but portfolio value > 0
+        portfolio_value = self._get_portfolio_value(current_price)
+
         params = PositionCalculationParams(
-            balance=self.balance,
+            balance=portfolio_value,  # Use total portfolio value, not just cash balance
             action_value=action_value,
             current_price=current_price,
             leverage=self.leverage,
@@ -452,6 +460,8 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
         # Apply loss and fees
         liquidation_fee = abs(self.position.position_size * self.liquidation_price) * self.transaction_fee
         self.balance += loss - liquidation_fee
+        # Clamp balance to prevent floating point errors from creating slightly negative balance
+        self.balance = max(0.0, self.balance)
         trade_info["fee_paid"] = liquidation_fee
 
         # Reset position
@@ -608,6 +618,8 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
 
         # Deduct fee and margin
         self.balance -= fee
+        # Clamp balance to prevent floating point errors from creating slightly negative balance
+        self.balance = max(0.0, self.balance)
 
         # Set position
         self.position.position_size = position_size
@@ -679,6 +691,8 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
 
         # Execute trade and update balance
         self.balance -= fee
+        # Clamp balance to prevent floating point errors from creating slightly negative balance
+        self.balance = max(0.0, self.balance)
 
         # Calculate weighted average entry price
         current_value = abs(self.position.position_size * self.position.entry_price)
@@ -723,6 +737,8 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
 
         # Update balance
         self.balance += pnl - fee
+        # Clamp balance to prevent floating point errors from creating slightly negative balance
+        self.balance = max(0.0, self.balance)
 
         # Update position (entry price remains the same for partial close)
         self.position.position_size = target_position_size
@@ -761,6 +777,8 @@ class SeqFuturesEnv(TorchTradeOfflineEnv):
 
         # Update balance
         self.balance += pnl - fee
+        # Clamp balance to prevent floating point errors from creating slightly negative balance
+        self.balance = max(0.0, self.balance)
 
         # Reset position
         self.position.position_size = 0.0
