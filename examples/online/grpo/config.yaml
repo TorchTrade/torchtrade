@@ -30,7 +30,7 @@ logger:
   backend: wandb
   project_name: TorchTrade-GRPO
   group_name: ${env.name}
-  exp_name: grpo
+  exp_name: grpo-${env.name}
   test_interval: 12000
   num_test_episodes: 1
 

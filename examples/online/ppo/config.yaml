@@ -14,7 +14,7 @@ logger:
   backend: wandb
   project_name: TorchTrade-Online
   group_name: ${env.name}
-  exp_name: ppo
+  exp_name: ppo-${env.name}
   test_interval: 1_000_000
   num_test_episodes: 1
 

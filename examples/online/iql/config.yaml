@@ -12,8 +12,8 @@ env:
 logger:
   backend: wandb
   project_name: TorchTrade-Online
-  exp_name: iql
-  group_name: null
+  exp_name: iql-${env.name}
+  group_name: ${env.name}
   eval_iter: 20000
   mode: online
 

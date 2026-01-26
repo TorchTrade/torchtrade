@@ -54,8 +54,8 @@ compile:
 logger:
   backend: wandb
   project_name: TorchTrade-Online
-  group_name: null
-  exp_name: dSAC
+  group_name: ${env.name}
+  exp_name: dsac-${env.name}
   mode: online
   eval_iter: 5_000
 
