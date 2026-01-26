@@ -115,9 +115,9 @@ class TestBitgetFuturesTorchTradingEnv:
         assert "market_data_5m_10" in obs_spec.keys()
 
     def test_account_state_shape(self, env):
-        """Test account state has correct shape (10 elements for futures)."""
+        """Test account state has correct shape (6 elements)."""
         obs_spec = env.observation_spec
-        assert obs_spec["account_state"].shape == (10,)
+        assert obs_spec["account_state"].shape == (6,)
 
     def test_reset(self, env, mock_trader):
         """Test environment reset."""
@@ -133,7 +133,7 @@ class TestBitgetFuturesTorchTradingEnv:
         """Test observation shapes after reset."""
         td = env.reset()
 
-        assert td["account_state"].shape == (10,)
+        assert td["account_state"].shape == (6,)
         assert td["market_data_1m_10"].shape == (10, 4)
         assert td["market_data_5m_10"].shape == (10, 4)
 

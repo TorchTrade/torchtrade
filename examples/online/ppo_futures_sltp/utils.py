@@ -1,4 +1,4 @@
-"""Utility functions for PPO training on SeqFuturesSLTPEnv."""
+"""Utility functions for PPO training on SequentialTradingEnvSLTP."""
 from __future__ import annotations
 import functools
 
@@ -28,7 +28,7 @@ from torchrl.modules import (
 )
 from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
-from torchtrade.envs import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
+from torchtrade.envs import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS
@@ -68,8 +68,8 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
-    """Create a SeqFuturesSLTPEnv instance."""
-    config = SeqFuturesSLTPEnvConfig(
+    """Create a SequentialTradingEnvSLTP instance."""
+    config = SequentialTradingEnvSLTPConfig(
         symbol=cfg.env.symbol,
         time_frames=cfg.env.time_frames,
         window_sizes=cfg.env.window_sizes,
@@ -86,7 +86,7 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
         stoploss_levels=cfg.env.stoploss_levels,
         takeprofit_levels=cfg.env.takeprofit_levels,
     )
-    return SeqFuturesSLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    return SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=custom_preprocessing)
 
 
 def apply_env_transforms(env, max_steps):
@@ -212,7 +212,7 @@ def make_discrete_ppo_model(cfg, env, device):
         ).to(device))
 
     # Account state encoder with SimpleMLPEncoder
-    # IMPORTANT: SeqFuturesSLTPEnv has 10 account state features (not 7 like SeqLongOnly)
+    # IMPORTANT: SequentialTradingEnvSLTP has 10 account state features (not 7 like SeqLongOnly)
     # [cash, position_size, position_value, entry_price, current_price,
     #  unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
     account_encoder_model = SimpleMLPEncoder(

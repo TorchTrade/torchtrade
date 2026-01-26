@@ -238,3 +238,108 @@ def price_gap_df():
     })
 
 
+# ============================================================================
+# UNIFIED ENVIRONMENT FIXTURES (for consolidated tests)
+# ============================================================================
+
+@pytest.fixture(params=["spot", "futures"])
+def trading_mode(request):
+    """Parametrized fixture for testing both spot and futures trading modes."""
+    return request.param
+
+
+@pytest.fixture
+def unified_config_spot():
+    """Config for spot trading mode (SequentialTradingEnv)."""
+    from torchtrade.envs.offline import SequentialTradingEnvConfig
+
+    return SequentialTradingEnvConfig(
+        trading_mode="spot",
+        initial_cash=1000,
+        execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+        window_sizes=[10],
+        transaction_fee=0.01,
+        slippage=0.0,
+        seed=42,
+        max_traj_length=100,
+        random_start=False,
+    )
+
+
+@pytest.fixture
+def unified_config_futures():
+    """Config for futures trading mode (SequentialTradingEnv)."""
+    from torchtrade.envs.offline import SequentialTradingEnvConfig
+
+    return SequentialTradingEnvConfig(
+        trading_mode="futures",
+        leverage=10,
+        initial_cash=1000,
+        execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+        window_sizes=[10],
+        transaction_fee=0.01,
+        slippage=0.0,
+        seed=42,
+        max_traj_length=100,
+        random_start=False,
+    )
+
+
+def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
+    """Simple feature processing function for testing."""
+    df = df.copy().reset_index(drop=False)
+    df["features_close"] = df["close"]
+    df["features_volume"] = df["volume"]
+    df.fillna(0, inplace=True)
+    return df
+
+
+def validate_account_state(account_state, trading_mode):
+    """
+    Shared validation helper for account state structure.
+
+    Args:
+        account_state: Account state tensor [6]
+            [exposure_pct, position_direction, unrealized_pnl_pct,
+             holding_time, leverage, distance_to_liquidation]
+        trading_mode: "spot" or "futures"
+    """
+    import torch
+
+    assert isinstance(account_state, torch.Tensor)
+    assert account_state.shape[-1] == 6, "Account state should have 6 elements"
+
+    # Extract components (new 6-element structure)
+    exposure_pct = account_state[..., 0]
+    position_direction = account_state[..., 1]
+    unrealized_pnl_pct = account_state[..., 2]
+    holding_time = account_state[..., 3]
+    leverage = account_state[..., 4]
+    distance_to_liquidation = account_state[..., 5]
+
+    # Common validations
+    assert (exposure_pct >= 0).all(), "Exposure percentage should be non-negative"
+    assert (holding_time >= 0).all(), "Holding time should be non-negative"
+    assert (leverage >= 1.0).all(), "Leverage should be >= 1.0"
+    assert (distance_to_liquidation >= 0).all(), "Distance to liquidation should be non-negative"
+
+    # Mode-specific validations
+    if trading_mode == "spot":
+        # Spot: position_direction should be 0 or +1 (no shorts)
+        assert (position_direction >= 0).all(), "Spot position direction should be >= 0 (no shorts)"
+        assert ((position_direction == 0) | (position_direction == 1)).all(), \
+            "Spot position direction should be 0 or 1"
+        # Spot: leverage = 1.0
+        assert (leverage == 1.0).all(), "Spot leverage should be 1.0"
+        # Spot: distance_to_liquidation should be 1.0 (no liquidation risk)
+        assert (distance_to_liquidation == 1.0).all(), "Spot distance_to_liquidation should be 1.0"
+    else:  # futures
+        # Futures: position_direction should be -1, 0, or +1
+        assert ((position_direction == -1) | (position_direction == 0) | (position_direction == 1)).all(), \
+            "Futures position direction should be -1, 0, or +1"
+        # Futures: leverage >= 1.0 (already checked above)
+        assert (leverage >= 1.0).all(), "Futures leverage should be >= 1.0"
+
+

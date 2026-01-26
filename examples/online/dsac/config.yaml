@@ -1,7 +1,8 @@
 
 # task and env
 env:
-  name: SeqLongOnlyEnv
+  name: SequentialTradingEnv
+  trading_mode: "spot"
   symbol: "BTC/USD"
   time_frames: ["1Hour"]
   window_sizes: [48]

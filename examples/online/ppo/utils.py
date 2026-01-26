@@ -25,7 +25,7 @@ from torchrl.modules import (
 )
 from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
-from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig, SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
+from torchtrade.envs import SequentialTradingEnv, SequentialTradingEnvConfig, SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS
@@ -62,8 +62,8 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
-    if cfg.env.name == "SeqLongOnlyEnv":
-        config = SeqLongOnlyEnvConfig(
+    if cfg.env.name == "SequentialTradingEnv":
+        config = SequentialTradingEnvConfig(
             symbol=cfg.env.symbol,
             time_frames=cfg.env.time_frames,
             window_sizes=cfg.env.window_sizes,
@@ -77,9 +77,9 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
             max_traj_length=max_traj_length,
             random_start=random_start
         )
-        return SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
-    elif cfg.env.name == "SeqLongOnlySLTPEnv":
-        config = SeqLongOnlySLTPEnvConfig(
+        return SequentialTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    elif cfg.env.name == "SequentialTradingEnvSLTP":
+        config = SequentialTradingEnvSLTPConfig(
             symbol=cfg.env.symbol,
             time_frames=cfg.env.time_frames,
             window_sizes=cfg.env.window_sizes,
@@ -93,7 +93,7 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
             max_traj_length=max_traj_length,
             random_start=random_start
         )
-        return SeqLongOnlySLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+        return SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=custom_preprocessing)
     else:
         raise ValueError(f"Unknown environment: {cfg.env.name}")
 

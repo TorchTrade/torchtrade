@@ -1,5 +1,6 @@
 env:
-  name: LongOnlyOneStepEnv
+  name: OneStepTradingEnv
+  trading_mode: "spot"
   # only used in SeqLongOnlySLTPEnv
   stoploss_levels: [-0.02, -0.04]
   takeprofit_levels: [0.04, 0.08]

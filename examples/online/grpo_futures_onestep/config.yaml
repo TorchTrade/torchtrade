@@ -1,5 +1,6 @@
 env:
-  name: FuturesOneStepEnv
+  name: OneStepTradingEnv
+  trading_mode: "futures"
   symbol: "BTC/USD"
   time_frames: ["15Min"]
   window_sizes: [10]

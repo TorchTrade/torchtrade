@@ -22,7 +22,7 @@ from torchrl.modules import (
 )
 from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
-from torchtrade.envs import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig, SeqLongOnlySLTPEnvConfig, SeqLongOnlySLTPEnv
+from torchtrade.envs import OneStepTradingEnv, OneStepTradingEnvConfig, SequentialTradingEnvSLTPConfig, SequentialTradingEnvSLTP
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS
@@ -61,7 +61,7 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
     if not eval:
-        config = LongOnlyOneStepEnvConfig(
+        config = OneStepTradingEnvConfig(
             symbol=cfg.env.symbol,
             time_frames=cfg.env.time_frames,
             window_sizes=cfg.env.window_sizes,
@@ -76,9 +76,9 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             takeprofit_levels=cfg.env.takeprofit_levels,
             max_traj_length=max_traj_length,
         )
-        return LongOnlyOneStepEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+        return OneStepTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
     else:
-        config = SeqLongOnlySLTPEnvConfig(
+        config = SequentialTradingEnvSLTPConfig(
             symbol=cfg.env.symbol,
             time_frames=cfg.env.time_frames,
             window_sizes=cfg.env.window_sizes,
@@ -94,7 +94,7 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             max_traj_length=max_traj_length,
             random_start=False
         )
-        return SeqLongOnlySLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+        return SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=custom_preprocessing)
 
 def apply_env_transforms(
     env,

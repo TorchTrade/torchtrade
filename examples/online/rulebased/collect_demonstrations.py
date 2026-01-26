@@ -26,13 +26,13 @@ from tensordict import TensorDict
 from tqdm import tqdm
 
 from torchtrade.actor import MomentumActor, MeanReversionActor, BreakoutActor, create_expert_ensemble
-from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
-def create_env(df: pd.DataFrame, config_overrides: Optional[dict] = None) -> SeqLongOnlyEnv:
-    """Create a SeqLongOnlyEnv with default or custom configuration."""
-    config = SeqLongOnlyEnvConfig(
+def create_env(df: pd.DataFrame, config_overrides: Optional[dict] = None) -> SequentialTradingEnv:
+    """Create a SequentialTradingEnv with default or custom configuration."""
+    config = SequentialTradingEnvConfig(
         symbol="BTC/USD",
         time_frames=[
             TimeFrame(1, TimeFrameUnit.Minute),
@@ -53,11 +53,11 @@ def create_env(df: pd.DataFrame, config_overrides: Optional[dict] = None) -> Seq
         for key, value in config_overrides.items():
             setattr(config, key, value)
 
-    return SeqLongOnlyEnv(df, config)
+    return SequentialTradingEnv(df, config)
 
 
 def collect_demonstrations_from_expert(
-    env: SeqLongOnlyEnv,
+    env: SequentialTradingEnv,
     expert,
     num_episodes: int = 100,
     verbose: bool = True,
@@ -123,7 +123,7 @@ def collect_demonstrations_from_expert(
 
 
 def evaluate_expert(
-    env: SeqLongOnlyEnv,
+    env: SequentialTradingEnv,
     expert,
     num_episodes: int = 10,
     verbose: bool = True,

@@ -40,7 +40,7 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 import numpy as np
 import ta
-from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 # ====================================================================
 # Environment utils
 # -----------------
@@ -74,7 +74,7 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def env_maker(df, cfg, device="cpu"):
-    config = SeqLongOnlyEnvConfig(
+    config = SequentialTradingEnvConfig(
         symbol=cfg.env.symbol,
         time_frames=cfg.env.time_frames,
         window_sizes=cfg.env.window_sizes,
@@ -86,7 +86,7 @@ def env_maker(df, cfg, device="cpu"):
         bankrupt_threshold=cfg.env.bankrupt_threshold,
         seed=cfg.env.seed,
     )
-    return SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    return SequentialTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
 
 
 

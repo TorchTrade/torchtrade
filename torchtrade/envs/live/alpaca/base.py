@@ -25,9 +25,17 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
     - Portfolio value calculation (cash + position_market_value)
     - Helper methods for market data keys and account state
 
-    Standard account state for Alpaca environments:
-    ["cash", "position_size", "position_value", "entry_price",
-     "current_price", "unrealized_pnlpct", "holding_time"]
+    Standard account state for Alpaca environments (6 elements):
+    [exposure_pct, position_direction, unrealized_pnl_pct,
+     holding_time, leverage, distance_to_liquidation]
+
+    Element definitions:
+        - exposure_pct: position_value / portfolio_value (0.0 to 1.0 for spot)
+        - position_direction: sign(position_size) (0 or +1 for spot, no shorts)
+        - unrealized_pnl_pct: (current_price - entry_price) / entry_price * direction
+        - holding_time: steps since position opened
+        - leverage: Always 1.0 for spot (no leverage)
+        - distance_to_liquidation: Always 1.0 for spot (no liquidation risk)
 
     Subclasses must implement:
     - Action space definition (different for standard vs SLTP)
@@ -36,12 +44,11 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
     - _check_termination(): Episode termination logic
     """
 
-    # Standard account state for Alpaca environments (7 elements)
-    # Note: Subclasses may define their own ACCOUNT_STATE if they have different state dimensions.
-    # For example, futures environments have 10 elements instead of 7.
+    # Standard account state for Alpaca environments (6 elements)
+    # Universal state used across all TorchTrade environments for better generalization.
     ACCOUNT_STATE = [
-        "cash", "position_size", "position_value", "entry_price",
-        "current_price", "unrealized_pnlpct", "holding_time"
+        "exposure_pct", "position_direction", "unrealized_pnlpct",
+        "holding_time", "leverage", "distance_to_liquidation"
     ]
 
     def __init__(
@@ -185,12 +192,14 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         cash = float(account.cash)
         position_status = status.get("position_status", None)
 
+        # Calculate portfolio value
         if position_status is None:
             position_size = 0.0
             position_value = 0.0
             entry_price = 0.0
             unrealized_pnlpc = 0.0
             holding_time = 0.0
+            portfolio_value = cash
             # Get current market price even when no position
             try:
                 current_price = self.observer.get_current_price()
@@ -203,10 +212,28 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             current_price = position_status.current_price
             unrealized_pnlpc = position_status.unrealized_plpc
             holding_time = float(self.position.hold_counter)
+            portfolio_value = cash + position_value
 
-        # Build account state tensor
+        # Calculate new 6-element account state
+        # Element 0: exposure_pct (position_value / portfolio_value)
+        exposure_pct = position_value / portfolio_value if portfolio_value > 0 else 0.0
+
+        # Element 1: position_direction (0 or +1 for spot, no shorts)
+        position_direction = 1.0 if position_size > 0 else 0.0
+
+        # Element 2: unrealized_pnl_pct (inherited from Alpaca)
+        # Element 3: holding_time
+        # Element 4: leverage (always 1.0 for spot)
+        leverage = 1.0
+
+        # Element 5: distance_to_liquidation (always 1.0 for spot, no liquidation)
+        distance_to_liquidation = 1.0
+
+        # Build 6-element account state tensor
+        # [exposure_pct, position_direction, unrealized_pnl_pct,
+        #  holding_time, leverage, distance_to_liquidation]
         account_state = torch.tensor(
-            [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpc, holding_time],
+            [exposure_pct, position_direction, unrealized_pnlpc, holding_time, leverage, distance_to_liquidation],
             dtype=torch.float
         )
 

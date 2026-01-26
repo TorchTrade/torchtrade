@@ -1,4 +1,4 @@
-"""Utility functions for PPO training on SeqFuturesEnv."""
+"""Utility functions for PPO training on SequentialTradingEnv."""
 from __future__ import annotations
 import functools
 
@@ -28,7 +28,7 @@ from torchrl.modules import (
 )
 from torchtrade.models import SimpleCNNEncoder
 
-from torchtrade.envs import SeqFuturesEnv, SeqFuturesEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
@@ -69,8 +69,8 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
-    """Create a SeqFuturesEnv instance."""
-    config = SeqFuturesEnvConfig(
+    """Create a SequentialTradingEnv instance."""
+    config = SequentialTradingEnvConfig(
         symbol=cfg.env.symbol,
         time_frames=cfg.env.time_frames,
         window_sizes=cfg.env.window_sizes,
@@ -85,7 +85,7 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
         random_start=random_start,
         leverage=cfg.env.leverage,
     )
-    return SeqFuturesEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    return SequentialTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
 
 
 def apply_env_transforms(env, max_steps):
@@ -210,7 +210,7 @@ def make_discrete_ppo_model(cfg, env, device):
         ).to(device))
 
     # Account state encoder with MLP
-    # IMPORTANT: SeqFuturesEnv has 10 account state features (not 7 like SeqLongOnly)
+    # IMPORTANT: SequentialTradingEnv has 10 account state features (not 7 like SeqLongOnly)
     # [cash, position_size, position_value, entry_price, current_price,
     #  unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
     account_state_encoder = SafeModule(

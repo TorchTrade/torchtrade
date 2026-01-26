@@ -1,6 +1,6 @@
-"""PPO training example for SeqFuturesSLTPEnv.
+"""PPO training example for SequentialTradingEnvSLTP.
 
-This script demonstrates PPO training on the SeqFuturesSLTPEnv environment
+This script demonstrates PPO training on the SequentialTradingEnvSLTP environment
 for futures trading with leverage, stop-loss, and take-profit support.
 """
 from __future__ import annotations
@@ -365,7 +365,7 @@ def main(cfg: DictConfig):  # noqa: F821
                 fig = eval_env.base_env.render_history(return_fig=True)
                 eval_env.reset()
                 if fig is not None and logger is not None:
-                    # render_history returns a figure directly for SeqFuturesSLTPEnv
+                    # render_history returns a figure directly for SequentialTradingEnvSLTP
                     metrics_to_log["eval/history"] = wandb.Image(fig[0])
                 torch.save(actor.state_dict(), f"ppo_futures_sltp_policy_{i}.pth")
                 actor.train()

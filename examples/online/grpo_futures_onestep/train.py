@@ -1,6 +1,6 @@
-"""GRPO training example for FuturesOneStepEnv.
+"""GRPO training example for OneStepTradingEnv.
 
-This script demonstrates GRPO training on the FuturesOneStepEnv environment
+This script demonstrates GRPO training on the OneStepTradingEnv environment
 for futures trading with leverage, stop-loss, and take-profit support.
 """
 from __future__ import annotations
@@ -216,7 +216,7 @@ def main(cfg: DictConfig):  # noqa: F821
                     print(f"Warning: Could not compute metrics: {e}")
                     print(traceback.format_exc())
 
-                # Render history (available in SeqFuturesSLTPEnv for eval)
+                # Render history (available in SequentialTradingEnvSLTP for eval)
                 fig = eval_env.base_env.render_history(return_fig=True)
                 eval_env.reset()
                 if fig is not None and logger is not None:

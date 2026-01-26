@@ -1,5 +1,5 @@
 """
-Demonstration of LocalLLMActor on SeqFuturesSLTPEnv.
+Demonstration of LocalLLMActor on SequentialTradingEnvSLTP.
 
 This example shows:
 1. Futures trading with leverage and bracket orders (stop-loss/take-profit)
@@ -18,7 +18,7 @@ import pandas as pd
 import torch
 
 from torchtrade.actor import LocalLLMActor
-from torchtrade.envs.offline import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
 from torchtrade.envs.offline.futures.sequential_sltp import futures_sltp_action_map
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
@@ -46,7 +46,7 @@ def preprocessing_with_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def main():
     print("=" * 80)
-    print("LocalLLMActor + SeqFuturesSLTPEnv Example")
+    print("LocalLLMActor + SequentialTradingEnvSLTP Example")
     print("Futures Trading with Leverage and Bracket Orders")
     print("=" * 80)
 
@@ -65,8 +65,8 @@ def main():
     print(f"  Loaded {len(df)} rows")
 
     # Create environment configuration
-    print("\n[2/6] Creating SeqFuturesSLTPEnv...")
-    config = SeqFuturesSLTPEnvConfig(
+    print("\n[2/6] Creating SequentialTradingEnvSLTP...")
+    config = SequentialTradingEnvSLTPConfig(
         symbol="BTC/USD",
         # Multi-timeframe observations
         time_frames=[
@@ -104,7 +104,7 @@ def main():
     print(f"    - {len(config.stoploss_levels) * len(config.takeprofit_levels) + 1}-{len(action_map) - 1}: Short positions")
 
     # Create environment
-    env = SeqFuturesSLTPEnv(df, config, feature_preprocessing_fn=preprocessing_with_features)
+    env = SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=preprocessing_with_features)
     print(f"  Max steps: {env.max_steps}")
 
     # Create LocalLLMActor with futures_sltp support

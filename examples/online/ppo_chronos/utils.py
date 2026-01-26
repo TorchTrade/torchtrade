@@ -26,7 +26,7 @@ from torchrl.modules import (
     SafeModule,
 )
 
-from torchtrade.envs import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
+from torchtrade.envs import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS
@@ -66,13 +66,13 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
-    """Create a SeqFuturesSLTPEnv instance."""
+    """Create a SequentialTradingEnvSLTP instance."""
     # Convert Hydra ListConfig to regular Python lists
     window_sizes = list(cfg.env.window_sizes)
     stoploss_levels = list(cfg.env.stoploss_levels)
     takeprofit_levels = list(cfg.env.takeprofit_levels)
 
-    config = SeqFuturesSLTPEnvConfig(
+    config = SequentialTradingEnvSLTPConfig(
         symbol=cfg.env.symbol,
         time_frames=cfg.env.time_frames,
         window_sizes=window_sizes,
@@ -89,7 +89,7 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
         stoploss_levels=stoploss_levels,
         takeprofit_levels=takeprofit_levels,
     )
-    return SeqFuturesSLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    return SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=custom_preprocessing)
 
 
 def apply_env_transforms(env, max_steps, cfg):

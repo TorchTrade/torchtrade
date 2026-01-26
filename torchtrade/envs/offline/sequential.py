@@ -1,0 +1,859 @@
+"""Sequential Trading Environment supporting both spot and futures modes.
+
+A TorchRL-compatible environment for algorithmic trading that supports both
+spot (long-only) and futures (leverage + short) trading via a `trading_mode` parameter.
+
+Key Features:
+    - 6-element account state for both modes (improved generalization)
+    - Spot mode: no leverage, no liquidation, no short positions
+    - Futures mode: full leverage, liquidation mechanics, bidirectional positions
+    - Mode-aware action space: spot defaults to 3 actions, futures to 5
+    - Fractional position sizing with configurable action levels
+"""
+
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple, Union, Callable, Literal
+import warnings
+
+import pandas as pd
+import torch
+from tensordict import TensorDict, TensorDictBase
+from torchrl.data import Categorical
+
+from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
+from torchtrade.envs.core.state import FuturesHistoryTracker, binarize_action_type
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, normalize_timeframe_config
+from torchtrade.envs.utils.fractional_sizing import (
+    calculate_fractional_position,
+    PositionCalculationParams,
+    build_default_action_levels,
+    validate_action_levels,
+    POSITION_TOLERANCE_PCT,
+    POSITION_TOLERANCE_ABS,
+)
+from torchtrade.envs.core.common_types import MarginType
+
+
+@dataclass
+class SequentialTradingEnvConfig:
+    """Configuration for sequential trading environment.
+
+    Supports both spot (long-only) and futures (leverage + short) trading modes.
+    """
+    # Trading mode selection
+    trading_mode: Literal["spot", "futures"] = "spot"
+
+    # Common parameters
+    symbol: str = "BTC/USD"
+    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Min"
+    window_sizes: Union[List[int], int] = 10
+    execute_on: Union[str, TimeFrame] = "1Min"
+    initial_cash: Union[Tuple[int, int], int] = (1000, 5000)
+    transaction_fee: float = 0.0004
+    slippage: float = 0.001
+    bankrupt_threshold: float = 0.1
+
+    # Environment settings
+    seed: Optional[int] = 42
+    include_base_features: bool = False
+    max_traj_length: Optional[int] = None
+    random_start: bool = True
+
+    # Reward settings
+    reward_scaling: float = 1.0
+    reward_function: Optional[Callable] = None
+
+    # Action space configuration
+    action_levels: Optional[List[float]] = None
+
+    # Futures-specific parameters
+    leverage: int = 1
+    margin_type: MarginType = MarginType.ISOLATED
+    maintenance_margin_rate: float = 0.004
+
+    def __post_init__(self):
+        """Validate configuration and normalize timeframes."""
+        # Normalize timeframe configuration
+        self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
+            self.execute_on, self.time_frames, self.window_sizes
+        )
+
+        # Validate leverage for spot mode
+        if self.trading_mode == "spot" and self.leverage != 1:
+            raise ValueError(
+                f"Spot trading mode must have leverage=1, got leverage={self.leverage}. "
+                "Spot trading does not support leverage."
+            )
+
+        # Validate leverage for futures mode
+        if self.trading_mode == "futures" and not (1 <= self.leverage <= 125):
+            raise ValueError(
+                f"Futures leverage must be between 1 and 125, got {self.leverage}"
+            )
+
+        # Build default action levels based on trading mode
+        if self.action_levels is None:
+            self.action_levels = build_default_action_levels(
+                allow_short=(self.trading_mode == "futures")
+            )
+        else:
+            validate_action_levels(self.action_levels)
+
+            # Warn about negative actions in spot mode
+            if self.trading_mode == "spot":
+                negative_actions = [a for a in self.action_levels if a < 0]
+                if negative_actions:
+                    warnings.warn(
+                        f"Spot trading mode has negative action levels {negative_actions}. "
+                        f"Negative actions will be clipped to 0.0 (close position). "
+                        f"Consider using only non-negative actions for spot mode."
+                    )
+
+
+class SequentialTradingEnv(TorchTradeOfflineEnv):
+    """Sequential trading environment for both spot and futures trading.
+
+    This environment supports two trading modes controlled by the `trading_mode` parameter:
+
+    Spot Mode (trading_mode="spot"):
+    --------------------------------
+    - Long-only positions (no short selling)
+    - No leverage (1x only)
+    - No liquidation risk
+    - Action space: typically [0.0, 0.5, 1.0] (flat, 50% invested, 100% invested)
+    - Account state: 10 elements with leverage=1.0, liquidation_price=0.0
+
+    Futures Mode (trading_mode="futures"):
+    --------------------------------------
+    - Long and short positions
+    - Configurable leverage (1x - 125x)
+    - Liquidation mechanics based on margin
+    - Action space: typically [-1.0, -0.5, 0.0, 0.5, 1.0] (short→flat→long)
+    - Account state: 10 elements with actual leverage and liquidation price
+
+    Universal Account State (6 elements for both modes):
+    ----------------------------------------------------
+    [exposure_pct, position_direction, unrealized_pnl_pct,
+     holding_time, leverage, distance_to_liquidation]
+
+    Element definitions:
+        - exposure_pct: position_value / portfolio_value (0.0 to 1.0+ with leverage)
+        - position_direction: sign(position_size) (-1=short, 0=flat, +1=long)
+        - unrealized_pnl_pct: (current_price - entry_price) / entry_price * direction
+        - holding_time: steps since position opened
+        - leverage: 1.0 for spot, 1.0-125.0 for futures
+        - distance_to_liquidation: normalized distance to liquidation (1.0 for spot/no position)
+
+    Spot mode values:
+        - position_direction: 0 or +1 (no shorts)
+        - leverage: Always 1.0
+        - distance_to_liquidation: Always 1.0 (no liquidation risk)
+
+    Futures mode values:
+        - position_direction: -1, 0, or +1 (full bidirectional)
+        - leverage: 1.0 to 125.0
+        - distance_to_liquidation: (price - liq_price) / price for longs,
+                                    (liq_price - price) / price for shorts
+
+    Action Space (Fractional Mode):
+    -------------------------------
+    Actions represent the fraction of portfolio to allocate.
+
+    Spot mode (default: 3 actions):
+        - 0.0: Close position (go to cash)
+        - 0.5: Invest 50% of portfolio
+        - 1.0: Invest 100% of portfolio (all-in)
+
+    Futures mode (default: 5 actions):
+        - -1.0: 100% short (all-in short)
+        - -0.5: 50% short
+        - 0.0: Market neutral (close all positions)
+        - 0.5: 50% long
+        - 1.0: 100% long (all-in long)
+
+    Custom action levels are supported for both modes.
+    """
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        config: SequentialTradingEnvConfig,
+        feature_preprocessing_fn: Optional[Callable] = None,
+    ):
+        """Initialize the sequential trading environment.
+
+        Args:
+            df: OHLCV DataFrame for backtesting
+            config: Environment configuration
+            feature_preprocessing_fn: Optional function to preprocess features
+        """
+        # Initialize base class (handles sampler, history, balance, etc.)
+        super().__init__(df, config, feature_preprocessing_fn)
+
+        # Store trading mode and configuration
+        self.trading_mode = config.trading_mode
+        self.action_levels = config.action_levels
+        self.leverage = config.leverage
+        self.margin_type = config.margin_type
+        self.maintenance_margin_rate = config.maintenance_margin_rate
+
+        # Define action spec
+        self.action_spec = Categorical(len(self.action_levels))
+
+        # Build observation specs with universal 6-element account state
+        account_state = [
+            "exposure_pct", "position_direction", "unrealized_pnlpct",
+            "holding_time", "leverage", "distance_to_liquidation"
+        ]
+        num_features = len(self.sampler.get_feature_keys())
+        self._build_observation_specs(account_state, num_features)
+
+        # Initialize futures-specific tracking state
+        # (These are calculation helpers, not part of PositionState)
+        self.unrealized_pnl = 0.0  # Absolute unrealized PnL
+        self.unrealized_pnl_pct = 0.0  # Percentage unrealized PnL
+        self.liquidation_price = 0.0  # Liquidation price
+
+    def _reset_history(self):
+        """Reset history tracking."""
+        # Use FuturesHistoryTracker for both modes (it has position tracking)
+        self.history = FuturesHistoryTracker()
+
+    def _calculate_liquidation_price(self, entry_price: float, position_size: float) -> float:
+        """Calculate liquidation price for a position.
+
+        Spot mode: Always returns 0.0 (no liquidation)
+        Futures mode: Calculates based on leverage and margin type
+
+        For ISOLATED margin:
+        - Long: liquidation_price = entry_price * (1 - 1/leverage + maintenance_margin_rate)
+        - Short: liquidation_price = entry_price * (1 + 1/leverage - maintenance_margin_rate)
+        """
+        if self.trading_mode == "spot":
+            return 0.0
+
+        if position_size == 0:
+            return 0.0
+
+        margin_fraction = 1.0 / self.leverage
+
+        if position_size > 0:
+            # Long position - liquidated if price drops
+            liquidation_price = entry_price * (1 - margin_fraction + self.maintenance_margin_rate)
+        else:
+            # Short position - liquidated if price rises
+            liquidation_price = entry_price * (1 + margin_fraction - self.maintenance_margin_rate)
+
+        return max(0, liquidation_price)
+
+    def _check_liquidation(self, current_price: float) -> bool:
+        """Check if current position should be liquidated.
+
+        Spot mode: Always returns False (no liquidation)
+        Futures mode: Checks if price crossed liquidation threshold
+        """
+        if self.trading_mode == "spot":
+            return False
+
+        if self.position.position_size == 0:
+            return False
+
+        if self.position.position_size > 0:
+            # Long position - liquidated if price below liquidation price
+            return current_price <= self.liquidation_price
+        else:
+            # Short position - liquidated if price above liquidation price
+            return current_price >= self.liquidation_price
+
+    def _calculate_unrealized_pnl(
+        self, entry_price: float, current_price: float, position_size: float
+    ) -> float:
+        """Calculate absolute unrealized PnL.
+
+        For long: PnL = (current_price - entry_price) * position_size
+        For short: PnL = (entry_price - current_price) * abs(position_size)
+        """
+        if position_size == 0 or entry_price == 0:
+            return 0.0
+
+        if position_size > 0:
+            # Long position
+            return (current_price - entry_price) * position_size
+        else:
+            # Short position
+            return (entry_price - current_price) * abs(position_size)
+
+    def _calculate_unrealized_pnl_pct(
+        self, entry_price: float, current_price: float, position_size: float
+    ) -> float:
+        """Calculate unrealized PnL as a percentage."""
+        if entry_price == 0:
+            return 0.0
+
+        if position_size > 0:
+            # Long position
+            return (current_price - entry_price) / entry_price
+        elif position_size < 0:
+            # Short position
+            return (entry_price - current_price) / entry_price
+        return 0.0
+
+    def _calculate_exposure_pct(self, position_value: float, portfolio_value: float) -> float:
+        """Calculate exposure percentage (position_value / portfolio_value).
+
+        Returns value from 0.0 (no position) to 1.0+ (with leverage).
+
+        Args:
+            position_value: Absolute notional value of position
+            portfolio_value: Total portfolio value (balance + unrealized PnL)
+
+        Returns:
+            Exposure percentage (can exceed 1.0 with leverage)
+        """
+        if portfolio_value <= 0:
+            return 0.0
+        return position_value / portfolio_value
+
+    def _calculate_distance_to_liquidation(
+        self, current_price: float, liquidation_price: float, position_size: float
+    ) -> float:
+        """Calculate normalized distance to liquidation price.
+
+        Returns 1.0 for spot mode or no position (no liquidation risk).
+        For futures, returns distance as fraction of current price.
+
+        Args:
+            current_price: Current market price
+            liquidation_price: Liquidation price (0.0 for spot)
+            position_size: Current position size (signed)
+
+        Returns:
+            Distance to liquidation (1.0 = no risk, 0.0 = at liquidation)
+        """
+        # Spot mode or no position: no liquidation risk
+        if self.trading_mode == "spot" or position_size == 0:
+            return 1.0
+
+        if current_price == 0:
+            return 1.0
+
+        if position_size > 0:
+            # Long position - liquidated if price drops below liquidation_price
+            distance = (current_price - liquidation_price) / current_price
+        else:
+            # Short position - liquidated if price rises above liquidation_price
+            distance = (liquidation_price - current_price) / current_price
+
+        # Clamp to [0, inf) - negative means already liquidated
+        return max(0.0, distance)
+
+    def _get_portfolio_value(self, current_price: Optional[float] = None) -> float:
+        """Calculate total portfolio value including unrealized PnL."""
+        if current_price is None:
+            if self.current_timestamp is None:
+                raise RuntimeError(
+                    "current_timestamp is not set. _get_portfolio_value() must be called "
+                    "after _get_observation() which sets the current timestamp."
+                )
+            current_price = self._cached_base_features["close"]
+
+        unrealized_pnl = self._calculate_unrealized_pnl(
+            self.position.entry_price, current_price, self.position.position_size
+        )
+        return self.balance + unrealized_pnl
+
+    def _get_observation(self) -> TensorDictBase:
+        """Get the current observation state."""
+        # Get market data (scaffold sets current_timestamp, truncated, and caches base features)
+        obs_dict = self._get_observation_scaffold()
+        current_price = self._cached_base_features["close"]
+
+        # Calculate position value (absolute value of notional)
+        self.position.position_value = abs(self.position.position_size * current_price)
+
+        # Calculate unrealized PnL
+        if self.position.position_size != 0:
+            self.unrealized_pnl = self._calculate_unrealized_pnl(
+                self.position.entry_price, current_price, self.position.position_size
+            )
+            self.unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(
+                self.position.entry_price, current_price, self.position.position_size
+            )
+        else:
+            self.unrealized_pnl = 0.0
+            self.unrealized_pnl_pct = 0.0
+
+        # Calculate portfolio value and exposure
+        portfolio_value = self._get_portfolio_value(current_price)
+        exposure_pct = self._calculate_exposure_pct(self.position.position_value, portfolio_value)
+
+        # Calculate position direction (-1, 0, +1)
+        position_direction = float(
+            1 if self.position.position_size > 0
+            else -1 if self.position.position_size < 0
+            else 0
+        )
+
+        # Calculate distance to liquidation
+        distance_to_liquidation = self._calculate_distance_to_liquidation(
+            current_price, self.liquidation_price, self.position.position_size
+        )
+
+        # Universal 6-element account state
+        # [exposure_pct, position_direction, unrealized_pnl_pct,
+        #  holding_time, leverage, distance_to_liquidation]
+        account_state = torch.tensor([
+            exposure_pct,                          # Element 0: exposure_pct
+            position_direction,                    # Element 1: position_direction (-1, 0, +1)
+            self.unrealized_pnl_pct,              # Element 2: unrealized_pnl_pct
+            float(self.position.hold_counter),     # Element 3: holding_time
+            float(self.leverage),                  # Element 4: leverage
+            distance_to_liquidation,               # Element 5: distance_to_liquidation
+        ], dtype=torch.float)
+
+        # Combine account state and market data
+        obs_data = {self.account_state_key: account_state}
+        obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
+
+        return TensorDict(obs_data, batch_size=())
+
+    def _reset_position_state(self):
+        """Reset position tracking state."""
+        super()._reset_position_state()
+        # Reset futures-specific state
+        self.unrealized_pnl = 0.0
+        self.unrealized_pnl_pct = 0.0
+        self.liquidation_price = 0.0
+
+    def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
+        """Execute one environment step."""
+        self.step_counter += 1
+
+        # Cache base features and get current price
+        cached_price = self._cached_base_features["close"]
+
+        # Store old portfolio value for reward calculation
+        old_portfolio_value = self._get_portfolio_value(cached_price)
+
+        # Get desired action
+        action_idx = tensordict.get("action", 0)
+        if isinstance(action_idx, torch.Tensor):
+            action_idx = action_idx.item()
+        desired_action = self.action_levels[action_idx]
+
+        # Check for liquidation (futures only)
+        trade_info = {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
+
+        if self._check_liquidation(cached_price):
+            trade_info = self._execute_liquidation(cached_price)
+        else:
+            trade_info = self._execute_trade_if_needed(desired_action, cached_price)
+
+        # Update position flag
+        if trade_info["executed"]:
+            if self.trading_mode == "spot":
+                # Spot: only out of position if we sell all
+                self.position.current_position = int(
+                    not (trade_info["side"] == "sell" and desired_action <= 0)
+                )
+            else:
+                # Futures: track direction (1=long, -1=short, 0=flat)
+                if trade_info["side"] == "long":
+                    self.position.current_position = 1
+                elif trade_info["side"] == "short":
+                    self.position.current_position = -1
+                elif trade_info["side"] in ("flat", "close", "liquidation"):
+                    self.position.current_position = 0
+
+        # Get updated state (advances timestamp and caches new base features)
+        next_tensordict = self._get_observation()
+        new_price = self._cached_base_features["close"]
+        new_portfolio_value = self._get_portfolio_value(new_price)
+
+        # Add state_index for coverage tracking (only during training with random_start)
+        if self.random_start:
+            next_tensordict.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
+
+        # Calculate reward
+        reward = self._calculate_reward(
+            old_portfolio_value, new_portfolio_value, desired_action, trade_info
+        )
+
+        # Determine action_type and binarize action for history
+        action_type = trade_info.get("side") or "hold"
+
+        if self.trading_mode == "spot":
+            # Spot mode: convert side to action type
+            if action_type == "buy":
+                binarized_action = 1
+            elif action_type == "sell":
+                binarized_action = -1
+            else:
+                binarized_action = 0
+        else:
+            # Futures mode: use binarize_action_type utility
+            binarized_action = binarize_action_type(action_type)
+
+        # Record step history
+        self.history.record_step(
+            price=new_price,
+            action=binarized_action,
+            reward=reward,
+            portfolio_value=new_portfolio_value,
+            position=self.position.position_size,
+            action_type=action_type
+        )
+
+        # Check termination
+        done = self._check_termination(new_portfolio_value)
+
+        next_tensordict.set("reward", reward)
+        next_tensordict.set("done", self.truncated or done)
+        next_tensordict.set("truncated", self.truncated)
+        next_tensordict.set("terminated", self.truncated or done)
+
+        return next_tensordict
+
+    def _calculate_fractional_position(
+        self, action_value: float, current_price: float
+    ) -> Tuple[float, float, str]:
+        """Calculate position size from fractional action value.
+
+        Uses shared utility function for consistent position sizing.
+
+        Spot mode: Clips negative actions to 0.0 (close position)
+        Futures mode: Supports full bidirectional trading
+
+        IMPORTANT: Uses portfolio value (balance + unrealized PnL) instead of just balance
+        to avoid forced trading after opening positions. With leverage or full investment,
+        balance can be near zero but portfolio value stays constant.
+
+        Args:
+            action_value: Action from [-1.0, 1.0] (or [0.0, 1.0] for spot)
+            current_price: Current market price
+
+        Returns:
+            Tuple of (position_size, notional_value, side)
+        """
+        # Spot mode: clip negative actions to 0.0
+        if self.trading_mode == "spot" and action_value < 0:
+            action_value = 0.0
+
+        # Use portfolio value instead of balance to avoid forced trading
+        portfolio_value = self._get_portfolio_value(current_price)
+
+        params = PositionCalculationParams(
+            balance=portfolio_value,
+            action_value=action_value,
+            current_price=current_price,
+            leverage=self.leverage,
+            transaction_fee=self.transaction_fee,
+            allow_short=(self.trading_mode == "futures")
+        )
+        position_size, notional_value, side = calculate_fractional_position(params)
+
+        # Spot mode: convert "long" to "buy" for clarity
+        if self.trading_mode == "spot" and side == "long":
+            side = "buy"
+
+        return position_size, notional_value, side
+
+    def _execute_trade_if_needed(self, desired_action: float, base_price: float = None) -> Dict:
+        """Execute trade using fractional position sizing."""
+        if base_price is None:
+            base_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+
+        # Apply slippage
+        price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage).item()
+        execution_price = base_price * price_noise
+
+        # Execute fractional action
+        return self._execute_fractional_action(desired_action, execution_price)
+
+    def _execute_fractional_action(self, action_value: float, execution_price: float) -> Dict:
+        """Execute action using fractional position sizing.
+
+        Handles all position lifecycle operations:
+        - Opening new positions from flat
+        - Closing positions to go neutral
+        - Switching direction (futures only)
+        - Adjusting position size
+        - Implicit holding
+
+        Args:
+            action_value: Fractional action value in [-1.0, 1.0]
+            execution_price: Price at which trade executes (includes slippage)
+
+        Returns:
+            trade_info: Dict with execution details
+        """
+        # Calculate target position from action value
+        target_position_size, target_notional, target_side = (
+            self._calculate_fractional_position(action_value, execution_price)
+        )
+
+        # Tolerance for position comparison
+        tolerance = max(abs(target_position_size) * POSITION_TOLERANCE_PCT, POSITION_TOLERANCE_ABS)
+
+        # Check if already at target position (implicit hold)
+        if abs(target_position_size - self.position.position_size) < tolerance:
+            if self.position.position_size != 0:
+                self.position.hold_counter += 1
+            return self._create_trade_info()
+
+        # Execute appropriate position change
+        if target_position_size == 0.0:
+            # Close to neutral
+            return self._handle_close_to_neutral(execution_price)
+
+        if self.position.position_size == 0.0:
+            # Open new position
+            return self._open_position(target_side, target_position_size, target_notional, execution_price)
+
+        # Check for direction switch (futures only - spot can't switch)
+        if self._is_direction_switch(self.position.position_size, target_position_size):
+            return self._handle_direction_switch(
+                action_value, target_side, target_position_size, target_notional, execution_price
+            )
+
+        # Adjust position size in same direction
+        return self._adjust_position_size(target_position_size, target_notional, execution_price)
+
+    def _is_direction_switch(self, current_position: float, target_position: float) -> bool:
+        """Check if switching from long to short or vice versa."""
+        return (current_position > 0 and target_position < 0) or \
+               (current_position < 0 and target_position > 0)
+
+    def _handle_close_to_neutral(self, execution_price: float) -> Dict:
+        """Handle closing position to go neutral."""
+        if self.position.position_size == 0:
+            return self._create_trade_info()
+
+        trade_info = self._close_position(execution_price)
+        trade_info["side"] = "sell" if self.trading_mode == "spot" else "flat"
+        return trade_info
+
+    def _handle_direction_switch(
+        self,
+        action_value: float,
+        target_side: str,
+        target_position_size: float,
+        target_notional: float,
+        execution_price: float
+    ) -> Dict:
+        """Handle switching from long to short or vice versa (futures only)."""
+        self._close_position(execution_price)
+
+        # Recalculate target position after closing (balance may have changed)
+        target_position_size, target_notional, target_side = (
+            self._calculate_fractional_position(action_value, execution_price)
+        )
+
+        return self._open_position(target_side, target_position_size, target_notional, execution_price)
+
+    def _open_position(
+        self, side: str, position_size: float, notional_value: float, execution_price: float
+    ) -> Dict:
+        """Open a new position from flat."""
+        # Calculate margin and fee
+        margin_required = notional_value / self.leverage
+        fee = abs(notional_value) * self.transaction_fee
+
+        # Check if sufficient balance
+        if margin_required + fee > self.balance:
+            return self._create_trade_info()
+
+        # Deduct fee
+        self.balance -= fee
+        self.balance = max(0.0, self.balance)
+
+        # Set position
+        self.position.position_size = position_size
+        self.position.position_value = abs(notional_value)
+        self.position.entry_price = execution_price
+        self.position.hold_counter = 0
+
+        # Set position direction
+        if self.trading_mode == "spot":
+            self.position.current_position = 1  # Always long
+        else:
+            self.position.current_position = 1 if side == "long" else -1
+
+        # Calculate liquidation price (futures only)
+        self.liquidation_price = self._calculate_liquidation_price(execution_price, position_size)
+
+        return self._create_trade_info(executed=True, side=side, fee_paid=fee)
+
+    def _adjust_position_size(
+        self, target_position_size: float, target_notional: float, execution_price: float
+    ) -> Dict:
+        """Adjust existing position size (same direction)."""
+        delta_position = target_position_size - self.position.position_size
+        delta_notional = abs(delta_position * execution_price)
+
+        # Check if delta is negligible
+        if abs(delta_position) < POSITION_TOLERANCE_ABS:
+            return self._create_trade_info()
+
+        # Determine if increasing or decreasing
+        is_increasing = abs(target_position_size) > abs(self.position.position_size)
+
+        if is_increasing:
+            return self._increase_position_size(
+                target_position_size, target_notional, delta_position, delta_notional, execution_price
+            )
+
+        return self._decrease_position_size(target_position_size, target_notional, execution_price)
+
+    def _increase_position_size(
+        self,
+        target_position_size: float,
+        target_notional: float,
+        delta_position: float,
+        delta_notional: float,
+        execution_price: float
+    ) -> Dict:
+        """Increase position size by adding to existing position."""
+        fee = delta_notional * self.transaction_fee
+        margin_required = delta_notional / self.leverage
+
+        # Check sufficient balance
+        if margin_required + fee > self.balance:
+            return self._create_trade_info()
+
+        # Execute trade
+        self.balance -= fee
+        self.balance = max(0.0, self.balance)
+
+        # Calculate weighted average entry price
+        current_value = abs(self.position.position_size * self.position.entry_price)
+        new_value = delta_notional
+        total_value = current_value + new_value
+
+        if total_value > 0:
+            self.position.entry_price = (
+                (self.position.entry_price * current_value + execution_price * new_value) / total_value
+            )
+
+        # Update position
+        self.position.position_size = target_position_size
+        self.position.position_value = abs(target_notional)
+
+        # Recalculate liquidation price
+        self.liquidation_price = self._calculate_liquidation_price(
+            self.position.entry_price, self.position.position_size
+        )
+
+        side = "buy" if self.trading_mode == "spot" else ("long" if delta_position > 0 else "short")
+        return self._create_trade_info(executed=True, side=side, fee_paid=fee)
+
+    def _decrease_position_size(
+        self, target_position_size: float, target_notional: float, execution_price: float
+    ) -> Dict:
+        """Decrease position size by partially closing."""
+        fraction_to_close = 1.0 - (abs(target_position_size) / abs(self.position.position_size))
+
+        # Calculate PnL and fee on portion being closed
+        pnl = self._calculate_unrealized_pnl(
+            self.position.entry_price,
+            execution_price,
+            self.position.position_size * fraction_to_close
+        )
+
+        close_notional = abs(self.position.position_size * fraction_to_close * execution_price)
+        fee = close_notional * self.transaction_fee
+
+        # Update balance
+        self.balance += pnl - fee
+        self.balance = max(0.0, self.balance)
+
+        # Update position
+        self.position.position_size = target_position_size
+        self.position.position_value = abs(target_notional)
+
+        # Liquidation price remains the same
+        self.liquidation_price = self._calculate_liquidation_price(
+            self.position.entry_price, self.position.position_size
+        )
+
+        side = "sell" if self.trading_mode == "spot" else "close_partial"
+        return self._create_trade_info(executed=True, side=side, fee_paid=fee)
+
+    def _close_position(self, execution_price: float) -> Dict:
+        """Close existing position."""
+        if self.position.position_size == 0:
+            return self._create_trade_info(executed=False)
+
+        # Calculate PnL and fee
+        pnl = self._calculate_unrealized_pnl(
+            self.position.entry_price, execution_price, self.position.position_size
+        )
+        notional = abs(self.position.position_size * execution_price)
+        fee = notional * self.transaction_fee
+
+        # Update balance
+        self.balance += pnl - fee
+        self.balance = max(0.0, self.balance)
+
+        # Reset position
+        self.position.position_size = 0.0
+        self.position.position_value = 0.0
+        self.position.entry_price = 0.0
+        self.liquidation_price = 0.0
+        self.position.current_position = 0
+        self.position.hold_counter = 0
+
+        return self._create_trade_info(executed=True, side="close", fee_paid=fee)
+
+    def _execute_liquidation(self, current_price: float) -> Dict:
+        """Execute forced liquidation of position (futures only)."""
+        trade_info = {
+            "executed": True,
+            "side": "liquidation",
+            "fee_paid": 0.0,
+            "liquidated": True,
+        }
+
+        # Realize the loss at liquidation price
+        if self.position.position_size > 0:
+            # Long position liquidated
+            loss = (self.liquidation_price - self.position.entry_price) * self.position.position_size
+        else:
+            # Short position liquidated
+            loss = (self.position.entry_price - self.liquidation_price) * abs(self.position.position_size)
+
+        # Apply loss and fees
+        liquidation_fee = abs(self.position.position_size * self.liquidation_price) * self.transaction_fee
+        self.balance += loss - liquidation_fee
+        self.balance = max(0.0, self.balance)
+        trade_info["fee_paid"] = liquidation_fee
+
+        # Reset position
+        self.position.position_size = 0.0
+        self.position.position_value = 0.0
+        self.position.entry_price = 0.0
+        self.liquidation_price = 0.0
+        self.position.current_position = 0
+        self.position.hold_counter = 0
+
+        return trade_info
+
+    def _create_trade_info(
+        self, executed: bool = False, side: str = None, fee_paid: float = 0.0, liquidated: bool = False
+    ) -> Dict:
+        """Create a standardized trade info dictionary."""
+        return {
+            "executed": executed,
+            "side": side,
+            "fee_paid": fee_paid,
+            "liquidated": liquidated,
+        }
+
+    def _check_termination(self, portfolio_value: float) -> bool:
+        """Check if episode should terminate."""
+        bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
+        return portfolio_value < bankruptcy_threshold or self.step_counter >= self.max_steps
+
+    def close(self):
+        """Clean up resources."""
+        pass

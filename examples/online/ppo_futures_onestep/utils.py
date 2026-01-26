@@ -1,4 +1,4 @@
-"""Utility functions for PPO training on SeqFuturesSLTPEnv."""
+"""Utility functions for PPO training on SequentialTradingEnvSLTP."""
 from __future__ import annotations
 import functools
 
@@ -28,8 +28,8 @@ from torchrl.modules import (
 )
 from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
-from torchtrade.envs import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
-from torchtrade.envs import FuturesOneStepEnv, FuturesOneStepEnvConfig
+from torchtrade.envs import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
+from torchtrade.envs import OneStepTradingEnv, OneStepTradingEnvConfig
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS
@@ -68,19 +68,19 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
-    """Create a FuturesOneStepEnv or SeqFuturesSLTPEnv instance.
+    """Create a OneStepTradingEnv or SequentialTradingEnvSLTP instance.
 
     Both environments share the same 19-action space:
     - Action 0: Hold/Close
     - Actions 1-9: Long positions with SL/TP combinations
     - Actions 10-18: Short positions with SL/TP combinations
 
-    Training uses FuturesOneStepEnv (one-step GRPO-style training).
-    Evaluation uses SeqFuturesSLTPEnv (sequential episodes with render_history).
+    Training uses OneStepTradingEnv (one-step GRPO-style training).
+    Evaluation uses SequentialTradingEnvSLTP (sequential episodes with render_history).
     """
     if not eval:
-        # Training: use FuturesOneStepEnv for GRPO-style training
-        config = FuturesOneStepEnvConfig(
+        # Training: use OneStepTradingEnv for GRPO-style training
+        config = OneStepTradingEnvConfig(
             symbol=cfg.env.symbol,
             time_frames=cfg.env.time_frames,
             window_sizes=cfg.env.window_sizes,
@@ -96,11 +96,11 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             takeprofit_levels=cfg.env.takeprofit_levels,
             max_traj_length=max_traj_length,
         )
-        return FuturesOneStepEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+        return OneStepTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
     else:
-        # Evaluation: use SeqFuturesSLTPEnv for sequential evaluation
+        # Evaluation: use SequentialTradingEnvSLTP for sequential evaluation
         # Both envs have the same 19-action space (1 hold + 9 long + 9 short)
-        config = SeqFuturesSLTPEnvConfig(
+        config = SequentialTradingEnvSLTPConfig(
             symbol=cfg.env.symbol,
             time_frames=cfg.env.time_frames,
             window_sizes=cfg.env.window_sizes,
@@ -117,7 +117,7 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
             max_traj_length=max_traj_length,
             random_start=False,
         )
-        return SeqFuturesSLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+        return SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=custom_preprocessing)
 
 
 def apply_env_transforms(env, max_steps, one_step_env=True):
@@ -182,7 +182,7 @@ def make_environment(
     maker = functools.partial(
         env_maker, test_df, cfg, max_traj_length=max_eval_traj_length, eval=True
     )
-    # Eval env uses SeqFuturesSLTPEnv which is NOT one-step, so use full transforms
+    # Eval env uses SequentialTradingEnvSLTP which is NOT one-step, so use full transforms
     eval_parallel_env = ParallelEnv(
         eval_num_envs,
         EnvCreator(maker),
@@ -262,7 +262,7 @@ def make_discrete_ppo_model(cfg, env, device):
         ).to(device))
 
     # Account state encoder with SimpleMLPEncoder
-    # IMPORTANT: SeqFuturesSLTPEnv has 10 account state features (not 7 like SeqLongOnly)
+    # IMPORTANT: SequentialTradingEnvSLTP has 10 account state features (not 7 like SeqLongOnly)
     # [cash, position_size, position_value, entry_price, current_price,
     #  unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
     account_encoder_model = SimpleMLPEncoder(

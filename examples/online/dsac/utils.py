@@ -33,7 +33,7 @@ from torchrl.modules import MLP, SafeModule, SafeSequential
 from torchrl.modules.tensordict_module.actors import ProbabilisticActor
 from torchrl.objectives import SoftUpdate
 from torchrl.objectives.sac import DiscreteSACLoss
-from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchrl.trainers.helpers.models import ACTIVATIONS
 from torchtrade.models.simple_encoders import SimpleCNNEncoder
 import copy
@@ -76,7 +76,7 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
-    config = SeqLongOnlyEnvConfig(
+    config = SequentialTradingEnvConfig(
         symbol=cfg.env.symbol,
         time_frames=cfg.env.time_frames,
         window_sizes=cfg.env.window_sizes,
@@ -91,7 +91,7 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
         seed=cfg.env.seed,
         action_levels=cfg.env.action_levels,
     )
-    return SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    return SequentialTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
 
 
 
