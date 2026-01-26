@@ -1,5 +1,5 @@
 defaults:
-  - env: sequential_sltp
+  - env: sequential
   - _self_
 
 # Collector settings (PPO-specific)
@@ -18,9 +18,6 @@ logger:
   test_interval: 1_000_000
   num_test_episodes: 1
 
-# Eval
-eval:
-  model_path: "outputs/2025-12-12/16-06-44/ppo_policy_360.pth"
 
 # Optim (PPO-specific)
 optim:

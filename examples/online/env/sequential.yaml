@@ -1,11 +1,11 @@
 # @package env
 name: SequentialTradingEnv
 symbol: "BTC/USD"
-time_frames: ["5Min", "15Min"]
-window_sizes: [10, 10]
-execute_on: "15Min"
-leverage: 1  # Spot mode (no liquidation)
-action_levels: [0.0, 1.0]  # Long-only (no shorts)
+time_frames: ["1Hour"]
+window_sizes: [24]
+execute_on: "1Hour"
+leverage: 1
+action_levels: [0.0, 1.0]
 exp_name: ${logger.exp_name}
 seed: 0
 train_envs: 5

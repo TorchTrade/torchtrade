@@ -1,10 +1,10 @@
 # @package env
 name: SequentialTradingEnvSLTP
 symbol: "BTC/USD"
-time_frames: ["5Min", "15Min"]
-window_sizes: [10, 10]
-execute_on: "15Min"
-leverage: 1  # Spot mode (no liquidation)
+time_frames: ["1Hour"]
+window_sizes: [24]
+execute_on: "1Hour"
+leverage: 1
 stoploss_levels: [-0.01, -0.02, -0.03, -0.04]
 takeprofit_levels: [0.02, 0.04, 0.06, 0.08, 0.1]
 include_hold_action: true

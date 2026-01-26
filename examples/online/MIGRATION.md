@@ -23,20 +23,30 @@ We've consolidated duplicate algorithm directories using Hydra's defaults list p
 
 ```
 examples/online/
-├── env/                              # Shared environment configs
-│   ├── sequential_spot.yaml
-│   ├── sequential_futures.yaml
-│   ├── sequential_sltp.yaml
-│   ├── sequential_futures_sltp.yaml
-│   ├── onestep_spot.yaml
-│   └── onestep_futures.yaml
+├── env/                              # Central environment configs
+│   ├── sequential.yaml               # Basic sequential trading
+│   ├── sequential_sltp.yaml          # Sequential with stop-loss/take-profit
+│   └── onestep.yaml                  # One-step for contextual bandits
 │
-├── ppo/                              # Consolidated PPO (4 → 1)
-├── ppo_chronos/                      # Chronos model variant
-├── dsac/                             # Off-policy algorithm
-├── iql/                              # Offline RL algorithm
-└── grpo/                             # Consolidated GRPO (2 → 1)
+├── ppo/                              # PPO algorithm
+│   ├── config.yaml                   # Algorithm-specific config
+│   ├── env/ → ../env/                # Symlink for CLI env switching
+│   ├── train.py
+│   └── utils.py
+├── grpo/                             # GRPO algorithm (onestep-only)
+│   ├── config.yaml                   # Env embedded, no symlink
+│   ├── train.py
+│   └── utils.py
+└── ...  (dsac, iql, ppo_chronos have env symlinks)
 ```
+
+**Key Points:**
+- **Algorithm configs** are real files in each algorithm directory
+- **Environment configs** are centralized in `env/` directory (except GRPO)
+- **One env symlink** per algorithm enables CLI environment switching
+- **GRPO is special** - environment embedded directly, no CLI switching (onestep-only)
+- **No spot/futures split** - users override `leverage` and `action_levels` for futures
+- **All use 1Hour timeframe** by default
 
 ## Benefits
 
@@ -68,12 +78,13 @@ collector:
 ```yaml
 # NEW: config.yaml
 defaults:
-  - env: sequential_spot  # or your preferred environment
+  - env: sequential  # Choose: sequential, sequential_sltp, or onestep
   - _self_
 
 # Optional: algorithm-specific env overrides
 env:
-  time_frames: ["1Hour"]  # Override if needed
+  leverage: 5  # Override for futures
+  action_levels: [-1.0, 0.0, 1.0]  # Override for futures
 
 collector:
   frames_per_batch: 100000
@@ -82,30 +93,29 @@ collector:
 
 ### Step 2: Create or Use Environment Config
 
-Either use an existing config from `examples/online/env/` or create a custom one:
+Use one of the standard configs or create a custom one:
 
 ```yaml
 # examples/online/env/my_custom_env.yaml
 # @package env
 name: SequentialTradingEnv
-trading_mode: "spot"
 symbol: "BTC/USD"
-time_frames: ["5Min", "15Min"]
-window_sizes: [10, 10]
-execute_on: "15Min"
-initial_cash: [1000, 5000]
-transaction_fee: 0.0025
-slippage: 0.001
-bankrupt_threshold: 0.1
+time_frames: ["1Hour"]
+window_sizes: [24]
+execute_on: "1Hour"
+leverage: 1
+action_levels: [0.0, 1.0]
 exp_name: ${logger.exp_name}
 seed: 0
 train_envs: 5
 eval_envs: 1
-data_path: Torch-Trade/btcusdt_spot_1m_01_2020_to_12_2025
+data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
 test_split_start: "2025-01-01"
 ```
 
-### Step 3: Update Config Path in train.py and Create Symlink
+**For futures trading:** Override `leverage` and `action_levels` via CLI or in algorithm config.
+
+### Step 3: Update Config Path and Create Symlink
 
 ```python
 # OLD:
@@ -115,89 +125,91 @@ test_split_start: "2025-01-01"
 @hydra.main(config_path=".", config_name="config", version_base="1.1")
 ```
 
-Then create a symlink to the shared env directory:
+Then create a symlink to enable CLI environment switching:
 
 ```bash
 cd examples/online/your_algorithm/
-ln -sf ../env env
+ln -sf ../env env  # Symlink to central env configs for CLI switching
 ```
 
-This allows Hydra to find environment configs when switching with `env=envname`.
+**Why the env symlink?** It enables CLI environment switching (`env=X`) while keeping environment configs centralized.
 
 ## Available Environment Configs
 
-| Config Name | Environment Class | Trading Mode | SLTP | Leverage | Use Cases |
-|-------------|-------------------|--------------|------|----------|-----------|
-| `sequential_spot` | SequentialTradingEnv | spot | No | 1x | Basic spot trading |
-| `sequential_futures` | SequentialTradingEnv | futures | No | 5-6x | Basic futures trading |
-| `sequential_sltp` | SequentialTradingEnvSLTP | spot | Yes | 1x | Spot with bracket orders |
-| `sequential_futures_sltp` | SequentialTradingEnvSLTP | futures | Yes | 5x | Futures with bracket orders |
-| `onestep_spot` | OneStepTradingEnv | spot | Yes | 1x | Contextual bandit (spot) |
-| `onestep_futures` | OneStepTradingEnv | futures | Yes | 5x | Contextual bandit (futures) |
+| Config Name | Environment Class | SLTP | Timeframe | Use Cases |
+|-------------|-------------------|------|-----------|-----------|
+| `sequential` | SequentialTradingEnv | No | 1Hour | Basic sequential trading |
+| `sequential_sltp` | SequentialTradingEnvSLTP | Yes | 1Hour | Sequential with bracket orders |
+| `onestep` | OneStepTradingEnv | Yes | 1Hour | One-step for GRPO/contextual bandits |
+
+**Configuring Spot vs Futures:**
+- **Spot trading**: `leverage: 1` + `action_levels: [0.0, 1.0]` (default)
+- **Futures trading**: Override with `env.leverage=5` + `env.action_levels='[-1.0,0.0,1.0]'`
 
 ## Usage Examples
 
 ### PPO Variants
 
 ```bash
-# Spot trading with bracket orders (default)
+# Default: sequential trading (spot, 1Hour)
 python examples/online/ppo/train.py
 
-# Basic futures trading (no SLTP)
-python examples/online/ppo/train.py env=sequential_futures
+# Sequential with bracket orders
+python examples/online/ppo/train.py env=sequential_sltp
 
-# Futures with bracket orders
-python examples/online/ppo/train.py env=sequential_futures_sltp
-
-# One-step futures (contextual bandit)
-python examples/online/ppo/train.py env=onestep_futures
-
-# Override specific parameters
+# Configure for futures trading
 python examples/online/ppo/train.py \
-    env=sequential_futures \
+    env.leverage=5 \
+    env.action_levels='[-1.0,0.0,1.0]'
+
+# Override environment and parameters
+python examples/online/ppo/train.py \
+    env=sequential_sltp \
     env.symbol="ETH/USD" \
     env.leverage=10 \
     optim.lr=1e-4
 ```
 
-### GRPO Variants
+### GRPO
+
+GRPO is specifically designed for one-step environments and has the environment config embedded directly:
 
 ```bash
-# Futures one-step (default)
+# Default: one-step trading (spot, 1Hour)
 python examples/online/grpo/train.py
 
-# Spot one-step
-python examples/online/grpo/train.py env=onestep_spot
-
-# Sequential futures (non-onestep)
-python examples/online/grpo/train.py env=sequential_futures
-
-# Custom configuration
+# Configure for futures trading
 python examples/online/grpo/train.py \
-    env=onestep_spot \
+    env.leverage=5 \
     env.quantity_per_trade=200
+
+# Override other parameters
+python examples/online/grpo/train.py \
+    env.stoploss_levels='[-0.05]' \
+    env.takeprofit_levels='[0.10]'
 ```
+
+**Note:** GRPO does not support environment switching - it only works with OneStepTradingEnv.
 
 ### Other Algorithms
 
 ```bash
-# dSAC (default: sequential spot)
+# dSAC (default: sequential, 1Hour)
 python examples/online/dsac/train.py
 
-# dSAC with futures
-python examples/online/dsac/train.py env=sequential_futures
-
-# IQL (default: sequential spot)
+# IQL (default: sequential, 1Hour)
 python examples/online/iql/train.py
 
 # IQL with SLTP
 python examples/online/iql/train.py env=sequential_sltp
 
-# PPO-Chronos (default: sequential futures SLTP)
+# PPO-Chronos (default: sequential, 1Hour)
 python examples/online/ppo_chronos/train.py
 
-# PPO-Chronos with spot
-python examples/online/ppo_chronos/train.py env=sequential_spot
+# Configure any algorithm for futures
+python examples/online/dsac/train.py \
+    env.leverage=5 \
+    env.action_levels='[-1.0,0.0,1.0]'
 ```
 
 ## Breaking Changes
@@ -215,24 +227,31 @@ The following directories have been removed:
 
 ### Config Path Changes
 
-All `train.py` files now use `config_path="."` instead of `config_path=""`. This enables Hydra to find the shared `env/` configs.
+All `train.py` files now use `config_path="."` pointing to the local `config.yaml`:
+
+- **Algorithm configs** are real files in each algorithm directory (no duplication)
+- **Environment configs** are centralized in `env/` directory (single source of truth)
+- **One symlink** (`env/`) per algorithm enables CLI environment switching
+
+This approach balances config organization with CLI usability.
 
 ### Environment Config Location
 
-Environment parameters are no longer defined directly in algorithm configs. Instead:
+Environment configs are centralized in `examples/online/env/`:
 
-1. **Base config** comes from `examples/online/env/<envname>.yaml`
-2. **Algorithm-specific overrides** can be added in the algorithm's `config.yaml`
+1. **Base config** comes from `env/<envname>.yaml`
+2. **Algorithm-specific overrides** can be added in `<algorithm>/config.yaml`
 
 ```yaml
 # Algorithm config can override env parameters
 defaults:
-  - env: sequential_spot
+  - env: sequential
   - _self_
 
 env:
-  time_frames: ["1Hour"]  # Override from sequential_spot.yaml
-  transaction_fee: 0.0    # Override from sequential_spot.yaml
+  leverage: 5                    # Override for futures
+  action_levels: [-1.0, 0.0, 1.0]  # Override for futures
+  train_envs: 10                 # Algorithm-specific override
 ```
 
 ## Migrating Custom Scripts
@@ -273,13 +292,24 @@ Example migration:
       # ... rest of code unchanged
 ```
 
+```bash
+# Create symlinks in your algorithm directory
+cd examples/online/your_algorithm/
+ln -sf ../algorithm/your_algorithm.yaml config.yaml
+ln -sf ../env env
+```
+
 ## Troubleshooting
 
 ### Error: "Could not find 'env/sequential_spot'"
 
 **Cause**: Hydra can't find the env config folder.
 
-**Solution**: Ensure `config_path="."` in your `@hydra.main` decorator.
+**Solution**: Ensure you have the `env` symlink in your algorithm directory:
+```bash
+cd examples/online/your_algorithm/
+ln -sf ../env env
+```
 
 ### Error: "Missing key 'env.name'"
 

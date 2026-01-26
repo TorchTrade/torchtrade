@@ -1,5 +1,5 @@
 defaults:
-  - env: sequential_futures_sltp
+  - env: sequential
   - _self_
 
 # Environment overrides (chronos-specific configuration)

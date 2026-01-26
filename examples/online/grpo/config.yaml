@@ -1,16 +1,22 @@
-defaults:
-  - env: onestep_futures
-  - _self_
-
-# Environment overrides (grpo-specific configuration)
+# Environment configuration (GRPO only works with OneStepTradingEnv)
 env:
+  name: OneStepTradingEnv
+  symbol: "BTC/USD"
+  time_frames: ["1Hour"]
+  window_sizes: [24]
+  execute_on: "1Hour"
+  leverage: 1
   stoploss_levels: [-0.02]
   takeprofit_levels: [0.04]
-  train_envs: 6
-  eval_envs: 1
+  include_hold_action: true
   quantity_per_trade: 100
   trade_mode: notional
-  include_hold_action: True
+  exp_name: ${logger.exp_name}
+  seed: 0
+  train_envs: 6
+  eval_envs: 1
+  data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
+  test_split_start: "2025-01-01"
 
 # Collector (GRPO-specific)
 collector:
