@@ -495,28 +495,59 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
                 label='Price History', color='blue', linewidth=1.5
             )
 
-            # Plot long/short actions
+            # Plot long/short actions and position exits
             # Get action types if available (backward compatibility)
             action_types = history_dict.get('action_types', [])
             if action_types:
                 # Use action_types for accurate classification
                 long_indices = [i for i, atype in enumerate(action_types) if atype == "long"]
                 short_indices = [i for i, atype in enumerate(action_types) if atype == "short"]
+
+                # Track position exits (close, liquidation, SL/TP)
+                # For exits, determine marker by checking previous position direction
+                close_long_indices = []
+                close_short_indices = []
+                exit_action_types = ["close", "liquidation", "sltp_sl", "sltp_tp"]
+
+                for i, atype in enumerate(action_types):
+                    if atype in exit_action_types:
+                        # Check previous position to determine which direction was closed
+                        # Position at index i is AFTER the close, so check position at i-1
+                        if i > 0:
+                            prev_position = position_history[i-1]
+                            if prev_position > 0:  # Was long
+                                close_long_indices.append(i)
+                            elif prev_position < 0:  # Was short
+                                close_short_indices.append(i)
             else:
                 # Fallback to legacy action value checks
                 long_indices = [i for i, action in enumerate(action_history) if action == 1]
                 short_indices = [i for i, action in enumerate(action_history) if action == -1]
+                close_long_indices = []
+                close_short_indices = []
 
             long_prices = [price_history[i] for i in long_indices]
             short_prices = [price_history[i] for i in short_indices]
+            close_long_prices = [price_history[i] for i in close_long_indices]
+            close_short_prices = [price_history[i] for i in close_short_indices]
 
+            # Plot position opens
             ax1.scatter(
                 long_indices, long_prices,
-                marker='^', color='green', s=80, label='Long', zorder=5
+                marker='^', color='green', s=80, label='Long Open', zorder=5
             )
             ax1.scatter(
                 short_indices, short_prices,
-                marker='v', color='red', s=80, label='Short', zorder=5
+                marker='v', color='red', s=80, label='Short Open', zorder=5
+            )
+            # Plot position closes
+            ax1.scatter(
+                close_long_indices, close_long_prices,
+                marker='v', color='orange', s=80, label='Long Close', zorder=5, alpha=0.7
+            )
+            ax1.scatter(
+                close_short_indices, close_short_prices,
+                marker='^', color='cyan', s=80, label='Short Close', zorder=5, alpha=0.7
             )
 
             ax1.set_ylabel('Price (USD)')
@@ -578,28 +609,41 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
                 label='Price History', color='blue', linewidth=2
             )
 
-            # Plot buy/sell actions
+            # Plot buy/sell actions and position exits
             # Get action types if available (backward compatibility)
             action_types = history_dict.get('action_types', [])
             if action_types:
                 # Use action_types for accurate classification
-                buy_indices = [i for i, atype in enumerate(action_types) if atype == "buy"]
+                buy_indices = [i for i, atype in enumerate(action_types) if atype in ("buy", "long")]
                 sell_indices = [i for i, atype in enumerate(action_types) if atype == "sell"]
+
+                # Track position exits (close, liquidation, SL/TP)
+                # For spot long-only, all closes are selling longs
+                exit_action_types = ["close", "liquidation", "sltp_sl", "sltp_tp"]
+                close_indices = [i for i, atype in enumerate(action_types) if atype in exit_action_types]
             else:
                 # Fallback to legacy action value checks
                 buy_indices = [i for i, action in enumerate(action_history) if action == 1]
                 sell_indices = [i for i, action in enumerate(action_history) if action == -1]
+                close_indices = []
 
             buy_prices = [price_history[i] for i in buy_indices]
             sell_prices = [price_history[i] for i in sell_indices]
+            close_prices = [price_history[i] for i in close_indices]
 
+            # Plot position opens
             ax1.scatter(
                 buy_indices, buy_prices,
-                marker='^', color='green', s=100, label='Buy (1)'
+                marker='^', color='green', s=100, label='Buy/Long Open'
             )
             ax1.scatter(
                 sell_indices, sell_prices,
-                marker='v', color='red', s=100, label='Sell (-1)'
+                marker='v', color='red', s=100, label='Sell'
+            )
+            # Plot position closes (for long-only, these are exits)
+            ax1.scatter(
+                close_indices, close_prices,
+                marker='v', color='orange', s=100, label='Position Close', alpha=0.7
             )
 
             ax1.set_ylabel('Price (USD)')
