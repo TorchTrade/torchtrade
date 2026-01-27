@@ -185,31 +185,50 @@ See **[Offline Environments Documentation](https://torchtrade.github.io/torchtra
 <details>
 <summary><h2>🚀 Training Algorithms & Examples</h2></summary>
 
-TorchTrade includes implementations of multiple RL algorithms:
+TorchTrade includes implementations of multiple RL algorithms with flexible environment switching via Hydra:
 
-| Algorithm | Type | Environment Type | Example Location |
-|-----------|------|------------------|------------------|
-| **PPO** | On-policy | Sequential | `examples/online/ppo/` |
-| **IQL** | Offline | Sequential | `examples/online/iql/` |
-| **GRPO** | Policy gradient | One-step | `examples/online/grpo_futures_onestep/` |
-| **DSAC** | Off-policy | Sequential | `examples/online/dsac/` |
+| Algorithm | Type | Default Environment | Example Location |
+|-----------|------|---------------------|------------------|
+| **PPO** | On-policy | Sequential SLTP | `examples/online/ppo/` |
+| **PPO-Chronos** | On-policy | Sequential Futures SLTP | `examples/online/ppo_chronos/` |
+| **IQL** | Offline | Sequential Spot | `examples/online/iql/` |
+| **GRPO** | Policy gradient | One-step Futures | `examples/online/grpo/` |
+| **DSAC** | Off-policy | Sequential Spot | `examples/online/dsac/` |
 | **CTRL** | Self-supervised | Sequential | Research |
 
 ### Run Training Examples
 
 ```bash
-# PPO on long-only environment
+# PPO with default environment (sequential SLTP)
 uv run python examples/online/ppo/train.py
 
-# GRPO on futures one-step
-uv run python examples/online/grpo_futures_onestep/train.py
+# PPO with different environments (switch via command-line)
+uv run python examples/online/ppo/train.py env=sequential_futures
+uv run python examples/online/ppo/train.py env=onestep_futures
+uv run python examples/online/ppo/train.py env=sequential_spot
+
+# GRPO with default (one-step futures)
+uv run python examples/online/grpo/train.py
+
+# GRPO with spot trading
+uv run python examples/online/grpo/train.py env=onestep_spot
 
 # Customize with Hydra overrides
 uv run python examples/online/ppo/train.py \
-    env.symbol="BTC/USD" \
+    env=sequential_futures \
+    env.symbol="ETH/USD" \
+    env.leverage=10 \
     optim.lr=1e-4 \
     loss.gamma=0.95
 ```
+
+**Available environment configs** (`env=<name>`):
+- `sequential_spot` - Basic spot trading
+- `sequential_futures` - Basic futures trading
+- `sequential_sltp` - Spot with bracket orders
+- `sequential_futures_sltp` - Futures with bracket orders
+- `onestep_spot` - Contextual bandit (spot)
+- `onestep_futures` - Contextual bandit (futures)
 
 See **[Examples Documentation](https://torchtrade.github.io/torchtrade_envs/examples/)** for all available examples.
 
@@ -340,7 +359,6 @@ experts = create_expert_ensemble(
 
 # Available: MomentumActor, MeanReversionActor, BreakoutActor
 # Use for imitation learning or baselines
-# See examples/online/rulebased/
 ```
 
 ### Feature Engineering
@@ -433,17 +451,13 @@ See **[Advanced Customization](https://torchtrade.github.io/torchtrade_envs/guid
 <details>
 <summary><h2>⚙️ Configuration with Hydra</h2></summary>
 
-TorchTrade uses Hydra for configuration management:
+TorchTrade uses Hydra for configuration management with a defaults list pattern:
 
 ```yaml
 # examples/online/ppo/config.yaml
-env:
-  symbol: "BTC/USD"
-  time_frames: ["1min", "5min", "15min", "60min"]
-  window_sizes: [12, 8, 8, 24]
-  execute_on: [5, "Minute"]
-  initial_cash: [1000, 5000]
-  transaction_fee: 0.0025
+defaults:
+  - env: sequential_sltp  # Load environment config
+  - _self_
 
 collector:
   frames_per_batch: 100000
@@ -460,11 +474,30 @@ loss:
   entropy_coef: 0.01
 ```
 
+```yaml
+# examples/online/env/sequential_sltp.yaml
+env:
+  name: SequentialTradingEnvSLTP
+  trading_mode: "spot"
+  symbol: "BTC/USD"
+  time_frames: ["5Min", "15Min"]
+  window_sizes: [10, 10]
+  execute_on: "15Min"
+  initial_cash: [1000, 5000]
+  transaction_fee: 0.0025
+  # ... more env config
+```
+
 Override from command line:
 
 ```bash
+# Switch environment entirely
+uv run python examples/online/ppo/train.py env=sequential_futures
+
+# Override specific parameters
 uv run python examples/online/ppo/train.py \
     env.symbol="ETH/USD" \
+    env.leverage=10 \
     optim.lr=1e-4 \
     loss.gamma=0.95
 ```

@@ -5,7 +5,7 @@ defaults:
 # Collector settings (PPO-specific)
 collector:
   device:
-  frames_per_batch: 100000
+  frames_per_batch: 10000
   total_frames: 100_000_000
 
 # Logger (PPO-specific)
@@ -30,14 +30,14 @@ optim:
 
 # Loss (PPO-specific)
 loss:
-  gamma: 0.9
-  mini_batch_size: 33333
+  gamma: 0.99
+  mini_batch_size: 3333
   ppo_epochs: 3
   gae_lambda: 0.95
   clip_epsilon: 0.1
   anneal_clip_epsilon: True
   critic_coef: 1.0
-  entropy_coef: 0.01
+  entropy_coef: 0.1
   loss_critic_type: l2
 
 compile:
