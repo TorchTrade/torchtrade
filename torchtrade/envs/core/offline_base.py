@@ -541,21 +541,27 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             ax2.legend()
             ax2.grid(True, alpha=0.3)
 
-            # Plot position history
+            # Plot exposure percentage history
+            # Calculate exposure % = (position_size * price / portfolio_value) * 100
+            exposure_pct = [
+                (pos * price / pv * 100) if pv > 0 else 0.0
+                for pos, price, pv in zip(position_history, price_history, portfolio_value_history)
+            ]
+
             ax3.fill_between(
-                time_indices, position_history, 0,
-                where=[p > 0 for p in position_history],
+                time_indices, exposure_pct, 0,
+                where=[e > 0 for e in exposure_pct],
                 color='green', alpha=0.3, label='Long'
             )
             ax3.fill_between(
-                time_indices, position_history, 0,
-                where=[p < 0 for p in position_history],
+                time_indices, exposure_pct, 0,
+                where=[e < 0 for e in exposure_pct],
                 color='red', alpha=0.3, label='Short'
             )
             ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
             ax3.set_xlabel('Time (Index)')
-            ax3.set_ylabel('Position Size')
-            ax3.set_title('Position History')
+            ax3.set_ylabel('Exposure (%)')
+            ax3.set_title('Exposure History')
             ax3.legend()
             ax3.grid(True, alpha=0.3)
 
