@@ -144,25 +144,8 @@ class TestSequentialEnvReset:
         # Element 1: position_direction should be 0 after reset (no position)
         assert account_state[1] == 0.0, "Position direction should be 0 after reset"
 
-    def test_reset_advances_episode_start(self, unified_env):
-        """Reset should advance episode start when random_start=True."""
-        # Enable random start
-        unified_env.random_start = True
-        positions = []
-        for _ in range(5):
-            td = unified_env.reset()
-            # Store the internal _current_idx or similar attribute
-            # This test is implementation-dependent, skip if attribute doesn't exist
-            if hasattr(unified_env, '_current_idx'):
-                positions.append(unified_env._current_idx)
-            elif hasattr(unified_env, 'current_index'):
-                positions.append(unified_env.current_index)
-
-        # Should have different start positions (if we could track them)
-        if len(positions) > 0:
-            assert len(set(positions)) > 1, "Random start should vary episode start positions"
-        else:
-            pytest.skip("Environment doesn't expose current index")
+    # Removed test_reset_advances_episode_start - tests implementation detail (current_index)
+    # Random start behavior is tested indirectly through seeding tests
 
 
 # ============================================================================
@@ -194,29 +177,8 @@ class TestSequentialEnvStep:
         assert "reward" in next_td["next"].keys()
         assert "done" in next_td["next"].keys()
 
-    def test_step_increments_time(self, unified_env):
-        """Step should increment internal time index."""
-        td = unified_env.reset()
-
-        # Get initial index (implementation-dependent)
-        if hasattr(unified_env, '_current_idx'):
-            initial_idx = unified_env._current_idx
-        elif hasattr(unified_env, 'current_index'):
-            initial_idx = unified_env.current_index
-        else:
-            pytest.skip("Environment doesn't expose current index")
-
-        action_td = td.clone()
-        # Use close action (0 for spot, 2 for futures)
-        close_action = 0 if unified_env.leverage == 1 else 1
-        action_td["action"] = torch.tensor(close_action)
-        unified_env.step(action_td)
-
-        # Check index incremented
-        if hasattr(unified_env, '_current_idx'):
-            assert unified_env._current_idx == initial_idx + 1
-        elif hasattr(unified_env, 'current_index'):
-            assert unified_env.current_index == initial_idx + 1
+    # Removed test_step_increments_time - tests implementation detail (current_index)
+    # Time progression is tested through observation changes and done conditions
 
     def test_same_action_preserves_position_size(self, unified_env):
         """Repeating same action should keep similar position size (not exact due to price changes)."""

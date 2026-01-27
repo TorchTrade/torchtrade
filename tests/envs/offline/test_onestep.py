@@ -78,19 +78,21 @@ class TestOneStepEnvInitialization:
         assert onestep_env is not None
         assert onestep_env.leverage == trading_mode  # trading_mode fixture returns leverage value
 
-    @pytest.mark.parametrize("leverage,expected_actions", [
-        (1, 3),      # spot: sell/hold/buy
-        (10, 5),     # futures: short_all/close_all/long_25/long_50/long_100
-    ])
-    def test_action_spec(self, sample_ohlcv_df, leverage, expected_actions):
-        """Action spec should match leverage (spot vs futures)."""
-        pytest.skip("OneStepEnv uses SLTP action space - expectations need update")
-        config = OneStepTradingEnvConfig(
-            leverage=leverage,
-        )
-        env = OneStepTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
-        assert env.action_spec.n == expected_actions
-        env.close()
+    def test_action_spec_sltp_combinatorial(self, onestep_env, trading_mode):
+        """OneStep uses SLTP action space with combinatorial actions.
+
+        Action space = 1 (hold) + (num_sl * num_tp * num_directions)
+        Default: 3 SL levels * 3 TP levels = 9 combinations per direction
+        - Spot (leverage=1): 1 + 9 = 10 actions (long only)
+        - Futures (leverage>1): 1 + 18 = 19 actions (long + short)
+        """
+        expected_actions = 10 if trading_mode == 1 else 19
+        assert onestep_env.action_spec.n == expected_actions, \
+            f"Expected {expected_actions} actions for leverage={trading_mode}, got {onestep_env.action_spec.n}"
+
+        # Verify action map structure
+        assert 0 in onestep_env.action_map, "Should have hold action at index 0"
+        assert onestep_env.action_map[0][0] is None, "Hold action should have None action_type"
 
         """Rollout length should be set from config."""
 
@@ -159,17 +161,8 @@ class TestOneStepSingleDecision:
         reward = next_td["next"]["reward"]
         assert isinstance(reward.item(), float)
 
-    def test_terminal_state_at_rollout_end(self, onestep_env):
-        pytest.skip("Test needs refactoring - current_index not exposed")
-        initial_idx = onestep_env.current_index
-        td = onestep_env.reset()
-
-        action_td = td.clone()
-        action_td["action"] = torch.tensor(1)
-        next_td = onestep_env.step(action_td)
-
-        # Note: implementation details may vary
-        # This is a conceptual test
+    # Removed test_terminal_state_at_rollout_end - tests implementation detail (current_index)
+    # Terminal state behavior is tested through done flag and truncation tests
 
 
 # ============================================================================
@@ -324,17 +317,8 @@ class TestOneStepRewardAccumulation:
         # We can't guarantee sign, but it should be a valid float
         assert isinstance(reward, float)
 
-    def test_hold_reward_is_zero(self, onestep_env):
-        """Hold action should have zero reward."""
-        pytest.skip("Hold action may have non-zero reward depending on rollout")
-        td = onestep_env.reset()
-
-        action_td = td.clone()
-        action_td["action"] = torch.tensor(1)  # Hold
-        next_td = onestep_env.step(action_td)
-
-        # No position = no reward
-        assert next_td["next"]["reward"] == 0.0
+    # Removed test_hold_reward_is_zero - wrong assumption about hold reward
+    # Hold action can have non-zero reward if it preserves gains during rollout
 
     def test_transaction_costs_included(self, onestep_env, trading_mode):
         """Terminal reward should include transaction costs."""
