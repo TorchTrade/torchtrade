@@ -432,10 +432,12 @@ class TestHistoryReset:
         # Reset environment
         env.reset()
 
-        # Check that history is cleared
+        # Check that history is cleared (except for initial state)
         history = env.history.to_dict()
-        assert len(history["action_types"]) == 0, \
-            "action_types should be cleared after reset"
+        assert len(history["action_types"]) == 1, \
+            "action_types should have only initial state after reset"
+        assert history["action_types"][0] == "hold", \
+            "Initial action_type should be 'hold'"
 
         env.close()
 
@@ -560,7 +562,7 @@ class TestHistoryArrayConsistency:
         env.close()
 
     def test_empty_history_after_reset(self, sample_ohlcv_df):
-        """Test that history is empty immediately after reset."""
+        """Test that history contains only initial state after reset."""
         config = SequentialTradingEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
@@ -578,11 +580,13 @@ class TestHistoryArrayConsistency:
 
         env.reset()
 
-        # History should be empty right after reset
+        # History should contain only initial state right after reset
         history = env.history.to_dict()
-        assert len(history["action_types"]) == 0, \
-            "History should be empty immediately after reset"
-        assert len(history["actions"]) == 0
-        assert len(history["rewards"]) == 0
+        assert len(history["action_types"]) == 1, \
+            "History should contain initial state after reset"
+        assert history["action_types"][0] == "hold", "Initial action should be hold"
+        assert len(history["actions"]) == 1
+        assert len(history["rewards"]) == 1
+        assert history["rewards"][0] == 0.0, "Initial reward should be 0"
 
         env.close()

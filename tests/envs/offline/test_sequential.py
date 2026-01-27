@@ -206,15 +206,16 @@ class TestSequentialEnvStep:
 class TestSequentialEnvTradeExecution:
     """Tests for trade execution (spot and futures specific behavior)."""
 
-    @pytest.mark.parametrize("action_levels,open_action_idx,expected_direction", [
-        ([0, 1], 1, 1),           # Spot: buy -> long (+1)
-        ([-1, 0, 1], 2, 1),       # Futures: long -> long (+1)
-        ([-1, 0, 1], 0, -1),      # Futures: short -> short (-1)
+    @pytest.mark.parametrize("action_levels,leverage,open_action_idx,expected_direction", [
+        ([0, 1], 1, 1, 1),            # Spot: buy -> long (+1)
+        ([-1, 0, 1], 2, 2, 1),        # Futures: long -> long (+1)
+        ([-1, 0, 1], 2, 0, -1),       # Futures: short -> short (-1)
     ])
-    def test_open_position(self, sample_ohlcv_df, action_levels, open_action_idx, expected_direction):
+    def test_open_position(self, sample_ohlcv_df, action_levels, leverage, open_action_idx, expected_direction):
         """Opening a position should set correct position_direction."""
         config = SequentialTradingEnvConfig(
             action_levels=action_levels,
+            leverage=leverage,
             initial_cash=1000,
             transaction_fee=0.0,  # Avoid floating point precision issues
         )

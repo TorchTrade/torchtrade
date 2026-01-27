@@ -205,8 +205,16 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
     @property
     def allows_short(self) -> bool:
-        """Check if short positions are allowed (any negative action levels)."""
-        return any(a < 0 for a in self.action_levels)
+        """Check if short positions are allowed.
+
+        Requires both:
+        - Negative action_levels configured
+        - Futures mode (leverage > 1)
+
+        In spot mode (leverage=1), shorts are impossible regardless of action_levels.
+        """
+        has_negative_actions = any(a < 0 for a in self.action_levels)
+        return has_negative_actions and self.leverage > 1
 
     def _reset_history(self):
         """Reset history tracking."""
@@ -329,7 +337,11 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         return max(0.0, distance)
 
     def _get_portfolio_value(self, current_price: Optional[float] = None) -> float:
-        """Calculate total portfolio value including unrealized PnL."""
+        """Calculate total portfolio value.
+
+        For spot (leverage=1): PV = balance + position_value
+        For futures (leverage>1): PV = free_margin + locked_margin + unrealized_pnl
+        """
         if current_price is None:
             if self.current_timestamp is None:
                 raise RuntimeError(
@@ -338,10 +350,22 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
                 )
             current_price = self._cached_base_features["close"]
 
-        unrealized_pnl = self._calculate_unrealized_pnl(
-            self.position.entry_price, current_price, self.position.position_size
-        )
-        return self.balance + unrealized_pnl
+        if self.leverage == 1:
+            # Spot mode: balance is cash after buying, add current position value
+            position_value = abs(self.position.position_size) * current_price if self.position.position_size != 0 else 0.0
+            return self.balance + position_value
+        else:
+            # Futures mode: balance is free margin, add locked margin and unrealized PnL
+            # locked_margin = notional / leverage (what was deducted from balance when opening)
+            locked_margin = 0.0
+            if self.position.position_size != 0:
+                position_notional = abs(self.position.position_size * self.position.entry_price)
+                locked_margin = position_notional / self.leverage
+
+            unrealized_pnl = self._calculate_unrealized_pnl(
+                self.position.entry_price, current_price, self.position.position_size
+            )
+            return self.balance + locked_margin + unrealized_pnl
 
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
@@ -612,8 +636,10 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         if margin_required + fee > self.balance:
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
-        # Deduct fee
-        self.balance -= fee
+        # Deduct fee and margin
+        # For spot (leverage=1): margin_required = notional_value (full cost)
+        # For futures (leverage>1): margin_required = notional_value / leverage
+        self.balance -= fee + margin_required
         self.balance = max(0.0, self.balance)
 
         # Set position
@@ -670,8 +696,8 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         if margin_required + fee > self.balance:
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
-        # Execute trade
-        self.balance -= fee
+        # Execute trade - deduct fee and additional margin
+        self.balance -= fee + margin_required
         self.balance = max(0.0, self.balance)
 
         # Calculate weighted average entry price
@@ -712,8 +738,11 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         close_notional = abs(self.position.position_size * fraction_to_close * execution_price)
         fee = close_notional * self.transaction_fee
 
-        # Update balance
-        self.balance += pnl - fee
+        # Calculate freed margin (based on entry price, not current price)
+        freed_margin = abs(self.position.position_size * fraction_to_close * self.position.entry_price) / self.leverage
+
+        # Update balance: add PnL, subtract fee, return freed margin
+        self.balance += pnl - fee + freed_margin
         self.balance = max(0.0, self.balance)
 
         # Update position
@@ -739,9 +768,11 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         )
         notional = abs(self.position.position_size * execution_price)
         fee = notional * self.transaction_fee
+        # Return the margin that was locked when opening
+        margin_to_return = abs(self.position.position_size * self.position.entry_price) / self.leverage
 
-        # Update balance
-        self.balance += pnl - fee
+        # Update balance: add realized PnL, subtract fee, return locked margin
+        self.balance += pnl - fee + margin_to_return
         self.balance = max(0.0, self.balance)
 
         # Reset position
@@ -771,9 +802,12 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             # Short position liquidated
             loss = (self.position.entry_price - self.liquidation_price) * abs(self.position.position_size)
 
-        # Apply loss and fees
+        # Return locked margin before applying loss and fees
+        margin_to_return = abs(self.position.position_size * self.position.entry_price) / self.leverage
+
+        # Apply loss, fees, and return margin
         liquidation_fee = abs(self.position.position_size * self.liquidation_price) * self.transaction_fee
-        self.balance += loss - liquidation_fee
+        self.balance += loss - liquidation_fee + margin_to_return
         self.balance = max(0.0, self.balance)
         trade_info["fee_paid"] = liquidation_fee
 

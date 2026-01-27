@@ -199,6 +199,9 @@ def main(cfg: DictConfig):  # noqa: F821
                 i * frames_in_batch
             ) // test_interval:
                 actor.eval()
+                # Evaluate on test data (using SequentialTradingEnvSLTP)
+                # Note: GRPO uses OneStepTradingEnv for training, which doesn't support
+                # normal rollouts, so we only evaluate on the test env (SequentialSLTPEnv)
                 # Keep eval_env on CPU, move actor to CPU temporarily for eval
                 eval_rollout = eval_env.rollout(
                     max_eval_traj_length,
@@ -211,23 +214,12 @@ def main(cfg: DictConfig):  # noqa: F821
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
 
-                # Compute and log trading metrics
-                try:
-                    # ParallelEnv delegates get_metrics() to all workers and returns a list
-                    # We take the first environment's metrics
-                    env_metrics = eval_env.base_env.get_metrics()[0]
-                    metrics_to_log.update({f"eval/{k}": v for k, v in env_metrics.items()})
-
-                except (KeyError, AttributeError, ValueError, RuntimeError) as e:
-                    import traceback
-                    print(f"Warning: Could not compute metrics: {e}")
-                    print(traceback.format_exc())
-
                 # Render history (available in SequentialTradingEnvSLTP for eval)
                 fig = eval_env.base_env.render_history(return_fig=True)
                 eval_env.reset()
                 if fig is not None and logger is not None:
                     metrics_to_log["eval/history"] = wandb.Image(fig[0])
+
                 actor.train()
 
         # Log dual coverage metrics (if available and enabled)
