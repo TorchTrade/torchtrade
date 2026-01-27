@@ -4,23 +4,23 @@ defaults:
 
 # Environment overrides for futures trading
 env:
-  leverage: 6
+  leverage: 2
   action_levels: [-1.0, 0.0, 1.0]
 
 # Collector (DQN-specific)
 collector:
-  device:
+  device: cuda
   frames_per_batch: 5
   total_frames: 1_000_000
-  init_random_frames: 10_000
+  init_random_frames: 1000
   eps_start: 1.0
-  eps_end: 0.1
-  annealing_frames: 1_000_000
+  eps_end: 0.05
+  annealing_frames: 20_000
 
 # Replay buffer (DQN-specific)
 buffer:
   buffer_size: 100_000
-  batch_size: 256
+  batch_size: 32
 
 # Logger
 logger:
@@ -29,7 +29,7 @@ logger:
   project_name: TorchTrade-Online
   group_name: ${env.name}
   exp_name: dqn-${env.name}
-  test_interval: 100_000
+  test_interval: 10_000
   num_test_episodes: 1
 
 # Model (DQN-specific)
@@ -41,15 +41,15 @@ model:
 
 # Optimization (DQN-specific)
 optim:
-  lr: 2.0e-4
+  lr: 2.0e-5
   max_grad_norm: 10
-  device:
+  device: cuda
 
 # Loss (DQN-specific)
 loss:
   gamma: 0.9
-  hard_update_freq: 10000
-  num_updates: 5
+  hard_update_freq: 50
+  num_updates: 10
 
 compile:
   compile: False

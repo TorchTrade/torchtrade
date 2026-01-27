@@ -87,6 +87,9 @@ def main(cfg: DictConfig):  # noqa: F821
         max_eval_traj_length=max_eval_traj_length,
     )
 
+    train_env.to(device)
+    eval_env.to(device)
+
     total_frames = cfg.collector.total_frames
     test_interval = cfg.logger.test_interval
 
@@ -227,7 +230,7 @@ def main(cfg: DictConfig):  # noqa: F821
                     metrics_to_log["train/loss"] = sum(losses) / len(losses)
 
         # Log epsilon for exploration
-        exploration_policy[-1].step(collected_frames)
+        exploration_policy[-1].step(frames_in_batch)
         current_epsilon = exploration_policy[-1].eps
         metrics_to_log["train/epsilon"] = current_epsilon
 
@@ -239,7 +242,6 @@ def main(cfg: DictConfig):  # noqa: F821
                 i * frames_in_batch
             ) // test_interval:
                 actor.eval()
-                actor.to("cpu")
 
                 # Evaluate on test data
                 eval_rollout = eval_env.rollout(
@@ -267,16 +269,14 @@ def main(cfg: DictConfig):  # noqa: F821
                 )
                 # Only log reward from env[0] to match the rendered figure
                 train_eval_reward = train_rollout[0]["next", "reward"].sum().item()
-                metrics_to_log["train_eval/reward"] = train_eval_reward
+                metrics_to_log["eval/train_reward"] = train_eval_reward
 
                 # Render train history (from env[0])
                 train_fig = train_env.base_env.render_history(return_fig=True)
                 train_env.reset()
                 if train_fig is not None and logger is not None:
-                    metrics_to_log["train_eval/history"] = wandb.Image(train_fig[0])
+                    metrics_to_log["eval/train_history"] = wandb.Image(train_fig[0])
 
-                # Move actor back to device for training
-                actor.to(device)
                 torch.save(actor.state_dict(), f"dqn_policy_{i}.pth")
                 actor.train()
 
