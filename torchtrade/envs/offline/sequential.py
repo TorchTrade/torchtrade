@@ -205,8 +205,16 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
     @property
     def allows_short(self) -> bool:
-        """Check if short positions are allowed (any negative action levels)."""
-        return any(a < 0 for a in self.action_levels)
+        """Check if short positions are allowed.
+
+        Requires both:
+        - Negative action_levels configured
+        - Futures mode (leverage > 1)
+
+        In spot mode (leverage=1), shorts are impossible regardless of action_levels.
+        """
+        has_negative_actions = any(a < 0 for a in self.action_levels)
+        return has_negative_actions and self.leverage > 1
 
     def _reset_history(self):
         """Reset history tracking."""
@@ -332,7 +340,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         """Calculate total portfolio value.
 
         For spot (leverage=1): PV = balance + position_value
-        For futures (leverage>1): PV = balance + unrealized_pnl
+        For futures (leverage>1): PV = free_margin + locked_margin + unrealized_pnl
         """
         if current_price is None:
             if self.current_timestamp is None:
@@ -347,11 +355,17 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             position_value = abs(self.position.position_size) * current_price if self.position.position_size != 0 else 0.0
             return self.balance + position_value
         else:
-            # Futures mode: balance includes locked margin, add unrealized PnL
+            # Futures mode: balance is free margin, add locked margin and unrealized PnL
+            # locked_margin = notional / leverage (what was deducted from balance when opening)
+            locked_margin = 0.0
+            if self.position.position_size != 0:
+                position_notional = abs(self.position.position_size * self.position.entry_price)
+                locked_margin = position_notional / self.leverage
+
             unrealized_pnl = self._calculate_unrealized_pnl(
                 self.position.entry_price, current_price, self.position.position_size
             )
-            return self.balance + unrealized_pnl
+            return self.balance + locked_margin + unrealized_pnl
 
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""

@@ -149,7 +149,7 @@ class TestRenderHistorySpecialActionTypes:
         td = env.step(td.set("action", torch.tensor([1])))
 
         history = env.history.to_dict()
-        assert len(history["action_types"]) == 1, "Should have exactly 1 action_type"
+        assert len(history["action_types"]) == 2, "Should have initial state + 1 action_type"
 
         # Should render single step without errors
         try:

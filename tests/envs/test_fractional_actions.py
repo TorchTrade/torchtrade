@@ -60,7 +60,7 @@ class TestFractionalActionMapping:
         # Shared config for all action tests
         config = SeqFuturesEnvConfig(
             action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],
-            leverage=1,
+            leverage=2,  # Futures mode (required for shorts)
             initial_cash=10000,
             transaction_fee=0.0,  # Disable fees for simpler calculation
             slippage=0.0,  # Disable slippage
@@ -78,7 +78,7 @@ class TestFractionalActionMapping:
         td = env.step(td)["next"]
 
         # Calculate expected position: (balance * action_level * leverage) / price
-        expected_position = (initial_balance * action_level * 1) / current_price
+        expected_position = (initial_balance * action_level * config.leverage) / current_price
         actual_position = env.position.position_size
 
         # Verify position size
