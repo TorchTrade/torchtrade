@@ -252,18 +252,6 @@ def main(cfg: DictConfig):  # noqa: F821
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
 
-                # Compute and log trading metrics
-                try:
-                    # ParallelEnv delegates get_metrics() to all workers and returns a list
-                    # We take the first environment's metrics
-                    env_metrics = eval_env.base_env.get_metrics()[0]
-                    metrics_to_log.update({f"eval/{k}": v for k, v in env_metrics.items()})
-
-                except (KeyError, AttributeError, ValueError, RuntimeError) as e:
-                    import traceback
-                    print(f"Warning: Could not compute metrics: {e}")
-                    print(traceback.format_exc())
-
                 # Render history
                 fig = eval_env.base_env.render_history(return_fig=True)
                 eval_env.reset()
