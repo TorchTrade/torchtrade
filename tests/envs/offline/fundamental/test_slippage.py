@@ -183,6 +183,7 @@ class TestSlippageRandomness:
             leverage=2,
             action_levels=[-1, 0, 1],
             seed=None,  # Avoid reseeding torch RNG
+            random_start=False,  # Avoid timestamp exhaustion
         )
 
         market_price = 100.0
@@ -317,6 +318,7 @@ class TestSlippageOnClose:
             leverage=2,
             action_levels=[-1, 0, 1],
             seed=None,  # Avoid reseeding torch RNG
+            random_start=False,  # Avoid timestamp exhaustion
         )
 
         # Open and close multiple times, track PnL variation
