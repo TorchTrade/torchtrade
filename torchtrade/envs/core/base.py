@@ -9,8 +9,6 @@ import torch
 from torchrl.data import Bounded
 from torchrl.envs import EnvBase
 
-from torchtrade.envs.core.reward import build_reward_context, default_log_return, validate_reward_function
-
 logger = logging.getLogger(__name__)
 
 
@@ -38,15 +36,14 @@ class TorchTradeBaseEnv(EnvBase):
                    - transaction_fee: float
                    - slippage: float
                    - seed: Optional[int]
-                   - reward_function: Optional[Callable]
-                   - reward_scaling: float
+                   - reward_function: Optional[Callable] (takes history tracker, returns float)
         """
         self.config = config
 
         # Validate custom reward function signature if provided
         reward_function = getattr(config, 'reward_function', None)
         if reward_function is not None:
-            validate_reward_function(reward_function)
+            self._validate_reward_function(reward_function)
 
         # Validate and store transaction parameters (only for offline environments)
         if hasattr(config, 'transaction_fee') and hasattr(config, 'slippage'):
@@ -82,100 +79,35 @@ class TorchTradeBaseEnv(EnvBase):
                 f"Slippage must be between 0 and 1, got {config.slippage}"
             )
 
-    def _calculate_reward(
-        self,
-        old_portfolio_value: float,
-        new_portfolio_value: float,
-        action: int,
-        trade_info: Dict[str, Any],
-    ) -> float:
-        """
-        Calculate reward using custom or default function.
+    def _validate_reward_function(self, reward_function: Any):
+        """Validate that custom reward function has correct signature.
 
-        If config.reward_function is provided, uses that custom function.
-        Otherwise, uses the default log return reward.
+        Reward functions must accept a single parameter (history tracker) and return a float.
 
         Args:
-            old_portfolio_value: Portfolio value before action
-            new_portfolio_value: Portfolio value after action
-            action: Action taken
-            trade_info: Dictionary with trade execution details
+            reward_function: The custom reward function to validate
 
-        Returns:
-            Reward value (float)
+        Raises:
+            TypeError: If the reward function doesn't have the correct signature
+
+        Example:
+            >>> def my_reward(history) -> float:
+            ...     return np.log(history.portfolio_values[-1] / history.portfolio_values[-2])
         """
-        # Use custom reward function if provided
-        reward_function = getattr(self.config, 'reward_function', None)
-        if reward_function is not None:
-            # Compute buy & hold value if terminal
-            is_terminal = self.step_counter >= self.max_traj_length - 1
-            buy_and_hold_value = None
+        if reward_function is None:
+            return
 
-            # Only compute buy_and_hold if we have sufficient price history (need at least 2 points)
-            # and first price is valid (non-zero to avoid division by zero)
-            if (is_terminal and hasattr(self, 'base_price_history') and
-                len(self.base_price_history) >= 2):
-                first_price = self.base_price_history[0]
-                if first_price > 0:
-                    buy_and_hold_value = (
-                        self.initial_portfolio_value / first_price
-                    ) * self.base_price_history[-1]
-                else:
-                    logger.warning(
-                        f"Cannot calculate buy-and-hold benchmark: first price is {first_price} "
-                        f"(must be positive). This indicates corrupted price data. "
-                        f"Custom reward functions will receive buy_and_hold_value=None."
-                    )
+        import inspect
 
-            # Check if this is an offline environment (has history tracking)
-            # For offline envs using custom rewards, history attributes are required
-            is_offline_env = hasattr(self, 'sampler') and hasattr(self, 'base_price_history')
+        sig = inspect.signature(reward_function)
+        params = list(sig.parameters.values())
 
-            if is_offline_env:
-                # Validate that offline environment has all required history attributes
-                required_attrs = ['portfolio_value_history', 'action_history',
-                                'reward_history', 'base_price_history', 'initial_portfolio_value']
-                missing = [attr for attr in required_attrs if not hasattr(self, attr)]
-                if missing:
-                    raise RuntimeError(
-                        f"Offline environment using custom reward function is missing required "
-                        f"history tracking attributes: {missing}. Ensure the environment properly "
-                        f"inherits from TorchTradeOfflineEnv and calls super().__init__()."
-                    )
-
-                ctx = build_reward_context(
-                    self,
-                    old_portfolio_value,
-                    new_portfolio_value,
-                    action,
-                    trade_info,
-                    portfolio_value_history=self.portfolio_value_history,
-                    action_history=self.action_history,
-                    reward_history=self.reward_history,
-                    base_price_history=self.base_price_history,
-                    initial_portfolio_value=self.initial_portfolio_value,
-                    buy_and_hold_value=buy_and_hold_value,
-                )
-            else:
-                # Live environments don't track history, pass empty data
-                ctx = build_reward_context(
-                    self,
-                    old_portfolio_value,
-                    new_portfolio_value,
-                    action,
-                    trade_info,
-                    portfolio_value_history=[],
-                    action_history=[],
-                    reward_history=[],
-                    base_price_history=[],
-                    initial_portfolio_value=None,
-                    buy_and_hold_value=None,
-                )
-
-            return float(self.config.reward_function(ctx)) * self.config.reward_scaling
-
-        # Otherwise use default log return
-        return default_log_return(old_portfolio_value, new_portfolio_value) * self.config.reward_scaling
+        if len(params) != 1:
+            raise TypeError(
+                f"Reward function must accept exactly 1 parameter (history tracker), "
+                f"but got {len(params)} parameters: {list(sig.parameters.keys())}. "
+                f"Expected signature: def reward_function(history) -> float"
+            )
 
     @abstractmethod
     def _get_portfolio_value(self, *args, **kwargs) -> float:

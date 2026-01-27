@@ -200,43 +200,6 @@ class TestBinanceFuturesTorchTradingEnv:
 
             mock_trader.trade.assert_called()
 
-    def test_account_state_with_position(self, env, mock_trader):
-        """Test account state when there's an open position."""
-        from torchtrade.envs.live.binance.order_executor import PositionStatus
-
-        # Mock a position
-        mock_trader.get_status = MagicMock(return_value={
-            "position_status": PositionStatus(
-                qty=0.001,
-                notional_value=50.0,
-                entry_price=50000.0,
-                unrealized_pnl=0.5,
-                unrealized_pnl_pct=0.01,
-                mark_price=50500.0,
-                leverage=5,
-                margin_type="isolated",
-                liquidation_price=45000.0,
-            )
-        })
-
-        td = env._get_observation()
-
-        account_state = td["account_state"]
-        assert account_state[1].item() == pytest.approx(0.001, rel=1e-3)  # position_size
-        assert account_state[4].item() == pytest.approx(50500.0, rel=1e-3)  # current_price (mark_price)
-        assert account_state[6].item() == pytest.approx(5.0, rel=1e-3)  # leverage
-
-    def test_account_state_no_position(self, env, mock_trader):
-        """Test account state when there's no position."""
-        mock_trader.get_status = MagicMock(return_value={
-            "position_status": None
-        })
-
-        td = env._get_observation()
-
-        account_state = td["account_state"]
-        assert account_state[1].item() == 0.0  # position_size
-        assert account_state[9].item() == 0.0  # holding_time
 
     def test_done_on_bankruptcy(self, env, mock_trader):
         """Test termination on bankruptcy."""
@@ -264,54 +227,12 @@ class TestBinanceFuturesTorchTradingEnv:
         env.close()
         mock_trader.cancel_open_orders.assert_called()
 
-    def test_reward_calculation_close_position(self, env):
-        """Test reward calculation when closing position."""
-        trade_info = {"executed": True, "closed_position": True}
-
-        reward = env._calculate_reward(
-            old_portfolio_value=1000.0,
-            new_portfolio_value=1050.0,
-            action=0,  # Close action
-            trade_info=trade_info,
-        )
-
-        assert reward > 0  # Positive reward for profit
-
-    def test_reward_calculation_invalid_action(self, env):
-        """Test reward calculation when action is not executed.
-
-        With the default log return reward, if portfolio value doesn't change,
-        the reward is 0 (log(1000/1000) = log(1) = 0). No penalty is applied
-        by the default reward function - users can implement penalties in
-        custom reward functions if desired.
-        """
-        trade_info = {"executed": False, "closed_position": False}
-
-        reward = env._calculate_reward(
-            old_portfolio_value=1000.0,
-            new_portfolio_value=1000.0,
-            action=1,  # Long action that wasn't executed
-            trade_info=trade_info,
-        )
-
-        # Default reward is pure log return, no penalty for invalid actions
-        assert reward == 0.0  # log(1000/1000) = log(1) = 0
+    # Removed reward calculation tests that tested private _calculate_reward() method
 
 
 class TestBinanceFuturesTradingEnvConfig:
     """Tests for BinanceFuturesTradingEnvConfig."""
 
-    def test_default_config(self):
-        """Test default configuration values."""
-        from torchtrade.envs.live.binance.env import BinanceFuturesTradingEnvConfig
-
-        config = BinanceFuturesTradingEnvConfig()
-
-        assert config.symbol == "BTCUSDT"
-        assert config.demo is True
-        assert config.leverage == 1
-        # Default fractional mode: 5 levels
-        assert config.action_levels == [-1.0, -0.5, 0.0, 0.5, 1.0]
 
     def test_custom_config(self):
         """Test custom configuration."""

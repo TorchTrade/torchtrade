@@ -86,7 +86,7 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
 
         # Set reward function
-        from torchtrade.envs.core.rewards import log_return_reward
+        from torchtrade.envs.core.default_rewards import log_return_reward
         self.reward_function = reward_function or log_return_reward
 
         # Create action map from SL/TP combinations

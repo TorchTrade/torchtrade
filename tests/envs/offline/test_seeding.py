@@ -15,12 +15,9 @@ import torch
 
 from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservationSampler
 from torchtrade.envs.offline.infrastructure.utils import InitialBalanceSampler
-from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.longonly.sequential_sltp import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
-from torchtrade.envs.offline.longonly.onestep import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig
-from torchtrade.envs.offline.futures.sequential import SeqFuturesEnv, SeqFuturesEnvConfig
-from torchtrade.envs.offline.futures.sequential_sltp import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
-from torchtrade.envs.offline.futures.onestep import FuturesOneStepEnv, FuturesOneStepEnvConfig
+from torchtrade.envs.offline.sequential import SequentialTradingEnv, SequentialTradingEnvConfig
+from torchtrade.envs.offline.sequential_sltp import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
+from torchtrade.envs.offline.onestep import OneStepTradingEnv, OneStepTradingEnvConfig
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
@@ -201,12 +198,12 @@ class TestEnvironmentSeeding:
     """Integration tests for environment-level seeding across all offline environments."""
 
     @pytest.mark.parametrize("env_class,config_class,config_kwargs", [
-        (SeqLongOnlyEnv, SeqLongOnlyEnvConfig, {}),
-        (SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig, LONGONLY_SLTP_CONFIG),
-        (LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig, {}),
-        (SeqFuturesEnv, SeqFuturesEnvConfig, FUTURES_CONFIG),
-        (SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig, FUTURES_SLTP_CONFIG),
-        (FuturesOneStepEnv, FuturesOneStepEnvConfig, FUTURES_CONFIG),
+        (SequentialTradingEnv, SequentialTradingEnvConfig, {}),
+        (SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig, LONGONLY_SLTP_CONFIG),
+        (OneStepTradingEnv, OneStepTradingEnvConfig, {}),
+        (SequentialTradingEnv, SequentialTradingEnvConfig, FUTURES_CONFIG),
+        (SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig, FUTURES_SLTP_CONFIG),
+        (OneStepTradingEnv, OneStepTradingEnvConfig, FUTURES_CONFIG),
     ])
     def test_env_reset_reproducible_with_same_seed(
         self, large_ohlcv_df, env_class, config_class, config_kwargs
@@ -256,8 +253,8 @@ class TestEnvironmentSeeding:
                     f"Reset {i}: state_index should match with same seed"
 
     @pytest.mark.parametrize("env_class,config_class,config_kwargs", [
-        (SeqLongOnlyEnv, SeqLongOnlyEnvConfig, {}),
-        (SeqFuturesEnv, SeqFuturesEnvConfig, FUTURES_CONFIG),
+        (SequentialTradingEnv, SequentialTradingEnvConfig, {}),
+        (SequentialTradingEnv, SequentialTradingEnvConfig, FUTURES_CONFIG),
     ])
     def test_full_episode_reproducible_with_same_seed(
         self, large_ohlcv_df, env_class, config_class, config_kwargs
@@ -327,8 +324,8 @@ class TestEnvironmentSeeding:
         assert rewards1 == rewards2, "Full episode rewards should match with same seed"
 
     @pytest.mark.parametrize("env_class,config_class,config_kwargs", [
-        (SeqLongOnlyEnv, SeqLongOnlyEnvConfig, {}),
-        (SeqFuturesEnv, SeqFuturesEnvConfig, FUTURES_CONFIG),
+        (SequentialTradingEnv, SequentialTradingEnvConfig, {}),
+        (SequentialTradingEnv, SequentialTradingEnvConfig, FUTURES_CONFIG),
     ])
     def test_different_seeds_produce_different_trajectories(
         self, large_ohlcv_df, env_class, config_class, config_kwargs
@@ -355,20 +352,21 @@ class TestEnvironmentSeeding:
         env1 = env_class(large_ohlcv_df, config1, feature_preprocessing_fn=simple_feature_fn)
         env2 = env_class(large_ohlcv_df, config2, feature_preprocessing_fn=simple_feature_fn)
 
-        # Collect starting positions from multiple resets
-        positions1 = []
-        positions2 = []
+        # Collect starting conditions from multiple resets
+        balances1 = []
+        balances2 = []
 
         for _ in range(10):
             obs1 = env1.reset()
             obs2 = env2.reset()
 
-            # Extract initial cash (first element of account_state)
-            cash1 = obs1['account_state'][0].item()
-            cash2 = obs2['account_state'][0].item()
+            # Extract initial balance (stored in env.balance, not in account_state)
+            # Account state has exposure_pct at index 0, not cash
+            cash1 = env1.balance
+            cash2 = env2.balance
 
-            positions1.append(cash1)
-            positions2.append(cash2)
+            balances1.append(cash1)
+            balances2.append(cash2)
 
-        # At least some initial conditions should differ
-        assert positions1 != positions2, "Different seeds should produce different trajectories"
+        # At least some initial conditions should differ due to different seeds
+        assert balances1 != balances2, "Different seeds should produce different trajectories"

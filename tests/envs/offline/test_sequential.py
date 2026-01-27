@@ -422,6 +422,9 @@ class TestSequentialEnvTermination:
             leverage=20,  # Very high leverage for easier liquidation
             initial_cash=1000,
             max_traj_length=200,  # Lower max to ensure termination
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],  # Use small timeframe for limited data
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
         )
         env = SequentialTradingEnv(trending_down_df, config, simple_feature_fn)
         td = env.reset()

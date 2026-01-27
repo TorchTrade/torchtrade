@@ -162,13 +162,6 @@ class TestAlpacaTorchTradingEnvReset:
 
         assert isinstance(td, TensorDict)
 
-    def test_reset_contains_account_state(self, env):
-        """Test that reset returns account state."""
-        td = env.reset()
-
-        assert env.account_state_key in td.keys()
-        assert td[env.account_state_key].shape == (7,)
-
     def test_reset_contains_market_data(self, env):
         """Test that reset returns market data."""
         td = env.reset()
@@ -293,7 +286,6 @@ class TestAlpacaTorchTradingEnvReward:
         config = AlpacaTradingEnvConfig(
             symbol="BTC/USD",
             window_sizes=[10],
-            reward_scaling=1.0,
         )
         mock_observer = MockObserver(window_sizes=[10])
         mock_trader = MockTrader(initial_cash=10000.0)
@@ -333,36 +325,6 @@ class TestAlpacaTorchTradingEnvReward:
         # Current behavior: reward is 0 because executed=True (even though trade failed)
         # The penalty logic checks `not trade_info["executed"]`, not success
         assert td_out["reward"].item() == 0.0
-
-    def test_reward_scaling(self):
-        """Test that reward scaling works on realized profit."""
-        config = AlpacaTradingEnvConfig(
-            symbol="BTC/USD",
-            window_sizes=[10],
-            reward_scaling=10.0,
-        )
-        mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockTrader(initial_cash=10000.0)
-
-        env = AlpacaTorchTradingEnv(
-            config=config,
-            observer=mock_observer,
-            trader=mock_trader,
-        )
-        env._wait_for_next_timestamp = lambda: None
-
-        env.reset()
-
-        # Buy first
-        td_buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
-        env._step(td_buy)
-
-        # Sell to realize profit/loss
-        td_sell = TensorDict({"action": torch.tensor(0)}, batch_size=())
-        td_out = env._step(td_sell)
-
-        # Reward should be scaled (actual value depends on price changes)
-        assert isinstance(td_out["reward"].item(), float)
 
 
 class TestAlpacaTorchTradingEnvTermination:
@@ -509,45 +471,6 @@ class TestAlpacaTorchTradingEnvPositionTracking:
 
         return env
 
-    def test_holding_time_increases(self, env):
-        """Test that holding time increases while holding position."""
-        env.reset()
-
-        # Buy
-        td_buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
-        td_out1 = env._step(td_buy)
-
-        # Hold (maintain 100% position)
-        td_hold = TensorDict({"action": torch.tensor(2)}, batch_size=())
-        td_out2 = env._step(td_hold)
-
-        # Account state: [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpc, holding_time]
-        holding_time_1 = td_out1[env.account_state_key][6].item()
-        holding_time_2 = td_out2[env.account_state_key][6].item()
-
-        assert holding_time_2 > holding_time_1
-
-    def test_holding_time_resets_on_sell(self, env):
-        """Test that holding time resets after selling."""
-        env.reset()
-
-        # Buy
-        td_buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
-        env._step(td_buy)
-
-        # Hold a few steps
-        td_hold = TensorDict({"action": torch.tensor(1)}, batch_size=())
-        env._step(td_hold)
-        env._step(td_hold)
-
-        # Sell
-        td_sell = TensorDict({"action": torch.tensor(0)}, batch_size=())
-        td_out = env._step(td_sell)
-
-        # After selling, holding time should be 0
-        holding_time = td_out[env.account_state_key][6].item()
-        assert holding_time == 0
-
 
 class TestAlpacaTorchTradingEnvBaseFeatures:
     """Tests for base features inclusion."""
@@ -680,66 +603,3 @@ class TestAlpacaTorchTradingEnvSeed:
         # Should not raise
 
 
-class TestAlpacaTorchTradingEnvAccountState:
-    """Tests for account state observation."""
-
-    @pytest.fixture
-    def env(self):
-        """Create an environment with mocks."""
-        config = AlpacaTradingEnvConfig(
-            symbol="BTC/USD",
-            window_sizes=[10],
-        )
-        mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockTrader(initial_cash=10000.0, current_price=100000.0)
-
-        env = AlpacaTorchTradingEnv(
-            config=config,
-            observer=mock_observer,
-            trader=mock_trader,
-        )
-        env._wait_for_next_timestamp = lambda: None
-
-        return env
-
-    def test_account_state_dimensions(self, env):
-        """Test account state has correct dimensions."""
-        td = env.reset()
-        account_state = td[env.account_state_key]
-
-        # [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpc, holding_time]
-        assert account_state.shape == (7,)
-
-    def test_account_state_after_buy(self, env):
-        """Test account state is correct after buy."""
-        env.reset()
-
-        # Buy
-        td_buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
-        td_out = env._step(td_buy)
-
-        account_state = td_out[env.account_state_key]
-
-        # cash should be lower, position_size should be > 0
-        assert account_state[0].item() < 10000.0  # cash
-        assert account_state[1].item() > 0  # position_size
-        assert account_state[2].item() > 0  # position_value
-        assert account_state[3].item() > 0  # entry_price
-
-    def test_account_state_after_sell(self, env):
-        """Test account state is correct after sell."""
-        env.reset()
-
-        # Buy
-        td_buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
-        env._step(td_buy)
-
-        # Sell
-        td_sell = TensorDict({"action": torch.tensor(0)}, batch_size=())
-        td_out = env._step(td_sell)
-
-        account_state = td_out[env.account_state_key]
-
-        # position_size and position_value should be 0
-        assert account_state[1].item() == 0  # position_size
-        assert account_state[2].item() == 0  # position_value

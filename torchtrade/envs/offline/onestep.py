@@ -309,8 +309,17 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
             action_type=action_type
         )
 
-        # Calculate terminal reward (accumulated over rollout) using UPDATED history tracker
-        reward = float(self.reward_function(self.history))
+        # Calculate terminal reward from accumulated rollout returns
+        # For one-step environments, the reward is the sum of log returns during rollout
+        if len(self.rollout_returns) > 0:
+            # Position was opened and rolled out - use accumulated returns
+            reward = sum(self.rollout_returns)
+        elif trade_info.get("executed") and trade_info.get("liquidated"):
+            # Liquidation happened before any rollout - large negative reward
+            reward = -1.0
+        else:
+            # HOLD action or no trade - use standard reward function (typically 0.0)
+            reward = float(self.reward_function(self.history))
 
         # If truncated without trigger, set reward to 0 (no reward for incomplete episodes)
         if self.truncated and not trade_info.get("executed"):

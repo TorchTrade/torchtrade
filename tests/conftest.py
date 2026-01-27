@@ -244,17 +244,26 @@ def price_gap_df():
 
 @pytest.fixture(params=["spot", "futures"])
 def trading_mode(request):
-    """Parametrized fixture for testing both spot and futures trading modes."""
-    return request.param
+    """Parametrized fixture for testing both spot and futures configurations.
+
+    Returns leverage value for each mode:
+    - spot: leverage=1
+    - futures: leverage=10
+    """
+    return {"spot": 1, "futures": 10}[request.param]
 
 
 @pytest.fixture
 def unified_config_spot():
-    """Config for spot trading mode (SequentialTradingEnv)."""
+    """Config for spot-like trading (leverage=1, no shorts).
+
+    Default action_levels: [0, 1] (flat, long)
+    """
     from torchtrade.envs.offline import SequentialTradingEnvConfig
 
     return SequentialTradingEnvConfig(
-        trading_mode="spot",
+        leverage=1,  # No liquidation
+        # action_levels auto-generated: [0, 1]
         initial_cash=1000,
         execute_on=TimeFrame(1, TimeFrameUnit.Minute),
         time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
@@ -269,12 +278,15 @@ def unified_config_spot():
 
 @pytest.fixture
 def unified_config_futures():
-    """Config for futures trading mode (SequentialTradingEnv)."""
+    """Config for futures-like trading (leverage>1, bidirectional).
+
+    Default action_levels: [-1, 0, 1] (short, flat, long)
+    """
     from torchtrade.envs.offline import SequentialTradingEnvConfig
 
     return SequentialTradingEnvConfig(
-        trading_mode="futures",
-        leverage=10,
+        leverage=10,  # Enables liquidation
+        # action_levels auto-generated: [-1, 0, 1]
         initial_cash=1000,
         execute_on=TimeFrame(1, TimeFrameUnit.Minute),
         time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
@@ -296,7 +308,7 @@ def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def validate_account_state(account_state, trading_mode):
+def validate_account_state(account_state, leverage):
     """
     Shared validation helper for account state structure.
 
@@ -304,7 +316,7 @@ def validate_account_state(account_state, trading_mode):
         account_state: Account state tensor [6]
             [exposure_pct, position_direction, unrealized_pnl_pct,
              holding_time, leverage, distance_to_liquidation]
-        trading_mode: "spot" or "futures"
+        leverage: Leverage value (1 for spot, >1 for futures)
     """
     import torch
 
@@ -316,30 +328,30 @@ def validate_account_state(account_state, trading_mode):
     position_direction = account_state[..., 1]
     unrealized_pnl_pct = account_state[..., 2]
     holding_time = account_state[..., 3]
-    leverage = account_state[..., 4]
+    state_leverage = account_state[..., 4]
     distance_to_liquidation = account_state[..., 5]
 
     # Common validations
     assert (exposure_pct >= 0).all(), "Exposure percentage should be non-negative"
     assert (holding_time >= 0).all(), "Holding time should be non-negative"
-    assert (leverage >= 1.0).all(), "Leverage should be >= 1.0"
+    assert (state_leverage >= 1.0).all(), "Leverage should be >= 1.0"
     assert (distance_to_liquidation >= 0).all(), "Distance to liquidation should be non-negative"
 
-    # Mode-specific validations
-    if trading_mode == "spot":
+    # Leverage-specific validations
+    if leverage == 1:
         # Spot: position_direction should be 0 or +1 (no shorts)
         assert (position_direction >= 0).all(), "Spot position direction should be >= 0 (no shorts)"
         assert ((position_direction == 0) | (position_direction == 1)).all(), \
             "Spot position direction should be 0 or 1"
         # Spot: leverage = 1.0
-        assert (leverage == 1.0).all(), "Spot leverage should be 1.0"
+        assert (state_leverage == 1.0).all(), "Spot leverage should be 1.0"
         # Spot: distance_to_liquidation should be 1.0 (no liquidation risk)
         assert (distance_to_liquidation == 1.0).all(), "Spot distance_to_liquidation should be 1.0"
-    else:  # futures
+    else:  # leverage > 1
         # Futures: position_direction should be -1, 0, or +1
         assert ((position_direction == -1) | (position_direction == 0) | (position_direction == 1)).all(), \
             "Futures position direction should be -1, 0, or +1"
         # Futures: leverage >= 1.0 (already checked above)
-        assert (leverage >= 1.0).all(), "Futures leverage should be >= 1.0"
+        assert (state_leverage >= 1.0).all(), "Futures leverage should be >= 1.0"
 
 

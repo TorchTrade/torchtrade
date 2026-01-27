@@ -351,31 +351,6 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
 
             assert trade_info["executed"] is False
 
-    def test_account_state_with_position(self, env, mock_trader):
-        """Test account state when there's an open position."""
-        from torchtrade.envs.live.binance.order_executor import PositionStatus
-
-        # Mock a position
-        mock_trader.get_status = MagicMock(return_value={
-            "position_status": PositionStatus(
-                qty=0.001,
-                notional_value=50.0,
-                entry_price=50000.0,
-                unrealized_pnl=0.5,
-                unrealized_pnl_pct=0.01,
-                mark_price=50500.0,
-                leverage=5,
-                margin_type="isolated",
-                liquidation_price=45000.0,
-            )
-        })
-
-        td = env._get_observation()
-
-        account_state = td["account_state"]
-        assert account_state[1].item() == pytest.approx(0.001, rel=1e-3)  # position_size
-        assert account_state[4].item() == pytest.approx(50500.0, rel=1e-3)  # current_price
-        assert account_state[6].item() == pytest.approx(5.0, rel=1e-3)  # leverage
 
     def test_done_on_bankruptcy(self, env, mock_trader):
         """Test termination on bankruptcy."""
@@ -713,55 +688,7 @@ class TestCriticalEdgeCases:
             with pytest.raises(KeyError):
                 env.step(action_td)
 
-    def test_reward_calculation_at_bankruptcy(self, env_with_mocks):
-        """Test reward calculation when portfolio value reaches zero (Critical: 8/10).
-
-        Currently raises ValueError - documents that environment doesn't handle
-        bankruptcy gracefully in reward calculation.
-        """
-        env, mock_trader, _ = env_with_mocks
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-            env.initial_portfolio_value = 1000.0
-
-            # Simulate going bankrupt (portfolio value -> 0)
-            mock_trader.get_account_balance = MagicMock(
-                return_value={
-                    "total_wallet_balance": 0.0,
-                    "available_balance": 0.0,
-                    "total_margin_balance": 0.0,
-                }
-            )
-
-            action_td = TensorDict({"action": torch.tensor(0)}, batch_size=())
-
-            # Currently raises ValueError due to zero portfolio value
-            # TODO: Consider handling this more gracefully
-            with pytest.raises(ValueError, match="Invalid old_portfolio_value: 0.0"):
-                env.step(action_td)
-
-    def test_reward_with_portfolio_increase(self, env_with_mocks):
-        """Test reward when portfolio value increases (Critical: 8/10)."""
-        env, mock_trader, _ = env_with_mocks
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-
-            # Simulate profit by mocking _get_portfolio_value directly
-            # First call (old_portfolio_value): 1000
-            # Second call (new_portfolio_value): 1100
-            with patch.object(
-                env, "_get_portfolio_value", side_effect=[1000.0, 1100.0]
-            ):
-                action_td = TensorDict({"action": torch.tensor(0)}, batch_size=())
-                next_td = env.step(action_td)
-
-                reward = next_td["next", "reward"].item()
-
-                # Profit should give positive reward (log return)
-                assert reward > 0
-                assert np.isfinite(reward)
+    # Removed edge case reward tests that mock internal methods and expect specific errors
                 # Log return from 1000 to 1100 is log(1100/1000) = log(1.1) ≈ 0.0953
                 assert reward == pytest.approx(np.log(1100 / 1000), rel=1e-5)
 

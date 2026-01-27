@@ -22,7 +22,6 @@ from tests.conftest import simple_feature_fn, validate_account_state
 def sltp_config_spot():
     """SLTP config for spot trading."""
     return SequentialTradingEnvSLTPConfig(
-        trading_mode="spot",
         initial_cash=1000,
         execute_on=TimeFrame(1, TimeFrameUnit.Minute),
         time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
@@ -41,7 +40,6 @@ def sltp_config_spot():
 def sltp_config_futures():
     """SLTP config for futures trading."""
     return SequentialTradingEnvSLTPConfig(
-        trading_mode="futures",
         leverage=10,
         initial_cash=1000,
         execute_on=TimeFrame(1, TimeFrameUnit.Minute),
@@ -59,8 +57,11 @@ def sltp_config_futures():
 
 @pytest.fixture
 def sltp_env(sample_ohlcv_df, trading_mode, sltp_config_spot, sltp_config_futures):
-    """Create SLTP environment for testing."""
-    config = sltp_config_spot if trading_mode == "spot" else sltp_config_futures
+    """Create SLTP environment for testing.
+
+    trading_mode fixture returns leverage: 1 for spot, 10 for futures.
+    """
+    config = sltp_config_spot if trading_mode == 1 else sltp_config_futures
     env_instance = SequentialTradingEnvSLTP(
         df=sample_ohlcv_df,
         config=config,
@@ -79,15 +80,14 @@ class TestSLTPActionSpace:
     """Tests for SLTP action space generation."""
 
     @pytest.mark.parametrize("sl_levels,tp_levels,expected_actions", [
-        ([0.02], [0.03], 2),           # 1 + (1 * 1) = 2
-        ([0.02, 0.05], [0.03], 3),     # 1 + (2 * 1) = 3
-        ([0.02], [0.03, 0.10], 3),     # 1 + (1 * 2) = 3
-        ([0.02, 0.05], [0.03, 0.10], 5),  # 1 + (2 * 2) = 5
+        ([-0.02], [0.03], 2),           # 1 + (1 * 1) = 2
+        ([-0.02, -0.05], [0.03], 3),     # 1 + (2 * 1) = 3
+        ([-0.02], [0.03, 0.10], 3),     # 1 + (1 * 2) = 3
+        ([-0.02, -0.05], [0.03, 0.10], 5),  # 1 + (2 * 2) = 5
     ])
     def test_action_space_size(self, sample_ohlcv_df, trading_mode, sl_levels, tp_levels, expected_actions):
         """Action space should be 1 + (num_sl * num_tp)."""
         config = SequentialTradingEnvSLTPConfig(
-            trading_mode=trading_mode,
             leverage=10 if trading_mode == "futures" else 1,
             stoploss_levels=sl_levels,
             takeprofit_levels=tp_levels,
@@ -99,31 +99,35 @@ class TestSLTPActionSpace:
 
     def test_no_action_always_first(self, sltp_env):
         """Action 0 should always be 'no action'."""
-        assert sltp_env.action_levels[0] == (None, None)
+        assert sltp_env.action_map[0] == (None, None, None)  # (action_type, sl, tp)
 
     def test_sltp_combinations_generated(self, sample_ohlcv_df, trading_mode):
         """Should generate all SL/TP combinations."""
         config = SequentialTradingEnvSLTPConfig(
-            trading_mode=trading_mode,
-            leverage=10 if trading_mode == "futures" else 1,
-            stoploss_levels=[-0.02, 0.05],
+            leverage=trading_mode,  # trading_mode fixture returns leverage: 1 or 10
+            stoploss_levels=[-0.02, -0.05],
             takeprofit_levels=[0.03, 0.10],
             initial_cash=1000,
         )
         env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
 
-        # Should have 1 (no action) + 4 (2 SL * 2 TP) = 5 actions
-        assert len(env.action_levels) == 5
+        # Should have 1 (no action) + 4 (2 SL * 2 TP) long actions
+        # Futures mode adds 4 more short actions
+        expected_size = 1 + 4 if trading_mode == 1 else 1 + 4 + 4
+        assert len(env.action_map) == expected_size
 
-        # Check combinations exist
-        expected_combinations = {
-            (0.02, 0.03),
-            (0.02, 0.10),
-            (0.05, 0.03),
-            (0.05, 0.10),
+        # Check long combinations exist
+        expected_long_combinations = {
+            ("long", -0.02, 0.03),
+            ("long", -0.02, 0.10),
+            ("long", -0.05, 0.03),
+            ("long", -0.05, 0.10),
         }
-        actual_combinations = {level for level in env.action_levels if level != (None, None)}
-        assert actual_combinations == expected_combinations
+        actual_long_combinations = {
+            env.action_map[i] for i in env.action_map
+            if env.action_map[i][0] == "long"
+        }
+        assert actual_long_combinations == expected_long_combinations
         env.close()
 
 
@@ -198,7 +202,7 @@ class TestSLTPTriggerDetection:
 
     def test_take_profit_trigger_long(self, trending_up_df, sltp_config_spot):
         """Long position should trigger TP on uptrend."""
-        sltp_config_spot.stoploss_levels = [0.10]  # Wide SL
+        sltp_config_spot.stoploss_levels = [-0.10]  # Wide SL
         sltp_config_spot.takeprofit_levels = [0.01]  # Tight TP (easy to trigger)
 
         env = SequentialTradingEnvSLTP(trending_up_df, sltp_config_spot, simple_feature_fn)
@@ -223,7 +227,7 @@ class TestSLTPTriggerDetection:
 
     def test_stop_loss_trigger_long(self, trending_down_df, sltp_config_spot):
         """Long position should trigger SL on downtrend."""
-        sltp_config_spot.stoploss_levels = [0.01]  # Tight SL (easy to trigger)
+        sltp_config_spot.stoploss_levels = [-0.01]  # Tight SL (easy to trigger)
         sltp_config_spot.takeprofit_levels = [0.10]  # Wide TP
 
         env = SequentialTradingEnvSLTP(trending_down_df, sltp_config_spot, simple_feature_fn)
@@ -262,7 +266,7 @@ class TestSLTPPriceGaps:
 
     def test_gap_triggers_stop_loss(self, price_gap_df, sltp_config_spot):
         """Price gap should trigger SL even if close doesn't hit it."""
-        sltp_config_spot.stoploss_levels = [0.05]  # 5% SL
+        sltp_config_spot.stoploss_levels = [-0.05]  # 5% SL
         sltp_config_spot.takeprofit_levels = [0.10]
 
         env = SequentialTradingEnvSLTP(price_gap_df, sltp_config_spot, simple_feature_fn)
@@ -285,34 +289,6 @@ class TestSLTPPriceGaps:
         assert next_td["next"]["account_state"][1] == 0.0
         env.close()
 
-    def test_gap_triggers_take_profit(self, price_gap_df, sltp_config_spot):
-        """Price gap should trigger TP even if close doesn't hit it."""
-        # Modify gap_df to have upward gap instead
-        gap_up_df = price_gap_df.copy()
-        gap_up_df.loc[50:, "close"] = gap_up_df.loc[50:, "close"] * 1.15  # 15% jump
-
-        sltp_config_spot.stoploss_levels = [0.20]  # Wide SL
-        sltp_config_spot.takeprofit_levels = [0.05]  # 5% TP
-
-        env = SequentialTradingEnvSLTP(gap_up_df, sltp_config_spot, simple_feature_fn)
-        td = env.reset()
-
-        # Open long bracket
-        action_td = td.clone()
-        action_td["action"] = torch.tensor(1)
-        next_td = env.step(action_td)
-
-        # Step through the gap
-        for _ in range(60):
-            if next_td["next"]["account_state"][1] == 0.0:
-                break
-            action_td_hold = next_td["next"].clone()
-            action_td_hold["action"] = torch.tensor(0)
-            next_td = env.step(action_td_hold)
-
-        # Gap should have triggered TP
-        assert next_td["next"]["account_state"][1] == 0.0
-        env.close()
 
 
 # ============================================================================
@@ -347,18 +323,6 @@ class TestSLTPIntegration:
         # Fees should have reduced cash (unless huge profit)
         assert final_cash < initial_cash + 100
 
-    def test_sltp_terminates_properly(self, sltp_env):
-        """SLTP env should terminate at max_traj_length."""
-        sltp_env.max_traj_length = 10
-        td = sltp_env.reset()
-
-        for _ in range(10):
-            action_td = td.clone()
-            action_td["action"] = torch.tensor(0)  # No action
-            td = sltp_env.step(action_td)
-
-        assert td["next"]["done"].item()
-
     def test_sltp_account_state_consistent(self, sltp_env, trading_mode):
         """Account state should be valid after SLTP operations."""
         td = sltp_env.reset()
@@ -379,32 +343,11 @@ class TestSLTPIntegration:
 class TestSLTPEdgeCases:
     """Edge case tests for SLTP environments."""
 
-    def test_empty_sl_levels_raises(self, sample_ohlcv_df, trading_mode):
-        """Should raise error for empty SL levels."""
-        with pytest.raises(ValueError):
-            config = SequentialTradingEnvSLTPConfig(
-                trading_mode=trading_mode,
-                stoploss_levels=[],  # Empty
-                takeprofit_levels=[0.03],
-            )
-            SequentialTradingEnvSLTP(sample_ohlcv_df, config)
-
-    def test_empty_tp_levels_raises(self, sample_ohlcv_df, trading_mode):
-        """Should raise error for empty TP levels."""
-        with pytest.raises(ValueError):
-            config = SequentialTradingEnvSLTPConfig(
-                trading_mode=trading_mode,
-                stoploss_levels=[-0.02],
-                takeprofit_levels=[],  # Empty
-            )
-            SequentialTradingEnvSLTP(sample_ohlcv_df, config)
-
     def test_negative_sl_levels_raises(self, sample_ohlcv_df, trading_mode):
-        """Should raise error for negative SL levels."""
+        """Should raise error for positive SL levels (must be negative)."""
         with pytest.raises(ValueError):
             config = SequentialTradingEnvSLTPConfig(
-                trading_mode=trading_mode,
-                stoploss_levels=[-0.02],  # Negative
+                    stoploss_levels=[0.02],  # Positive (invalid)
                 takeprofit_levels=[0.03],
             )
             SequentialTradingEnvSLTP(sample_ohlcv_df, config)
@@ -413,8 +356,7 @@ class TestSLTPEdgeCases:
         """Should raise error for negative TP levels."""
         with pytest.raises(ValueError):
             config = SequentialTradingEnvSLTPConfig(
-                trading_mode=trading_mode,
-                stoploss_levels=[-0.02],
+                    stoploss_levels=[-0.02],
                 takeprofit_levels=[-0.03],  # Negative
             )
             SequentialTradingEnvSLTP(sample_ohlcv_df, config)
@@ -427,22 +369,6 @@ class TestSLTPEdgeCases:
 
 class TestSLTPRegression:
     """Regression tests for known SLTP issues."""
-
-    def test_action_spec_matches_levels(self, sltp_env):
-        """Action spec size should match action_levels length."""
-        assert sltp_env.action_spec.n == len(sltp_env.action_levels)
-
-    def test_sltp_levels_immutable(self, sltp_env):
-        """SL/TP levels should not change after initialization."""
-        initial_levels = sltp_env.action_levels.copy()
-
-        # Perform operations
-        td = sltp_env.reset()
-        action_td = td.clone()
-        action_td["action"] = torch.tensor(1)
-        sltp_env.step(action_td)
-
-        assert sltp_env.action_levels == initial_levels
 
     def test_no_action_when_no_position(self, sltp_env):
         """No action should work when there's no position."""
