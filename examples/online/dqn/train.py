@@ -239,24 +239,44 @@ def main(cfg: DictConfig):  # noqa: F821
                 i * frames_in_batch
             ) // test_interval:
                 actor.eval()
-                # Move actor to CPU temporarily for eval
+                actor.to("cpu")
+
+                # Evaluate on test data
                 eval_rollout = eval_env.rollout(
                     max_eval_traj_length,
-                    actor.to("cpu"),
+                    actor,
                     auto_cast_to_device=False,
                     break_when_any_done=True,
                 )
-                # Move actor back to device for training
-                actor.to(device)
                 eval_rollout.squeeze()
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
 
-                # Render history
+                # Render test history
                 fig = eval_env.base_env.render_history(return_fig=True)
                 eval_env.reset()
                 if fig is not None and logger is not None:
                     metrics_to_log["eval/history"] = wandb.Image(fig[0])
+
+                # Evaluate on train data
+                train_rollout = train_env.rollout(
+                    max_train_traj_length,
+                    actor,
+                    auto_cast_to_device=False,
+                    break_when_any_done=True,
+                )
+                train_rollout.squeeze()
+                train_eval_reward = train_rollout["next", "reward"].sum(-2).mean().item()
+                metrics_to_log["train_eval/reward"] = train_eval_reward
+
+                # Render train history
+                train_fig = train_env.base_env.render_history(return_fig=True)
+                train_env.reset()
+                if train_fig is not None and logger is not None:
+                    metrics_to_log["train_eval/history"] = wandb.Image(train_fig[0])
+
+                # Move actor back to device for training
+                actor.to(device)
                 torch.save(actor.state_dict(), f"dqn_policy_{i}.pth")
                 actor.train()
 
