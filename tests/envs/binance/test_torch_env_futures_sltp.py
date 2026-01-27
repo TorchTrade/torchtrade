@@ -688,10 +688,6 @@ class TestCriticalEdgeCases:
             with pytest.raises(KeyError):
                 env.step(action_td)
 
-    # Removed edge case reward tests that mock internal methods and expect specific errors
-                # Log return from 1000 to 1100 is log(1100/1000) = log(1.1) ≈ 0.0953
-                assert reward == pytest.approx(np.log(1100 / 1000), rel=1e-5)
-
     def test_position_state_resync_on_reset(self, env_with_mocks):
         """Test that reset synchronizes position state with exchange (Critical: 8/10)."""
         env, mock_trader, _ = env_with_mocks

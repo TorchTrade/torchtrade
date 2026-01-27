@@ -135,43 +135,7 @@ class TestOnlineExamplesWithMocks:
 # =============================================================================
 
 class TestOfflineEnvironments:
-    """Test offline environments with synthetic data."""
-
-    @pytest.fixture
-    def sample_df(self):
-        """Create a sample OHLCV DataFrame."""
-        np.random.seed(42)
-        n_rows = 2000
-
-        start_time = np.datetime64("2024-01-01 00:00:00")
-        timestamps = [start_time + np.timedelta64(i, "m") for i in range(n_rows)]
-
-        initial_price = 100.0
-        returns = np.random.normal(0, 0.001, n_rows)
-        close_prices = initial_price * np.exp(np.cumsum(returns))
-
-        high_prices = close_prices * (1 + np.abs(np.random.normal(0, 0.002, n_rows)))
-        low_prices = close_prices * (1 - np.abs(np.random.normal(0, 0.002, n_rows)))
-        open_prices = np.roll(close_prices, 1)
-        open_prices[0] = initial_price
-
-        low_prices = np.minimum(low_prices, np.minimum(open_prices, close_prices))
-        high_prices = np.maximum(high_prices, np.maximum(open_prices, close_prices))
-
-        volume = np.random.lognormal(10, 1, n_rows)
-
-        import pandas as pd
-        return pd.DataFrame({
-            "timestamp": timestamps,
-            "open": open_prices,
-            "high": high_prices,
-            "low": low_prices,
-            "close": close_prices,
-            "volume": volume,
-        })
-
-    # Removed outdated tests for old environment names (SeqLongOnlyEnv, etc.)
-    # These environments were replaced by SequentialTradingEnv
+    """Test offline environments with synthetic data (deprecated - use EXAMPLE_COMMANDS instead)."""
     pass
 
 
@@ -337,9 +301,6 @@ class TestHuggingFaceDataset:
 # All examples now use HuggingFace datasets for market data
 # NOTE: Must use env.train_envs>=2 and env.eval_envs>=2 to avoid batch dimension squeeze issues
 EXAMPLE_COMMANDS = {
-    # Removed outdated example commands that reference non-existent training scripts
-    # Examples have been reorganized into consolidated directories (ppo, grpo, iql, etc.)
-
     # ==========================================================================
     # IQL Examples
     # ==========================================================================
@@ -357,14 +318,13 @@ EXAMPLE_COMMANDS = {
         "env.test_split_start=2025-07-01 "
     ),
 
-    # IQL Offline - uses HuggingFace dataset for replay buffer
-    # NOTE: Currently disabled because evaluation runs on step 0 and fails due
-    # to shape mismatch between model's expected dimensions and eval env.
+    # TODO: Enable offline IQL test once encoder shape mismatch is fixed
     # "iql_offline": (
     #     "python examples/offline/iql/train.py "
     #     "optim.gradient_steps=5 "
-    #     f"replay_buffer.data_path={HF_DATASET_PATH} "
+    #     "replay_buffer.data_path=synthetic "
     #     "replay_buffer.batch_size=16 "
+    #     "replay_buffer.buffer_size=50 "
     #     "logger.backend= "
     #     "logger.eval_iter=1000000 "
     # ),
@@ -444,8 +404,6 @@ def test_example_commands(name: str, command: str):
 
 class TestExampleImports:
     """Test that example utilities can be imported."""
-
-    # Removed test_import_offline_envs - tests old environment names that were refactored
 
     def test_import_alpaca_envs(self):
         """Test importing Alpaca environments."""

@@ -237,9 +237,6 @@ class TestDefaultSpotMode:
         finally:
             env.close()
 
-    # Removed test_spot_mode_long_only_positions - data/windowing bug with small sample_ohlcv_df
-    # Spot mode fractional positioning is thoroughly tested in test_fractional_actions.py
-
 
 class TestErrorHandlingWithDefaults:
     """Test error handling with default configurations."""

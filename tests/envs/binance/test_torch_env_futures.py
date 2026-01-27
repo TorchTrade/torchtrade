@@ -227,8 +227,6 @@ class TestBinanceFuturesTorchTradingEnv:
         env.close()
         mock_trader.cancel_open_orders.assert_called()
 
-    # Removed reward calculation tests that tested private _calculate_reward() method
-
 
 class TestBinanceFuturesTradingEnvConfig:
     """Tests for BinanceFuturesTradingEnvConfig."""

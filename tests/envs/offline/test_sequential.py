@@ -144,9 +144,6 @@ class TestSequentialEnvReset:
         # Element 1: position_direction should be 0 after reset (no position)
         assert account_state[1] == 0.0, "Position direction should be 0 after reset"
 
-    # Removed test_reset_advances_episode_start - tests implementation detail (current_index)
-    # Random start behavior is tested indirectly through seeding tests
-
 
 # ============================================================================
 # STEP TESTS
@@ -176,9 +173,6 @@ class TestSequentialEnvStep:
         assert "account_state" in next_td["next"].keys()
         assert "reward" in next_td["next"].keys()
         assert "done" in next_td["next"].keys()
-
-    # Removed test_step_increments_time - tests implementation detail (current_index)
-    # Time progression is tested through observation changes and done conditions
 
     def test_same_action_preserves_position_size(self, unified_env):
         """Repeating same action should keep similar position size (not exact due to price changes)."""

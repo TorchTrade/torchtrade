@@ -161,9 +161,6 @@ class TestOneStepSingleDecision:
         reward = next_td["next"]["reward"]
         assert isinstance(reward.item(), float)
 
-    # Removed test_terminal_state_at_rollout_end - tests implementation detail (current_index)
-    # Terminal state behavior is tested through done flag and truncation tests
-
 
 # ============================================================================
 # ROLLOUT SIMULATION TESTS
@@ -316,9 +313,6 @@ class TestOneStepRewardAccumulation:
         # Reward should be non-zero (unless price didn't move)
         # We can't guarantee sign, but it should be a valid float
         assert isinstance(reward, float)
-
-    # Removed test_hold_reward_is_zero - wrong assumption about hold reward
-    # Hold action can have non-zero reward if it preserves gains during rollout
 
     def test_transaction_costs_included(self, onestep_env, trading_mode):
         """Terminal reward should include transaction costs."""
