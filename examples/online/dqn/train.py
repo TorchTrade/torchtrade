@@ -265,11 +265,11 @@ def main(cfg: DictConfig):  # noqa: F821
                     auto_cast_to_device=False,
                     break_when_any_done=True,
                 )
-                train_rollout.squeeze()
-                train_eval_reward = train_rollout["next", "reward"].sum(-2).mean().item()
+                # Only log reward from env[0] to match the rendered figure
+                train_eval_reward = train_rollout[0]["next", "reward"].sum().item()
                 metrics_to_log["train_eval/reward"] = train_eval_reward
 
-                # Render train history
+                # Render train history (from env[0])
                 train_fig = train_env.base_env.render_history(return_fig=True)
                 train_env.reset()
                 if train_fig is not None and logger is not None:
