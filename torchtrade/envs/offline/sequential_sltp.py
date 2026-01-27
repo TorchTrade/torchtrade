@@ -312,12 +312,14 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
             self.position.entry_price, execution_price, self.position.position_size
         )
 
-        # Calculate fee
+        # Calculate fee and margin to return
         notional = abs(self.position.position_size * execution_price)
         fee = notional * self.transaction_fee
+        # Return the margin that was locked when opening
+        margin_to_return = abs(self.position.position_size * self.position.entry_price) / self.leverage
 
-        # Update balance
-        self.balance += pnl - fee
+        # Update balance: add realized PnL, subtract fee, return locked margin
+        self.balance += pnl - fee + margin_to_return
         self.balance = max(0.0, self.balance)
 
         # Reset position and SLTP state
@@ -531,8 +533,10 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         if margin_required + fee > self.balance:
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
-        # Deduct fee
-        self.balance -= fee
+        # Deduct fee and margin
+        # For spot (leverage=1): margin_required = notional_value (full cost)
+        # For futures (leverage>1): margin_required = notional_value / leverage
+        self.balance -= fee + margin_required
         self.balance = max(0.0, self.balance)
 
         # Set position
