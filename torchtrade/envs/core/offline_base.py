@@ -265,6 +265,18 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         # Get initial observation
         obs = self._get_observation()
 
+        # Record initial state to history (before any actions)
+        initial_price = self._cached_base_features["close"]
+        initial_portfolio_value = self._get_portfolio_value(initial_price)
+        self.history.record_step(
+            price=initial_price,
+            action=0.0,  # No action taken yet (hold)
+            reward=0.0,  # No reward yet
+            portfolio_value=initial_portfolio_value,
+            position=0.0,  # Starting with no position
+            action_type="hold"
+        )
+
         # Add coverage tracking indices (only during training with random_start)
         if self.random_start:
             obs.set(
