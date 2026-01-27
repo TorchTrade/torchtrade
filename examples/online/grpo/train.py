@@ -199,7 +199,9 @@ def main(cfg: DictConfig):  # noqa: F821
                 i * frames_in_batch
             ) // test_interval:
                 actor.eval()
-                # Evaluate on test data
+                # Evaluate on test data (using SequentialTradingEnvSLTP)
+                # Note: GRPO uses OneStepTradingEnv for training, which doesn't support
+                # normal rollouts, so we only evaluate on the test env (SequentialSLTPEnv)
                 # Keep eval_env on CPU, move actor to CPU temporarily for eval
                 eval_rollout = eval_env.rollout(
                     max_eval_traj_length,
@@ -229,24 +231,6 @@ def main(cfg: DictConfig):  # noqa: F821
                 eval_env.reset()
                 if fig is not None and logger is not None:
                     metrics_to_log["eval/history"] = wandb.Image(fig[0])
-
-                # Evaluate on train data
-                train_rollout = train_env.rollout(
-                    max_train_traj_length,
-                    actor.to("cpu"),
-                    auto_cast_to_device=False,
-                    break_when_any_done=True,
-                )
-                actor.to(device)  # Move actor back to device for training
-                # Only log reward from env[0] to match the rendered figure
-                train_eval_reward = train_rollout[0]["next", "reward"].sum().item()
-                metrics_to_log["eval/train_reward"] = train_eval_reward
-
-                # Render train history (from env[0])
-                train_fig = train_env.base_env.render_history(return_fig=True)
-                train_env.reset()
-                if train_fig is not None and logger is not None:
-                    metrics_to_log["eval/train_history"] = wandb.Image(train_fig[0])
 
                 actor.train()
 
