@@ -1,14 +1,14 @@
 # @package env
 name: SequentialTradingEnv
 symbol: "BTC/USD"
-time_frames: ["15Min"]
-window_sizes: [10]
-execute_on: "15Min"
+time_frames: ["1Hour"]
+window_sizes: [24]
+execute_on: "1Hour"
 leverage: 6
 action_levels: [-1.0, 0.0, 1.0]
-initial_cash: [800, 1200]
-transaction_fee: 0.0006
-slippage: 0.001
+initial_cash: 10000
+transaction_fee: 0.0
+slippage: 0.0
 bankrupt_threshold: 0.1
 include_base_features: false
 max_traj_length: null
