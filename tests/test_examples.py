@@ -363,19 +363,21 @@ EXAMPLE_COMMANDS = {
     ),
 
     # ==========================================================================
-    # PPO + Chronos Example
+    # PPO + Chronos Example (requires optional chronos-forecasting package)
     # ==========================================================================
 
-    "ppo_chronos_online": (
-        "python examples/online/ppo_chronos/train.py "
-        "collector.total_frames=10 "
-        "collector.frames_per_batch=10 "
-        "loss.mini_batch_size=5 "
-        "env.train_envs=2 "
-        "logger.backend= "
-        "logger.test_interval=1000000 "
-        "env.test_split_start=2025-07-01 "
-    ),
+    # TODO: Enable ppo_chronos test once chronos-forecasting is added as optional dependency
+    # Requires: pip install git+https://github.com/amazon-science/chronos-forecasting.git
+    # "ppo_chronos_online": (
+    #     "python examples/online/ppo_chronos/train.py "
+    #     "collector.total_frames=10 "
+    #     "collector.frames_per_batch=10 "
+    #     "loss.mini_batch_size=5 "
+    #     "env.train_envs=2 "
+    #     "logger.backend= "
+    #     "logger.test_interval=1000000 "
+    #     "env.test_split_start=2025-07-01 "
+    # ),
 
     # ==========================================================================
     # GRPO Example
@@ -385,7 +387,6 @@ EXAMPLE_COMMANDS = {
         "python examples/online/grpo/train.py "
         "collector.total_frames=10 "
         "collector.frames_per_batch=10 "
-        "loss.mini_batch_size=5 "
         "env.train_envs=2 "
         "logger.backend= "
         "logger.test_interval=1000000 "

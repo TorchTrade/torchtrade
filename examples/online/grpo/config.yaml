@@ -6,11 +6,13 @@ env:
   window_sizes: [24]
   execute_on: "1Hour"
   leverage: 1
+  initial_cash: 10000
+  transaction_fee: 0.0
+  slippage: 0.0
+  bankrupt_threshold: 0.1
   stoploss_levels: [-0.02]
   takeprofit_levels: [0.04]
   include_hold_action: true
-  quantity_per_trade: 100
-  trade_mode: notional
   exp_name: ${logger.exp_name}
   seed: 0
   train_envs: 6

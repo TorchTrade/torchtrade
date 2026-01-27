@@ -4,9 +4,10 @@ defaults:
 
 # Environment overrides (chronos-specific configuration)
 env:
-  name: SeqFuturesSLTPEnv-Chronos
+  name: SequentialTradingEnvSLTP
   stoploss_levels: [-0.02]
   takeprofit_levels: [0.04, 0.06]
+  include_hold_action: true
   train_envs: 10
   eval_envs: 1
 
