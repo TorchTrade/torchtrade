@@ -696,8 +696,8 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         if margin_required + fee > self.balance:
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
-        # Execute trade
-        self.balance -= fee
+        # Execute trade - deduct fee and additional margin
+        self.balance -= fee + margin_required
         self.balance = max(0.0, self.balance)
 
         # Calculate weighted average entry price
@@ -738,8 +738,11 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         close_notional = abs(self.position.position_size * fraction_to_close * execution_price)
         fee = close_notional * self.transaction_fee
 
-        # Update balance
-        self.balance += pnl - fee
+        # Calculate freed margin (based on entry price, not current price)
+        freed_margin = abs(self.position.position_size * fraction_to_close * self.position.entry_price) / self.leverage
+
+        # Update balance: add PnL, subtract fee, return freed margin
+        self.balance += pnl - fee + freed_margin
         self.balance = max(0.0, self.balance)
 
         # Update position
@@ -799,9 +802,12 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             # Short position liquidated
             loss = (self.position.entry_price - self.liquidation_price) * abs(self.position.position_size)
 
-        # Apply loss and fees
+        # Return locked margin before applying loss and fees
+        margin_to_return = abs(self.position.position_size * self.position.entry_price) / self.leverage
+
+        # Apply loss, fees, and return margin
         liquidation_fee = abs(self.position.position_size * self.liquidation_price) * self.transaction_fee
-        self.balance += loss - liquidation_fee
+        self.balance += loss - liquidation_fee + margin_to_return
         self.balance = max(0.0, self.balance)
         trade_info["fee_paid"] = liquidation_fee
 
