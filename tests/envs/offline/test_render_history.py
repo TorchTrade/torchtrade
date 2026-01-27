@@ -6,8 +6,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for testing
 
-from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.futures.sequential import SeqFuturesEnv, SeqFuturesEnvConfig
+from torchtrade.envs.offline.sequential import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
@@ -25,7 +24,7 @@ class TestRenderHistoryLongOnly:
 
     def test_render_with_action_types(self, sample_ohlcv_df):
         """Test that render_history works with action_types."""
-        config = SeqLongOnlyEnvConfig(
+        config = SequentialTradingEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
@@ -33,7 +32,7 @@ class TestRenderHistoryLongOnly:
             max_traj_length=100,
             random_start=False,
         )
-        env = SeqLongOnlyEnv(
+        env = SequentialTradingEnv(
             df=sample_ohlcv_df,
             config=config,
             feature_preprocessing_fn=simple_feature_fn,
@@ -63,7 +62,7 @@ class TestRenderHistoryLongOnly:
 
     def test_render_with_legacy_history(self, sample_ohlcv_df):
         """Test backward compatibility with history without action_types."""
-        config = SeqLongOnlyEnvConfig(
+        config = SequentialTradingEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
@@ -71,7 +70,7 @@ class TestRenderHistoryLongOnly:
             max_traj_length=100,
             random_start=False,
         )
-        env = SeqLongOnlyEnv(
+        env = SequentialTradingEnv(
             df=sample_ohlcv_df,
             config=config,
             feature_preprocessing_fn=simple_feature_fn,
@@ -108,7 +107,7 @@ class TestRenderHistoryFutures:
 
     def test_render_with_action_types(self, sample_ohlcv_df):
         """Test that render_history works with action_types for futures."""
-        config = SeqFuturesEnvConfig(
+        config = SequentialTradingEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
@@ -117,7 +116,7 @@ class TestRenderHistoryFutures:
             max_traj_length=100,
             random_start=False,
         )
-        env = SeqFuturesEnv(
+        env = SequentialTradingEnv(
             df=sample_ohlcv_df,
             config=config,
             feature_preprocessing_fn=simple_feature_fn,
@@ -142,7 +141,7 @@ class TestRenderHistoryFutures:
 
     def test_render_with_legacy_history(self, sample_ohlcv_df):
         """Test backward compatibility with history without action_types."""
-        config = SeqFuturesEnvConfig(
+        config = SequentialTradingEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
@@ -151,7 +150,7 @@ class TestRenderHistoryFutures:
             max_traj_length=100,
             random_start=False,
         )
-        env = SeqFuturesEnv(
+        env = SequentialTradingEnv(
             df=sample_ohlcv_df,
             config=config,
             feature_preprocessing_fn=simple_feature_fn,

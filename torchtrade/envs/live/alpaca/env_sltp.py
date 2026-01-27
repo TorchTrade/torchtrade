@@ -24,23 +24,21 @@ class AlpacaSLTPTradingEnvConfig:
     represents a (stop_loss_pct, take_profit_pct) pair for bracket orders.
     """
     symbol: str = "BTC/USD"
-    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Min"
+    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Hour"
     window_sizes: Union[List[int], int] = 10
-    execute_on: Union[str, TimeFrame] = "1Min"
+    execute_on: Union[str, TimeFrame] = "1Hour"
     # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
     stoploss_levels: Tuple[float, ...] = (-0.025, -0.05, -0.1)
     # Take profit levels as percentages (positive values, e.g., 0.05 = 5%)
     takeprofit_levels: Tuple[float, ...] = (0.05, 0.1, 0.2)
     include_hold_action: bool = True  # Include HOLD action (index 0) in action space
     include_close_action: bool = False  # Include CLOSE action for manual position exit (default: False for SLTP)
-    reward_scaling: float = 1.0
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
     paper: bool = True
     trade_mode: TradeMode = "notional"
     seed: Optional[int] = 42
     include_base_features: bool = False
-    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = normalize_alpaca_timeframe_config(
@@ -69,6 +67,7 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         api_key: str = "",
         api_secret: str = "",
         feature_preprocessing_fn: Optional[Callable] = None,
+        reward_function: Optional[Callable] = None,
         observer: Optional[AlpacaObservationClass] = None,
         trader: Optional[AlpacaOrderClass] = None,
     ):
@@ -79,11 +78,16 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
             api_key: Alpaca API key (not required if observer and trader are provided)
             api_secret: Alpaca API secret (not required if observer and trader are provided)
             feature_preprocessing_fn: Optional custom preprocessing function
+            reward_function: Optional reward function (default: log_return_reward)
             observer: Optional pre-configured AlpacaObservationClass for dependency injection
             trader: Optional pre-configured AlpacaOrderClass for dependency injection
         """
         # Initialize base class (handles observer/trader, obs specs, portfolio value, etc.)
         super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
+
+        # Set reward function
+        from torchtrade.envs.core.default_rewards import log_return_reward
+        self.reward_function = reward_function or log_return_reward
 
         # Create action map from SL/TP combinations
         self.stoploss_levels = list(config.stoploss_levels)
@@ -114,9 +118,6 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
-
-        # Store old portfolio value for reward calculation
-        old_portfolio_value = self._get_portfolio_value()
 
         # Get current price from trader status (avoids redundant observation call)
         status = self.trader.get_status()
@@ -157,18 +158,25 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         new_portfolio_value = self._get_portfolio_value()
         next_tensordict = self._get_observation()
 
-        # Calculate reward and check termination
-        reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, action_tuple, trade_info)
-        done = self._check_termination(new_portfolio_value)
-
-        # Record step history (convert action_tuple to numeric action)
+        # Convert action_tuple to numeric action for history
         action_value = 1.0 if action_tuple != (None, None) else 0.0
+
+        # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(
             price=current_price,
             action=action_value,
-            reward=reward,
-            portfolio_value=old_portfolio_value
+            reward=0.0,  # Placeholder, will be set after reward calculation
+            portfolio_value=new_portfolio_value
         )
+
+        # Calculate reward using UPDATED history tracker
+        reward = float(self.reward_function(self.history))
+
+        # Update the reward in history
+        self.history.rewards[-1] = reward
+
+        # Check termination
+        done = self._check_termination(new_portfolio_value)
 
         next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
         next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))

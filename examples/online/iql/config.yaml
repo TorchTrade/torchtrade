@@ -1,31 +1,25 @@
-# env and task
+defaults:
+  - env: sequential
+  - _self_
+
+# Environment overrides (iql-specific configuration)
 env:
-  name: SeqLongOnlyEnv
-  symbol: "BTC/USD"
-  time_frames: ["5Min", "15Min"]
-  window_sizes: [10, 10]
-  execute_on: "15Min"
   initial_cash: 1000
   transaction_fee: 0.015
   slippage: 0.01
-  bankrupt_threshold: 0.1
-  exp_name: ${logger.exp_name}
-  seed: 0
-  train_envs: 5
+  train_envs: 1
   eval_envs: 1
-  data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
-  test_split_start: "2025-01-01"
 
-# logger
+# Logger
 logger:
   backend: wandb
   project_name: TorchTrade-Online
-  exp_name: iql
-  group_name: null
+  exp_name: iql-${env.name}
+  group_name: ${env.name}
   eval_iter: 20000
   mode: online
 
-# replay buffer
+# Replay buffer
 replay_buffer:
   buffer_size: 1000000
   batch_size: 256
@@ -34,7 +28,7 @@ replay_buffer:
   device: cpu
   prefetch: 3
 
-# collector
+# Collector
 collector:
   device: cpu
   init_random_frames: 10000
@@ -42,29 +36,27 @@ collector:
   max_frames_per_traj: 100000
   total_frames: 2000000
 
-# optimization
+# Optimization
 optim:
   device: null
   lr: 3e-4
   weight_decay: 0.0
   utd_ratio: 1
 
-# network
+# Network
 model:
   hidden_sizes: [256, 256]
   activation: relu
   default_policy_scale: 1.0
   scale_lb: 0.1
 
-# loss
-loss: 
+# Loss
+loss:
   loss_function: l2
-  gamma: 0.4 # 0.95
+  gamma: 0.4
   tau: 0.005
   hard_update_interval: 1000
-
-
-# IQL specific hyperparameter
+  # IQL specific hyperparameters
   temperature: 3.0
   expectile: 0.7
 

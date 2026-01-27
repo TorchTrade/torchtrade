@@ -12,7 +12,7 @@ from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import FuturesHistoryTracker, PositionState
+from torchtrade.envs.core.state import HistoryTracker, PositionState
 
 
 class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -26,9 +26,17 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
     - Portfolio value calculation (total_margin_balance)
     - Helper methods for market data keys and account state
 
-    Standard account state for Bitget futures environments:
-    ["cash", "position_size", "position_value", "entry_price", "current_price",
-     "unrealized_pnlpct", "leverage", "margin_ratio", "liquidation_price", "holding_time"]
+    Standard account state for Bitget futures environments (6 elements):
+    [exposure_pct, position_direction, unrealized_pnl_pct,
+     holding_time, leverage, distance_to_liquidation]
+
+    Element definitions:
+        - exposure_pct: position_value / total_equity
+        - position_direction: sign(position_size) (-1=short, 0=flat, +1=long)
+        - unrealized_pnl_pct: percentage unrealized PnL from entry
+        - holding_time: steps since position opened
+        - leverage: 1-125x leverage multiplier
+        - distance_to_liquidation: normalized distance to liquidation price
 
     Subclasses must implement:
     - Action space definition (different per environment)
@@ -36,10 +44,11 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
     - _check_termination(): Episode termination logic
     """
 
-    # Standard account state for Bitget futures environments (10 elements)
+    # Standard account state for Bitget futures environments (6 elements)
+    # Universal state used across all TorchTrade environments for better generalization.
     ACCOUNT_STATE = [
-        "cash", "position_size", "position_value", "entry_price", "current_price",
-        "unrealized_pnlpct", "leverage", "margin_ratio", "liquidation_price", "holding_time"
+        "exposure_pct", "position_direction", "unrealized_pnlpct",
+        "holding_time", "leverage", "distance_to_liquidation"
     ]
 
     def __init__(
@@ -105,8 +114,8 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Initialize position state
         self.position = PositionState()  # current_position: 0=no position, 1=long, -1=short
 
-        # Initialize history tracking (futures environments use FuturesHistoryTracker)
-        self.history = FuturesHistoryTracker()
+        # Initialize history tracking (futures environments use HistoryTracker)
+        self.history = HistoryTracker()
 
     def _init_trading_clients(
         self,
@@ -169,7 +178,7 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.market_data_key = "market_data"
         self.account_state_key = "account_state"
 
-        # Account state spec (10 elements for Bitget futures)
+        # Account state spec (6 elements)
         account_state_spec = Bounded(
             low=-torch.inf,
             high=torch.inf,
@@ -223,7 +232,6 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
             current_price = self.trader.get_mark_price()
             unrealized_pnl_pct = 0.0
             leverage = float(self.config.leverage)
-            margin_ratio = 0.0
             liquidation_price = 0.0
             holding_time = 0.0
         else:
@@ -234,24 +242,52 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
             current_price = position_status.mark_price
             unrealized_pnl_pct = position_status.unrealized_pnl_pct
             leverage = float(position_status.leverage)
-            # Calculate margin ratio (position value / total balance)
-            margin_ratio = position_value / total_balance if total_balance > 0 else 0.0
             liquidation_price = position_status.liquidation_price
             holding_time = float(self.position.hold_counter)
 
-        # Build account state tensor (10 elements for Bitget futures)
+        # Calculate new 6-element account state
+        # Element 0: exposure_pct (position_value / portfolio_value)
+        exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
+
+        # Element 1: position_direction (-1, 0, +1)
+        position_direction = float(
+            1 if position_size > 0
+            else -1 if position_size < 0
+            else 0
+        )
+
+        # Element 2: unrealized_pnl_pct (from Bitget API)
+
+        # Element 3: holding_time
+
+        # Element 4: leverage
+
+        # Element 5: distance_to_liquidation
+        if position_size == 0:
+            distance_to_liquidation = 1.0
+        elif current_price == 0:
+            distance_to_liquidation = 1.0
+        else:
+            if position_size > 0:
+                # Long position - liquidated if price drops below liquidation_price
+                distance_to_liquidation = (current_price - liquidation_price) / current_price
+            else:
+                # Short position - liquidated if price rises above liquidation_price
+                distance_to_liquidation = (liquidation_price - current_price) / current_price
+            # Clamp to [0, inf)
+            distance_to_liquidation = max(0.0, distance_to_liquidation)
+
+        # Build 6-element account state tensor
+        # [exposure_pct, position_direction, unrealized_pnl_pct,
+        #  holding_time, leverage, distance_to_liquidation]
         account_state = torch.tensor(
             [
-                cash,
-                position_size,
-                position_value,
-                entry_price,
-                current_price,
+                exposure_pct,
+                position_direction,
                 unrealized_pnl_pct,
-                leverage,
-                margin_ratio,
-                liquidation_price,
                 holding_time,
+                leverage,
+                distance_to_liquidation,
             ],
             dtype=torch.float,
         )

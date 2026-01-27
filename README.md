@@ -63,21 +63,22 @@ uv sync --all-extras             # Install all optional dependencies
 ### 2. Your First Environment
 
 ```python
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 import pandas as pd
 
 # Load OHLCV data
 df = pd.read_csv("btcusdt_1m.csv")
 df['timestamp'] = pd.to_datetime(df['timestamp'])
 
-# Create environment
-config = SeqLongOnlyEnvConfig(
+# Create environment (spot trading = long-only)
+config = SequentialTradingEnvConfig(
+    trading_mode="spot",  # or "futures" for leveraged trading
     time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
     initial_cash=1000
 )
-env = SeqLongOnlyEnv(df, config)
+env = SequentialTradingEnv(df, config)
 
 # Run
 tensordict = env.reset()
@@ -162,17 +163,18 @@ Your support helps maintain the project, add new features, and keep documentatio
 
 Offline environments use historical data for backtesting (not "offline RL"):
 
-| Environment | Asset Type | Futures | Leverage | Bracket Orders | One-Step | Best For |
-|-------------|------------|---------|----------|----------------|----------|----------|
-| **SeqLongOnlyEnv** | Crypto/Stocks | ❌ | ❌ | ❌ | ❌ | Beginners, simple strategies |
-| **SeqLongOnlySLTPEnv** | Crypto/Stocks | ❌ | ❌ | ✅ | ❌ | Risk management research |
-| **LongOnlyOneStepEnv** | Crypto/Stocks | ❌ | ❌ | ✅ | ✅ | Contextual bandits, GRPO |
-| **SeqFuturesEnv** | Crypto | ✅ | ✅ (1-125x) | ❌ | ❌ | Advanced futures backtesting |
-| **SeqFuturesSLTPEnv** | Crypto | ✅ | ✅ (1-125x) | ✅ | ❌ | Risk-managed futures |
-| **FuturesOneStepEnv** | Crypto | ✅ | ✅ (1-125x) | ✅ | ✅ | Fast futures iteration, GRPO |
+| Environment | Trading Mode | Futures | Leverage | Bracket Orders | One-Step | Best For |
+|-------------|--------------|---------|----------|----------------|----------|----------|
+| **SequentialTradingEnv** | Spot | ❌ | ❌ | ❌ | ❌ | Beginners, simple strategies |
+| **SequentialTradingEnv** | Futures | ✅ | ✅ (1-125x) | ❌ | ❌ | Advanced futures backtesting |
+| **SequentialTradingEnvSLTP** | Spot | ❌ | ❌ | ✅ | ❌ | Risk management research |
+| **SequentialTradingEnvSLTP** | Futures | ✅ | ✅ (1-125x) | ✅ | ❌ | Risk-managed futures |
+| **OneStepTradingEnv** | Spot | ❌ | ❌ | ✅ | ✅ | Contextual bandits, GRPO |
+| **OneStepTradingEnv** | Futures | ✅ | ✅ (1-125x) | ✅ | ✅ | Fast futures iteration, GRPO |
 
-**Key Differences:**
-- **Futures vs Spot**: Futures support leverage (1-125x), margin tracking, and liquidation mechanics
+**Key Features:**
+- **Unified Architecture**: Use `trading_mode="spot"` for long-only or `trading_mode="futures"` for leveraged bidirectional trading
+- **Universal Account State**: All environments use 6-element account state for better generalization across portfolio sizes
 - **Bracket Orders (SL/TP)**: SLTP variants support stop-loss and take-profit with combinatorial action spaces
 - **One-Step**: Optimized for GRPO with episodic rollouts instead of sequential trading
 
@@ -183,31 +185,50 @@ See **[Offline Environments Documentation](https://torchtrade.github.io/torchtra
 <details>
 <summary><h2>🚀 Training Algorithms & Examples</h2></summary>
 
-TorchTrade includes implementations of multiple RL algorithms:
+TorchTrade includes implementations of multiple RL algorithms with flexible environment switching via Hydra:
 
-| Algorithm | Type | Environment Type | Example Location |
-|-----------|------|------------------|------------------|
-| **PPO** | On-policy | Sequential | `examples/online/ppo/` |
-| **IQL** | Offline | Sequential | `examples/online/iql/` |
-| **GRPO** | Policy gradient | One-step | `examples/online/grpo_futures_onestep/` |
-| **DSAC** | Off-policy | Sequential | `examples/online/dsac/` |
+| Algorithm | Type | Default Environment | Example Location |
+|-----------|------|---------------------|------------------|
+| **PPO** | On-policy | Sequential SLTP | `examples/online/ppo/` |
+| **PPO-Chronos** | On-policy | Sequential Futures SLTP | `examples/online/ppo_chronos/` |
+| **IQL** | Offline | Sequential Spot | `examples/online/iql/` |
+| **GRPO** | Policy gradient | One-step Futures | `examples/online/grpo/` |
+| **DSAC** | Off-policy | Sequential Spot | `examples/online/dsac/` |
 | **CTRL** | Self-supervised | Sequential | Research |
 
 ### Run Training Examples
 
 ```bash
-# PPO on long-only environment
+# PPO with default environment (sequential SLTP)
 uv run python examples/online/ppo/train.py
 
-# GRPO on futures one-step
-uv run python examples/online/grpo_futures_onestep/train.py
+# PPO with different environments (switch via command-line)
+uv run python examples/online/ppo/train.py env=sequential_futures
+uv run python examples/online/ppo/train.py env=onestep_futures
+uv run python examples/online/ppo/train.py env=sequential_spot
+
+# GRPO with default (one-step futures)
+uv run python examples/online/grpo/train.py
+
+# GRPO with spot trading
+uv run python examples/online/grpo/train.py env=onestep_spot
 
 # Customize with Hydra overrides
 uv run python examples/online/ppo/train.py \
-    env.symbol="BTC/USD" \
+    env=sequential_futures \
+    env.symbol="ETH/USD" \
+    env.leverage=10 \
     optim.lr=1e-4 \
     loss.gamma=0.95
 ```
+
+**Available environment configs** (`env=<name>`):
+- `sequential_spot` - Basic spot trading
+- `sequential_futures` - Basic futures trading
+- `sequential_sltp` - Spot with bracket orders
+- `sequential_futures_sltp` - Futures with bracket orders
+- `onestep_spot` - Contextual bandit (spot)
+- `onestep_futures` - Contextual bandit (futures)
 
 See **[Examples Documentation](https://torchtrade.github.io/torchtrade_envs/examples/)** for all available examples.
 
@@ -268,7 +289,7 @@ uv run pytest tests/ -v
 ### Training PPO on Backtesting Data
 
 ```python
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 import datasets
 
 # Load historical data from HuggingFace
@@ -277,7 +298,8 @@ df = df["train"].to_pandas()
 df['0'] = pd.to_datetime(df['0'])
 
 # Configure multi-timeframe environment
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
+    trading_mode="spot",  # Long-only trading
     time_frames=["1min", "5min", "15min", "60min"],
     window_sizes=[12, 8, 8, 24],
     execute_on=(5, "Minute"),
@@ -286,7 +308,7 @@ config = SeqLongOnlyEnvConfig(
     slippage=0.001
 )
 
-env = SeqLongOnlyEnv(df, config)
+env = SequentialTradingEnv(df, config)
 # Train with PPO - see examples/online/ppo/train.py
 ```
 
@@ -337,7 +359,6 @@ experts = create_expert_ensemble(
 
 # Available: MomentumActor, MeanReversionActor, BreakoutActor
 # Use for imitation learning or baselines
-# See examples/online/rulebased/
 ```
 
 ### Feature Engineering
@@ -355,7 +376,8 @@ def custom_preprocessing(df):
     df.fillna(0, inplace=True)
     return df
 
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
+    trading_mode="spot",
     feature_preprocessing_fn=custom_preprocessing,
     time_frames=["1min", "5min"],
     window_sizes=[12, 8],
@@ -373,7 +395,8 @@ See **[Advanced Customization](https://torchtrade.github.io/torchtrade_envs/guid
 ### Multi-Timeframe Observations
 
 ```python
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
+    trading_mode="spot",
     time_frames=["1min", "5min", "15min", "60min"],
     window_sizes=[12, 8, 8, 24],
     execute_on=(5, "Minute")
@@ -392,12 +415,21 @@ config = SeqLongOnlyEnvConfig(
 observation = {
     "market_data_1min": tensor([12, num_features]),
     "market_data_5min": tensor([8, num_features]),
-    "account_state": tensor([7]),  # or [10] for futures
+    "account_state": tensor([6]),  # Universal 6-element state
 }
 
-# Account state (spot): [cash, position_size, position_value,
-#                        entry_price, current_price, unrealized_pnl_pct, holding_time]
-# Futures adds: [leverage, margin_ratio, liquidation_price]
+# Account state (universal): [exposure_pct, position_direction, unrealized_pnl_pct,
+#                             holding_time, leverage, distance_to_liquidation]
+# Element definitions:
+#   - exposure_pct: position_value / portfolio_value (0-1+ with leverage)
+#   - position_direction: sign(position_size) (-1=short, 0=flat, +1=long)
+#   - unrealized_pnl_pct: (current_price - entry_price) / entry_price * direction
+#   - holding_time: steps since position opened
+#   - leverage: 1.0 for spot, 1-125 for futures
+#   - distance_to_liquidation: normalized distance (1.0 for spot/no position)
+#
+# Spot mode: position_direction in {0, +1}, leverage=1.0, distance_to_liquidation=1.0
+# Futures mode: position_direction in {-1, 0, +1}, leverage=1-125, calculated distance
 ```
 
 ### Action Spaces
@@ -419,17 +451,13 @@ See **[Advanced Customization](https://torchtrade.github.io/torchtrade_envs/guid
 <details>
 <summary><h2>⚙️ Configuration with Hydra</h2></summary>
 
-TorchTrade uses Hydra for configuration management:
+TorchTrade uses Hydra for configuration management with a defaults list pattern:
 
 ```yaml
 # examples/online/ppo/config.yaml
-env:
-  symbol: "BTC/USD"
-  time_frames: ["1min", "5min", "15min", "60min"]
-  window_sizes: [12, 8, 8, 24]
-  execute_on: [5, "Minute"]
-  initial_cash: [1000, 5000]
-  transaction_fee: 0.0025
+defaults:
+  - env: sequential_sltp  # Load environment config
+  - _self_
 
 collector:
   frames_per_batch: 100000
@@ -446,11 +474,30 @@ loss:
   entropy_coef: 0.01
 ```
 
+```yaml
+# examples/online/env/sequential_sltp.yaml
+env:
+  name: SequentialTradingEnvSLTP
+  trading_mode: "spot"
+  symbol: "BTC/USD"
+  time_frames: ["5Min", "15Min"]
+  window_sizes: [10, 10]
+  execute_on: "15Min"
+  initial_cash: [1000, 5000]
+  transaction_fee: 0.0025
+  # ... more env config
+```
+
 Override from command line:
 
 ```bash
+# Switch environment entirely
+uv run python examples/online/ppo/train.py env=sequential_futures
+
+# Override specific parameters
 uv run python examples/online/ppo/train.py \
     env.symbol="ETH/USD" \
+    env.leverage=10 \
     optim.lr=1e-4 \
     loss.gamma=0.95
 ```

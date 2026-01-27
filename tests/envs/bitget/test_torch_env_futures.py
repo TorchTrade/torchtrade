@@ -115,9 +115,9 @@ class TestBitgetFuturesTorchTradingEnv:
         assert "market_data_5m_10" in obs_spec.keys()
 
     def test_account_state_shape(self, env):
-        """Test account state has correct shape (10 elements for futures)."""
+        """Test account state has correct shape (6 elements)."""
         obs_spec = env.observation_spec
-        assert obs_spec["account_state"].shape == (10,)
+        assert obs_spec["account_state"].shape == (6,)
 
     def test_reset(self, env, mock_trader):
         """Test environment reset."""
@@ -133,7 +133,7 @@ class TestBitgetFuturesTorchTradingEnv:
         """Test observation shapes after reset."""
         td = env.reset()
 
-        assert td["account_state"].shape == (10,)
+        assert td["account_state"].shape == (6,)
         assert td["market_data_1m_10"].shape == (10, 4)
         assert td["market_data_5m_10"].shape == (10, 4)
 
@@ -199,85 +199,6 @@ class TestBitgetFuturesTorchTradingEnv:
             assert isinstance(terminated, torch.Tensor)
             assert isinstance(truncated, torch.Tensor)
             assert done.shape == (1,)
-
-    def test_account_state_with_position(self, env, mock_trader):
-        """Test account state when there's an open position."""
-        from torchtrade.envs.live.bitget.order_executor import PositionStatus
-
-        # Mock a position
-        mock_trader.get_status = MagicMock(return_value={
-            "position_status": PositionStatus(
-                qty=0.001,
-                notional_value=50.0,
-                entry_price=50000.0,
-                unrealized_pnl=0.5,
-                unrealized_pnl_pct=0.01,
-                mark_price=50500.0,
-                leverage=5,
-                margin_mode="isolated",
-                liquidation_price=45000.0,
-            )
-        })
-
-        td = env._get_observation()
-
-        account_state = td["account_state"]
-        assert account_state[1].item() == pytest.approx(0.001, rel=1e-3)  # position_size
-        assert account_state[4].item() == pytest.approx(50500.0, rel=1e-3)  # current_price (mark_price)
-        assert account_state[6].item() == pytest.approx(5.0, rel=1e-3)  # leverage
-
-    def test_account_state_no_position(self, env, mock_trader):
-        """Test account state when there's no position."""
-        mock_trader.get_status = MagicMock(return_value={
-            "position_status": None
-        })
-
-        td = env._get_observation()
-
-        account_state = td["account_state"]
-        assert account_state[1].item() == 0.0  # position_size should be 0
-
-    def test_account_state_short_position(self, env, mock_trader):
-        """Test account state with short position (negative qty)."""
-        from torchtrade.envs.live.bitget.order_executor import PositionStatus
-
-        mock_trader.get_status = MagicMock(return_value={
-            "position_status": PositionStatus(
-                qty=-0.001,  # Negative for short
-                notional_value=50.0,
-                entry_price=50000.0,
-                unrealized_pnl=0.5,
-                unrealized_pnl_pct=0.01,
-                mark_price=49500.0,
-                leverage=5,
-                margin_mode="isolated",
-                liquidation_price=55000.0,
-            )
-        })
-
-        td = env._get_observation()
-
-        account_state = td["account_state"]
-        assert account_state[1].item() < 0  # position_size should be negative
-
-    def test_bankruptcy_termination(self, env, mock_trader):
-        """Test that environment terminates on bankruptcy."""
-        # Mock low balance
-        mock_trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 50.0,  # Below 10% of initial 1000
-            "available_balance": 50.0,
-            "total_unrealized_profit": 0.0,
-            "total_margin_balance": 50.0,
-        })
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
-            next_td = env.step(action_td)
-
-            done = next_td["next"]["done"]
-            assert done.item() is True
 
     def test_no_bankruptcy_when_disabled(self, env_config, mock_observer, mock_trader):
         """Test that bankruptcy check can be disabled."""

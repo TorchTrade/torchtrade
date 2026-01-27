@@ -17,10 +17,9 @@ from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
 class AlpacaTradingEnvConfig:
     symbol: str = "BTC/USD"
     action_levels: Optional[List[float]] = None  # Custom action levels (defaults based on mode)
-    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Min"
+    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Hour"
     window_sizes: Union[List[int], int] = 10
-    execute_on: Union[str, TimeFrame] = "1Min"  # On which timeframe to execute trades
-    reward_scaling: float = 1.0
+    execute_on: Union[str, TimeFrame] = "1Hour"  # On which timeframe to execute trades
     position_penalty: float = 0.0001  # Penalty for holding positions
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
@@ -28,7 +27,6 @@ class AlpacaTradingEnvConfig:
     trade_mode: TradeMode = "notional"
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
-    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = normalize_alpaca_timeframe_config(
@@ -80,6 +78,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         api_key: str = "",
         api_secret: str = "",
         feature_preprocessing_fn: Optional[Callable] = None,
+        reward_function: Optional[Callable] = None,
         observer: Optional[AlpacaObservationClass] = None,
         trader: Optional[AlpacaOrderClass] = None,
     ):
@@ -91,11 +90,16 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
             api_key: Alpaca API key (not required if observer and trader are provided)
             api_secret: Alpaca API secret (not required if observer and trader are provided)
             feature_preprocessing_fn: Optional custom preprocessing function
+            reward_function: Optional reward function (default: log_return_reward)
             observer: Optional pre-configured AlpacaObservationClass for dependency injection
             trader: Optional pre-configured AlpacaOrderClass for dependency injection
         """
         # Initialize base class (handles observer/trader, obs specs, portfolio value, etc.)
         super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
+
+        # Set reward function
+        from torchtrade.envs.core.default_rewards import log_return_reward
+        self.reward_function = reward_function or log_return_reward
 
         # Define action space (environment-specific)
         self.action_levels = config.action_levels
@@ -103,9 +107,6 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
-
-        # Store old portfolio value for reward calculation
-        old_portfolio_value = self._get_portfolio_value()
 
         # Get desired action and current position
         desired_action = self.action_levels[tensordict.get("action", 0)]
@@ -134,17 +135,22 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         new_portfolio_value = self._get_portfolio_value()
         next_tensordict = self._get_observation()
 
-        # Calculate reward and check termination
-        reward = self._calculate_reward(old_portfolio_value, new_portfolio_value, desired_action, trade_info)
-        done = self._check_termination(new_portfolio_value)
-
-        # Record step history
+        # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(
             price=current_price,
             action=desired_action,
-            reward=reward,
-            portfolio_value=old_portfolio_value
+            reward=0.0,  # Placeholder, will be set after reward calculation
+            portfolio_value=new_portfolio_value
         )
+
+        # Calculate reward using UPDATED history tracker
+        reward = float(self.reward_function(self.history))
+
+        # Update the reward in history
+        self.history.rewards[-1] = reward
+
+        # Check termination
+        done = self._check_termination(new_portfolio_value)
 
         next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
         next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))

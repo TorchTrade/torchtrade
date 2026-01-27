@@ -1,4 +1,4 @@
-"""Utility functions for PPO training on SeqFuturesSLTPEnv."""
+"""Utility functions for GRPO training on OneStepTradingEnv."""
 from __future__ import annotations
 import functools
 
@@ -19,16 +19,19 @@ from torchtrade.envs.transforms import CoverageTracker
 from torchrl.collectors import SyncDataCollector
 
 from torchrl.modules import (
-    ActorValueOperator,
     MLP,
     ProbabilisticActor,
-    ValueOperator,
     SafeModule,
     SafeSequential,
 )
-from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
+from torchtrade.models import SimpleCNNEncoder
 
-from torchtrade.envs import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
+from torchtrade.envs import (
+    OneStepTradingEnv,
+    OneStepTradingEnvConfig,
+    SequentialTradingEnvSLTP,
+    SequentialTradingEnvSLTPConfig,
+)
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS
@@ -49,7 +52,7 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy().reset_index(drop=False)
 
-    # Basic OHLCV features
+    # Basic OHLCV features (same as PPO)
     df["features_close"] = df["close"]
     df["features_open"] = df["open"]
     df["features_high"] = df["high"]
@@ -67,34 +70,67 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
-    """Create a SeqFuturesSLTPEnv instance."""
-    config = SeqFuturesSLTPEnvConfig(
-        symbol=cfg.env.symbol,
-        time_frames=cfg.env.time_frames,
-        window_sizes=cfg.env.window_sizes,
-        execute_on=cfg.env.execute_on,
-        include_base_features=False,
-        initial_cash=cfg.env.initial_cash,
-        slippage=cfg.env.slippage,
-        transaction_fee=cfg.env.transaction_fee,
-        bankrupt_threshold=cfg.env.bankrupt_threshold,
-        seed=cfg.env.seed,
-        max_traj_length=max_traj_length,
-        random_start=random_start,
-        leverage=cfg.env.leverage,
-        stoploss_levels=cfg.env.stoploss_levels,
-        takeprofit_levels=cfg.env.takeprofit_levels,
-    )
-    return SeqFuturesSLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
+    """Create a OneStepTradingEnv or SequentialTradingEnvSLTP instance.
+
+    Both environments share the same 19-action space:
+    - Action 0: Hold/Close
+    - Actions 1-9: Long positions with SL/TP combinations
+    - Actions 10-18: Short positions with SL/TP combinations
+
+    Training uses OneStepTradingEnv (one-step GRPO-style training).
+    Evaluation uses SequentialTradingEnvSLTP (sequential episodes with render_history).
+    """
+    if not eval:
+        # Training: use OneStepTradingEnv for GRPO-style training
+        config = OneStepTradingEnvConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
+            max_traj_length=max_traj_length,
+            include_hold_action=cfg.env.include_hold_action,
+        )
+        return OneStepTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    else:
+        # Evaluation: use SequentialTradingEnvSLTP for sequential evaluation
+        # Both envs have the same 19-action space (1 hold + 9 long + 9 short)
+        config = SequentialTradingEnvSLTPConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
+            max_traj_length=max_traj_length,
+            random_start=False,
+        )
+        return SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=custom_preprocessing)
 
 
-def apply_env_transforms(env, max_steps):
+def apply_env_transforms(env, max_steps, one_step_env=True):
     """Apply standard transforms to the environment.
 
     Args:
-        env: Base environment
-        max_steps: Maximum steps for StepCounter
+        env: The environment to transform
+        max_steps: Maximum steps per episode
+        one_step_env: If True, skip unnecessary transforms for one-step envs
 
     Returns:
         transformed_env: Environment with transforms applied
@@ -102,15 +138,27 @@ def apply_env_transforms(env, max_steps):
     Note: Normalization is handled in the preprocessing function using StandardScaler
           to avoid VecNormV2 device issues.
     """
-    transformed_env = TransformedEnv(
-        env,
-        Compose(
-            InitTracker(),
-            DoubleToFloat(),
-            RewardSum(),
-            StepCounter(max_steps=max_steps),
-        ),
-    )
+    if one_step_env:
+        # PERF: Minimal transforms for one-step environments
+        # - RewardSum is unnecessary (each step terminates)
+        # - DoubleToFloat skipped (data already float32 from environment)
+        transformed_env = TransformedEnv(
+            env,
+            Compose(
+                InitTracker(),
+                StepCounter(max_steps=max_steps),
+            ),
+        )
+    else:
+        transformed_env = TransformedEnv(
+            env,
+            Compose(
+                InitTracker(),
+                DoubleToFloat(),
+                RewardSum(),
+                StepCounter(max_steps=max_steps),
+            ),
+        )
     return transformed_env
 
 
@@ -125,7 +173,7 @@ def make_environment(
 ):
     """Make environments for training and evaluation."""
     maker = functools.partial(
-        env_maker, train_df, cfg, max_traj_length=max_train_traj_length, random_start=True
+        env_maker, train_df, cfg, max_traj_length=max_train_traj_length
     )
     max_train_steps = train_df.shape[0]
     parallel_env = ParallelEnv(
@@ -133,22 +181,21 @@ def make_environment(
         EnvCreator(maker),
         serial_for_single=True,
     )
-    parallel_env.set_seed(cfg.env.seed)
+    parallel_env.set_seed(cfg.env.seed, static_seed=True)  # needs to be static for GRPO style training
 
-    # Create train environment
-    train_env = apply_env_transforms(parallel_env, max_train_steps)
+    # PERF: Use minimal transforms for one-step training env
+    train_env = apply_env_transforms(parallel_env, max_train_steps, one_step_env=True)
 
-    # Create eval environment
     maker = functools.partial(
-        env_maker, test_df, cfg, max_traj_length=max_eval_traj_length
+        env_maker, test_df, cfg, max_traj_length=max_eval_traj_length, eval=True
     )
-    eval_base_env = ParallelEnv(
+    # Eval env uses SequentialTradingEnvSLTP which is NOT one-step, so use full transforms
+    eval_parallel_env = ParallelEnv(
         eval_num_envs,
         EnvCreator(maker),
         serial_for_single=True,
     )
-    max_eval_steps = test_df.shape[0]
-    eval_env = apply_env_transforms(eval_base_env, max_eval_steps)
+    eval_env = apply_env_transforms(eval_parallel_env, max_eval_traj_length, one_step_env=False)
 
     # Create coverage tracker for postproc (used in collector)
     coverage_tracker = CoverageTracker()
@@ -159,10 +206,6 @@ def make_environment(
 # ====================================================================
 # Model utils
 # --------------------------------------------------------------------
-# NOTE: Safety wrappers (AccountStateNormalizer, SafeEncoderWrapper, etc.)
-# were removed after confirming BiNMTABL works fine with clean datasets.
-# NaN issues were caused by data gaps, not model architecture.
-# If you see NaN during training, check your dataset for missing periods.
 
 
 class BatchSafeWrapper(torch.nn.Module):
@@ -180,9 +223,9 @@ class BatchSafeWrapper(torch.nn.Module):
         return out
 
 
-def make_discrete_ppo_model(cfg, env, device):
-    """Make discrete PPO agent"""
-    activation = cfg.model.activation
+def make_discrete_grpo_model(cfg, env, device):
+    """Make discrete GRPO agent encoder (same as PPO)."""
+    activation = "tanh"
     action_spec = env.action_spec
     market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
     assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"
@@ -196,36 +239,34 @@ def make_discrete_ppo_model(cfg, env, device):
 
     # Build CNN encoders for market data
     for key, t, w in zip(market_data_keys, time_frames, window_sizes):
-        model = SimpleCNNEncoder(
+        base_model = SimpleCNNEncoder(
             input_shape=(w, num_features),
             output_shape=(1, 14),
             hidden_channels=64,
             kernel_size=3,
             activation=activation,
             final_activation=activation,
-            dropout=0.1
+            dropout=0.1,
         )
+        # Wrap to handle batch_size=1 case where encoder might squeeze batch dim
+        model = BatchSafeWrapper(base_model, output_features=14)
         encoders.append(SafeModule(
             module=model,
             in_keys=key,
             out_keys=[f"encoding_{t}_{w}"],
         ).to(device))
 
-    # Account state encoder with SimpleMLPEncoder
-    # IMPORTANT: SeqFuturesSLTPEnv has 10 account state features (not 7 like SeqLongOnly)
+    # Account state encoder with MLP
+    # IMPORTANT: OneStepTradingEnv has 10 account state features (not 7 like SeqLongOnly)
     # [cash, position_size, position_value, entry_price, current_price,
     #  unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
-    account_encoder_model = SimpleMLPEncoder(
-        input_shape=(1, 10),  # 10 features for futures (vs 7 for long-only)
-        output_shape=(1, 14),  # Match embedding_dim output
-        hidden_sizes=(32, 32),
-        activation="gelu",
-        dropout=0.1,
-        final_activation="gelu",
-    )
-
     account_state_encoder = SafeModule(
-        module=account_encoder_model,
+        module=MLP(
+            num_cells=[32, 32],
+            out_features=14,
+            activation_class=ACTIVATIONS[activation],
+            device=device,
+        ),
         in_keys=[account_state_key],
         out_keys=["encoding_account_state"],
     ).to(device)
@@ -245,11 +286,11 @@ def make_discrete_ppo_model(cfg, env, device):
     )
     common_module = SafeSequential(*encoders, account_state_encoder, common_module)
 
+    # Policy head
     action_out_features = action_spec.n
     distribution_class = torch.distributions.Categorical
     distribution_kwargs = {}
 
-    # Policy head
     policy_net = MLP(
         in_features=128,
         out_features=action_out_features,
@@ -263,7 +304,9 @@ def make_discrete_ppo_model(cfg, env, device):
         out_keys=["logits"],
     )
 
-    policy_module = ProbabilisticActor(
+    policy_module = SafeSequential(common_module, policy_module)
+
+    policy = ProbabilisticActor(
         policy_module,
         in_keys=["logits"],
         spec=env.full_action_spec_unbatched.to(device),
@@ -273,49 +316,28 @@ def make_discrete_ppo_model(cfg, env, device):
         default_interaction_type=ExplorationType.RANDOM,
     )
 
-    # Value head
-    value_net = MLP(
-        activation_class=torch.nn.ReLU,
-        in_features=128,
-        out_features=1,
-        num_cells=[],
-        device=device,
-    )
-    value_module = ValueOperator(
-        value_net,
-        in_keys=["common_features"],
-    )
-
-    return common_module, policy_module, value_module
+    return policy
 
 
-def make_ppo_models(env, device, cfg):
-    """Create PPO actor and critic models."""
-    common_module, policy_module, value_module = make_discrete_ppo_model(
+def make_grpo_policy(env, device, cfg):
+    """Create GRPO policy."""
+    policy = make_discrete_grpo_model(
         cfg,
         env,
         device=device,
     )
 
-    # Wrap modules in a single ActorCritic operator
-    actor_critic = ActorValueOperator(
-        common_operator=common_module,
-        policy_operator=policy_module,
-        value_operator=value_module,
-    ).to(device)
+    policy.to(device)
 
     with torch.no_grad():
-        td = env.fake_tensordict().unsqueeze(0).expand(3, 2).to(actor_critic.device)
-        actor_critic(td)
+        td = env.fake_tensordict().unsqueeze(0).expand(3, 2).to(policy.device)
+        policy(td)
         del td
 
-    total_params = sum(p.numel() for p in actor_critic.parameters())
+    total_params = sum(p.numel() for p in policy.parameters())
     print(f"Total number of parameters: {total_params}")
 
-    actor = actor_critic.get_policy_operator()
-    critic = actor_critic.get_value_operator()
-
-    return actor, critic
+    return policy
 
 
 def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=None, device="cpu"):
@@ -334,11 +356,14 @@ def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=N
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
         postproc=postproc,  # Add coverage tracker as postproc
     )
-    collector.set_seed(cfg.env.seed)
     return collector
 
 
 def log_metrics(logger, metrics, step):
     """Log metrics to the logger."""
+    import torch
     for metric_name, metric_value in metrics.items():
+        # PERF: Convert tensors to Python floats for logging (single sync point)
+        if isinstance(metric_value, torch.Tensor):
+            metric_value = metric_value.item()
         logger.log_scalar(metric_name, metric_value, step)

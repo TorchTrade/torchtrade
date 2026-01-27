@@ -13,7 +13,7 @@ from torchrl.envs import (
 )
 from torchrl.collectors import SyncDataCollector
 
-from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 import pandas as pd
 
 # ====================================================================
@@ -42,7 +42,7 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
     window_sizes = list(cfg.env.window_sizes)
 
-    config = SeqLongOnlyEnvConfig(
+    config = SequentialTradingEnvConfig(
         symbol=cfg.env.symbol,
         time_frames=cfg.env.time_frames,
         window_sizes=window_sizes,
@@ -56,7 +56,7 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
         max_traj_length=max_traj_length,
         random_start=random_start
     )
-    return SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    return SequentialTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
 
 
 

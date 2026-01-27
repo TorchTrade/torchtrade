@@ -1,19 +1,18 @@
+# Environment configuration (GRPO only works with OneStepTradingEnv)
 env:
-  name: FuturesOneStepEnv
+  name: OneStepTradingEnv
   symbol: "BTC/USD"
-  time_frames: ["15Min"]
-  window_sizes: [10]
-  execute_on: "15Min"
-  initial_cash: [1000, 5000]
-  transaction_fee: 0.0004  # 0.04% typical futures fee
-  slippage: 0.001
+  time_frames: ["1Hour"]
+  window_sizes: [24]
+  execute_on: "1Hour"
+  leverage: 1
+  initial_cash: 10000
+  transaction_fee: 0.0
+  slippage: 0.0
   bankrupt_threshold: 0.1
-  quantity_per_trade: 100
-  trade_mode: notional
-  leverage: 5  # 5x leverage
-  stoploss_levels: [-0.02]  # 2%, 5%, 10% stop loss
-  takeprofit_levels: [0.04]    # 5%, 10%, 20% take profit
-  include_hold_action: True
+  stoploss_levels: [-0.02]
+  takeprofit_levels: [0.04]
+  include_hold_action: true
   exp_name: ${logger.exp_name}
   seed: 0
   train_envs: 6
@@ -21,28 +20,28 @@ env:
   data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
   test_split_start: "2025-01-01"
 
-# collector
+# Collector (GRPO-specific)
 collector:
   device:
   frames_per_batch: 1200
   total_frames: 10_000_000
 
-# logger
+# Logger (GRPO-specific)
 logger:
   mode: online
   backend: wandb
-  project_name: TorchTrade-FuturesOneStep
+  project_name: TorchTrade-GRPO
   group_name: ${env.name}
-  exp_name: grpo_futures
+  exp_name: grpo-${env.name}
   test_interval: 12000
   num_test_episodes: 1
 
-# optimization
+# Optimization (GRPO-specific)
 optim:
   lr: 2.5e-4
   device:
 
-# loss
+# Loss (GRPO-specific)
 loss:
   entropy_coef: 0.01
 

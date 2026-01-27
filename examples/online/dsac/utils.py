@@ -33,7 +33,7 @@ from torchrl.modules import MLP, SafeModule, SafeSequential
 from torchrl.modules.tensordict_module.actors import ProbabilisticActor
 from torchrl.objectives import SoftUpdate
 from torchrl.objectives.sac import DiscreteSACLoss
-from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchrl.trainers.helpers.models import ACTIVATIONS
 from torchtrade.models.simple_encoders import SimpleCNNEncoder
 import copy
@@ -76,22 +76,66 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
-    config = SeqLongOnlyEnvConfig(
-        symbol=cfg.env.symbol,
-        time_frames=cfg.env.time_frames,
-        window_sizes=cfg.env.window_sizes,
-        execute_on=cfg.env.execute_on,
-        include_base_features=False,
-        initial_cash=cfg.env.initial_cash,
-        slippage=cfg.env.slippage,
-        transaction_fee=cfg.env.transaction_fee,
-        bankrupt_threshold=cfg.env.bankrupt_threshold,
-        random_start=random_start,
-        max_traj_length=max_traj_length,
-        seed=cfg.env.seed,
-        action_levels=cfg.env.action_levels,
-    )
-    return SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    if cfg.env.name == "SequentialTradingEnv":
+        config = SequentialTradingEnvConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            random_start=random_start,
+            max_traj_length=max_traj_length,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            action_levels=cfg.env.action_levels,
+        )
+        return SequentialTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    elif cfg.env.name == "SequentialTradingEnvSLTP":
+        config = SequentialTradingEnvSLTPConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            random_start=random_start,
+            max_traj_length=max_traj_length,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
+            include_hold_action=cfg.env.include_hold_action,
+        )
+        return SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=custom_preprocessing)
+    elif cfg.env.name == "OneStepTradingEnv":
+        config = OneStepTradingEnvConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
+            include_hold_action=cfg.env.include_hold_action,
+            quantity_per_trade=cfg.env.quantity_per_trade,
+            trade_mode=cfg.env.trade_mode,
+        )
+        return OneStepTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    else:
+        raise ValueError(f"Unknown environment: {cfg.env.name}")
 
 
 
@@ -249,6 +293,7 @@ def make_sac_agent(cfg, env, device):
 
     # Get number of features from environment observation spec
     num_features = env.observation_spec[market_data_keys[0]].shape[-1]
+    account_state_dim = env.observation_spec[account_state_key].shape[-1]
 
     # Build the encoder
     for key, t, w in zip(market_data_keys, time_frames, window_sizes):
@@ -268,6 +313,7 @@ def make_sac_agent(cfg, env, device):
 
     account_state_encoder = SafeModule(
         module=MLP(
+            in_features=account_state_dim,
             num_cells=[32],
             out_features=14,
             activation_class=ACTIVATIONS[cfg.network.activation],

@@ -13,9 +13,14 @@ import pandas as pd
 import numpy as np
 import torch
 
-from torchtrade.envs.offline.futures.sequential import SeqFuturesEnv, SeqFuturesEnvConfig
-from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+# Aliases for backwards compatibility
+SeqFuturesEnv = SequentialTradingEnv
+SeqFuturesEnvConfig = SequentialTradingEnvConfig
+SeqLongOnlyEnv = SequentialTradingEnv
+SeqLongOnlyEnvConfig = SequentialTradingEnvConfig
 
 # Test tolerance constants
 POSITION_TOLERANCE = 0.001  # 0.1% tolerance for position size comparisons
@@ -44,8 +49,15 @@ def sample_df():
 class TestFractionalActionMapping:
     """Test that action values correctly map to position sizes."""
 
-    def test_action_1_0_maps_to_100_percent_long(self, sample_df):
-        """Action 1.0 should create a position worth 100% of balance * leverage."""
+    @pytest.mark.parametrize("action_level,action_idx,description", [
+        (1.0, 4, "100% long"),
+        (0.5, 3, "50% long"),
+        (-0.5, 1, "50% short"),
+        (-1.0, 0, "100% short"),
+    ])
+    def test_action_maps_to_position_size(self, sample_df, action_level, action_idx, description):
+        """Action levels should map to correct position sizes (% of balance * leverage)."""
+        # Shared config for all action tests
         config = SeqFuturesEnvConfig(
             action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],
             leverage=1,
@@ -61,42 +73,24 @@ class TestFractionalActionMapping:
         initial_balance = env.balance
         current_price = env._cached_base_features["close"]
 
-        # Action index 4 = 1.0 (100% long)
-        td["action"] = torch.tensor([4])
+        # Execute action
+        td["action"] = torch.tensor([action_idx])
         td = env.step(td)["next"]
 
-        # Expected position: (balance * 1.0 * leverage) / price
-        expected_position = (initial_balance * 1.0 * 1) / current_price
+        # Calculate expected position: (balance * action_level * leverage) / price
+        expected_position = (initial_balance * action_level * 1) / current_price
         actual_position = env.position.position_size
 
-        # Should be very close (allowing for minor floating point differences)
-        assert abs(actual_position - expected_position) / expected_position < POSITION_TOLERANCE
+        # Verify position size
+        if expected_position != 0:
+            assert abs(actual_position - expected_position) / abs(expected_position) < POSITION_TOLERANCE, \
+                f"{description}: expected {expected_position:.4f}, got {actual_position:.4f}"
+        else:
+            assert actual_position == 0.0, f"{description}: expected 0.0, got {actual_position:.4f}"
 
-    def test_action_0_5_maps_to_50_percent_long(self, sample_df):
-        """Action 0.5 should create a position worth 50% of balance * leverage."""
-        config = SeqFuturesEnvConfig(
-            action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],
-            leverage=1,
-            initial_cash=10000,
-            transaction_fee=0.0,
-            slippage=0.0,
-            random_start=False,
-            max_traj_length=10
-        )
-        env = SeqFuturesEnv(sample_df, config)
-
-        td = env.reset()
-        initial_balance = env.balance
-        current_price = env._cached_base_features["close"]
-
-        # Action index 3 = 0.5 (50% long)
-        td["action"] = torch.tensor([3])
-        td = env.step(td)["next"]
-
-        expected_position = (initial_balance * 0.5 * 1) / current_price
-        actual_position = env.position.position_size
-
-        assert abs(actual_position - expected_position) / expected_position < POSITION_TOLERANCE
+        # Verify sign for short positions
+        if action_level < 0:
+            assert actual_position < 0, f"{description}: position should be negative (short)"
 
     def test_action_0_0_closes_position(self, sample_df):
         """Action 0.0 should close all positions (market neutral)."""
@@ -124,60 +118,6 @@ class TestFractionalActionMapping:
 
         # Position should be zero
         assert env.position.position_size == 0.0
-
-    def test_action_negative_0_5_maps_to_50_percent_short(self, sample_df):
-        """Action -0.5 should create a short position worth 50% of balance * leverage."""
-        config = SeqFuturesEnvConfig(
-            action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],
-            leverage=1,
-            initial_cash=10000,
-            transaction_fee=0.0,
-            slippage=0.0,
-            random_start=False,
-            max_traj_length=10
-        )
-        env = SeqFuturesEnv(sample_df, config)
-
-        td = env.reset()
-        initial_balance = env.balance
-        current_price = env._cached_base_features["close"]
-
-        # Action index 1 = -0.5 (50% short)
-        td["action"] = torch.tensor([1])
-        td = env.step(td)["next"]
-
-        expected_position = -(initial_balance * 0.5 * 1) / current_price
-        actual_position = env.position.position_size
-
-        assert abs(actual_position - expected_position) / abs(expected_position) < POSITION_TOLERANCE
-        assert actual_position < 0  # Should be negative (short)
-
-    def test_action_negative_1_0_maps_to_100_percent_short(self, sample_df):
-        """Action -1.0 should create a short position worth 100% of balance * leverage."""
-        config = SeqFuturesEnvConfig(
-            action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],
-            leverage=1,
-            initial_cash=10000,
-            transaction_fee=0.0,
-            slippage=0.0,
-            random_start=False,
-            max_traj_length=10
-        )
-        env = SeqFuturesEnv(sample_df, config)
-
-        td = env.reset()
-        initial_balance = env.balance
-        current_price = env._cached_base_features["close"]
-
-        # Action index 0 = -1.0 (100% short)
-        td["action"] = torch.tensor([0])
-        td = env.step(td)["next"]
-
-        expected_position = -(initial_balance * 1.0 * 1) / current_price
-        actual_position = env.position.position_size
-
-        assert abs(actual_position - expected_position) / abs(expected_position) < POSITION_TOLERANCE
-        assert actual_position < 0  # Should be negative (short)
 
 
 class TestBalanceScaling:
@@ -219,8 +159,14 @@ class TestBalanceScaling:
 class TestLeverageApplication:
     """Test that leverage is correctly applied to positions."""
 
-    def test_5x_leverage_amplifies_position(self, sample_df):
-        """5x leverage should create a position 5x larger than 1x leverage."""
+    @pytest.mark.parametrize("leverage_ratio,expected_multiplier", [
+        (5, 5.0),
+        (10, 10.0),
+        (20, 20.0),
+    ])
+    def test_leverage_amplifies_position(self, sample_df, leverage_ratio, expected_multiplier):
+        """Higher leverage should create proportionally larger positions."""
+        # Config with 1x leverage (baseline)
         config_1x = SeqFuturesEnvConfig(
             action_levels=[0.0, 1.0],
             leverage=1,
@@ -231,9 +177,10 @@ class TestLeverageApplication:
             max_traj_length=10
         )
 
-        config_5x = SeqFuturesEnvConfig(
+        # Config with specified leverage
+        config_nx = SeqFuturesEnvConfig(
             action_levels=[0.0, 1.0],
-            leverage=5,
+            leverage=leverage_ratio,
             initial_cash=10000,
             transaction_fee=0.0,
             slippage=0.0,
@@ -241,32 +188,88 @@ class TestLeverageApplication:
             max_traj_length=10
         )
 
-        # 1x leverage
+        # 1x leverage baseline
         env_1x = SeqFuturesEnv(sample_df, config_1x)
         td = env_1x.reset()
         td["action"] = torch.tensor([1])  # 100% long
         td = env_1x.step(td)["next"]
         position_1x = env_1x.position.position_size
 
-        # 5x leverage
-        env_5x = SeqFuturesEnv(sample_df, config_5x)
-        td = env_5x.reset()
+        # Nx leverage
+        env_nx = SeqFuturesEnv(sample_df, config_nx)
+        td = env_nx.reset()
         td["action"] = torch.tensor([1])  # 100% long
-        td = env_5x.step(td)["next"]
-        position_5x = env_5x.position.position_size
+        td = env_nx.step(td)["next"]
+        position_nx = env_nx.position.position_size
 
-        # Position with 5x leverage should be 5x larger
-        assert abs(position_5x / position_1x - 5.0) < BALANCE_TOLERANCE
+        # Position with Nx leverage should be N times larger
+        actual_multiplier = position_nx / position_1x
+        assert abs(actual_multiplier - expected_multiplier) < BALANCE_TOLERANCE, \
+            f"{leverage_ratio}x leverage: expected {expected_multiplier}x position, got {actual_multiplier:.2f}x"
+
+
+class TestMarginAndFeeInteraction:
+    """Test that margin calculation correctly accounts for fees with leverage."""
+
+    @pytest.mark.parametrize("leverage,fee,min_expected,max_expected", [
+        (1, 0.001, 0.98, 1.0),      # Spot: ~99% invested (accounting for fee)
+        (10, 0.001, 9.7, 10.0),     # 10x: ~9.8x invested (accounting for fee)
+        (20, 0.01, 16.0, 20.0),     # 20x + 1% fee: ~16.5x (margin + fee impact)
+    ])
+    def test_margin_calculation_with_fees(self, sample_df, leverage, fee, min_expected, max_expected):
+        """Margin calculation should account for fees correctly to prevent over-leveraging.
+
+        The formula is: margin_required = capital_allocated / (1 + leverage * fee)
+        This ensures that fees don't cause the position to exceed available margin.
+
+        The test verifies that:
+        1. Position size increases with leverage
+        2. Higher fees reduce effective position size
+        3. System doesn't over-leverage (which could cause instant liquidation)
+        """
+        config = SeqFuturesEnvConfig(
+            action_levels=[0.0, 1.0],
+            leverage=leverage,
+            transaction_fee=fee,
+            initial_cash=10000,
+            slippage=0.0,
+            random_start=False,
+            max_traj_length=10
+        )
+        env = SeqFuturesEnv(sample_df, config)
+        td = env.reset()
+
+        # Open 100% long position
+        td["action"] = torch.tensor([1])
+        td = env.step(td)["next"]
+
+        # Calculate actual notional value as multiple of initial cash
+        current_price = env._cached_base_features["close"]
+        position_notional = env.position.position_size * current_price
+        actual_multiplier = position_notional / 10000
+
+        # Verify position size is in expected range
+        assert min_expected <= actual_multiplier <= max_expected, \
+            f"Leverage {leverage}x with {fee*100:.1f}% fee: expected {min_expected:.1f}x-{max_expected:.1f}x, got {actual_multiplier:.2f}x"
+
+        # Verify position was actually opened (not zero)
+        assert actual_multiplier > 0.9, f"Position should be opened, got {actual_multiplier:.2f}x"
+
+        env.close()
 
 
 class TestDirectionSwitching:
     """Test that direction switches work correctly."""
 
-    def test_long_to_short_switch(self, sample_df):
-        """Switching from long to short should close long and open short."""
+    @pytest.mark.parametrize("first_action_idx,first_sign,second_action_idx,second_sign,description", [
+        (2, 1, 0, -1, "long to short"),
+        (0, -1, 2, 1, "short to long"),
+    ])
+    def test_direction_switch(self, sample_df, first_action_idx, first_sign, second_action_idx, second_sign, description):
+        """Switching direction should close current position and open opposite position."""
         config = SeqFuturesEnvConfig(
             action_levels=[-1.0, 0.0, 1.0],
-            leverage=1,
+            leverage=10,  # Futures mode (leverage > 1) to allow shorts
             initial_cash=10000,
             transaction_fee=0.001,  # Small fee
             slippage=0.0,
@@ -277,48 +280,31 @@ class TestDirectionSwitching:
 
         td = env.reset()
 
-        # Go long
-        td["action"] = torch.tensor([2])  # 1.0 = 100% long
+        # Open first position
+        td["action"] = torch.tensor([first_action_idx])
         td = env.step(td)["next"]
-        assert env.position.position_size > 0
+        if first_sign > 0:
+            assert env.position.position_size > 0, f"{description}: first position should be long"
+        else:
+            assert env.position.position_size < 0, f"{description}: first position should be short"
 
-        # Switch to short
-        td["action"] = torch.tensor([0])  # -1.0 = 100% short
+        # Switch direction
+        td["action"] = torch.tensor([second_action_idx])
         td = env.step(td)["next"]
-        assert env.position.position_size < 0  # Now short
-
-    def test_short_to_long_switch(self, sample_df):
-        """Switching from short to long should close short and open long."""
-        config = SeqFuturesEnvConfig(
-            action_levels=[-1.0, 0.0, 1.0],
-            leverage=1,
-            initial_cash=10000,
-            transaction_fee=0.001,
-            slippage=0.0,
-            random_start=False,
-            max_traj_length=10
-        )
-        env = SeqFuturesEnv(sample_df, config)
-
-        td = env.reset()
-
-        # Go short
-        td["action"] = torch.tensor([0])  # -1.0 = 100% short
-        td = env.step(td)["next"]
-        assert env.position.position_size < 0
-
-        # Switch to long
-        td["action"] = torch.tensor([2])  # 1.0 = 100% long
-        td = env.step(td)["next"]
-        assert env.position.position_size > 0  # Now long
+        if second_sign > 0:
+            assert env.position.position_size > 0, f"{description}: second position should be long"
+        else:
+            assert env.position.position_size < 0, f"{description}: second position should be short"
 
 
 class TestLongOnlyFractional:
     """Test fractional position sizing for SeqLongOnlyEnv."""
 
     def test_long_only_default_action_levels_no_negatives(self, sample_df):
-        """Long-only env default action levels should not include negative values."""
+        """Long-only env action levels should not include negative values."""
         config = SeqLongOnlyEnvConfig(
+            leverage=1,  # Spot mode
+            action_levels=[0.0, 0.5, 1.0],  # Long-only levels
             initial_cash=10000,
             transaction_fee=0.0,
             slippage=0.0,
@@ -327,9 +313,9 @@ class TestLongOnlyFractional:
         )
         env = SeqLongOnlyEnv(sample_df, config)
 
-        # Default action levels should be non-negative
+        # Action levels should be non-negative
         assert all(level >= 0 for level in env.action_levels), \
-            f"Long-only default action_levels should be non-negative, got {env.action_levels}"
+            f"Long-only action_levels should be non-negative, got {env.action_levels}"
 
         # Should have at least close (0.0) and one positive action
         assert 0.0 in env.action_levels, "Should have action 0.0 for closing positions"
@@ -385,27 +371,37 @@ class TestLongOnlyFractional:
         td = env.step(td)["next"]
         assert env.position.position_size == 0.0
 
-    def test_long_only_negative_actions_trigger_warning(self, sample_df):
-        """Long-only env should warn when negative actions are used."""
-        import warnings
+    def test_long_only_no_shorts_allowed(self, sample_df):
+        """Long-only env (leverage=1, positive actions) should only allow longs."""
+        config = SeqLongOnlyEnvConfig(
+            leverage=1,  # Spot mode - no shorts allowed
+            action_levels=[0.0, 0.5, 1.0],  # Only non-negative actions
+            initial_cash=10000,
+            transaction_fee=0.0,
+            slippage=0.0,
+            random_start=False,
+            max_traj_length=10
+        )
+        env = SeqLongOnlyEnv(sample_df, config)
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        # Verify shorts are not allowed
+        assert not env.allows_short, "Spot mode should not allow shorts"
 
-            config = SeqLongOnlyEnvConfig(
-                action_levels=[-1.0, 0.0, 1.0],  # Includes negative action
-                initial_cash=10000,
-                transaction_fee=0.0,
-                slippage=0.0,
-                random_start=False,
-                max_traj_length=10
-            )
+        td = env.reset()
 
-            # Should trigger a warning about negative actions
-            assert len(w) == 1
-            assert issubclass(w[0].category, UserWarning)
-            assert "negative action_levels" in str(w[0].message).lower()
-            assert "redundancy" in str(w[0].message).lower()
+        # Open a long position
+        td["action"] = torch.tensor([2])  # 1.0 = 100% long
+        td = env.step(td)["next"]
+        assert env.position.position_size > 0
+        assert env.position.current_position > 0, "Should be long"
+
+        # Close position
+        td["action"] = torch.tensor([0])  # 0.0 = close
+        td = env.step(td)["next"]
+
+        # Should have closed position
+        assert abs(env.position.position_size) < 0.01, "Should close position"
+        assert env.position.current_position == 0, "Should be flat"
 
 
 class TestPartialPositionAdjustment:

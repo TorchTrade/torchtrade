@@ -61,9 +61,9 @@ class PositionState:
 
 @dataclass
 class HistoryTracker:
-    """Encapsulates episode history tracking for offline environments.
+    """Encapsulates episode history tracking for all environments.
 
-    Tracks price, action, reward, and portfolio value history across an episode.
+    Tracks price, action, reward, portfolio value, and position history across an episode.
     Provides methods to record steps, reset history, and export data for analysis.
 
     Attributes:
@@ -71,19 +71,21 @@ class HistoryTracker:
         actions: List of actions taken at each step
         rewards: List of rewards received at each step
         portfolio_values: List of total portfolio values at each step
-        action_types: List of action types at each step ("hold", "buy", "sell", etc.)
+        positions: List of position sizes at each step (positive=long, negative=short, 0=flat)
+        action_types: List of action types at each step ("hold", "buy", "sell", "long", "short", etc.)
 
     Example:
         >>> history = HistoryTracker()
-        >>> history.record_step(price=50000.0, action=1.0, reward=0.05, portfolio_value=5000.0, action_type="buy")
+        >>> history.record_step(price=50000.0, action=1.0, reward=0.05, portfolio_value=5000.0, position=0.5, action_type="long")
         >>> history.to_dict()
-        {'base_prices': [50000.0], 'actions': [1.0], 'rewards': [0.05], 'portfolio_values': [5000.0], 'action_types': ['buy']}
+        {'base_prices': [50000.0], 'actions': [1.0], 'rewards': [0.05], 'portfolio_values': [5000.0], 'positions': [0.5], 'action_types': ['long']}
     """
 
     base_prices: List[float] = field(default_factory=list)
     actions: List[float] = field(default_factory=list)
     rewards: List[float] = field(default_factory=list)
     portfolio_values: List[float] = field(default_factory=list)
+    positions: List[float] = field(default_factory=list)
     action_types: List[str] = field(default_factory=list)
 
     def reset(self) -> None:
@@ -95,6 +97,7 @@ class HistoryTracker:
         self.actions.clear()
         self.rewards.clear()
         self.portfolio_values.clear()
+        self.positions.clear()
         self.action_types.clear()
 
     def record_step(
@@ -103,6 +106,7 @@ class HistoryTracker:
         action: Union[int, float],
         reward: Union[int, float],
         portfolio_value: Union[int, float],
+        position: Union[int, float] = 0.0,
         action_type: str = "hold"
     ) -> None:
         """Record a single step's history.
@@ -112,12 +116,14 @@ class HistoryTracker:
             action: Action taken at this step
             reward: Reward received at this step
             portfolio_value: Total portfolio value at this step
-            action_type: Type of action taken ("hold", "buy", "sell", etc.)
+            position: Position size at this step (positive=long, negative=short, 0=flat). Defaults to 0.0.
+            action_type: Type of action taken ("hold", "buy", "sell", "long", "short", etc.)
         """
         self.base_prices.append(price)
         self.actions.append(action)
         self.rewards.append(reward)
         self.portfolio_values.append(portfolio_value)
+        self.positions.append(position)
         self.action_types.append(action_type)
 
     def to_dict(self) -> Dict[str, List[float]]:
@@ -135,51 +141,3 @@ class HistoryTracker:
             Number of steps in the history
         """
         return len(self.base_prices)
-
-
-@dataclass
-class FuturesHistoryTracker(HistoryTracker):
-    """Extended history tracker for futures environments.
-
-    Adds position size tracking to the base history tracker for environments
-    that support long/short positions (futures trading).
-
-    Attributes:
-        positions: List of position sizes at each step (positive for long, negative for short)
-
-    Example:
-        >>> history = FuturesHistoryTracker()
-        >>> history.record_step(price=50000.0, action=1.0, reward=0.05, portfolio_value=5000.0, position=0.5, action_type="long")
-        >>> history.to_dict()
-        {'base_prices': [50000.0], 'actions': [1.0], 'rewards': [0.05],
-         'portfolio_values': [5000.0], 'positions': [0.5], 'action_types': ['long']}
-    """
-
-    positions: List[float] = field(default_factory=list)
-
-    def reset(self) -> None:
-        """Clear all history arrays including position history."""
-        super().reset()
-        self.positions.clear()
-
-    def record_step(
-        self,
-        price: Union[int, float],
-        action: Union[int, float],
-        reward: Union[int, float],
-        portfolio_value: Union[int, float],
-        position: Union[int, float],
-        action_type: str = "hold"
-    ) -> None:
-        """Record a single step's history including position.
-
-        Args:
-            price: Base asset price at this step
-            action: Action taken at this step
-            reward: Reward received at this step
-            portfolio_value: Total portfolio value at this step
-            position: Position size at this step (positive=long, negative=short)
-            action_type: Type of action taken ("hold", "close", "long", "short")
-        """
-        super().record_step(price, action, reward, portfolio_value, action_type)
-        self.positions.append(position)

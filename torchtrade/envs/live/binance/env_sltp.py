@@ -29,9 +29,9 @@ class BinanceFuturesSLTPTradingEnvConfig:
     symbol: str = "BTCUSDT"
 
     # Timeframes and windows
-    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Min"
+    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Hour"
     window_sizes: Union[List[int], int] = 10
-    execute_on: Union[str, TimeFrame] = "1Min"  # Timeframe for trade execution timing
+    execute_on: Union[str, TimeFrame] = "1Hour"  # Timeframe for trade execution timing
 
     # Trading parameters
     leverage: int = 1  # Leverage (1-125)
@@ -50,9 +50,6 @@ class BinanceFuturesSLTPTradingEnvConfig:
     # Include CLOSE action for manual position exit (default: False for SLTP)
     include_close_action: bool = False
 
-    # Reward settings
-    reward_scaling: float = 1.0
-
     # Termination settings
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
@@ -62,7 +59,6 @@ class BinanceFuturesSLTPTradingEnvConfig:
     seed: Optional[int] = 42
     include_base_features: bool = False
     close_position_on_reset: bool = False  # Whether to close positions on env.reset()
-    reward_function: Optional[Callable] = None  # Custom reward function (uses default if None)
 
     def __post_init__(self):
         """Normalize timeframe configuration."""
@@ -106,6 +102,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         api_key: str = "",
         api_secret: str = "",
         feature_preprocessing_fn: Optional[Callable] = None,
+        reward_function: Optional[Callable] = None,
         observer: Optional[BinanceObservationClass] = None,
         trader: Optional[BinanceFuturesOrderClass] = None,
     ):
@@ -117,11 +114,16 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
             api_key: Binance API key
             api_secret: Binance API secret
             feature_preprocessing_fn: Optional custom preprocessing function
+            reward_function: Optional reward function (default: log_return_reward)
             observer: Optional pre-configured BinanceObservationClass
             trader: Optional pre-configured BinanceFuturesOrderClass
         """
         # Initialize base class (handles observer/trader, obs specs, portfolio value, etc.)
         super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
+
+        # Set reward function
+        from torchtrade.envs.core.default_rewards import log_return_reward
+        self.reward_function = reward_function or log_return_reward
 
         # Create action map from SL/TP combinations
         self.stoploss_levels = list(config.stoploss_levels)
@@ -153,8 +155,6 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
-        # Store old portfolio value
-        old_portfolio_value = self._get_portfolio_value()
 
         # Get current price and position from trader status (avoids redundant observation call)
         status = self.trader.get_status()
@@ -205,13 +205,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         new_portfolio_value = self._get_portfolio_value()
         next_tensordict = self._get_observation()
 
-        # Calculate reward and check termination
-        reward = self._calculate_reward(
-            old_portfolio_value, new_portfolio_value, action_tuple, trade_info
-        )
-        done = self._check_termination(new_portfolio_value)
-
-        # Record step history (convert action_tuple to numeric action)
+        # Convert action_tuple to numeric action for history
         # action_tuple is (side, sl, tp) where side can be "long", "short", or None
         side, _, _ = action_tuple
         if side == "long":
@@ -221,13 +215,23 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         else:
             action_value = 0.0
 
+        # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(
             price=current_price,
             action=action_value,
-            reward=reward,
-            portfolio_value=old_portfolio_value,
+            reward=0.0,  # Placeholder, will be set after reward calculation
+            portfolio_value=new_portfolio_value,
             position=position_size
         )
+
+        # Calculate reward using UPDATED history tracker
+        reward = float(self.reward_function(self.history))
+
+        # Update the reward in history
+        self.history.rewards[-1] = reward
+
+        # Check termination
+        done = self._check_termination(new_portfolio_value)
 
         next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
         next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))

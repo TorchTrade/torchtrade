@@ -104,18 +104,18 @@ def build_default_action_levels(
     Examples:
         >>> # Futures (default)
         >>> build_default_action_levels(allow_short=True)
-        [-1.0, -0.5, 0.0, 0.5, 1.0]
+        [-1, 0, 1]
 
         >>> # Long-only
         >>> build_default_action_levels(allow_short=False)
-        [0.0, 0.5, 1.0]
+        [0, 1]
     """
     if allow_short:
-        # Futures: allow both long and short positions
-        return [-1.0, -0.5, 0.0, 0.5, 1.0]
+        # Futures: short, flat, long
+        return [-1, 0, 1]
     else:
-        # Long-only: only non-negative actions (0 = close, positive = buy)
-        return [0.0, 0.5, 1.0]
+        # Long-only: flat, long
+        return [0, 1]
 
 
 def validate_action_levels(action_levels: list[float]) -> None:

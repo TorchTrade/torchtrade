@@ -35,7 +35,7 @@ from torchtrade.envs.transforms import CoverageTracker
 torch.set_float32_matmul_precision("high")
 
 
-@hydra.main(config_path="", config_name="config")
+@hydra.main(config_path=".", config_name="config", version_base="1.1")
 def main(cfg: DictConfig):  # noqa: F821
 
     # Create logger

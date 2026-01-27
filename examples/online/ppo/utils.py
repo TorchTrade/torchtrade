@@ -25,7 +25,7 @@ from torchrl.modules import (
 )
 from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 
-from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig, SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
+from torchtrade.envs import SequentialTradingEnv, SequentialTradingEnvConfig, SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS
@@ -62,8 +62,8 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
-    if cfg.env.name == "SeqLongOnlyEnv":
-        config = SeqLongOnlyEnvConfig(
+    if cfg.env.name == "SequentialTradingEnv":
+        config = SequentialTradingEnvConfig(
             symbol=cfg.env.symbol,
             time_frames=cfg.env.time_frames,
             window_sizes=cfg.env.window_sizes,
@@ -74,12 +74,14 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
             transaction_fee=cfg.env.transaction_fee,
             bankrupt_threshold=cfg.env.bankrupt_threshold,
             seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            action_levels=cfg.env.action_levels,
             max_traj_length=max_traj_length,
             random_start=random_start
         )
-        return SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
-    elif cfg.env.name == "SeqLongOnlySLTPEnv":
-        config = SeqLongOnlySLTPEnvConfig(
+        return SequentialTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    elif cfg.env.name == "SequentialTradingEnvSLTP":
+        config = SequentialTradingEnvSLTPConfig(
             symbol=cfg.env.symbol,
             time_frames=cfg.env.time_frames,
             window_sizes=cfg.env.window_sizes,
@@ -90,10 +92,34 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
             transaction_fee=cfg.env.transaction_fee,
             bankrupt_threshold=cfg.env.bankrupt_threshold,
             seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
+            include_hold_action=cfg.env.include_hold_action,
             max_traj_length=max_traj_length,
             random_start=random_start
         )
-        return SeqLongOnlySLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+        return SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=custom_preprocessing)
+    elif cfg.env.name == "OneStepTradingEnv":
+        config = OneStepTradingEnvConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
+            include_hold_action=cfg.env.include_hold_action,
+            quantity_per_trade=cfg.env.quantity_per_trade,
+            trade_mode=cfg.env.trade_mode,
+        )
+        return OneStepTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
     else:
         raise ValueError(f"Unknown environment: {cfg.env.name}")
 
@@ -189,9 +215,12 @@ def make_discrete_ppo_model(cfg, env, device):
         ).to(device))
 
 
+    # Get account state dimension from environment
+    account_state_dim = env.observation_spec[account_state_key].shape[-1]
+
     account_encoder_model = SimpleMLPEncoder(
-        input_shape=(1, 7),  # 7 account state features, single timestep
-        output_shape=(1, 14),  # Match embedding_dim output
+        input_shape=(1, account_state_dim),
+        output_shape=(1, 14),
         hidden_sizes=(32, 32),
         activation="gelu",
         dropout=0.1,

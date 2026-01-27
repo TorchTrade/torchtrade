@@ -6,8 +6,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for testing
 
-from torchtrade.envs.offline.futures.sequential import SeqFuturesEnv, SeqFuturesEnvConfig
-from torchtrade.envs.offline.longonly.sequential import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline.sequential import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
@@ -25,7 +24,7 @@ class TestRenderHistorySpecialActionTypes:
 
     def test_render_with_mixed_action_types(self, sample_ohlcv_df):
         """Test render_history with various action types including special ones."""
-        config = SeqFuturesEnvConfig(
+        config = SequentialTradingEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
@@ -34,7 +33,7 @@ class TestRenderHistorySpecialActionTypes:
             max_traj_length=100,
             random_start=False,
         )
-        env = SeqFuturesEnv(
+        env = SequentialTradingEnv(
             df=sample_ohlcv_df,
             config=config,
             feature_preprocessing_fn=simple_feature_fn,
@@ -65,7 +64,7 @@ class TestRenderHistorySpecialActionTypes:
 
     def test_render_with_only_holds(self, sample_ohlcv_df):
         """Test render_history with history containing only holds."""
-        config = SeqLongOnlyEnvConfig(
+        config = SequentialTradingEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
@@ -73,7 +72,7 @@ class TestRenderHistorySpecialActionTypes:
             max_traj_length=100,
             random_start=False,
         )
-        env = SeqLongOnlyEnv(
+        env = SequentialTradingEnv(
             df=sample_ohlcv_df,
             config=config,
             feature_preprocessing_fn=simple_feature_fn,
@@ -81,9 +80,10 @@ class TestRenderHistorySpecialActionTypes:
 
         td = env.reset()
 
-        # Execute only hold actions (action level 0)
+        # Execute only hold actions (action index 1 maps to action_level 0 = hold)
+        # Default action_levels = [-1, 0, 1], so index 1 is hold
         for _ in range(10):
-            td = env.step(td.set("action", torch.tensor([0])))
+            td = env.step(td.set("action", torch.tensor([1])))
             if td.get("done", False).item():
                 break
 
@@ -102,7 +102,7 @@ class TestRenderHistorySpecialActionTypes:
 
     def test_render_with_empty_history(self, sample_ohlcv_df):
         """Test render_history handles empty history gracefully."""
-        config = SeqLongOnlyEnvConfig(
+        config = SequentialTradingEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
@@ -110,7 +110,7 @@ class TestRenderHistorySpecialActionTypes:
             max_traj_length=100,
             random_start=False,
         )
-        env = SeqLongOnlyEnv(
+        env = SequentialTradingEnv(
             df=sample_ohlcv_df,
             config=config,
             feature_preprocessing_fn=simple_feature_fn,
@@ -130,7 +130,7 @@ class TestRenderHistorySpecialActionTypes:
 
     def test_render_with_single_step(self, sample_ohlcv_df):
         """Test render_history with only one step."""
-        config = SeqLongOnlyEnvConfig(
+        config = SequentialTradingEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
@@ -138,7 +138,7 @@ class TestRenderHistorySpecialActionTypes:
             max_traj_length=100,
             random_start=False,
         )
-        env = SeqLongOnlyEnv(
+        env = SequentialTradingEnv(
             df=sample_ohlcv_df,
             config=config,
             feature_preprocessing_fn=simple_feature_fn,
@@ -161,7 +161,7 @@ class TestRenderHistorySpecialActionTypes:
 
     def test_render_with_unknown_action_type(self, sample_ohlcv_df):
         """Test render_history handles unknown action types gracefully."""
-        config = SeqFuturesEnvConfig(
+        config = SequentialTradingEnvConfig(
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
@@ -170,7 +170,7 @@ class TestRenderHistorySpecialActionTypes:
             max_traj_length=100,
             random_start=False,
         )
-        env = SeqFuturesEnv(
+        env = SequentialTradingEnv(
             df=sample_ohlcv_df,
             config=config,
             feature_preprocessing_fn=simple_feature_fn,

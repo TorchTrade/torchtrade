@@ -26,7 +26,7 @@ from torchrl.modules import (
     SafeModule,
 )
 
-from torchtrade.envs import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
+from torchtrade.envs import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS
@@ -66,30 +66,74 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
-    """Create a SeqFuturesSLTPEnv instance."""
-    # Convert Hydra ListConfig to regular Python lists
+    """Create environment instance based on cfg.env.name."""
     window_sizes = list(cfg.env.window_sizes)
-    stoploss_levels = list(cfg.env.stoploss_levels)
-    takeprofit_levels = list(cfg.env.takeprofit_levels)
 
-    config = SeqFuturesSLTPEnvConfig(
-        symbol=cfg.env.symbol,
-        time_frames=cfg.env.time_frames,
-        window_sizes=window_sizes,
-        execute_on=cfg.env.execute_on,
-        include_base_features=False,
-        initial_cash=cfg.env.initial_cash,
-        slippage=cfg.env.slippage,
-        transaction_fee=cfg.env.transaction_fee,
-        bankrupt_threshold=cfg.env.bankrupt_threshold,
-        seed=cfg.env.seed,
-        max_traj_length=max_traj_length,
-        random_start=random_start,
-        leverage=cfg.env.leverage,
-        stoploss_levels=stoploss_levels,
-        takeprofit_levels=takeprofit_levels,
-    )
-    return SeqFuturesSLTPEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    if cfg.env.name == "SequentialTradingEnv":
+        action_levels = list(cfg.env.action_levels) if hasattr(cfg.env, 'action_levels') else [-1, 0, 1]
+        config = SequentialTradingEnvConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            max_traj_length=max_traj_length,
+            random_start=random_start,
+            leverage=cfg.env.leverage,
+            action_levels=action_levels,
+        )
+        return SequentialTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    elif cfg.env.name == "SequentialTradingEnvSLTP":
+        stoploss_levels = list(cfg.env.stoploss_levels)
+        takeprofit_levels = list(cfg.env.takeprofit_levels)
+        config = SequentialTradingEnvSLTPConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            max_traj_length=max_traj_length,
+            random_start=random_start,
+            leverage=cfg.env.leverage,
+            stoploss_levels=stoploss_levels,
+            takeprofit_levels=takeprofit_levels,
+            include_hold_action=cfg.env.include_hold_action,
+        )
+        return SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=custom_preprocessing)
+    elif cfg.env.name == "OneStepTradingEnv":
+        stoploss_levels = list(cfg.env.stoploss_levels)
+        takeprofit_levels = list(cfg.env.takeprofit_levels)
+        config = OneStepTradingEnvConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            stoploss_levels=stoploss_levels,
+            takeprofit_levels=takeprofit_levels,
+            include_hold_action=cfg.env.include_hold_action,
+            quantity_per_trade=cfg.env.quantity_per_trade,
+            trade_mode=cfg.env.trade_mode,
+        )
+        return OneStepTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    else:
+        raise ValueError(f"Unknown environment: {cfg.env.name}")
 
 
 def apply_env_transforms(env, max_steps, cfg):

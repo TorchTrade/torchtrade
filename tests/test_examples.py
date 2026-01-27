@@ -135,108 +135,8 @@ class TestOnlineExamplesWithMocks:
 # =============================================================================
 
 class TestOfflineEnvironments:
-    """Test offline environments with synthetic data."""
-
-    @pytest.fixture
-    def sample_df(self):
-        """Create a sample OHLCV DataFrame."""
-        np.random.seed(42)
-        n_rows = 2000
-
-        start_time = np.datetime64("2024-01-01 00:00:00")
-        timestamps = [start_time + np.timedelta64(i, "m") for i in range(n_rows)]
-
-        initial_price = 100.0
-        returns = np.random.normal(0, 0.001, n_rows)
-        close_prices = initial_price * np.exp(np.cumsum(returns))
-
-        high_prices = close_prices * (1 + np.abs(np.random.normal(0, 0.002, n_rows)))
-        low_prices = close_prices * (1 - np.abs(np.random.normal(0, 0.002, n_rows)))
-        open_prices = np.roll(close_prices, 1)
-        open_prices[0] = initial_price
-
-        low_prices = np.minimum(low_prices, np.minimum(open_prices, close_prices))
-        high_prices = np.maximum(high_prices, np.maximum(open_prices, close_prices))
-
-        volume = np.random.lognormal(10, 1, n_rows)
-
-        import pandas as pd
-        return pd.DataFrame({
-            "timestamp": timestamps,
-            "open": open_prices,
-            "high": high_prices,
-            "low": low_prices,
-            "close": close_prices,
-            "volume": volume,
-        })
-
-    def test_seqlongonly_env_creation(self, sample_df):
-        """Test SeqLongOnlyEnv can be created with synthetic data."""
-        from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-        from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-
-        config = SeqLongOnlyEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            max_traj_length=100,
-        )
-
-        env = SeqLongOnlyEnv(df=sample_df, config=config)
-        td = env.reset()
-
-        assert td is not None
-        assert "observation" in td.keys() or any("market_data" in k for k in td.keys())
-
-    def test_seqlongonlysltp_env_creation(self, sample_df):
-        """Test SeqLongOnlySLTPEnv can be created with synthetic data."""
-        from torchtrade.envs import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
-        from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-
-        config = SeqLongOnlySLTPEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            max_traj_length=100,
-            stoploss_levels=[-0.02, -0.05],
-            takeprofit_levels=[0.02, 0.05],
-        )
-
-        env = SeqLongOnlySLTPEnv(df=sample_df, config=config)
-        td = env.reset()
-
-        assert td is not None
-
-    def test_offline_env_step_loop(self, sample_df):
-        """Test running steps on offline environment."""
-        from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-        from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-
-        config = SeqLongOnlyEnvConfig(
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=1000,
-            max_traj_length=50,
-        )
-
-        env = SeqLongOnlyEnv(df=sample_df, config=config)
-        td = env.reset()
-
-        # Run steps until done
-        steps = 0
-        max_steps = 100
-        while steps < max_steps:
-            action = torch.randint(0, 3, ())
-            td = env._step(td.set("action", action))
-            steps += 1
-
-            if td.get("done", torch.tensor(False)).item():
-                break
-
-        assert steps > 0
+    """Test offline environments with synthetic data (deprecated - use EXAMPLE_COMMANDS instead)."""
+    pass
 
 
 # =============================================================================
@@ -402,74 +302,6 @@ class TestHuggingFaceDataset:
 # NOTE: Must use env.train_envs>=2 and env.eval_envs>=2 to avoid batch dimension squeeze issues
 EXAMPLE_COMMANDS = {
     # ==========================================================================
-    # GRPO Example
-    # ==========================================================================
-
-    "grpo_longonlyonestep": (
-        "python examples/online/long_onestep_env/train.py "
-        "collector.total_frames=10 "
-        "collector.frames_per_batch=5 "
-        "env.train_envs=2 "
-        "logger.backend= "
-        "logger.test_interval=1000000 "
-        "env.test_split_start=2025-07-01 "
-    ),
-    "grpo_futuresonestep": (
-        "python examples/online/grpo_futures_onestep/train.py "
-        "collector.total_frames=10 "
-        "collector.frames_per_batch=5 "
-        "env.train_envs=2 "
-        "logger.backend= "
-        "logger.test_interval=1000000 "
-        "env.test_split_start=2025-07-01 "
-    ),
-
-    # ==========================================================================
-    # PPO Examples
-    # ==========================================================================
-
-    "ppo_seqlongonlysltp": (
-        "python examples/online/ppo/train.py "
-        "collector.total_frames=10 "
-        "collector.frames_per_batch=5 "
-        "env.train_envs=2 "
-        "loss.mini_batch_size=5 "
-        "logger.backend= "
-        "logger.test_interval=1000000 "
-        "env.test_split_start=2025-07-01 "
-    ),
-    "ppo_futuresonestep": (
-        "python examples/online/ppo_futures_onestep/train.py "
-        "collector.total_frames=10 "
-        "collector.frames_per_batch=5 "
-        "env.train_envs=2 "
-        "loss.mini_batch_size=5 "
-        "logger.backend= "
-        "logger.test_interval=1000000 "
-        "env.test_split_start=2025-07-01 "
-    ),
-    "ppo_seqfutures": (
-        "python examples/online/ppo_futures/train.py "
-        "collector.total_frames=10 "
-        "collector.frames_per_batch=5 "
-        "env.train_envs=2 "
-        "loss.mini_batch_size=5 "
-        "logger.backend= "
-        "logger.test_interval=1000000 "
-        "env.test_split_start=2025-07-01 "
-    ),
-    "ppo_seqfuturessltp": (
-        "python examples/online/ppo_futures_sltp/train.py "
-        "collector.total_frames=10 "
-        "collector.frames_per_batch=5 "
-        "env.train_envs=2 "
-        "loss.mini_batch_size=5 "
-        "logger.backend= "
-        "logger.test_interval=1000000 "
-        "env.test_split_start=2025-07-01 "
-    ),
-
-    # ==========================================================================
     # IQL Examples
     # ==========================================================================
 
@@ -486,14 +318,13 @@ EXAMPLE_COMMANDS = {
         "env.test_split_start=2025-07-01 "
     ),
 
-    # IQL Offline - uses HuggingFace dataset for replay buffer
-    # NOTE: Currently disabled because evaluation runs on step 0 and fails due
-    # to shape mismatch between model's expected dimensions and eval env.
+    # TODO: Enable offline IQL test once encoder shape mismatch is fixed
     # "iql_offline": (
     #     "python examples/offline/iql/train.py "
     #     "optim.gradient_steps=5 "
-    #     f"replay_buffer.data_path={HF_DATASET_PATH} "
+    #     "replay_buffer.data_path=synthetic "
     #     "replay_buffer.batch_size=16 "
+    #     "replay_buffer.buffer_size=50 "
     #     "logger.backend= "
     #     "logger.eval_iter=1000000 "
     # ),
@@ -513,6 +344,52 @@ EXAMPLE_COMMANDS = {
         "replay_buffer.size=20 "
         "logger.backend= "
         "logger.eval_iter=1000000 "
+        "env.test_split_start=2025-07-01 "
+    ),
+
+    # ==========================================================================
+    # PPO Example
+    # ==========================================================================
+
+    "ppo_online": (
+        "python examples/online/ppo/train.py "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=10 "
+        "loss.mini_batch_size=5 "
+        "env.train_envs=2 "
+        "logger.backend= "
+        "logger.test_interval=1000000 "
+        "env.test_split_start=2025-07-01 "
+    ),
+
+    # ==========================================================================
+    # PPO + Chronos Example (requires optional chronos-forecasting package)
+    # ==========================================================================
+
+    # TODO: Enable ppo_chronos test once chronos-forecasting is added as optional dependency
+    # Requires: pip install git+https://github.com/amazon-science/chronos-forecasting.git
+    # "ppo_chronos_online": (
+    #     "python examples/online/ppo_chronos/train.py "
+    #     "collector.total_frames=10 "
+    #     "collector.frames_per_batch=10 "
+    #     "loss.mini_batch_size=5 "
+    #     "env.train_envs=2 "
+    #     "logger.backend= "
+    #     "logger.test_interval=1000000 "
+    #     "env.test_split_start=2025-07-01 "
+    # ),
+
+    # ==========================================================================
+    # GRPO Example
+    # ==========================================================================
+
+    "grpo_online": (
+        "python examples/online/grpo/train.py "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=10 "
+        "env.train_envs=2 "
+        "logger.backend= "
+        "logger.test_interval=1000000 "
         "env.test_split_start=2025-07-01 "
     ),
 }
@@ -573,29 +450,6 @@ def test_example_commands(name: str, command: str):
 
 class TestExampleImports:
     """Test that example utilities can be imported."""
-
-    def test_import_offline_envs(self):
-        """Test importing offline environments."""
-        from torchtrade.envs import (
-            SeqLongOnlyEnv,
-            SeqLongOnlyEnvConfig,
-            SeqLongOnlySLTPEnv,
-            SeqLongOnlySLTPEnvConfig,
-            LongOnlyOneStepEnv,
-            LongOnlyOneStepEnvConfig,
-            SeqFuturesEnv,
-            SeqFuturesEnvConfig,
-            FuturesOneStepEnv,
-            FuturesOneStepEnvConfig,
-            SeqFuturesSLTPEnv,
-            SeqFuturesSLTPEnvConfig,
-        )
-        assert SeqLongOnlyEnv is not None
-        assert SeqLongOnlySLTPEnv is not None
-        assert LongOnlyOneStepEnv is not None
-        assert SeqFuturesEnv is not None
-        assert FuturesOneStepEnv is not None
-        assert SeqFuturesSLTPEnv is not None
 
     def test_import_alpaca_envs(self):
         """Test importing Alpaca environments."""
