@@ -346,6 +346,51 @@ EXAMPLE_COMMANDS = {
         "logger.eval_iter=1000000 "
         "env.test_split_start=2025-07-01 "
     ),
+
+    # ==========================================================================
+    # PPO Example
+    # ==========================================================================
+
+    "ppo_online": (
+        "python examples/online/ppo/train.py "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=10 "
+        "loss.mini_batch_size=5 "
+        "env.train_envs=2 "
+        "logger.backend= "
+        "logger.test_interval=1000000 "
+        "env.test_split_start=2025-07-01 "
+    ),
+
+    # ==========================================================================
+    # PPO + Chronos Example
+    # ==========================================================================
+
+    "ppo_chronos_online": (
+        "python examples/online/ppo_chronos/train.py "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=10 "
+        "loss.mini_batch_size=5 "
+        "env.train_envs=2 "
+        "logger.backend= "
+        "logger.test_interval=1000000 "
+        "env.test_split_start=2025-07-01 "
+    ),
+
+    # ==========================================================================
+    # GRPO Example
+    # ==========================================================================
+
+    "grpo_online": (
+        "python examples/online/grpo/train.py "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=10 "
+        "loss.mini_batch_size=5 "
+        "env.train_envs=2 "
+        "logger.backend= "
+        "logger.test_interval=1000000 "
+        "env.test_split_start=2025-07-01 "
+    ),
 }
 
 
