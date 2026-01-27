@@ -91,8 +91,8 @@ class TestMarginAccounting:
         expected_margin = initial_balance * action_level
         expected_balance = initial_balance - expected_margin
 
-        assert abs(env.balance - expected_balance) < 1, \
-            f"Leverage={leverage}, action={action_level}: expected balance {expected_balance:.2f}, got {env.balance:.2f}"
+        assert abs(env.balance - expected_balance) < 0.1, \
+            f"Leverage={leverage}, action={action_level}: expected balance {expected_balance:.4f}, got {env.balance:.4f}"
 
         # Verify position was opened
         assert env.position.position_size != 0, "Position should be opened"
@@ -128,8 +128,8 @@ class TestMarginAccounting:
         balance_after_close = env.balance
 
         # With no price change and no fees, balance should return to initial
-        assert abs(balance_after_close - initial_balance) < 1, \
-            f"Leverage={leverage}: balance should return to {initial_balance:.2f}, got {balance_after_close:.2f}"
+        assert abs(balance_after_close - initial_balance) < 0.01, \
+            f"Leverage={leverage}: balance should return to {initial_balance:.4f}, got {balance_after_close:.4f}"
 
         # Position should be flat
         assert env.position.position_size == 0, "Position should be closed"
@@ -265,8 +265,8 @@ class TestFeeAccounting:
         margin_deducted = position_notional / leverage
         expected_balance = 10000 - margin_deducted - expected_fee
 
-        assert abs(env.balance - expected_balance) < 1, \
-            f"Fee rate={fee_rate}, leverage={leverage}: expected {expected_balance:.2f}, got {env.balance:.2f}"
+        assert abs(env.balance - expected_balance) < 0.1, \
+            f"Fee rate={fee_rate}, leverage={leverage}: expected {expected_balance:.4f}, got {env.balance:.4f}"
 
     @pytest.mark.parametrize("fee_rate", [0.0, 0.001, 0.002])
     def test_round_trip_loses_exactly_two_fees(self, constant_price_df, fee_rate):
@@ -300,8 +300,8 @@ class TestFeeAccounting:
         expected_total_fee = position_notional * fee_rate * 2
         expected_final = initial_balance - expected_total_fee
 
-        assert abs(final_balance - expected_final) < 1, \
-            f"Fee={fee_rate}: expected {expected_final:.2f}, got {final_balance:.2f}"
+        assert abs(final_balance - expected_final) < 0.5, \
+            f"Fee={fee_rate}: expected {expected_final:.4f}, got {final_balance:.4f}"
 
 
 class TestPnLCalculations:

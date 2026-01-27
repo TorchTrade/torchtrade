@@ -2,6 +2,9 @@
 
 CRITICAL: Slippage affects execution price in real trading.
 If broken, backtests will be unrealistically optimistic.
+
+Current implementation: Random noise in range [1-slippage, 1+slippage]
+These tests verify the bounds are respected and slippage is actually applied.
 """
 
 import pytest
@@ -25,72 +28,12 @@ def constant_price_df():
     return df
 
 
-class TestSlippageApplication:
-    """Test that slippage is applied correctly to execution prices."""
+class TestSlippageBounds:
+    """Test that slippage stays within configured bounds."""
 
-    @pytest.mark.parametrize("slippage,leverage", [
-        (0.0, 1),      # No slippage baseline
-        (0.001, 1),    # 0.1% slippage
-        (0.005, 2),    # 0.5% slippage
-        (0.01, 5),     # 1% slippage
-    ])
-    def test_slippage_affects_execution_price(self, constant_price_df, slippage, leverage):
-        """Slippage should cause execution price to differ from market price.
-
-        With slippage, actual execution happens at worse price than market:
-        - Buy: pay more (1 + random_slippage) × market_price
-        - Sell: get less (1 - random_slippage) × market_price
-
-        We can't test exact values due to randomness, but we can verify:
-        1. Entry price differs from market price when slippage > 0
-        2. Difference is within slippage bounds
-        """
-        config = SequentialTradingEnvConfig(
-            execute_on="1Hour",
-            time_frames=["1Hour"],
-            window_sizes=[5],
-            initial_cash=10000,
-            transaction_fee=0.0,  # Isolate slippage effect
-            slippage=slippage,
-            leverage=leverage,
-            action_levels=[-1, 0, 1] if leverage > 1 else [0, 1],
-        )
-        env = SequentialTradingEnv(constant_price_df, config)
-
-        td = env.reset()
-
-        # Get market price (before slippage)
-        market_price = env._cached_base_features["close"]
-
-        # Open position
-        action_idx = 2 if leverage > 1 else 1
-        td["action"] = action_idx
-        td = env.step(td)["next"]
-
-        # Get actual entry price (after slippage)
-        entry_price = env.position.entry_price
-
-        if slippage == 0.0:
-            # No slippage: entry should equal market
-            assert abs(entry_price - market_price) < 0.01, \
-                f"With slippage=0, entry={entry_price:.2f} should equal market={market_price:.2f}"
-        else:
-            # With slippage: entry should differ from market
-            # Slippage is sampled from uniform(1-slippage, 1+slippage)
-            # So entry_price should be in range [market × (1-slippage), market × (1+slippage)]
-            min_expected = market_price * (1 - slippage)
-            max_expected = market_price * (1 + slippage)
-
-            assert min_expected <= entry_price <= max_expected, \
-                f"Slippage={slippage}: entry={entry_price:.2f} outside range [{min_expected:.2f}, {max_expected:.2f}]"
-
-    @pytest.mark.parametrize("slippage", [0.005, 0.01, 0.02])
-    def test_slippage_symmetric_for_long_and_short(self, constant_price_df, slippage):
-        """Slippage should affect longs and shorts symmetrically.
-
-        Over many samples, average slippage cost should be similar for long/short.
-        We test this by opening many positions and checking the distribution.
-        """
+    @pytest.mark.parametrize("slippage", [0.001, 0.005, 0.01, 0.02])
+    def test_entry_price_within_slippage_bounds_long(self, constant_price_df, slippage):
+        """Long entry price must be within [market*(1-s), market*(1+s)]."""
         config = SequentialTradingEnvConfig(
             execute_on="1Hour",
             time_frames=["1Hour"],
@@ -98,113 +41,100 @@ class TestSlippageApplication:
             initial_cash=10000,
             transaction_fee=0.0,
             slippage=slippage,
-            leverage=2,  # Enable shorts
+            leverage=2,
             action_levels=[-1, 0, 1],
-            seed=42,  # Fixed seed for reproducibility
         )
 
-        # Sample multiple longs
-        long_entry_prices = []
-        for _ in range(20):
+        market_price = 100.0
+        min_allowed = market_price * (1 - slippage)
+        max_allowed = market_price * (1 + slippage)
+
+        # Test multiple times to catch bound violations
+        for i in range(50):
             env = SequentialTradingEnv(constant_price_df, config)
             td = env.reset()
             td["action"] = 2  # Long
             td = env.step(td)["next"]
-            long_entry_prices.append(env.position.entry_price)
 
-        # Sample multiple shorts
-        short_entry_prices = []
-        for _ in range(20):
-            env = SequentialTradingEnv(constant_price_df, config)
-            td = env.reset()
-            td["action"] = 0  # Short
-            td = env.step(td)["next"]
-            short_entry_prices.append(env.position.entry_price)
+            entry = env.position.entry_price
+            assert min_allowed <= entry <= max_allowed, \
+                f"Trial {i}: entry={entry:.4f} outside bounds [{min_allowed:.4f}, {max_allowed:.4f}]"
 
-        # Market price is 100
-        market_price = 100.0
-
-        # Calculate average deviation from market
-        avg_long_deviation = np.mean([abs(p - market_price) / market_price for p in long_entry_prices])
-        avg_short_deviation = np.mean([abs(p - market_price) / market_price for p in short_entry_prices])
-
-        # Deviations should be similar (within 50% of each other)
-        ratio = avg_long_deviation / avg_short_deviation if avg_short_deviation > 0 else 1.0
-        assert 0.5 < ratio < 2.0, \
-            f"Slippage asymmetric: long deviation={avg_long_deviation:.4f}, short={avg_short_deviation:.4f}"
-
-    @pytest.mark.parametrize("slippage,fee", [
-        (0.01, 0.0),     # Only slippage
-        (0.0, 0.001),    # Only fee
-        (0.01, 0.001),   # Both
-    ])
-    def test_slippage_and_fees_are_separate(self, constant_price_df, slippage, fee):
-        """Slippage affects execution price, fees affect balance.
-
-        These are separate costs:
-        - Slippage: execution_price = market_price × (1 ± slippage)
-        - Fee: balance -= notional × fee
-
-        Both should be applied independently.
-        """
+    @pytest.mark.parametrize("slippage", [0.001, 0.005, 0.01, 0.02])
+    def test_entry_price_within_slippage_bounds_short(self, constant_price_df, slippage):
+        """Short entry price must be within [market*(1-s), market*(1+s)]."""
         config = SequentialTradingEnvConfig(
             execute_on="1Hour",
             time_frames=["1Hour"],
             window_sizes=[5],
             initial_cash=10000,
-            transaction_fee=fee,
+            transaction_fee=0.0,
             slippage=slippage,
-            leverage=1,
-            action_levels=[0, 1],
+            leverage=2,
+            action_levels=[-1, 0, 1],
+        )
+
+        market_price = 100.0
+        min_allowed = market_price * (1 - slippage)
+        max_allowed = market_price * (1 + slippage)
+
+        for i in range(50):
+            env = SequentialTradingEnv(constant_price_df, config)
+            td = env.reset()
+            td["action"] = 0  # Short
+            td = env.step(td)["next"]
+
+            entry = env.position.entry_price
+            assert min_allowed <= entry <= max_allowed, \
+                f"Trial {i}: entry={entry:.4f} outside bounds [{min_allowed:.4f}, {max_allowed:.4f}]"
+
+
+class TestZeroSlippage:
+    """Test that zero slippage means exact market price execution."""
+
+    @pytest.mark.parametrize("leverage,action_idx", [
+        (1, 1),   # Spot long
+        (2, 2),   # Futures long
+        (2, 0),   # Futures short
+        (5, 2),   # High leverage long
+    ])
+    def test_zero_slippage_executes_at_market_price(self, constant_price_df, leverage, action_idx):
+        """With slippage=0, entry price must EXACTLY equal market price."""
+        action_levels = [-1, 0, 1] if leverage > 1 else [0, 1]
+        config = SequentialTradingEnvConfig(
+            execute_on="1Hour",
+            time_frames=["1Hour"],
+            window_sizes=[5],
+            initial_cash=10000,
+            transaction_fee=0.0,
+            slippage=0.0,  # Zero slippage
+            leverage=leverage,
+            action_levels=action_levels,
         )
         env = SequentialTradingEnv(constant_price_df, config)
 
         td = env.reset()
-        initial_balance = env.balance
         market_price = env._cached_base_features["close"]
 
-        # Open position
-        td["action"] = 1
+        td["action"] = action_idx
         td = env.step(td)["next"]
 
-        entry_price = env.position.entry_price
-        position_size = env.position.position_size
-
-        # Calculate expected balance
-        # In spot mode: balance should be nearly 0 (used all for position)
-        # Fee is deducted: notional × fee where notional = position_size × entry_price
-        notional = abs(position_size * entry_price)
-        expected_fee = notional * fee
-
-        # Balance should be: initial - notional (used for position) - fee
-        # Which is approximately: initial - notional - fee ≈ 0 (since notional ≈ initial)
-        # More precisely: balance = initial - margin_required - fee
-        # For spot: margin_required = notional
-
-        # The key test: verify fee was deducted separately from slippage effect
-        if fee > 0:
-            # With fees, balance should be less than without fees
-            assert env.balance < initial_balance, \
-                f"Fee={fee}: balance should decrease"
-
-        # Slippage affects entry price, not balance directly
-        if slippage > 0:
-            # Entry price should differ from market
-            assert abs(entry_price - market_price) / market_price <= slippage, \
-                f"Slippage={slippage}: entry price deviation too large"
+        entry = env.position.entry_price
+        # With zero slippage, must be EXACT (not approximate)
+        assert entry == market_price, \
+            f"Zero slippage: entry={entry} != market={market_price}"
 
 
-class TestSlippageImpactOnPnL:
-    """Test that slippage affects realized PnL correctly."""
+class TestSlippageRandomness:
+    """Test that slippage introduces actual randomness."""
 
-    def test_slippage_affects_execution_price_on_trades(self, constant_price_df):
-        """Slippage should cause execution prices to differ from market price.
+    def test_slippage_produces_varying_prices(self, constant_price_df):
+        """Slippage should produce different entry prices across trials.
 
-        With slippage, entry prices should differ from market close price.
-        Over many trades, slippage typically increases trading costs.
+        If all entries are identical, slippage isn't being applied.
+        Note: Must use seed=None to avoid torch RNG being reseeded identically.
         """
-        # With slippage
-        config_slip = SequentialTradingEnvConfig(
+        config = SequentialTradingEnvConfig(
             execute_on="1Hour",
             time_frames=["1Hour"],
             window_sizes=[5],
@@ -213,28 +143,204 @@ class TestSlippageImpactOnPnL:
             slippage=0.01,  # 1% slippage
             leverage=2,
             action_levels=[-1, 0, 1],
-            seed=42,
+            seed=None,  # Avoid reseeding torch RNG
         )
-        env_slip = SequentialTradingEnv(constant_price_df, config_slip)
 
-        td = env_slip.reset()
-        market_price = env_slip._cached_base_features["close"]
+        entries = []
+        for _ in range(30):
+            env = SequentialTradingEnv(constant_price_df, config)
+            td = env.reset()
+            td["action"] = 2
+            td = env.step(td)["next"]
+            entries.append(env.position.entry_price)
 
-        # Open
-        td["action"] = 2
-        td = env_slip.step(td)["next"]
+        unique_entries = len(set(entries))
+        # With random slippage, should have many unique values
+        assert unique_entries > 10, \
+            f"Only {unique_entries} unique entries out of 30 - slippage not random?"
 
-        entry_price = env_slip.position.entry_price
+    def test_slippage_distribution_covers_range(self):
+        """Slippage should cover the full range, not just edges or center."""
+        # Create a longer dataframe to avoid running out of data
+        dates = pd.date_range('2024-01-01', periods=200, freq='1h')
+        df = pd.DataFrame({
+            'timestamp': dates,
+            'open': [100.0] * 200,
+            'high': [101.0] * 200,
+            'low': [99.0] * 200,
+            'close': [100.0] * 200,
+            'volume': [1000.0] * 200,
+        })
 
-        # Entry price should differ from market price due to slippage
-        price_diff_pct = abs(entry_price - market_price) / market_price
+        slippage = 0.02  # 2%
+        config = SequentialTradingEnvConfig(
+            execute_on="1Hour",
+            time_frames=["1Hour"],
+            window_sizes=[5],
+            initial_cash=10000,
+            transaction_fee=0.0,
+            slippage=slippage,
+            leverage=2,
+            action_levels=[-1, 0, 1],
+            seed=None,  # Avoid reseeding torch RNG
+        )
 
-        assert price_diff_pct > 0, \
-            f"With slippage, entry price should differ from market price"
+        market_price = 100.0
+        entries = []
+        for _ in range(100):
+            env = SequentialTradingEnv(df, config)
+            td = env.reset()
+            td["action"] = 2
+            td = env.step(td)["next"]
+            entries.append(env.position.entry_price)
 
-        # Difference should be within slippage bounds
-        assert price_diff_pct <= config_slip.slippage, \
-            f"Price difference {price_diff_pct:.3%} exceeds slippage {config_slip.slippage:.3%}"
+        # Check distribution covers the range
+        min_entry = min(entries)
+        max_entry = max(entries)
+        entry_range = max_entry - min_entry
+        expected_range = market_price * slippage * 2  # Full range is 2*slippage
+
+        # Should cover at least 50% of the possible range
+        coverage = entry_range / expected_range
+        assert coverage > 0.5, \
+            f"Slippage only covers {coverage:.1%} of range - distribution too narrow"
+
+
+class TestSlippageFeeIndependence:
+    """Test that slippage and fees are independent costs."""
+
+    @pytest.mark.parametrize("slippage,fee", [
+        (0.01, 0.0),      # Only slippage
+        (0.0, 0.001),     # Only fee
+        (0.01, 0.001),    # Both
+    ])
+    def test_slippage_affects_price_fee_affects_balance(self, constant_price_df, slippage, fee):
+        """Slippage changes execution price. Fee deducts from balance.
+
+        These are INDEPENDENT:
+        - entry_price = market_price * slippage_factor
+        - balance -= notional * fee (calculated on slipped price)
+        """
+        config = SequentialTradingEnvConfig(
+            execute_on="1Hour",
+            time_frames=["1Hour"],
+            window_sizes=[5],
+            initial_cash=10000,
+            transaction_fee=fee,
+            slippage=slippage,
+            leverage=2,
+            action_levels=[-1, 0, 1],
+        )
+        env = SequentialTradingEnv(constant_price_df, config)
+
+        td = env.reset()
+        initial_balance = env.balance
+        market_price = env._cached_base_features["close"]
+
+        td["action"] = 2  # Long
+        td = env.step(td)["next"]
+
+        entry_price = env.position.entry_price
+        position_size = env.position.position_size
+
+        # Verify slippage affected price (if slippage > 0)
+        if slippage > 0:
+            price_deviation = abs(entry_price - market_price) / market_price
+            assert price_deviation <= slippage, \
+                f"Price deviation {price_deviation:.4f} > slippage {slippage}"
+        else:
+            assert entry_price == market_price, \
+                f"No slippage but price differs: {entry_price} != {market_price}"
+
+        # Verify fee was deducted from balance (if fee > 0)
+        if fee > 0:
+            notional = abs(position_size * entry_price)
+            expected_fee = notional * fee
+            margin = notional / config.leverage
+            expected_balance = initial_balance - margin - expected_fee
+
+            assert abs(env.balance - expected_balance) < 0.01, \
+                f"Balance={env.balance:.2f}, expected={expected_balance:.2f}"
+
+    def test_fee_calculated_on_slipped_price(self, constant_price_df):
+        """Fee should be calculated on the slipped execution price, not market price."""
+        slippage = 0.05  # Large slippage to make difference visible
+        fee = 0.001
+
+        config = SequentialTradingEnvConfig(
+            execute_on="1Hour",
+            time_frames=["1Hour"],
+            window_sizes=[5],
+            initial_cash=10000,
+            transaction_fee=fee,
+            slippage=slippage,
+            leverage=2,
+            action_levels=[-1, 0, 1],
+        )
+
+        # Run multiple times and verify fee is on slipped price
+        for _ in range(20):
+            env = SequentialTradingEnv(constant_price_df, config)
+            td = env.reset()
+            initial_balance = env.balance
+
+            td["action"] = 2
+            td = env.step(td)["next"]
+
+            entry_price = env.position.entry_price
+            position_size = env.position.position_size
+            notional = abs(position_size * entry_price)
+            margin = notional / config.leverage
+            expected_fee = notional * fee
+
+            # Balance = initial - margin - fee
+            expected_balance = initial_balance - margin - expected_fee
+
+            assert abs(env.balance - expected_balance) < 0.01, \
+                f"Fee not calculated on slipped price. " \
+                f"Balance={env.balance:.2f}, expected={expected_balance:.2f}"
+
+
+class TestSlippageOnClose:
+    """Test that slippage affects close/exit trades too."""
+
+    def test_close_trade_has_slippage(self, constant_price_df):
+        """Closing a position should also have slippage applied."""
+        slippage = 0.01
+        config = SequentialTradingEnvConfig(
+            execute_on="1Hour",
+            time_frames=["1Hour"],
+            window_sizes=[5],
+            initial_cash=10000,
+            transaction_fee=0.0,
+            slippage=slippage,
+            leverage=2,
+            action_levels=[-1, 0, 1],
+            seed=None,  # Avoid reseeding torch RNG
+        )
+
+        # Open and close multiple times, track PnL variation
+        pnls = []
+        for _ in range(30):
+            env = SequentialTradingEnv(constant_price_df, config)
+            td = env.reset()
+            initial_pv = env._get_portfolio_value()
+
+            # Open long
+            td["action"] = 2
+            td = env.step(td)["next"]
+
+            # Close
+            td["action"] = 1
+            td = env.step(td)["next"]
+
+            final_pv = env._get_portfolio_value()
+            pnls.append(final_pv - initial_pv)
+
+        # With slippage on both open AND close, PnL should vary
+        unique_pnls = len(set([round(p, 2) for p in pnls]))
+        assert unique_pnls > 5, \
+            f"Only {unique_pnls} unique PnLs - close slippage not applied?"
 
 
 if __name__ == "__main__":

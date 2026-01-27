@@ -97,10 +97,10 @@ class TestSpotAccountingSequential:
         pv_after_hold = spot_env.history.portfolio_values[-1]
 
         # Portfolio value should be preserved (constant price, no fees)
-        assert abs(pv_after_open - initial_pv) < 10, \
-            f"PV should stay ~{initial_pv} after open, got {pv_after_open}"
-        assert abs(pv_after_hold - initial_pv) < 10, \
-            f"PV should stay ~{initial_pv} after hold, got {pv_after_hold}"
+        assert abs(pv_after_open - initial_pv) < 0.01, \
+            f"PV should stay ~{initial_pv:.4f} after open, got {pv_after_open:.4f}"
+        assert abs(pv_after_hold - initial_pv) < 0.01, \
+            f"PV should stay ~{initial_pv:.4f} after hold, got {pv_after_hold:.4f}"
 
     def test_margin_returned_when_closing(self, spot_env):
         """Closing position should return margin to balance (spot)."""
@@ -118,8 +118,8 @@ class TestSpotAccountingSequential:
         balance_after_close = spot_env.balance
 
         # Balance should be back to ~initial (no price change, no fees)
-        assert abs(balance_after_close - initial_balance) < 10, \
-            f"Balance should return to ~{initial_balance}, got {balance_after_close}"
+        assert abs(balance_after_close - initial_balance) < 0.01, \
+            f"Balance should return to ~{initial_balance:.4f}, got {balance_after_close:.4f}"
 
         # Position should be flat
         assert spot_env.position.position_size == 0, "Position should be closed"
@@ -149,8 +149,8 @@ class TestSpotAccountingSequential:
         expected_pv = env.balance + (env.position.position_size * current_price)
         actual_pv = env.history.portfolio_values[-1]
 
-        assert abs(actual_pv - expected_pv) < 1, \
-            f"PV formula incorrect: expected {expected_pv:.2f}, got {actual_pv:.2f}"
+        assert abs(actual_pv - expected_pv) < 0.01, \
+            f"PV formula incorrect: expected {expected_pv:.4f}, got {actual_pv:.4f}"
 
 
 class TestFuturesAccountingSequential:
@@ -253,8 +253,8 @@ class TestFuturesAccountingSequential:
         expected_pv = env.balance + locked_margin + unrealized_pnl
         actual_pv = env.history.portfolio_values[-1]
 
-        assert abs(actual_pv - expected_pv) < 1, \
-            f"PV formula incorrect: expected {expected_pv:.2f}, got {actual_pv:.2f}"
+        assert abs(actual_pv - expected_pv) < 0.01, \
+            f"PV formula incorrect: expected {expected_pv:.4f}, got {actual_pv:.4f}"
 
 
 class TestSpotAccountingSLTP:
@@ -305,10 +305,10 @@ class TestSpotAccountingSLTP:
         td = sltp_spot_env.step(td)["next"]
         pv_after_hold = sltp_spot_env.history.portfolio_values[-1]
 
-        assert abs(pv_after_open - initial_pv) < 10, \
-            f"SLTP PV should stay ~{initial_pv}, got {pv_after_open}"
-        assert abs(pv_after_hold - initial_pv) < 10, \
-            f"SLTP PV should stay ~{initial_pv}, got {pv_after_hold}"
+        assert abs(pv_after_open - initial_pv) < 0.01, \
+            f"SLTP PV should stay ~{initial_pv:.4f}, got {pv_after_open:.4f}"
+        assert abs(pv_after_hold - initial_pv) < 0.01, \
+            f"SLTP PV should stay ~{initial_pv:.4f}, got {pv_after_hold:.4f}"
 
 
 class TestHistoryRecording:
