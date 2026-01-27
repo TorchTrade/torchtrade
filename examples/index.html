@@ -651,6 +651,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#available-environment-configs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available Environment Configs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#common-hydra-overrides" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1420,6 +1431,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#available-environment-configs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available Environment Configs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#common-hydra-overrides" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1566,12 +1588,31 @@
 <p><strong>That's it!</strong> The collector, loss function, optimizer, and training loop remain identical. This doesn't only allow the use of any TorchRL algorithm, but any of the other useful components of TorchRL - replay buffers, transforms, modules, data structures - and provides seamless integration into the entire TorchRL ecosystem.</p>
 <hr />
 <h2 id="example-file-structure">Example File Structure<a class="headerlink" href="#example-file-structure" title="Permanent link">&para;</a></h2>
-<p>Each example in TorchTrade follows a consistent file organization pattern that separates configuration, utilities, and training logic:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>examples/online/&lt;algorithm&gt;/
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── config.yaml           # Main configuration file
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>├── utils.py             # Helper functions (env creation, network setup, etc.)
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>└── train.py            # Training script and main loop
+<p>TorchTrade examples use a clean configuration structure with centralized environment configs:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>examples/online/
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── env/                              # Central environment configs
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>│   ├── sequential.yaml               # Basic sequential trading
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>│   ├── sequential_sltp.yaml          # Sequential with stop-loss/take-profit
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>│   └── onestep.yaml                  # One-step for contextual bandits
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>│
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>├── &lt;algorithm&gt;/                      # Most algorithms (ppo, dsac, iql, ppo_chronos)
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>│   ├── config.yaml                   # Algorithm config (real file)
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>│   ├── env/ → ../env/                # Symlink for CLI env switching
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>│   ├── train.py                      # Training script and main loop
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>│   └── utils.py                      # Helper functions
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>│
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>└── grpo/                             # GRPO (onestep-only)
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    ├── config.yaml                   # Env embedded, no symlink
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    ├── train.py
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    └── utils.py
 </span></code></pre></div>
+<p><strong>Key Features:</strong>
+- <strong>Algorithm configs</strong> are real files in each algorithm directory
+- <strong>Environment configs</strong> are centralized in <code>env/</code> directory (single source of truth)
+- <strong>One symlink</strong> per algorithm enables CLI environment switching (except GRPO)
+- <strong>GRPO is special</strong> - designed for onestep-only, environment embedded directly
+- <strong>No spot/futures split</strong> - users override <code>leverage</code> and <code>action_levels</code> for futures
+- <strong>All use 1Hour timeframe</strong> by default</p>
 <h3 id="what-each-component-does">What Each Component Does<a class="headerlink" href="#what-each-component-does" title="Permanent link">&para;</a></h3>
 <p><strong><code>config.yaml</code> - Configuration Management</strong></p>
 <p>The configuration file uses <a href="https://hydra.cc/">Hydra</a> to manage all hyperparameters and settings. This includes:</p>
@@ -1654,7 +1695,7 @@
 <tr>
 <th>Example</th>
 <th>Algorithm</th>
-<th>Environment</th>
+<th>Default Environment</th>
 <th>Key Features</th>
 </tr>
 </thead>
@@ -1662,59 +1703,36 @@
 <tr>
 <td><strong>ppo/</strong></td>
 <td>PPO</td>
-<td>SeqLongOnlyEnv</td>
-<td>Standard policy gradient with multi-timeframe observations</td>
-</tr>
-<tr>
-<td><strong>ppo_futures/</strong></td>
-<td>PPO</td>
-<td>SeqFuturesEnv</td>
-<td>Futures trading with leverage and margin management</td>
-</tr>
-<tr>
-<td><strong>ppo_futures_sltp/</strong></td>
-<td>PPO</td>
-<td>SeqFuturesSLTPEnv</td>
-<td>Futures with bracket orders (stop-loss/take-profit)</td>
-</tr>
-<tr>
-<td><strong>ppo_futures_onestep/</strong></td>
-<td>PPO</td>
-<td>FuturesOneStepEnv</td>
-<td>One-step futures for episodic optimization</td>
+<td>SequentialTradingEnv (spot, 1Hour)</td>
+<td>Standard policy gradient</td>
 </tr>
 <tr>
 <td><strong>ppo_chronos/</strong></td>
 <td>PPO</td>
-<td>SeqLongOnlyEnv + ChronosEmbedding</td>
+<td>SequentialTradingEnv (spot, 1Hour)</td>
 <td>Time series embedding with Chronos T5 models</td>
 </tr>
 <tr>
 <td><strong>iql/</strong></td>
 <td>IQL (Implicit Q-Learning)</td>
-<td>SeqLongOnlyEnv</td>
+<td>SequentialTradingEnv (spot, 1Hour)</td>
 <td>Offline RL algorithm for sequential trading</td>
 </tr>
 <tr>
 <td><strong>dsac/</strong></td>
 <td>DSAC (Distributional SAC)</td>
-<td>SeqLongOnlyEnv</td>
+<td>SequentialTradingEnv (spot, 1Hour)</td>
 <td>Soft actor-critic with distributional value functions</td>
 </tr>
 <tr>
-<td><strong>grpo_futures_onestep/</strong></td>
+<td><strong>grpo/</strong></td>
 <td>GRPO</td>
-<td>FuturesOneStepEnv</td>
-<td>Group relative policy optimization for one-step RL</td>
-</tr>
-<tr>
-<td><strong>long_onestep_env/</strong></td>
-<td>GRPO</td>
-<td>LongOnlyOneStepEnv</td>
-<td>One-step long-only with SLTP bracket orders</td>
+<td>OneStepTradingEnv (spot, 1Hour)</td>
+<td>Group relative policy optimization (onestep-only, no env switching)</td>
 </tr>
 </tbody>
 </table>
+<p>All algorithms except GRPO support environment switching via CLI - see <a href="#running-examples">Running Examples</a> below.</p>
 <h3 id="offline-rl">Offline RL<a class="headerlink" href="#offline-rl" title="Permanent link">&para;</a></h3>
 <p>These examples use offline RL algorithms that learn from pre-collected datasets without requiring live environment interaction during training. The data can be collected from interactions with offline backtesting environments or from real online live trading sessions. We provide simple example offline datasets at <a href="https://huggingface.co/Torch-Trade">HuggingFace/Torch-Trade</a>.</p>
 <p>Located in <code>examples/offline/</code>:</p>
@@ -1759,26 +1777,7 @@
 <p><strong>Future Work</strong>: We plan to provide example scripts for fine-tuning LLMs on reasoning traces from frontier models for trading. Additionally, we are working on integrating Vision-Language Models (VLMs) to process trading chart plots for decision-making.</p>
 <h3 id="rule-based-actors">Rule-Based Actors<a class="headerlink" href="#rule-based-actors" title="Permanent link">&para;</a></h3>
 <p>TorchTrade provides actor classes that allow easy creation of rule-based trading strategies using technical indicators and market signals, for example mean reversion, breakout, and more. These rule-based actors integrate seamlessly with TorchTrade environments for both backtesting and live trading, serving as baselines or components in hybrid approaches. This is especially interesting with our <strong><a href="../guides/custom-features/">custom feature preprocessing</a></strong>, which allows you to add technical indicators and derived features to enhance rule-based strategies.</p>
-<p>Located in <code>examples/online/rulebased/</code>:</p>
-<table>
-<thead>
-<tr>
-<th>Example</th>
-<th>Actor Type</th>
-<th>Environment</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>rulebased/</strong></td>
-<td>MeanReversionActor</td>
-<td>SeqLongOnlyEnv</td>
-<td>Mean reversion strategy using Bollinger Bands and Stochastic RSI</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Future Work</strong>: We plan to provide examples of hybrid approaches that combine rule-based policies with neural network policies as actors, leveraging the strengths of both deterministic strategies and learned behaviors.</p>
+<p><strong>Future Work</strong>: We plan to provide examples of rule-based strategies and hybrid approaches that combine rule-based policies with neural network policies as actors, leveraging the strengths of both deterministic strategies and learned behaviors.</p>
 <h3 id="live-trading">Live Trading<a class="headerlink" href="#live-trading" title="Permanent link">&para;</a></h3>
 <p>These examples demonstrate deploying trained policies to real exchange APIs for live trading. We strongly recommend starting with paper trading to validate your strategies risk-free before transitioning to live capital deployment.</p>
 <p>Located in <code>examples/live/</code>:</p>
@@ -1820,17 +1819,65 @@
 <p><strong>Note</strong>: If you would like us to add additional transforms for other pretrained models (similar to ChronosEmbedding), we welcome <a href="https://github.com/TorchTrade/torchtrade/issues">GitHub issues</a> with your requests. We're happy to implement these given the availability of model weights and resources.</p>
 <hr />
 <h2 id="running-examples">Running Examples<a class="headerlink" href="#running-examples" title="Permanent link">&para;</a></h2>
-<p>All examples use Hydra for configuration management:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Run with default configuration</span>
+<p>All examples use Hydra for configuration management with centralized environment configs:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Run with default configuration (sequential, spot, 1Hour)</span>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online/ppo/train.py
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Override config parameters</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online/ppo/train.py<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span>env.symbol<span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span>optim.lr<span class="o">=</span>1e-4<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span>collector.frames_per_batch<span class="o">=</span><span class="m">1000</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span>loss.gamma<span class="o">=</span><span class="m">0</span>.95
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Switch environment via CLI</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online/ppo/train.py<span class="w"> </span><span class="nv">env</span><span class="o">=</span>sequential_sltp
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online/ppo/train.py<span class="w"> </span><span class="nv">env</span><span class="o">=</span>onestep
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="c1"># Configure for futures trading</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online/ppo/train.py<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">    </span>env.leverage<span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">    </span>env.action_levels<span class="o">=</span><span class="s1">&#39;[-1.0,0.0,1.0]&#39;</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="c1"># Override multiple parameters</span>
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online/ppo/train.py<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">    </span><span class="nv">env</span><span class="o">=</span>sequential_sltp<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="w">    </span>env.symbol<span class="o">=</span><span class="s2">&quot;ETH/USD&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="w">    </span>env.leverage<span class="o">=</span><span class="m">10</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="w">    </span>optim.lr<span class="o">=</span>1e-4<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="w">    </span>loss.gamma<span class="o">=</span><span class="m">0</span>.95
 </span></code></pre></div>
+<h3 id="available-environment-configs">Available Environment Configs<a class="headerlink" href="#available-environment-configs" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Config</th>
+<th>Environment Class</th>
+<th>SLTP</th>
+<th>Timeframe</th>
+<th>Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sequential</code></td>
+<td>SequentialTradingEnv</td>
+<td>No</td>
+<td>1Hour</td>
+<td>Basic sequential trading</td>
+</tr>
+<tr>
+<td><code>sequential_sltp</code></td>
+<td>SequentialTradingEnvSLTP</td>
+<td>Yes</td>
+<td>1Hour</td>
+<td>Sequential with bracket orders</td>
+</tr>
+<tr>
+<td><code>onestep</code></td>
+<td>OneStepTradingEnv</td>
+<td>Yes</td>
+<td>1Hour</td>
+<td>One-step for GRPO/contextual bandits</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Spot vs Futures:</strong>
+- <strong>Spot (default)</strong>: <code>leverage: 1</code>, <code>action_levels: [0.0, 1.0]</code>
+- <strong>Futures</strong>: Override with <code>env.leverage=5 env.action_levels='[-1.0,0.0,1.0]'</code></p>
 <h3 id="common-hydra-overrides">Common Hydra Overrides<a class="headerlink" href="#common-hydra-overrides" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -1918,19 +1965,43 @@
 <p>This structure mirrors <a href="https://github.com/pytorch/rl/tree/main/sota-implementations">TorchRL's SOTA implementations</a>, making it easy to adapt other algorithms.</p>
 <hr />
 <h2 id="configuration-files">Configuration Files<a class="headerlink" href="#configuration-files" title="Permanent link">&para;</a></h2>
-<p>Each example includes a <code>config/</code> directory with Hydra configs:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>examples/online/ppo/
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>├── train.py              # Training script
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>├── config/
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>│   ├── config.yaml       # Main config
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>│   ├── env/
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>│   │   └── default.yaml  # Environment config
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>│   ├── collector/
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>│   │   └── default.yaml  # Data collection config
-</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>│   └── loss/
-</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>│       └── default.yaml  # Loss function config
+<p>Configurations are split between algorithm-specific and centralized environment configs:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>examples/online/
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>├── env/                          # Central environment configs
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>│   ├── sequential.yaml           # Basic sequential trading
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>│   ├── sequential_sltp.yaml      # With stop-loss/take-profit
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>│   └── onestep.yaml              # One-step for GRPO
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>└── ppo/
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    ├── config.yaml               # Algorithm-specific config
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    ├── env/ → ../env/            # Symlink for CLI switching
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    ├── train.py
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    └── utils.py
 </span></code></pre></div>
-<p>This allows clean separation of concerns and easy experimentation.</p>
+<p>Algorithm configs use Hydra's defaults list to compose with environment configs:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># ppo/config.yaml</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">defaults</span><span class="p">:</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sequential</span><span class="w">  </span><span class="c1"># Default environment (spot, 1Hour)</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">_self_</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="c1"># Optional: override for futures trading</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="nt">env</span><span class="p">:</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">  </span><span class="nt">leverage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">  </span><span class="nt">action_levels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">-1.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">1.0</span><span class="p p-Indicator">]</span>
+</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>
+</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="nt">collector</span><span class="p">:</span>
+</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">  </span><span class="nt">frames_per_batch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000</span>
+</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">  </span><span class="nt">total_frames</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100_000_000</span>
+</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
+</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="nt">optim</span><span class="p">:</span>
+</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">  </span><span class="nt">lr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.5e-4</span>
+</span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">  </span><span class="nt">max_grad_norm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>
+</span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="nt">loss</span><span class="p">:</span>
+</span><span id="__span-8-20"><a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="w">  </span><span class="nt">gamma</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.9</span>
+</span><span id="__span-8-21"><a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="w">  </span><span class="nt">clip_epsilon</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span>
+</span><span id="__span-8-22"><a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a><span class="w">  </span><span class="nt">entropy_coef</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.01</span>
+</span></code></pre></div>
+<p>This structure keeps algorithm configs separate while centralizing environment configs for easy reuse.</p>
 <hr />
 <h2 id="creating-your-own-examples">Creating Your Own Examples<a class="headerlink" href="#creating-your-own-examples" title="Permanent link">&para;</a></h2>
 <p>To create a new training script:</p>
@@ -1943,9 +2014,9 @@
 </ol>
 <p><strong>Tips:</strong>
 - Start with <code>ppo/</code> for standard RL
-- Start with <code>grpo_futures_onestep/</code> for one-step RL
+- Start with <code>grpo/</code> for one-step RL
 - Start with <code>ppo_chronos/</code> for time series embeddings
-- Start with <code>rulebased/</code> for non-RL baselines</p>
+- Use <code>env=&lt;config_name&gt;</code> to switch environments without copying code</p>
 <hr />
 <h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
 <ul>
