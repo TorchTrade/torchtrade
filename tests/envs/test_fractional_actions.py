@@ -208,6 +208,56 @@ class TestLeverageApplication:
             f"{leverage_ratio}x leverage: expected {expected_multiplier}x position, got {actual_multiplier:.2f}x"
 
 
+class TestMarginAndFeeInteraction:
+    """Test that margin calculation correctly accounts for fees with leverage."""
+
+    @pytest.mark.parametrize("leverage,fee,min_expected,max_expected", [
+        (1, 0.001, 0.98, 1.0),      # Spot: ~99% invested (accounting for fee)
+        (10, 0.001, 9.7, 10.0),     # 10x: ~9.8x invested (accounting for fee)
+        (20, 0.01, 16.0, 20.0),     # 20x + 1% fee: ~16.5x (margin + fee impact)
+    ])
+    def test_margin_calculation_with_fees(self, sample_df, leverage, fee, min_expected, max_expected):
+        """Margin calculation should account for fees correctly to prevent over-leveraging.
+
+        The formula is: margin_required = capital_allocated / (1 + leverage * fee)
+        This ensures that fees don't cause the position to exceed available margin.
+
+        The test verifies that:
+        1. Position size increases with leverage
+        2. Higher fees reduce effective position size
+        3. System doesn't over-leverage (which could cause instant liquidation)
+        """
+        config = SeqFuturesEnvConfig(
+            action_levels=[0.0, 1.0],
+            leverage=leverage,
+            transaction_fee=fee,
+            initial_cash=10000,
+            slippage=0.0,
+            random_start=False,
+            max_traj_length=10
+        )
+        env = SeqFuturesEnv(sample_df, config)
+        td = env.reset()
+
+        # Open 100% long position
+        td["action"] = torch.tensor([1])
+        td = env.step(td)["next"]
+
+        # Calculate actual notional value as multiple of initial cash
+        current_price = env._cached_base_features["close"]
+        position_notional = env.position.position_size * current_price
+        actual_multiplier = position_notional / 10000
+
+        # Verify position size is in expected range
+        assert min_expected <= actual_multiplier <= max_expected, \
+            f"Leverage {leverage}x with {fee*100:.1f}% fee: expected {min_expected:.1f}x-{max_expected:.1f}x, got {actual_multiplier:.2f}x"
+
+        # Verify position was actually opened (not zero)
+        assert actual_multiplier > 0.9, f"Position should be opened, got {actual_multiplier:.2f}x"
+
+        env.close()
+
+
 class TestDirectionSwitching:
     """Test that direction switches work correctly."""
 

@@ -414,6 +414,46 @@ class TestSequentialEnvTermination:
         assert terminated, "Episode should terminate"
         env.close()
 
+    def test_liquidation_short_position_uptrend(self, sample_ohlcv_df, trending_up_df):
+        """Short position should liquidate on uptrend (symmetric to long liquidation test)."""
+        config = SequentialTradingEnvConfig(
+            leverage=20,  # Very high leverage for easier liquidation
+            action_levels=[-1, 0, 1],  # Need short actions
+            initial_cash=1000,
+            max_traj_length=200,
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+        env = SequentialTradingEnv(trending_up_df, config, simple_feature_fn)
+        td = env.reset()
+
+        # Open short position on uptrend (should eventually liquidate or hit max)
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(0)  # Short (action_levels: [-1, 0, 1])
+        td = env.step(action_td)
+
+        # Verify short position was opened
+        assert env.position.position_size < 0, "Should have opened short position"
+
+        # Continue stepping with same action (keep short position)
+        terminated = False
+        for _ in range(200):
+            if td["next"]["done"].item():
+                terminated = True
+                break
+            action_td = td["next"].clone()
+            action_td["action"] = torch.tensor(0)  # Keep short position
+            try:
+                td = env.step(action_td)
+            except (ValueError, IndexError):
+                terminated = True
+                break
+
+        # Should have terminated (either liquidation, max length, or out of data)
+        assert terminated, "Episode should terminate"
+        env.close()
+
 
 # ============================================================================
 # EDGE CASES

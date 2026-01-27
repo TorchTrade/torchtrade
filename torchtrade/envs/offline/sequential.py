@@ -280,17 +280,20 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
     def _calculate_unrealized_pnl_pct(
         self, entry_price: float, current_price: float, position_size: float
     ) -> float:
-        """Calculate unrealized PnL as a percentage."""
-        if entry_price == 0:
+        """Calculate unrealized PnL as a percentage of entry value.
+
+        Returns PnL as fraction of initial notional value.
+        For both long and short, this is the return on the position.
+        """
+        if entry_price == 0 or position_size == 0:
             return 0.0
 
-        if position_size > 0:
-            # Long position
-            return (current_price - entry_price) / entry_price
-        elif position_size < 0:
-            # Short position
-            return (entry_price - current_price) / entry_price
-        return 0.0
+        # Reuse absolute PnL calculation
+        pnl_absolute = self._calculate_unrealized_pnl(entry_price, current_price, position_size)
+
+        # Normalize by entry notional value
+        entry_notional = abs(position_size * entry_price)
+        return pnl_absolute / entry_notional if entry_notional > 0 else 0.0
 
     def _calculate_distance_to_liquidation(
         self, current_price: float, liquidation_price: float, position_size: float
@@ -366,11 +369,12 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         exposure_pct = self.position.position_value / portfolio_value if portfolio_value > 0 else 0.0
 
         # Calculate position direction (-1, 0, +1)
-        position_direction = float(
-            1 if self.position.position_size > 0
-            else -1 if self.position.position_size < 0
-            else 0
-        )
+        if self.position.position_size > 0:
+            position_direction = 1.0
+        elif self.position.position_size < 0:
+            position_direction = -1.0
+        else:
+            position_direction = 0.0
 
         # Calculate distance to liquidation
         distance_to_liquidation = self._calculate_distance_to_liquidation(
@@ -571,9 +575,18 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             # Open new position
             return self._open_position(target_side, target_position_size, target_notional, execution_price)
 
-        # Check for direction switch (futures only - spot can't switch)
-        if ((self.position.position_size > 0 and target_position_size < 0) or
-            (self.position.position_size < 0 and target_position_size > 0)):
+        # Check for direction switch (long→short or short→long)
+        has_long_position = self.position.position_size > 0
+        has_short_position = self.position.position_size < 0
+        wants_long = target_position_size > 0
+        wants_short = target_position_size < 0
+
+        is_direction_switch = (
+            (has_long_position and wants_short) or
+            (has_short_position and wants_long)
+        )
+
+        if is_direction_switch:
             # Close current position then open opposite
             self._close_position(execution_price)
 
