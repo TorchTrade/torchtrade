@@ -1,0 +1,65 @@
+defaults:
+  - env: sequential
+  - _self_
+
+# Environment overrides for futures trading
+env:
+  leverage: 2
+  action_levels: [-1.0, 0.0, 1.0]
+
+# Collector (DQN-specific)
+collector:
+  device: null
+  frames_per_batch: 5
+  total_frames: 1_000_000
+  init_random_frames: 1000
+  eps_start: 1.0
+  eps_end: 0.05
+  annealing_frames: 20_000
+
+# Replay buffer (DQN-specific)
+buffer:
+  buffer_size: 100_000
+  batch_size: 32
+
+# Logger
+logger:
+  mode: online
+  backend: wandb
+  project_name: TorchTrade-Online
+  group_name: ${env.name}
+  exp_name: dqn-${env.name}
+  test_interval: 10_000
+  num_test_episodes: 1
+
+# Model (DQN-specific)
+model:
+  network_type: tdqn
+  activation: relu
+  hidden_size: 128
+  dropout: 0.1
+
+# Optimization (DQN-specific)
+optim:
+  lr: 2.0e-5
+  max_grad_norm: 10
+  device: null
+
+# Loss (DQN-specific)
+loss:
+  gamma: 0.9
+  hard_update_freq: 50
+  num_updates: 10
+
+compile:
+  compile: False
+  compile_mode:
+  cudagraphs: False
+
+# Hydra configuration - saves outputs in example directory
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ./outputs/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
