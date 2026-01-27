@@ -1,6 +1,11 @@
 defaults:
-  - env: sequential_futures
+  - env: sequential
   - _self_
+
+# Environment overrides for futures trading
+env:
+  leverage: 6
+  action_levels: [-1.0, 0.0, 1.0]
 
 # Collector (DQN-specific)
 collector:
