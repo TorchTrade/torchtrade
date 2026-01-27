@@ -67,14 +67,14 @@ class TestBinanceFuturesOrderClass:
     @pytest.fixture
     def order_executor(self, mock_client):
         """Create order executor with mock client."""
-        from torchtrade.envs.binance.futures_order_executor import (
+        from torchtrade.envs.live.binance.order_executor import (
             BinanceFuturesOrderClass,
             TradeMode,
         )
 
         return BinanceFuturesOrderClass(
             symbol="BTCUSDT",
-            trade_mode=TradeMode.QUANTITY,
+            trade_mode="quantity",
             demo=True,
             leverage=10,
             client=mock_client,
@@ -91,14 +91,14 @@ class TestBinanceFuturesOrderClass:
 
     def test_symbol_normalization(self, mock_client):
         """Test that symbol with slash is normalized."""
-        from torchtrade.envs.binance.futures_order_executor import (
+        from torchtrade.envs.live.binance.order_executor import (
             BinanceFuturesOrderClass,
             TradeMode,
         )
 
         executor = BinanceFuturesOrderClass(
             symbol="BTC/USDT",
-            trade_mode=TradeMode.QUANTITY,
+            trade_mode="quantity",
             client=mock_client,
         )
         assert executor.symbol == "BTCUSDT"
@@ -302,7 +302,7 @@ class TestPositionStatusDataclass:
 
     def test_position_status_creation(self):
         """Test creating PositionStatus."""
-        from torchtrade.envs.binance.futures_order_executor import PositionStatus
+        from torchtrade.envs.live.binance.order_executor import PositionStatus
 
         pos = PositionStatus(
             qty=0.001,
@@ -325,7 +325,7 @@ class TestOrderStatusDataclass:
 
     def test_order_status_creation(self):
         """Test creating OrderStatus."""
-        from torchtrade.envs.binance.futures_order_executor import OrderStatus
+        from torchtrade.envs.live.binance.order_executor import OrderStatus
 
         order = OrderStatus(
             is_open=False,

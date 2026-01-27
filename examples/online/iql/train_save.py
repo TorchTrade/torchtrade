@@ -29,6 +29,7 @@ from utils import (
     make_replay_buffer,
     make_collector,
 )
+from torchtrade.envs.offline.infrastructure.utils import load_torch_trade_dataset
 
 torch.set_float32_matmul_precision("high")
 
@@ -64,7 +65,7 @@ def main(cfg: DictConfig):  # noqa: F821
     device = torch.device(device)
 
     # Creante env
-    df = pd.read_csv("/home/sebastian/Documents/TorchTrade/torchrl_alpaca_env/torchtrade/data/binance_spot_1m_cleaned/btcusdt_spot_1m_12_2024_to_09_2025.csv")
+    df = load_torch_trade_dataset()
     test_df = df[0:(1440 * 14)] # 14 days
     train_df = df[(1440 * 14):]
 

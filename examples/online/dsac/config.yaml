@@ -1,51 +1,42 @@
+defaults:
+  - env: sequential
+  - _self_
 
-# task and env
+# Environment overrides (dsac-specific configuration)
 env:
-  name: SeqLongOnlyEnv
-  symbol: "BTC/USD"
-  time_frames: ["5Min", "15Min"]
-  window_sizes: [10, 10]
-  execute_on: "15Min"
-  initial_cash: 1000
-  transaction_fee: 0.015
-  slippage: 0.01
-  bankrupt_threshold: 0.1
-  exp_name: ${logger.exp_name}
-  seed: 0
-  train_envs: 5
+  time_frames: ["1Hour"]
+  window_sizes: [48]
+  execute_on: "1Hour"
+  train_envs: 1
   eval_envs: 1
-  data_path: Sebasdi/TorchTrade_btcusd_spot_1m_12_2024_to_09_2025
-  test_split_start: "2025-01-01"
 
-# collector
+# Collector
 collector:
-  device: cpu
-  init_random_frames: 10000
-  frames_per_batch: 5000
-  max_frames_per_traj: 100000
+  device: gpu
+  init_random_frames: 10_000
+  frames_per_batch: 500
+  max_frames_per_traj: 10000
   total_frames: 2000000
 
-# replay buffer
+# Replay buffer
 replay_buffer:
-  prb: 0 # use prioritized experience replay
-  size: 1000000
+  prb: 0
+  size: 100_000
   scratch_dir: null
 
-# optim
+# Optim
 optim:
   utd_ratio: 1.0
-  gamma: 0.9
-  batch_size: 256
+  gamma: 0.99
+  batch_size: 32
   lr: 3.0e-4
-  weight_decay: 0.0
+  weight_decay: 1e-5
   target_update_polyak: 0.995
-  target_entropy_weight: 0.2
+  target_entropy_weight: 0.8
   target_entropy: "auto"
-  loss_function: l2
-  # default is 0.98 but needs to be decreased for env
-  # with small action space
+  loss_function: smooth_l1
 
-# network
+# Network
 network:
   hidden_sizes: [256, 256]
   activation: relu
@@ -56,12 +47,19 @@ compile:
   compile_mode:
   cudagraphs: False
 
-# logging
+# Logging
 logger:
   backend: wandb
   project_name: TorchTrade-Online
-  group_name: null
-  exp_name: dSAC
+  group_name: ${env.name}
+  exp_name: dsac-${env.name}
   mode: online
-  eval_iter: 20000
-  video: False
+  eval_iter: 5_000
+
+# Hydra configuration - saves outputs in example directory
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ./outputs/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

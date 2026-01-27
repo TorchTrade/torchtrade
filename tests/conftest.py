@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
 # Fix MKL threading issue for ParallelEnv tests
@@ -236,5 +236,122 @@ def price_gap_df():
         "close": close_prices,
         "volume": volume,
     })
+
+
+# ============================================================================
+# UNIFIED ENVIRONMENT FIXTURES (for consolidated tests)
+# ============================================================================
+
+@pytest.fixture(params=["spot", "futures"])
+def trading_mode(request):
+    """Parametrized fixture for testing both spot and futures configurations.
+
+    Returns leverage value for each mode:
+    - spot: leverage=1
+    - futures: leverage=10
+    """
+    return {"spot": 1, "futures": 10}[request.param]
+
+
+@pytest.fixture
+def unified_config_spot():
+    """Config for spot-like trading (leverage=1, no shorts).
+
+    Default action_levels: [0, 1] (flat, long)
+    """
+    from torchtrade.envs.offline import SequentialTradingEnvConfig
+
+    return SequentialTradingEnvConfig(
+        leverage=1,  # No liquidation
+        # action_levels auto-generated: [0, 1]
+        initial_cash=1000,
+        execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+        window_sizes=[10],
+        transaction_fee=0.01,
+        slippage=0.0,
+        seed=42,
+        max_traj_length=100,
+        random_start=False,
+    )
+
+
+@pytest.fixture
+def unified_config_futures():
+    """Config for futures-like trading (leverage>1, bidirectional).
+
+    Default action_levels: [-1, 0, 1] (short, flat, long)
+    """
+    from torchtrade.envs.offline import SequentialTradingEnvConfig
+
+    return SequentialTradingEnvConfig(
+        leverage=10,  # Enables liquidation
+        # action_levels auto-generated: [-1, 0, 1]
+        initial_cash=1000,
+        execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+        window_sizes=[10],
+        transaction_fee=0.01,
+        slippage=0.0,
+        seed=42,
+        max_traj_length=100,
+        random_start=False,
+    )
+
+
+def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
+    """Simple feature processing function for testing."""
+    df = df.copy().reset_index(drop=False)
+    df["features_close"] = df["close"]
+    df["features_volume"] = df["volume"]
+    df.fillna(0, inplace=True)
+    return df
+
+
+def validate_account_state(account_state, leverage):
+    """
+    Shared validation helper for account state structure.
+
+    Args:
+        account_state: Account state tensor [6]
+            [exposure_pct, position_direction, unrealized_pnl_pct,
+             holding_time, leverage, distance_to_liquidation]
+        leverage: Leverage value (1 for spot, >1 for futures)
+    """
+    import torch
+
+    assert isinstance(account_state, torch.Tensor)
+    assert account_state.shape[-1] == 6, "Account state should have 6 elements"
+
+    # Extract components (new 6-element structure)
+    exposure_pct = account_state[..., 0]
+    position_direction = account_state[..., 1]
+    unrealized_pnl_pct = account_state[..., 2]
+    holding_time = account_state[..., 3]
+    state_leverage = account_state[..., 4]
+    distance_to_liquidation = account_state[..., 5]
+
+    # Common validations
+    assert (exposure_pct >= 0).all(), "Exposure percentage should be non-negative"
+    assert (holding_time >= 0).all(), "Holding time should be non-negative"
+    assert (state_leverage >= 1.0).all(), "Leverage should be >= 1.0"
+    assert (distance_to_liquidation >= 0).all(), "Distance to liquidation should be non-negative"
+
+    # Leverage-specific validations
+    if leverage == 1:
+        # Spot: position_direction should be 0 or +1 (no shorts)
+        assert (position_direction >= 0).all(), "Spot position direction should be >= 0 (no shorts)"
+        assert ((position_direction == 0) | (position_direction == 1)).all(), \
+            "Spot position direction should be 0 or 1"
+        # Spot: leverage = 1.0
+        assert (state_leverage == 1.0).all(), "Spot leverage should be 1.0"
+        # Spot: distance_to_liquidation should be 1.0 (no liquidation risk)
+        assert (distance_to_liquidation == 1.0).all(), "Spot distance_to_liquidation should be 1.0"
+    else:  # leverage > 1
+        # Futures: position_direction should be -1, 0, or +1
+        assert ((position_direction == -1) | (position_direction == 0) | (position_direction == 1)).all(), \
+            "Futures position direction should be -1, 0, or +1"
+        # Futures: leverage >= 1.0 (already checked above)
+        assert (state_leverage >= 1.0).all(), "Futures leverage should be >= 1.0"
 
 

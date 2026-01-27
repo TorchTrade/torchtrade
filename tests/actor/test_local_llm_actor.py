@@ -5,7 +5,7 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from torchtrade.envs.offline.utils import build_sltp_action_map
+from torchtrade.envs.offline.infrastructure.utils import build_sltp_action_map
 
 
 def futures_sltp_action_map(stoploss_levels, takeprofit_levels):
@@ -617,7 +617,9 @@ class TestLocalLLMActorActionSpaceDescription:
         )
         instructions, format_str = actor._build_action_space_description()
 
-        assert "0: Hold/Close" in instructions
+        # Check for HOLD and CLOSE actions separately (indices 0 and 1)
+        assert "0: Hold position" in instructions
+        assert "1: Close current position" in instructions
         assert "long" in instructions.lower()
         assert "short" in instructions.lower()
         assert "SL=" in instructions

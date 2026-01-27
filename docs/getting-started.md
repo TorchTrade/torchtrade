@@ -35,6 +35,12 @@ cd torchtrade
 # Install TorchTrade and all dependencies
 uv sync
 
+# Optional: Install with extra features
+uv sync --extra llm              # OpenAI API support for LLMActor
+uv sync --extra llm_local        # Local LLM inference (vLLM, transformers)
+uv sync --extra chronos          # Chronos forecasting transforms
+uv sync --all-extras             # Install all optional dependencies
+
 # Activate the virtual environment
 source .venv/bin/activate  # On Unix/macOS
 # or

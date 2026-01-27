@@ -28,7 +28,7 @@ from torchrl.envs import TransformedEnv, Compose, InitTracker, RewardSum
 from tensordict.nn import TensorDictModule
 import torch.nn as nn
 
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchtrade.envs.transforms import ChronosEmbeddingTransform
 import datasets
 
@@ -43,14 +43,14 @@ def example_basic_and_multitimeframe():
     df = df["train"].to_pandas()
 
     # Create environment with multiple timeframes
-    config = SeqLongOnlyEnvConfig(
+    config = SequentialTradingEnvConfig(
         symbol="BTC/USD",
         time_frames=["1Min", "5Min", "15Min"],  # 1min, 5min, 15min
         window_sizes=[12, 8, 6],
         execute_on="5Min",
         initial_cash=1000,
     )
-    base_env = SeqLongOnlyEnv(df, config)
+    base_env = SequentialTradingEnv(df, config)
 
     # Transform all timeframes with Chronos embeddings
     env = TransformedEnv(
@@ -102,14 +102,14 @@ def example_with_policy():
     df = df["train"].to_pandas()
 
     # Create environment with Chronos embedding
-    config = SeqLongOnlyEnvConfig(
+    config = SequentialTradingEnvConfig(
         symbol="BTC/USD",
         time_frames=["5Min", "15Min"],
         window_sizes=[12, 8],
         execute_on="5Min",
         initial_cash=1000,
     )
-    base_env = SeqLongOnlyEnv(df, config)
+    base_env = SequentialTradingEnv(df, config)
 
     env = TransformedEnv(
         base_env,

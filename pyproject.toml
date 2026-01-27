@@ -20,7 +20,7 @@ classifiers = [
 dependencies = [
     "alpaca-py",
     "python-binance",
-    "ccxt>=4.0.0",  # Replaced python-bitget with ccxt for V2 API support
+    "ccxt>=4.0.0", # Replaced python-bitget with ccxt for V2 API support
     "python-dotenv",
     "torchrl",
     "wandb",
@@ -29,6 +29,7 @@ dependencies = [
     "matplotlib",
     "ta",
     "datasets",
+    "scikit-learn>=1.6.1",  # Used by example training scripts for StandardScaler
 ]
 
 [project.optional-dependencies]
@@ -45,6 +46,9 @@ llm_local = [
     "accelerate>=0.20.0",
     "bitsandbytes>=0.41.0",
 ]
+llm = [
+    "openai>=1.0.0",
+]
 chronos = [
     "chronos-forecasting",
 ]
@@ -56,9 +60,9 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 
 [project.urls]
-"Homepage" = "https://github.com/torchtrade/torchrl-alpaca-env"
-"Bug Reports" = "https://github.com/torchtrade/torchrl-alpaca-env/issues"
-"Source" = "https://github.com/torchtrade/torchrl-alpaca-env"
+"Homepage" = "https://github.com/TorchTrade/torchtrade"
+"Bug Reports" = "https://github.com/TorchTrade/torchtrade/issues"
+"Source" = "https://github.com/TorchTrade/torchtrade"
 
 [tool.hatch.metadata]
 allow-direct-references = true

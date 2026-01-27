@@ -1,44 +1,25 @@
-env:
-  name: SeqLongOnlySLTPEnv
-  # only used in SeqLongOnlySLTPEnv
-  stoploss_levels: [-0.01, -0.02, -0.03, -0.04]
-  takeprofit_levels: [0.02, 0.04, 0.06, 0.08, 0.1]
-  symbol: "BTC/USD"
-  time_frames: ["5Min", "15Min"]
-  window_sizes: [10, 10]
-  execute_on: "15Min"
-  initial_cash: [1000, 5000]
-  transaction_fee: 0.0025 
-  slippage: 0.001
-  bankrupt_threshold: 0.1
-  exp_name: ${logger.exp_name}
-  seed: 0
-  train_envs: 10
-  eval_envs: 2
-  #data_path: Sebasdi/TorchTrade_btcusd_spot_1m_12_2024_to_09_2025
-  test_split_start: "2025-01-01"
-  data_path: Torch-Trade/btcusdt_spot_1m_01_2020_to_12_2025
+defaults:
+  - env: sequential
+  - _self_
 
-  # collector
+# Collector settings (PPO-specific)
 collector:
-  device: 
-  frames_per_batch: 100000 # 5 envs -> 1000 steps per rollout execute on 5 min -> ~ 3.5 days per rollout
+  device:
+  frames_per_batch: 10000
   total_frames: 100_000_000
 
-# logger
+# Logger (PPO-specific)
 logger:
   mode: online
   backend: wandb
   project_name: TorchTrade-Online
   group_name: ${env.name}
-  exp_name: ppo
+  exp_name: ppo-${env.name}
   test_interval: 1_000_000
   num_test_episodes: 1
 
-eval:
-  model_path: "outputs/2025-12-12/16-06-44/ppo_policy_360.pth"
 
-# Optim
+# Optim (PPO-specific)
 optim:
   lr: 2.5e-4
   eps: 1.0e-6
@@ -47,19 +28,27 @@ optim:
   anneal_lr: True
   device:
 
-# loss
+# Loss (PPO-specific)
 loss:
-  gamma: 0.9
-  mini_batch_size: 33333
+  gamma: 0.99
+  mini_batch_size: 3333
   ppo_epochs: 3
   gae_lambda: 0.95
   clip_epsilon: 0.1
   anneal_clip_epsilon: True
   critic_coef: 1.0
-  entropy_coef: 0.01
+  entropy_coef: 0.1
   loss_critic_type: l2
 
 compile:
   compile: False
   compile_mode:
   cudagraphs: False
+
+# Hydra configuration - saves outputs in example directory
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ./outputs/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

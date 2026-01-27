@@ -3,7 +3,7 @@ Simple demonstration of LocalLLMActor for offline backtesting.
 
 This example shows:
 1. Loading a small dataset from CSV
-2. Creating a SeqLongOnlyEnv
+2. Creating a SequentialTradingEnv
 3. Running LocalLLMActor with a configurable local LLM
 4. Printing actions and reasoning traces
 
@@ -18,8 +18,8 @@ import pandas as pd
 import torch
 
 from torchtrade.actor import LocalLLMActor
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
 def simple_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
@@ -64,7 +64,7 @@ def main():
 
     # Create environment configuration
     print("\n[2/5] Creating environment...")
-    config = SeqLongOnlyEnvConfig(
+    config = SequentialTradingEnvConfig(
         symbol="BTC/USD",
         time_frames=[
             TimeFrame(1, TimeFrameUnit.Minute),
@@ -80,7 +80,7 @@ def main():
     )
 
     # Create environment
-    env = SeqLongOnlyEnv(df, config, feature_preprocessing_fn=simple_preprocessing)
+    env = SequentialTradingEnv(df, config, feature_preprocessing_fn=simple_preprocessing)
     print(f"  Environment created with {env.max_steps} max steps")
 
     # Create LocalLLMActor

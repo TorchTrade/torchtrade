@@ -358,19 +358,6 @@ class CoverageTracker(Transform):
             - Note: Reset coverage can be much lower than state coverage since episodes
               start at specific positions but then traverse many subsequent states
 
-        Entropy (reset_entropy, state_entropy):
-            - Range: [0, log(N)] where N = total_positions
-            - Measures: Uniformity of the visit distribution
-            - Maximum entropy = log(N): Perfectly uniform (all positions visited equally)
-            - Low entropy: Concentrated on few positions (high variance in visit counts)
-            - High entropy: Spread across many positions (uniform sampling)
-            - Interpretation:
-                * If coverage is high but entropy is low: Visiting many positions but
-                  some are visited much more frequently than others
-                * If coverage is low but entropy is high: Only visiting a subset, but
-                  those positions are visited uniformly
-                * Ideal: Both high coverage (>0.8) and high entropy (close to log(N))
-
         Reset vs State Coverage:
             - reset_coverage: Diversity of episode starting points
             - state_coverage: Diversity of all states seen during episodes (includes
@@ -385,8 +372,6 @@ class CoverageTracker(Transform):
               positions but exploring 90% of dataset through episode trajectories
             - reset_coverage=0.5, state_coverage=0.5: Warning! Agent only seeing
               states near episode starts, not exploring forward in time
-            - reset_entropy=3.2, max_entropy=log(1000)≈6.9: Moderate uniformity,
-              some positions sampled more than others (check std_visits)
 
         Returns:
             Dictionary containing coverage metrics:
@@ -401,7 +386,6 @@ class CoverageTracker(Transform):
             - reset_max_visits (int): Maximum visits to any reset position
             - reset_min_visits (int): Minimum visits to any reset position
             - reset_std_visits (float): Standard deviation of reset visit distribution
-            - reset_entropy (float): Shannon entropy of reset distribution (higher = more uniform)
 
             State coverage (full trajectory coverage):
             - state_visited (int): Number of unique states visited during episodes
@@ -411,7 +395,6 @@ class CoverageTracker(Transform):
             - state_max_visits (int): Maximum visits to any state
             - state_min_visits (int): Minimum visits to any state
             - state_std_visits (float): Standard deviation of state visit distribution
-            - state_entropy (float): Shannon entropy of state distribution (higher = more uniform)
 
             If tracking is disabled, returns:
             - enabled (bool): False
@@ -445,7 +428,6 @@ class CoverageTracker(Transform):
             "reset_max_visits": int(self._reset_coverage_counts.max()),
             "reset_min_visits": int(self._reset_coverage_counts.min()),
             "reset_std_visits": float(self._reset_coverage_counts.std()),
-            "reset_entropy": float(self._compute_entropy(self._reset_coverage_counts, self._total_resets)),
 
             # State coverage (all timesteps)
             "state_visited": int(state_visited),
@@ -455,52 +437,7 @@ class CoverageTracker(Transform):
             "state_max_visits": int(self._state_coverage_counts.max()),
             "state_min_visits": int(self._state_coverage_counts.min()),
             "state_std_visits": float(self._state_coverage_counts.std()),
-            "state_entropy": float(self._compute_entropy(self._state_coverage_counts, self._total_states)),
         }
-
-    def _compute_entropy(self, coverage_counts: np.ndarray, total_count: int) -> float:
-        """Compute Shannon entropy of coverage distribution.
-
-        Shannon entropy H measures the randomness/uniformity of a probability distribution.
-        For coverage tracking, it tells us how uniformly we're sampling positions:
-
-        Formula: H = -sum(p_i * log(p_i)) where p_i = count_i / total_count
-
-        Interpretation:
-            - H = 0: All visits to single position (minimum randomness)
-            - H = log(N): Perfectly uniform across N positions (maximum randomness)
-            - H in between: Some positions visited more than others
-
-        Practical thresholds (for N=1000 positions, max_entropy ≈ 6.9):
-            - H < 2.0: Very concentrated (bad - potential overfitting)
-            - H = 2.0-4.0: Moderately concentrated
-            - H = 4.0-6.0: Reasonably uniform
-            - H > 6.0: Highly uniform (good - broad exploration)
-
-        Why entropy matters:
-            - High coverage + low entropy = Visiting many positions, but some way more
-              than others (skewed sampling distribution)
-            - Low coverage + high entropy = Only visiting subset of data, but uniformly
-              (limited but balanced exploration)
-            - High coverage + high entropy = Visiting most positions uniformly (ideal!)
-
-        Args:
-            coverage_counts: Array of visit counts per position
-            total_count: Total number of visits
-
-        Returns:
-            Shannon entropy in nats (natural logarithm, not bits)
-        """
-        if coverage_counts is None or total_count == 0:
-            return 0.0
-
-        # Normalize to probability distribution
-        probs = coverage_counts / total_count
-        probs = probs[probs > 0]  # Filter zeros to avoid log(0)
-
-        # Shannon entropy: H = -sum(p * log(p))
-        entropy = -np.sum(probs * np.log(probs + 1e-10))
-        return entropy
 
     def get_coverage_distribution(self) -> Dict[str, Optional[np.ndarray]]:
         """Get the raw coverage counts arrays for both reset and state tracking.

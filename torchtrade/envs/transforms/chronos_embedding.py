@@ -8,7 +8,7 @@ from typing import List, Optional, Union
 import torch
 import torch.nn as nn
 from torchrl.envs.transforms import Transform
-from torchrl.data import CompositeSpec, UnboundedContinuousTensorSpec
+from torchrl.data import Composite, UnboundedContinuousTensorSpec
 from tensordict import TensorDictBase
 import warnings
 
@@ -268,7 +268,7 @@ class ChronosEmbeddingTransform(Transform):
         """Apply transform to reset observations."""                                                                         
         return self._call(tensordict_reset) 
 
-    def transform_observation_spec(self, observation_spec: CompositeSpec) -> CompositeSpec:
+    def transform_observation_spec(self, observation_spec: Composite) -> Composite:
         """Update observation spec with embedding dimensions.
 
         Args:

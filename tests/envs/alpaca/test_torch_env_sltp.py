@@ -9,12 +9,11 @@ import numpy as np
 import torch
 from tensordict import TensorDict
 
-from torchtrade.envs.alpaca.torch_env_sltp import (
+from torchtrade.envs.live.alpaca.env_sltp import (
     AlpacaSLTPTorchTradingEnv,
     AlpacaSLTPTradingEnvConfig,
 )
-from torchtrade.envs.action_maps import create_alpaca_sltp_action_map as combinatory_action_map
-from torchtrade.envs.alpaca.order_executor import TradeMode
+from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map as combinatory_action_map
 from .mocks import MockObserver, MockTrader, PositionStatus
 
 
@@ -86,11 +85,11 @@ class TestCombinatorActionMap:
         stoploss_levels = [-0.05, -0.1]
         takeprofit_levels = [0.05, 0.1]
 
-        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels)
+        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels, include_close_action=False)
 
         # Action 0 should be HOLD
         assert action_map[0] == (None, None)
-        # Should have 1 + (2 * 2) = 5 actions
+        # Should have 1 + (2 * 2) = 5 actions (HOLD + 4 SL/TP combinations)
         assert len(action_map) == 5
 
     def test_action_map_single_level(self):
@@ -98,9 +97,9 @@ class TestCombinatorActionMap:
         stoploss_levels = [-0.05]
         takeprofit_levels = [0.1]
 
-        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels)
+        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels, include_close_action=False)
 
-        assert len(action_map) == 2
+        assert len(action_map) == 2  # HOLD + 1 SL/TP combination
         assert action_map[0] == (None, None)
         assert action_map[1] == (-0.05, 0.1)
 
@@ -109,9 +108,9 @@ class TestCombinatorActionMap:
         stoploss_levels = [-0.025, -0.05, -0.1]
         takeprofit_levels = [0.05, 0.1, 0.2]
 
-        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels)
+        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels, include_close_action=False)
 
-        # 1 HOLD + 3*3 combinations = 10 actions
+        # 1 HOLD + 3*3 combinations = 10 actions (no CLOSE)
         assert len(action_map) == 10
 
 
@@ -162,26 +161,6 @@ class TestAlpacaSLTPTradingEnvInitialization:
         # 1 HOLD + 3*3 SL/TP combinations = 10 actions
         assert env.action_spec.n == 10
 
-    def test_observation_spec_account_state(self):
-        """Test that observation spec has 7-element account state."""
-        config = AlpacaSLTPTradingEnvConfig(
-            symbol="BTC/USD",
-            window_sizes=[10],
-        )
-
-        mock_observer = MockObserver(window_sizes=[10], num_features=4)
-        mock_trader = MockSLTPTrader()
-
-        env = AlpacaSLTPTorchTradingEnv(
-            config=config,
-            observer=mock_observer,
-            trader=mock_trader,
-        )
-
-        assert "account_state" in env.observation_spec.keys()
-        # Account state should have 7 elements
-        assert env.observation_spec["account_state"].shape == (7,)
-
     def test_action_map_created(self):
         """Test that action map is correctly created."""
         config = AlpacaSLTPTradingEnvConfig(
@@ -229,12 +208,6 @@ class TestAlpacaSLTPTradingEnvReset:
         td = env.reset()
         assert isinstance(td, TensorDict)
 
-    def test_reset_contains_account_state(self, env):
-        """Test that reset returns account state with 7 elements."""
-        td = env.reset()
-
-        assert env.account_state_key in td.keys()
-        assert td[env.account_state_key].shape == (7,)
 
     def test_reset_resets_sltp_state(self, env):
         """Test that reset clears active SL/TP levels."""
@@ -321,52 +294,6 @@ class TestAlpacaSLTPTradingEnvStep:
         env._step(td_buy2)
 
         assert env.trader.cash == cash_after_buy
-
-
-class TestAlpacaSLTPTradingEnvAccountState:
-    """Tests for account state observation."""
-
-    @pytest.fixture
-    def env(self):
-        """Create an environment with mocks."""
-        config = AlpacaSLTPTradingEnvConfig(
-            symbol="BTC/USD",
-            window_sizes=[10],
-        )
-        mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader(initial_cash=10000.0, current_price=100000.0)
-
-        env = AlpacaSLTPTorchTradingEnv(
-            config=config,
-            observer=mock_observer,
-            trader=mock_trader,
-        )
-        env._wait_for_next_timestamp = lambda: None
-
-        return env
-
-    def test_account_state_has_7_elements(self, env):
-        """Test account state has 7 elements."""
-        td = env.reset()
-        account_state = td[env.account_state_key]
-
-        # [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpc, holding_time]
-        assert account_state.shape == (7,)
-
-    def test_account_state_after_buy(self, env):
-        """Test account state after buy action."""
-        env.reset()
-
-        td_buy = TensorDict({"action": torch.tensor(1)}, batch_size=())
-        td_out = env._step(td_buy)
-
-        account_state = td_out[env.account_state_key]
-
-        # cash should be lower, position_size should be > 0
-        assert account_state[0].item() < 10000.0  # cash
-        assert account_state[1].item() > 0  # position_size
-        assert account_state[2].item() > 0  # position_value
-        assert account_state[3].item() > 0  # entry_price
 
 
 class TestAlpacaSLTPTradingEnvTermination:

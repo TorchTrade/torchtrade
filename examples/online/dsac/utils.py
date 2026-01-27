@@ -24,6 +24,7 @@ from torchrl.envs import (
     InitTracker,
     ParallelEnv,
     RewardSum,
+    StepCounter,
     TransformedEnv,
 )
 from torchrl.envs.utils import ExplorationType, set_exploration_type
@@ -32,14 +33,15 @@ from torchrl.modules import MLP, SafeModule, SafeSequential
 from torchrl.modules.tensordict_module.actors import ProbabilisticActor
 from torchrl.objectives import SoftUpdate
 from torchrl.objectives.sac import DiscreteSACLoss
-from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchrl.trainers.helpers.models import ACTIVATIONS
 from torchtrade.models.simple_encoders import SimpleCNNEncoder
 import copy
-import ta
-import numpy as np
+
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
+from torchtrade.envs.transforms import CoverageTracker
+
 
 # ====================================================================
 # Environment utils
@@ -57,10 +59,10 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy().reset_index(drop=False)
 
-    df["features_close"] = df["close"]
     df["features_open"] = df["open"]
     df["features_high"] = df["high"]
     df["features_low"] = df["low"]
+    df["features_close"] = df["close"]
     df["features_volume"] = df["volume"]
 
     # Normalize features using StandardScaler
@@ -73,28 +75,76 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def env_maker(df, cfg, device="cpu"):
-    config = SeqLongOnlyEnvConfig(
-        symbol=cfg.env.symbol,
-        time_frames=cfg.env.time_frames,
-        window_sizes=cfg.env.window_sizes,
-        execute_on=cfg.env.execute_on,
-        include_base_features=False,
-        initial_cash=cfg.env.initial_cash,
-        slippage=cfg.env.slippage,
-        transaction_fee=cfg.env.transaction_fee,
-        bankrupt_threshold=cfg.env.bankrupt_threshold,
-        seed=cfg.env.seed,
-    )
-    return SeqLongOnlyEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
+    if cfg.env.name == "SequentialTradingEnv":
+        config = SequentialTradingEnvConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            random_start=random_start,
+            max_traj_length=max_traj_length,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            action_levels=cfg.env.action_levels,
+        )
+        return SequentialTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    elif cfg.env.name == "SequentialTradingEnvSLTP":
+        config = SequentialTradingEnvSLTPConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            random_start=random_start,
+            max_traj_length=max_traj_length,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
+            include_hold_action=cfg.env.include_hold_action,
+        )
+        return SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=custom_preprocessing)
+    elif cfg.env.name == "OneStepTradingEnv":
+        config = OneStepTradingEnvConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
+            include_hold_action=cfg.env.include_hold_action,
+            quantity_per_trade=cfg.env.quantity_per_trade,
+            trade_mode=cfg.env.trade_mode,
+        )
+        return OneStepTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    else:
+        raise ValueError(f"Unknown environment: {cfg.env.name}")
 
 
 
-def apply_env_transforms(env):
+def apply_env_transforms(env, max_steps):
     """Apply standard transforms to the environment.
 
     Args:
         env: Base environment
+        max_steps: Maximum steps for StepCounter
 
     Returns:
         transformed_env: Environment with transforms applied
@@ -108,14 +158,26 @@ def apply_env_transforms(env):
             InitTracker(),
             DoubleToFloat(),
             RewardSum(),
+            StepCounter(max_steps=max_steps),
         ),
     )
     return transformed_env
 
 
-def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
+def make_environment(
+    train_df,
+    test_df,
+    cfg,
+    train_num_envs=1,
+    eval_num_envs=1,
+    max_train_traj_length=1,
+    max_eval_traj_length=1,
+):
     """Make environments for training and evaluation."""
-    maker = functools.partial(env_maker, train_df, cfg)
+    maker = functools.partial(
+        env_maker, train_df, cfg, max_traj_length=max_train_traj_length, random_start=True
+    )
+    max_train_steps = train_df.shape[0]
     parallel_env = ParallelEnv(
         train_num_envs,
         EnvCreator(maker),
@@ -124,18 +186,24 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
     parallel_env.set_seed(cfg.env.seed)
 
     # Create train environment
-    train_env = apply_env_transforms(parallel_env)
+    train_env = apply_env_transforms(parallel_env, max_train_steps)
 
     # Create eval environment
-    maker = functools.partial(env_maker, test_df, cfg)
+    maker = functools.partial(
+        env_maker, test_df, cfg, max_traj_length=max_eval_traj_length
+    )
     eval_base_env = ParallelEnv(
         eval_num_envs,
         EnvCreator(maker),
         serial_for_single=True,
     )
-    eval_env = apply_env_transforms(eval_base_env)
+    max_eval_steps = test_df.shape[0]
+    eval_env = apply_env_transforms(eval_base_env, max_eval_steps)
 
-    return train_env, eval_env
+    # Create coverage tracker for postproc (used in collector)
+    coverage_tracker = CoverageTracker()
+
+    return train_env, eval_env, coverage_tracker
 
 
 
@@ -144,20 +212,21 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
 # ---------------------------
 
 
-def make_collector(cfg, train_env, actor_model_explore, compile_mode, device="cpu"):
+def make_collector(cfg, train_env, actor_model_explore, compile_mode, device="cpu", postproc=None):
     """Make collector.
 
     Args:
         device: Device for data collection (default: "cpu", can use "cuda" now that VecNormV2 is removed)
+        postproc: Optional postprocessing transform (e.g., CoverageTracker)
     """
     collector = SyncDataCollector(
         train_env,
         actor_model_explore,
         frames_per_batch=cfg.collector.frames_per_batch,
         init_random_frames=cfg.collector.init_random_frames,
-        max_frames_per_traj=cfg.collector.max_frames_per_traj,
         total_frames=cfg.collector.total_frames,
         device=device,
+        postproc=postproc,  # Add coverage tracker as postproc
         compile_policy={"mode": compile_mode} if compile_mode else False,
         cudagraph_policy={"warmup": 10} if cfg.compile.cudagraphs else False,
     )
@@ -224,6 +293,7 @@ def make_sac_agent(cfg, env, device):
 
     # Get number of features from environment observation spec
     num_features = env.observation_spec[market_data_keys[0]].shape[-1]
+    account_state_dim = env.observation_spec[account_state_key].shape[-1]
 
     # Build the encoder
     for key, t, w in zip(market_data_keys, time_frames, window_sizes):
@@ -243,6 +313,7 @@ def make_sac_agent(cfg, env, device):
 
     account_state_encoder = SafeModule(
         module=MLP(
+            in_features=account_state_dim,
             num_cells=[32],
             out_features=14,
             activation_class=ACTIVATIONS[cfg.network.activation],
@@ -257,7 +328,7 @@ def make_sac_agent(cfg, env, device):
     # Define the actor
     actor_net = MLP(
         num_cells=cfg.network.hidden_sizes,
-        out_features=3,
+        out_features=action_spec.n,
         activation_class=ACTIVATIONS[cfg.network.activation],
         device=device,
     )
@@ -274,7 +345,7 @@ def make_sac_agent(cfg, env, device):
         module=full_actor,
         in_keys=["logits"],
         out_keys=["action"],
-        distribution_class=Categorical, #Categorical, OneHotCategorical
+        distribution_class=Categorical,
         distribution_kwargs={},
         default_interaction_type=InteractionType.RANDOM,
         return_log_prob=False,
@@ -283,7 +354,7 @@ def make_sac_agent(cfg, env, device):
     # Define Critic Network
     qvalue_net = MLP(
         num_cells=cfg.network.hidden_sizes,
-        out_features=3,
+        out_features=action_spec.n,
         activation_class=ACTIVATIONS[cfg.network.activation],
         device=device,
     )

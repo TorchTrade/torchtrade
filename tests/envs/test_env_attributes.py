@@ -10,13 +10,30 @@ have the necessary attributes for LLM actor integration:
 import pandas as pd
 import pytest
 
-from torchtrade.envs.offline.seqlongonly import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchtrade.envs.offline.seqlongonlysltp import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
-from torchtrade.envs.offline.longonlyonestepenv import LongOnlyOneStepEnv, LongOnlyOneStepEnvConfig
-from torchtrade.envs.offline.seqfutures import SeqFuturesEnv, SeqFuturesEnvConfig
-from torchtrade.envs.offline.seqfuturessltp import SeqFuturesSLTPEnv, SeqFuturesSLTPEnvConfig
-from torchtrade.envs.offline.futuresonestepenv import FuturesOneStepEnv, FuturesOneStepEnvConfig
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline import (
+    SequentialTradingEnv,
+    SequentialTradingEnvConfig,
+    SequentialTradingEnvSLTP,
+    SequentialTradingEnvSLTPConfig,
+    OneStepTradingEnv,
+    OneStepTradingEnvConfig,
+)
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+
+# Aliases for backwards compatibility in tests
+SeqLongOnlyEnv = SequentialTradingEnv
+SeqLongOnlyEnvConfig = SequentialTradingEnvConfig
+SeqLongOnlySLTPEnv = SequentialTradingEnvSLTP
+SeqLongOnlySLTPEnvConfig = SequentialTradingEnvSLTPConfig
+LongOnlyOneStepEnv = OneStepTradingEnv
+LongOnlyOneStepEnvConfig = OneStepTradingEnvConfig
+SeqFuturesEnv = SequentialTradingEnv
+SeqFuturesEnvConfig = SequentialTradingEnvConfig
+SeqFuturesSLTPEnv = SequentialTradingEnvSLTP
+SeqFuturesSLTPEnvConfig = SequentialTradingEnvSLTPConfig
+FuturesOneStepEnv = OneStepTradingEnv
+FuturesOneStepEnvConfig = OneStepTradingEnvConfig
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
@@ -28,16 +45,10 @@ def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# Expected account state configurations
-STANDARD_ACCOUNT_STATE = [
-    "cash", "position_size", "position_value", "entry_price",
-    "current_price", "unrealized_pnlpct", "holding_time"
-]
-
-FUTURES_ACCOUNT_STATE = [
-    "cash", "position_size", "position_value", "entry_price",
-    "current_price", "unrealized_pnlpct", "leverage",
-    "margin_ratio", "liquidation_price", "holding_time"
+# Expected account state configuration (unified 6-element structure)
+UNIFIED_ACCOUNT_STATE = [
+    "exposure_pct", "position_direction", "unrealized_pnlpct",
+    "holding_time", "leverage", "distance_to_liquidation"
 ]
 
 
@@ -53,6 +64,7 @@ class TestOfflineEnvironmentAttributes:
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
             initial_cash=10000.0,
             transaction_fee=0.001,
+            leverage=1,  # Spot mode
         )
         env = SeqLongOnlyEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
 
@@ -65,7 +77,7 @@ class TestOfflineEnvironmentAttributes:
         assert isinstance(env.market_data_keys, list), "market_data_keys should be a list"
 
         # Check account_state content
-        assert env.account_state == STANDARD_ACCOUNT_STATE, f"Expected {STANDARD_ACCOUNT_STATE}, got {env.account_state}"
+        assert env.account_state == UNIFIED_ACCOUNT_STATE, f"Expected {UNIFIED_ACCOUNT_STATE}, got {env.account_state}"
 
         # Check market_data_keys is not empty
         assert len(env.market_data_keys) > 0, "market_data_keys should not be empty"
@@ -95,6 +107,7 @@ class TestOfflineEnvironmentAttributes:
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
             initial_cash=10000.0,
             transaction_fee=0.001,
+            leverage=1,  # Spot mode
             stoploss_levels=[-0.02, -0.05],
             takeprofit_levels=[0.03, 0.06],
         )
@@ -104,7 +117,7 @@ class TestOfflineEnvironmentAttributes:
         assert hasattr(env, "market_data_keys"), "SeqLongOnlySLTPEnv missing market_data_keys attribute"
         assert isinstance(env.account_state, list)
         assert isinstance(env.market_data_keys, list)
-        assert env.account_state == STANDARD_ACCOUNT_STATE
+        assert env.account_state == UNIFIED_ACCOUNT_STATE
         assert len(env.market_data_keys) > 0
 
         # Check getter methods
@@ -126,6 +139,9 @@ class TestOfflineEnvironmentAttributes:
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
             initial_cash=10000.0,
             transaction_fee=0.001,
+            leverage=1,  # Spot mode
+            stoploss_levels=[-0.02],
+            takeprofit_levels=[0.03],
         )
         env = LongOnlyOneStepEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
 
@@ -133,7 +149,7 @@ class TestOfflineEnvironmentAttributes:
         assert hasattr(env, "market_data_keys"), "LongOnlyOneStepEnv missing market_data_keys attribute"
         assert isinstance(env.account_state, list)
         assert isinstance(env.market_data_keys, list)
-        assert env.account_state == STANDARD_ACCOUNT_STATE
+        assert env.account_state == UNIFIED_ACCOUNT_STATE
         assert len(env.market_data_keys) > 0
 
         # Check getter methods
@@ -163,7 +179,7 @@ class TestOfflineEnvironmentAttributes:
         assert hasattr(env, "market_data_keys"), "SeqFuturesEnv missing market_data_keys attribute"
         assert isinstance(env.account_state, list)
         assert isinstance(env.market_data_keys, list)
-        assert env.account_state == FUTURES_ACCOUNT_STATE, f"Expected {FUTURES_ACCOUNT_STATE}, got {env.account_state}"
+        assert env.account_state == UNIFIED_ACCOUNT_STATE, f"Expected {UNIFIED_ACCOUNT_STATE}, got {env.account_state}"
         assert len(env.market_data_keys) > 0
 
         # Check getter methods
@@ -195,7 +211,7 @@ class TestOfflineEnvironmentAttributes:
         assert hasattr(env, "market_data_keys"), "SeqFuturesSLTPEnv missing market_data_keys attribute"
         assert isinstance(env.account_state, list)
         assert isinstance(env.market_data_keys, list)
-        assert env.account_state == FUTURES_ACCOUNT_STATE
+        assert env.account_state == UNIFIED_ACCOUNT_STATE
         assert len(env.market_data_keys) > 0
 
         # Check getter methods
@@ -227,7 +243,7 @@ class TestOfflineEnvironmentAttributes:
         assert hasattr(env, "market_data_keys"), "FuturesOneStepEnv missing market_data_keys attribute"
         assert isinstance(env.account_state, list)
         assert isinstance(env.market_data_keys, list)
-        assert env.account_state == FUTURES_ACCOUNT_STATE
+        assert env.account_state == UNIFIED_ACCOUNT_STATE
         assert len(env.market_data_keys) > 0
 
         # Check getter methods
@@ -248,7 +264,7 @@ class TestAlpacaEnvironmentAttributes:
         """Test AlpacaTorchTradingEnv has account_state and market_data_keys."""
         # Note: We can't easily instantiate Alpaca envs without API credentials,
         # but we can import and check the class structure
-        from torchtrade.envs.alpaca.torch_env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+        from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 
         # Check that the config exists (at minimum)
         assert AlpacaTorchTradingEnv is not None
@@ -258,7 +274,7 @@ class TestAlpacaEnvironmentAttributes:
 
     def test_alpaca_sltp_torch_env_has_attributes(self):
         """Test AlpacaSLTPTorchTradingEnv has account_state and market_data_keys."""
-        from torchtrade.envs.alpaca.torch_env_sltp import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
+        from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
 
         assert AlpacaSLTPTorchTradingEnv is not None
         assert AlpacaSLTPTradingEnvConfig is not None
@@ -271,7 +287,7 @@ class TestBinanceEnvironmentAttributes:
 
     def test_binance_futures_env_has_attributes(self):
         """Test BinanceFuturesTorchTradingEnv has account_state and market_data_keys."""
-        from torchtrade.envs.binance.torch_env_futures import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
+        from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 
         assert BinanceFuturesTorchTradingEnv is not None
         assert BinanceFuturesTradingEnvConfig is not None
@@ -282,34 +298,33 @@ class TestBinanceEnvironmentAttributes:
 class TestAccountStateStructure:
     """Test that account_state structure matches documentation."""
 
-    def test_standard_account_state_length(self, sample_ohlcv_df):
-        """Test standard environments have 7-element account state."""
-        config = SeqLongOnlyEnvConfig(
+    def test_unified_account_state_length(self, sample_ohlcv_df):
+        """Test all environments use unified 6-element account state."""
+        # Test spot mode
+        spot_config = SeqLongOnlyEnvConfig(
             symbol="TEST/USD",
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
             initial_cash=10000.0,
             transaction_fee=0.001,
+            leverage=1,  # Spot mode
         )
-        env = SeqLongOnlyEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
+        spot_env = SeqLongOnlyEnv(sample_ohlcv_df, spot_config, feature_preprocessing_fn=simple_feature_fn)
+        assert len(spot_env.account_state) == 6, f"Spot environments should have 6-element account state, got {len(spot_env.account_state)}"
 
-        assert len(env.account_state) == 7, f"Standard environments should have 7-element account state, got {len(env.account_state)}"
-
-    def test_futures_account_state_length(self, sample_ohlcv_df):
-        """Test futures environments have 10-element account state."""
-        config = SeqFuturesEnvConfig(
+        # Test futures mode
+        futures_config = SeqFuturesEnvConfig(
             symbol="TEST/USD",
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
             initial_cash=10000.0,
             transaction_fee=0.001,
-            leverage=10.0,
+            leverage=10,  # Futures mode
         )
-        env = SeqFuturesEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
-
-        assert len(env.account_state) == 10, f"Futures environments should have 10-element account state, got {len(env.account_state)}"
+        futures_env = SeqFuturesEnv(sample_ohlcv_df, futures_config, feature_preprocessing_fn=simple_feature_fn)
+        assert len(futures_env.account_state) == 6, f"Futures environments should have 6-element account state, got {len(futures_env.account_state)}"
 
 
 class TestMarketDataKeys:
@@ -327,6 +342,7 @@ class TestMarketDataKeys:
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
             initial_cash=10000.0,
             transaction_fee=0.001,
+            leverage=1,  # Spot mode
         )
         env = SeqLongOnlyEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
 
@@ -351,6 +367,7 @@ class TestMarketDataKeys:
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
             initial_cash=10000.0,
             transaction_fee=0.001,
+            leverage=1,  # Spot mode
         )
         env = SeqLongOnlyEnv(sample_ohlcv_df, config, feature_preprocessing_fn=simple_feature_fn)
 

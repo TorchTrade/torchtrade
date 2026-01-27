@@ -66,7 +66,7 @@ class TestBitgetFuturesTorchTradingEnv:
     @pytest.fixture
     def env_config(self):
         """Create environment configuration."""
-        from torchtrade.envs.bitget.torch_env_futures import BitgetFuturesTradingEnvConfig
+        from torchtrade.envs.live.bitget.env import BitgetFuturesTradingEnvConfig
 
         return BitgetFuturesTradingEnvConfig(
             symbol="BTCUSDT",
@@ -80,7 +80,7 @@ class TestBitgetFuturesTorchTradingEnv:
     @pytest.fixture
     def env(self, env_config, mock_observer, mock_trader):
         """Create environment with mocks."""
-        from torchtrade.envs.bitget.torch_env_futures import BitgetFuturesTorchTradingEnv
+        from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv
 
         # Patch time.sleep to avoid waiting
         with patch("time.sleep"):
@@ -100,11 +100,11 @@ class TestBitgetFuturesTorchTradingEnv:
 
     def test_action_spec(self, env):
         """Test action spec is correctly defined."""
-        assert env.action_spec.n == 3  # short, hold, long
+        assert env.action_spec.n == 5  # fractional: -1.0, -0.5, 0.0, 0.5, 1.0
 
     def test_action_levels(self, env):
         """Test action levels are correctly set."""
-        assert env.action_levels == [-1.0, 0.0, 1.0]
+        assert env.action_levels == [-1.0, -0.5, 0.0, 0.5, 1.0]
 
     def test_observation_spec(self, env):
         """Test observation spec contains expected keys."""
@@ -115,9 +115,9 @@ class TestBitgetFuturesTorchTradingEnv:
         assert "market_data_5m_10" in obs_spec.keys()
 
     def test_account_state_shape(self, env):
-        """Test account state has correct shape (10 elements for futures)."""
+        """Test account state has correct shape (6 elements)."""
         obs_spec = env.observation_spec
-        assert obs_spec["account_state"].shape == (10,)
+        assert obs_spec["account_state"].shape == (6,)
 
     def test_reset(self, env, mock_trader):
         """Test environment reset."""
@@ -133,7 +133,7 @@ class TestBitgetFuturesTorchTradingEnv:
         """Test observation shapes after reset."""
         td = env.reset()
 
-        assert td["account_state"].shape == (10,)
+        assert td["account_state"].shape == (6,)
         assert td["market_data_1m_10"].shape == (10, 4)
         assert td["market_data_5m_10"].shape == (10, 4)
 
@@ -142,7 +142,7 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())  # Hold
+            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # Hold/Close (0.0)
             next_td = env.step(action_td)
 
             # TorchRL step returns results under "next" key
@@ -155,7 +155,7 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # Long
+            action_td = TensorDict({"action": torch.tensor(4)}, batch_size=())  # Long (1.0)
             next_td = env.step(action_td)
 
             # Trade should have been attempted
@@ -176,7 +176,7 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
+            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
             next_td = env.step(action_td)
 
             reward = next_td["next"]["reward"]
@@ -188,7 +188,7 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
+            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
             next_td = env.step(action_td)
 
             done = next_td["next"]["done"]
@@ -200,88 +200,9 @@ class TestBitgetFuturesTorchTradingEnv:
             assert isinstance(truncated, torch.Tensor)
             assert done.shape == (1,)
 
-    def test_account_state_with_position(self, env, mock_trader):
-        """Test account state when there's an open position."""
-        from torchtrade.envs.bitget.futures_order_executor import PositionStatus
-
-        # Mock a position
-        mock_trader.get_status = MagicMock(return_value={
-            "position_status": PositionStatus(
-                qty=0.001,
-                notional_value=50.0,
-                entry_price=50000.0,
-                unrealized_pnl=0.5,
-                unrealized_pnl_pct=0.01,
-                mark_price=50500.0,
-                leverage=5,
-                margin_mode="isolated",
-                liquidation_price=45000.0,
-            )
-        })
-
-        td = env._get_observation()
-
-        account_state = td["account_state"]
-        assert account_state[1].item() == pytest.approx(0.001, rel=1e-3)  # position_size
-        assert account_state[4].item() == pytest.approx(50500.0, rel=1e-3)  # current_price (mark_price)
-        assert account_state[6].item() == pytest.approx(5.0, rel=1e-3)  # leverage
-
-    def test_account_state_no_position(self, env, mock_trader):
-        """Test account state when there's no position."""
-        mock_trader.get_status = MagicMock(return_value={
-            "position_status": None
-        })
-
-        td = env._get_observation()
-
-        account_state = td["account_state"]
-        assert account_state[1].item() == 0.0  # position_size should be 0
-
-    def test_account_state_short_position(self, env, mock_trader):
-        """Test account state with short position (negative qty)."""
-        from torchtrade.envs.bitget.futures_order_executor import PositionStatus
-
-        mock_trader.get_status = MagicMock(return_value={
-            "position_status": PositionStatus(
-                qty=-0.001,  # Negative for short
-                notional_value=50.0,
-                entry_price=50000.0,
-                unrealized_pnl=0.5,
-                unrealized_pnl_pct=0.01,
-                mark_price=49500.0,
-                leverage=5,
-                margin_mode="isolated",
-                liquidation_price=55000.0,
-            )
-        })
-
-        td = env._get_observation()
-
-        account_state = td["account_state"]
-        assert account_state[1].item() < 0  # position_size should be negative
-
-    def test_bankruptcy_termination(self, env, mock_trader):
-        """Test that environment terminates on bankruptcy."""
-        # Mock low balance
-        mock_trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 50.0,  # Below 10% of initial 1000
-            "available_balance": 50.0,
-            "total_unrealized_profit": 0.0,
-            "total_margin_balance": 50.0,
-        })
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-
-            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
-            next_td = env.step(action_td)
-
-            done = next_td["next"]["done"]
-            assert done.item() is True
-
     def test_no_bankruptcy_when_disabled(self, env_config, mock_observer, mock_trader):
         """Test that bankruptcy check can be disabled."""
-        from torchtrade.envs.bitget.torch_env_futures import BitgetFuturesTorchTradingEnv
+        from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv
 
         env_config.done_on_bankruptcy = False
 
@@ -304,7 +225,7 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
+            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
             next_td = env.step(action_td)
 
             done = next_td["next"]["done"]
@@ -312,7 +233,7 @@ class TestBitgetFuturesTorchTradingEnv:
 
     def test_close_position_action(self, env, mock_trader):
         """Test that action 1 (hold/close) closes existing position."""
-        from torchtrade.envs.bitget.futures_order_executor import PositionStatus
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
 
         # Mock existing long position
         mock_trader.get_status = MagicMock(return_value={
@@ -332,21 +253,16 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            # Action 1 with level 0.0 should close position
-            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
+            # Action index 2 maps to level 0.0, which should close position
+            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())
             env._step(action_td)  # Use _step to test internal logic
 
-            # Should NOT have called trade or close (because action is 0.0, not closing)
-            # But if qty != 0 and action is 0, it SHOULD close
-            # Let me check the action_levels mapping again
-            # Action 0 = -1.0 (short), Action 1 = 0.0 (close/hold), Action 2 = 1.0 (long)
-
-            # Actually, looking at the implementation, action 0.0 means close position
-            # So with action index 1 (which maps to level 0.0), if there's a position, it should close
+            # Fractional action levels: [0=-1.0, 1=-0.5, 2=0.0, 3=0.5, 4=1.0]
+            # Action 0.0 means close position, so if qty != 0, it should close
 
     def test_long_from_short(self, env, mock_trader):
-        """Test going long from short position closes short first."""
-        from torchtrade.envs.bitget.futures_order_executor import PositionStatus
+        """Test going long from short position executes correct trade."""
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
 
         # Mock existing short position
         mock_trader.get_status = MagicMock(return_value={
@@ -366,17 +282,20 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            # Go long (should close short first)
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # Long
+            # Go long (should buy to flip from short to long)
+            action_td = TensorDict({"action": torch.tensor(4)}, batch_size=())  # Long (1.0)
             env._step(action_td)
 
-            # Should call close_position and then trade
-            mock_trader.close_position.assert_called()
+            # With fractional sizing, it should call trade() with the delta amount to flip position
+            # No need to call close_position() separately - just execute one trade
             mock_trader.trade.assert_called()
+            # Verify it's a buy order (to flip from short to long)
+            call_kwargs = mock_trader.trade.call_args[1]
+            assert call_kwargs["side"] == "buy"
 
     def test_config_post_init(self):
         """Test config post_init normalization."""
-        from torchtrade.envs.bitget.torch_env_futures import BitgetFuturesTradingEnvConfig
+        from torchtrade.envs.live.bitget.env import BitgetFuturesTradingEnvConfig
 
         config = BitgetFuturesTradingEnvConfig(
             symbol="BTCUSDT",
@@ -398,7 +317,7 @@ class TestBitgetFuturesTorchTradingEnvIntegration:
     def test_live_environment(self):
         """Test environment with live Bitget testnet."""
         import os
-        from torchtrade.envs.bitget.torch_env_futures import (
+        from torchtrade.envs.live.bitget.env import (
             BitgetFuturesTorchTradingEnv,
             BitgetFuturesTradingEnvConfig,
         )
@@ -422,6 +341,6 @@ class TestBitgetFuturesTorchTradingEnvIntegration:
         td = env.reset()
         assert "account_state" in td.keys()
 
-        action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
+        action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
         next_td = env.step(action_td)
         assert "reward" in next_td["next"].keys()

@@ -2,6 +2,58 @@
 
 Offline environments are designed for **training on historical data** (backtesting). These are not "offline RL" methods like CQL or IQL, but rather environments that use pre-collected market data instead of live exchange APIs.
 
+## Environment Types
+
+TorchTrade currently offers three main categories of offline environments, each designed for different trading strategies and learning paradigms:
+
+### Sequential Environments (Seq)
+
+**Environments**: `SeqLongOnlyEnv`, `SeqFuturesEnv`
+
+These are the foundational environments for step-by-step trading with **fractional position sizing**. The agent can continuously adapt its position at every timestep:
+
+- **Fractional actions**: Action values represent the fraction of capital to deploy (e.g., 0.5 = 50% allocation)
+- **Flexible position management**: Agent can adjust position size up or down at any time, or go completely market neutral (action = 0)
+- **Futures support**: `SeqFuturesEnv` adds leverage (1-125x), margin management, and liquidation mechanics
+- **No leverage**: `SeqLongOnlyEnv` uses spot trading without leverage (long-only positions)
+
+**Key characteristic**: Maximum flexibility - the agent can rebalance or exit positions freely at every decision point.
+
+### SL/TP Environments (Stop-Loss/Take-Profit)
+
+**Environments**: `SeqLongOnlySLTPEnv`, `SeqFuturesSLTPEnv`
+
+These environments extend sequential environments with **bracket order risk management**:
+
+- **Bracket orders**: Each trade includes configurable stop-loss and take-profit trigger levels
+- **Combinatorial action space**: Agent selects from combinations of SL/TP levels (e.g., SL=-2% with TP=+5%)
+- **Risk mitigation**: Automated exit triggers help limit downside and lock in profits
+- **Still flexible**: Agent can manually exit positions or switch directions before triggers are hit
+
+**Key characteristic**: Structured risk management with predefined exit conditions, but maintains flexibility for manual intervention.
+
+### OneStep Environments (Episodic Rollouts)
+
+**Environments**: `LongOnlyOneStepEnv`, `FuturesOneStepEnv`
+
+These environments are optimized for **fast episodic training** with algorithms like [GRPO](https://arxiv.org/abs/2402.03300):
+
+- **Single decision point**: Agent observes market state, takes one action, and episode completes
+- **Internal rollouts**: After action is taken, environment internally simulates the position until SL/TP triggers or max rollout length
+- **No mid-episode adjustments**: Unlike sequential environments, the agent cannot change position during the rollout
+- **Terminal rewards**: Returns cumulative PnL from the entire rollout as a single terminal reward
+
+**Key characteristic**: Optimized for fast iteration and contextual bandit-style learning. Policies can be deployed to sequential environments for step-by-step execution.
+
+---
+
+!!! note "Extensible Framework"
+    This is the **current base setup** of TorchTrade environments. The framework is designed to be extensible:
+
+    - We plan to add more environment variants based on user needs and research directions
+    - Users can create **custom environments** by inheriting from existing base classes or implementing new ones from scratch
+    - See [Building Custom Environments](../guides/custom-environment.md) for guidance on extending TorchTrade
+
 ## Overview
 
 TorchTrade provides 6 offline environments:
@@ -28,6 +80,157 @@ All environments support the `include_hold_action` parameter (default: `True`):
   - SLTP environments: Only SL/TP combinations (no HOLD)
 
 **Use Case**: Set to `False` when you want to ensure the agent is always actively trading rather than holding neutral positions. Useful for testing aggressive strategies or ensuring the agent explores trading actions.
+
+### Fractional Position Sizing
+
+**Non-SLTP environments** (`SeqLongOnlyEnv`, `SeqFuturesEnv`) support **fractional position sizing** where action values directly represent the fraction of balance to allocate to positions.
+
+#### How It Works
+
+**Action Interpretation:**
+- Action values range from **-1.0 to 1.0**
+- **Magnitude** = fraction of balance to allocate (0.5 = 50%, 1.0 = 100%)
+- **Sign** = direction (positive = long, negative = short)
+- **Zero** = market neutral (close all positions, stay in cash)
+
+**Position Sizing Formula:**
+```python
+# For futures environments with leverage:
+position_size = (balance × |action| × leverage) / price
+
+# For long-only environments (no leverage):
+position_size = (balance × action) / price
+```
+
+**Examples:**
+
+=== "Futures (SeqFuturesEnv)"
+    ```python
+    from torchtrade.envs.offline import SeqFuturesEnv, SeqFuturesEnvConfig
+
+    config = SeqFuturesEnvConfig(
+        leverage=5,  # Fixed 5x leverage
+        action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # 5 discrete actions
+        initial_cash=10000
+    )
+    env = SeqFuturesEnv(df, config)
+
+    # Action interpretation with $10k balance, 5x leverage, $50k BTC price:
+    # action = -1.0  → 100% short: (10k × 1.0 × 5) / 50k = -1.0 BTC short
+    # action = -0.5  → 50% short:  (10k × 0.5 × 5) / 50k = -0.5 BTC short
+    # action =  0.0  → Market neutral: 0 BTC (flat, all cash)
+    # action =  0.5  → 50% long:   (10k × 0.5 × 5) / 50k = 0.5 BTC long
+    # action =  1.0  → 100% long:  (10k × 1.0 × 5) / 50k = 1.0 BTC long
+    ```
+
+=== "Long-Only (SeqLongOnlyEnv)"
+    ```python
+    from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+
+    config = SeqLongOnlyEnvConfig(
+        action_levels=[0.0, 0.5, 1.0],  # Default: close, 50%, 100%
+        initial_cash=10000
+    )
+    env = SeqLongOnlyEnv(df, config)
+
+    # Action interpretation with $10k balance, $50k BTC price:
+    # action =  0.0  → Close position (go to 100% cash)
+    # action =  0.5  → 50% invested: 10k × 0.5 / 50k = 0.1 BTC
+    # action =  1.0  → 100% invested: 10k × 1.0 / 50k = 0.2 BTC
+
+    # Note: Negative actions are technically supported for backwards compatibility
+    # but are not recommended as they add redundancy (behave same as action=0)
+    ```
+
+#### Customizing Action Levels
+
+Action levels are **fully customizable**. You can specify any list of values in [-1.0, 1.0]:
+
+```python
+# Fine-grained control (9 actions)
+action_levels = [-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0]
+
+# More precision near neutral (7 actions) - asymmetric
+action_levels = [-1.0, -0.3, -0.1, 0.0, 0.1, 0.3, 1.0]
+
+# Conservative (no full positions, 5 actions)
+action_levels = [-0.5, -0.25, 0.0, 0.25, 0.5]
+
+# Long-only (buy-focused, 5 actions)
+action_levels = [0.0, 0.25, 0.5, 0.75, 1.0]
+
+# Very coarse (3 actions)
+action_levels = [-1.0, 0.0, 1.0]
+```
+
+**Default Values:**
+- Futures: `[-1.0, -0.5, 0.0, 0.5, 1.0]` (5 actions: short/neutral/long)
+- Long-only: `[0.0, 0.5, 1.0]` (3 actions: close/half/full invested)
+
+Note: For long-only, action=0.0 closes the position. Negative actions are technically supported for backwards compatibility but not recommended (they behave identically to action=0.0, adding redundancy to the action space).
+
+#### Efficient Partial Adjustments
+
+When adjusting position size (e.g., going from 100% to 50%), the environment **only trades the delta**:
+
+```python
+# Current position: 1.0 BTC long (100%)
+# New action: 0.5 (target 50% long)
+# Environment sells only 0.5 BTC (the delta)
+# ✅ Reduces fees by only trading what changed
+# ✅ Preserves entry price for remaining position
+```
+
+#### Custom Action Levels Example
+
+You can customize action levels for finer control over position sizing:
+
+```python
+# Example: More granular position control
+config = SeqFuturesEnvConfig(
+    action_levels=[-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0],
+    leverage=5,
+)
+# Each action level controls the fraction of balance to allocate
+# Action values must be in range [-1.0, 1.0]
+# Leverage is set separately and applies to all positions
+```
+
+**Important**: Action levels must be in range `[-1.0, 1.0]`. Values outside this range will fail validation. To adjust position sizes, modify the `leverage` parameter instead of using values outside the valid range
+
+### Leverage Design (Futures Environments)
+
+For futures environments (`SeqFuturesEnv`, `SeqFuturesSLTPEnv`), **leverage is a fixed global parameter**, not part of the action space.
+
+**Design Philosophy:**
+- **Leverage** = "How much risk am I willing to take?" (configuration/risk management)
+- **Action** = "How much of my allocation should I deploy?" (learned policy)
+- These are fundamentally different questions and should be separated
+
+**Benefits of Fixed Leverage:**
+
+1. **Simpler Learning**: Smaller action space → faster convergence
+2. **Better Risk Control**: Easy to enforce global leverage constraints
+3. **Easier Tuning**: Sweep leverage independently of action granularity
+4. **Clear Semantics**: `action=0.5` always means "use 50% of capital" regardless of leverage
+5. **Matches Trader Workflows**: Most traders choose leverage once, then size positions
+
+**Dynamic Leverage (Not Currently Implemented):**
+
+If you need agents to dynamically choose leverage per trade, this could be implemented as multi-dimensional action spaces:
+
+```python
+# Future extension (not currently available):
+action_space = {
+    "position_fraction": Categorical([-1, -0.5, 0, 0.5, 1]),  # Position sizing
+    "leverage_multiplier": Categorical([1, 3, 5])              # Leverage choice
+}
+```
+
+However, **fixed leverage is recommended** for most use cases. Dynamic leverage:
+- Increases action space complexity (harder to learn)
+- Makes risk management harder (no global constraint)
+- Is rarely used in practice (traders typically fix leverage)
 
 !!! warning "Timeframe Format - Critical for Model Compatibility"
     When specifying `time_frames`, **always use canonical forms**:

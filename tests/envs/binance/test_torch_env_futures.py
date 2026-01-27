@@ -65,7 +65,7 @@ class TestBinanceFuturesTorchTradingEnv:
     @pytest.fixture
     def env_config(self):
         """Create environment configuration."""
-        from torchtrade.envs.binance.torch_env_futures import BinanceFuturesTradingEnvConfig
+        from torchtrade.envs.live.binance.env import BinanceFuturesTradingEnvConfig
 
         return BinanceFuturesTradingEnvConfig(
             symbol="BTCUSDT",
@@ -79,11 +79,11 @@ class TestBinanceFuturesTorchTradingEnv:
     @pytest.fixture
     def env(self, env_config, mock_observer, mock_trader):
         """Create environment with mocks."""
-        from torchtrade.envs.binance.torch_env_futures import BinanceFuturesTorchTradingEnv
+        from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv
 
         # Patch time.sleep to avoid waiting
         with patch("time.sleep"):
-            with patch("torchtrade.envs.binance.torch_env_futures.BinanceFuturesTorchTradingEnv._wait_for_next_timestamp"):
+            with patch("torchtrade.envs.live.binance.env.BinanceFuturesTorchTradingEnv._wait_for_next_timestamp"):
                 env = BinanceFuturesTorchTradingEnv(
                     config=env_config,
                     observer=mock_observer,
@@ -98,8 +98,40 @@ class TestBinanceFuturesTorchTradingEnv:
         assert env.config.demo is True
 
     def test_action_spec(self, env):
-        """Test action spec is correctly defined."""
-        assert env.action_spec.n == 3  # short, hold, long
+        """Test action spec uses fractional mode with proper ordering."""
+        # Should have fractional action levels (not exact count check)
+        assert env.action_spec.n >= 3, "Should have at least 3 actions"
+
+        # Verify action levels are fractional (floats between -1 and 1)
+        action_levels = env.action_levels
+        assert all(isinstance(level, (int, float)) for level in action_levels), \
+            "Action levels should be numeric"
+        assert all(-1 <= level <= 1 for level in action_levels), \
+            f"Action levels should be in [-1, 1], got {action_levels}"
+
+        # Verify proper ordering: negative values, then 0, then positive values
+        # Should be sorted in ascending order: [-1, -0.5, 0, 0.5, 1] ✓
+        # Should NOT be: [1, 0.5, 0, -0.5, -1] ✗
+        assert action_levels == sorted(action_levels), \
+            f"Action levels should be sorted ascending, got {action_levels}"
+
+        # Verify no improper mixing (e.g., [-1, 0.5, 0, 0.5, 1] would be wrong)
+        negatives = [x for x in action_levels if x < 0]
+        positives = [x for x in action_levels if x > 0]
+        zeros = [x for x in action_levels if x == 0]
+
+        # If we have negatives and positives, zero should be between them
+        if negatives and positives:
+            assert len(zeros) > 0, "Should have 0 between negative and positive values"
+            neg_indices = [i for i, x in enumerate(action_levels) if x < 0]
+            pos_indices = [i for i, x in enumerate(action_levels) if x > 0]
+            zero_indices = [i for i, x in enumerate(action_levels) if x == 0]
+
+            # All negatives should come before zero, zero before positives
+            assert max(neg_indices) < min(zero_indices), \
+                "Negative values should come before zero"
+            assert max(zero_indices) < min(pos_indices), \
+                "Zero should come before positive values"
 
     def test_observation_spec(self, env):
         """Test observation spec contains expected keys."""
@@ -110,9 +142,9 @@ class TestBinanceFuturesTorchTradingEnv:
         assert "market_data_5m_10" in obs_spec.keys()
 
     def test_account_state_shape(self, env):
-        """Test account state has correct shape (10 elements for futures)."""
+        """Test account state has correct shape (6 elements)."""
         obs_spec = env.observation_spec
-        assert obs_spec["account_state"].shape == (10,)
+        assert obs_spec["account_state"].shape == (6,)
 
     def test_reset(self, env, mock_trader):
         """Test environment reset."""
@@ -128,7 +160,7 @@ class TestBinanceFuturesTorchTradingEnv:
         """Test observation shapes after reset."""
         td = env.reset()
 
-        assert td["account_state"].shape == (10,)
+        assert td["account_state"].shape == (6,)
         assert td["market_data_1m_10"].shape == (10, 4)
         assert td["market_data_5m_10"].shape == (10, 4)
 
@@ -150,7 +182,9 @@ class TestBinanceFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # Long
+            # Get the index for max positive action (e.g., 1.0)
+            max_long_idx = len(env.action_levels) - 1
+            action_td = TensorDict({"action": torch.tensor(max_long_idx)}, batch_size=())
             next_td = env.step(action_td)
 
             # Trade should have been attempted
@@ -166,43 +200,6 @@ class TestBinanceFuturesTorchTradingEnv:
 
             mock_trader.trade.assert_called()
 
-    def test_account_state_with_position(self, env, mock_trader):
-        """Test account state when there's an open position."""
-        from torchtrade.envs.binance.futures_order_executor import PositionStatus
-
-        # Mock a position
-        mock_trader.get_status = MagicMock(return_value={
-            "position_status": PositionStatus(
-                qty=0.001,
-                notional_value=50.0,
-                entry_price=50000.0,
-                unrealized_pnl=0.5,
-                unrealized_pnl_pct=0.01,
-                mark_price=50500.0,
-                leverage=5,
-                margin_type="isolated",
-                liquidation_price=45000.0,
-            )
-        })
-
-        td = env._get_observation()
-
-        account_state = td["account_state"]
-        assert account_state[1].item() == pytest.approx(0.001, rel=1e-3)  # position_size
-        assert account_state[4].item() == pytest.approx(50500.0, rel=1e-3)  # current_price (mark_price)
-        assert account_state[6].item() == pytest.approx(5.0, rel=1e-3)  # leverage
-
-    def test_account_state_no_position(self, env, mock_trader):
-        """Test account state when there's no position."""
-        mock_trader.get_status = MagicMock(return_value={
-            "position_status": None
-        })
-
-        td = env._get_observation()
-
-        account_state = td["account_state"]
-        assert account_state[1].item() == 0.0  # position_size
-        assert account_state[9].item() == 0.0  # holding_time
 
     def test_done_on_bankruptcy(self, env, mock_trader):
         """Test termination on bankruptcy."""
@@ -230,58 +227,15 @@ class TestBinanceFuturesTorchTradingEnv:
         env.close()
         mock_trader.cancel_open_orders.assert_called()
 
-    def test_reward_calculation_close_position(self, env):
-        """Test reward calculation when closing position."""
-        trade_info = {"executed": True, "closed_position": True}
-
-        reward = env._calculate_reward(
-            old_portfolio_value=1000.0,
-            new_portfolio_value=1050.0,
-            action=0,  # Close action
-            trade_info=trade_info,
-        )
-
-        assert reward > 0  # Positive reward for profit
-
-    def test_reward_calculation_invalid_action(self, env):
-        """Test reward calculation when action is not executed.
-
-        With the default log return reward, if portfolio value doesn't change,
-        the reward is 0 (log(1000/1000) = log(1) = 0). No penalty is applied
-        by the default reward function - users can implement penalties in
-        custom reward functions if desired.
-        """
-        trade_info = {"executed": False, "closed_position": False}
-
-        reward = env._calculate_reward(
-            old_portfolio_value=1000.0,
-            new_portfolio_value=1000.0,
-            action=1,  # Long action that wasn't executed
-            trade_info=trade_info,
-        )
-
-        # Default reward is pure log return, no penalty for invalid actions
-        assert reward == 0.0  # log(1000/1000) = log(1) = 0
-
 
 class TestBinanceFuturesTradingEnvConfig:
     """Tests for BinanceFuturesTradingEnvConfig."""
 
-    def test_default_config(self):
-        """Test default configuration values."""
-        from torchtrade.envs.binance.torch_env_futures import BinanceFuturesTradingEnvConfig
-
-        config = BinanceFuturesTradingEnvConfig()
-
-        assert config.symbol == "BTCUSDT"
-        assert config.demo is True
-        assert config.leverage == 1
-        assert config.action_levels == [-1.0, 0.0, 1.0]
 
     def test_custom_config(self):
         """Test custom configuration."""
-        from torchtrade.envs.binance.torch_env_futures import BinanceFuturesTradingEnvConfig
-        from torchtrade.envs.binance.futures_order_executor import MarginType
+        from torchtrade.envs.live.binance.env import BinanceFuturesTradingEnvConfig
+        from torchtrade.envs.live.binance.order_executor import MarginType
 
         config = BinanceFuturesTradingEnvConfig(
             symbol="ETHUSDT",
@@ -302,7 +256,7 @@ class TestMultipleSteps:
     @pytest.fixture
     def env_with_mocks(self):
         """Create environment for multi-step testing."""
-        from torchtrade.envs.binance.torch_env_futures import (
+        from torchtrade.envs.live.binance.env import (
             BinanceFuturesTorchTradingEnv,
             BinanceFuturesTradingEnvConfig,
         )

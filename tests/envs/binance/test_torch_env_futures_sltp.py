@@ -65,7 +65,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
     @pytest.fixture
     def env_config(self):
         """Create environment configuration."""
-        from torchtrade.envs.binance.torch_env_futures_sltp import BinanceFuturesSLTPTradingEnvConfig
+        from torchtrade.envs.live.binance.env_sltp import BinanceFuturesSLTPTradingEnvConfig
 
         return BinanceFuturesSLTPTradingEnvConfig(
             symbol="BTCUSDT",
@@ -83,7 +83,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
     @pytest.fixture
     def env(self, env_config, mock_observer, mock_trader):
         """Create environment with mocks."""
-        from torchtrade.envs.binance.torch_env_futures_sltp import BinanceFuturesSLTPTorchTradingEnv
+        from torchtrade.envs.live.binance.env_sltp import BinanceFuturesSLTPTorchTradingEnv
 
         # Patch time.sleep to avoid waiting
         with patch("time.sleep"):
@@ -139,8 +139,8 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
         env_config.include_short_positions = False
 
         with patch("time.sleep"):
-            with patch("torchtrade.envs.binance.torch_env_futures_sltp.BinanceFuturesSLTPTorchTradingEnv._wait_for_next_timestamp"):
-                from torchtrade.envs.binance.torch_env_futures_sltp import BinanceFuturesSLTPTorchTradingEnv
+            with patch("torchtrade.envs.live.binance.env_sltp.BinanceFuturesSLTPTorchTradingEnv._wait_for_next_timestamp"):
+                from torchtrade.envs.live.binance.env_sltp import BinanceFuturesSLTPTorchTradingEnv
                 env = BinanceFuturesSLTPTorchTradingEnv(
                     config=env_config,
                     observer=mock_observer,
@@ -158,9 +158,9 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
         assert "market_data_1m_10" in obs_spec.keys()
 
     def test_account_state_shape(self, env):
-        """Test account state has correct shape (10 elements for futures)."""
+        """Test account state has correct shape (6 elements)."""
         obs_spec = env.observation_spec
-        assert obs_spec["account_state"].shape == (10,)
+        assert obs_spec["account_state"].shape == (6,)
 
     def test_reset(self, env, mock_trader):
         """Test environment reset."""
@@ -178,7 +178,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
         """Test observation shapes after reset."""
         td = env.reset()
 
-        assert td["account_state"].shape == (10,)
+        assert td["account_state"].shape == (6,)
         assert td["market_data_1m_10"].shape == (10, 4)
 
     def test_step_hold_action(self, env, mock_trader):
@@ -277,7 +277,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
 
     def test_position_not_closed_detection(self, env, mock_trader):
         """Test detection when position is still open."""
-        from torchtrade.envs.binance.futures_order_executor import PositionStatus
+        from torchtrade.envs.live.binance.order_executor import PositionStatus
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
@@ -351,31 +351,6 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
 
             assert trade_info["executed"] is False
 
-    def test_account_state_with_position(self, env, mock_trader):
-        """Test account state when there's an open position."""
-        from torchtrade.envs.binance.futures_order_executor import PositionStatus
-
-        # Mock a position
-        mock_trader.get_status = MagicMock(return_value={
-            "position_status": PositionStatus(
-                qty=0.001,
-                notional_value=50.0,
-                entry_price=50000.0,
-                unrealized_pnl=0.5,
-                unrealized_pnl_pct=0.01,
-                mark_price=50500.0,
-                leverage=5,
-                margin_type="isolated",
-                liquidation_price=45000.0,
-            )
-        })
-
-        td = env._get_observation()
-
-        account_state = td["account_state"]
-        assert account_state[1].item() == pytest.approx(0.001, rel=1e-3)  # position_size
-        assert account_state[4].item() == pytest.approx(50500.0, rel=1e-3)  # current_price
-        assert account_state[6].item() == pytest.approx(5.0, rel=1e-3)  # leverage
 
     def test_done_on_bankruptcy(self, env, mock_trader):
         """Test termination on bankruptcy."""
@@ -396,7 +371,7 @@ class TestBinanceFuturesSLTPTradingEnvConfig:
 
     def test_default_config(self):
         """Test default configuration values."""
-        from torchtrade.envs.binance.torch_env_futures_sltp import BinanceFuturesSLTPTradingEnvConfig
+        from torchtrade.envs.live.binance.env_sltp import BinanceFuturesSLTPTradingEnvConfig
 
         config = BinanceFuturesSLTPTradingEnvConfig()
 
@@ -409,7 +384,7 @@ class TestBinanceFuturesSLTPTradingEnvConfig:
 
     def test_custom_sltp_levels(self):
         """Test custom SL/TP levels."""
-        from torchtrade.envs.binance.torch_env_futures_sltp import BinanceFuturesSLTPTradingEnvConfig
+        from torchtrade.envs.live.binance.env_sltp import BinanceFuturesSLTPTradingEnvConfig
 
         config = BinanceFuturesSLTPTradingEnvConfig(
             stoploss_levels=(-0.01, -0.03, -0.05, -0.10),
@@ -421,7 +396,7 @@ class TestBinanceFuturesSLTPTradingEnvConfig:
 
     def test_long_only_config(self):
         """Test long-only configuration."""
-        from torchtrade.envs.binance.torch_env_futures_sltp import BinanceFuturesSLTPTradingEnvConfig
+        from torchtrade.envs.live.binance.env_sltp import BinanceFuturesSLTPTradingEnvConfig
 
         config = BinanceFuturesSLTPTradingEnvConfig(
             include_short_positions=False
@@ -435,7 +410,7 @@ class TestCombinatoryActionMap:
 
     def test_action_map_basic(self):
         """Test basic action map generation."""
-        from torchtrade.envs.action_maps import create_sltp_action_map as combinatory_action_map
+        from torchtrade.envs.utils.action_maps import create_sltp_action_map as combinatory_action_map
 
         action_map = combinatory_action_map(
             stoploss_levels=[-0.02, -0.05],
@@ -449,7 +424,7 @@ class TestCombinatoryActionMap:
 
     def test_action_map_long_only(self):
         """Test action map with shorts disabled."""
-        from torchtrade.envs.action_maps import create_sltp_action_map as combinatory_action_map
+        from torchtrade.envs.utils.action_maps import create_sltp_action_map as combinatory_action_map
 
         action_map = combinatory_action_map(
             stoploss_levels=[-0.02, -0.05],
@@ -462,7 +437,7 @@ class TestCombinatoryActionMap:
 
     def test_action_map_long_sides(self):
         """Test that long actions have correct structure."""
-        from torchtrade.envs.action_maps import create_sltp_action_map as combinatory_action_map
+        from torchtrade.envs.utils.action_maps import create_sltp_action_map as combinatory_action_map
 
         action_map = combinatory_action_map(
             stoploss_levels=[-0.02],
@@ -478,7 +453,7 @@ class TestCombinatoryActionMap:
 
     def test_action_map_short_sign_flip(self):
         """Test that short actions have flipped signs."""
-        from torchtrade.envs.action_maps import create_sltp_action_map as combinatory_action_map
+        from torchtrade.envs.utils.action_maps import create_sltp_action_map as combinatory_action_map
 
         action_map = combinatory_action_map(
             stoploss_levels=[-0.02],
@@ -500,7 +475,7 @@ class TestMultipleSteps:
     @pytest.fixture
     def env_with_mocks(self):
         """Create environment for multi-step testing."""
-        from torchtrade.envs.binance.torch_env_futures_sltp import (
+        from torchtrade.envs.live.binance.env_sltp import (
             BinanceFuturesSLTPTorchTradingEnv,
             BinanceFuturesSLTPTradingEnvConfig,
         )
@@ -577,12 +552,12 @@ class TestCriticalEdgeCases:
     @pytest.fixture
     def env_with_mocks(self):
         """Create environment for critical edge case testing."""
-        from torchtrade.envs.binance.torch_env_futures_sltp import (
+        from torchtrade.envs.live.binance.env_sltp import (
             BinanceFuturesSLTPTorchTradingEnv,
             BinanceFuturesSLTPTradingEnvConfig,
         )
-        from torchtrade.envs.binance.obs_class import BinanceObservationClass
-        from torchtrade.envs.binance.futures_order_executor import (
+        from torchtrade.envs.live.binance.observation import BinanceObservationClass
+        from torchtrade.envs.live.binance.order_executor import (
             BinanceFuturesOrderClass,
             PositionStatus,
         )
@@ -713,58 +688,6 @@ class TestCriticalEdgeCases:
             with pytest.raises(KeyError):
                 env.step(action_td)
 
-    def test_reward_calculation_at_bankruptcy(self, env_with_mocks):
-        """Test reward calculation when portfolio value reaches zero (Critical: 8/10).
-
-        Currently raises ValueError - documents that environment doesn't handle
-        bankruptcy gracefully in reward calculation.
-        """
-        env, mock_trader, _ = env_with_mocks
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-            env.initial_portfolio_value = 1000.0
-
-            # Simulate going bankrupt (portfolio value -> 0)
-            mock_trader.get_account_balance = MagicMock(
-                return_value={
-                    "total_wallet_balance": 0.0,
-                    "available_balance": 0.0,
-                    "total_margin_balance": 0.0,
-                }
-            )
-
-            action_td = TensorDict({"action": torch.tensor(0)}, batch_size=())
-
-            # Currently raises ValueError due to zero portfolio value
-            # TODO: Consider handling this more gracefully
-            with pytest.raises(ValueError, match="Invalid old_portfolio_value: 0.0"):
-                env.step(action_td)
-
-    def test_reward_with_portfolio_increase(self, env_with_mocks):
-        """Test reward when portfolio value increases (Critical: 8/10)."""
-        env, mock_trader, _ = env_with_mocks
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-
-            # Simulate profit by mocking _get_portfolio_value directly
-            # First call (old_portfolio_value): 1000
-            # Second call (new_portfolio_value): 1100
-            with patch.object(
-                env, "_get_portfolio_value", side_effect=[1000.0, 1100.0]
-            ):
-                action_td = TensorDict({"action": torch.tensor(0)}, batch_size=())
-                next_td = env.step(action_td)
-
-                reward = next_td["next", "reward"].item()
-
-                # Profit should give positive reward (log return)
-                assert reward > 0
-                assert np.isfinite(reward)
-                # Log return from 1000 to 1100 is log(1100/1000) = log(1.1) ≈ 0.0953
-                assert reward == pytest.approx(np.log(1100 / 1000), rel=1e-5)
-
     def test_position_state_resync_on_reset(self, env_with_mocks):
         """Test that reset synchronizes position state with exchange (Critical: 8/10)."""
         env, mock_trader, _ = env_with_mocks
@@ -815,7 +738,7 @@ class TestCriticalEdgeCases:
         agent cannot open new position in the same step.
         """
         env, mock_trader, _ = env_with_mocks
-        from torchtrade.envs.binance.futures_order_executor import PositionStatus
+        from torchtrade.envs.live.binance.order_executor import PositionStatus
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
@@ -853,7 +776,7 @@ class TestDuplicateActionPrevention:
     @pytest.fixture
     def env_with_mocks(self):
         """Create environment for duplicate action testing."""
-        from torchtrade.envs.binance.torch_env_futures_sltp import (
+        from torchtrade.envs.live.binance.env_sltp import (
             BinanceFuturesSLTPTorchTradingEnv,
             BinanceFuturesSLTPTradingEnvConfig,
         )

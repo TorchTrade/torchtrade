@@ -57,9 +57,123 @@ for batch in collector:
 
 ---
 
+## Example File Structure
+
+TorchTrade examples use a clean configuration structure with centralized environment configs:
+
+```
+examples/online/
+├── env/                              # Central environment configs
+│   ├── sequential.yaml               # Basic sequential trading
+│   ├── sequential_sltp.yaml          # Sequential with stop-loss/take-profit
+│   └── onestep.yaml                  # One-step for contextual bandits
+│
+├── <algorithm>/                      # Most algorithms (ppo, dsac, iql, ppo_chronos)
+│   ├── config.yaml                   # Algorithm config (real file)
+│   ├── env/ → ../env/                # Symlink for CLI env switching
+│   ├── train.py                      # Training script and main loop
+│   └── utils.py                      # Helper functions
+│
+└── grpo/                             # GRPO (onestep-only)
+    ├── config.yaml                   # Env embedded, no symlink
+    ├── train.py
+    └── utils.py
+```
+
+**Key Features:**
+- **Algorithm configs** are real files in each algorithm directory
+- **Environment configs** are centralized in `env/` directory (single source of truth)
+- **One symlink** per algorithm enables CLI environment switching (except GRPO)
+- **GRPO is special** - designed for onestep-only, environment embedded directly
+- **No spot/futures split** - users override `leverage` and `action_levels` for futures
+- **All use 1Hour timeframe** by default
+
+### What Each Component Does
+
+**`config.yaml` - Configuration Management**
+
+The configuration file uses [Hydra](https://hydra.cc/) to manage all hyperparameters and settings. This includes:
+
+- **Environment settings**: Symbol, timeframes, initial cash, transaction fees, window sizes
+- **Network architecture**: Hidden dimensions, activation functions, layer configurations
+- **Training hyperparameters**: Learning rate, batch size, discount factor (gamma), entropy coefficient
+- **Collector settings**: Frames per batch, number of parallel environments
+- **Logging**: Wandb project name, experiment tracking settings
+
+By centralizing all parameters in YAML, you can easily experiment with different configurations without modifying code. Hydra also allows you to override any parameter from the command line:
+
+```bash
+# Override multiple parameters
+python train.py env.symbol="ETH/USD" optim.lr=1e-4 loss.gamma=0.95
+```
+
+**Example config.yaml:**
+```yaml
+env:
+  name: SeqLongOnlyEnv
+  symbol: "BTC/USD"
+  time_frames: ["5Min", "15Min"]
+  window_sizes: [10, 10]
+  execute_on: "15Min"
+  initial_cash: [1000, 5000]
+  transaction_fee: 0.0025
+  train_envs: 10
+  eval_envs: 2
+
+collector:
+  frames_per_batch: 100000
+  total_frames: 100_000_000
+
+optim:
+  lr: 2.5e-4
+  max_grad_norm: 0.5
+  anneal_lr: True
+
+loss:
+  gamma: 0.9
+  mini_batch_size: 33333
+  ppo_epochs: 3
+  clip_epsilon: 0.1
+  entropy_coef: 0.01
+
+logger:
+  backend: wandb
+  project_name: TorchTrade-Online
+  exp_name: ppo
+```
+
+**`utils.py` - Helper Functions**
+
+This file contains modular helper functions that handle setup tasks:
+
+- **`make_env()`**: Creates and configures the trading environment (offline or online)
+- **`make_actor()`**: Builds the policy network architecture (deterministic or stochastic)
+- **`make_critic()`**: Creates the value function network (if needed for the algorithm)
+- **`make_loss()`**: Initializes the loss module (PPO, SAC, IQL, etc.)
+- **`make_collector()`**: Sets up the data collection pipeline
+
+These utility functions keep the main training script clean and make it easy to swap components (e.g., changing from SeqLongOnlyEnv to SeqFuturesEnv requires only modifying `make_env()`).
+
+**`train.py` - Training Loop**
+
+The main training script orchestrates everything:
+
+1. **Hydra initialization**: Loads configuration from `config.yaml`
+2. **Component creation**: Uses `utils.py` functions to create env, actor, loss, optimizer
+3. **Training loop**: Collects data, computes losses, updates policy, logs metrics
+4. **Evaluation**: Periodically evaluates the policy on test environments
+5. **Checkpointing**: Saves model weights and training state
+
+This structure mirrors [TorchRL's SOTA implementations](https://github.com/pytorch/rl/tree/main/sota-implementations), making it familiar to TorchRL users and easy to adapt existing algorithms.
+
+---
+
 ## Available Examples
 
 The following examples demonstrate the flexibility of TorchTrade across different algorithms, environments, and use cases. These examples are meant to be starting points for further experimentation and adaptation - customize them according to your needs, ideas, and environments.
+
+!!! warning "Hyperparameters Not Tuned"
+    **All hyperparameters in our examples are NOT tuned.** The configurations provided are starting points for experimentation, not optimized settings. You should tune hyperparameters (learning rates, network architectures, reward functions, etc.) according to your specific trading environment, market conditions, and objectives.
 
 ### Online RL (Offline Backtesting Environments)
 
@@ -67,17 +181,15 @@ These examples use online RL algorithms (learning from interaction as it happens
 
 Located in `examples/online/`:
 
-| Example | Algorithm | Environment | Key Features |
-|---------|-----------|-------------|--------------|
-| **ppo/** | PPO | SeqLongOnlyEnv | Standard policy gradient with multi-timeframe observations |
-| **ppo_futures/** | PPO | SeqFuturesEnv | Futures trading with leverage and margin management |
-| **ppo_futures_sltp/** | PPO | SeqFuturesSLTPEnv | Futures with bracket orders (stop-loss/take-profit) |
-| **ppo_futures_onestep/** | PPO | FuturesOneStepEnv | One-step futures for episodic optimization |
-| **ppo_chronos/** | PPO | SeqLongOnlyEnv + ChronosEmbedding | Time series embedding with Chronos T5 models |
-| **iql/** | IQL (Implicit Q-Learning) | SeqLongOnlyEnv | Offline RL algorithm for sequential trading |
-| **dsac/** | DSAC (Distributional SAC) | SeqLongOnlyEnv | Soft actor-critic with distributional value functions |
-| **grpo_futures_onestep/** | GRPO | FuturesOneStepEnv | Group relative policy optimization for one-step RL |
-| **long_onestep_env/** | GRPO | LongOnlyOneStepEnv | One-step long-only with SLTP bracket orders |
+| Example | Algorithm | Default Environment | Key Features |
+|---------|-----------|---------------------|--------------|
+| **ppo/** | PPO | SequentialTradingEnv (spot, 1Hour) | Standard policy gradient |
+| **ppo_chronos/** | PPO | SequentialTradingEnv (spot, 1Hour) | Time series embedding with Chronos T5 models |
+| **iql/** | IQL (Implicit Q-Learning) | SequentialTradingEnv (spot, 1Hour) | Offline RL algorithm for sequential trading |
+| **dsac/** | DSAC (Distributional SAC) | SequentialTradingEnv (spot, 1Hour) | Soft actor-critic with distributional value functions |
+| **grpo/** | GRPO | OneStepTradingEnv (spot, 1Hour) | Group relative policy optimization (onestep-only, no env switching) |
+
+All algorithms except GRPO support environment switching via CLI - see [Running Examples](#running-examples) below.
 
 ### Offline RL
 
@@ -107,13 +219,7 @@ Located in `examples/llm/`:
 
 TorchTrade provides actor classes that allow easy creation of rule-based trading strategies using technical indicators and market signals, for example mean reversion, breakout, and more. These rule-based actors integrate seamlessly with TorchTrade environments for both backtesting and live trading, serving as baselines or components in hybrid approaches. This is especially interesting with our **[custom feature preprocessing](guides/custom-features.md)**, which allows you to add technical indicators and derived features to enhance rule-based strategies.
 
-Located in `examples/online/rulebased/`:
-
-| Example | Actor Type | Environment | Description |
-|---------|------------|-------------|-------------|
-| **rulebased/** | MeanReversionActor | SeqLongOnlyEnv | Mean reversion strategy using Bollinger Bands and Stochastic RSI |
-
-**Future Work**: We plan to provide examples of hybrid approaches that combine rule-based policies with neural network policies as actors, leveraging the strengths of both deterministic strategies and learned behaviors.
+**Future Work**: We plan to provide examples of rule-based strategies and hybrid approaches that combine rule-based policies with neural network policies as actors, leveraging the strengths of both deterministic strategies and learned behaviors.
 
 ### Live Trading
 
@@ -141,19 +247,41 @@ Located in `examples/transforms/`:
 
 ## Running Examples
 
-All examples use Hydra for configuration management:
+All examples use Hydra for configuration management with centralized environment configs:
 
 ```bash
-# Run with default configuration
+# Run with default configuration (sequential, spot, 1Hour)
 uv run python examples/online/ppo/train.py
 
-# Override config parameters
+# Switch environment via CLI
+uv run python examples/online/ppo/train.py env=sequential_sltp
+uv run python examples/online/ppo/train.py env=onestep
+
+# Configure for futures trading
 uv run python examples/online/ppo/train.py \
-    env.symbol="BTC/USD" \
+    env.leverage=5 \
+    env.action_levels='[-1.0,0.0,1.0]'
+
+# Override multiple parameters
+uv run python examples/online/ppo/train.py \
+    env=sequential_sltp \
+    env.symbol="ETH/USD" \
+    env.leverage=10 \
     optim.lr=1e-4 \
-    collector.frames_per_batch=1000 \
     loss.gamma=0.95
 ```
+
+### Available Environment Configs
+
+| Config | Environment Class | SLTP | Timeframe | Use Case |
+|--------|-------------------|------|-----------|----------|
+| `sequential` | SequentialTradingEnv | No | 1Hour | Basic sequential trading |
+| `sequential_sltp` | SequentialTradingEnvSLTP | Yes | 1Hour | Sequential with bracket orders |
+| `onestep` | OneStepTradingEnv | Yes | 1Hour | One-step for GRPO/contextual bandits |
+
+**Spot vs Futures:**
+- **Spot (default)**: `leverage: 1`, `action_levels: [0.0, 1.0]`
+- **Futures**: Override with `env.leverage=5 env.action_levels='[-1.0,0.0,1.0]'`
 
 ### Common Hydra Overrides
 
@@ -215,22 +343,49 @@ This structure mirrors [TorchRL's SOTA implementations](https://github.com/pytor
 
 ## Configuration Files
 
-Each example includes a `config/` directory with Hydra configs:
+Configurations are split between algorithm-specific and centralized environment configs:
 
 ```
-examples/online/ppo/
-├── train.py              # Training script
-├── config/
-│   ├── config.yaml       # Main config
-│   ├── env/
-│   │   └── default.yaml  # Environment config
-│   ├── collector/
-│   │   └── default.yaml  # Data collection config
-│   └── loss/
-│       └── default.yaml  # Loss function config
+examples/online/
+├── env/                          # Central environment configs
+│   ├── sequential.yaml           # Basic sequential trading
+│   ├── sequential_sltp.yaml      # With stop-loss/take-profit
+│   └── onestep.yaml              # One-step for GRPO
+└── ppo/
+    ├── config.yaml               # Algorithm-specific config
+    ├── env/ → ../env/            # Symlink for CLI switching
+    ├── train.py
+    └── utils.py
 ```
 
-This allows clean separation of concerns and easy experimentation.
+Algorithm configs use Hydra's defaults list to compose with environment configs:
+
+```yaml
+# ppo/config.yaml
+defaults:
+  - env: sequential  # Default environment (spot, 1Hour)
+  - _self_
+
+# Optional: override for futures trading
+env:
+  leverage: 5
+  action_levels: [-1.0, 0.0, 1.0]
+
+collector:
+  frames_per_batch: 100000
+  total_frames: 100_000_000
+
+optim:
+  lr: 2.5e-4
+  max_grad_norm: 0.5
+
+loss:
+  gamma: 0.9
+  clip_epsilon: 0.1
+  entropy_coef: 0.01
+```
+
+This structure keeps algorithm configs separate while centralizing environment configs for easy reuse.
 
 ---
 
@@ -246,9 +401,9 @@ To create a new training script:
 
 **Tips:**
 - Start with `ppo/` for standard RL
-- Start with `grpo_futures_onestep/` for one-step RL
+- Start with `grpo/` for one-step RL
 - Start with `ppo_chronos/` for time series embeddings
-- Start with `rulebased/` for non-RL baselines
+- Use `env=<config_name>` to switch environments without copying code
 
 ---
 
