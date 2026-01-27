@@ -1,8 +1,18 @@
-"""DQN training example for SeqFuturesEnv.
+"""DQN training example for SequentialTradingEnv.
 
-This script demonstrates DQN training on the SeqFuturesEnv environment
-for futures trading with leverage support. DQN is an off-policy algorithm
+This script demonstrates DQN training on the SequentialTradingEnv environment
+for trading with optional leverage support. DQN is an off-policy algorithm
 that uses experience replay and target networks for stable learning.
+
+Usage:
+    # Default (futures with 6x leverage)
+    python train.py
+
+    # Spot trading
+    python train.py env=sequential
+
+    # Custom leverage
+    python train.py env.leverage=10
 """
 from __future__ import annotations
 
@@ -14,7 +24,7 @@ from torchrl._utils import compile_with_warmup
 import datasets
 
 
-@hydra.main(config_path="", config_name="config", version_base="1.1")
+@hydra.main(config_path=".", config_name="config", version_base="1.1")
 def main(cfg: DictConfig):  # noqa: F821
 
     import torch.optim
@@ -117,10 +127,10 @@ def main(cfg: DictConfig):  # noqa: F821
     # Create logger
     logger = None
     if cfg.logger.backend:
-        exp_name = generate_exp_name("TorchTrade-Futures-DQN", cfg.logger.exp_name)
+        exp_name = generate_exp_name("TorchTrade-DQN", cfg.logger.exp_name)
         logger = get_logger(
             cfg.logger.backend,
-            logger_name="dqn_futures_logging",
+            logger_name="dqn_logging",
             experiment_name=exp_name,
             wandb_kwargs={
                 "mode": cfg.logger.mode,
@@ -217,6 +227,7 @@ def main(cfg: DictConfig):  # noqa: F821
                     metrics_to_log["train/loss"] = sum(losses) / len(losses)
 
         # Log epsilon for exploration
+        exploration_policy[-1].step(collected_frames)
         current_epsilon = exploration_policy[-1].eps
         metrics_to_log["train/epsilon"] = current_epsilon
 
@@ -258,7 +269,7 @@ def main(cfg: DictConfig):  # noqa: F821
                 eval_env.reset()
                 if fig is not None and logger is not None:
                     metrics_to_log["eval/history"] = wandb.Image(fig[0])
-                torch.save(actor.state_dict(), f"dqn_futures_policy_{i}.pth")
+                torch.save(actor.state_dict(), f"dqn_policy_{i}.pth")
                 actor.train()
 
         # Log dual coverage metrics (if available and enabled)
@@ -267,10 +278,8 @@ def main(cfg: DictConfig):  # noqa: F821
             if coverage_stats["enabled"]:
                 # Reset coverage (episode start diversity)
                 metrics_to_log["train/reset_coverage"] = coverage_stats["reset_coverage"]
-                metrics_to_log["train/reset_entropy"] = coverage_stats["reset_entropy"]
                 # State coverage (full trajectory coverage)
                 metrics_to_log["train/state_coverage"] = coverage_stats["state_coverage"]
-                metrics_to_log["train/state_entropy"] = coverage_stats["state_entropy"]
 
         if logger is not None:
             time_dict = timeit.todict(prefix="time")

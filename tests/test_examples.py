@@ -392,6 +392,24 @@ EXAMPLE_COMMANDS = {
         "logger.test_interval=1000000 "
         "env.test_split_start=2025-07-01 "
     ),
+
+    # ==========================================================================
+    # DQN Example
+    # ==========================================================================
+
+    "dqn_online": (
+        "python examples/online/dqn/train.py "
+        "collector.total_frames=10 "
+        "collector.frames_per_batch=5 "
+        "collector.init_random_frames=5 "
+        "env.train_envs=2 "
+        "env.eval_envs=2 "
+        "buffer.batch_size=5 "
+        "buffer.buffer_size=20 "
+        "logger.backend= "
+        "logger.test_interval=1000000 "
+        "env.test_split_start=2025-07-01 "
+    ),
 }
 
 

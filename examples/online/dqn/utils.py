@@ -1,4 +1,4 @@
-"""Utility functions for DQN training on SeqFuturesEnv."""
+"""Utility functions for DQN training on SequentialTradingEnv."""
 from __future__ import annotations
 import functools
 
@@ -6,7 +6,6 @@ import torch.nn
 from torchrl.envs import (
     DoubleToFloat,
     EnvCreator,
-    ExplorationType,
     FlattenObservation,
     ParallelEnv,
     RewardSum,
@@ -29,8 +28,12 @@ from torchrl.modules import (
 )
 from torchtrade.models import SimpleCNNEncoder
 
-from torchtrade.envs import SeqFuturesEnv, SeqFuturesEnvConfig
-import numpy as np
+from torchtrade.envs import (
+    SequentialTradingEnv,
+    SequentialTradingEnvConfig,
+    SequentialTradingEnvSLTP,
+    SequentialTradingEnvSLTPConfig,
+)
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS
@@ -72,23 +75,47 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
-    """Create a SeqFuturesEnv instance."""
-    config = SeqFuturesEnvConfig(
-        symbol=cfg.env.symbol,
-        time_frames=cfg.env.time_frames,
-        window_sizes=cfg.env.window_sizes,
-        execute_on=cfg.env.execute_on,
-        include_base_features=False,
-        initial_cash=cfg.env.initial_cash,
-        slippage=cfg.env.slippage,
-        transaction_fee=cfg.env.transaction_fee,
-        bankrupt_threshold=cfg.env.bankrupt_threshold,
-        seed=cfg.env.seed,
-        max_traj_length=max_traj_length,
-        random_start=random_start,
-        leverage=cfg.env.leverage,
-    )
-    return SeqFuturesEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    """Create environment instance based on cfg.env.name."""
+    if cfg.env.name == "SequentialTradingEnv":
+        config = SequentialTradingEnvConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            action_levels=cfg.env.action_levels,
+            max_traj_length=max_traj_length,
+            random_start=random_start,
+        )
+        return SequentialTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
+    elif cfg.env.name == "SequentialTradingEnvSLTP":
+        config = SequentialTradingEnvSLTPConfig(
+            symbol=cfg.env.symbol,
+            time_frames=cfg.env.time_frames,
+            window_sizes=cfg.env.window_sizes,
+            execute_on=cfg.env.execute_on,
+            include_base_features=False,
+            initial_cash=cfg.env.initial_cash,
+            slippage=cfg.env.slippage,
+            transaction_fee=cfg.env.transaction_fee,
+            bankrupt_threshold=cfg.env.bankrupt_threshold,
+            seed=cfg.env.seed,
+            leverage=cfg.env.leverage,
+            stoploss_levels=cfg.env.stoploss_levels,
+            takeprofit_levels=cfg.env.takeprofit_levels,
+            include_hold_action=cfg.env.include_hold_action,
+            max_traj_length=max_traj_length,
+            random_start=random_start,
+        )
+        return SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=custom_preprocessing)
+    else:
+        raise ValueError(f"Unknown environment: {cfg.env.name}")
 
 
 def apply_env_transforms(env, max_steps):
@@ -311,9 +338,7 @@ def make_dqn_agent(cfg, train_env, device):
         ).to(device))
 
     # Account state encoder with MLP
-    # IMPORTANT: SeqFuturesEnv has 10 account state features
-    # [cash, position_size, position_value, entry_price, current_price,
-    #  unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
+    # Account state features are determined dynamically from environment spec
     account_state_encoder = SafeModule(
         module=MLP(
             num_cells=[32, 32],
