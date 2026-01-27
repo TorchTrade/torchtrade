@@ -242,6 +242,7 @@ def main(cfg: DictConfig):  # noqa: F821
             with set_exploration_type(
                 ExplorationType.DETERMINISTIC
             ), torch.no_grad(), timeit("eval"):
+                # Evaluate on test data
                 eval_rollout = eval_env.rollout(
                     max_eval_traj_length,
                     model[0],
@@ -254,6 +255,22 @@ def main(cfg: DictConfig):  # noqa: F821
                 eval_env.reset()
                 if logger is not None and fig is not None:
                     metrics_to_log["eval/history"] = wandb.Image(fig[0])
+
+                # Evaluate on train data
+                train_rollout = train_env.rollout(
+                    max_train_traj_length,
+                    model[0],
+                    break_when_any_done=True,
+                )
+                # Only log reward from env[0] to match the rendered figure
+                train_eval_reward = train_rollout[0]["next", "reward"].sum().item()
+                metrics_to_log["eval/train_reward"] = train_eval_reward
+
+                # Render train history (from env[0])
+                train_fig = train_env.base_env.render_history(return_fig=True, plot_bh_baseline=False)
+                train_env.reset()
+                if train_fig is not None and logger is not None:
+                    metrics_to_log["eval/train_history"] = wandb.Image(train_fig[0])
         if logger is not None:
             metrics_to_log.update(timeit.todict(prefix="time"))
             metrics_to_log["time/speed"] = pbar.format_dict["rate"]

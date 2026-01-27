@@ -93,6 +93,7 @@ def main(cfg: DictConfig):  # noqa: F821
         eval_num_envs=cfg.env.eval_envs,
     )
     max_eval_steps = 10000
+    max_train_eval_steps = 1000
 
     # Create replay buffer
     replay_buffer = make_replay_buffer(
@@ -202,6 +203,7 @@ def main(cfg: DictConfig):  # noqa: F821
             with set_exploration_type(
                 ExplorationType.DETERMINISTIC
             ), torch.no_grad(), timeit("evaluating"):
+                # Evaluate on test data
                 # Keep eval_env on CPU, move actor to CPU temporarily for eval
                 eval_rollout = eval_env.rollout(
                     max_eval_steps,
@@ -217,6 +219,24 @@ def main(cfg: DictConfig):  # noqa: F821
                 eval_env.reset()
                 if logger is not None and fig is not None:
                     metrics_to_log["eval/history"] = wandb.Image(fig[0])
+
+                # Evaluate on train data
+                train_rollout = train_env.rollout(
+                    max_train_eval_steps,
+                    model[0].to("cpu"),
+                    auto_cast_to_device=False,
+                    break_when_any_done=True,
+                )
+                model[0].to(device)  # Move actor back to device for training
+                # Only log reward from env[0] to match the rendered figure
+                train_eval_reward = train_rollout[0]["next", "reward"].sum().item()
+                metrics_to_log["eval/train_reward"] = train_eval_reward
+
+                # Render train history (from env[0])
+                train_fig = train_env.base_env.render_history(return_fig=True)
+                train_env.reset()
+                if train_fig is not None and logger is not None:
+                    metrics_to_log["eval/train_history"] = wandb.Image(train_fig[0])
         if len(episode_rewards) > 0:
             episode_length = tensordict["next", "step_count"][
                 tensordict["next", "done"]
