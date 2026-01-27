@@ -43,6 +43,7 @@ class TestSlippageBounds:
             slippage=slippage,
             leverage=2,
             action_levels=[-1, 0, 1],
+            random_start=False,  # Avoid timestamp exhaustion in loop
         )
 
         market_price = 100.0
@@ -72,6 +73,7 @@ class TestSlippageBounds:
             slippage=slippage,
             leverage=2,
             action_levels=[-1, 0, 1],
+            random_start=False,  # Avoid timestamp exhaustion in loop
         )
 
         market_price = 100.0
@@ -144,6 +146,7 @@ class TestSlippageRandomness:
             leverage=2,
             action_levels=[-1, 0, 1],
             seed=None,  # Avoid reseeding torch RNG
+            random_start=False,  # Avoid timestamp exhaustion
         )
 
         entries = []
@@ -277,6 +280,7 @@ class TestSlippageFeeIndependence:
             slippage=slippage,
             leverage=2,
             action_levels=[-1, 0, 1],
+            random_start=False,  # Avoid timestamp exhaustion in loop
         )
 
         # Run multiple times and verify fee is on slipped price
