@@ -266,7 +266,7 @@ def main(cfg: DictConfig):  # noqa: F821
                 train_rollout = train_env.rollout(
                     max_train_traj_length,
                     model[0],
-                    auto_cast_to_device=False,
+                    auto_cast_to_device=True,
                     break_when_any_done=True,
                 )
                 # Only log reward from env[0] to match the rendered figure
