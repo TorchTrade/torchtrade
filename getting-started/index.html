@@ -1644,10 +1644,10 @@
 <h2 id="training-your-first-policy">Training Your First Policy<a class="headerlink" href="#training-your-first-policy" title="Permanent link">&para;</a></h2>
 <h3 id="quick-training-run">Quick Training Run<a class="headerlink" href="#quick-training-run" title="Permanent link">&para;</a></h3>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Train PPO with default config</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online/ppo/train.py
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online_rl/ppo/train.py
 </span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
 </span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># Customize with Hydra overrides</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online/ppo/train.py<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online_rl/ppo/train.py<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">    </span>env.symbol<span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="w"> </span><span class="se">\</span>
 </span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span>optim.lr<span class="o">=</span>1e-4<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">    </span>loss.gamma<span class="o">=</span><span class="m">0</span>.95
