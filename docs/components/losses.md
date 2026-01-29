@@ -25,7 +25,7 @@ Group Relative Policy Optimization (GRPO) loss for one-step reinforcement learni
 
 ### When to Use
 
-- **FuturesOneStepEnv** or **LongOnlyOneStepEnv** - One-step environments where episodes reset after each action
+- **OneStepTradingEnv** - One-step environments where episodes reset after each action
 - **SLTP bracket orders** - Trading with predefined stop-loss and take-profit levels
 - **Contextual bandit** - Single-step decision problems
 

@@ -63,19 +63,19 @@ sampler.reset(random_start=True)
 
 ### Usage in Offline Environments
 
-The sampler is used in all offline environments (SeqLongOnlyEnv, SeqFuturesEnv, etc.) and allows flexible selection of timeframes through the environment configuration:
+The sampler is used in all offline environments (SequentialTradingEnv, SequentialTradingEnvSLTP, OneStepTradingEnv) and allows flexible selection of timeframes through the environment configuration:
 
 ```python
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 
 # Configure multi-timeframe sampling
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
     time_frames=["1min", "5min", "15min", "1hour"],
     window_sizes=[12, 8, 8, 24],
     execute_on=(5, "Minute"),
 )
 
-env = SeqLongOnlyEnv(df, config)
+env = SequentialTradingEnv(df, config)
 
 # Observations contain all timeframes
 obs = env.reset()

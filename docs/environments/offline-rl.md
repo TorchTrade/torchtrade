@@ -8,7 +8,7 @@ TorchTrade provides **TensorDict-based datasets** that can be loaded and used di
 
 Offline RL can be performed using datasets collected from two sources:
 
-1. **Offline Environment Interactions** - Collect trajectories by running policies in backtesting environments (SeqLongOnlyEnv, SeqFuturesEnv, etc.)
+1. **Offline Environment Interactions** - Collect trajectories by running policies in backtesting environments (SequentialTradingEnv, SequentialTradingEnvSLTP, etc.)
 2. **Real Online Environment Interactions** - Record actual trading data from live exchanges (Alpaca, Binance, Bitget)
 
 This approach is particularly valuable for:
@@ -23,12 +23,12 @@ TorchTrade provides an example implementation of offline RL using **Implicit Q-L
 
 ```python
 # Example: Training IQL on pre-collected dataset
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
 
 # 1. Create environment (for evaluation only)
-env = SeqLongOnlyEnv(df, config)
+env = SequentialTradingEnv(df, config)
 
 # 2. Load pre-collected dataset
 # Dataset should contain trajectories: (observation, action, reward, next_observation, done)
@@ -50,7 +50,7 @@ For a complete implementation, see [examples/offline/iql/](https://github.com/To
 ### From Offline Environments
 
 ```python
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
 

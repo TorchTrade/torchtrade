@@ -30,7 +30,7 @@ The `feature_preprocessing_fn` parameter in environment configs transforms raw O
 ```python
 import pandas as pd
 import ta  # Technical Analysis library
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 
 def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -68,7 +68,7 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # Use in environment config
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
     feature_preprocessing_fn=custom_preprocessing,
     time_frames=["1min", "5min", "15min"],  # Note: use "1hour" not "60min"
     window_sizes=[12, 8, 8],
@@ -76,7 +76,7 @@ config = SeqLongOnlyEnvConfig(
     initial_cash=1000
 )
 
-env = SeqLongOnlyEnv(df, config)
+env = SequentialTradingEnv(df, config)
 ```
 
 ### Example 2: Normalized Features (Recommended)
@@ -115,7 +115,7 @@ def normalized_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
     feature_preprocessing_fn=normalized_preprocessing,
     ...
 )

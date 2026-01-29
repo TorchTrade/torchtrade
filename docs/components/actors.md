@@ -108,7 +108,7 @@ Concrete implementation of RuleBasedActor using Bollinger Bands and Stochastic R
 
 ```python
 from torchtrade.actor.rulebased.meanreversion import MeanReversionActor
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 
 # Create actor
 actor = MeanReversionActor(
@@ -126,12 +126,12 @@ actor = MeanReversionActor(
 preprocessing_fn = actor.get_preprocessing_fn()
 
 # Create environment with preprocessing
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
     df=train_df,
     preprocessing_fn=preprocessing_fn,  # Compute indicators upfront
     # ... other config ...
 )
-env = SeqLongOnlyEnv(config)
+env = SequentialTradingEnv(df, config)
 
 # Use actor to trade
 observation = env.reset()
@@ -178,11 +178,11 @@ LLM-based trading actor using OpenAI API (GPT-4, GPT-5) for decision-making. The
 
 ```python
 from torchtrade.actor import LLMActor
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 
 # Create environment
-config = SeqLongOnlyEnvConfig(...)
-env = SeqLongOnlyEnv(config)
+config = SequentialTradingEnvConfig(...)
+env = SequentialTradingEnv(df, config)
 
 # Create LLM actor (uses environment attributes)
 actor = LLMActor(
@@ -314,10 +314,10 @@ action = output["action"]
 
 **SLTP Environment (Bracket Orders)**:
 ```python
-from torchtrade.envs.offline import SeqLongOnlySLTPEnv
+from torchtrade.envs.offline import SequentialTradingEnvSLTP
 
 # Get action map from environment
-env = SeqLongOnlySLTPEnv(config)
+env = SequentialTradingEnvSLTP(df, config)
 action_map = env.action_map  # Dict mapping action indices to (side, sl, tp)
 
 # Create actor for SLTP
@@ -331,9 +331,9 @@ actor = LocalLLMActor(
 
 **Futures Environment with Leverage**:
 ```python
-from torchtrade.envs.offline import SeqFuturesSLTPEnv
+from torchtrade.envs.offline import SequentialTradingEnvSLTP
 
-env = SeqFuturesSLTPEnv(config)
+env = SequentialTradingEnvSLTP(df, config)
 
 actor = LocalLLMActor(
     model="Qwen/Qwen2.5-3B-Instruct",
@@ -394,7 +394,7 @@ pip install transformers accelerate bitsandbytes
 # Test environment with known strategy first
 actor = MeanReversionActor(...)
 preprocessing_fn = actor.get_preprocessing_fn()
-env = SeqLongOnlyEnv(config, preprocessing_fn=preprocessing_fn)
+env = SequentialTradingEnv(df, config)
 # ... run episodes ...
 ```
 
@@ -449,7 +449,5 @@ If vLLM import fails, LocalLLMActor automatically falls back to transformers.
 
 ## See Also
 
-- [Environments Guide](../environments/offline.md) - Compatible environment types
-- [Reward Functions](../guides/reward-functions.md) - Reward engineering for RL actors
-- [Loss Functions](losses.md) - Training objectives for neural network actors
+- [Environments](../environments/offline.md) - Compatible environment types
 - [TorchRL Actors](https://pytorch.org/rl/reference/modules.html#actors) - Building neural network policies

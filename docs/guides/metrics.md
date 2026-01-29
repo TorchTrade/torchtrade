@@ -203,13 +203,13 @@ profit_factor: 5.78
 ### Example 1: Evaluating Policy Performance
 
 ```python
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchtrade.metrics import compute_all_metrics
 from torchrl.collectors import SyncDataCollector
 import torch
 
 # Create evaluation environment
-eval_env = SeqLongOnlyEnv(test_df, config)
+eval_env = SequentialTradingEnv(test_df, config)
 
 # Collect evaluation rollouts
 collector = SyncDataCollector(
@@ -368,7 +368,7 @@ Choose `periods_per_year` based on your `execute_on` frequency:
 
 ```python
 # Example: 5-minute execution
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
     execute_on=(5, "Minute"),
     # ... other config
 )
@@ -411,7 +411,7 @@ Don't rely on a single metric. Look at:
 Ensure your environment includes realistic transaction fees and slippage:
 
 ```python
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
     transaction_fee=0.0025,  # 0.25% per trade
     slippage=0.001           # 0.1% slippage
 )

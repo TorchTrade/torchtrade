@@ -9,7 +9,7 @@ TorchTrade's goal is to provide accessible deployment of RL methods to trading. 
 TorchTrade provides modular environments for both live trading with major exchanges and offline backtesting. The framework supports:
 
 - 🎯 **Multi-Timeframe Observations** - Train on 1m, 5m, 15m, 1h bars simultaneously
-- 🤖 **Multiple RL Algorithms** - PPO, IQL, GRPO, DSAC implementations
+- 🤖 **Multiple RL Algorithms** - PPO, DQN, IQL, GRPO, DSAC implementations
 - 📊 **Feature Engineering** - Add technical indicators and custom features
 - 🔴 **Live Trading** - Direct API integration with major exchanges
 - 📉 **Risk Management** - Stop-loss/take-profit, margin, leverage, liquidation mechanics
@@ -25,7 +25,7 @@ TorchTrade provides modular environments for both live trading with major exchan
 
 ### Environments
 - **[Offline Environments](environments/offline.md)** - Backtesting with historical data
-  - SeqLongOnlyEnv, SeqFuturesEnv, OneStepEnv variants
+  - SequentialTradingEnv, SequentialTradingEnvSLTP, OneStepTradingEnv
 - **[Online Environments](environments/online.md)** - Live trading with exchange APIs
   - Alpaca, Binance, Bitget integrations
 
@@ -45,7 +45,7 @@ TorchTrade provides modular environments for both live trading with major exchan
 Observe market data at multiple time scales simultaneously:
 
 ```python
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
     time_frames=["1min", "5min", "15min", "60min"],
     window_sizes=[12, 8, 8, 24],       # Lookback per timeframe
     execute_on=(5, "Minute")           # Execute every 5 minutes
@@ -56,7 +56,7 @@ config = SeqLongOnlyEnvConfig(
 Trade with leverage and manage margin:
 
 ```python
-config = SeqFuturesEnvConfig(
+config = SequentialTradingEnvConfig(
     leverage=10,                       # 10x leverage
     initial_cash=10000,
     margin_call_threshold=0.2,         # 20% margin ratio triggers liquidation
@@ -67,7 +67,7 @@ config = SeqFuturesEnvConfig(
 Risk management with combinatorial action spaces:
 
 ```python
-config = SeqLongOnlySLTPEnvConfig(
+config = SequentialTradingEnvSLTPConfig(
     stoploss_levels=[-0.02, -0.05],    # -2%, -5%
     takeprofit_levels=[0.05, 0.10],    # +5%, +10%
     include_hold_action=True,          # Optional: set False to remove HOLD
@@ -75,42 +75,17 @@ config = SeqLongOnlySLTPEnvConfig(
 # Action space: HOLD + (2 SL × 2 TP) = 5 actions (or 4 without HOLD)
 ```
 
-## Architecture Overview
-
-```
-Raw OHLCV Data (1-minute bars)
-    ↓
-MarketDataObservationSampler
-    ├── Resample to multiple timeframes
-    ├── Apply feature preprocessing
-    └── Create sliding windows
-    ↓
-TensorDict Observations
-    ├── market_data_* (per timeframe)
-    └── account_state (cash, position, PnL)
-    ↓
-TorchRL Environment (EnvBase)
-    ├── _reset() - Initialize episode
-    ├── _step(action) - Execute trade
-    ├── _calculate_reward() - Compute reward
-    └── _check_termination() - Check end
-    ↓
-Loss Function (PPO/IQL/GRPO/DSAC)
-    └── Optimizer → Policy Update
-```
-
 ## Environment Comparison
 
 ### Offline Environments (Backtesting)
 
-| Environment | Futures | Leverage | Bracket Orders | One-Step | Best For |
-|-------------|---------|----------|----------------|----------|----------|
-| **SeqLongOnlyEnv** | ❌ | ❌ | ❌ | ❌ | Beginners, simple strategies |
-| **SeqLongOnlySLTPEnv** | ❌ | ❌ | ✅ | ❌ | Risk management research |
-| **LongOnlyOneStepEnv** | ❌ | ❌ | ✅ | ✅ | GRPO, contextual bandits |
-| **SeqFuturesEnv** | ✅ | ✅ | ❌ | ❌ | Advanced futures backtesting |
-| **SeqFuturesSLTPEnv** | ✅ | ✅ | ✅ | ❌ | Risk-managed futures |
-| **FuturesOneStepEnv** | ✅ | ✅ | ✅ | ✅ | Fast futures iteration |
+All environments support both spot and futures trading via config (`leverage=1` for spot, `leverage>1` for futures with margin/liquidation mechanics).
+
+| Environment | Bracket Orders | One-Step | Best For |
+|-------------|----------------|----------|----------|
+| **SequentialTradingEnv** | ❌ | ❌ | Standard sequential trading |
+| **SequentialTradingEnvSLTP** | ✅ | ❌ | Risk management with SL/TP |
+| **OneStepTradingEnv** | ✅ | ✅ | GRPO, contextual bandits |
 
 ### Live Environments (Exchange APIs)
 
@@ -125,20 +100,4 @@ Loss Function (PPO/IQL/GRPO/DSAC)
 
 ## Next Steps
 
-Ready to get started? Head to the **[Getting Started Guide](getting-started.md)** to install TorchTrade and run your first environment!
-
-Already familiar with the basics? Check out:
-
-- **[Offline Environments](environments/offline.md)** - Deep dive into backtesting environments
-- **[Reward Functions](guides/reward-functions.md)** - Design better reward signals
-- **[Building Custom Environments](guides/custom-environment.md)** - Extend the framework
-
-## Support
-
-- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchtrade/discussions)
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade/issues)
-- 📧 **Email**: torchtradecontact@gmail.com
-
----
-
-**Built with TorchRL • Designed for Algorithmic Trading • Open Source**
+**[Getting Started Guide](getting-started.md)** - Install TorchTrade and run your first environment.
