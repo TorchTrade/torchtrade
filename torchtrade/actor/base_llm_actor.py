@@ -2,7 +2,7 @@
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
 
@@ -32,7 +32,7 @@ class BaseLLMActor(ABC):
         account_state_labels: List[str],
         action_levels: List[float],
         symbol: str = "BTC/USD",
-        execute_on: str = "1Hour",
+        execute_on: Union[str, "TimeFrame"] = "1Hour",
         feature_keys: Optional[List[str]] = None,
         debug: bool = False,
     ):
@@ -40,7 +40,11 @@ class BaseLLMActor(ABC):
         self.account_state_labels = account_state_labels
         self.action_levels = action_levels
         self.symbol = symbol
-        self.execute_on = execute_on
+        # Accept TimeFrame objects — format as e.g. "1Hour"
+        if hasattr(execute_on, 'value') and hasattr(execute_on, 'unit'):
+            self.execute_on = f"{execute_on.value}{execute_on.unit.name}"
+        else:
+            self.execute_on = str(execute_on)
         self.feature_keys = feature_keys or ["open", "high", "low", "close", "volume"]
         self.debug = debug
 

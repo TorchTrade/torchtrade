@@ -1,13 +1,14 @@
-# Rule-based actors (no optional dependencies)
-from torchtrade.actor.rulebased import (
-    RuleBasedActor,
-    MeanReversionActor,
-)
+__all__ = []
 
-__all__ = [
-    "RuleBasedActor",
-    "MeanReversionActor",
-]
+# Rule-based actors
+try:
+    from torchtrade.actor.rulebased import (
+        RuleBasedActor,
+        MeanReversionActor,
+    )
+    __all__.extend(["RuleBasedActor", "MeanReversionActor"])
+except ImportError:
+    pass
 
 # Optional LLM actors
 try:
