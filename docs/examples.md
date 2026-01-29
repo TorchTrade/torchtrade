@@ -59,33 +59,33 @@ for batch in collector:
 
 ## Example File Structure
 
-TorchTrade examples use a clean configuration structure with centralized environment configs:
+Each algorithm directory is fully self-contained — configs, scripts, and all training outputs (checkpoints, logs, Hydra outputs) are written to that directory:
 
 ```
 examples/online_rl/
-├── env/                              # Central environment configs
-│   ├── sequential.yaml               # Basic sequential trading
-│   ├── sequential_sltp.yaml          # Sequential with stop-loss/take-profit
-│   └── onestep.yaml                  # One-step for contextual bandits
-│
-├── <algorithm>/                      # Most algorithms (ppo, dsac, iql, ppo_chronos)
-│   ├── config.yaml                   # Algorithm config (real file)
-│   ├── env/ → ../env/                # Symlink for CLI env switching
+├── <algorithm>/                      # ppo, dqn, dsac, iql, ppo_chronos
+│   ├── config.yaml                   # Algorithm config
+│   ├── env/                          # Environment configs
+│   │   ├── sequential.yaml           # Basic sequential trading
+│   │   └── sequential_sltp.yaml      # Sequential with stop-loss/take-profit
 │   ├── train.py                      # Training script (offline backtesting)
-│   ├── live.py                       # Live trading script (exchange API)
-│   └── utils.py                      # Helper functions (shared by train + live)
+│   ├── live.py                       # Live trading script (optional)
+│   ├── utils.py                      # Helper functions
+│   └── outputs/                      # Hydra outputs, checkpoints, logs
 │
 └── grpo/                             # GRPO (onestep-only)
-    ├── config.yaml                   # Env embedded, no symlink
+    ├── config.yaml                   # Algorithm config
+    ├── env/
+    │   └── onestep.yaml              # One-step environment config
     ├── train.py
-    └── utils.py
+    ├── utils.py
+    └── outputs/
 ```
 
 **Key Features:**
-- **Algorithm configs** are real files in each algorithm directory
-- **Environment configs** are centralized in `env/` directory (single source of truth)
-- **One symlink** per algorithm enables CLI environment switching (except GRPO)
-- **GRPO is special** - designed for onestep-only, environment embedded directly
+- Each algorithm directory is **self-contained** — everything you need to run, train, and deploy lives in one place
+- Training outputs (checkpoints, logs) are written to the algorithm's own directory
+- **GRPO** only supports onestep environments
 - **No spot/futures split** - users override `leverage` and `action_levels` for futures
 - **All use 1Hour timeframe** by default
 
@@ -209,7 +209,7 @@ Located alongside each algorithm in `examples/online_rl/`:
 
 | Example | Exchange | Algorithm | Description |
 |---------|----------|-----------|-------------|
-| **dqn/live.py** | Binance Futures | DQN | Live futures trading with epsilon-greedy DQN |
+| **dqn/live.py** | Binance Futures | DQN | Live futures trading with DQN |
 | **ppo/live.py** | Alpaca | PPO | Live spot trading with PPO actor |
 
 **Usage:**
