@@ -32,7 +32,7 @@ TorchTrade provides modular environments for both live trading with major exchan
 ### Components
 - **[Loss Functions](components/losses.md)** - Training objectives (GRPOLoss, CTRLLoss, CTRLPPOLoss)
 - **[Transforms](components/transforms.md)** - Data preprocessing (CoverageTracker, ChronosEmbeddingTransform)
-- **[Actors](components/actors.md)** - Trading policies (RuleBasedActor, LLMActor, LocalLLMActor, HumanActor)
+- **[Actors](components/actors.md)** - Trading policies (RuleBasedActor, LLMActor, LocalLLMActor)
 
 ### Advanced Customization
 - **[Feature Engineering](guides/custom-features.md)** - Add technical indicators and features

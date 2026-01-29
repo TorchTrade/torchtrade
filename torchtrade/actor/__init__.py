@@ -22,8 +22,3 @@ try:
 except ImportError:
     pass
 
-try:
-    from torchtrade.actor.human import HumanActor
-    __all__.append("HumanActor")
-except ImportError:
-    pass
