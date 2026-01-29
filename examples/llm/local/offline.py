@@ -22,10 +22,10 @@ from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 def simple_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy().reset_index(drop=True)
-    df["features_close"] = df["close"]
     df["features_open"] = df["open"]
     df["features_high"] = df["high"]
     df["features_low"] = df["low"]
+    df["features_close"] = df["close"]
     df["features_volume"] = df["volume"]
     df.dropna(inplace=True)
     return df
