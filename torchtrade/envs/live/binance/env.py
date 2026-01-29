@@ -506,7 +506,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         """
         Execute trade if position change is needed.
 
-        Routes to fractional or fixed position sizing based on config.
+        Skips execution if already in the requested position direction.
 
         Args:
             desired_action: Action level
@@ -514,7 +514,15 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         Returns:
             Dict with trade execution info
         """
-        # Execute fractional action
+        # Skip if already in the requested position
+        current_pos = self.position.current_position
+        if desired_action > 0 and current_pos == 1:
+            return self._create_trade_info(executed=False)
+        if desired_action < 0 and current_pos == -1:
+            return self._create_trade_info(executed=False)
+        if desired_action == 0 and current_pos == 0:
+            return self._create_trade_info(executed=False)
+
         return self._execute_fractional_action(desired_action)
 
     def _check_termination(self, portfolio_value: float) -> bool:
