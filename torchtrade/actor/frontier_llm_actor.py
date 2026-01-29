@@ -1,5 +1,5 @@
 """Frontier (API-based) LLM Actor using OpenAI-compatible APIs."""
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 from torchtrade.actor.base_llm_actor import BaseLLMActor
 
@@ -36,7 +36,3 @@ class FrontierLLMActor(BaseLLMActor):
             input=user_prompt,
         )
         return response.output_text
-
-
-# Backwards-compatible alias
-LLMActor = FrontierLLMActor

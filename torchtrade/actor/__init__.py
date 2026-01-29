@@ -17,8 +17,8 @@ except ImportError:
     pass
 
 try:
-    from torchtrade.actor.frontier_llm_actor import FrontierLLMActor, LLMActor
-    __all__.extend(["FrontierLLMActor", "LLMActor"])
+    from torchtrade.actor.frontier_llm_actor import FrontierLLMActor
+    __all__.append("FrontierLLMActor")
 except ImportError:
     pass
 

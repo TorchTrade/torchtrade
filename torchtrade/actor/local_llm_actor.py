@@ -1,6 +1,6 @@
 """Local LLM Actor using vllm or transformers backends."""
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 import torch
 

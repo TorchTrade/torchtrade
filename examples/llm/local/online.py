@@ -13,6 +13,7 @@ Requirements:
 """
 
 import os
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 import numpy as np
 import pandas as pd
@@ -84,14 +85,19 @@ def main():
         ),
     )
 
-    # Create LocalLLMActor
+    # Create LocalLLMActor using env attributes
     print("Initializing LocalLLMActor (Qwen/Qwen2.5-0.5B-Instruct)...")
+    base_env = env.base_env if hasattr(env, "base_env") else env
     policy = LocalLLMActor(
         model="Qwen/Qwen2.5-0.5B-Instruct",
         backend="vllm",
         device="cuda" if torch.cuda.is_available() else "cpu",
         debug=True,
-        action_space_type="standard",
+        market_data_keys=base_env.market_data_keys,
+        account_state_labels=base_env.account_state,
+        action_levels=base_env.action_levels,
+        symbol=config.symbol,
+        execute_on=config.execute_on,
     )
 
     # Create collector and replay buffer
