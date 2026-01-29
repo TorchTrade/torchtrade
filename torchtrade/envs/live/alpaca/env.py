@@ -173,10 +173,11 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         """
         # Skip if already in the requested position
         current_pos = self.position.current_position
+        no_trade = {"executed": False, "amount": 0, "side": None, "success": None}
         if desired_action > 0 and current_pos == 1:
-            return self._create_trade_info(executed=False)
+            return no_trade
         if desired_action == 0 and current_pos == 0:
-            return self._create_trade_info(executed=False)
+            return no_trade
 
         return self._execute_fractional_action(desired_action)
 
