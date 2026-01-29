@@ -134,19 +134,19 @@ for _ in range(100):
 
 ## Example 2: Extending Existing Environments
 
-Extend `SeqLongOnlyEnv` to add custom features:
+Extend `SequentialTradingEnv` to add custom features:
 
 ```python
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 from tensordict import TensorDict
 import torch
 
-class CustomLongOnlyEnv(SeqLongOnlyEnv):
+class CustomLongOnlyEnv(SequentialTradingEnv):
     """
-    Extended SeqLongOnlyEnv with sentiment data.
+    Extended SequentialTradingEnv with sentiment data.
     """
 
-    def __init__(self, df, config: SeqLongOnlyEnvConfig, sentiment_data: torch.Tensor):
+    def __init__(self, df, config: SequentialTradingEnvConfig, sentiment_data: torch.Tensor):
         super().__init__(df, config)
         self.sentiment_data = sentiment_data  # Timeseries sentiment scores
 
@@ -180,7 +180,7 @@ import pandas as pd
 df = pd.read_csv("prices.csv")
 sentiment = torch.randn(len(df))  # Random sentiment scores
 
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
     time_frames=["1min", "5min"],
     window_sizes=[12, 8],
     execute_on=(5, "Minute"),
@@ -202,7 +202,7 @@ print(obs.keys())  # [..., 'sentiment']
 Prefer composing existing components:
 
 ```python
-class CustomEnv(SeqLongOnlyEnv):
+class CustomEnv(SequentialTradingEnv):
     def __init__(self, df, config, custom_component):
         super().__init__(df, config)
         self.custom_component = custom_component  # Inject custom logic
@@ -282,10 +282,10 @@ from torchtrade.envs.state import HistoryTracker, FuturesHistoryTracker
 class CustomEnv(EnvBase):
     def __init__(self):
         super().__init__()
-        # For long-only environments (spot trading)
+        # For spot trading (leverage=1)
         self.history = HistoryTracker()
 
-        # For futures environments (tracks position size)
+        # For futures trading (leverage > 1, tracks position size)
         # self.history = FuturesHistoryTracker()
 
     def _step(self, tensordict):
@@ -386,7 +386,5 @@ print(f"Reward range: [{min(rewards):.2f}, {max(rewards):.2f}]")
 
 ## Next Steps
 
-- **[Offline Environments](../environments/offline.md)** - Understand existing environment architecture
-- **[Reward Functions](reward-functions.md)** - Define custom reward logic
-- **[Feature Engineering](custom-features.md)** - Add technical indicators
+- **[Offline Environments](../environments/offline.md)** - Existing environment architecture
 - **[TorchRL EnvBase](https://pytorch.org/rl/reference/envs.html#envbase)** - Base class documentation

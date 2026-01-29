@@ -81,7 +81,7 @@ df = pd.DataFrame({
 ### Step 2: Create an Environment
 
 ```python
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 import pandas as pd
 
 # Load your data
@@ -89,7 +89,7 @@ df = pd.read_csv("btcusdt_1m.csv")
 df['timestamp'] = pd.to_datetime(df['timestamp'])
 
 # Configure environment
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
     time_frames=["1min", "5min", "15min"],        # 1m, 5m, 15m bars
     window_sizes=[12, 8, 8],       # Lookback windows
     execute_on=(5, "Minute"),      # Execute every 5 minutes
@@ -99,32 +99,10 @@ config = SeqLongOnlyEnvConfig(
 )
 
 # Create environment
-env = SeqLongOnlyEnv(df, config)
+env = SequentialTradingEnv(df, config)
 ```
-
-### Step 3: Run the Environment
-
-```python
-# Reset environment
-tensordict = env.reset()
-
-print("Initial observation keys:", tensordict.keys())
-print("Market data shape:", tensordict["market_data_5Minute"].shape)
-print("Account state:", tensordict["account_state"])
-
-# Take an action
-tensordict["action"] = torch.tensor([2])  # BUY action
-tensordict = env.step(tensordict)
-
-print(f"Reward: {tensordict['reward'].item()}")
-print(f"Done: {tensordict['done'].item()}")
-```
-
-**Note**: TorchTrade uses a default log-return reward function, but you can customize it to shape agent behavior. See **[Reward Functions](guides/reward-functions.md)** for examples including transaction cost penalties, Sharpe ratio rewards, and more.
 
 ## Training Your First Policy
-
-Let's train a PPO policy on the long-only environment.
 
 ### Quick Training Run
 
@@ -139,42 +117,7 @@ uv run python examples/online/ppo/train.py \
     loss.gamma=0.95
 ```
 
-**Note**: TorchTrade provides several example training scripts (PPO, IQL, DSAC, GRPO, etc.) designed for inspiration and learning. These examples follow the structure of [TorchRL's SOTA implementations](https://github.com/pytorch/rl/tree/main/sota-implementations), enabling near plug-and-play compatibility with any TorchRL algorithm. See the **[Examples](examples.md)** page for a complete list and usage guide.
-
-### Understanding the Training Script
-
-The training script structure:
-
-```python
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
-from torchrl.collectors import SyncDataCollector
-from torchrl.modules import TanhNormal, ProbabilisticActor
-
-# 1. Create environment
-config = SeqLongOnlyEnvConfig(...)
-env = SeqLongOnlyEnv(df, config)
-
-# 2. Create your custom policy architecture
-# TorchTrade provides simple default networks in the examples
-# See torchtrade/models/simple_encoders.py for reference implementations
-# Check the examples/ directory for more details on network architectures
-actor_net = YourCustomNetwork(...)
-policy = ProbabilisticActor(...)
-
-# 3. Create data collector
-collector = SyncDataCollector(
-    env,
-    policy,
-    frames_per_batch=10000,
-    total_frames=1_000_000
-)
-
-# 4. Training loop
-for batch in collector:
-    loss = loss_module(batch)
-    loss.backward()
-    optimizer.step()
-```
+See the **[Examples](examples.md)** page for all available algorithms (PPO, DQN, IQL, DSAC, GRPO) and usage guides.
 
 ## Common Use Cases
 
@@ -190,13 +133,13 @@ df['0'] = pd.to_datetime(df['0'])  # First column is timestamp
 df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
 
 # Create environment
-env = SeqLongOnlyEnv(df, config)
+env = SequentialTradingEnv(df, config)
 ```
 
 ### Multi-Timeframe Configuration
 
 ```python
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
     time_frames=["1min", "5min", "15min", "60min"],        # 1m, 5m, 15m, 1h
     window_sizes=[12, 8, 8, 24],       # Lookback per timeframe
     execute_on=(5, "Minute"),          # Execute every 5 minutes
@@ -213,9 +156,9 @@ The environment will provide observations:
 ### Using Stop-Loss / Take-Profit
 
 ```python
-from torchtrade.envs.offline import SeqLongOnlySLTPEnv, SeqLongOnlySLTPEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
 
-config = SeqLongOnlySLTPEnvConfig(
+config = SequentialTradingEnvSLTPConfig(
     stoploss_levels=[-0.02, -0.05],     # -2%, -5%
     takeprofit_levels=[0.05, 0.10],     # +5%, +10%
     time_frames=["1min", "5min", "15min"],
@@ -224,7 +167,7 @@ config = SeqLongOnlySLTPEnvConfig(
     initial_cash=1000
 )
 
-env = SeqLongOnlySLTPEnv(df, config)
+env = SequentialTradingEnvSLTP(df, config)
 
 # Action space: 1 (HOLD) + 2×2 (SL/TP combinations) = 5 actions
 # Action 0: HOLD
@@ -301,58 +244,12 @@ env = BinanceFuturesTorchTradingEnv(config)
 
 ## Next Steps
 
-Now that you have the basics, explore these topics:
-
 - **[Offline Environments](environments/offline.md)** - Deep dive into backtesting environments
 - **[Online Environments](environments/online.md)** - Live trading with exchange APIs
-- **[Feature Engineering](guides/custom-features.md)** - Add technical indicators
-- **[Reward Functions](guides/reward-functions.md)** - Design better reward signals
-- **[Performance Metrics](guides/metrics.md)** - Evaluate agent performance with trading metrics
-- **[Understanding the Sampler](guides/sampler.md)** - How multi-timeframe sampling works
-- **[Building Custom Environments](guides/custom-environment.md)** - Extend TorchTrade
+- **[Examples](examples.md)** - Training scripts for all algorithms
 
-## Troubleshooting
-
-### Common Issues
-
-**Issue: "No module named 'torchtrade'"**
-
-Solution: Make sure you've activated the virtual environment:
-```bash
-source .venv/bin/activate  # Unix/macOS
-.venv\Scripts\activate  # Windows
-```
-
-**Issue: "CUDA out of memory"**
-
-Solution: Reduce batch size or use CPU:
-```python
-# In training config
-collector:
-  frames_per_batch: 50000  # Reduce from 100000
-  device: "cpu"  # Use CPU instead of CUDA
-```
-
-**Issue: "Columns do not match required format"**
-
-Solution: Ensure your DataFrame has the exact column names:
-```python
-df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
-```
-
-**Issue: "Environment returns NaN rewards"**
-
-Solution: Check for invalid price data:
-```python
-# Remove NaN values
-df = df.dropna()
-
-# Check for zero/negative prices
-assert (df[['open', 'high', 'low', 'close']] > 0).all().all()
-```
-
-## Getting Help
-
-- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchtrade/discussions)
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade/issues)
-- 📧 **Email**: torchtradecontact@gmail.com
+??? tip "Troubleshooting"
+    - **"No module named 'torchtrade'"** → Activate the venv: `source .venv/bin/activate`
+    - **"CUDA out of memory"** → Reduce `frames_per_batch` or set `device: "cpu"`
+    - **"Columns do not match required format"** → Ensure columns are `['timestamp', 'open', 'high', 'low', 'close', 'volume']`
+    - **"Environment returns NaN rewards"** → Check for NaN/zero prices: `df = df.dropna()`

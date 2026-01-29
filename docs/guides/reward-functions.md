@@ -76,7 +76,7 @@ def cost_penalty_reward(ctx: RewardContext) -> float:
     return log_return + cost_penalty
 
 # Use in environment
-config = SeqLongOnlyEnvConfig(
+config = SequentialTradingEnvConfig(
     reward_fn=cost_penalty_reward,
     ...
 )

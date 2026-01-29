@@ -724,11 +724,11 @@ api_secret = os.getenv("BINANCE_SECRET_KEY")
 First, train and validate your policy on historical data:
 
 ```python
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 
 # Train on historical data
-offline_config = SeqLongOnlyEnvConfig(...)
-offline_env = SeqLongOnlyEnv(df, offline_config)
+offline_config = SequentialTradingEnvConfig(...)
+offline_env = SequentialTradingEnv(df, offline_config)
 
 # Train policy with PPO/IQL/GRPO
 train_policy(offline_env, policy)

@@ -10,7 +10,7 @@ TorchTrade's goal is to provide accessible deployment of RL methods to trading. 
 
 TorchTrade provides modular environments for both live trading with major exchanges and offline backtesting. The framework supports:
 - 🎯 **Multi-Timeframe Observations** - Train on 1m, 5m, 15m, 1h bars simultaneously
-- 🤖 **Multiple RL Algorithms** - PPO, IQL, GRPO, DSAC, CTRL implementations
+- 🤖 **Multiple RL Algorithms** - PPO, DQN, IQL, GRPO, DSAC, CTRL implementations
 - 📊 **Feature Engineering** - Add technical indicators and custom features
 - 🔴 **Live Trading** - Direct Alpaca, Binance, and Bitget API integration
 - 🧠 **LLM Integration** - Use GPT-4o-mini or local LLMs as trading agents
@@ -161,22 +161,13 @@ Your support helps maintain the project, add new features, and keep documentatio
 <details>
 <summary><h2>📦 Offline Environments</h2></summary>
 
-Offline environments use historical data for backtesting (not "offline RL"):
+All environments support both spot (`leverage=1`) and futures (`leverage>1`) trading via config.
 
-| Environment | Trading Mode | Futures | Leverage | Bracket Orders | One-Step | Best For |
-|-------------|--------------|---------|----------|----------------|----------|----------|
-| **SequentialTradingEnv** | Spot | ❌ | ❌ | ❌ | ❌ | Beginners, simple strategies |
-| **SequentialTradingEnv** | Futures | ✅ | ✅ (1-125x) | ❌ | ❌ | Advanced futures backtesting |
-| **SequentialTradingEnvSLTP** | Spot | ❌ | ❌ | ✅ | ❌ | Risk management research |
-| **SequentialTradingEnvSLTP** | Futures | ✅ | ✅ (1-125x) | ✅ | ❌ | Risk-managed futures |
-| **OneStepTradingEnv** | Spot | ❌ | ❌ | ✅ | ✅ | Contextual bandits, GRPO |
-| **OneStepTradingEnv** | Futures | ✅ | ✅ (1-125x) | ✅ | ✅ | Fast futures iteration, GRPO |
-
-**Key Features:**
-- **Unified Architecture**: Use `trading_mode="spot"` for long-only or `trading_mode="futures"` for leveraged bidirectional trading
-- **Universal Account State**: All environments use 6-element account state for better generalization across portfolio sizes
-- **Bracket Orders (SL/TP)**: SLTP variants support stop-loss and take-profit with combinatorial action spaces
-- **One-Step**: Optimized for GRPO with episodic rollouts instead of sequential trading
+| Environment | Bracket Orders | One-Step | Best For |
+|-------------|----------------|----------|----------|
+| **SequentialTradingEnv** | ❌ | ❌ | Standard sequential trading |
+| **SequentialTradingEnvSLTP** | ✅ | ❌ | Risk management with SL/TP |
+| **OneStepTradingEnv** | ✅ | ✅ | GRPO, contextual bandits |
 
 See **[Offline Environments Documentation](https://torchtrade.github.io/torchtrade_envs/environments/offline/)** for detailed guides.
 
@@ -185,16 +176,15 @@ See **[Offline Environments Documentation](https://torchtrade.github.io/torchtra
 <details>
 <summary><h2>🚀 Training Algorithms & Examples</h2></summary>
 
-TorchTrade includes implementations of multiple RL algorithms with flexible environment switching via Hydra:
+TorchTrade includes implementations of multiple RL algorithms, all usable across any environment via Hydra config switching:
 
-| Algorithm | Type | Default Environment | Example Location |
-|-----------|------|---------------------|------------------|
-| **PPO** | On-policy | Sequential SLTP | `examples/online/ppo/` |
-| **PPO-Chronos** | On-policy | Sequential Futures SLTP | `examples/online/ppo_chronos/` |
-| **IQL** | Offline | Sequential Spot | `examples/online/iql/` |
-| **GRPO** | Policy gradient | One-step Futures | `examples/online/grpo/` |
-| **DSAC** | Off-policy | Sequential Spot | `examples/online/dsac/` |
-| **CTRL** | Self-supervised | Sequential | Research |
+- **PPO** - `examples/online/ppo/`
+- **PPO + Chronos** (time series embeddings) - `examples/online/ppo_chronos/`
+- **DQN** - `examples/online/dqn/`
+- **IQL** - `examples/online/iql/`
+- **DSAC** - `examples/online/dsac/`
+- **GRPO** - `examples/online/grpo/`
+- **CTRL** - Research
 
 ### Run Training Examples
 

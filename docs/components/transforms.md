@@ -229,11 +229,11 @@ aggregation="concat"  # Output: (num_features * embedding_dim,)
 For environments already created, use `append_transform`:
 
 ```python
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 
 # Create environment
-config = SeqLongOnlyEnvConfig(...)
-env = SeqLongOnlyEnv(config)
+config = SequentialTradingEnvConfig(...)
+env = SequentialTradingEnv(df, config)
 
 # Append Chronos transform
 env = env.append_transform(

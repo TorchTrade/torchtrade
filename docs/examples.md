@@ -37,10 +37,10 @@ for batch in collector:
 
 **TorchTrade Adaptation (Only Environment Changes):**
 ```python
-from torchtrade.envs.offline import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 
 # Environment setup - ONLY CHANGE
-env = SeqLongOnlyEnv(df, SeqLongOnlyEnvConfig(...))
+env = SequentialTradingEnv(df, SequentialTradingEnvConfig(...))
 
 # Everything else stays EXACTLY the same
 collector = SyncDataCollector(env, policy, ...)
@@ -110,15 +110,18 @@ python train.py env.symbol="ETH/USD" optim.lr=1e-4 loss.gamma=0.95
 **Example config.yaml:**
 ```yaml
 env:
-  name: SeqLongOnlyEnv
+  name: SequentialTradingEnv
   symbol: "BTC/USD"
-  time_frames: ["5Min", "15Min"]
-  window_sizes: [10, 10]
-  execute_on: "15Min"
-  initial_cash: [1000, 5000]
-  transaction_fee: 0.0025
-  train_envs: 10
-  eval_envs: 2
+  time_frames: ["1Hour"]
+  window_sizes: [24]
+  execute_on: "1Hour"
+  leverage: 2
+  action_levels: [0.0, 1.0]
+  initial_cash: 10000
+  transaction_fee: 0.0
+  slippage: 0.0
+  train_envs: 5
+  eval_envs: 1
 
 collector:
   frames_per_batch: 100000
@@ -127,14 +130,9 @@ collector:
 optim:
   lr: 2.5e-4
   max_grad_norm: 0.5
-  anneal_lr: True
 
 loss:
   gamma: 0.9
-  mini_batch_size: 33333
-  ppo_epochs: 3
-  clip_epsilon: 0.1
-  entropy_coef: 0.01
 
 logger:
   backend: wandb
@@ -142,29 +140,9 @@ logger:
   exp_name: ppo
 ```
 
-**`utils.py` - Helper Functions**
+**`utils.py`** - Helper functions (`make_env()`, `make_actor()`, `make_critic()`, `make_loss()`, `make_collector()`) that keep the training script clean.
 
-This file contains modular helper functions that handle setup tasks:
-
-- **`make_env()`**: Creates and configures the trading environment (offline or online)
-- **`make_actor()`**: Builds the policy network architecture (deterministic or stochastic)
-- **`make_critic()`**: Creates the value function network (if needed for the algorithm)
-- **`make_loss()`**: Initializes the loss module (PPO, SAC, IQL, etc.)
-- **`make_collector()`**: Sets up the data collection pipeline
-
-These utility functions keep the main training script clean and make it easy to swap components (e.g., changing from SeqLongOnlyEnv to SeqFuturesEnv requires only modifying `make_env()`).
-
-**`train.py` - Training Loop**
-
-The main training script orchestrates everything:
-
-1. **Hydra initialization**: Loads configuration from `config.yaml`
-2. **Component creation**: Uses `utils.py` functions to create env, actor, loss, optimizer
-3. **Training loop**: Collects data, computes losses, updates policy, logs metrics
-4. **Evaluation**: Periodically evaluates the policy on test environments
-5. **Checkpointing**: Saves model weights and training state
-
-This structure mirrors [TorchRL's SOTA implementations](https://github.com/pytorch/rl/tree/main/sota-implementations), making it familiar to TorchRL users and easy to adapt existing algorithms.
+**`train.py`** - Main training loop: loads config via Hydra, creates components, collects data, trains, evaluates, and checkpoints.
 
 ---
 
@@ -181,13 +159,12 @@ These examples use online RL algorithms (learning from interaction as it happens
 
 Located in `examples/online/`:
 
-| Example | Algorithm | Default Environment | Key Features |
-|---------|-----------|---------------------|--------------|
-| **ppo/** | PPO | SequentialTradingEnv (spot, 1Hour) | Standard policy gradient |
-| **ppo_chronos/** | PPO | SequentialTradingEnv (spot, 1Hour) | Time series embedding with Chronos T5 models |
-| **iql/** | IQL (Implicit Q-Learning) | SequentialTradingEnv (spot, 1Hour) | Offline RL algorithm for sequential trading |
-| **dsac/** | DSAC (Distributional SAC) | SequentialTradingEnv (spot, 1Hour) | Soft actor-critic with distributional value functions |
-| **grpo/** | GRPO | OneStepTradingEnv (spot, 1Hour) | Group relative policy optimization (onestep-only, no env switching) |
+- **PPO** - `ppo/` - Standard policy gradient
+- **PPO + Chronos** - `ppo_chronos/` - Time series embedding with Chronos T5 models
+- **DQN** - `dqn/` - Deep Q-learning with experience replay and target networks
+- **IQL** - `iql/` - Implicit Q-Learning
+- **DSAC** - `dsac/` - Distributional Soft Actor-Critic
+- **GRPO** - `grpo/` - Group Relative Policy Optimization (onestep-only, no env switching)
 
 All algorithms except GRPO support environment switching via CLI - see [Running Examples](#running-examples) below.
 
@@ -199,7 +176,7 @@ Located in `examples/offline/`:
 
 | Example | Algorithm | Environment | Key Features |
 |---------|-----------|-------------|--------------|
-| **iql/** | IQL | SeqLongOnlyEnv | Offline RL from pre-collected trajectories |
+| **iql/** | IQL | SequentialTradingEnv | Offline RL from pre-collected trajectories |
 
 **Note**: Thanks to the compatibility with TorchRL, you can easily add other offline RL methods like CQL, TD3+BC, and Decision Transformers from TorchRL to do offline RL with TorchTrade environments.
 
@@ -341,84 +318,10 @@ This structure mirrors [TorchRL's SOTA implementations](https://github.com/pytor
 
 ---
 
-## Configuration Files
-
-Configurations are split between algorithm-specific and centralized environment configs:
-
-```
-examples/online/
-├── env/                          # Central environment configs
-│   ├── sequential.yaml           # Basic sequential trading
-│   ├── sequential_sltp.yaml      # With stop-loss/take-profit
-│   └── onestep.yaml              # One-step for GRPO
-└── ppo/
-    ├── config.yaml               # Algorithm-specific config
-    ├── env/ → ../env/            # Symlink for CLI switching
-    ├── train.py
-    └── utils.py
-```
-
-Algorithm configs use Hydra's defaults list to compose with environment configs:
-
-```yaml
-# ppo/config.yaml
-defaults:
-  - env: sequential  # Default environment (spot, 1Hour)
-  - _self_
-
-# Optional: override for futures trading
-env:
-  leverage: 5
-  action_levels: [-1.0, 0.0, 1.0]
-
-collector:
-  frames_per_batch: 100000
-  total_frames: 100_000_000
-
-optim:
-  lr: 2.5e-4
-  max_grad_norm: 0.5
-
-loss:
-  gamma: 0.9
-  clip_epsilon: 0.1
-  entropy_coef: 0.01
-```
-
-This structure keeps algorithm configs separate while centralizing environment configs for easy reuse.
-
----
-
 ## Creating Your Own Examples
 
-To create a new training script:
+Copy an existing example closest to your use case and customize:
 
-1. **Copy an existing example** that's closest to your use case
-2. **Modify the environment** - change to your preferred env and config
-3. **Customize the policy** - adjust network architecture if needed
-4. **Tune hyperparameters** - update config files
-5. **Add custom logic** - rewards, features, transforms
-
-**Tips:**
-- Start with `ppo/` for standard RL
-- Start with `grpo/` for one-step RL
-- Start with `ppo_chronos/` for time series embeddings
+- Start with `ppo/` for standard RL, `grpo/` for one-step RL, `ppo_chronos/` for time series embeddings
 - Use `env=<config_name>` to switch environments without copying code
 
----
-
-## Next Steps
-
-- **[Offline Environments](environments/offline.md)** - Understand environment mechanics
-- **[Reward Functions](guides/reward-functions.md)** - Design better reward signals
-- **[Feature Engineering](guides/custom-features.md)** - Add technical indicators
-- **[Transforms](components/transforms.md)** - Use ChronosEmbedding and other transforms
-- **[TorchRL SOTA Implementations](https://github.com/pytorch/rl/tree/main/sota-implementations)** - Explore more TorchRL algorithms
-
----
-
-## Support
-
-- 💬 **Questions**: [GitHub Discussions](https://github.com/TorchTrade/torchtrade/discussions)
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/TorchTrade/torchtrade/issues)
-- 📧 **Email**: torchtradecontact@gmail.com
