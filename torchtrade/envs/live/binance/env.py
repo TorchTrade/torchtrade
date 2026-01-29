@@ -399,9 +399,11 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             )
             return 0.0, 0.0, "flat"
 
-        # Round to exchange step size
+        # Floor to exchange step size (never exceed available margin)
         position_qty = abs(position_size)
-        position_qty = round_to_step_size(position_qty, self._get_step_size())
+        step_size = self._get_step_size()
+        if step_size > 0:
+            position_qty = int(position_qty / step_size) * step_size
 
         # Apply direction
         direction = 1 if position_size > 0 else -1
