@@ -73,7 +73,7 @@
     
     
     
-    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="grey" data-md-color-accent="orange">
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="orange">
   
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
@@ -128,20 +128,20 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="grey" data-md-color-accent="orange"  aria-label="Switch to Dark Mode"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="orange"  aria-label="Switch to Light Mode"  type="radio" name="__palette" id="__palette_0">
     
-      <label class="md-header__button md-icon" title="Switch to Dark Mode" for="__palette_1" hidden>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 6H7c-3.31 0-6 2.69-6 6s2.69 6 6 6h10c3.31 0 6-2.69 6-6s-2.69-6-6-6m0 10H7c-2.21 0-4-1.79-4-4s1.79-4 4-4h10c2.21 0 4 1.79 4 4s-1.79 4-4 4M7 9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3"/></svg>
+      <label class="md-header__button md-icon" title="Switch to Light Mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 7H7a5 5 0 0 0-5 5 5 5 0 0 0 5 5h10a5 5 0 0 0 5-5 5 5 0 0 0-5-5m0 8a3 3 0 0 1-3-3 3 3 0 0 1 3-3 3 3 0 0 1 3 3 3 3 0 0 1-3 3"/></svg>
       </label>
     
   
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="orange"  aria-label="Switch to Light Mode"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="grey" data-md-color-accent="orange"  aria-label="Switch to Dark Mode"  type="radio" name="__palette" id="__palette_1">
     
-      <label class="md-header__button md-icon" title="Switch to Light Mode" for="__palette_0" hidden>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 7H7a5 5 0 0 0-5 5 5 5 0 0 0 5 5h10a5 5 0 0 0 5-5 5 5 0 0 0-5-5m0 8a3 3 0 0 1-3-3 3 3 0 0 1 3-3 3 3 0 0 1 3 3 3 3 0 0 1-3 3"/></svg>
+      <label class="md-header__button md-icon" title="Switch to Dark Mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 6H7c-3.31 0-6 2.69-6 6s2.69 6 6 6h10c3.31 0 6-2.69 6-6s-2.69-6-6-6m0 10H7c-2.21 0-4-1.79-4-4s1.79-4 4-4h10c2.21 0 4 1.79 4 4s-1.79 4-4 4M7 9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3"/></svg>
       </label>
     
   
@@ -674,17 +674,6 @@
         
       </ul>
     </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#example-structure" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example Structure
-      
-    </span>
-  </a>
   
 </li>
       
@@ -1425,17 +1414,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#example-structure" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example Structure
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#creating-your-own-examples" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1542,12 +1520,25 @@
 </span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    ├── utils.py
 </span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>    └── outputs/
 </span></code></pre></div>
-<p><strong>Key Features:</strong>
-- Each algorithm directory is <strong>self-contained</strong> — everything you need to run, train, and deploy lives in one place
-- Training outputs (checkpoints, logs) are written to the algorithm's own directory
-- <strong>GRPO</strong> only supports onestep environments
-- <strong>No spot/futures split</strong> - users override <code>leverage</code> and <code>action_levels</code> for futures
-- <strong>All use 1Hour timeframe</strong> by default</p>
+<p><strong>Key Features:</strong></p>
+<ul>
+<li>
+<p>Each algorithm directory is <strong>self-contained</strong> — everything you need to run, train, and deploy lives in one place</p>
+</li>
+<li>
+<p>Training outputs (checkpoints, logs) are written to the algorithm's own directory</p>
+</li>
+<li>
+<p><strong>GRPO</strong> only supports onestep environments</p>
+</li>
+<li>
+<p><strong>No spot/futures split</strong> - users override <code>leverage</code> and <code>action_levels</code> for 
+futures</p>
+</li>
+<li>
+<p><strong>All use 1Hour timeframe</strong> by default</p>
+</li>
+</ul>
 <h3 id="what-each-component-does">What Each Component Does<a class="headerlink" href="#what-each-component-does" title="Permanent link">&para;</a></h3>
 <p><strong><code>config.yaml</code> - Configuration Management</strong></p>
 <p>The configuration file uses <a href="https://hydra.cc/">Hydra</a> to manage all hyperparameters and settings. This includes:</p>
@@ -1606,12 +1597,12 @@
 <p>These examples use online RL algorithms (learning from interaction as it happens) with historical market data for backtesting. This allows you to train policies on past data before deploying them to live trading environments. We typically split the training data into training and test environments to evaluate the generalization performance of learned policies on unseen market conditions.</p>
 <p>Located in <code>examples/online_rl/</code>:</p>
 <ul>
-<li><strong>PPO</strong> - <code>ppo/</code> - Standard policy gradient</li>
-<li><strong>PPO + Chronos</strong> - <code>ppo_chronos/</code> - Time series embedding with Chronos T5 models</li>
-<li><strong>DQN</strong> - <code>dqn/</code> - Deep Q-learning with experience replay and target networks</li>
-<li><strong>IQL</strong> - <code>iql/</code> - Implicit Q-Learning</li>
-<li><strong>DSAC</strong> - <code>dsac/</code> - Distributional Soft Actor-Critic</li>
-<li><strong>GRPO</strong> - <code>grpo/</code> - Group Relative Policy Optimization (onestep-only, no env switching)</li>
+<li><strong><a href="https://arxiv.org/abs/1707.06347">PPO</a></strong> - <code>ppo/</code> - Standard policy gradient</li>
+<li><strong><a href="https://arxiv.org/abs/1707.06347">PPO</a> + <a href="https://arxiv.org/abs/2403.07815">Chronos</a></strong> - <code>ppo_chronos/</code> - Time series embedding with Chronos T5 models</li>
+<li><strong><a href="https://arxiv.org/abs/1312.5602">DQN</a></strong> - <code>dqn/</code> - Deep Q-learning with experience replay and target networks</li>
+<li><strong><a href="https://arxiv.org/abs/2110.06169">IQL</a></strong> - <code>iql/</code> - Implicit Q-Learning</li>
+<li><strong><a href="https://arxiv.org/abs/1910.07207">Discrete SAC</a></strong> - <code>dsac/</code> - Discrete Soft Actor-Critic</li>
+<li><strong><a href="https://arxiv.org/abs/2402.03300">GRPO</a></strong> - <code>grpo/</code> - Group Relative Policy Optimization (onestep-only, no env switching)</li>
 </ul>
 <p>All algorithms except GRPO support environment switching via CLI - see <a href="#running-examples">Running Examples</a> below.</p>
 <h3 id="offline-rl">Offline RL<a class="headerlink" href="#offline-rl" title="Permanent link">&para;</a></h3>
@@ -1747,7 +1738,6 @@
 <th>Config</th>
 <th>Environment Class</th>
 <th>SLTP</th>
-<th>Timeframe</th>
 <th>Use Case</th>
 </tr>
 </thead>
@@ -1756,28 +1746,31 @@
 <td><code>sequential</code></td>
 <td>SequentialTradingEnv</td>
 <td>No</td>
-<td>1Hour</td>
 <td>Basic sequential trading</td>
 </tr>
 <tr>
 <td><code>sequential_sltp</code></td>
 <td>SequentialTradingEnvSLTP</td>
 <td>Yes</td>
-<td>1Hour</td>
 <td>Sequential with bracket orders</td>
 </tr>
 <tr>
 <td><code>onestep</code></td>
 <td>OneStepTradingEnv</td>
 <td>Yes</td>
-<td>1Hour</td>
 <td>One-step for GRPO/contextual bandits</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Spot vs Futures:</strong>
-- <strong>Spot (default)</strong>: <code>leverage: 1</code>, <code>action_levels: [0.0, 1.0]</code>
-- <strong>Futures</strong>: Override with <code>env.leverage=5 env.action_levels='[-1.0,0.0,1.0]'</code></p>
+<p><strong>Spot vs Futures:</strong></p>
+<ul>
+<li>
+<p><strong>Spot (default)</strong>: <code>leverage: 1</code>, <code>action_levels: [0.0, 1.0]</code></p>
+</li>
+<li>
+<p><strong>Futures</strong>: Override with <code>env.leverage=5 env.action_levels='[-1.0,0.0,1.0]'</code></p>
+</li>
+</ul>
 <h3 id="common-hydra-overrides">Common Hydra Overrides<a class="headerlink" href="#common-hydra-overrides" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -1825,44 +1818,6 @@
 </tr>
 </tbody>
 </table>
-<hr />
-<h2 id="example-structure">Example Structure<a class="headerlink" href="#example-structure" title="Permanent link">&para;</a></h2>
-<p>Each training example follows this pattern:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># 1. Configuration (via Hydra)</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nd">@hydra</span><span class="o">.</span><span class="n">main</span><span class="p">(</span><span class="n">config_path</span><span class="o">=</span><span class="s2">&quot;config&quot;</span><span class="p">,</span> <span class="n">config_name</span><span class="o">=</span><span class="s2">&quot;config&quot;</span><span class="p">)</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">cfg</span><span class="p">):</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="c1"># 2. Create environment</span>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">env</span> <span class="o">=</span> <span class="n">make_env</span><span class="p">(</span><span class="n">cfg</span><span class="p">)</span>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="c1"># 3. Build policy network</span>
-</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="n">actor</span> <span class="o">=</span> <span class="n">make_actor</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">env</span><span class="p">)</span>
-</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>
-</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>    <span class="c1"># 4. Create collector</span>
-</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="n">collector</span> <span class="o">=</span> <span class="n">SyncDataCollector</span><span class="p">(</span>
-</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>        <span class="n">env</span><span class="p">,</span>
-</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>        <span class="n">actor</span><span class="p">,</span>
-</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>        <span class="n">frames_per_batch</span><span class="o">=</span><span class="n">cfg</span><span class="o">.</span><span class="n">collector</span><span class="o">.</span><span class="n">frames_per_batch</span><span class="p">,</span>
-</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>    <span class="p">)</span>
-</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>
-</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>    <span class="c1"># 5. Loss function</span>
-</span><span id="__span-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>    <span class="n">loss_module</span> <span class="o">=</span> <span class="n">make_loss</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">actor</span><span class="p">)</span>
-</span><span id="__span-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>
-</span><span id="__span-7-21"><a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>    <span class="c1"># 6. Optimizer</span>
-</span><span id="__span-7-22"><a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>    <span class="n">optimizer</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">Adam</span><span class="p">(</span>
-</span><span id="__span-7-23"><a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a>        <span class="n">loss_module</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span>
-</span><span id="__span-7-24"><a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a>        <span class="n">lr</span><span class="o">=</span><span class="n">cfg</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">lr</span>
-</span><span id="__span-7-25"><a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a>    <span class="p">)</span>
-</span><span id="__span-7-26"><a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a>
-</span><span id="__span-7-27"><a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a>    <span class="c1"># 7. Training loop</span>
-</span><span id="__span-7-28"><a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a>    <span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">collector</span><span class="p">:</span>
-</span><span id="__span-7-29"><a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a>        <span class="n">loss_values</span> <span class="o">=</span> <span class="n">loss_module</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
-</span><span id="__span-7-30"><a id="__codelineno-7-30" name="__codelineno-7-30" href="#__codelineno-7-30"></a>        <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_values</span><span class="p">[</span><span class="s2">&quot;loss_objective&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">loss_values</span><span class="p">[</span><span class="s2">&quot;loss_critic&quot;</span><span class="p">]</span>
-</span><span id="__span-7-31"><a id="__codelineno-7-31" name="__codelineno-7-31" href="#__codelineno-7-31"></a>        <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
-</span><span id="__span-7-32"><a id="__codelineno-7-32" name="__codelineno-7-32" href="#__codelineno-7-32"></a>        <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
-</span><span id="__span-7-33"><a id="__codelineno-7-33" name="__codelineno-7-33" href="#__codelineno-7-33"></a>        <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
-</span></code></pre></div>
-<p>This structure mirrors <a href="https://github.com/pytorch/rl/tree/main/sota-implementations">TorchRL's SOTA implementations</a>, making it easy to adapt other algorithms.</p>
 <hr />
 <h2 id="creating-your-own-examples">Creating Your Own Examples<a class="headerlink" href="#creating-your-own-examples" title="Permanent link">&para;</a></h2>
 <p>Copy an existing example closest to your use case and customize:</p>
