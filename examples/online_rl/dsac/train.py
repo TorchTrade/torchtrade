@@ -111,6 +111,7 @@ def main(cfg: DictConfig):  # noqa: F821
 
     # Create TD3 loss
     loss_module, target_net_updater = make_loss_module(cfg, model)
+    loss_module = loss_module.to(device)
 
     # Create replay buffer
     replay_buffer = make_replay_buffer(
