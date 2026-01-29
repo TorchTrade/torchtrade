@@ -358,16 +358,20 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             return 0.0, 0.0, "flat"
 
         # Query actual balance from exchange
+        # Use total_margin_balance (not available_balance) so the target reflects
+        # the full portfolio, including margin already locked in open positions.
+        # available_balance only shows free margin, which shrinks as positions grow,
+        # causing repeated buys when the agent keeps requesting action=1.0.
         balance_info = self.trader.get_account_balance()
-        available_balance = balance_info.get('available_balance', 0.0)
+        total_balance = balance_info.get('total_margin_balance', 0.0)
 
-        if available_balance <= 0:
-            logger.warning("No available balance for fractional position sizing")
+        if total_balance <= 0:
+            logger.warning("No balance for fractional position sizing")
             return 0.0, 0.0, "flat"
 
         # Use shared utility for core position calculation
         # Reserve 2% buffer for exchange maintenance margin requirements
-        effective_balance = available_balance * 0.98
+        effective_balance = total_balance * 0.98
         fee_rate = 0.0004  # Binance futures maker/taker fee
         params = PositionCalculationParams(
             balance=effective_balance,
@@ -460,7 +464,13 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         sign = 1 if delta > 0 else -1
         delta = int(abs(delta) / step_size) * step_size * sign
 
-        # 8. Determine trade direction and execute
+        # 8. Check delta notional meets exchange minimum
+        delta_notional = abs(delta) * current_price
+        min_notional = self._get_min_notional()
+        if delta_notional < min_notional:
+            return self._create_trade_info(executed=False)  # Delta too small for exchange
+
+        # 9. Determine trade direction and execute
         if (current_qty > 0 and target_qty < 0) or (current_qty < 0 and target_qty > 0):
             # Direction switch: close current, then open opposite
             #

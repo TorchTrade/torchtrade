@@ -283,16 +283,18 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
             return 0.0, 0.0, "flat"
 
         # Get actual balance from exchange
+        # Use total_margin_balance (not available_balance) so the target reflects
+        # the full portfolio, including margin already locked in open positions.
         balance_info = self.trader.get_account_balance()
-        available_balance = balance_info.get('available_balance', 0.0)
+        total_balance = balance_info.get('total_margin_balance', 0.0)
 
-        if available_balance <= 0:
-            logger.warning("No available balance for fractional position sizing")
+        if total_balance <= 0:
+            logger.warning("No balance for fractional position sizing")
             return 0.0, 0.0, "flat"
 
         # Use shared utility for core position calculation
         # Reserve 2% buffer for exchange maintenance margin requirements
-        effective_balance = available_balance * 0.98
+        effective_balance = total_balance * 0.98
         fee_rate = 0.0002  # Bitget futures maker/taker fee
         params = PositionCalculationParams(
             balance=effective_balance,
