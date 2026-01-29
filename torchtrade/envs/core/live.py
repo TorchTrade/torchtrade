@@ -133,6 +133,11 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
             "Min": "minutes",
             "H": "hours",
             "D": "days",
+            # Lowercase variants
+            "min": "minutes",
+            "hour": "hours",
+            "day": "days",
+            "minute": "minutes",
             # Binance uses seconds-based intervals
             "seconds": "seconds",
         }

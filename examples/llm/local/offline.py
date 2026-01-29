@@ -8,8 +8,11 @@ Usage:
     python examples/llm/local/offline.py
 
 Requirements:
-    pip install -e ".[llm_local]"
+    pip install -e ".[llm]"
 """
+
+import os
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 import datasets
 import pandas as pd
@@ -53,20 +56,25 @@ def main():
         initial_cash=10000,
         transaction_fee=0.0,
         slippage=0.0,
+        action_levels=[-1, 0, 1],
         include_base_features=False,
         random_start=False,
     )
     env = SequentialTradingEnv(df, config, feature_preprocessing_fn=simple_preprocessing)
     print(f"  Max steps: {env.max_steps}")
 
-    # Create actor
-    print("Initializing LocalLLMActor (Qwen/Qwen2.5-0.5B-Instruct)...")
+    # Initialize actor AFTER environment so we can pass env attributes
+    print("\nInitializing LocalLLMActor (Qwen/Qwen2.5-0.5B-Instruct)...")
     actor = LocalLLMActor(
         model="Qwen/Qwen2.5-0.5B-Instruct",
         backend="vllm",
         device="cuda" if torch.cuda.is_available() else "cpu",
         debug=True,
-        action_space_type="standard",
+        market_data_keys=env.market_data_keys,
+        account_state_labels=env.account_state,
+        action_levels=env.action_levels,
+        symbol=config.symbol,
+        execute_on=config.execute_on,
     )
 
     # Run rollout
@@ -75,13 +83,14 @@ def main():
     print("=" * 80)
 
     td = env.reset()
-    action_names = {0: "SELL", 1: "HOLD", 2: "BUY"}
     episode_reward = 0.0
-
+    # NOTE: We use manual rollouts for demonstration here
+    # but you can use a collector and a replay buffer to store transitions look at the online example
     for step in range(max_steps):
         td = actor(td)
         action_idx = td["action"].item()
-        print(f"\nStep {step + 1}: {action_names.get(action_idx, 'UNKNOWN')} (idx={action_idx})")
+        target_pct = env.action_levels[action_idx] * 100
+        print(f"\nStep {step + 1}: action={action_idx} (target {target_pct:+.0f}%)")
 
         if "thinking" in td.keys():
             print(f"  Reasoning: {td['thinking'][:200]}...")

@@ -147,6 +147,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.observation_spec = Composite(shape=())
         self.market_data_key = "market_data"
         self.account_state_key = "account_state"
+        self.account_state = self.ACCOUNT_STATE
 
         # Account state spec
         account_state_spec = Bounded(

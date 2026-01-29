@@ -8,11 +8,12 @@ Usage:
     python examples/llm/local/online.py
 
 Requirements:
-    pip install -e ".[llm_local]"
+    pip install -e ".[llm]"
     # Set ALPACA_API_KEY and ALPACA_SECRET_KEY in .env
 """
 
 import os
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 import numpy as np
 import pandas as pd
@@ -58,9 +59,9 @@ def main():
     config = AlpacaTradingEnvConfig(
         symbol="BTC/USD",
         paper=True,
-        time_frames=["1Hour"],
+        time_frames=["1Min"], # For testing we use 1Min
         window_sizes=[48],
-        execute_on="1Hour",
+        execute_on="1Min", 
         include_base_features=True,
     )
 
@@ -84,14 +85,19 @@ def main():
         ),
     )
 
-    # Create LocalLLMActor
+    # Create LocalLLMActor using env attributes
     print("Initializing LocalLLMActor (Qwen/Qwen2.5-0.5B-Instruct)...")
+    base_env = env.base_env if hasattr(env, "base_env") else env
     policy = LocalLLMActor(
         model="Qwen/Qwen2.5-0.5B-Instruct",
         backend="vllm",
         device="cuda" if torch.cuda.is_available() else "cpu",
         debug=True,
-        action_space_type="standard",
+        market_data_keys=base_env.market_data_keys,
+        account_state_labels=base_env.account_state,
+        action_levels=base_env.action_levels,
+        symbol=config.symbol,
+        execute_on=config.execute_on,
     )
 
     # Create collector and replay buffer

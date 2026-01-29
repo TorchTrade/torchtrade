@@ -16,7 +16,7 @@ import datasets
 import pandas as pd
 import torch
 
-from torchtrade.actor import LLMActor
+from torchtrade.actor import FrontierLLMActor
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 
 
@@ -62,12 +62,13 @@ def main():
 
     # Create actor
     print("Initializing LLMActor (OpenAI API)...")
-    actor = LLMActor(
+    actor = FrontierLLMActor(
         market_data_keys=env.market_data_keys,
-        account_state=env.account_state,
+        account_state_labels=env.account_state,
+        action_levels=env.action_levels,
         model="gpt-4o-mini",
         symbol=config.symbol,
-        execute_on="1Hour",
+        execute_on=config.execute_on,
         feature_keys=["open", "high", "low", "close", "volume"],
         debug=True,
     )
@@ -79,7 +80,8 @@ def main():
 
     td = env.reset()
     episode_reward = 0.0
-
+    # NOTE: We use manual rollouts for demonstration here
+    # but you can use a collector and a replay buffer to store transitions look at the online example
     for step in range(max_steps):
         td = actor(td)
         action_idx = td["action"].item()
