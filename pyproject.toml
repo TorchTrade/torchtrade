@@ -7,7 +7,7 @@ name = "torchtrade"
 version = "0.0.1"
 description = "Reinforcement learning environments for trading applications"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
     {name = "Sebastian Dittert", email = "torchtradecontact@gmail.com"}
 ]
@@ -40,14 +40,12 @@ dev = [
 docs = [
     "mkdocs-material",
 ]
-llm_local = [
+llm = [
+    "openai>=1.0.0",
     "vllm>=0.6.0",
     "transformers>=4.30.0",
     "accelerate>=0.20.0",
     "bitsandbytes>=0.41.0",
-]
-llm = [
-    "openai>=1.0.0",
 ]
 chronos = [
     "chronos-forecasting",

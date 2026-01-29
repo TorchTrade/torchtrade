@@ -20,7 +20,7 @@ import torch
 import tqdm
 from dotenv import load_dotenv
 
-from torchtrade.actor import LLMActor
+from torchtrade.actor import FrontierLLMActor
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
@@ -58,9 +58,9 @@ def main():
     config = AlpacaTradingEnvConfig(
         symbol="BTC/USD",
         paper=True,
-        time_frames=["1Hour"],
+        time_frames=["1Min"], # For testing we use 1Min
         window_sizes=[48],
-        execute_on="1Hour",
+        execute_on="1Min",
         include_base_features=True,
     )
 
@@ -86,12 +86,13 @@ def main():
 
     # Create LLMActor
     print("Initializing LLMActor (OpenAI API)...")
-    policy = LLMActor(
+    policy = FrontierLLMActor(
         market_data_keys=env.market_data_keys,
-        account_state=env.ACCOUNT_STATE,
+        account_state_labels=env.account_state,
+        action_levels=env.action_levels,
         model="gpt-4o-mini",
         symbol=config.symbol,
-        execute_on="1Hour",
+        execute_on=config.execute_on,
         feature_keys=["open", "high", "low", "close", "volume"],
         debug=True,
     )

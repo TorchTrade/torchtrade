@@ -54,8 +54,7 @@ uv sync
 source .venv/bin/activate  # On Unix/macOS
 
 # Optional: Install with extra features
-uv sync --extra llm              # OpenAI API support for LLMActor
-uv sync --extra llm_local        # Local LLM inference (vLLM, transformers)
+uv sync --extra llm              # LLM actors (OpenAI API + local vLLM/transformers)
 uv sync --extra chronos          # Chronos forecasting transforms
 uv sync --all-extras             # Install all optional dependencies
 ```
@@ -248,8 +247,7 @@ cd torchtrade
 uv sync
 
 # Optional: Install with extra features
-# uv sync --extra llm              # OpenAI API support for LLMActor
-# uv sync --extra llm_local        # Local LLM inference (vLLM, transformers)
+# uv sync --extra llm              # LLM actors (OpenAI API + local vLLM/transformers)
 # uv sync --extra chronos          # Chronos forecasting transforms
 # uv sync --extra dev              # Development/testing tools
 # uv sync --extra docs             # Documentation building
