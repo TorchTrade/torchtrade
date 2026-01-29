@@ -62,7 +62,7 @@ for batch in collector:
 TorchTrade examples use a clean configuration structure with centralized environment configs:
 
 ```
-examples/online/
+examples/online_rl/
 ├── env/                              # Central environment configs
 │   ├── sequential.yaml               # Basic sequential trading
 │   ├── sequential_sltp.yaml          # Sequential with stop-loss/take-profit
@@ -157,7 +157,7 @@ The following examples demonstrate the flexibility of TorchTrade across differen
 
 These examples use online RL algorithms (learning from interaction as it happens) with historical market data for backtesting. This allows you to train policies on past data before deploying them to live trading environments. We typically split the training data into training and test environments to evaluate the generalization performance of learned policies on unseen market conditions.
 
-Located in `examples/online/`:
+Located in `examples/online_rl/`:
 
 - **PPO** - `ppo/` - Standard policy gradient
 - **PPO + Chronos** - `ppo_chronos/` - Time series embedding with Chronos T5 models
@@ -228,19 +228,19 @@ All examples use Hydra for configuration management with centralized environment
 
 ```bash
 # Run with default configuration (sequential, spot, 1Hour)
-uv run python examples/online/ppo/train.py
+uv run python examples/online_rl/ppo/train.py
 
 # Switch environment via CLI
-uv run python examples/online/ppo/train.py env=sequential_sltp
-uv run python examples/online/ppo/train.py env=onestep
+uv run python examples/online_rl/ppo/train.py env=sequential_sltp
+uv run python examples/online_rl/ppo/train.py env=onestep
 
 # Configure for futures trading
-uv run python examples/online/ppo/train.py \
+uv run python examples/online_rl/ppo/train.py \
     env.leverage=5 \
     env.action_levels='[-1.0,0.0,1.0]'
 
 # Override multiple parameters
-uv run python examples/online/ppo/train.py \
+uv run python examples/online_rl/ppo/train.py \
     env=sequential_sltp \
     env.symbol="ETH/USD" \
     env.leverage=10 \

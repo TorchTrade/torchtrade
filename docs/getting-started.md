@@ -107,10 +107,10 @@ env = SequentialTradingEnv(df, config)
 
 ```bash
 # Train PPO with default config
-uv run python examples/online/ppo/train.py
+uv run python examples/online_rl/ppo/train.py
 
 # Customize with Hydra overrides
-uv run python examples/online/ppo/train.py \
+uv run python examples/online_rl/ppo/train.py \
     env.symbol="BTC/USD" \
     optim.lr=1e-4 \
     loss.gamma=0.95

@@ -89,10 +89,10 @@ print(f"Reward: {tensordict['reward'].item()}")
 
 ```bash
 # Train PPO with default settings
-uv run python examples/online/ppo/train.py
+uv run python examples/online_rl/ppo/train.py
 
 # Customize with Hydra overrides
-uv run python examples/online/ppo/train.py \
+uv run python examples/online_rl/ppo/train.py \
     env.symbol="BTC/USD" \
     optim.lr=1e-4
 ```
@@ -177,33 +177,33 @@ See **[Offline Environments Documentation](https://torchtrade.github.io/torchtra
 
 TorchTrade includes implementations of multiple RL algorithms, all usable across any environment via Hydra config switching:
 
-- **PPO** - `examples/online/ppo/`
-- **PPO + Chronos** (time series embeddings) - `examples/online/ppo_chronos/`
-- **DQN** - `examples/online/dqn/`
-- **IQL** - `examples/online/iql/`
-- **DSAC** - `examples/online/dsac/`
-- **GRPO** - `examples/online/grpo/`
+- **PPO** - `examples/online_rl/ppo/`
+- **PPO + Chronos** (time series embeddings) - `examples/online_rl/ppo_chronos/`
+- **DQN** - `examples/online_rl/dqn/`
+- **IQL** - `examples/online_rl/iql/`
+- **DSAC** - `examples/online_rl/dsac/`
+- **GRPO** - `examples/online_rl/grpo/`
 - **CTRL** - Research
 
 ### Run Training Examples
 
 ```bash
 # PPO with default environment (sequential SLTP)
-uv run python examples/online/ppo/train.py
+uv run python examples/online_rl/ppo/train.py
 
 # PPO with different environments (switch via command-line)
-uv run python examples/online/ppo/train.py env=sequential_futures
-uv run python examples/online/ppo/train.py env=onestep_futures
-uv run python examples/online/ppo/train.py env=sequential_spot
+uv run python examples/online_rl/ppo/train.py env=sequential_futures
+uv run python examples/online_rl/ppo/train.py env=onestep_futures
+uv run python examples/online_rl/ppo/train.py env=sequential_spot
 
 # GRPO with default (one-step futures)
-uv run python examples/online/grpo/train.py
+uv run python examples/online_rl/grpo/train.py
 
 # GRPO with spot trading
-uv run python examples/online/grpo/train.py env=onestep_spot
+uv run python examples/online_rl/grpo/train.py env=onestep_spot
 
 # Customize with Hydra overrides
-uv run python examples/online/ppo/train.py \
+uv run python examples/online_rl/ppo/train.py \
     env=sequential_futures \
     env.symbol="ETH/USD" \
     env.leverage=10 \
@@ -297,7 +297,7 @@ config = SequentialTradingEnvConfig(
 )
 
 env = SequentialTradingEnv(df, config)
-# Train with PPO - see examples/online/ppo/train.py
+# Train with PPO - see examples/online_rl/ppo/train.py
 ```
 
 ### Live Trading with Alpaca
@@ -442,7 +442,7 @@ See **[Advanced Customization](https://torchtrade.github.io/torchtrade_envs/guid
 TorchTrade uses Hydra for configuration management with a defaults list pattern:
 
 ```yaml
-# examples/online/ppo/config.yaml
+# examples/online_rl/ppo/config.yaml
 defaults:
   - env: sequential_sltp  # Load environment config
   - _self_
@@ -463,7 +463,7 @@ loss:
 ```
 
 ```yaml
-# examples/online/env/sequential_sltp.yaml
+# examples/online_rl/env/sequential_sltp.yaml
 env:
   name: SequentialTradingEnvSLTP
   trading_mode: "spot"
@@ -480,10 +480,10 @@ Override from command line:
 
 ```bash
 # Switch environment entirely
-uv run python examples/online/ppo/train.py env=sequential_futures
+uv run python examples/online_rl/ppo/train.py env=sequential_futures
 
 # Override specific parameters
-uv run python examples/online/ppo/train.py \
+uv run python examples/online_rl/ppo/train.py \
     env.symbol="ETH/USD" \
     env.leverage=10 \
     optim.lr=1e-4 \
