@@ -306,7 +306,7 @@ EXAMPLE_COMMANDS = {
     # ==========================================================================
 
     "iql_online": (
-        "python examples/online/iql/train.py "
+        "python examples/online_rl/iql/train.py "
         "collector.total_frames=10 "
         "collector.frames_per_batch=5 "
         "collector.init_random_frames=5 "
@@ -320,7 +320,7 @@ EXAMPLE_COMMANDS = {
 
     # TODO: Enable offline IQL test once encoder shape mismatch is fixed
     # "iql_offline": (
-    #     "python examples/offline/iql/train.py "
+    #     "python examples/offline_rl/iql/train.py "
     #     "optim.gradient_steps=5 "
     #     "replay_buffer.data_path=synthetic "
     #     "replay_buffer.batch_size=16 "
@@ -334,7 +334,7 @@ EXAMPLE_COMMANDS = {
     # ==========================================================================
 
     "dsac_online": (
-        "python examples/online/dsac/train.py "
+        "python examples/online_rl/dsac/train.py "
         "collector.total_frames=10 "
         "collector.frames_per_batch=5 "
         "collector.init_random_frames=5 "
@@ -352,7 +352,7 @@ EXAMPLE_COMMANDS = {
     # ==========================================================================
 
     "ppo_online": (
-        "python examples/online/ppo/train.py "
+        "python examples/online_rl/ppo/train.py "
         "collector.total_frames=10 "
         "collector.frames_per_batch=10 "
         "loss.mini_batch_size=5 "
@@ -369,7 +369,7 @@ EXAMPLE_COMMANDS = {
     # TODO: Enable ppo_chronos test once chronos-forecasting is added as optional dependency
     # Requires: pip install git+https://github.com/amazon-science/chronos-forecasting.git
     # "ppo_chronos_online": (
-    #     "python examples/online/ppo_chronos/train.py "
+    #     "python examples/online_rl/ppo_chronos/train.py "
     #     "collector.total_frames=10 "
     #     "collector.frames_per_batch=10 "
     #     "loss.mini_batch_size=5 "
@@ -384,7 +384,7 @@ EXAMPLE_COMMANDS = {
     # ==========================================================================
 
     "grpo_online": (
-        "python examples/online/grpo/train.py "
+        "python examples/online_rl/grpo/train.py "
         "collector.total_frames=10 "
         "collector.frames_per_batch=10 "
         "env.train_envs=2 "
@@ -398,7 +398,7 @@ EXAMPLE_COMMANDS = {
     # ==========================================================================
 
     "dqn_online": (
-        "python examples/online/dqn/train.py "
+        "python examples/online_rl/dqn/train.py "
         "collector.total_frames=10 "
         "collector.frames_per_batch=5 "
         "collector.init_random_frames=5 "

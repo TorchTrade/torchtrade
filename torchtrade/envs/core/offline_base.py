@@ -9,7 +9,7 @@ import pandas as pd
 import torch
 from tensordict import TensorDictBase
 from torchrl.data import Bounded
-from torchrl.data import Composite, Unbounded
+from torchrl.data import Categorical, Composite, Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import HistoryTracker, PositionState
@@ -162,6 +162,13 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             )
             self.observation_spec.set(market_data_key, market_data_spec)
             self.market_data_keys.append(market_data_key)
+
+        # Done spec: declare truncated so check_env_specs passes
+        self.full_done_spec = Composite(
+            done=Categorical(2, dtype=torch.bool, shape=(1,)),
+            terminated=Categorical(2, dtype=torch.bool, shape=(1,)),
+            truncated=Categorical(2, dtype=torch.bool, shape=(1,)),
+        )
 
         # Add coverage tracking indices (only when random_start=True)
         if self.random_start:
