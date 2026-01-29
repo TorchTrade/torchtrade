@@ -689,43 +689,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#configuration-files" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration Files
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#creating-your-own-examples" class="md-nav__link">
     <span class="md-ellipsis">
       
         Creating Your Own Examples
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Next Steps
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#support" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Support
       
     </span>
   </a>
@@ -1469,43 +1436,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#configuration-files" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration Files
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#creating-your-own-examples" class="md-nav__link">
     <span class="md-ellipsis">
       
         Creating Your Own Examples
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Next Steps
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#support" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Support
       
     </span>
   </a>
@@ -1570,10 +1504,10 @@
 </span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
 </span></code></pre></div></p>
 <p><strong>TorchTrade Adaptation (Only Environment Changes):</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SeqLongOnlyEnv</span><span class="p">,</span> <span class="n">SeqLongOnlyEnvConfig</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SequentialTradingEnv</span><span class="p">,</span> <span class="n">SequentialTradingEnvConfig</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># Environment setup - ONLY CHANGE</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">SeqLongOnlyEnvConfig</span><span class="p">(</span><span class="o">...</span><span class="p">))</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SequentialTradingEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">SequentialTradingEnvConfig</span><span class="p">(</span><span class="o">...</span><span class="p">))</span>
 </span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="c1"># Everything else stays EXACTLY the same</span>
 </span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">collector</span> <span class="o">=</span> <span class="n">SyncDataCollector</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">policy</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
@@ -1629,57 +1563,37 @@
 </span></code></pre></div>
 <p><strong>Example config.yaml:</strong>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">env</span><span class="p">:</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SeqLongOnlyEnv</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SequentialTradingEnv</span>
 </span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">symbol</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;BTC/USD&quot;</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">time_frames</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;5Min&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;15Min&quot;</span><span class="p p-Indicator">]</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">window_sizes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">10</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">10</span><span class="p p-Indicator">]</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">execute_on</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;15Min&quot;</span>
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span><span class="nt">initial_cash</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">1000</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">5000</span><span class="p p-Indicator">]</span>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span><span class="nt">transaction_fee</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0025</span>
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span><span class="nt">train_envs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
-</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">  </span><span class="nt">eval_envs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
-</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>
-</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="nt">collector</span><span class="p">:</span>
-</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">  </span><span class="nt">frames_per_batch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000</span>
-</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="w">  </span><span class="nt">total_frames</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100_000_000</span>
-</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>
-</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="nt">optim</span><span class="p">:</span>
-</span><span id="__span-4-17"><a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="w">  </span><span class="nt">lr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.5e-4</span>
-</span><span id="__span-4-18"><a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a><span class="w">  </span><span class="nt">max_grad_norm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
-</span><span id="__span-4-19"><a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="w">  </span><span class="nt">anneal_lr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">True</span>
-</span><span id="__span-4-20"><a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>
-</span><span id="__span-4-21"><a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a><span class="nt">loss</span><span class="p">:</span>
-</span><span id="__span-4-22"><a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a><span class="w">  </span><span class="nt">gamma</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.9</span>
-</span><span id="__span-4-23"><a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a><span class="w">  </span><span class="nt">mini_batch_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">33333</span>
-</span><span id="__span-4-24"><a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a><span class="w">  </span><span class="nt">ppo_epochs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
-</span><span id="__span-4-25"><a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a><span class="w">  </span><span class="nt">clip_epsilon</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span>
-</span><span id="__span-4-26"><a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a><span class="w">  </span><span class="nt">entropy_coef</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.01</span>
-</span><span id="__span-4-27"><a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>
-</span><span id="__span-4-28"><a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a><span class="nt">logger</span><span class="p">:</span>
-</span><span id="__span-4-29"><a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">wandb</span>
-</span><span id="__span-4-30"><a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a><span class="w">  </span><span class="nt">project_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TorchTrade-Online</span>
-</span><span id="__span-4-31"><a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a><span class="w">  </span><span class="nt">exp_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ppo</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">time_frames</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;1Hour&quot;</span><span class="p p-Indicator">]</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">window_sizes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">24</span><span class="p p-Indicator">]</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">execute_on</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1Hour&quot;</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span><span class="nt">leverage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span><span class="nt">action_levels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">1.0</span><span class="p p-Indicator">]</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span><span class="nt">initial_cash</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10000</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">  </span><span class="nt">transaction_fee</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">  </span><span class="nt">slippage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">  </span><span class="nt">train_envs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">  </span><span class="nt">eval_envs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>
+</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="nt">collector</span><span class="p">:</span>
+</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="w">  </span><span class="nt">frames_per_batch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000</span>
+</span><span id="__span-4-17"><a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="w">  </span><span class="nt">total_frames</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100_000_000</span>
+</span><span id="__span-4-18"><a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>
+</span><span id="__span-4-19"><a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="nt">optim</span><span class="p">:</span>
+</span><span id="__span-4-20"><a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a><span class="w">  </span><span class="nt">lr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.5e-4</span>
+</span><span id="__span-4-21"><a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a><span class="w">  </span><span class="nt">max_grad_norm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</span><span id="__span-4-22"><a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>
+</span><span id="__span-4-23"><a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a><span class="nt">loss</span><span class="p">:</span>
+</span><span id="__span-4-24"><a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a><span class="w">  </span><span class="nt">gamma</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.9</span>
+</span><span id="__span-4-25"><a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>
+</span><span id="__span-4-26"><a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a><span class="nt">logger</span><span class="p">:</span>
+</span><span id="__span-4-27"><a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">wandb</span>
+</span><span id="__span-4-28"><a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a><span class="w">  </span><span class="nt">project_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TorchTrade-Online</span>
+</span><span id="__span-4-29"><a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a><span class="w">  </span><span class="nt">exp_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ppo</span>
 </span></code></pre></div></p>
-<p><strong><code>utils.py</code> - Helper Functions</strong></p>
-<p>This file contains modular helper functions that handle setup tasks:</p>
-<ul>
-<li><strong><code>make_env()</code></strong>: Creates and configures the trading environment (offline or online)</li>
-<li><strong><code>make_actor()</code></strong>: Builds the policy network architecture (deterministic or stochastic)</li>
-<li><strong><code>make_critic()</code></strong>: Creates the value function network (if needed for the algorithm)</li>
-<li><strong><code>make_loss()</code></strong>: Initializes the loss module (PPO, SAC, IQL, etc.)</li>
-<li><strong><code>make_collector()</code></strong>: Sets up the data collection pipeline</li>
-</ul>
-<p>These utility functions keep the main training script clean and make it easy to swap components (e.g., changing from SeqLongOnlyEnv to SeqFuturesEnv requires only modifying <code>make_env()</code>).</p>
-<p><strong><code>train.py</code> - Training Loop</strong></p>
-<p>The main training script orchestrates everything:</p>
-<ol>
-<li><strong>Hydra initialization</strong>: Loads configuration from <code>config.yaml</code></li>
-<li><strong>Component creation</strong>: Uses <code>utils.py</code> functions to create env, actor, loss, optimizer</li>
-<li><strong>Training loop</strong>: Collects data, computes losses, updates policy, logs metrics</li>
-<li><strong>Evaluation</strong>: Periodically evaluates the policy on test environments</li>
-<li><strong>Checkpointing</strong>: Saves model weights and training state</li>
-</ol>
-<p>This structure mirrors <a href="https://github.com/pytorch/rl/tree/main/sota-implementations">TorchRL's SOTA implementations</a>, making it familiar to TorchRL users and easy to adapt existing algorithms.</p>
+<p><strong><code>utils.py</code></strong> - Helper functions (<code>make_env()</code>, <code>make_actor()</code>, <code>make_critic()</code>, <code>make_loss()</code>, <code>make_collector()</code>) that keep the training script clean.</p>
+<p><strong><code>train.py</code></strong> - Main training loop: loads config via Hydra, creates components, collects data, trains, evaluates, and checkpoints.</p>
 <hr />
 <h2 id="available-examples">Available Examples<a class="headerlink" href="#available-examples" title="Permanent link">&para;</a></h2>
 <p>The following examples demonstrate the flexibility of TorchTrade across different algorithms, environments, and use cases. These examples are meant to be starting points for further experimentation and adaptation - customize them according to your needs, ideas, and environments.</p>
@@ -1690,48 +1604,14 @@
 <h3 id="online-rl-offline-backtesting-environments">Online RL (Offline Backtesting Environments)<a class="headerlink" href="#online-rl-offline-backtesting-environments" title="Permanent link">&para;</a></h3>
 <p>These examples use online RL algorithms (learning from interaction as it happens) with historical market data for backtesting. This allows you to train policies on past data before deploying them to live trading environments. We typically split the training data into training and test environments to evaluate the generalization performance of learned policies on unseen market conditions.</p>
 <p>Located in <code>examples/online/</code>:</p>
-<table>
-<thead>
-<tr>
-<th>Example</th>
-<th>Algorithm</th>
-<th>Default Environment</th>
-<th>Key Features</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>ppo/</strong></td>
-<td>PPO</td>
-<td>SequentialTradingEnv (spot, 1Hour)</td>
-<td>Standard policy gradient</td>
-</tr>
-<tr>
-<td><strong>ppo_chronos/</strong></td>
-<td>PPO</td>
-<td>SequentialTradingEnv (spot, 1Hour)</td>
-<td>Time series embedding with Chronos T5 models</td>
-</tr>
-<tr>
-<td><strong>iql/</strong></td>
-<td>IQL (Implicit Q-Learning)</td>
-<td>SequentialTradingEnv (spot, 1Hour)</td>
-<td>Offline RL algorithm for sequential trading</td>
-</tr>
-<tr>
-<td><strong>dsac/</strong></td>
-<td>DSAC (Distributional SAC)</td>
-<td>SequentialTradingEnv (spot, 1Hour)</td>
-<td>Soft actor-critic with distributional value functions</td>
-</tr>
-<tr>
-<td><strong>grpo/</strong></td>
-<td>GRPO</td>
-<td>OneStepTradingEnv (spot, 1Hour)</td>
-<td>Group relative policy optimization (onestep-only, no env switching)</td>
-</tr>
-</tbody>
-</table>
+<ul>
+<li><strong>PPO</strong> - <code>ppo/</code> - Standard policy gradient</li>
+<li><strong>PPO + Chronos</strong> - <code>ppo_chronos/</code> - Time series embedding with Chronos T5 models</li>
+<li><strong>DQN</strong> - <code>dqn/</code> - Deep Q-learning with experience replay and target networks</li>
+<li><strong>IQL</strong> - <code>iql/</code> - Implicit Q-Learning</li>
+<li><strong>DSAC</strong> - <code>dsac/</code> - Distributional Soft Actor-Critic</li>
+<li><strong>GRPO</strong> - <code>grpo/</code> - Group Relative Policy Optimization (onestep-only, no env switching)</li>
+</ul>
 <p>All algorithms except GRPO support environment switching via CLI - see <a href="#running-examples">Running Examples</a> below.</p>
 <h3 id="offline-rl">Offline RL<a class="headerlink" href="#offline-rl" title="Permanent link">&para;</a></h3>
 <p>These examples use offline RL algorithms that learn from pre-collected datasets without requiring live environment interaction during training. The data can be collected from interactions with offline backtesting environments or from real online live trading sessions. We provide simple example offline datasets at <a href="https://huggingface.co/Torch-Trade">HuggingFace/Torch-Trade</a>.</p>
@@ -1749,7 +1629,7 @@
 <tr>
 <td><strong>iql/</strong></td>
 <td>IQL</td>
-<td>SeqLongOnlyEnv</td>
+<td>SequentialTradingEnv</td>
 <td>Offline RL from pre-collected trajectories</td>
 </tr>
 </tbody>
@@ -1964,74 +1844,11 @@
 </span></code></pre></div>
 <p>This structure mirrors <a href="https://github.com/pytorch/rl/tree/main/sota-implementations">TorchRL's SOTA implementations</a>, making it easy to adapt other algorithms.</p>
 <hr />
-<h2 id="configuration-files">Configuration Files<a class="headerlink" href="#configuration-files" title="Permanent link">&para;</a></h2>
-<p>Configurations are split between algorithm-specific and centralized environment configs:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>examples/online/
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>├── env/                          # Central environment configs
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>│   ├── sequential.yaml           # Basic sequential trading
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>│   ├── sequential_sltp.yaml      # With stop-loss/take-profit
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>│   └── onestep.yaml              # One-step for GRPO
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>└── ppo/
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    ├── config.yaml               # Algorithm-specific config
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    ├── env/ → ../env/            # Symlink for CLI switching
-</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    ├── train.py
-</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    └── utils.py
-</span></code></pre></div>
-<p>Algorithm configs use Hydra's defaults list to compose with environment configs:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># ppo/config.yaml</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">defaults</span><span class="p">:</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sequential</span><span class="w">  </span><span class="c1"># Default environment (spot, 1Hour)</span>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">_self_</span>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="c1"># Optional: override for futures trading</span>
-</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="nt">env</span><span class="p">:</span>
-</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">  </span><span class="nt">leverage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
-</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">  </span><span class="nt">action_levels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">-1.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">1.0</span><span class="p p-Indicator">]</span>
-</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>
-</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="nt">collector</span><span class="p">:</span>
-</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">  </span><span class="nt">frames_per_batch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000</span>
-</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">  </span><span class="nt">total_frames</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100_000_000</span>
-</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
-</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="nt">optim</span><span class="p">:</span>
-</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">  </span><span class="nt">lr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.5e-4</span>
-</span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">  </span><span class="nt">max_grad_norm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
-</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>
-</span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="nt">loss</span><span class="p">:</span>
-</span><span id="__span-8-20"><a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="w">  </span><span class="nt">gamma</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.9</span>
-</span><span id="__span-8-21"><a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="w">  </span><span class="nt">clip_epsilon</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span>
-</span><span id="__span-8-22"><a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a><span class="w">  </span><span class="nt">entropy_coef</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.01</span>
-</span></code></pre></div>
-<p>This structure keeps algorithm configs separate while centralizing environment configs for easy reuse.</p>
-<hr />
 <h2 id="creating-your-own-examples">Creating Your Own Examples<a class="headerlink" href="#creating-your-own-examples" title="Permanent link">&para;</a></h2>
-<p>To create a new training script:</p>
-<ol>
-<li><strong>Copy an existing example</strong> that's closest to your use case</li>
-<li><strong>Modify the environment</strong> - change to your preferred env and config</li>
-<li><strong>Customize the policy</strong> - adjust network architecture if needed</li>
-<li><strong>Tune hyperparameters</strong> - update config files</li>
-<li><strong>Add custom logic</strong> - rewards, features, transforms</li>
-</ol>
-<p><strong>Tips:</strong>
-- Start with <code>ppo/</code> for standard RL
-- Start with <code>grpo/</code> for one-step RL
-- Start with <code>ppo_chronos/</code> for time series embeddings
-- Use <code>env=&lt;config_name&gt;</code> to switch environments without copying code</p>
-<hr />
-<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<p>Copy an existing example closest to your use case and customize:</p>
 <ul>
-<li><strong><a href="../environments/offline/">Offline Environments</a></strong> - Understand environment mechanics</li>
-<li><strong><a href="../guides/reward-functions/">Reward Functions</a></strong> - Design better reward signals</li>
-<li><strong><a href="../guides/custom-features/">Feature Engineering</a></strong> - Add technical indicators</li>
-<li><strong><a href="../components/transforms/">Transforms</a></strong> - Use ChronosEmbedding and other transforms</li>
-<li><strong><a href="https://github.com/pytorch/rl/tree/main/sota-implementations">TorchRL SOTA Implementations</a></strong> - Explore more TorchRL algorithms</li>
-</ul>
-<hr />
-<h2 id="support">Support<a class="headerlink" href="#support" title="Permanent link">&para;</a></h2>
-<ul>
-<li>💬 <strong>Questions</strong>: <a href="https://github.com/TorchTrade/torchtrade/discussions">GitHub Discussions</a></li>
-<li>🐛 <strong>Bug Reports</strong>: <a href="https://github.com/TorchTrade/torchtrade/issues">GitHub Issues</a></li>
-<li>📧 <strong>Email</strong>: torchtradecontact@gmail.com</li>
+<li>Start with <code>ppo/</code> for standard RL, <code>grpo/</code> for one-step RL, <code>ppo_chronos/</code> for time series embeddings</li>
+<li>Use <code>env=&lt;config_name&gt;</code> to switch environments without copying code</li>
 </ul>
 
 

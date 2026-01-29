@@ -572,17 +572,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#architecture-overview" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Architecture Overview
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#environment-comparison" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -626,17 +615,6 @@
     <span class="md-ellipsis">
       
         Next Steps
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#support" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Support
       
     </span>
   </a>
@@ -1373,17 +1351,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#architecture-overview" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Architecture Overview
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#environment-comparison" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1433,17 +1400,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#support" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Support
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1479,7 +1435,7 @@
 <p>TorchTrade provides modular environments for both live trading with major exchanges and offline backtesting. The framework supports:</p>
 <ul>
 <li>🎯 <strong>Multi-Timeframe Observations</strong> - Train on 1m, 5m, 15m, 1h bars simultaneously</li>
-<li>🤖 <strong>Multiple RL Algorithms</strong> - PPO, IQL, GRPO, DSAC implementations</li>
+<li>🤖 <strong>Multiple RL Algorithms</strong> - PPO, DQN, IQL, GRPO, DSAC implementations</li>
 <li>📊 <strong>Feature Engineering</strong> - Add technical indicators and custom features</li>
 <li>🔴 <strong>Live Trading</strong> - Direct API integration with major exchanges</li>
 <li>📉 <strong>Risk Management</strong> - Stop-loss/take-profit, margin, leverage, liquidation mechanics</li>
@@ -1496,7 +1452,7 @@
 <h3 id="environments">Environments<a class="headerlink" href="#environments" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong><a href="environments/offline/">Offline Environments</a></strong> - Backtesting with historical data</li>
-<li>SeqLongOnlyEnv, SeqFuturesEnv, OneStepEnv variants</li>
+<li>SequentialTradingEnv, SequentialTradingEnvSLTP, OneStepTradingEnv</li>
 <li><strong><a href="environments/online/">Online Environments</a></strong> - Live trading with exchange APIs</li>
 <li>Alpaca, Binance, Bitget integrations</li>
 </ul>
@@ -1515,7 +1471,7 @@
 <h2 id="key-features">Key Features<a class="headerlink" href="#key-features" title="Permanent link">&para;</a></h2>
 <h3 id="multi-timeframe-support">Multi-Timeframe Support<a class="headerlink" href="#multi-timeframe-support" title="Permanent link">&para;</a></h3>
 <p>Observe market data at multiple time scales simultaneously:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnvConfig</span><span class="p">(</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SequentialTradingEnvConfig</span><span class="p">(</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;1min&quot;</span><span class="p">,</span> <span class="s2">&quot;5min&quot;</span><span class="p">,</span> <span class="s2">&quot;15min&quot;</span><span class="p">,</span> <span class="s2">&quot;60min&quot;</span><span class="p">],</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">24</span><span class="p">],</span>       <span class="c1"># Lookback per timeframe</span>
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;Minute&quot;</span><span class="p">)</span>           <span class="c1"># Execute every 5 minutes</span>
@@ -1523,7 +1479,7 @@
 </span></code></pre></div>
 <h3 id="futures-trading-with-leverage">Futures Trading with Leverage<a class="headerlink" href="#futures-trading-with-leverage" title="Permanent link">&para;</a></h3>
 <p>Trade with leverage and manage margin:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SeqFuturesEnvConfig</span><span class="p">(</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SequentialTradingEnvConfig</span><span class="p">(</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">leverage</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>                       <span class="c1"># 10x leverage</span>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">initial_cash</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">margin_call_threshold</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span>         <span class="c1"># 20% margin ratio triggers liquidation</span>
@@ -1531,42 +1487,20 @@
 </span></code></pre></div>
 <h3 id="stop-loss-take-profit-bracket-orders">Stop-Loss / Take-Profit Bracket Orders<a class="headerlink" href="#stop-loss-take-profit-bracket-orders" title="Permanent link">&para;</a></h3>
 <p>Risk management with combinatorial action spaces:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SeqLongOnlySLTPEnvConfig</span><span class="p">(</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SequentialTradingEnvSLTPConfig</span><span class="p">(</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">stoploss_levels</span><span class="o">=</span><span class="p">[</span><span class="o">-</span><span class="mf">0.02</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.05</span><span class="p">],</span>    <span class="c1"># -2%, -5%</span>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">takeprofit_levels</span><span class="o">=</span><span class="p">[</span><span class="mf">0.05</span><span class="p">,</span> <span class="mf">0.10</span><span class="p">],</span>    <span class="c1"># +5%, +10%</span>
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">include_hold_action</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>          <span class="c1"># Optional: set False to remove HOLD</span>
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="p">)</span>
 </span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># Action space: HOLD + (2 SL × 2 TP) = 5 actions (or 4 without HOLD)</span>
 </span></code></pre></div>
-<h2 id="architecture-overview">Architecture Overview<a class="headerlink" href="#architecture-overview" title="Permanent link">&para;</a></h2>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Raw OHLCV Data (1-minute bars)
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    ↓
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>MarketDataObservationSampler
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    ├── Resample to multiple timeframes
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    ├── Apply feature preprocessing
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    └── Create sliding windows
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    ↓
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>TensorDict Observations
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    ├── market_data_* (per timeframe)
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    └── account_state (cash, position, PnL)
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    ↓
-</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>TorchRL Environment (EnvBase)
-</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    ├── _reset() - Initialize episode
-</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    ├── _step(action) - Execute trade
-</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    ├── _calculate_reward() - Compute reward
-</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    └── _check_termination() - Check end
-</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>    ↓
-</span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>Loss Function (PPO/IQL/GRPO/DSAC)
-</span><span id="__span-3-19"><a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>    └── Optimizer → Policy Update
-</span></code></pre></div>
 <h2 id="environment-comparison">Environment Comparison<a class="headerlink" href="#environment-comparison" title="Permanent link">&para;</a></h2>
 <h3 id="offline-environments-backtesting">Offline Environments (Backtesting)<a class="headerlink" href="#offline-environments-backtesting" title="Permanent link">&para;</a></h3>
+<p>All environments support both spot and futures trading via config (<code>leverage=1</code> for spot, <code>leverage&gt;1</code> for futures with margin/liquidation mechanics).</p>
 <table>
 <thead>
 <tr>
 <th>Environment</th>
-<th>Futures</th>
-<th>Leverage</th>
 <th>Bracket Orders</th>
 <th>One-Step</th>
 <th>Best For</th>
@@ -1574,52 +1508,22 @@
 </thead>
 <tbody>
 <tr>
-<td><strong>SeqLongOnlyEnv</strong></td>
+<td><strong>SequentialTradingEnv</strong></td>
 <td>❌</td>
 <td>❌</td>
-<td>❌</td>
-<td>❌</td>
-<td>Beginners, simple strategies</td>
+<td>Standard sequential trading</td>
 </tr>
 <tr>
-<td><strong>SeqLongOnlySLTPEnv</strong></td>
-<td>❌</td>
-<td>❌</td>
+<td><strong>SequentialTradingEnvSLTP</strong></td>
 <td>✅</td>
 <td>❌</td>
-<td>Risk management research</td>
+<td>Risk management with SL/TP</td>
 </tr>
 <tr>
-<td><strong>LongOnlyOneStepEnv</strong></td>
-<td>❌</td>
-<td>❌</td>
+<td><strong>OneStepTradingEnv</strong></td>
 <td>✅</td>
 <td>✅</td>
 <td>GRPO, contextual bandits</td>
-</tr>
-<tr>
-<td><strong>SeqFuturesEnv</strong></td>
-<td>✅</td>
-<td>✅</td>
-<td>❌</td>
-<td>❌</td>
-<td>Advanced futures backtesting</td>
-</tr>
-<tr>
-<td><strong>SeqFuturesSLTPEnv</strong></td>
-<td>✅</td>
-<td>✅</td>
-<td>✅</td>
-<td>❌</td>
-<td>Risk-managed futures</td>
-</tr>
-<tr>
-<td><strong>FuturesOneStepEnv</strong></td>
-<td>✅</td>
-<td>✅</td>
-<td>✅</td>
-<td>✅</td>
-<td>Fast futures iteration</td>
 </tr>
 </tbody>
 </table>
@@ -1680,21 +1584,7 @@
 </tbody>
 </table>
 <h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
-<p>Ready to get started? Head to the <strong><a href="getting-started/">Getting Started Guide</a></strong> to install TorchTrade and run your first environment!</p>
-<p>Already familiar with the basics? Check out:</p>
-<ul>
-<li><strong><a href="environments/offline/">Offline Environments</a></strong> - Deep dive into backtesting environments</li>
-<li><strong><a href="guides/reward-functions/">Reward Functions</a></strong> - Design better reward signals</li>
-<li><strong><a href="guides/custom-environment/">Building Custom Environments</a></strong> - Extend the framework</li>
-</ul>
-<h2 id="support">Support<a class="headerlink" href="#support" title="Permanent link">&para;</a></h2>
-<ul>
-<li>💬 <strong>Questions</strong>: <a href="https://github.com/TorchTrade/torchtrade/discussions">GitHub Discussions</a></li>
-<li>🐛 <strong>Bug Reports</strong>: <a href="https://github.com/TorchTrade/torchtrade/issues">GitHub Issues</a></li>
-<li>📧 <strong>Email</strong>: torchtradecontact@gmail.com</li>
-</ul>
-<hr />
-<p><strong>Built with TorchRL • Designed for Algorithmic Trading • Open Source</strong></p>
+<p><strong><a href="getting-started/">Getting Started Guide</a></strong> - Install TorchTrade and run your first environment.</p>
 
 
 

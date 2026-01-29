@@ -584,17 +584,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#step-3-run-the-environment" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 3: Run the Environment
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -617,17 +606,6 @@
     <span class="md-ellipsis">
       
         Quick Training Run
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#understanding-the-training-script" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Understanding the Training Script
       
     </span>
   </a>
@@ -733,45 +711,6 @@
     <span class="md-ellipsis">
       
         Next Steps
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#troubleshooting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Troubleshooting
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Troubleshooting">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#common-issues" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Common Issues
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#getting-help" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Getting Help
       
     </span>
   </a>
@@ -1464,17 +1403,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#step-3-run-the-environment" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 3: Run the Environment
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1497,17 +1425,6 @@
     <span class="md-ellipsis">
       
         Quick Training Run
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#understanding-the-training-script" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Understanding the Training Script
       
     </span>
   </a>
@@ -1619,45 +1536,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#troubleshooting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Troubleshooting
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Troubleshooting">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#common-issues" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Common Issues
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#getting-help" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Getting Help
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1744,7 +1622,7 @@
 </span></code></pre></div>
 <p><strong>Note</strong>: You can also use our pre-processed datasets from <a href="https://huggingface.co/Torch-Trade">HuggingFace/Torch-Trade</a> which include various cryptocurrency pairs with 1-minute OHLCV data.</p>
 <h3 id="step-2-create-an-environment">Step 2: Create an Environment<a class="headerlink" href="#step-2-create-an-environment" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SeqLongOnlyEnv</span><span class="p">,</span> <span class="n">SeqLongOnlyEnvConfig</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SequentialTradingEnv</span><span class="p">,</span> <span class="n">SequentialTradingEnvConfig</span>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
 </span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Load your data</span>
@@ -1752,7 +1630,7 @@
 </span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">df</span><span class="p">[</span><span class="s1">&#39;timestamp&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_datetime</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;timestamp&#39;</span><span class="p">])</span>
 </span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
 </span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="c1"># Configure environment</span>
-</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnvConfig</span><span class="p">(</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SequentialTradingEnvConfig</span><span class="p">(</span>
 </span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;1min&quot;</span><span class="p">,</span> <span class="s2">&quot;5min&quot;</span><span class="p">,</span> <span class="s2">&quot;15min&quot;</span><span class="p">],</span>        <span class="c1"># 1m, 5m, 15m bars</span>
 </span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>       <span class="c1"># Lookback windows</span>
 </span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;Minute&quot;</span><span class="p">),</span>      <span class="c1"># Execute every 5 minutes</span>
@@ -1762,88 +1640,40 @@
 </span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="p">)</span>
 </span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>
 </span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="c1"># Create environment</span>
-</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SequentialTradingEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
 </span></code></pre></div>
-<h3 id="step-3-run-the-environment">Step 3: Run the Environment<a class="headerlink" href="#step-3-run-the-environment" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Reset environment</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">tensordict</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Initial observation keys:&quot;</span><span class="p">,</span> <span class="n">tensordict</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Market data shape:&quot;</span><span class="p">,</span> <span class="n">tensordict</span><span class="p">[</span><span class="s2">&quot;market_data_5Minute&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Account state:&quot;</span><span class="p">,</span> <span class="n">tensordict</span><span class="p">[</span><span class="s2">&quot;account_state&quot;</span><span class="p">])</span>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="c1"># Take an action</span>
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">tensordict</span><span class="p">[</span><span class="s2">&quot;action&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="mi">2</span><span class="p">])</span>  <span class="c1"># BUY action</span>
-</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="n">tensordict</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">tensordict</span><span class="p">)</span>
-</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>
-</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Reward: </span><span class="si">{</span><span class="n">tensordict</span><span class="p">[</span><span class="s1">&#39;reward&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">item</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Done: </span><span class="si">{</span><span class="n">tensordict</span><span class="p">[</span><span class="s1">&#39;done&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">item</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-</span></code></pre></div>
-<p><strong>Note</strong>: TorchTrade uses a default log-return reward function, but you can customize it to shape agent behavior. See <strong><a href="../guides/reward-functions/">Reward Functions</a></strong> for examples including transaction cost penalties, Sharpe ratio rewards, and more.</p>
 <h2 id="training-your-first-policy">Training Your First Policy<a class="headerlink" href="#training-your-first-policy" title="Permanent link">&para;</a></h2>
-<p>Let's train a PPO policy on the long-only environment.</p>
 <h3 id="quick-training-run">Quick Training Run<a class="headerlink" href="#quick-training-run" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Train PPO with default config</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online/ppo/train.py
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># Customize with Hydra overrides</span>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online/ppo/train.py<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">    </span>env.symbol<span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span>optim.lr<span class="o">=</span>1e-4<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span>loss.gamma<span class="o">=</span><span class="m">0</span>.95
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Train PPO with default config</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online/ppo/train.py
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># Customize with Hydra overrides</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online/ppo/train.py<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">    </span>env.symbol<span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span>optim.lr<span class="o">=</span>1e-4<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">    </span>loss.gamma<span class="o">=</span><span class="m">0</span>.95
 </span></code></pre></div>
-<p><strong>Note</strong>: TorchTrade provides several example training scripts (PPO, IQL, DSAC, GRPO, etc.) designed for inspiration and learning. These examples follow the structure of <a href="https://github.com/pytorch/rl/tree/main/sota-implementations">TorchRL's SOTA implementations</a>, enabling near plug-and-play compatibility with any TorchRL algorithm. See the <strong><a href="../examples/">Examples</a></strong> page for a complete list and usage guide.</p>
-<h3 id="understanding-the-training-script">Understanding the Training Script<a class="headerlink" href="#understanding-the-training-script" title="Permanent link">&para;</a></h3>
-<p>The training script structure:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SeqLongOnlyEnv</span><span class="p">,</span> <span class="n">SeqLongOnlyEnvConfig</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchrl.collectors</span><span class="w"> </span><span class="kn">import</span> <span class="n">SyncDataCollector</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchrl.modules</span><span class="w"> </span><span class="kn">import</span> <span class="n">TanhNormal</span><span class="p">,</span> <span class="n">ProbabilisticActor</span>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># 1. Create environment</span>
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnvConfig</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
-</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
-</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
-</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c1"># 2. Create your custom policy architecture</span>
-</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="c1"># TorchTrade provides simple default networks in the examples</span>
-</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="c1"># See torchtrade/models/simple_encoders.py for reference implementations</span>
-</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="c1"># Check the examples/ directory for more details on network architectures</span>
-</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="n">actor_net</span> <span class="o">=</span> <span class="n">YourCustomNetwork</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
-</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="n">policy</span> <span class="o">=</span> <span class="n">ProbabilisticActor</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
-</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>
-</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="c1"># 3. Create data collector</span>
-</span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="n">collector</span> <span class="o">=</span> <span class="n">SyncDataCollector</span><span class="p">(</span>
-</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>    <span class="n">env</span><span class="p">,</span>
-</span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>    <span class="n">policy</span><span class="p">,</span>
-</span><span id="__span-8-20"><a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>    <span class="n">frames_per_batch</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span>
-</span><span id="__span-8-21"><a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>    <span class="n">total_frames</span><span class="o">=</span><span class="mi">1_000_000</span>
-</span><span id="__span-8-22"><a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a><span class="p">)</span>
-</span><span id="__span-8-23"><a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a>
-</span><span id="__span-8-24"><a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a><span class="c1"># 4. Training loop</span>
-</span><span id="__span-8-25"><a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a><span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">collector</span><span class="p">:</span>
-</span><span id="__span-8-26"><a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a>    <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_module</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
-</span><span id="__span-8-27"><a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a>    <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
-</span><span id="__span-8-28"><a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a>    <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
-</span></code></pre></div>
+<p>See the <strong><a href="../examples/">Examples</a></strong> page for all available algorithms (PPO, DQN, IQL, DSAC, GRPO) and usage guides.</p>
 <h2 id="common-use-cases">Common Use Cases<a class="headerlink" href="#common-use-cases" title="Permanent link">&para;</a></h2>
 <h3 id="loading-historical-data-from-huggingface">Loading Historical Data from HuggingFace<a class="headerlink" href="#loading-historical-data-from-huggingface" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">datasets</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="c1"># Load pre-processed Bitcoin data</span>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">ds</span> <span class="o">=</span> <span class="n">datasets</span><span class="o">.</span><span class="n">load_dataset</span><span class="p">(</span><span class="s2">&quot;Torch-Trade/btcusdt_spot_1m_01_2020_to_12_2025&quot;</span><span class="p">)</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">df</span> <span class="o">=</span> <span class="n">ds</span><span class="p">[</span><span class="s2">&quot;train&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">()</span>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="n">df</span><span class="p">[</span><span class="s1">&#39;0&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_datetime</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;0&#39;</span><span class="p">])</span>  <span class="c1"># First column is timestamp</span>
-</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;timestamp&#39;</span><span class="p">,</span> <span class="s1">&#39;open&#39;</span><span class="p">,</span> <span class="s1">&#39;high&#39;</span><span class="p">,</span> <span class="s1">&#39;low&#39;</span><span class="p">,</span> <span class="s1">&#39;close&#39;</span><span class="p">,</span> <span class="s1">&#39;volume&#39;</span><span class="p">]</span>
-</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
-</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="c1"># Create environment</span>
-</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">datasets</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># Load pre-processed Bitcoin data</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">ds</span> <span class="o">=</span> <span class="n">datasets</span><span class="o">.</span><span class="n">load_dataset</span><span class="p">(</span><span class="s2">&quot;Torch-Trade/btcusdt_spot_1m_01_2020_to_12_2025&quot;</span><span class="p">)</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">df</span> <span class="o">=</span> <span class="n">ds</span><span class="p">[</span><span class="s2">&quot;train&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">()</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">df</span><span class="p">[</span><span class="s1">&#39;0&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_datetime</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;0&#39;</span><span class="p">])</span>  <span class="c1"># First column is timestamp</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;timestamp&#39;</span><span class="p">,</span> <span class="s1">&#39;open&#39;</span><span class="p">,</span> <span class="s1">&#39;high&#39;</span><span class="p">,</span> <span class="s1">&#39;low&#39;</span><span class="p">,</span> <span class="s1">&#39;close&#39;</span><span class="p">,</span> <span class="s1">&#39;volume&#39;</span><span class="p">]</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="c1"># Create environment</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SequentialTradingEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="multi-timeframe-configuration">Multi-Timeframe Configuration<a class="headerlink" href="#multi-timeframe-configuration" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnvConfig</span><span class="p">(</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;1min&quot;</span><span class="p">,</span> <span class="s2">&quot;5min&quot;</span><span class="p">,</span> <span class="s2">&quot;15min&quot;</span><span class="p">,</span> <span class="s2">&quot;60min&quot;</span><span class="p">],</span>        <span class="c1"># 1m, 5m, 15m, 1h</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">24</span><span class="p">],</span>       <span class="c1"># Lookback per timeframe</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;Minute&quot;</span><span class="p">),</span>          <span class="c1"># Execute every 5 minutes</span>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">initial_cash</span><span class="o">=</span><span class="p">[</span><span class="mi">1000</span><span class="p">,</span> <span class="mi">5000</span><span class="p">],</span>         <span class="c1"># Domain randomization</span>
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SequentialTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;1min&quot;</span><span class="p">,</span> <span class="s2">&quot;5min&quot;</span><span class="p">,</span> <span class="s2">&quot;15min&quot;</span><span class="p">,</span> <span class="s2">&quot;60min&quot;</span><span class="p">],</span>        <span class="c1"># 1m, 5m, 15m, 1h</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">24</span><span class="p">],</span>       <span class="c1"># Lookback per timeframe</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;Minute&quot;</span><span class="p">),</span>          <span class="c1"># Execute every 5 minutes</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">initial_cash</span><span class="o">=</span><span class="p">[</span><span class="mi">1000</span><span class="p">,</span> <span class="mi">5000</span><span class="p">],</span>         <span class="c1"># Domain randomization</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>The environment will provide observations:
 - <code>market_data_1Minute</code>: [12, num_features] - Last 12 one-minute bars
@@ -1851,119 +1681,91 @@
 - <code>market_data_15Minute</code>: [8, num_features] - Last 120 minutes
 - <code>market_data_60Minute</code>: [24, num_features] - Last 24 hours</p>
 <h3 id="using-stop-loss-take-profit">Using Stop-Loss / Take-Profit<a class="headerlink" href="#using-stop-loss-take-profit" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SeqLongOnlySLTPEnv</span><span class="p">,</span> <span class="n">SeqLongOnlySLTPEnvConfig</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SeqLongOnlySLTPEnvConfig</span><span class="p">(</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">stoploss_levels</span><span class="o">=</span><span class="p">[</span><span class="o">-</span><span class="mf">0.02</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.05</span><span class="p">],</span>     <span class="c1"># -2%, -5%</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">takeprofit_levels</span><span class="o">=</span><span class="p">[</span><span class="mf">0.05</span><span class="p">,</span> <span class="mf">0.10</span><span class="p">],</span>     <span class="c1"># +5%, +10%</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;1min&quot;</span><span class="p">,</span> <span class="s2">&quot;5min&quot;</span><span class="p">,</span> <span class="s2">&quot;15min&quot;</span><span class="p">],</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
-</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;Minute&quot;</span><span class="p">),</span>
-</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="n">initial_cash</span><span class="o">=</span><span class="mi">1000</span>
-</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="p">)</span>
-</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>
-</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SeqLongOnlySLTPEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
-</span><span id="__span-11-13"><a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>
-</span><span id="__span-11-14"><a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="c1"># Action space: 1 (HOLD) + 2×2 (SL/TP combinations) = 5 actions</span>
-</span><span id="__span-11-15"><a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="c1"># Action 0: HOLD</span>
-</span><span id="__span-11-16"><a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="c1"># Action 1: BUY with SL=-2%, TP=+5%</span>
-</span><span id="__span-11-17"><a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="c1"># Action 2: BUY with SL=-2%, TP=+10%</span>
-</span><span id="__span-11-18"><a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a><span class="c1"># Action 3: BUY with SL=-5%, TP=+5%</span>
-</span><span id="__span-11-19"><a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="c1"># Action 4: BUY with SL=-5%, TP=+10%</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SequentialTradingEnvSLTP</span><span class="p">,</span> <span class="n">SequentialTradingEnvSLTPConfig</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SequentialTradingEnvSLTPConfig</span><span class="p">(</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">stoploss_levels</span><span class="o">=</span><span class="p">[</span><span class="o">-</span><span class="mf">0.02</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.05</span><span class="p">],</span>     <span class="c1"># -2%, -5%</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">takeprofit_levels</span><span class="o">=</span><span class="p">[</span><span class="mf">0.05</span><span class="p">,</span> <span class="mf">0.10</span><span class="p">],</span>     <span class="c1"># +5%, +10%</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;1min&quot;</span><span class="p">,</span> <span class="s2">&quot;5min&quot;</span><span class="p">,</span> <span class="s2">&quot;15min&quot;</span><span class="p">],</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;Minute&quot;</span><span class="p">),</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    <span class="n">initial_cash</span><span class="o">=</span><span class="mi">1000</span>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="p">)</span>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SequentialTradingEnvSLTP</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>
+</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="c1"># Action space: 1 (HOLD) + 2×2 (SL/TP combinations) = 5 actions</span>
+</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="c1"># Action 0: HOLD</span>
+</span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="c1"># Action 1: BUY with SL=-2%, TP=+5%</span>
+</span><span id="__span-9-17"><a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="c1"># Action 2: BUY with SL=-2%, TP=+10%</span>
+</span><span id="__span-9-18"><a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a><span class="c1"># Action 3: BUY with SL=-5%, TP=+5%</span>
+</span><span id="__span-9-19"><a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="c1"># Action 4: BUY with SL=-5%, TP=+10%</span>
 </span></code></pre></div>
 <h2 id="live-trading-setup">Live Trading Setup<a class="headerlink" href="#live-trading-setup" title="Permanent link">&para;</a></h2>
 <p>For live trading with real exchanges, you'll need API credentials.</p>
 <h3 id="alpaca-us-stocks-crypto">Alpaca (US Stocks &amp; Crypto)<a class="headerlink" href="#alpaca-us-stocks-crypto" title="Permanent link">&para;</a></h3>
 <p>Alpaca offers commission-free paper trading for testing strategies without risk. See <a href="https://docs.alpaca.markets/docs/paper-trading">Alpaca Paper Trading Docs</a> for API credentials setup.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Create .env file</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.env<span class="w"> </span><span class="s">&lt;&lt; EOF</span>
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="s">API_KEY=your_alpaca_api_key</span>
-</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="s">SECRET_KEY=your_alpaca_secret_key</span>
-</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="s">EOF</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Create .env file</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.env<span class="w"> </span><span class="s">&lt;&lt; EOF</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="s">API_KEY=your_alpaca_api_key</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="s">SECRET_KEY=your_alpaca_secret_key</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="s">EOF</span>
 </span></code></pre></div>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.alpaca</span><span class="w"> </span><span class="kn">import</span> <span class="n">AlpacaTorchTradingEnv</span><span class="p">,</span> <span class="n">AlpacaTradingEnvConfig</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">alpaca.data.timeframe</span><span class="w"> </span><span class="kn">import</span> <span class="n">TimeFrame</span><span class="p">,</span> <span class="n">TimeFrameUnit</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="n">config</span> <span class="o">=</span> <span class="n">AlpacaTradingEnvConfig</span><span class="p">(</span>
-</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="p">,</span>
-</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span>
-</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>        <span class="n">TimeFrame</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">TimeFrameUnit</span><span class="o">.</span><span class="n">Minute</span><span class="p">),</span>
-</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>        <span class="n">TimeFrame</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="n">TimeFrameUnit</span><span class="o">.</span><span class="n">Minute</span><span class="p">),</span>
-</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>    <span class="p">],</span>
-</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
-</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="n">TimeFrame</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="n">TimeFrameUnit</span><span class="o">.</span><span class="n">Minute</span><span class="p">),</span>
-</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>    <span class="n">paper</span><span class="o">=</span><span class="kc">True</span>  <span class="c1"># Start with paper trading!</span>
-</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="p">)</span>
-</span><span id="__span-13-14"><a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>
-</span><span id="__span-13-15"><a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="n">env</span> <span class="o">=</span> <span class="n">AlpacaTorchTradingEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.alpaca</span><span class="w"> </span><span class="kn">import</span> <span class="n">AlpacaTorchTradingEnv</span><span class="p">,</span> <span class="n">AlpacaTradingEnvConfig</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">alpaca.data.timeframe</span><span class="w"> </span><span class="kn">import</span> <span class="n">TimeFrame</span><span class="p">,</span> <span class="n">TimeFrameUnit</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">config</span> <span class="o">=</span> <span class="n">AlpacaTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="p">,</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>        <span class="n">TimeFrame</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">TimeFrameUnit</span><span class="o">.</span><span class="n">Minute</span><span class="p">),</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>        <span class="n">TimeFrame</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="n">TimeFrameUnit</span><span class="o">.</span><span class="n">Minute</span><span class="p">),</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="p">],</span>
+</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
+</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="n">TimeFrame</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="n">TimeFrameUnit</span><span class="o">.</span><span class="n">Minute</span><span class="p">),</span>
+</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>    <span class="n">paper</span><span class="o">=</span><span class="kc">True</span>  <span class="c1"># Start with paper trading!</span>
+</span><span id="__span-11-13"><a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="p">)</span>
+</span><span id="__span-11-14"><a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>
+</span><span id="__span-11-15"><a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="n">env</span> <span class="o">=</span> <span class="n">AlpacaTorchTradingEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="binance-crypto-futures">Binance (Crypto Futures)<a class="headerlink" href="#binance-crypto-futures" title="Permanent link">&para;</a></h3>
 <p>If you want to trade on Binance, register <a href="https://accounts.binance.com/register?ref=25015935">here</a> in case you have no account. Binance also allows for demo trading, see <a href="https://www.binance.com/en/square/post/14316321292186">here</a>.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Add to .env</span>
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="nv">BINANCE_API_KEY</span><span class="o">=</span>your_binance_api_key
-</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="nv">BINANCE_SECRET_KEY</span><span class="o">=</span>your_binance_secret_key
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Add to .env</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="nv">BINANCE_API_KEY</span><span class="o">=</span>your_binance_api_key
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="nv">BINANCE_SECRET_KEY</span><span class="o">=</span>your_binance_secret_key
 </span></code></pre></div>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.binance</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
-</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>    <span class="n">BinanceFuturesTorchTradingEnv</span><span class="p">,</span>
-</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>    <span class="n">BinanceFuturesTradingEnvConfig</span>
-</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="p">)</span>
-</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>
-</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="n">config</span> <span class="o">=</span> <span class="n">BinanceFuturesTradingEnvConfig</span><span class="p">(</span>
-</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTCUSDT&quot;</span><span class="p">,</span>
-</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>    <span class="n">intervals</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;1m&quot;</span><span class="p">,</span> <span class="s2">&quot;5m&quot;</span><span class="p">],</span>
-</span><span id="__span-15-9"><a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
-</span><span id="__span-15-10"><a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="s2">&quot;1m&quot;</span><span class="p">,</span>
-</span><span id="__span-15-11"><a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a>    <span class="n">leverage</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>                        <span class="c1"># 5x leverage</span>
-</span><span id="__span-15-12"><a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>    <span class="n">quantity_per_trade</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>
-</span><span id="__span-15-13"><a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>    <span class="n">demo</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>                         <span class="c1"># Use testnet</span>
-</span><span id="__span-15-14"><a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a><span class="p">)</span>
-</span><span id="__span-15-15"><a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a>
-</span><span id="__span-15-16"><a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a><span class="n">env</span> <span class="o">=</span> <span class="n">BinanceFuturesTorchTradingEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.binance</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    <span class="n">BinanceFuturesTorchTradingEnv</span><span class="p">,</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">BinanceFuturesTradingEnvConfig</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="p">)</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="n">config</span> <span class="o">=</span> <span class="n">BinanceFuturesTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTCUSDT&quot;</span><span class="p">,</span>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>    <span class="n">intervals</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;1m&quot;</span><span class="p">,</span> <span class="s2">&quot;5m&quot;</span><span class="p">],</span>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="s2">&quot;1m&quot;</span><span class="p">,</span>
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>    <span class="n">leverage</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>                        <span class="c1"># 5x leverage</span>
+</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>    <span class="n">quantity_per_trade</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>
+</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>    <span class="n">demo</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>                         <span class="c1"># Use testnet</span>
+</span><span id="__span-13-14"><a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="p">)</span>
+</span><span id="__span-13-15"><a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a>
+</span><span id="__span-13-16"><a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="n">env</span> <span class="o">=</span> <span class="n">BinanceFuturesTorchTradingEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
 </span></code></pre></div>
 <p><strong>Note</strong>: Alpaca and Binance are just two examples of live environments/brokers that TorchTrade supports. For more details on all available exchanges and configurations, see <strong><a href="../environments/online/">Online Environments</a></strong>. We're always open to including additional brokers - if you'd like to request support for a new exchange, please <a href="https://github.com/TorchTrade/torchtrade/issues">create an issue</a> or contact us directly at torchtradecontact@gmail.com.</p>
 <h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
-<p>Now that you have the basics, explore these topics:</p>
 <ul>
 <li><strong><a href="../environments/offline/">Offline Environments</a></strong> - Deep dive into backtesting environments</li>
 <li><strong><a href="../environments/online/">Online Environments</a></strong> - Live trading with exchange APIs</li>
-<li><strong><a href="../guides/custom-features/">Feature Engineering</a></strong> - Add technical indicators</li>
-<li><strong><a href="../guides/reward-functions/">Reward Functions</a></strong> - Design better reward signals</li>
-<li><strong><a href="../guides/metrics/">Performance Metrics</a></strong> - Evaluate agent performance with trading metrics</li>
-<li><strong><a href="../guides/sampler/">Understanding the Sampler</a></strong> - How multi-timeframe sampling works</li>
-<li><strong><a href="../guides/custom-environment/">Building Custom Environments</a></strong> - Extend TorchTrade</li>
+<li><strong><a href="../examples/">Examples</a></strong> - Training scripts for all algorithms</li>
 </ul>
-<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
-<h3 id="common-issues">Common Issues<a class="headerlink" href="#common-issues" title="Permanent link">&para;</a></h3>
-<p><strong>Issue: "No module named 'torchtrade'"</strong></p>
-<p>Solution: Make sure you've activated the virtual environment:
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nb">source</span><span class="w"> </span>.venv/bin/activate<span class="w">  </span><span class="c1"># Unix/macOS</span>
-</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>.venv<span class="se">\S</span>cripts<span class="se">\a</span>ctivate<span class="w">  </span><span class="c1"># Windows</span>
-</span></code></pre></div></p>
-<p><strong>Issue: "CUDA out of memory"</strong></p>
-<p>Solution: Reduce batch size or use CPU:
-<div class="language-python highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># In training config</span>
-</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">collector</span><span class="p">:</span>
-</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>  <span class="n">frames_per_batch</span><span class="p">:</span> <span class="mi">50000</span>  <span class="c1"># Reduce from 100000</span>
-</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>  <span class="n">device</span><span class="p">:</span> <span class="s2">&quot;cpu&quot;</span>  <span class="c1"># Use CPU instead of CUDA</span>
-</span></code></pre></div></p>
-<p><strong>Issue: "Columns do not match required format"</strong></p>
-<p>Solution: Ensure your DataFrame has the exact column names:
-<div class="language-python highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;timestamp&#39;</span><span class="p">,</span> <span class="s1">&#39;open&#39;</span><span class="p">,</span> <span class="s1">&#39;high&#39;</span><span class="p">,</span> <span class="s1">&#39;low&#39;</span><span class="p">,</span> <span class="s1">&#39;close&#39;</span><span class="p">,</span> <span class="s1">&#39;volume&#39;</span><span class="p">]</span>
-</span></code></pre></div></p>
-<p><strong>Issue: "Environment returns NaN rewards"</strong></p>
-<p>Solution: Check for invalid price data:
-<div class="language-python highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># Remove NaN values</span>
-</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span>
-</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
-</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="c1"># Check for zero/negative prices</span>
-</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="k">assert</span> <span class="p">(</span><span class="n">df</span><span class="p">[[</span><span class="s1">&#39;open&#39;</span><span class="p">,</span> <span class="s1">&#39;high&#39;</span><span class="p">,</span> <span class="s1">&#39;low&#39;</span><span class="p">,</span> <span class="s1">&#39;close&#39;</span><span class="p">]]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
-</span></code></pre></div></p>
-<h2 id="getting-help">Getting Help<a class="headerlink" href="#getting-help" title="Permanent link">&para;</a></h2>
+<details class="tip">
+<summary>Troubleshooting</summary>
 <ul>
-<li>💬 <strong>Questions</strong>: <a href="https://github.com/TorchTrade/torchtrade/discussions">GitHub Discussions</a></li>
-<li>🐛 <strong>Bug Reports</strong>: <a href="https://github.com/TorchTrade/torchtrade/issues">GitHub Issues</a></li>
-<li>📧 <strong>Email</strong>: torchtradecontact@gmail.com</li>
+<li><strong>"No module named 'torchtrade'"</strong> → Activate the venv: <code>source .venv/bin/activate</code></li>
+<li><strong>"CUDA out of memory"</strong> → Reduce <code>frames_per_batch</code> or set <code>device: "cpu"</code></li>
+<li><strong>"Columns do not match required format"</strong> → Ensure columns are <code>['timestamp', 'open', 'high', 'low', 'close', 'volume']</code></li>
+<li><strong>"Environment returns NaN rewards"</strong> → Check for NaN/zero prices: <code>df = df.dropna()</code></li>
 </ul>
+</details>
 
 
 

@@ -2229,7 +2229,7 @@
 </ul>
 <h3 id="usage-example">Usage Example<a class="headerlink" href="#usage-example" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.actor.rulebased.meanreversion</span><span class="w"> </span><span class="kn">import</span> <span class="n">MeanReversionActor</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SeqLongOnlyEnv</span><span class="p">,</span> <span class="n">SeqLongOnlyEnvConfig</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SequentialTradingEnv</span><span class="p">,</span> <span class="n">SequentialTradingEnvConfig</span>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Create actor</span>
 </span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">actor</span> <span class="o">=</span> <span class="n">MeanReversionActor</span><span class="p">(</span>
@@ -2247,12 +2247,12 @@
 </span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="n">preprocessing_fn</span> <span class="o">=</span> <span class="n">actor</span><span class="o">.</span><span class="n">get_preprocessing_fn</span><span class="p">()</span>
 </span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>
 </span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="c1"># Create environment with preprocessing</span>
-</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnvConfig</span><span class="p">(</span>
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SequentialTradingEnvConfig</span><span class="p">(</span>
 </span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>    <span class="n">df</span><span class="o">=</span><span class="n">train_df</span><span class="p">,</span>
 </span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>    <span class="n">preprocessing_fn</span><span class="o">=</span><span class="n">preprocessing_fn</span><span class="p">,</span>  <span class="c1"># Compute indicators upfront</span>
 </span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>    <span class="c1"># ... other config ...</span>
 </span><span id="__span-1-24"><a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="p">)</span>
-</span><span id="__span-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+</span><span id="__span-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SequentialTradingEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
 </span><span id="__span-1-26"><a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>
 </span><span id="__span-1-27"><a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="c1"># Use actor to trade</span>
 </span><span id="__span-1-28"><a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="n">observation</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
@@ -2335,11 +2335,11 @@
 </table>
 <h3 id="usage-example_1">Usage Example<a class="headerlink" href="#usage-example_1" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.actor</span><span class="w"> </span><span class="kn">import</span> <span class="n">LLMActor</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SeqLongOnlyEnv</span><span class="p">,</span> <span class="n">SeqLongOnlyEnvConfig</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SequentialTradingEnv</span><span class="p">,</span> <span class="n">SequentialTradingEnvConfig</span>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Create environment</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnvConfig</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SequentialTradingEnvConfig</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SequentialTradingEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
 </span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
 </span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="c1"># Create LLM actor (uses environment attributes)</span>
 </span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">actor</span> <span class="o">=</span> <span class="n">LLMActor</span><span class="p">(</span>
@@ -2531,10 +2531,10 @@
 </span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="n">action</span> <span class="o">=</span> <span class="n">output</span><span class="p">[</span><span class="s2">&quot;action&quot;</span><span class="p">]</span>
 </span></code></pre></div></p>
 <p><strong>SLTP Environment (Bracket Orders)</strong>:
-<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SeqLongOnlySLTPEnv</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SequentialTradingEnvSLTP</span>
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
 </span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># Get action map from environment</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SeqLongOnlySLTPEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SequentialTradingEnvSLTP</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
 </span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">action_map</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">action_map</span>  <span class="c1"># Dict mapping action indices to (side, sl, tp)</span>
 </span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
 </span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># Create actor for SLTP</span>
@@ -2546,9 +2546,9 @@
 </span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="p">)</span>
 </span></code></pre></div></p>
 <p><strong>Futures Environment with Leverage</strong>:
-<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SeqFuturesSLTPEnv</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SequentialTradingEnvSLTP</span>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SeqFuturesSLTPEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SequentialTradingEnvSLTP</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
 </span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
 </span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">actor</span> <span class="o">=</span> <span class="n">LocalLLMActor</span><span class="p">(</span>
 </span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;Qwen/Qwen2.5-3B-Instruct&quot;</span><span class="p">,</span>
@@ -2693,11 +2693,11 @@
 </table>
 <h3 id="usage-example_3">Usage Example<a class="headerlink" href="#usage-example_3" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.actor</span><span class="w"> </span><span class="kn">import</span> <span class="n">HumanActor</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SeqLongOnlyEnv</span><span class="p">,</span> <span class="n">SeqLongOnlyEnvConfig</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SequentialTradingEnv</span><span class="p">,</span> <span class="n">SequentialTradingEnvConfig</span>
 </span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
 </span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Create environment</span>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnvConfig</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SequentialTradingEnvConfig</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SequentialTradingEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
 </span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
 </span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="c1"># Create human actor</span>
 </span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="n">actor</span> <span class="o">=</span> <span class="n">HumanActor</span><span class="p">(</span>
@@ -2802,7 +2802,7 @@
 <div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Test environment with known strategy first</span>
 </span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">actor</span> <span class="o">=</span> <span class="n">MeanReversionActor</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
 </span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">preprocessing_fn</span> <span class="o">=</span> <span class="n">actor</span><span class="o">.</span><span class="n">get_preprocessing_fn</span><span class="p">()</span>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnv</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="n">preprocessing_fn</span><span class="o">=</span><span class="n">preprocessing_fn</span><span class="p">)</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SequentialTradingEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
 </span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="c1"># ... run episodes ...</span>
 </span></code></pre></div></p>
 <p><strong>Pattern 2: LLM Exploration</strong>
@@ -2858,9 +2858,7 @@
 <hr />
 <h2 id="see-also">See Also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../../environments/offline/">Environments Guide</a> - Compatible environment types</li>
-<li><a href="../../guides/reward-functions/">Reward Functions</a> - Reward engineering for RL actors</li>
-<li><a href="../losses/">Loss Functions</a> - Training objectives for neural network actors</li>
+<li><a href="../../environments/offline/">Environments</a> - Compatible environment types</li>
 <li><a href="https://pytorch.org/rl/reference/modules.html#actors">TorchRL Actors</a> - Building neural network policies</li>
 </ul>
 

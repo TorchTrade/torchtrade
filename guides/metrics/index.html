@@ -2020,13 +2020,13 @@
 <hr />
 <h2 id="integration-with-training-loops">Integration with Training Loops<a class="headerlink" href="#integration-with-training-loops" title="Permanent link">&para;</a></h2>
 <h3 id="example-1-evaluating-policy-performance">Example 1: Evaluating Policy Performance<a class="headerlink" href="#example-1-evaluating-policy-performance" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SeqLongOnlyEnv</span><span class="p">,</span> <span class="n">SeqLongOnlyEnvConfig</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SequentialTradingEnv</span><span class="p">,</span> <span class="n">SequentialTradingEnvConfig</span>
 </span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.metrics</span><span class="w"> </span><span class="kn">import</span> <span class="n">compute_all_metrics</span>
 </span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchrl.collectors</span><span class="w"> </span><span class="kn">import</span> <span class="n">SyncDataCollector</span>
 </span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
 </span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
 </span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="c1"># Create evaluation environment</span>
-</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="n">eval_env</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnv</span><span class="p">(</span><span class="n">test_df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="n">eval_env</span> <span class="o">=</span> <span class="n">SequentialTradingEnv</span><span class="p">(</span><span class="n">test_df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
 </span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
 </span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="c1"># Collect evaluation rollouts</span>
 </span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="n">collector</span> <span class="o">=</span> <span class="n">SyncDataCollector</span><span class="p">(</span>
@@ -2200,7 +2200,7 @@
 </tbody>
 </table>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Example: 5-minute execution</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnvConfig</span><span class="p">(</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SequentialTradingEnvConfig</span><span class="p">(</span>
 </span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;Minute&quot;</span><span class="p">),</span>
 </span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    <span class="c1"># ... other config</span>
 </span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="p">)</span>
@@ -2231,7 +2231,7 @@
 - <strong>Efficiency metrics</strong>: Win rate, profit factor, number of trades</p>
 <h3 id="3-account-for-transaction-costs">3. Account for Transaction Costs<a class="headerlink" href="#3-account-for-transaction-costs" title="Permanent link">&para;</a></h3>
 <p>Ensure your environment includes realistic transaction fees and slippage:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SeqLongOnlyEnvConfig</span><span class="p">(</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SequentialTradingEnvConfig</span><span class="p">(</span>
 </span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>    <span class="n">transaction_fee</span><span class="o">=</span><span class="mf">0.0025</span><span class="p">,</span>  <span class="c1"># 0.25% per trade</span>
 </span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>    <span class="n">slippage</span><span class="o">=</span><span class="mf">0.001</span>           <span class="c1"># 0.1% slippage</span>
 </span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="p">)</span>
