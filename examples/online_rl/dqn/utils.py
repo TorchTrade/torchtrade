@@ -328,9 +328,9 @@ def make_dqn_agent(cfg, train_env, device):
 
     exploration_policy = TensorDictSequential(actor, exploration_module)
 
-    # Test forward pass
+    # Test forward pass (unsqueeze to batch_size=2 for BatchNorm compatibility)
     with torch.no_grad():
-        td = train_env.fake_tensordict().to(device)
+        td = train_env.fake_tensordict().unsqueeze(0).expand(2).to(device)
         actor(td)
         del td
 
@@ -384,9 +384,9 @@ def make_tdqn_agent(cfg, train_env, device):
 
     exploration_policy = TensorDictSequential(actor, exploration_module).to(device)
 
-    # Test forward pass
+    # Test forward pass (unsqueeze to batch_size=2 for BatchNorm compatibility)
     with torch.no_grad():
-        td = train_env.fake_tensordict().to(device)
+        td = train_env.fake_tensordict().unsqueeze(0).expand(2).to(device)
         actor(td)
         del td
 

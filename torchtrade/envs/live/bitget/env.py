@@ -291,9 +291,11 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
             return 0.0, 0.0, "flat"
 
         # Use shared utility for core position calculation
+        # Reserve 2% buffer for exchange maintenance margin requirements
+        effective_balance = available_balance * 0.98
         fee_rate = 0.0002  # Bitget futures maker/taker fee
         params = PositionCalculationParams(
-            balance=available_balance,
+            balance=effective_balance,
             action_value=action_value,
             current_price=current_price,
             leverage=self.config.leverage,
@@ -348,8 +350,12 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
             side = "sell"
             amount = abs(delta_qty)
 
-        # TODO: Consider rounding amount to exchange step size to avoid order rejection
-        # (similar to Binance's implementation using round_to_step_size())
+        # Floor to step size to avoid exceeding available margin
+        step_size = min_qty  # TODO: Query actual step size from Bitget exchange info
+        amount = int(amount / step_size) * step_size
+
+        if amount < min_qty:
+            return self._create_trade_info(executed=False)
 
         # Execute market order
         return self._execute_market_order(side, amount)

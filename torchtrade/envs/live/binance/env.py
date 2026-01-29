@@ -366,9 +366,11 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             return 0.0, 0.0, "flat"
 
         # Use shared utility for core position calculation
+        # Reserve 2% buffer for exchange maintenance margin requirements
+        effective_balance = available_balance * 0.98
         fee_rate = 0.0004  # Binance futures maker/taker fee
         params = PositionCalculationParams(
-            balance=available_balance,
+            balance=effective_balance,
             action_value=action_value,
             current_price=current_price,
             leverage=self.config.leverage,
@@ -454,8 +456,9 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         if abs(delta) < step_size:
             return self._create_trade_info(executed=False)  # Already close enough
 
-        # 7. Round delta to step size
-        delta = round_to_step_size(delta, self._get_step_size())
+        # 7. Floor delta to step size (never exceed available margin)
+        sign = 1 if delta > 0 else -1
+        delta = int(abs(delta) / step_size) * step_size * sign
 
         # 8. Determine trade direction and execute
         if (current_qty > 0 and target_qty < 0) or (current_qty < 0 and target_qty > 0):
