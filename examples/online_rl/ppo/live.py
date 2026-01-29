@@ -98,8 +98,8 @@ def make_live_env(
 
     env = AlpacaTorchTradingEnv(
         config,
-        api_key=os.getenv("ALPACA_API_KEY", ""),
-        api_secret=os.getenv("ALPACA_SECRET_KEY", ""),
+        api_key=os.getenv("API_KEY", ""),
+        api_secret=os.getenv("SECRET_KEY", ""),
         feature_preprocessing_fn=custom_preprocessing,
     )
 

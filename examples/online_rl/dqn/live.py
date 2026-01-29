@@ -103,7 +103,7 @@ def make_live_env(
     env = BinanceFuturesTorchTradingEnv(
         config,
         api_key=os.getenv("BINANCE_API_KEY", ""),
-        api_secret=os.getenv("BINANCE_SECRET_KEY", ""),
+        api_secret=os.getenv("BINANCE_SECRET", ""),
         feature_preprocessing_fn=custom_preprocessing,
     )
 
@@ -136,9 +136,9 @@ def main():
     parser = argparse.ArgumentParser(description="DQN live trading on Binance")
     parser.add_argument("--weights", type=str, default=None, help="Path to .pth weights file")
     parser.add_argument("--symbol", type=str, default="BTCUSDT")
-    parser.add_argument("--time_frames", nargs="+", default=["1Hour"])
+    parser.add_argument("--time_frames", nargs="+", default=["1Min"])
     parser.add_argument("--window_sizes", nargs="+", type=int, default=[24])
-    parser.add_argument("--execute_on", type=str, default="1Hour")
+    parser.add_argument("--execute_on", type=str, default="1Min")
     parser.add_argument("--leverage", type=int, default=2)
     parser.add_argument("--action_levels", nargs="+", type=float, default=[-1.0, 0.0, 1.0])
     parser.add_argument("--demo", action="store_true", default=True)
