@@ -18,6 +18,13 @@ logger:
   test_interval: 12000
   num_test_episodes: 1
 
+# Model (GRPO-specific) - network_type: "cnn" (default) or "batchnorm_mlp"
+model:
+  network_type: cnn
+  hidden_size: 128
+  dropout: 0.1
+  num_layers: 4
+
 # Optimization (GRPO-specific)
 optim:
   lr: 2.5e-4

@@ -6,6 +6,7 @@ from torchrl.envs import (
     DoubleToFloat,
     EnvCreator,
     ExplorationType,
+    FlattenObservation,
     ParallelEnv,
     RewardSum,
     InitTracker,
@@ -24,6 +25,7 @@ from torchrl.modules import (
     SafeSequential,
 )
 from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
+from torchtrade.models import BatchNormMLP
 
 from torchtrade.envs import SequentialTradingEnv, SequentialTradingEnvConfig, SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
 import pandas as pd
@@ -123,12 +125,14 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
     else:
         raise ValueError(f"Unknown environment: {cfg.env.name}")
 
-def apply_env_transforms(env, max_steps):
+def apply_env_transforms(env, max_steps, flatten_market_obs=False):
     """Apply standard transforms to the environment.
 
     Args:
         env: Base environment
         max_steps: Maximum steps for StepCounter
+        flatten_market_obs: If True, flatten market_data observations from
+            (seq_len, features) to a flat vector. Required for BatchNormMLP.
 
     Returns:
         transformed_env: Environment with transforms applied
@@ -136,21 +140,27 @@ def apply_env_transforms(env, max_steps):
     Note: Normalization is handled in the preprocessing function using StandardScaler
           to avoid VecNormV2 device issues.
     """
-    transformed_env = TransformedEnv(
-        env,
-        Compose(
-            InitTracker(),
-            DoubleToFloat(),
-            RewardSum(),
-            StepCounter(max_steps=max_steps),
-        ),
-    )
+    transforms = [
+        InitTracker(),
+        DoubleToFloat(),
+        RewardSum(),
+        StepCounter(max_steps=max_steps),
+    ]
+
+    if flatten_market_obs:
+        obs_keys = list(env.observation_spec.keys())
+        market_keys = [k for k in obs_keys if k.startswith("market_")]
+        for key in market_keys:
+            transforms.append(FlattenObservation(in_keys=[key], first_dim=-2, last_dim=-1))
+
+    transformed_env = TransformedEnv(env, Compose(*transforms))
     return transformed_env
 
 
 def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1,
                      max_train_traj_length=1,
-                     max_eval_traj_length=1):
+                     max_eval_traj_length=1,
+                     flatten_market_obs=False):
     """Make environments for training and evaluation."""
     maker = functools.partial(env_maker, train_df, cfg, max_traj_length=max_train_traj_length, random_start=True)
     max_train_steps = train_df.shape[0]
@@ -162,7 +172,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1,
     parallel_env.set_seed(cfg.env.seed)
 
     # Create train environment
-    train_env = apply_env_transforms(parallel_env, max_train_steps)
+    train_env = apply_env_transforms(parallel_env, max_train_steps, flatten_market_obs=flatten_market_obs)
 
     # Create eval environment
     maker = functools.partial(env_maker, test_df, cfg, max_traj_length=max_eval_traj_length)
@@ -172,7 +182,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1,
         serial_for_single=True,
     )
     max_eval_steps = test_df.shape[0]
-    eval_env = apply_env_transforms(eval_base_env, max_eval_steps)
+    eval_env = apply_env_transforms(eval_base_env, max_eval_steps, flatten_market_obs=flatten_market_obs)
 
     return train_env, eval_env
 
@@ -278,7 +288,7 @@ def make_discrete_ppo_model(cfg, env, device):
 
     # Define another head for the value
     value_net = MLP(
-        activation_class=torch.nn.ReLU, #ACTIVATIONS[activation], #
+        activation_class=ACTIVATIONS[activation],
         in_features=128,
         out_features=1,
         num_cells=[],
@@ -292,12 +302,89 @@ def make_discrete_ppo_model(cfg, env, device):
     return common_module, policy_module, value_module
 
 
-def make_ppo_models(env, device, cfg):
-    common_module, policy_module, value_module = make_discrete_ppo_model(
-        cfg,
-        env,
+def make_batchnorm_ppo_model(cfg, env, device):
+    """Make PPO agent using BatchNormMLP as the shared backbone.
+
+    Expects market_data observations to already be flattened by env transforms
+    (FlattenObservation). Concatenates all flat observations and feeds through
+    BatchNormMLP, then splits into policy and value heads.
+    """
+    activation = "tanh"
+    action_spec = env.action_spec
+    market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
+    assert "account_state" in list(env.observation_spec.keys())
+    account_state_key = "account_state"
+
+    # Observations are already flat from FlattenObservation transform
+    total_input = sum(env.observation_spec[k].shape[-1] for k in market_data_keys)
+    total_input += env.observation_spec[account_state_key].shape[-1]
+
+    hidden_size = getattr(cfg.model, "hidden_size", 128)
+    dropout = getattr(cfg.model, "dropout", 0.1)
+    num_layers = getattr(cfg.model, "num_layers", 4)
+
+    backbone = BatchNormMLP(
+        input_size=total_input,
+        output_size=hidden_size,
+        hidden_size=hidden_size,
+        num_layers=num_layers,
+        dropout=dropout,
+    )
+
+    from tensordict.nn import TensorDictModule
+    common_module = TensorDictModule(
+        module=backbone,
+        in_keys=market_data_keys + [account_state_key],
+        out_keys=["common_features"],
+    ).to(device)
+
+    # Policy head
+    action_out_features = action_spec.n
+    policy_net = MLP(
+        in_features=hidden_size,
+        out_features=action_out_features,
+        activation_class=ACTIVATIONS[activation],
+        num_cells=[],
         device=device,
     )
+    policy_module = SafeModule(
+        module=policy_net,
+        in_keys=["common_features"],
+        out_keys=["logits"],
+    )
+    policy_module = ProbabilisticActor(
+        policy_module,
+        in_keys=["logits"],
+        spec=env.full_action_spec_unbatched.to(device),
+        distribution_class=torch.distributions.Categorical,
+        return_log_prob=True,
+        default_interaction_type=ExplorationType.RANDOM,
+    )
+
+    # Value head
+    value_net = MLP(
+        activation_class=ACTIVATIONS[activation],
+        in_features=hidden_size,
+        out_features=1,
+        num_cells=[],
+        device=device,
+    )
+    value_module = ValueOperator(
+        value_net,
+        in_keys=["common_features"],
+    )
+
+    return common_module, policy_module, value_module
+
+
+def make_ppo_models(env, device, cfg):
+    network_type = getattr(cfg, "model", {})
+    network_type = getattr(network_type, "network_type", "cnn") if hasattr(network_type, "network_type") else "cnn"
+
+    if network_type == "batchnorm_mlp":
+        common_module, policy_module, value_module = make_batchnorm_ppo_model(cfg, env, device=device)
+    else:
+        common_module, policy_module, value_module = make_discrete_ppo_model(cfg, env, device=device)
 
     # Wrap modules in a single ActorCritic operator
     actor_critic = ActorValueOperator(
@@ -307,9 +394,16 @@ def make_ppo_models(env, device, cfg):
     ).to(device)
 
     with torch.no_grad():
-        td = env.fake_tensordict().unsqueeze(0).expand(3, 2).to(actor_critic.device)
-        actor_critic(td)
-        del td
+        if network_type == "batchnorm_mlp":
+            actor_critic.eval()
+            td = env.fake_tensordict().to(actor_critic.device)
+            actor_critic(td)
+            del td
+            actor_critic.train()
+        else:
+            td = env.fake_tensordict().unsqueeze(0).expand(3, 2).to(actor_critic.device)
+            actor_critic(td)
+            del td
 
     total_params = sum(p.numel() for p in actor_critic.parameters())
     print(f"Total number of parameters: {total_params}")

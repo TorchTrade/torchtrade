@@ -26,7 +26,7 @@ from torchrl.modules import (
     EGreedyModule,
     QValueActor,
 )
-from torchtrade.models import SimpleCNNEncoder
+from torchtrade.models import SimpleCNNEncoder, BatchNormMLP
 
 from torchtrade.envs import (
     SequentialTradingEnv,
@@ -229,64 +229,6 @@ def make_replay_buffer(cfg, device="cpu"):
 # --------------------------------------------------------------------
 
 
-class TDQN(nn.Module):
-    """Trading DQN Network - Position-aware Q-network for trading.
-
-    Takes two inputs:
-    - observation: market data features
-    - position: current trading position
-
-    Architecture:
-    - 5 fully connected layers with BatchNorm and Dropout
-    - Concatenates observation + position as input
-    - LeakyReLU activation
-    """
-    def __init__(
-        self,
-        input_shape,
-        action_dim,
-        hidden_size=128,
-        dropout=0.2,
-        activation=nn.LeakyReLU,
-    ):
-        super(TDQN, self).__init__()
-
-        self.hidden_size = hidden_size
-        self.dropout = dropout
-        self.activation = activation()
-        self.output_activation = nn.Identity()
-
-        self.fc1 = nn.Linear(input_shape, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc3 = nn.Linear(hidden_size, hidden_size)
-        self.fc4 = nn.Linear(hidden_size, hidden_size)
-        self.fc5 = nn.Linear(hidden_size, action_dim)
-
-        # BatchNorm layers
-        self.norm1 = nn.BatchNorm1d(hidden_size)
-        self.norm2 = nn.BatchNorm1d(hidden_size)
-        self.norm3 = nn.BatchNorm1d(hidden_size)
-        self.norm4 = nn.BatchNorm1d(hidden_size)
-
-        # Dropout layers
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
-        self.dropout3 = nn.Dropout(dropout)
-        self.dropout4 = nn.Dropout(dropout)
-
-    def forward(self, observation, position):
-        """Forward pass with concatenated observation and position."""
-        # Concatenate observation and position
-        x = torch.cat([observation, position], dim=-1)
-
-        x = self.dropout1(self.activation(self.norm1(self.fc1(x))))
-        x = self.dropout2(self.activation(self.norm2(self.fc2(x))))
-        x = self.dropout3(self.activation(self.norm3(self.fc3(x))))
-        x = self.dropout4(self.activation(self.norm4(self.fc4(x))))
-        output = self.output_activation(self.fc5(x))
-        return output
-
-
 class BatchSafeWrapper(torch.nn.Module):
     """Wrapper to ensure consistent batch dimension in output."""
     def __init__(self, model, output_features):
@@ -412,10 +354,10 @@ def make_tdqn_agent(cfg, train_env, device):
     assert "account_state" in list(train_env.observation_spec.keys()), "Account state key not in observation spec"
     account_state_key = "account_state"
 
-    net = TDQN(
-        input_shape=train_env.observation_spec_unbatched[market_data_keys[0]].shape[0] + train_env.observation_spec_unbatched[account_state_key].shape[0],
-        action_dim=train_env.action_spec_unbatched.n,
-        hidden_size=128,
+    net = BatchNormMLP(
+        input_size=train_env.observation_spec_unbatched[market_data_keys[0]].shape[0] + train_env.observation_spec_unbatched[account_state_key].shape[0],
+        output_size=train_env.action_spec_unbatched.n,
+        hidden_size=cfg.model.hidden_size,
         dropout=cfg.model.dropout,
     )
 

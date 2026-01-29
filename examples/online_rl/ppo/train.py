@@ -64,6 +64,8 @@ def main(cfg: DictConfig):  # noqa: F821
     print(f"Test date range: {test_df['0'].min()} to {test_df['0'].max()}")
     print(f"Max train traj length: {max_train_traj_length}")
     print("="*80)
+    # BatchNormMLP needs flat observations; CNN-based models don't
+    flatten_obs = getattr(cfg.model, "network_type", "cnn") == "batchnorm_mlp"
     train_env, eval_env = make_environment(
         train_df,
         test_df,
@@ -71,7 +73,8 @@ def main(cfg: DictConfig):  # noqa: F821
         train_num_envs=cfg.env.train_envs,
         eval_num_envs=cfg.env.eval_envs,
         max_train_traj_length=max_train_traj_length,
-        max_eval_traj_length=max_eval_traj_length
+        max_eval_traj_length=max_eval_traj_length,
+        flatten_market_obs=flatten_obs,
     )
 
     # Correct
@@ -115,6 +118,8 @@ def main(cfg: DictConfig):  # noqa: F821
     )
 
     # Create loss and adv modules
+    # Disable vmap when using BatchNormMLP (vmap incompatible with BatchNorm running stats)
+    use_batchnorm = getattr(cfg.model, "network_type", "cnn") == "batchnorm_mlp"
     adv_module = GAE(
         gamma=cfg.loss.gamma,
         lmbda=cfg.loss.gae_lambda,
@@ -123,6 +128,7 @@ def main(cfg: DictConfig):  # noqa: F821
         device=device,
         time_dim=-3,
         vectorized=not cfg.compile.compile,
+        deactivate_vmap=use_batchnorm,
     )
     loss_module = ClipPPOLoss(
         actor_network=actor,

@@ -73,6 +73,7 @@ def main(cfg: DictConfig):  # noqa: F821
     print(f"Test date range: {test_df['0'].min()} to {test_df['0'].max()}")
     print(f"Max train traj length: {max_train_traj_length}")
     print("="*80)
+    flatten_obs = getattr(cfg.model, "network_type", "cnn") == "batchnorm_mlp"
     train_env, eval_env, coverage_tracker = make_environment(
         train_df,
         test_df,
@@ -81,6 +82,7 @@ def main(cfg: DictConfig):  # noqa: F821
         eval_num_envs=cfg.env.eval_envs,
         max_train_traj_length=max_train_traj_length,
         max_eval_traj_length=max_eval_traj_length,
+        flatten_market_obs=flatten_obs,
     )
 
     total_frames = cfg.collector.total_frames
