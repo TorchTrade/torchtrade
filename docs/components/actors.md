@@ -251,7 +251,7 @@ I should wait for a pullback before entering.
 
 **Requirements**: `.env` file with `OPENAI_API_KEY`
 
-**Code Reference**: `torchtrade/actor/llm_actor.py`
+**Code Reference**: `torchtrade/actor/frontier_llm_actor.py`
 
 ---
 
