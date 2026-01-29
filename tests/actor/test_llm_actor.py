@@ -8,7 +8,7 @@ from tensordict import TensorDict
 
 # Check if openai is available
 try:
-    from torchtrade.actor.llm_actor import _LLMModule, LLMActor
+    from torchtrade.actor.frontier_llm_actor import _LLMModule, LLMActor
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
@@ -26,7 +26,7 @@ def mock_openai_client():
     if not OPENAI_AVAILABLE:
         pytest.skip("openai not available")
 
-    with patch('torchtrade.actor.llm_actor.OpenAI') as mock_client_class:
+    with patch('torchtrade.actor.frontier_llm_actor.OpenAI') as mock_client_class:
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.output_text = "<think>Market analysis</think><answer>half_invested</answer>"
@@ -41,7 +41,7 @@ def mock_dotenv_values():
     if not OPENAI_AVAILABLE:
         pytest.skip("openai not available")
 
-    with patch('torchtrade.actor.llm_actor.dotenv_values') as mock_env:
+    with patch('torchtrade.actor.frontier_llm_actor.dotenv_values') as mock_env:
         mock_env.return_value = {"OPENAI_API_KEY": "test-api-key"}
         yield mock_env
 

@@ -260,7 +260,7 @@ The LLM receives this data with a system prompt instructing it to think step-by-
 ### Usage Example
 
 ```python
-from torchtrade.actor.llm_actor import LLMActor
+from torchtrade.actor.frontier_llm_actor import LLMActor
 
 # Create LLM actor with OpenAI model
 policy = LLMActor(model="gpt-4o-mini", debug=True)
@@ -285,7 +285,7 @@ You can customize the `LLMActor` by modifying:
 - `features_keys`: Which OHLCV features to show
 
 ```python
-from torchtrade.actor.llm_actor import LLMActor
+from torchtrade.actor.frontier_llm_actor import LLMActor
 
 class CustomLLMActor(LLMActor):
     def __init__(self, **kwargs):

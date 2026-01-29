@@ -1,0 +1,283 @@
+"""IQL Example.
+
+This is a self-contained example of an offline IQL training script.
+
+The helper functions are coded in the utils.py associated with this script.
+
+"""
+from __future__ import annotations
+
+import wandb
+import warnings
+import datasets
+import hydra
+from omegaconf import OmegaConf
+from pathlib import Path
+
+OmegaConf.register_new_resolver("script_dir", lambda: str(Path(__file__).resolve().parent))
+import numpy as np
+import pandas as pd
+import torch
+import tqdm
+from tensordict.nn import CudaGraphModule
+from torchrl._utils import timeit
+from torchrl.envs.utils import ExplorationType, set_exploration_type
+from torchrl.objectives import group_optimizers
+from torchrl.record.loggers import generate_exp_name, get_logger
+from utils import (
+    log_metrics,
+    make_environment,
+    make_iql_optimizer,
+    make_discrete_iql_model,
+    make_discrete_loss,
+    make_replay_buffer,
+    make_collector,
+)
+
+from torchtrade.envs.transforms import CoverageTracker
+
+torch.set_float32_matmul_precision("high")
+
+
+@hydra.main(config_path=".", config_name="config", version_base="1.1")
+def main(cfg: DictConfig):  # noqa: F821
+
+    # Create logger
+    exp_name = generate_exp_name("TorchTrade-online", cfg.logger.exp_name)
+    logger = None
+    if cfg.logger.backend:
+        logger = get_logger(
+            logger_type=cfg.logger.backend,
+            logger_name="iql_logging",
+            experiment_name=exp_name,
+            wandb_kwargs={
+                "mode": cfg.logger.mode,
+                "config": dict(cfg),
+                "project": cfg.logger.project_name,
+                "group": cfg.logger.group_name,
+            },
+        )
+
+    # Set seeds
+    torch.manual_seed(cfg.env.seed)
+    np.random.seed(cfg.env.seed)
+    device = cfg.optim.device
+    if device in ("", None):
+        if torch.cuda.is_available():
+            device = "cuda:0"
+        else:
+            device = "cpu"
+    device = torch.device(device)
+
+    # Create env
+    df = datasets.load_dataset(cfg.env.data_path)
+    df = df["train"].to_pandas()
+
+    # Convert timestamp column to datetime for proper filtering
+    df['0'] = pd.to_datetime(df['0'])
+    test_split_date = pd.to_datetime(cfg.env.test_split_start)
+
+    train_df = df[df['0'] < test_split_date]
+    test_df  = df[df['0'] >= test_split_date]
+
+    print("="*80)
+    print("DATA SPLIT INFO:")
+    print(f"Total rows: {len(df)}")
+    print(f"Train rows (1min): {len(train_df)}")
+    print(f"Test rows (1min): {len(test_df)}")
+    print(f"Train date range: {train_df['0'].min()} to {train_df['0'].max()}")
+    print(f"Test date range: {test_df['0'].min()} to {test_df['0'].max()}")
+    print("="*80)
+
+    train_env, eval_env, coverage_tracker = make_environment(
+        train_df,
+        test_df,
+        cfg,
+        train_num_envs=cfg.env.train_envs,
+        eval_num_envs=cfg.env.eval_envs,
+    )
+    max_eval_steps = 10000
+    max_train_eval_steps = 1000
+
+    # Create replay buffer
+    replay_buffer = make_replay_buffer(
+        batch_size=cfg.replay_buffer.batch_size,
+        prb=cfg.replay_buffer.prb,
+        buffer_size=cfg.replay_buffer.buffer_size,
+        scratch_dir=cfg.replay_buffer.scratch_dir,
+        device=cfg.replay_buffer.device,
+        prefetch=cfg.replay_buffer.prefetch,
+    )
+
+    # Create agent
+    model = make_discrete_iql_model(cfg, train_env, device)
+
+    # Create loss
+    loss_module, target_net_updater = make_discrete_loss(cfg.loss, model, device=device)
+
+    # Create optimizer
+    optimizer_actor, optimizer_critic, optimizer_value = make_iql_optimizer(
+        cfg.optim, loss_module
+    )
+    optimizer = group_optimizers(optimizer_actor, optimizer_critic, optimizer_value)
+
+    def update(data):
+        optimizer.zero_grad(set_to_none=True)
+        # compute losses
+        loss_info = loss_module(data)
+        actor_loss = loss_info["loss_actor"]
+        value_loss = loss_info["loss_value"]
+        q_loss = loss_info["loss_qvalue"]
+
+        (actor_loss + value_loss + q_loss).backward()
+        optimizer.step()
+
+        # update qnet_target params
+        target_net_updater.step()
+        return loss_info.detach()
+
+    compile_mode = None
+    if cfg.compile.compile:
+        compile_mode = cfg.compile.compile_mode
+        if compile_mode in ("", None):
+            if cfg.compile.cudagraphs:
+                compile_mode = "default"
+            else:
+                compile_mode = "reduce-overhead"
+
+    # Create collector with coverage tracker as postproc
+    collector = make_collector(
+        cfg, train_env, actor_model_explore=model[0], compile_mode=compile_mode,
+        postproc=coverage_tracker,
+    )
+
+    if cfg.compile.compile:
+        update = torch.compile(update, mode=compile_mode)
+    if cfg.compile.cudagraphs:
+        warnings.warn(
+            "CudaGraphModule is experimental and may lead to silently wrong results. Use with caution.",
+            category=UserWarning,
+        )
+        update = CudaGraphModule(update, warmup=50)
+
+    # Main loop
+    collected_frames = 0
+
+    init_random_frames = cfg.collector.init_random_frames
+    num_updates = int(cfg.collector.frames_per_batch * cfg.optim.utd_ratio)
+    eval_iter = cfg.logger.eval_iter
+    frames_per_batch = cfg.collector.frames_per_batch
+    collector_iter = iter(collector)
+    pbar = tqdm.tqdm(range(collector.total_frames))
+    total_iter = len(collector)
+    for _ in range(total_iter):
+        timeit.printevery(1000, total_iter, erase=True)
+
+        with timeit("collection"):
+            tensordict = next(collector_iter)
+        current_frames = tensordict.numel()
+        pbar.update(current_frames)
+        # update weights of the inference policy
+        collector.update_policy_weights_()
+
+        with timeit("rb - extend"):
+            # add to replay buffer
+            tensordict = tensordict.reshape(-1)
+            replay_buffer.extend(tensordict.cpu())
+        collected_frames += current_frames
+
+        # optimization steps
+        with timeit("training"):
+            if collected_frames >= init_random_frames:
+                for _ in range(num_updates):
+                    with timeit("rb - sampling"):
+                        # sample from replay buffer
+                        sampled_tensordict = replay_buffer.sample().to(device)
+                    with timeit("update"):
+                        torch.compiler.cudagraph_mark_step_begin()
+                        loss_info = update(sampled_tensordict)
+        episode_rewards = tensordict["next", "episode_reward"][
+            tensordict["next", "done"]
+        ]
+
+        # Logging
+        metrics_to_log = {}
+        # Evaluation
+        if abs(collected_frames % eval_iter) < frames_per_batch:
+            with set_exploration_type(
+                ExplorationType.DETERMINISTIC
+            ), torch.no_grad(), timeit("evaluating"):
+                # Evaluate on test data
+                # Keep eval_env on CPU, move actor to CPU temporarily for eval
+                eval_rollout = eval_env.rollout(
+                    max_eval_steps,
+                    model[0].to("cpu"),
+                    auto_cast_to_device=False,
+                    break_when_any_done=True,
+                )
+                model[0].to(device)  # Move actor back to device for training
+                eval_rollout.squeeze()
+                eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
+                metrics_to_log["eval/reward"] = eval_reward
+                fig = eval_env.base_env.render_history(return_fig=True)
+                eval_env.reset()
+                if logger is not None and fig is not None:
+                    metrics_to_log["eval/history"] = wandb.Image(fig[0])
+
+                # Evaluate on train data
+                train_rollout = train_env.rollout(
+                    max_train_eval_steps,
+                    model[0].to("cpu"),
+                    auto_cast_to_device=False,
+                    break_when_any_done=True,
+                )
+                model[0].to(device)  # Move actor back to device for training
+                # Only log reward from env[0] to match the rendered figure
+                train_eval_reward = train_rollout[0]["next", "reward"].sum().item()
+                metrics_to_log["eval/train_reward"] = train_eval_reward
+
+                # Render train history (from env[0])
+                train_fig = train_env.base_env.render_history(return_fig=True)
+                train_env.reset()
+                if train_fig is not None and logger is not None:
+                    metrics_to_log["eval/train_history"] = wandb.Image(train_fig[0])
+        if len(episode_rewards) > 0:
+            episode_length = tensordict["next", "step_count"][
+                tensordict["next", "done"]
+            ]
+            metrics_to_log["train/reward"] = episode_rewards.mean().item()
+            metrics_to_log["train/episode_length"] = episode_length.sum().item() / len(
+                episode_length
+            )
+        if collected_frames >= init_random_frames:
+            metrics_to_log["train/q_loss"] = loss_info["loss_qvalue"]
+            metrics_to_log["train/actor_loss"] = loss_info["loss_actor"]
+            metrics_to_log["train/value_loss"] = loss_info["loss_value"]
+            metrics_to_log["train/entropy"] = loss_info.get("entropy")
+
+        # Log dual coverage metrics (if available and enabled)
+        if coverage_tracker is not None:
+            coverage_stats = coverage_tracker.get_coverage_stats()
+            if coverage_stats["enabled"]:
+                # Reset coverage (episode start diversity)
+                metrics_to_log["train/reset_coverage"] = coverage_stats["reset_coverage"]
+                # State coverage (full trajectory coverage)
+                metrics_to_log["train/state_coverage"] = coverage_stats["state_coverage"]
+
+        if logger is not None:
+            metrics_to_log.update(timeit.todict(prefix="time"))
+            metrics_to_log["time/speed"] = pbar.format_dict["rate"]
+            log_metrics(logger, metrics_to_log, collected_frames)
+
+
+
+    collector.shutdown()
+
+    if not eval_env.is_closed:
+        eval_env.close()
+    if not train_env.is_closed:
+        train_env.close()
+
+
+if __name__ == "__main__":
+    main()

@@ -36,7 +36,7 @@ from torchrl.envs import (
     DoubleToFloat,
     TransformedEnv,
 )
-from torchtrade.actor.llm_actor import LLMActor
+from torchtrade.actor.frontier_llm_actor import LLMActor
 from torchrl.collectors import SyncDataCollector
 
 # Load environment variables

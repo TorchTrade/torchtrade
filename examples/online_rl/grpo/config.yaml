@@ -1,0 +1,41 @@
+defaults:
+  - env: onestep
+  - _self_
+
+# Collector (GRPO-specific)
+collector:
+  device:
+  frames_per_batch: 1200
+  total_frames: 10_000_000
+
+# Logger (GRPO-specific)
+logger:
+  mode: online
+  backend: wandb
+  project_name: TorchTrade-GRPO
+  group_name: ${env.name}
+  exp_name: grpo-${env.name}
+  test_interval: 12000
+  num_test_episodes: 1
+
+# Optimization (GRPO-specific)
+optim:
+  lr: 2.5e-4
+  device:
+
+# Loss (GRPO-specific)
+loss:
+  entropy_coef: 0.01
+
+compile:
+  compile: False
+  compile_mode:
+  cudagraphs: False
+
+# Hydra configuration - saves outputs in example directory
+hydra:
+  run:
+    dir: ${script_dir:}/outputs/${env.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ${script_dir:}/outputs/${env.name}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

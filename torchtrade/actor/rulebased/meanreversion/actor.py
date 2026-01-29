@@ -146,7 +146,7 @@ class MeanReversionActor(RuleBasedActor):
 
         # Extract market data for execution timeframe
         market_data = self.extract_market_data(observation)
-        key = f"{self.execute_timeframe.value}{self.execute_timeframe.unit.value}"
+        key = self.execute_timeframe.obs_key_freq()
         data = market_data[key]  # Shape: [window_size, num_features]
 
         # Extract most recent feature values using get_feature() by name

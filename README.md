@@ -326,7 +326,7 @@ env = AlpacaTorchTradingEnv(config)
 ### LLM-Based Trading
 
 ```python
-from torchtrade.actor.llm_actor import LLMActor
+from torchtrade.actor.frontier_llm_actor import LLMActor
 
 # Use GPT-4o-mini as trading policy
 policy = LLMActor(model="gpt-4o-mini", debug=True)

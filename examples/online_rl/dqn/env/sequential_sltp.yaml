@@ -1,0 +1,27 @@
+# @package env
+name: SequentialTradingEnvSLTP
+symbol: "BTC/USD"
+time_frames: ["1Hour"]
+window_sizes: [24]
+execute_on: "1Hour"
+leverage: 2
+action_levels: [-1.0, 0.0, 1.0]
+stoploss_levels: [-0.01, -0.02, -0.03, -0.04]
+takeprofit_levels: [0.02, 0.04, 0.06, 0.08, 0.1]
+include_hold_action: true
+include_close_action: false
+initial_cash: 10000
+transaction_fee: 0.0
+slippage: 0.0
+bankrupt_threshold: 0.1
+include_base_features: false
+max_traj_length: null
+random_start: true
+margin_type: isolated
+maintenance_margin_rate: 0.004
+exp_name: ${logger.exp_name}
+seed: 0
+train_envs: 5
+eval_envs: 1
+data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
+test_split_start: "2025-01-01"

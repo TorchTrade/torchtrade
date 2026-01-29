@@ -9,7 +9,7 @@ import pandas as pd
 import torch
 from tensordict import TensorDictBase
 from torchrl.data import Bounded
-from torchrl.data import Composite, Unbounded
+from torchrl.data import Categorical, Composite, Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import HistoryTracker, PositionState
@@ -163,6 +163,13 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             self.observation_spec.set(market_data_key, market_data_spec)
             self.market_data_keys.append(market_data_key)
 
+        # Done spec: declare truncated so check_env_specs passes
+        self.full_done_spec = Composite(
+            done=Categorical(2, dtype=torch.bool, shape=(1,)),
+            terminated=Categorical(2, dtype=torch.bool, shape=(1,)),
+            truncated=Categorical(2, dtype=torch.bool, shape=(1,)),
+        )
+
         # Add coverage tracking indices (only when random_start=True)
         if self.random_start:
             # reset_index: tracks episode start position diversity
@@ -279,9 +286,10 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
 
         # Add coverage tracking indices (only during training with random_start)
         if self.random_start:
+            self._reset_idx = self.sampler._sequential_idx
             obs.set(
                 "reset_index",
-                torch.tensor(self.sampler._sequential_idx, dtype=torch.long)
+                torch.tensor(self._reset_idx, dtype=torch.long)
             )
             obs.set(
                 "state_index",

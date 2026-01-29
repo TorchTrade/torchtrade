@@ -1,0 +1,58 @@
+defaults:
+  - env: sequential_sltp
+  - _self_
+
+# Collector
+collector:
+  device:
+  frames_per_batch: 100000
+  total_frames: 1_000_000_000
+
+# Logger
+logger:
+  mode: online
+  backend: wandb
+  project_name: TorchTrade-Chronos
+  group_name: ${env.name}
+  exp_name: ppo_chronos-${env.name}
+  test_interval: 10_000_000
+  num_test_episodes: 1
+
+# Model (Chronos-specific)
+model:
+  activation: tanh
+  chronos_model: "amazon/chronos-t5-small"
+
+# Optimization
+optim:
+  lr: 1.0e-6
+  eps: 1.0e-6
+  weight_decay: 0.0
+  max_grad_norm: 0.5
+  anneal_lr: True
+  device:
+
+# Loss
+loss:
+  gamma: 0.9
+  mini_batch_size: 33333
+  ppo_epochs: 3
+  gae_lambda: 0.95
+  clip_epsilon: 0.1
+  anneal_clip_epsilon: True
+  critic_coef: 1.0
+  entropy_coef: 0.01
+  loss_critic_type: l2
+
+compile:
+  compile: False
+  compile_mode:
+  cudagraphs: False
+
+# Hydra configuration - saves outputs in example directory
+hydra:
+  run:
+    dir: ${script_dir:}/outputs/${env.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ${script_dir:}/outputs/${env.name}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

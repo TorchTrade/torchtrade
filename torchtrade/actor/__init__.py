@@ -11,7 +11,7 @@ __all__ = [
 
 # Optional actors with external dependencies
 try:
-    from torchtrade.actor.llm_actor import LLMActor
+    from torchtrade.actor.frontier_llm_actor import LLMActor
     __all__.append("LLMActor")
 except ImportError:
     pass
@@ -22,8 +22,3 @@ try:
 except ImportError:
     pass
 
-try:
-    from torchtrade.actor.human import HumanActor
-    __all__.append("HumanActor")
-except ImportError:
-    pass

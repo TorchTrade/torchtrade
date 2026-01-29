@@ -69,12 +69,8 @@ class RuleBasedActor(ABC):
         market_data = {}
         for key in self.market_data_keys:
             if key in observation.keys():
-                # Extract timeframe name (e.g., "market_data_1Minute_12" -> "1Min")
+                # Extract timeframe name (e.g., "market_data_5Minute_8" -> "5Minute")
                 timeframe_name = key.replace("market_data_", "").rsplit("_", 1)[0]
-                if timeframe_name.endswith("ute") or timeframe_name.endswith("our"):
-                    timeframe_name = timeframe_name[:-3]
-                elif timeframe_name.endswith("ay"):
-                    timeframe_name = timeframe_name[:-2]
                 data = observation[key]
 
                 # Handle batch dimension if present

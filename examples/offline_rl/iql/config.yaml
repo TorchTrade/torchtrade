@@ -1,0 +1,74 @@
+# env and task
+env:
+  name: SequentialTradingEnv
+  trading_mode: "spot"
+  symbol: "BTC/USD"
+  time_frames: ["5Min", "15Min"]
+  window_sizes: [10, 10]
+  execute_on: "5Min"
+  initial_cash: 1000
+  transaction_fee: 0.015
+  slippage: 0.01
+  bankrupt_threshold: 0.1
+  exp_name: ${logger.exp_name}
+  seed: 0
+  backend: gym
+  data_path: Sebasdi/TorchTrade_btcusd_spot_1m_12_2024_to_09_2025
+
+# logger
+logger:
+  backend: wandb
+  project_name: TorchTrade-Offline
+  exp_name: iql
+  group_name: null
+  eval_iter: 200
+  eval_steps: 1000
+  mode: online
+  eval_envs: 5
+  video: False
+
+# replay buffer
+replay_buffer:
+  batch_size: 256
+  data_path: synthetic  # Use "synthetic" to generate synthetic data for testing
+  buffer_size: 10000
+  r2g_gamma: 0.99
+
+# optimization
+optim:
+  device: null
+  lr: 3e-4
+  weight_decay: 0.0
+  gradient_steps: 40000
+
+# network
+model:
+  hidden_sizes: [256, 256]
+  activation: relu
+  default_policy_scale: 1.0
+  scale_lb: 0.1
+
+# loss
+loss: 
+  loss_function: l2
+  gamma: 0.99
+  tau: 0.005
+  hard_update_interval: 10
+
+
+# IQL specific hyperparameter
+  temperature: 3.0
+  expectile: 0.7
+
+compile:
+  compile: False
+  compile_mode:
+  cudagraphs: False
+
+# Hydra configuration - saves outputs in example directory
+hydra:
+  run:
+    dir: ${script_dir:}/outputs/${env.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ${script_dir:}/outputs/${env.name}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

@@ -464,8 +464,9 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         new_price = self._cached_base_features["close"]
         new_portfolio_value = self._get_portfolio_value(new_price)
 
-        # Add state_index for coverage tracking (only during training with random_start)
+        # Add coverage tracking indices (only during training with random_start)
         if self.random_start:
+            next_tensordict.set("reset_index", torch.tensor(self._reset_idx, dtype=torch.long))
             next_tensordict.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
 
         # Determine action_type and binarize action for history
