@@ -7,6 +7,7 @@ from torchrl.envs import (
     DoubleToFloat,
     EnvCreator,
     ExplorationType,
+    FlattenObservation,
     ParallelEnv,
     RewardSum,
     InitTracker,
@@ -24,7 +25,7 @@ from torchrl.modules import (
     SafeModule,
     SafeSequential,
 )
-from torchtrade.models import SimpleCNNEncoder
+from torchtrade.models import SimpleCNNEncoder, BatchNormMLP
 
 from torchtrade.envs import (
     OneStepTradingEnv,
@@ -124,13 +125,15 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, eval=False):
         return SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=custom_preprocessing)
 
 
-def apply_env_transforms(env, max_steps, one_step_env=True):
+def apply_env_transforms(env, max_steps, one_step_env=True, flatten_market_obs=False):
     """Apply standard transforms to the environment.
 
     Args:
         env: The environment to transform
         max_steps: Maximum steps per episode
         one_step_env: If True, skip unnecessary transforms for one-step envs
+        flatten_market_obs: If True, flatten market_data observations from
+            (seq_len, features) to a flat vector. Required for BatchNormMLP.
 
     Returns:
         transformed_env: Environment with transforms applied
@@ -142,23 +145,25 @@ def apply_env_transforms(env, max_steps, one_step_env=True):
         # PERF: Minimal transforms for one-step environments
         # - RewardSum is unnecessary (each step terminates)
         # - DoubleToFloat skipped (data already float32 from environment)
-        transformed_env = TransformedEnv(
-            env,
-            Compose(
-                InitTracker(),
-                StepCounter(max_steps=max_steps),
-            ),
-        )
+        transforms = [
+            InitTracker(),
+            StepCounter(max_steps=max_steps),
+        ]
     else:
-        transformed_env = TransformedEnv(
-            env,
-            Compose(
-                InitTracker(),
-                DoubleToFloat(),
-                RewardSum(),
-                StepCounter(max_steps=max_steps),
-            ),
-        )
+        transforms = [
+            InitTracker(),
+            DoubleToFloat(),
+            RewardSum(),
+            StepCounter(max_steps=max_steps),
+        ]
+
+    if flatten_market_obs:
+        obs_keys = list(env.observation_spec.keys())
+        market_keys = [k for k in obs_keys if k.startswith("market_")]
+        for key in market_keys:
+            transforms.append(FlattenObservation(in_keys=[key], first_dim=-2, last_dim=-1))
+
+    transformed_env = TransformedEnv(env, Compose(*transforms))
     return transformed_env
 
 
@@ -170,6 +175,7 @@ def make_environment(
     eval_num_envs=1,
     max_train_traj_length=1,
     max_eval_traj_length=1,
+    flatten_market_obs=False,
 ):
     """Make environments for training and evaluation."""
     maker = functools.partial(
@@ -184,7 +190,7 @@ def make_environment(
     parallel_env.set_seed(cfg.env.seed, static_seed=True)  # needs to be static for GRPO style training
 
     # PERF: Use minimal transforms for one-step training env
-    train_env = apply_env_transforms(parallel_env, max_train_steps, one_step_env=True)
+    train_env = apply_env_transforms(parallel_env, max_train_steps, one_step_env=True, flatten_market_obs=flatten_market_obs)
 
     maker = functools.partial(
         env_maker, test_df, cfg, max_traj_length=max_eval_traj_length, eval=True
@@ -195,7 +201,7 @@ def make_environment(
         EnvCreator(maker),
         serial_for_single=True,
     )
-    eval_env = apply_env_transforms(eval_parallel_env, max_eval_traj_length, one_step_env=False)
+    eval_env = apply_env_transforms(eval_parallel_env, max_eval_traj_length, one_step_env=False, flatten_market_obs=flatten_market_obs)
 
     # Create coverage tracker for postproc (used in collector)
     coverage_tracker = CoverageTracker()
@@ -319,20 +325,89 @@ def make_discrete_grpo_model(cfg, env, device):
     return policy
 
 
-def make_grpo_policy(env, device, cfg):
-    """Create GRPO policy."""
-    policy = make_discrete_grpo_model(
-        cfg,
-        env,
+def make_batchnorm_grpo_model(cfg, env, device):
+    """Make GRPO policy using BatchNormMLP as the backbone.
+
+    Expects market_data observations to already be flattened by env transforms
+    (FlattenObservation). Concatenates all flat observations and feeds through
+    BatchNormMLP, then outputs action logits.
+    """
+    from tensordict.nn import TensorDictModule
+    action_spec = env.action_spec
+    market_data_keys = [k for k in list(env.observation_spec.keys()) if k.startswith("market_data")]
+    assert "account_state" in list(env.observation_spec.keys())
+    account_state_key = "account_state"
+
+    # Observations are already flat from FlattenObservation transform
+    total_input = sum(env.observation_spec[k].shape[-1] for k in market_data_keys)
+    total_input += env.observation_spec[account_state_key].shape[-1]
+
+    hidden_size = getattr(cfg.model, "hidden_size", 128)
+    dropout = getattr(cfg.model, "dropout", 0.1)
+    num_layers = getattr(cfg.model, "num_layers", 4)
+
+    # Backbone outputs common features
+    backbone = BatchNormMLP(
+        input_size=total_input,
+        output_size=hidden_size,
+        hidden_size=hidden_size,
+        num_layers=num_layers,
+        dropout=dropout,
+    )
+
+    common_module = TensorDictModule(
+        module=backbone,
+        in_keys=market_data_keys + [account_state_key],
+        out_keys=["common_features"],
+    ).to(device)
+
+    # Policy head
+    action_out_features = action_spec.n
+    policy_net = MLP(
+        in_features=hidden_size,
+        out_features=action_out_features,
+        activation_class=ACTIVATIONS["tanh"],
+        num_cells=[],
         device=device,
     )
+    policy_module = SafeModule(
+        module=policy_net,
+        in_keys=["common_features"],
+        out_keys=["logits"],
+    )
+
+    policy_module = SafeSequential(common_module, policy_module)
+
+    policy = ProbabilisticActor(
+        policy_module,
+        in_keys=["logits"],
+        spec=env.full_action_spec_unbatched.to(device),
+        distribution_class=torch.distributions.Categorical,
+        return_log_prob=True,
+        default_interaction_type=ExplorationType.RANDOM,
+    )
+
+    return policy
+
+
+def make_grpo_policy(env, device, cfg):
+    """Create GRPO policy."""
+    network_type = getattr(cfg, "model", {})
+    network_type = getattr(network_type, "network_type", "cnn") if hasattr(network_type, "network_type") else "cnn"
+
+    if network_type == "batchnorm_mlp":
+        policy = make_batchnorm_grpo_model(cfg, env, device=device)
+    else:
+        policy = make_discrete_grpo_model(cfg, env, device=device)
 
     policy.to(device)
 
     with torch.no_grad():
-        td = env.fake_tensordict().unsqueeze(0).expand(3, 2).to(policy.device)
+        policy.eval()
+        td = env.fake_tensordict().to(policy.device)
         policy(td)
         del td
+        policy.train()
 
     total_params = sum(p.numel() for p in policy.parameters())
     print(f"Total number of parameters: {total_params}")

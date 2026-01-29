@@ -19,6 +19,13 @@ logger:
   num_test_episodes: 1
 
 
+# Model (PPO-specific) - network_type: "cnn" (default) or "batchnorm_mlp"
+model:
+  network_type: cnn
+  hidden_size: 128
+  dropout: 0.1
+  num_layers: 4
+
 # Optim (PPO-specific)
 optim:
   lr: 2.5e-4
@@ -30,14 +37,14 @@ optim:
 
 # Loss (PPO-specific)
 loss:
-  gamma: 0.99
+  gamma: 0.9
   mini_batch_size: 3333
   ppo_epochs: 3
   gae_lambda: 0.95
   clip_epsilon: 0.1
   anneal_clip_epsilon: True
   critic_coef: 1.0
-  entropy_coef: 0.1
+  entropy_coef: 0.01
   loss_critic_type: l2
 
 compile:
