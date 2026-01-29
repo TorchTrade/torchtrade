@@ -1163,67 +1163,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#humanactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HumanActor
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="HumanActor">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#key-features_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Key Features
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#when-to-use_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        When to Use
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#configuration-parameters_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration Parameters
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#usage-example_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Usage Example
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#quick-reference" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1799,67 +1738,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#humanactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HumanActor
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="HumanActor">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#key-features_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Key Features
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#when-to-use_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        When to Use
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#configuration-parameters_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration Parameters
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#usage-example_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Usage Example
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#quick-reference" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2063,12 +1941,6 @@
 <td>LLM (Local inference)</td>
 <td>Production, privacy, cost efficiency</td>
 <td>vLLM or transformers backend, quantization support</td>
-</tr>
-<tr>
-<td><strong>HumanActor</strong></td>
-<td>Human-in-the-loop</td>
-<td>Expert demonstrations, data collection</td>
-<td>Interactive trading with visualization</td>
 </tr>
 </tbody>
 </table>
@@ -2398,7 +2270,7 @@
 </span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>&lt;answer&gt;hold&lt;/answer&gt;
 </span></code></pre></div></p>
 <p><strong>Requirements</strong>: <code>.env</code> file with <code>OPENAI_API_KEY</code></p>
-<p><strong>Code Reference</strong>: <code>torchtrade/actor/llm_actor.py</code></p>
+<p><strong>Code Reference</strong>: <code>torchtrade/actor/frontier_llm_actor.py</code></p>
 <hr />
 <h2 id="localllmactor">LocalLLMActor<a class="headerlink" href="#localllmactor" title="Permanent link">&para;</a></h2>
 <p>Local LLM-based actor using vLLM or transformers for inference. Similar to LLMActor but runs models locally for privacy, cost efficiency, and production deployment.</p>
@@ -2636,124 +2508,6 @@
 </span></code></pre></div></p>
 <p><strong>Code Reference</strong>: <code>torchtrade/actor/local_llm_actor.py</code></p>
 <hr />
-<h2 id="humanactor">HumanActor<a class="headerlink" href="#humanactor" title="Permanent link">&para;</a></h2>
-<p>Interactive debugging and visualization tool that allows humans to step through environments and understand what the agent "sees" at each timestep. Primarily designed for environment validation and debugging, it can also be used to collect human demonstrations for imitation learning.</p>
-<h3 id="key-features_3">Key Features<a class="headerlink" href="#key-features_3" title="Permanent link">&para;</a></h3>
-<ul>
-<li><strong>Interactive visualization</strong>: Plotly dashboards show market data across all timeframes</li>
-<li><strong>Observation inspection</strong>: View complete account state and market data at each step</li>
-<li><strong>Step-by-step debugging</strong>: Manually step through environment to validate dynamics</li>
-<li><strong>Agent perspective</strong>: See exactly what your RL agent observes at each timestep</li>
-<li><strong>Optional demonstrations</strong>: Can collect human trajectories for imitation learning</li>
-</ul>
-<h3 id="when-to-use_2">When to Use<a class="headerlink" href="#when-to-use_2" title="Permanent link">&para;</a></h3>
-<ul>
-<li><strong>Environment debugging</strong>: Step through episodes to verify environment correctness and understand dynamics</li>
-<li><strong>Observation inspection</strong>: See exactly what data the agent receives at each timestep</li>
-<li><strong>Reward validation</strong>: Manually verify reward signals make sense for trading decisions</li>
-<li><strong>Algorithm understanding</strong>: Understand what information is available to your RL agent</li>
-<li><strong>Expert demonstrations</strong>: Optionally collect human trajectories for imitation learning</li>
-</ul>
-<h3 id="configuration-parameters_3">Configuration Parameters<a class="headerlink" href="#configuration-parameters_3" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Parameter</th>
-<th>Type</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>symbol</code></td>
-<td>str</td>
-<td>Trading symbol for display</td>
-</tr>
-<tr>
-<td><code>features</code></td>
-<td>list[str]</td>
-<td>Feature names (OHLCV columns)</td>
-</tr>
-<tr>
-<td><code>market_data_keys</code></td>
-<td>list[str]</td>
-<td>Market data keys to visualize</td>
-</tr>
-<tr>
-<td><code>account_state_key</code></td>
-<td>str</td>
-<td>TensorDict key for account state</td>
-</tr>
-<tr>
-<td><code>action_spec</code></td>
-<td>Spec</td>
-<td>Action space specification</td>
-</tr>
-</tbody>
-</table>
-<h3 id="usage-example_3">Usage Example<a class="headerlink" href="#usage-example_3" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.actor</span><span class="w"> </span><span class="kn">import</span> <span class="n">HumanActor</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SequentialTradingEnv</span><span class="p">,</span> <span class="n">SequentialTradingEnvConfig</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Create environment</span>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SequentialTradingEnvConfig</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SequentialTradingEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
-</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
-</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="c1"># Create human actor</span>
-</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="n">actor</span> <span class="o">=</span> <span class="n">HumanActor</span><span class="p">(</span>
-</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="n">symbol</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">symbol</span><span class="p">,</span>
-</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>    <span class="n">features</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;close&quot;</span><span class="p">,</span> <span class="s2">&quot;open&quot;</span><span class="p">,</span> <span class="s2">&quot;high&quot;</span><span class="p">,</span> <span class="s2">&quot;low&quot;</span><span class="p">,</span> <span class="s2">&quot;volume&quot;</span><span class="p">],</span>
-</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="n">market_data_keys</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">market_data_keys</span><span class="p">,</span>
-</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>    <span class="n">account_state_key</span><span class="o">=</span><span class="s2">&quot;account_state&quot;</span><span class="p">,</span>
-</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>    <span class="n">action_spec</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">action_spec</span><span class="p">,</span>
-</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="p">)</span>
-</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>
-</span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="c1"># Interactive trading loop</span>
-</span><span id="__span-10-18"><a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="n">observation</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
-</span><span id="__span-10-19"><a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a><span class="n">done</span> <span class="o">=</span> <span class="kc">False</span>
-</span><span id="__span-10-20"><a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a><span class="k">while</span> <span class="ow">not</span> <span class="n">done</span><span class="p">:</span>
-</span><span id="__span-10-21"><a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a>    <span class="c1"># Shows plotly dashboard + account state</span>
-</span><span id="__span-10-22"><a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a>    <span class="c1"># Prompts: &quot;What action do you want to take? (buy:b, sell:s, hold:h)&quot;</span>
-</span><span id="__span-10-23"><a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a>    <span class="n">output</span> <span class="o">=</span> <span class="n">actor</span><span class="p">(</span><span class="n">observation</span><span class="p">)</span>
-</span><span id="__span-10-24"><a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a>    <span class="n">action</span> <span class="o">=</span> <span class="n">output</span><span class="p">[</span><span class="s2">&quot;action&quot;</span><span class="p">]</span>
-</span><span id="__span-10-25"><a id="__codelineno-10-25" name="__codelineno-10-25" href="#__codelineno-10-25"></a>    <span class="n">observation</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">done</span><span class="p">,</span> <span class="n">info</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">action</span><span class="p">)</span>
-</span><span id="__span-10-26"><a id="__codelineno-10-26" name="__codelineno-10-26" href="#__codelineno-10-26"></a>
-</span><span id="__span-10-27"><a id="__codelineno-10-27" name="__codelineno-10-27" href="#__codelineno-10-27"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Episode return: </span><span class="si">{</span><span class="n">env</span><span class="o">.</span><span class="n">episode_return</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-</span></code></pre></div>
-<p><strong>Interactive Prompt</strong>:
-<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Current account state:
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>cash: 9500.0
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>position_size: 0.5
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>position_value: 25000.0
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>entry_price: 50000.0
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>current_price: 50500.0
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>unrealized_pnlpct: 0.01
-</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>holding_time: 12.0
-</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>
-</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>---
-</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>[Plotly dashboard displays with multi-timeframe candlestick charts]
-</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>
-</span><span id="__span-11-13"><a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>What action do you want to take? (buy:b, sell:s, hold:h)
-</span><span id="__span-11-14"><a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>&gt; s
-</span></code></pre></div></p>
-<p><strong>Use Case - Collect Expert Demonstrations</strong>:
-<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Collect 100 expert trajectories</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">demonstrations</span> <span class="o">=</span> <span class="p">[]</span>
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="k">for</span> <span class="n">episode</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">):</span>
-</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="n">trajectory</span> <span class="o">=</span> <span class="p">[]</span>
-</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="n">obs</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
-</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    <span class="n">done</span> <span class="o">=</span> <span class="kc">False</span>
-</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    <span class="k">while</span> <span class="ow">not</span> <span class="n">done</span><span class="p">:</span>
-</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>        <span class="n">action_td</span> <span class="o">=</span> <span class="n">actor</span><span class="p">(</span><span class="n">obs</span><span class="p">)</span>  <span class="c1"># Human provides action</span>
-</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>        <span class="n">trajectory</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">obs</span><span class="p">,</span> <span class="n">action_td</span><span class="p">[</span><span class="s2">&quot;action&quot;</span><span class="p">]))</span>
-</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>        <span class="n">obs</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">done</span><span class="p">,</span> <span class="n">info</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">action_td</span><span class="p">[</span><span class="s2">&quot;action&quot;</span><span class="p">])</span>
-</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>    <span class="n">demonstrations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">trajectory</span><span class="p">)</span>
-</span><span id="__span-12-12"><a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>
-</span><span id="__span-12-13"><a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="c1"># Use for imitation learning</span>
-</span><span id="__span-12-14"><a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="n">train_behavioral_cloning</span><span class="p">(</span><span class="n">demonstrations</span><span class="p">)</span>
-</span></code></pre></div></p>
-<p><strong>Code Reference</strong>: <code>torchtrade/actor/human.py</code></p>
-<hr />
 <h2 id="quick-reference">Quick Reference<a class="headerlink" href="#quick-reference" title="Permanent link">&para;</a></h2>
 <h3 id="actor-selection-guide">Actor Selection Guide<a class="headerlink" href="#actor-selection-guide" title="Permanent link">&para;</a></h3>
 <table>
@@ -2785,56 +2539,28 @@
 <td>LocalLLMActor</td>
 <td>Local inference, cost-efficient</td>
 </tr>
-<tr>
-<td>Environment debugging</td>
-<td>HumanActor</td>
-<td>Visualize observations, validate rewards</td>
-</tr>
-<tr>
-<td>Data collection</td>
-<td>HumanActor</td>
-<td>Expert demonstrations (secondary use)</td>
-</tr>
 </tbody>
 </table>
 <h3 id="common-patterns">Common Patterns<a class="headerlink" href="#common-patterns" title="Permanent link">&para;</a></h3>
 <p><strong>Pattern 1: Rule-Based Baseline</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Test environment with known strategy first</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">actor</span> <span class="o">=</span> <span class="n">MeanReversionActor</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">preprocessing_fn</span> <span class="o">=</span> <span class="n">actor</span><span class="o">.</span><span class="n">get_preprocessing_fn</span><span class="p">()</span>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SequentialTradingEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
-</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="c1"># ... run episodes ...</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Test environment with known strategy first</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">actor</span> <span class="o">=</span> <span class="n">MeanReversionActor</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">preprocessing_fn</span> <span class="o">=</span> <span class="n">actor</span><span class="o">.</span><span class="n">get_preprocessing_fn</span><span class="p">()</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">env</span> <span class="o">=</span> <span class="n">SequentialTradingEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="c1"># ... run episodes ...</span>
 </span></code></pre></div></p>
 <p><strong>Pattern 2: LLM Exploration</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Quickly test ideas without training</span>
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">actor</span> <span class="o">=</span> <span class="n">LocalLLMActor</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;Qwen/Qwen2.5-1.5B&quot;</span><span class="p">,</span> <span class="n">quantization</span><span class="o">=</span><span class="s2">&quot;4bit&quot;</span><span class="p">)</span>
-</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="c1"># ... trade ...</span>
-</span></code></pre></div></p>
-<p><strong>Pattern 3: Environment Debugging &amp; Validation</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Debug environment and understand agent observations</span>
-</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">human_actor</span> <span class="o">=</span> <span class="n">HumanActor</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
-</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="n">obs</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
-</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>
-</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="c1"># Step through manually to verify environment behavior</span>
-</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="k">for</span> <span class="n">step</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">):</span>
-</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>    <span class="c1"># Visualize what the agent sees</span>
-</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>    <span class="n">action_td</span> <span class="o">=</span> <span class="n">human_actor</span><span class="p">(</span><span class="n">obs</span><span class="p">)</span>  <span class="c1"># Shows plotly dashboard + prompts for action</span>
-</span><span id="__span-15-9"><a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>    <span class="n">obs</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">action_td</span><span class="p">[</span><span class="s2">&quot;action&quot;</span><span class="p">])</span>
-</span><span id="__span-15-10"><a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>    <span class="c1"># Verify rewards, transitions, and observations are correct</span>
-</span></code></pre></div></p>
-<p><strong>Pattern 4: Optional - Human Demonstrations for Imitation Learning</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Collect expert trajectories (secondary use case)</span>
-</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">demos</span> <span class="o">=</span> <span class="n">collect_demonstrations</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">human_actor</span><span class="p">,</span> <span class="n">num_episodes</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
-</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="n">bc_loss</span> <span class="o">=</span> <span class="n">behavioral_cloning_loss</span><span class="p">(</span><span class="n">policy</span><span class="p">,</span> <span class="n">demos</span><span class="p">)</span>
-</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="c1"># ... train ...</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Quickly test ideas without training</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">actor</span> <span class="o">=</span> <span class="n">LocalLLMActor</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;Qwen/Qwen2.5-1.5B&quot;</span><span class="p">,</span> <span class="n">quantization</span><span class="o">=</span><span class="s2">&quot;4bit&quot;</span><span class="p">)</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="c1"># ... trade ...</span>
 </span></code></pre></div></p>
 <hr />
 <h2 id="implementation-notes">Implementation Notes<a class="headerlink" href="#implementation-notes" title="Permanent link">&para;</a></h2>
 <h3 id="rulebasedactor-preprocessing">RuleBasedActor Preprocessing<a class="headerlink" href="#rulebasedactor-preprocessing" title="Permanent link">&para;</a></h3>
 <p>Rule-based actors compute all indicators upfront on the full dataset:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="n">preprocessing_fn</span> <span class="o">=</span> <span class="n">actor</span><span class="o">.</span><span class="n">get_preprocessing_fn</span><span class="p">()</span>
-</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">df</span> <span class="o">=</span> <span class="n">preprocessing_fn</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>  <span class="c1"># Compute features once</span>
-</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="c1"># Features stored in DataFrame, accessed during episodes</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">preprocessing_fn</span> <span class="o">=</span> <span class="n">actor</span><span class="o">.</span><span class="n">get_preprocessing_fn</span><span class="p">()</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">df</span> <span class="o">=</span> <span class="n">preprocessing_fn</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>  <span class="c1"># Compute features once</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="c1"># Features stored in DataFrame, accessed during episodes</span>
 </span></code></pre></div>
 <p>This is efficient because indicators like Bollinger Bands require historical data, so computing them once is faster than recalculating at each step.</p>
 <h3 id="llm-prompt-engineering">LLM Prompt Engineering<a class="headerlink" href="#llm-prompt-engineering" title="Permanent link">&para;</a></h3>
