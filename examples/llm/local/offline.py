@@ -8,7 +8,7 @@ Usage:
     python examples/llm/local/offline.py
 
 Requirements:
-    pip install -e ".[llm_local]"
+    pip install -e ".[llm]"
 """
 
 import datasets

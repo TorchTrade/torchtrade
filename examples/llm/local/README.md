@@ -5,7 +5,7 @@ Use local LLMs as trading actors with TorchTrade via [vLLM](https://github.com/v
 ## Installation
 
 ```bash
-pip install -e ".[llm_local]"
+pip install -e ".[llm]"
 ```
 
 ## Examples

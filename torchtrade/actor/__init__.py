@@ -9,10 +9,16 @@ __all__ = [
     "MeanReversionActor",
 ]
 
-# Optional actors with external dependencies
+# Optional LLM actors
 try:
-    from torchtrade.actor.frontier_llm_actor import LLMActor
-    __all__.append("LLMActor")
+    from torchtrade.actor.base_llm_actor import BaseLLMActor
+    __all__.append("BaseLLMActor")
+except ImportError:
+    pass
+
+try:
+    from torchtrade.actor.frontier_llm_actor import FrontierLLMActor, LLMActor
+    __all__.extend(["FrontierLLMActor", "LLMActor"])
 except ImportError:
     pass
 
@@ -21,4 +27,3 @@ try:
     __all__.append("LocalLLMActor")
 except ImportError:
     pass
-

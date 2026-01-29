@@ -8,7 +8,7 @@ Usage:
     python examples/llm/local/online.py
 
 Requirements:
-    pip install -e ".[llm_local]"
+    pip install -e ".[llm]"
     # Set ALPACA_API_KEY and ALPACA_SECRET_KEY in .env
 """
 
