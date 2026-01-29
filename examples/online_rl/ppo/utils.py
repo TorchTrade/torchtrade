@@ -394,11 +394,16 @@ def make_ppo_models(env, device, cfg):
     ).to(device)
 
     with torch.no_grad():
-        actor_critic.eval()
-        td = env.fake_tensordict().to(actor_critic.device)
-        actor_critic(td)
-        del td
-        actor_critic.train()
+        if network_type == "batchnorm_mlp":
+            actor_critic.eval()
+            td = env.fake_tensordict().to(actor_critic.device)
+            actor_critic(td)
+            del td
+            actor_critic.train()
+        else:
+            td = env.fake_tensordict().unsqueeze(0).expand(3, 2).to(actor_critic.device)
+            actor_critic(td)
+            del td
 
     total_params = sum(p.numel() for p in actor_critic.parameters())
     print(f"Total number of parameters: {total_params}")
