@@ -58,9 +58,9 @@ def main():
     config = AlpacaTradingEnvConfig(
         symbol="BTC/USD",
         paper=True,
-        time_frames=["15Min"],
-        window_sizes=[16],
-        execute_on="15Min",
+        time_frames=["1Hour"],
+        window_sizes=[48],
+        execute_on="1Hour",
         include_base_features=True,
     )
 
@@ -91,7 +91,7 @@ def main():
         account_state=env.ACCOUNT_STATE,
         model="gpt-4o-mini",
         symbol=config.symbol,
-        execute_on="15Minute",
+        execute_on="1Hour",
         feature_keys=["open", "high", "low", "close", "volume"],
         debug=True,
     )

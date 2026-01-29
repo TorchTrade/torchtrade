@@ -18,7 +18,6 @@ import torch
 
 from torchtrade.actor import LLMActor
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
 def simple_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
@@ -48,15 +47,12 @@ def main():
     print("Creating environment...")
     config = SequentialTradingEnvConfig(
         symbol="BTC/USD",
-        time_frames=[
-            TimeFrame(1, TimeFrameUnit.Minute),
-            TimeFrame(5, TimeFrameUnit.Minute),
-        ],
-        window_sizes=[12, 8],
-        execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        time_frames=["1Hour"],
+        window_sizes=[48],
+        execute_on="1Hour",
         initial_cash=10000,
-        transaction_fee=0.001,
-        slippage=0.001,
+        transaction_fee=0.0,
+        slippage=0.0,
         include_base_features=False,
         random_start=False,
     )
@@ -70,7 +66,7 @@ def main():
         account_state=env.ACCOUNT_STATE,
         model="gpt-4o-mini",
         symbol=config.symbol,
-        execute_on="1Minute",
+        execute_on="1Hour",
         feature_keys=["open", "high", "low", "close", "volume"],
         debug=True,
     )
