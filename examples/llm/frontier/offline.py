@@ -21,7 +21,7 @@ from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvCo
 
 
 def simple_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy().reset_index(drop=True)
+    df = df.copy().reset_index(drop=False)
     df["features_open"] = df["open"]
     df["features_high"] = df["high"]
     df["features_low"] = df["low"]
@@ -40,8 +40,9 @@ def main():
     print("\nLoading data...")
     dataset = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
     df = dataset["train"].to_pandas()
-    df = df.head(1000)
-    print(f"  Loaded {len(df)} rows")
+
+    # Convert timestamp column to datetime for proper filtering
+    df['0'] = pd.to_datetime(df['0'])
 
     # Create environment
     print("Creating environment...")
@@ -63,7 +64,7 @@ def main():
     print("Initializing LLMActor (OpenAI API)...")
     actor = LLMActor(
         market_data_keys=env.market_data_keys,
-        account_state=env.ACCOUNT_STATE,
+        account_state=env.account_state,
         model="gpt-4o-mini",
         symbol=config.symbol,
         execute_on="1Hour",

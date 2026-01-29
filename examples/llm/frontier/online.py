@@ -32,7 +32,7 @@ torch.set_float32_matmul_precision("high")
 
 
 def simple_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy().reset_index(drop=True)
+    df = df.copy().reset_index(drop=False)
     df["features_open"] = df["open"]
     df["features_high"] = df["high"]
     df["features_low"] = df["low"]
