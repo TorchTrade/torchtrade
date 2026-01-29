@@ -1522,30 +1522,30 @@
 <p><strong>That's it!</strong> The collector, loss function, optimizer, and training loop remain identical. This doesn't only allow the use of any TorchRL algorithm, but any of the other useful components of TorchRL - replay buffers, transforms, modules, data structures - and provides seamless integration into the entire TorchRL ecosystem.</p>
 <hr />
 <h2 id="example-file-structure">Example File Structure<a class="headerlink" href="#example-file-structure" title="Permanent link">&para;</a></h2>
-<p>TorchTrade examples use a clean configuration structure with centralized environment configs:</p>
+<p>Each algorithm directory is fully self-contained — configs, scripts, and all training outputs (checkpoints, logs, Hydra outputs) are written to that directory:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>examples/online_rl/
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── env/                              # Central environment configs
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>│   ├── sequential.yaml               # Basic sequential trading
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>│   ├── sequential_sltp.yaml          # Sequential with stop-loss/take-profit
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>│   └── onestep.yaml                  # One-step for contextual bandits
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>│
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>├── &lt;algorithm&gt;/                      # Most algorithms (ppo, dsac, iql, ppo_chronos)
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>│   ├── config.yaml                   # Algorithm config (real file)
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>│   ├── env/ → ../env/                # Symlink for CLI env switching
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>│   ├── train.py                      # Training script (offline backtesting)
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>│   ├── live.py                       # Live trading script (exchange API)
-</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>│   └── utils.py                      # Helper functions (shared by train + live)
-</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>│
-</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>└── grpo/                             # GRPO (onestep-only)
-</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    ├── config.yaml                   # Env embedded, no symlink
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── &lt;algorithm&gt;/                      # ppo, dqn, dsac, iql, ppo_chronos
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>│   ├── config.yaml                   # Algorithm config
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>│   ├── env/                          # Environment configs
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>│   │   ├── sequential.yaml           # Basic sequential trading
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>│   │   └── sequential_sltp.yaml      # Sequential with stop-loss/take-profit
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>│   ├── train.py                      # Training script (offline backtesting)
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>│   ├── live.py                       # Live trading script (optional)
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>│   ├── utils.py                      # Helper functions
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>│   └── outputs/                      # Hydra outputs, checkpoints, logs
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>│
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>└── grpo/                             # GRPO (onestep-only)
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    ├── config.yaml                   # Algorithm config
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    ├── env/
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    │   └── onestep.yaml              # One-step environment config
 </span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    ├── train.py
-</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    └── utils.py
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    ├── utils.py
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>    └── outputs/
 </span></code></pre></div>
 <p><strong>Key Features:</strong>
-- <strong>Algorithm configs</strong> are real files in each algorithm directory
-- <strong>Environment configs</strong> are centralized in <code>env/</code> directory (single source of truth)
-- <strong>One symlink</strong> per algorithm enables CLI environment switching (except GRPO)
-- <strong>GRPO is special</strong> - designed for onestep-only, environment embedded directly
+- Each algorithm directory is <strong>self-contained</strong> — everything you need to run, train, and deploy lives in one place
+- Training outputs (checkpoints, logs) are written to the algorithm's own directory
+- <strong>GRPO</strong> only supports onestep environments
 - <strong>No spot/futures split</strong> - users override <code>leverage</code> and <code>action_levels</code> for futures
 - <strong>All use 1Hour timeframe</strong> by default</p>
 <h3 id="what-each-component-does">What Each Component Does<a class="headerlink" href="#what-each-component-does" title="Permanent link">&para;</a></h3>
@@ -1677,7 +1677,7 @@
 <td><strong>dqn/live.py</strong></td>
 <td>Binance Futures</td>
 <td>DQN</td>
-<td>Live futures trading with epsilon-greedy DQN</td>
+<td>Live futures trading with DQN</td>
 </tr>
 <tr>
 <td><strong>ppo/live.py</strong></td>
