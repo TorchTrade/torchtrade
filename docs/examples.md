@@ -71,8 +71,9 @@ examples/online_rl/
 ├── <algorithm>/                      # Most algorithms (ppo, dsac, iql, ppo_chronos)
 │   ├── config.yaml                   # Algorithm config (real file)
 │   ├── env/ → ../env/                # Symlink for CLI env switching
-│   ├── train.py                      # Training script and main loop
-│   └── utils.py                      # Helper functions
+│   ├── train.py                      # Training script (offline backtesting)
+│   ├── live.py                       # Live trading script (exchange API)
+│   └── utils.py                      # Helper functions (shared by train + live)
 │
 └── grpo/                             # GRPO (onestep-only)
     ├── config.yaml                   # Env embedded, no symlink
@@ -172,7 +173,7 @@ All algorithms except GRPO support environment switching via CLI - see [Running 
 
 These examples use offline RL algorithms that learn from pre-collected datasets without requiring live environment interaction during training. The data can be collected from interactions with offline backtesting environments or from real online live trading sessions. We provide simple example offline datasets at [HuggingFace/Torch-Trade](https://huggingface.co/Torch-Trade).
 
-Located in `examples/offline/`:
+Located in `examples/offline_rl/`:
 
 | Example | Algorithm | Environment | Key Features |
 |---------|-----------|-------------|--------------|
@@ -200,13 +201,28 @@ TorchTrade provides actor classes that allow easy creation of rule-based trading
 
 ### Live Trading
 
-These examples demonstrate deploying trained policies to real exchange APIs for live trading. We strongly recommend starting with paper trading to validate your strategies risk-free before transitioning to live capital deployment.
+Each online RL example includes a `live.py` script alongside the `train.py` script, demonstrating the smooth transition from offline backtesting to live trading. The same model architecture and `utils.py` helpers are reused — only the environment changes from an offline `SequentialTradingEnv` to a live exchange environment. This mirrors the core design philosophy: **swap the environment, keep everything else the same.**
 
-Located in `examples/live/`:
+Live scripts support loading pre-trained weights via `--weights` and store all live transitions in a replay buffer (saved periodically for crash safety), enabling offline analysis or further training on real market data.
 
-| Example | Exchange | Description |
-|---------|----------|-------------|
-| **alpaca/** | Alpaca | Live paper trading with Alpaca API |
+Located alongside each algorithm in `examples/online_rl/`:
+
+| Example | Exchange | Algorithm | Description |
+|---------|----------|-----------|-------------|
+| **dqn/live.py** | Binance Futures | DQN | Live futures trading with epsilon-greedy DQN |
+| **ppo/live.py** | Alpaca | PPO | Live spot trading with PPO actor |
+
+**Usage:**
+```bash
+# Train offline first
+python examples/online_rl/dqn/train.py
+
+# Deploy trained weights to Binance testnet
+python examples/online_rl/dqn/live.py --weights dqn_policy_100.pth --demo
+
+# Deploy PPO to Alpaca paper trading
+python examples/online_rl/ppo/live.py --weights ppo_policy_100.pth --paper
+```
 
 ### Transforms
 

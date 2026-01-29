@@ -283,17 +283,21 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
             return 0.0, 0.0, "flat"
 
         # Get actual balance from exchange
+        # Use total_margin_balance (not available_balance) so the target reflects
+        # the full portfolio, including margin already locked in open positions.
         balance_info = self.trader.get_account_balance()
-        available_balance = balance_info.get('available_balance', 0.0)
+        total_balance = balance_info.get('total_margin_balance', 0.0)
 
-        if available_balance <= 0:
-            logger.warning("No available balance for fractional position sizing")
+        if total_balance <= 0:
+            logger.warning("No balance for fractional position sizing")
             return 0.0, 0.0, "flat"
 
         # Use shared utility for core position calculation
+        # Reserve 2% buffer for exchange maintenance margin requirements
+        effective_balance = total_balance * 0.98
         fee_rate = 0.0002  # Bitget futures maker/taker fee
         params = PositionCalculationParams(
-            balance=available_balance,
+            balance=effective_balance,
             action_value=action_value,
             current_price=current_price,
             leverage=self.config.leverage,
@@ -348,8 +352,12 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
             side = "sell"
             amount = abs(delta_qty)
 
-        # TODO: Consider rounding amount to exchange step size to avoid order rejection
-        # (similar to Binance's implementation using round_to_step_size())
+        # Floor to step size to avoid exceeding available margin
+        step_size = min_qty  # TODO: Query actual step size from Bitget exchange info
+        amount = int(amount / step_size) * step_size
+
+        if amount < min_qty:
+            return self._create_trade_info(executed=False)
 
         # Execute market order
         return self._execute_market_order(side, amount)
@@ -357,12 +365,23 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
     def _execute_trade_if_needed(self, desired_action: float) -> Dict:
         """Execute trade based on desired action value.
 
+        Skips execution if already in the requested position direction.
+
         Args:
             desired_action: Fractional action value in [-1.0, 1.0]
 
         Returns:
             trade_info: Dict with execution details
         """
+        # Skip if already in the requested position
+        current_pos = self.position.current_position
+        if desired_action > 0 and current_pos == 1:
+            return self._create_trade_info(executed=False)
+        if desired_action < 0 and current_pos == -1:
+            return self._create_trade_info(executed=False)
+        if desired_action == 0 and current_pos == 0:
+            return self._create_trade_info(executed=False)
+
         return self._execute_fractional_action(desired_action)
 
 

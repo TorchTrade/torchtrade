@@ -163,13 +163,22 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
     def _execute_trade_if_needed(self, desired_action: float) -> Dict:
         """Execute trade based on desired action value.
 
+        Skips execution if already in the requested position direction.
+
         Args:
             desired_action: Action value (interpretation depends on mode)
 
         Returns:
             trade_info: Dict with execution details
         """
-        # Execute fractional action
+        # Skip if already in the requested position
+        current_pos = self.position.current_position
+        no_trade = {"executed": False, "amount": 0, "side": None, "success": None}
+        if desired_action > 0 and current_pos == 1:
+            return no_trade
+        if desired_action == 0 and current_pos == 0:
+            return no_trade
+
         return self._execute_fractional_action(desired_action)
 
     def _get_current_price(self, position_status=None) -> float:

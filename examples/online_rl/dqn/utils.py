@@ -328,11 +328,13 @@ def make_dqn_agent(cfg, train_env, device):
 
     exploration_policy = TensorDictSequential(actor, exploration_module)
 
-    # Test forward pass
+    # Test forward pass (eval mode for BatchNorm with batch_size=1)
     with torch.no_grad():
+        actor.eval()
         td = train_env.fake_tensordict().to(device)
         actor(td)
         del td
+        actor.train()
 
     total_params = sum(p.numel() for p in actor.parameters())
     print(f"Total number of parameters: {total_params}")
@@ -384,11 +386,13 @@ def make_tdqn_agent(cfg, train_env, device):
 
     exploration_policy = TensorDictSequential(actor, exploration_module).to(device)
 
-    # Test forward pass
+    # Test forward pass (eval mode for BatchNorm with batch_size=1)
     with torch.no_grad():
+        actor.eval()
         td = train_env.fake_tensordict().to(device)
         actor(td)
         del td
+        actor.train()
 
     total_params = sum(p.numel() for p in actor.parameters())
     print(f"Total number of parameters: {total_params}")

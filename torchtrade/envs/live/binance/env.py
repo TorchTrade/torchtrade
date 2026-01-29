@@ -358,17 +358,23 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             return 0.0, 0.0, "flat"
 
         # Query actual balance from exchange
+        # Use total_margin_balance (not available_balance) so the target reflects
+        # the full portfolio, including margin already locked in open positions.
+        # available_balance only shows free margin, which shrinks as positions grow,
+        # causing repeated buys when the agent keeps requesting action=1.0.
         balance_info = self.trader.get_account_balance()
-        available_balance = balance_info.get('available_balance', 0.0)
+        total_balance = balance_info.get('total_margin_balance', 0.0)
 
-        if available_balance <= 0:
-            logger.warning("No available balance for fractional position sizing")
+        if total_balance <= 0:
+            logger.warning("No balance for fractional position sizing")
             return 0.0, 0.0, "flat"
 
         # Use shared utility for core position calculation
+        # Reserve 2% buffer for exchange maintenance margin requirements
+        effective_balance = total_balance * 0.98
         fee_rate = 0.0004  # Binance futures maker/taker fee
         params = PositionCalculationParams(
-            balance=available_balance,
+            balance=effective_balance,
             action_value=action_value,
             current_price=current_price,
             leverage=self.config.leverage,
@@ -399,9 +405,11 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             )
             return 0.0, 0.0, "flat"
 
-        # Round to exchange step size
+        # Floor to exchange step size (never exceed available margin)
         position_qty = abs(position_size)
-        position_qty = round_to_step_size(position_qty, self._get_step_size())
+        step_size = self._get_step_size()
+        if step_size > 0:
+            position_qty = int(position_qty / step_size) * step_size
 
         # Apply direction
         direction = 1 if position_size > 0 else -1
@@ -452,10 +460,17 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         if abs(delta) < step_size:
             return self._create_trade_info(executed=False)  # Already close enough
 
-        # 7. Round delta to step size
-        delta = round_to_step_size(delta, self._get_step_size())
+        # 7. Floor delta to step size (never exceed available margin)
+        sign = 1 if delta > 0 else -1
+        delta = int(abs(delta) / step_size) * step_size * sign
 
-        # 8. Determine trade direction and execute
+        # 8. Check delta notional meets exchange minimum
+        delta_notional = abs(delta) * current_price
+        min_notional = self._get_min_notional()
+        if delta_notional < min_notional:
+            return self._create_trade_info(executed=False)  # Delta too small for exchange
+
+        # 9. Determine trade direction and execute
         if (current_qty > 0 and target_qty < 0) or (current_qty < 0 and target_qty > 0):
             # Direction switch: close current, then open opposite
             #
@@ -491,7 +506,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         """
         Execute trade if position change is needed.
 
-        Routes to fractional or fixed position sizing based on config.
+        Skips execution if already in the requested position direction.
 
         Args:
             desired_action: Action level
@@ -499,7 +514,15 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         Returns:
             Dict with trade execution info
         """
-        # Execute fractional action
+        # Skip if already in the requested position
+        current_pos = self.position.current_position
+        if desired_action > 0 and current_pos == 1:
+            return self._create_trade_info(executed=False)
+        if desired_action < 0 and current_pos == -1:
+            return self._create_trade_info(executed=False)
+        if desired_action == 0 and current_pos == 0:
+            return self._create_trade_info(executed=False)
+
         return self._execute_fractional_action(desired_action)
 
     def _check_termination(self, portfolio_value: float) -> bool:
