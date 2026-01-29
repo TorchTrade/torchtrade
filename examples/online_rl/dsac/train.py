@@ -109,7 +109,7 @@ def main(cfg: DictConfig):  # noqa: F821
     # Create agent
     model = make_sac_agent(cfg, eval_env, device)
 
-    # Create TD3 loss
+    # Create discrete SAC loss
     loss_module, target_net_updater = make_loss_module(cfg, model)
     loss_module = loss_module.to(device)
 
