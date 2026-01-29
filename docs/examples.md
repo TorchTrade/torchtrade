@@ -83,10 +83,16 @@ examples/online_rl/
 ```
 
 **Key Features:**
+
 - Each algorithm directory is **self-contained** — everything you need to run, train, and deploy lives in one place
+
 - Training outputs (checkpoints, logs) are written to the algorithm's own directory
+
 - **GRPO** only supports onestep environments
-- **No spot/futures split** - users override `leverage` and `action_levels` for futures
+
+- **No spot/futures split** - users override `leverage` and `action_levels` for 
+futures
+
 - **All use 1Hour timeframe** by default
 
 ### What Each Component Does
@@ -160,12 +166,12 @@ These examples use online RL algorithms (learning from interaction as it happens
 
 Located in `examples/online_rl/`:
 
-- **PPO** - `ppo/` - Standard policy gradient
-- **PPO + Chronos** - `ppo_chronos/` - Time series embedding with Chronos T5 models
-- **DQN** - `dqn/` - Deep Q-learning with experience replay and target networks
-- **IQL** - `iql/` - Implicit Q-Learning
-- **DSAC** - `dsac/` - Distributional Soft Actor-Critic
-- **GRPO** - `grpo/` - Group Relative Policy Optimization (onestep-only, no env switching)
+- **[PPO](https://arxiv.org/abs/1707.06347)** - `ppo/` - Standard policy gradient
+- **[PPO](https://arxiv.org/abs/1707.06347) + [Chronos](https://arxiv.org/abs/2403.07815)** - `ppo_chronos/` - Time series embedding with Chronos T5 models
+- **[DQN](https://arxiv.org/abs/1312.5602)** - `dqn/` - Deep Q-learning with experience replay and target networks
+- **[IQL](https://arxiv.org/abs/2110.06169)** - `iql/` - Implicit Q-Learning
+- **[Discrete SAC](https://arxiv.org/abs/1910.07207)** - `dsac/` - Discrete Soft Actor-Critic
+- **[GRPO](https://arxiv.org/abs/2402.03300)** - `grpo/` - Group Relative Policy Optimization (onestep-only, no env switching)
 
 All algorithms except GRPO support environment switching via CLI - see [Running Examples](#running-examples) below.
 
@@ -266,14 +272,16 @@ uv run python examples/online_rl/ppo/train.py \
 
 ### Available Environment Configs
 
-| Config | Environment Class | SLTP | Timeframe | Use Case |
-|--------|-------------------|------|-----------|----------|
-| `sequential` | SequentialTradingEnv | No | 1Hour | Basic sequential trading |
-| `sequential_sltp` | SequentialTradingEnvSLTP | Yes | 1Hour | Sequential with bracket orders |
-| `onestep` | OneStepTradingEnv | Yes | 1Hour | One-step for GRPO/contextual bandits |
+| Config | Environment Class | SLTP | Use Case |
+|--------|-------------------|------|----------|
+| `sequential` | SequentialTradingEnv | No | Basic sequential trading |
+| `sequential_sltp` | SequentialTradingEnvSLTP | Yes | Sequential with bracket orders |
+| `onestep` | OneStepTradingEnv | Yes | One-step for GRPO/contextual bandits |
 
 **Spot vs Futures:**
+
 - **Spot (default)**: `leverage: 1`, `action_levels: [0.0, 1.0]`
+
 - **Futures**: Override with `env.leverage=5 env.action_levels='[-1.0,0.0,1.0]'`
 
 ### Common Hydra Overrides
@@ -287,50 +295,6 @@ uv run python examples/online_rl/ppo/train.py \
 | `loss.gamma` | `0.99` | Discount factor |
 | `collector.frames_per_batch` | `2000` | Frames collected per iteration |
 | `total_frames` | `100000` | Total training frames |
-
----
-
-## Example Structure
-
-Each training example follows this pattern:
-
-```python
-# 1. Configuration (via Hydra)
-@hydra.main(config_path="config", config_name="config")
-def main(cfg):
-
-    # 2. Create environment
-    env = make_env(cfg)
-
-    # 3. Build policy network
-    actor = make_actor(cfg, env)
-
-    # 4. Create collector
-    collector = SyncDataCollector(
-        env,
-        actor,
-        frames_per_batch=cfg.collector.frames_per_batch,
-    )
-
-    # 5. Loss function
-    loss_module = make_loss(cfg, actor)
-
-    # 6. Optimizer
-    optimizer = torch.optim.Adam(
-        loss_module.parameters(),
-        lr=cfg.optim.lr
-    )
-
-    # 7. Training loop
-    for batch in collector:
-        loss_values = loss_module(batch)
-        loss = loss_values["loss_objective"] + loss_values["loss_critic"]
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-```
-
-This structure mirrors [TorchRL's SOTA implementations](https://github.com/pytorch/rl/tree/main/sota-implementations), making it easy to adapt other algorithms.
 
 ---
 

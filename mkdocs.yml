@@ -21,17 +21,17 @@ theme:
     - content.code.copy
   language: en
   palette:
-    - scheme: default
-      toggle:
-        icon: material/toggle-switch-off-outline
-        name: Switch to Dark Mode
-      primary: grey
-      accent: orange
     - scheme: slate
       toggle:
         icon: material/toggle-switch
         name: Switch to Light Mode
       primary: black
+      accent: orange
+    - scheme: default
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to Dark Mode
+      primary: grey
       accent: orange
 
 extra:
