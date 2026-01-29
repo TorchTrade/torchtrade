@@ -20,8 +20,12 @@ import warnings
 
 import hydra
 import pandas as pd
+from omegaconf import OmegaConf
+from pathlib import Path
 from torchrl._utils import compile_with_warmup
 import datasets
+
+OmegaConf.register_new_resolver("script_dir", lambda: str(Path(__file__).resolve().parent))
 
 
 @hydra.main(config_path=".", config_name="config", version_base="1.1")

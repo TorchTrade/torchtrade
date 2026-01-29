@@ -11,6 +11,10 @@ import wandb
 import warnings
 import datasets
 import hydra
+from omegaconf import OmegaConf
+from pathlib import Path
+
+OmegaConf.register_new_resolver("script_dir", lambda: str(Path(__file__).resolve().parent))
 import numpy as np
 import pandas as pd
 import torch

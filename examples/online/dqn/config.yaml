@@ -59,7 +59,7 @@ compile:
 # Hydra configuration - saves outputs in example directory
 hydra:
   run:
-    dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${script_dir:}/outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
   sweep:
-    dir: ./outputs/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${script_dir:}/outputs/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}

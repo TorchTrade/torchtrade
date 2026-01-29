@@ -12,7 +12,11 @@ from __future__ import annotations
 import warnings
 
 import hydra
+from omegaconf import OmegaConf
+from pathlib import Path
 import numpy as np
+
+OmegaConf.register_new_resolver("script_dir", lambda: str(Path(__file__).resolve().parent))
 import pandas as pd
 import torch
 import torch.cuda

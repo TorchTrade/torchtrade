@@ -14,8 +14,12 @@ from __future__ import annotations
 import warnings
 
 import hydra
+from omegaconf import OmegaConf
+from pathlib import Path
 import numpy as np
 import torch
+
+OmegaConf.register_new_resolver("script_dir", lambda: str(Path(__file__).resolve().parent))
 import tqdm
 from tensordict.nn import CudaGraphModule
 from torchrl._utils import timeit

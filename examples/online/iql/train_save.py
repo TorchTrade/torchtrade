@@ -11,7 +11,11 @@ import wandb
 import warnings
 import pandas as pd
 import hydra
+from omegaconf import OmegaConf
+from pathlib import Path
 import numpy as np
+
+OmegaConf.register_new_resolver("script_dir", lambda: str(Path(__file__).resolve().parent))
 import torch
 import tqdm
 from tensordict.nn import CudaGraphModule
