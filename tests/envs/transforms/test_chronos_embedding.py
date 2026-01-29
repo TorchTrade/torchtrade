@@ -5,7 +5,7 @@ import torch
 import numpy as np
 from unittest.mock import Mock, MagicMock, patch
 from tensordict import TensorDict
-from torchrl.data import CompositeSpec, BoundedTensorSpec, UnboundedContinuousTensorSpec
+from torchrl.data import Composite, Bounded, Unbounded
 
 from torchtrade.envs.transforms import ChronosEmbeddingTransform
 from tests.envs.transforms.conftest import mock_chronos_pipeline
@@ -383,8 +383,8 @@ class TestChronosEmbeddingTransformObsSpec:
             )
 
             # Create input spec
-            input_spec = CompositeSpec(
-                market_data=BoundedTensorSpec(
+            input_spec = Composite(
+                market_data=Bounded(
                     low=-10.0,
                     high=10.0,
                     shape=(10, 5),  # (window, features)
@@ -409,8 +409,8 @@ class TestChronosEmbeddingTransformObsSpec:
                 device="cpu"
             )
 
-            input_spec = CompositeSpec(
-                market_data=BoundedTensorSpec(
+            input_spec = Composite(
+                market_data=Bounded(
                     low=-10.0,
                     high=10.0,
                     shape=(10, 5),  # 5 features
@@ -433,8 +433,8 @@ class TestChronosEmbeddingTransformObsSpec:
                 device="cpu"
             )
 
-            input_spec = CompositeSpec(
-                market_data=BoundedTensorSpec(
+            input_spec = Composite(
+                market_data=Bounded(
                     low=-10.0,
                     high=10.0,
                     shape=(10, 5),
@@ -507,8 +507,8 @@ class TestChronosEmbeddingTransformEdgeCases:
                 device="cpu"
             )
 
-            input_spec = CompositeSpec(
-                market_data=BoundedTensorSpec(
+            input_spec = Composite(
+                market_data=Bounded(
                     low=-10.0,
                     high=10.0,
                     shape=(10, 5),
@@ -532,8 +532,8 @@ class TestChronosEmbeddingTransformEdgeCases:
                 device="cpu"
             )
 
-            input_spec = CompositeSpec(
-                market_data=BoundedTensorSpec(
+            input_spec = Composite(
+                market_data=Bounded(
                     low=-10.0,
                     high=10.0,
                     shape=(10, 5),

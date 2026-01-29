@@ -8,7 +8,7 @@ from typing import List, Optional, Union
 import torch
 import torch.nn as nn
 from torchrl.envs.transforms import Transform
-from torchrl.data import Composite, UnboundedContinuousTensorSpec
+from torchrl.data import Composite, Unbounded
 from tensordict import TensorDictBase
 import warnings
 
@@ -312,7 +312,7 @@ class ChronosEmbeddingTransform(Transform):
             # Create output spec
             spec.set(
                 out_key,
-                UnboundedContinuousTensorSpec(
+                Unbounded(
                     shape=(out_dim,),
                     device=self.device,
                     dtype=self.torch_dtype
