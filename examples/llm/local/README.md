@@ -31,9 +31,11 @@ Requires `ALPACA_API_KEY` and `ALPACA_SECRET_KEY` in `.env`.
 
 ## Recommended Models
 
+For production use, we recommend larger models (7B+) or fine-tuning on trading data. The examples use a 0.5B model for fast demonstration, but it will not produce good trading decisions out of the box.
+
 | Model | Size | VRAM | Notes |
 |-------|------|------|-------|
-| `Qwen/Qwen2.5-0.5B-Instruct` | 500M | ~2GB | Fast, good for testing |
+| `Qwen/Qwen2.5-0.5B-Instruct` | 500M | ~2GB | Fast, used in examples for demonstration |
 | `Qwen/Qwen2.5-1.5B-Instruct` | 1.5B | ~3GB | Good balance |
 | `Qwen/Qwen2.5-7B-Instruct` | 7B | ~8GB | Strong reasoning |
 
