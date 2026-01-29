@@ -286,9 +286,10 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
 
         # Add coverage tracking indices (only during training with random_start)
         if self.random_start:
+            self._reset_idx = self.sampler._sequential_idx
             obs.set(
                 "reset_index",
-                torch.tensor(self.sampler._sequential_idx, dtype=torch.long)
+                torch.tensor(self._reset_idx, dtype=torch.long)
             )
             obs.set(
                 "state_index",
