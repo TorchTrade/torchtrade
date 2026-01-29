@@ -17,8 +17,8 @@ import warnings
 
 class TimeFrameUnit(Enum):
     """Time frame units supported across all environments."""
-    Minute = 'Min'  # Pandas freq for minutes
-    Hour = 'H'      # Pandas freq for hours
+    Minute = 'min'  # Pandas freq for minutes
+    Hour = 'h'      # Pandas freq for hours
     Day = 'D'       # Pandas freq for days
 
 

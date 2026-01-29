@@ -18,12 +18,12 @@ class TestTimeFrameUnit:
     """Tests for TimeFrameUnit enum."""
 
     def test_minute_value(self):
-        """Minute unit should have 'Min' as pandas freq value."""
-        assert TimeFrameUnit.Minute.value == "Min"
+        """Minute unit should have 'min' as pandas freq value."""
+        assert TimeFrameUnit.Minute.value == "min"
 
     def test_hour_value(self):
-        """Hour unit should have 'H' as pandas freq value."""
-        assert TimeFrameUnit.Hour.value == "H"
+        """Hour unit should have 'h' as pandas freq value."""
+        assert TimeFrameUnit.Hour.value == "h"
 
     def test_day_value(self):
         """Day unit should have 'D' as pandas freq value."""
@@ -42,12 +42,12 @@ class TestTimeFrame:
     def test_to_pandas_freq_minute(self):
         """to_pandas_freq should return correct string for minutes."""
         tf = TimeFrame(5, TimeFrameUnit.Minute)
-        assert tf.to_pandas_freq() == "5Min"
+        assert tf.to_pandas_freq() == "5min"
 
     def test_to_pandas_freq_hour(self):
         """to_pandas_freq should return correct string for hours."""
         tf = TimeFrame(1, TimeFrameUnit.Hour)
-        assert tf.to_pandas_freq() == "1H"
+        assert tf.to_pandas_freq() == "1h"
 
     def test_to_pandas_freq_day(self):
         """to_pandas_freq should return correct string for days."""
@@ -72,13 +72,13 @@ class TestTimeFrame:
     def test_various_values(self):
         """TimeFrame should work with various integer values."""
         test_cases = [
-            (1, TimeFrameUnit.Minute, "1Min", "1Minute"),
-            (5, TimeFrameUnit.Minute, "5Min", "5Minute"),
-            (15, TimeFrameUnit.Minute, "15Min", "15Minute"),
-            (30, TimeFrameUnit.Minute, "30Min", "30Minute"),
-            (1, TimeFrameUnit.Hour, "1H", "1Hour"),
-            (4, TimeFrameUnit.Hour, "4H", "4Hour"),
-            (24, TimeFrameUnit.Hour, "24H", "24Hour"),
+            (1, TimeFrameUnit.Minute, "1min", "1Minute"),
+            (5, TimeFrameUnit.Minute, "5min", "5Minute"),
+            (15, TimeFrameUnit.Minute, "15min", "15Minute"),
+            (30, TimeFrameUnit.Minute, "30min", "30Minute"),
+            (1, TimeFrameUnit.Hour, "1h", "1Hour"),
+            (4, TimeFrameUnit.Hour, "4h", "4Hour"),
+            (24, TimeFrameUnit.Hour, "24h", "24Hour"),
             (1, TimeFrameUnit.Day, "1D", "1Day"),
             (7, TimeFrameUnit.Day, "7D", "7Day"),
         ]
@@ -314,7 +314,7 @@ class TestParseTimeframeString:
         result = parse_timeframe_string("15Min")
 
         # Should work with to_pandas_freq
-        assert result.to_pandas_freq() == "15Min"
+        assert result.to_pandas_freq() == "15min"
 
         # Should work with obs_key_freq
         assert result.obs_key_freq() == "15Minute"
