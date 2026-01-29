@@ -58,9 +58,9 @@ def main():
     config = AlpacaTradingEnvConfig(
         symbol="BTC/USD",
         paper=True,
-        time_frames=["1Hour"],
+        time_frames=["1Min"], # For testing we use 1Min
         window_sizes=[48],
-        execute_on="1Hour",
+        execute_on="1Min",
         include_base_features=True,
     )
 
