@@ -4,7 +4,7 @@ This guide will help you install TorchTrade and run your first trading environme
 
 ## Prerequisites
 
-- Python 3.8 or higher
+- Python 3.10 or higher
 - CUDA (optional, for GPU acceleration)
 - [UV](https://docs.astral.sh/uv/) - Fast Python package installer
 

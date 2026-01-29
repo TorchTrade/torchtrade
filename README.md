@@ -1,6 +1,6 @@
 # TorchTrade
 
-![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)
+![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![TorchRL](https://img.shields.io/badge/TorchRL-Compatible-green.svg)
 
