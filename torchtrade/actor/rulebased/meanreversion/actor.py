@@ -47,6 +47,7 @@ class MeanReversionActor(RuleBasedActor):
         stoch_d_window: Stochastic %D smoothing (default: 3)
         oversold_threshold: Stoch RSI oversold threshold (default: 20.0)
         overbought_threshold: Stoch RSI overbought threshold (default: 80.0)
+        volume_multiplier: Volume must exceed this multiple of average to confirm (default: 1.5)
         execute_timeframe: Timeframe to extract features from (default: "1Minute")
         **kwargs: Additional arguments passed to RuleBasedActor
 
@@ -74,6 +75,7 @@ class MeanReversionActor(RuleBasedActor):
         stoch_d_window: int = 3,
         oversold_threshold: float = 20.0,
         overbought_threshold: float = 80.0,
+        volume_multiplier: float = 1.5,
         execute_timeframe: TimeFrame = TimeFrame(5, TimeFrameUnit.Minute),
         **kwargs
     ):
@@ -85,6 +87,7 @@ class MeanReversionActor(RuleBasedActor):
         self.stoch_d_window = stoch_d_window
         self.oversold_threshold = oversold_threshold
         self.overbought_threshold = overbought_threshold
+        self.volume_multiplier = volume_multiplier
         self.execute_timeframe = execute_timeframe
 
     def get_preprocessing_fn(self) -> Callable[[pd.DataFrame], pd.DataFrame]:
@@ -167,8 +170,7 @@ class MeanReversionActor(RuleBasedActor):
                 f"D: {stoch_d_now:.2f} (prev: {stoch_d_prev:.2f}), Volume: {volume_now:.2f} (avg: {avg_volume:.2f}), "
                 f"Position: {position_size:.2f}")
 
-        # Volume confirmation (at least 50% above average)
-        volume_confirmed = volume_now >= 1.5 * avg_volume
+        volume_confirmed = volume_now >= self.volume_multiplier * avg_volume
 
         # BUY/Long signal: Price below lower BB AND bullish Stoch RSI crossover from oversold AND volume
         is_long_signal = (

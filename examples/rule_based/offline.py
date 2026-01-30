@@ -36,6 +36,7 @@ def main():
         stoch_rsi_window=10,
         oversold_threshold=35.0,
         overbought_threshold=65.0,
+        volume_multiplier=1.0,
         execute_timeframe=execute_tf,
         debug=False,
     )
