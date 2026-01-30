@@ -3,9 +3,8 @@ Offline backtesting with MeanReversionActor on SequentialTradingEnv.
 
 Runs a rule-based mean reversion strategy through a sequential trading
 environment using historical data, printing actions and episode metrics.
-
-NOTE: Strategy parameters are NOT tuned. This is a demonstration of how to
-wire a rule-based actor to an environment, not a profitable strategy.
+Parameters are not tuned — this serves as an example of how to wire a
+rule-based actor to an offline environment.
 
 Usage:
     python examples/rule_based/offline.py
