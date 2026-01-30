@@ -1891,8 +1891,31 @@ futures</p>
 <p>Fine-tuning LLMs on reasoning traces from frontier models, and integrating Vision-Language Models (VLMs) to process trading chart plots.</p>
 </div>
 <h3 id="rule-based-actors">Rule-Based Actors<a class="headerlink" href="#rule-based-actors" title="Permanent link">&para;</a></h3>
-<p>TorchTrade provides actor classes that allow easy creation of rule-based trading strategies using technical indicators and market signals, for example mean reversion, breakout, and more. These rule-based actors integrate seamlessly with TorchTrade environments for both backtesting and live trading, serving as baselines or components in hybrid approaches. This is especially interesting with our <strong><a href="guides/custom-features.md">custom feature preprocessing</a></strong>, which allows you to add technical indicators and derived features to enhance rule-based strategies.</p>
-<p><strong>Future Work</strong>: We plan to provide examples of rule-based strategies and hybrid approaches that combine rule-based policies with neural network policies as actors, leveraging the strengths of both deterministic strategies and learned behaviors.</p>
+<p>TorchTrade provides <a href="https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/rulebased/base.py">RuleBasedActor</a> for creating trading strategies using technical indicators and market signals. These actors integrate seamlessly with TorchTrade environments for both backtesting and live trading, serving as baselines or components in hybrid approaches.</p>
+<p>Located in <code>examples/rule_based/</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Example</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>offline.py</strong></td>
+<td>Backtesting a mean reversion strategy on historical data</td>
+</tr>
+<tr>
+<td><strong>live.py</strong></td>
+<td>Live trading with the mean reversion strategy</td>
+</tr>
+</tbody>
+</table>
+<p>Combine with <strong><a href="../guides/custom-features/">custom feature preprocessing</a></strong> to add technical indicators for rule-based strategies.</p>
+<div class="admonition note">
+<p class="admonition-title">Future Work</p>
+<p>Hybrid approaches that combine rule-based policies with neural network policies as actors, leveraging the strengths of both deterministic strategies and learned behaviors.</p>
+</div>
 <h3 id="live-trading">Live Trading<a class="headerlink" href="#live-trading" title="Permanent link">&para;</a></h3>
 <p>The DQN and PPO examples include a <code>live.py</code> script alongside the <code>train.py</code> script, demonstrating the smooth transition from offline backtesting to live trading. The same model architecture and <code>utils.py</code> helpers are reused — only the environment changes from an offline <code>SequentialTradingEnv</code> to a live exchange environment. This mirrors the core design philosophy: <strong>swap the environment, keep everything else the same.</strong></p>
 <p>Live scripts support loading pre-trained weights via <code>--weights</code> and store all live transitions in a replay buffer (saved periodically for crash safety), enabling offline analysis or further training on real market data.</p>
