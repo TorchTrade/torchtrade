@@ -81,7 +81,9 @@ edit_uri: edit/main/docs/
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
-  - Examples: examples.md
+  - Examples:
+      - Overview: examples/index.md
+      - Results: examples/results.md
 
   - Environments:
       - Offline Environments: environments/offline.md
