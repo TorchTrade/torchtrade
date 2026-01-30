@@ -47,6 +47,7 @@ class MeanReversionActor(RuleBasedActor):
         stoch_d_window: Stochastic %D smoothing (default: 3)
         oversold_threshold: Stoch RSI oversold threshold (default: 20.0)
         overbought_threshold: Stoch RSI overbought threshold (default: 80.0)
+        volume_multiplier: Volume must exceed this multiple of average to confirm (default: 1.5)
         execute_timeframe: Timeframe to extract features from (default: "1Minute")
         **kwargs: Additional arguments passed to RuleBasedActor
 
@@ -74,10 +75,18 @@ class MeanReversionActor(RuleBasedActor):
         stoch_d_window: int = 3,
         oversold_threshold: float = 20.0,
         overbought_threshold: float = 80.0,
+        volume_multiplier: float = 1.5,
         execute_timeframe: TimeFrame = TimeFrame(5, TimeFrameUnit.Minute),
         **kwargs
     ):
         super().__init__(**kwargs)
+
+        if self.action_levels != [-1, 0, 1]:
+            raise ValueError(
+                f"MeanReversionActor requires action_levels=[-1, 0, 1], "
+                f"got {self.action_levels}"
+            )
+
         self.bb_window = bb_window
         self.bb_std = bb_std
         self.stoch_rsi_window = stoch_rsi_window
@@ -85,6 +94,7 @@ class MeanReversionActor(RuleBasedActor):
         self.stoch_d_window = stoch_d_window
         self.oversold_threshold = oversold_threshold
         self.overbought_threshold = overbought_threshold
+        self.volume_multiplier = volume_multiplier
         self.execute_timeframe = execute_timeframe
 
     def get_preprocessing_fn(self) -> Callable[[pd.DataFrame], pd.DataFrame]:
@@ -132,16 +142,15 @@ class MeanReversionActor(RuleBasedActor):
 
     def select_action(self, observation: TensorDict) -> int:
         """
-        Select action based on mean reversion signals with crossover and volume confirmation.
+        Select action based on mean reversion signals.
 
-        Adapted decision logic:
-        1. BUY (action=2): Price below lower BB AND Stoch RSI bullish crossover from oversold AND volume confirmation AND (position <=0)
-        - Opens long from flat or closes short.
-        2. SELL (action=0): Price above upper BB AND Stoch RSI bearish crossover from overbought AND volume confirmation AND (position >=0)
-        - Opens short from flat or closes long.
-        3. HOLD (action=1): Otherwise
+        Entry logic (strict — requires crossover + volume confirmation):
+        1. BUY: Price below lower BB AND bullish Stoch RSI crossover from oversold AND volume
+        2. SELL: Price above upper BB AND bearish Stoch RSI crossover from overbought AND volume
 
-        Uses history from observation for crossover checks.
+        Exit logic (relaxed — mean reversion to middle band):
+        3. Close long: Position is long AND price reverts above middle BB (bb_position > 0.5)
+        4. Close short: Position is short AND price reverts below middle BB (bb_position < 0.5)
         """
 
         # Extract market data for execution timeframe
@@ -149,7 +158,7 @@ class MeanReversionActor(RuleBasedActor):
         key = self.execute_timeframe.obs_key_freq()
         data = market_data[key]  # Shape: [window_size, num_features]
 
-        # Extract most recent feature values using get_feature() by name
+        # Extract most recent feature values
         bb_position = self.get_feature(data, "features_bb_position")[-1].item()
         stoch_k_now = self.get_feature(data, "features_stoch_rsi_k")[-1].item()
         stoch_d_now = self.get_feature(data, "features_stoch_rsi_d")[-1].item()
@@ -158,34 +167,46 @@ class MeanReversionActor(RuleBasedActor):
         volume_now = self.get_feature(data, "features_volume")[-1].item()
         avg_volume = self.get_feature(data, "features_avg_volume")[-1].item()
 
-        # Get account state
-        account = observation["account_state"]
-        position_size = account[1].item()
+        position_direction = self.get_account_state(observation, "position_direction")
 
         if self.debug:
             print(f"BB Position: {bb_position:.4f}, Stoch RSI K: {stoch_k_now:.2f} (prev: {stoch_k_prev:.2f}), "
                 f"D: {stoch_d_now:.2f} (prev: {stoch_d_prev:.2f}), Volume: {volume_now:.2f} (avg: {avg_volume:.2f}), "
-                f"Position: {position_size:.2f}")
+                f"Position: {position_direction:.0f}")
 
-        # Volume confirmation (at least 50% above average)
-        volume_confirmed = volume_now >= 1.5 * avg_volume
+        volume_confirmed = volume_now >= self.volume_multiplier * avg_volume
 
-        # BUY/Long signal: Price below lower BB AND bullish Stoch RSI crossover from oversold AND volume
+        # --- EXIT: Mean reversion to middle band ---
+        if position_direction > 0 and bb_position > 0.5:
+            return self.action_flat  # Close long — price reverted to mean
+
+        if position_direction < 0 and bb_position < 0.5:
+            return self.action_flat  # Close short — price reverted to mean
+
+        # --- ENTRY: Strict signals with crossover + volume ---
         is_long_signal = (
-            bb_position < 0 and
-            (stoch_k_now > stoch_d_now) and (stoch_k_prev <= stoch_d_prev) and (stoch_k_prev < self.oversold_threshold) and
-            volume_confirmed
+            bb_position < 0
+            and stoch_k_now > stoch_d_now
+            and stoch_k_prev <= stoch_d_prev
+            and stoch_k_prev < self.oversold_threshold
+            and volume_confirmed
         )
-        if is_long_signal and position_size <= 0:
-            return 2  # BUY (open long or close short)
+        if is_long_signal and position_direction <= 0:
+            return self.action_long
 
-        # SELL/Short signal: Price above upper BB AND bearish Stoch RSI crossover from overbought AND volume
         is_short_signal = (
-            bb_position > 1 and
-            (stoch_k_now < stoch_d_now) and (stoch_k_prev >= stoch_d_prev) and (stoch_k_prev > self.overbought_threshold) and
-            volume_confirmed
+            bb_position > 1
+            and stoch_k_now < stoch_d_now
+            and stoch_k_prev >= stoch_d_prev
+            and stoch_k_prev > self.overbought_threshold
+            and volume_confirmed
         )
-        if is_short_signal and position_size >= 0:
-            return 0  # SELL (open short or close long)
+        if is_short_signal and position_direction >= 0:
+            return self.action_short
 
-        return 1  # HOLD
+        # Hold = maintain current position
+        if position_direction > 0:
+            return self.action_long
+        elif position_direction < 0:
+            return self.action_short
+        return self.action_flat

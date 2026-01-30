@@ -18,13 +18,13 @@ Run a local LLM through a `SequentialTradingEnv` with historical data:
 python examples/llm/local/offline.py
 ```
 
-### Live Trading (`online.py`)
+### Live Trading (`live.py`)
 
 Run a local LLM on Alpaca paper trading, collecting trajectories into a replay buffer:
 
 ```bash
 # Set API keys in .env
-python examples/llm/local/online.py
+python examples/llm/local/live.py
 ```
 
 Requires `ALPACA_API_KEY` and `ALPACA_SECRET_KEY` in `.env`.

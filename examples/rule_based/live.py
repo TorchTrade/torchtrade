@@ -1,19 +1,18 @@
 """
-Live trading with LocalLLMActor on Alpaca (paper trading).
+Live trading with MeanReversionActor on Alpaca (paper trading).
 
-Runs a local LLM as the trading policy on Alpaca's paper trading API,
-collecting trajectories into a replay buffer.
+Runs a rule-based mean reversion strategy on Alpaca's paper trading API,
+collecting trajectories into a replay buffer. Parameters are not tuned —
+this serves as an example of how to wire a rule-based actor to a live environment.
 
 Usage:
-    python examples/llm/local/online.py
+    python examples/rule_based/live.py
 
 Requirements:
-    pip install -e ".[llm]"
-    # Set ALPACA_API_KEY and ALPACA_SECRET_KEY in .env
+    Set ALPACA_API_KEY and ALPACA_SECRET_KEY in .env
 """
 
 import os
-os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 import numpy as np
 import pandas as pd
@@ -21,31 +20,20 @@ import torch
 import tqdm
 from dotenv import load_dotenv
 
-from torchtrade.actor import LocalLLMActor
+from torchtrade.actor import MeanReversionActor
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
 from torchrl.envs import Compose, DoubleToFloat, TransformedEnv
 from torchrl.envs.transforms import InitTracker, RewardSum, StepCounter, UnsqueezeTransform
 
 load_dotenv(dotenv_path=".env")
-torch.set_float32_matmul_precision("high")
-
-
-def simple_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy().reset_index(drop=False)
-    df["features_open"] = df["open"]
-    df["features_high"] = df["high"]
-    df["features_low"] = df["low"]
-    df["features_close"] = df["close"]
-    df["features_volume"] = df["volume"]
-    df.dropna(inplace=True)
-    return df
 
 
 def main():
     print("=" * 80)
-    print("LocalLLMActor - Live Trading (Alpaca Paper)")
+    print("MeanReversionActor - Live Trading (Alpaca Paper)")
     print("=" * 80)
 
     device = torch.device("cpu")
@@ -54,23 +42,40 @@ def main():
     torch.manual_seed(42)
     np.random.seed(42)
 
-    # Create Alpaca environment
+    # Create actor
+    execute_tf = TimeFrame(1, TimeFrameUnit.Minute)
+    actor = MeanReversionActor(
+        bb_window=20,
+        bb_std=2.0,
+        stoch_rsi_window=14,
+        oversold_threshold=20.0,
+        overbought_threshold=80.0,
+        execute_timeframe=execute_tf,
+        debug=True,
+    )
+
+    # Create Alpaca environment with actor's preprocessing
     print("\nCreating Alpaca paper trading environment...")
     config = AlpacaTradingEnvConfig(
         symbol="BTC/USD",
         paper=True,
-        time_frames=["1Min"], # For testing we use 1Min
+        time_frames=["1Min"],
         window_sizes=[48],
-        execute_on="1Min", 
-        include_base_features=True,
+        execute_on="1Min",
+        include_base_features=False,
     )
 
     env = AlpacaTorchTradingEnv(
         config,
         api_key=os.getenv("ALPACA_API_KEY"),
         api_secret=os.getenv("ALPACA_SECRET_KEY"),
-        feature_preprocessing_fn=simple_preprocessing,
+        feature_preprocessing_fn=actor.get_preprocessing_fn(),
     )
+
+    # Set actor's market_data_keys and features_order from env
+    actor.market_data_keys = env.market_data_keys
+    actor.features_order = env.feature_keys
+    actor.feature_idx = {feat: i for i, feat in enumerate(actor.features_order)}
 
     # Apply transforms
     unsqueeze_keys = env.market_data_keys + ["account_state"]
@@ -85,25 +90,10 @@ def main():
         ),
     )
 
-    # Create LocalLLMActor using env attributes
-    print("Initializing LocalLLMActor (Qwen/Qwen2.5-0.5B-Instruct)...")
-    base_env = env.base_env if hasattr(env, "base_env") else env
-    policy = LocalLLMActor(
-        model="Qwen/Qwen2.5-0.5B-Instruct",
-        backend="vllm",
-        device="cuda" if torch.cuda.is_available() else "cpu",
-        debug=True,
-        market_data_keys=base_env.market_data_keys,
-        account_state_labels=base_env.account_state,
-        action_levels=base_env.action_levels,
-        symbol=config.symbol,
-        execute_on=config.execute_on,
-    )
-
     # Create collector and replay buffer
     collector = SyncDataCollector(
         env,
-        policy,
+        actor,
         init_random_frames=0,
         frames_per_batch=1,
         total_frames=total_frames,

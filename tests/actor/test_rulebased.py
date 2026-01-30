@@ -163,7 +163,7 @@ class TestMeanReversionActor:
 
         obs = TensorDict({
             "market_data_5Minute_50": data.unsqueeze(0),
-            "account_state": torch.tensor([1000.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0]),  # No position
+            "account_state": torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0, 1.0]),  # flat position
         }, batch_size=[])
 
         actor = MeanReversionActor(
@@ -198,7 +198,7 @@ class TestMeanReversionActor:
 
         obs = TensorDict({
             "market_data_5Minute_50": data.unsqueeze(0),
-            "account_state": torch.tensor([1000.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0]),  # No position
+            "account_state": torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0, 1.0]),  # flat position
         }, batch_size=[])
 
         actor = MeanReversionActor(
@@ -233,7 +233,7 @@ class TestMeanReversionActor:
 
         obs = TensorDict({
             "market_data_5Minute_50": data.unsqueeze(0),
-            "account_state": torch.tensor([1000.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0]),
+            "account_state": torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0, 1.0]),  # flat position
         }, batch_size=[])
 
         actor = MeanReversionActor(
@@ -267,7 +267,7 @@ class TestMeanReversionActor:
 
         obs = TensorDict({
             "market_data_5Minute_50": data.unsqueeze(0),
-            "account_state": torch.tensor([1000.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0]),
+            "account_state": torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0, 1.0]),  # flat position
         }, batch_size=[])
 
         actor = MeanReversionActor(
@@ -280,7 +280,7 @@ class TestMeanReversionActor:
         assert action == 1, "Expected HOLD when volume too low"
 
     def test_select_action_respects_position(self):
-        """Test that actor respects existing positions (won't buy when long)."""
+        """Test that actor maintains position when already long and buy signal appears."""
         features_order = [
             "close", "open", "high", "low", "volume",
             "features_bb_middle", "features_bb_std", "features_bb_upper",
@@ -289,7 +289,7 @@ class TestMeanReversionActor:
             "features_volume", "features_avg_volume"
         ]
 
-        # Perfect BUY setup
+        # Perfect BUY setup (bb_position < 0, so exit condition won't trigger)
         data = create_market_data_with_features(
             bb_position=-0.1,
             stoch_k_now=25.0,
@@ -302,7 +302,7 @@ class TestMeanReversionActor:
         # Already have a long position
         obs = TensorDict({
             "market_data_5Minute_50": data.unsqueeze(0),
-            "account_state": torch.tensor([1000.0, 1.0, 100.0, 100.0, 100.0, 0.0, 0.0]),  # position_size > 0
+            "account_state": torch.tensor([1.0, 1.0, 0.0, 5.0, 1.0, 1.0]),  # long position
         }, batch_size=[])
 
         actor = MeanReversionActor(
@@ -312,5 +312,6 @@ class TestMeanReversionActor:
         )
 
         action = actor.select_action(obs)
-        assert action == 1, "Expected HOLD when already long and buy signal appears"
+        # Action 2 = LONG: maintains position (action 1 = FLAT would close it)
+        assert action == 2, "Expected LONG to maintain position when already long"
 
