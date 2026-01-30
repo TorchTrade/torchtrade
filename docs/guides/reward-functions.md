@@ -16,112 +16,151 @@ You can potentially improve learning and generalization by customizing this rewa
 
 ## How It Works
 
-Custom reward functions receive a `RewardContext` object and return a float reward:
+Custom reward functions receive a `HistoryTracker` object and return a float reward:
 
 ```python
-from torchtrade.envs.reward import RewardContext
-
-def my_reward(ctx: RewardContext) -> float:
-    """Custom reward function"""
+def my_reward(history) -> float:
+    """Custom reward function."""
     return reward_value
+```
+
+Pass your reward function via the environment config:
+
+```python
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
+
+config = SequentialTradingEnvConfig(
+    reward_function=my_reward,
+    ...
+)
+env = SequentialTradingEnv(df, config)
 ```
 
 ---
 
-## RewardContext Fields
+## HistoryTracker Fields
 
-### Quick Reference Table
+The `history` object passed to your reward function is a `HistoryTracker` instance with these attributes:
 
-| Category | Field | Type | Description |
-|----------|-------|------|-------------|
-| **Core** | `old_portfolio_value` | float | Portfolio value before action |
-| | `new_portfolio_value` | float | Portfolio value after action |
-| | `action` | int | Action taken (index) |
-| | `current_step` | int | Current episode step (0-indexed) |
-| | `max_steps` | int | Maximum steps in episode |
-| | `trade_executed` | bool | Whether a trade occurred |
-| | `fee_paid` | float | Transaction fees this step |
-| | `slippage_amount` | float | Slippage incurred this step |
-| **Sequential Envs** | `portfolio_value_history` | list[float] | Past portfolio values |
-| | `action_history` | list[int] | Past actions |
-| | `reward_history` | list[float] | Past rewards |
-| | `buy_and_hold_value` | float | Buy & hold benchmark (terminal only) |
-| **Futures Envs** | `leverage` | float | Current leverage |
-| | `margin_ratio` | float | Current margin ratio |
-| | `liquidation_price` | float | Liquidation price |
-| | `liquidated` | bool | Whether position was liquidated |
-| **One-Step Envs** | `rollout_returns` | tensor | Returns during rollout |
+| Field | Type | Description |
+|-------|------|-------------|
+| `portfolio_values` | list[float] | Portfolio value at each step |
+| `base_prices` | list[float] | Asset price at each step |
+| `actions` | list[float] | Actions taken at each step |
+| `rewards` | list[float] | Rewards received at each step |
+| `positions` | list[float] | Position sizes (positive=long, negative=short, 0=flat) |
+| `action_types` | list[str] | Action types ("hold", "buy", "sell", "long", "short") |
+
+All lists grow by one element per step. Use indexing (e.g., `history.portfolio_values[-1]`) to access recent values.
 
 ---
 
-## Basic Examples
+## Built-in Reward Functions
 
-### Example 1: Transaction Cost Penalty
+TorchTrade provides three built-in reward functions in `torchtrade.envs.core.default_rewards`:
 
 ```python
-from torchtrade.envs.reward import RewardContext
-import numpy as np
+from torchtrade.envs.core.default_rewards import (
+    log_return_reward,       # Default - log(value_t / value_t-1)
+    sharpe_ratio_reward,     # Running Sharpe ratio
+    drawdown_penalty_reward, # Log return with drawdown penalty
+)
 
-def cost_penalty_reward(ctx: RewardContext) -> float:
-    """Penalize transaction costs to discourage overtrading"""
-    if ctx.old_portfolio_value <= 0:
-        return 0.0
-
-    # Base reward: log return
-    log_return = np.log(ctx.new_portfolio_value / ctx.old_portfolio_value)
-
-    # Penalty for fees and slippage (normalized by portfolio value)
-    cost_penalty = -(ctx.fee_paid + ctx.slippage_amount) / ctx.old_portfolio_value
-
-    return log_return + cost_penalty
-
-# Use in environment
 config = SequentialTradingEnvConfig(
-    reward_fn=cost_penalty_reward,
+    reward_function=sharpe_ratio_reward,
     ...
 )
 ```
 
-### Example 2: Sharpe Ratio Reward
+### `log_return_reward` (default)
 
 ```python
-def sharpe_ratio_reward(ctx: RewardContext) -> float:
-    """Reward based on running Sharpe ratio"""
-    # Access portfolio history
-    history = ctx.metadata.get('portfolio_value_history', [])
-
-    if len(history) < 10:  # Need minimum history
-        if ctx.old_portfolio_value <= 0:
-            return 0.0
-        return np.log(ctx.new_portfolio_value / ctx.old_portfolio_value)
-
-    # Compute returns from history
-    returns = [np.log(history[i] / history[i-1]) for i in range(1, len(history))]
-
-    # Compute Sharpe ratio
-    mean_return = np.mean(returns)
-    std_return = np.std(returns) + 1e-9
-    sharpe = mean_return / std_return
-
-    return np.clip(sharpe, -10.0, 10.0)
+reward = log(portfolio_value[-1] / portfolio_value[-2])
 ```
 
-### Example 3: Sparse Terminal Reward
+- Scale-invariant, symmetric, handles compounding
+- Returns `-10.0` on bankruptcy, `0.0` if insufficient history
+
+### `sharpe_ratio_reward`
+
+Running Sharpe ratio over all historical portfolio values. Encourages risk-adjusted returns. Clipped to `[-10.0, 10.0]`.
+
+### `drawdown_penalty_reward`
+
+Log return plus a penalty when drawdown from peak exceeds 10%. Discourages large drawdowns while rewarding gains.
+
+---
+
+## Custom Examples
+
+### Example 1: Transaction Cost Penalty
 
 ```python
-def terminal_reward(ctx: RewardContext) -> float:
-    """Reward only at episode end (for episodic optimization)"""
-    # No reward during episode
-    if ctx.current_step < ctx.max_steps - 1:
+import numpy as np
+
+def cost_aware_reward(history) -> float:
+    """Log return scaled by trade frequency."""
+    if len(history.portfolio_values) < 2:
         return 0.0
 
-    # Terminal reward: compare to buy & hold
-    buy_hold = ctx.metadata.get('buy_and_hold_value', ctx.old_portfolio_value)
+    old_value = history.portfolio_values[-2]
+    new_value = history.portfolio_values[-1]
 
-    if ctx.new_portfolio_value > buy_hold:
-        return 1.0  # Beat buy & hold
-    else:
-        return -1.0  # Lost to buy & hold
+    if old_value <= 0:
+        return -10.0
+
+    log_return = np.log(new_value / old_value)
+
+    # Penalize frequent action changes
+    if len(history.actions) >= 2 and history.actions[-1] != history.actions[-2]:
+        log_return -= 0.001  # Small penalty for switching
+
+    return float(log_return)
+```
+
+### Example 2: Sparse Terminal Reward
+
+```python
+def terminal_reward(history) -> float:
+    """Only reward at episode end based on total return."""
+    if len(history.portfolio_values) < 2:
+        return 0.0
+
+    # Give zero reward during episode
+    # At terminal step, the environment handles this naturally
+    # Use total return as final reward
+    initial_value = history.portfolio_values[0]
+    current_value = history.portfolio_values[-1]
+
+    if initial_value <= 0:
+        return -10.0
+
+    return float(np.log(current_value / initial_value))
+```
+
+### Example 3: Multi-Objective Reward
+
+```python
+def multi_objective_reward(history) -> float:
+    """Combine returns with drawdown penalty."""
+    if len(history.portfolio_values) < 2:
+        return 0.0
+
+    old_value = history.portfolio_values[-2]
+    new_value = history.portfolio_values[-1]
+
+    if old_value <= 0 or new_value <= 0:
+        return -10.0
+
+    # Component 1: Log return
+    log_ret = float(np.log(new_value / old_value))
+
+    # Component 2: Drawdown from peak
+    peak = max(history.portfolio_values)
+    drawdown = (peak - new_value) / peak if peak > 0 else 0.0
+    dd_penalty = -5.0 * drawdown if drawdown > 0.1 else 0.0
+
+    return log_ret + dd_penalty
 ```
 
 ---
@@ -131,11 +170,10 @@ def terminal_reward(ctx: RewardContext) -> float:
 | Reward Type | Use Case | Pros | Cons |
 |-------------|----------|------|------|
 | **Log Return** (default) | General purpose | Simple, stable | Ignores costs, risk |
-| **Cost Penalty** | Reduce overtrading | Discourages frequent trades | May miss opportunities |
 | **Sharpe Ratio** | Risk-adjusted performance | Considers volatility | Requires history, unstable early |
-| **Terminal Sparse** | Episodic tasks | Clear objective | Sparse signal, slow learning |
 | **Drawdown Penalty** | Risk management | Controls max loss | May exit winners early |
-| **Win Rate Bonus** | Consistency focus | Rewards reliability | May sacrifice returns |
+| **Terminal Sparse** | Episodic tasks | Clear objective | Sparse signal, slow learning |
+| **Cost Penalty** | Reduce overtrading | Discourages frequent trades | May miss opportunities |
 
 ---
 
@@ -155,140 +193,22 @@ def terminal_reward(ctx: RewardContext) -> float:
 
 ### 2. Normalize Rewards
 
-Keep rewards in a consistent range (e.g., [-1, 1]) for stable learning:
+Keep rewards in a consistent range for stable learning:
 
 ```python
 # Clip extreme values
 reward = np.clip(reward, -10.0, 10.0)
-
-# Or normalize by running statistics
-reward = (reward - running_mean) / (running_std + 1e-9)
 ```
 
 ### 3. Avoid Lookahead Bias
 
-Only use information available at decision time:
-
-```python
-# ❌ Lookahead bias
-future_return = history[t+1] / history[t] - 1
-
-# ✅ Correct - past data only
-past_return = history[t] / history[t-1] - 1
-```
+Only use information available at decision time — use past values from `history`, never future data.
 
 ### 4. Consider Environment Type
 
-**Sequential Environments**: Can use history for complex rewards
-**One-Step Environments**: Limited to immediate reward (no history)
+**Sequential Environments**: Full history available for complex rewards
+**One-Step Environments**: Limited to immediate reward (minimal history)
 **Futures Environments**: Consider liquidation risk in reward
-
----
-
-## Advanced Patterns
-
-### Multi-Objective Rewards
-
-Combine multiple objectives with weighted sum:
-
-```python
-def multi_objective_reward(ctx: RewardContext) -> float:
-    # Component 1: Returns
-    log_return = np.log(ctx.new_portfolio_value / ctx.old_portfolio_value)
-
-    # Component 2: Cost penalty
-    cost = -(ctx.fee_paid + ctx.slippage_amount) / ctx.old_portfolio_value
-
-    # Component 3: Risk penalty (drawdown)
-    history = ctx.metadata.get('portfolio_value_history', [])
-    max_value = max(history) if history else ctx.old_portfolio_value
-    drawdown = (ctx.new_portfolio_value - max_value) / max_value
-    drawdown_penalty = min(0, drawdown) * 0.5  # Penalize only negative
-
-    # Weighted combination
-    return (
-        1.0 * log_return +      # 100% weight on returns
-        0.5 * cost +             # 50% weight on costs
-        0.3 * drawdown_penalty   # 30% weight on drawdown
-    )
-```
-
-### Adaptive Rewards
-
-Adjust rewards based on training progress:
-
-```python
-class AdaptiveReward:
-    def __init__(self):
-        self.episode_count = 0
-
-    def __call__(self, ctx: RewardContext) -> float:
-        # Early training: Dense rewards for exploration
-        if self.episode_count < 1000:
-            return np.log(ctx.new_portfolio_value / ctx.old_portfolio_value)
-
-        # Later training: Sparse terminal rewards for optimization
-        if ctx.current_step < ctx.max_steps - 1:
-            return 0.0
-        return ctx.new_portfolio_value - ctx.old_portfolio_value
-
-    def on_episode_end(self):
-        self.episode_count += 1
-
-# Note: You'll need to manually call on_episode_end in your training loop
-```
-
----
-
-## Debugging Rewards
-
-### Log Reward Statistics
-
-```python
-def debug_reward(ctx: RewardContext) -> float:
-    reward = my_reward_fn(ctx)
-
-    # Log statistics periodically
-    if ctx.current_step % 100 == 0:
-        print(f"Step {ctx.current_step}:")
-        print(f"  Reward: {reward:.4f}")
-        print(f"  Portfolio: {ctx.new_portfolio_value:.2f}")
-        print(f"  Action: {ctx.action}")
-
-    return reward
-```
-
-### Check Reward Distribution
-
-```python
-# Collect rewards during training
-rewards = []
-
-# After some episodes
-import matplotlib.pyplot as plt
-
-plt.hist(rewards, bins=50)
-plt.title("Reward Distribution")
-plt.xlabel("Reward")
-plt.ylabel("Frequency")
-plt.show()
-
-# Check statistics
-print(f"Mean: {np.mean(rewards):.4f}")
-print(f"Std: {np.std(rewards):.4f}")
-print(f"Min: {np.min(rewards):.4f}")
-print(f"Max: {np.max(rewards):.4f}")
-```
-
-Good distributions:
-- **Not constant**: Should vary with performance
-- **Reasonable range**: Typically [-10, 10] for log returns
-- **Some positive values**: Agent can achieve rewards
-
-Bad patterns:
-- **All zeros**: Reward function may have bug
-- **Extreme outliers**: May need clipping
-- **Constant value**: Reward not discriminating actions
 
 ---
 

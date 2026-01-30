@@ -204,32 +204,8 @@ Choose window sizes based on the information needed:
 
 ## Performance Tips
 
-### 1. Efficient Preprocessing
-
-```python
-# ❌ Slow - recalculating indicators
-def slow_preprocessing(df):
-    for i in range(len(df)):
-        df.loc[i, "sma"] = df["close"][i-20:i].mean()
-    return df
-
-# ✅ Fast - vectorized operations
-def fast_preprocessing(df):
-    df["sma"] = df["close"].rolling(20).mean()
-    return df
-```
-
-### 2. Appropriate Window Sizes
-
-Larger windows = more memory and computation:
-
-```python
-# Memory usage ≈ batch_size × num_envs × sum(window_sizes) × num_features × 4 bytes
-
-# Example: 32 batch × 8 envs × (12+8+8) windows × 10 features × 4 bytes ≈ 290 KB
-```
-
-Keep `sum(window_sizes) × num_features` reasonable (< 1000 total values per observation).
+- **Vectorize preprocessing**: Use pandas operations (`df["close"].rolling(20).mean()`) instead of loops.
+- **Appropriate window sizes**: Larger windows = more memory. Keep `sum(window_sizes) × num_features` < 1000 total values per observation.
 
 ---
 

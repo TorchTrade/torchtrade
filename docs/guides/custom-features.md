@@ -125,107 +125,17 @@ config = SequentialTradingEnvConfig(
 - **TorchRL transforms** - VecNormV2 and ObservationNorm are available but may have device compatibility issues
 - **Network level** - Use BatchNorm, LayerNorm, or other normalization layers in your policy network
 
-### Advanced Normalization Considerations
-
-The StandardScaler approach above uses fixed statistics from the training data. For financial data with **regime changes** (market conditions that shift over time), you might eventually want more adaptive approaches:
-
-**Per-regime normalization:**
-- Detect market regimes (bull/bear, high/low volatility)
-- Maintain separate scalers for each regime
-- Apply the appropriate scaler based on current market conditions
-
-**Rolling window statistics:**
-- Use a sliding window (e.g., last 252 trading days) to compute normalization statistics
-- Updates statistics as new data arrives
-- Adapts to gradual market shifts
-
-**Adaptive normalization:**
-- Exponentially weighted moving average of statistics
-- Continuously updates during training
-- Balances stability with adaptation
-
-**Example of rolling window approach:**
-```python
-def rolling_normalization(df: pd.DataFrame, window=252) -> pd.DataFrame:
-    """Normalize using rolling window statistics."""
-    df = df.copy()
-
-    # Create features
-    df["features_close"] = df["close"]
-    df["features_volume"] = df["volume"]
-
-    # Apply rolling normalization
-    for col in [c for c in df.columns if c.startswith("features_")]:
-        rolling_mean = df[col].rolling(window=window, min_periods=1).mean()
-        rolling_std = df[col].rolling(window=window, min_periods=1).std()
-        df[col] = (df[col] - rolling_mean) / (rolling_std + 1e-8)
-
-    df.fillna(0, inplace=True)
-    return df
-```
-
-**Trade-offs:**
-- Fixed StandardScaler: ✅ Simpler, reproducible | ⚠️ Less adaptive
-- Adaptive methods: ✅ Handles regime changes | ⚠️ More complex, harder to reproduce
-
-For most use cases, StandardScaler is sufficient. Consider adaptive methods if you observe performance degradation over time due to market regime changes.
+!!! tip "Advanced Normalization"
+    StandardScaler uses fixed statistics from training data. For data with **regime changes**, consider rolling window normalization or per-regime scalers. For most use cases, StandardScaler is sufficient.
 
 ---
 
 ## Important Rules
 
-### 1. Feature Column Naming
-
-**All feature columns MUST start with `features_` prefix:**
-
-```python
-# ✅ Correct
-df["features_rsi_14"] = ...
-df["features_macd"] = ...
-df["features_close"] = ...
-
-# ❌ Wrong - will be ignored
-df["rsi_14"] = ...
-df["macd"] = ...
-df["close"] = ...
-```
-
-### 2. Handle NaN Values
-
-Technical indicators often produce NaN values at the beginning. **Always fill NaN values:**
-
-```python
-# Option 1: Fill with 0 (recommended for most indicators)
-df.fillna(0, inplace=True)
-
-# Option 2: Forward fill (use for prices)
-df.fillna(method='ffill', inplace=True)
-
-# Option 3: Backward fill
-df.fillna(method='bfill', inplace=True)
-```
-
-### 3. Return the Modified DataFrame
-
-Your function must return the modified DataFrame:
-
-```python
-def preprocessing(df: pd.DataFrame) -> pd.DataFrame:
-    # ... add features ...
-    return df  # ✅ Return modified DataFrame
-```
-
-### 4. Avoid Lookahead Bias
-
-**Do NOT use future data in your features:**
-
-```python
-# ❌ Lookahead bias - using future data
-df["features_future_return"] = df["close"].pct_change().shift(-1)
-
-# ✅ Correct - only past data
-df["features_past_return"] = df["close"].pct_change()
-```
+1. **Feature prefix**: All columns MUST start with `features_` (e.g., `features_rsi_14`). Columns without this prefix are ignored.
+2. **Handle NaN**: Technical indicators produce NaN at the start. Always call `df.fillna(0, inplace=True)` (or `ffill`/`bfill`).
+3. **Return the DataFrame**: Your function must `return df`.
+4. **No lookahead bias**: Only use past data. Never use `.shift(-1)` or future values.
 
 ---
 
@@ -273,45 +183,10 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 ---
 
-## Performance Considerations
+## Performance Tips
 
-### Vectorize Operations
-
-Use pandas vectorized operations instead of loops for faster computation:
-
-```python
-# ❌ Slow - using loops
-for i in range(len(df)):
-    df.loc[i, "features_return"] = (df.loc[i, "close"] / df.loc[i-1, "close"]) - 1
-
-# ✅ Fast - vectorized (100x faster)
-df["features_return"] = df["close"].pct_change()
-```
-
-**General principle**: If you're using a loop, there's probably a pandas method that does it faster.
-
----
-
-## Debugging Tips
-
-### Check for NaN Values
-
-```python
-def safe_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
-    df["features_close"] = df["close"]
-    # ... add features ...
-
-    # Check for NaN values before filling
-    nan_counts = df.isna().sum()
-    if nan_counts.any():
-        print("⚠️ Warning: NaN values detected:")
-        print(nan_counts[nan_counts > 0])
-
-    df.fillna(0, inplace=True)
-    return df
-```
-
-This helps catch issues with indicator configuration or missing data.
+- **Vectorize**: Use pandas operations (`df["close"].pct_change()`) instead of loops — 100x faster.
+- **Check NaN**: Add `df.isna().sum()` during development to catch indicator issues before `fillna`.
 
 ---
 
