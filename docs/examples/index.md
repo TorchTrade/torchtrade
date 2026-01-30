@@ -307,9 +307,19 @@ Local models can be loaded from [HuggingFace Models](https://huggingface.co/mode
 
 ### Rule-Based Actors
 
-TorchTrade provides actor classes that allow easy creation of rule-based trading strategies using technical indicators and market signals, for example mean reversion, breakout, and more. These rule-based actors integrate seamlessly with TorchTrade environments for both backtesting and live trading, serving as baselines or components in hybrid approaches. This is especially interesting with our **[custom feature preprocessing](guides/custom-features.md)**, which allows you to add technical indicators and derived features to enhance rule-based strategies.
+TorchTrade provides [RuleBasedActor](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/rulebased/base.py) for creating trading strategies using technical indicators and market signals. These actors integrate seamlessly with TorchTrade environments for both backtesting and live trading, serving as baselines or components in hybrid approaches.
 
-**Future Work**: We plan to provide examples of rule-based strategies and hybrid approaches that combine rule-based policies with neural network policies as actors, leveraging the strengths of both deterministic strategies and learned behaviors.
+Located in `examples/rule_based/`:
+
+| Example | Description |
+|---------|-------------|
+| **offline.py** | Backtesting a mean reversion strategy on historical data |
+| **live.py** | Live trading with the mean reversion strategy |
+
+Combine with **[custom feature preprocessing](../guides/custom-features.md)** to add technical indicators for rule-based strategies.
+
+!!! note "Future Work"
+    Hybrid approaches that combine rule-based policies with neural network policies as actors, leveraging the strengths of both deterministic strategies and learned behaviors.
 
 ### Live Trading
 
