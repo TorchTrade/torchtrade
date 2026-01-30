@@ -467,6 +467,50 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
 
         return position_qty, notional_value
 
+    def _get_action_markers(self, action_types, action_history, position_history, is_futures):
+        """Return list of (indices, marker, color, label, alpha) for action scatter plots."""
+        exit_types = {"close", "liquidation", "sltp_sl", "sltp_tp"}
+
+        if is_futures:
+            if action_types:
+                long_idx = [i for i, a in enumerate(action_types) if a == "long"]
+                short_idx = [i for i, a in enumerate(action_types) if a == "short"]
+                close_long_idx, close_short_idx = [], []
+                for i, a in enumerate(action_types):
+                    if a in exit_types and i > 0:
+                        prev = position_history[i - 1]
+                        if prev > 0:
+                            close_long_idx.append(i)
+                        elif prev < 0:
+                            close_short_idx.append(i)
+            else:
+                long_idx = [i for i, a in enumerate(action_history) if a == 1]
+                short_idx = [i for i, a in enumerate(action_history) if a == -1]
+                close_long_idx, close_short_idx = [], []
+
+            return [
+                (long_idx, '^', 'green', 'Long Open', 1.0),
+                (short_idx, 'v', 'red', 'Short Open', 1.0),
+                (close_long_idx, 'v', 'orange', 'Long Close', 0.7),
+                (close_short_idx, '^', 'cyan', 'Short Close', 0.7),
+            ]
+
+        # Spot/long-only
+        if action_types:
+            buy_idx = [i for i, a in enumerate(action_types) if a in ("buy", "long")]
+            sell_idx = [i for i, a in enumerate(action_types) if a == "sell"]
+            close_idx = [i for i, a in enumerate(action_types) if a in exit_types]
+        else:
+            buy_idx = [i for i, a in enumerate(action_history) if a == 1]
+            sell_idx = [i for i, a in enumerate(action_history) if a == -1]
+            close_idx = []
+
+        return [
+            (buy_idx, '^', 'green', 'Buy', 1.0),
+            (sell_idx, 'v', 'red', 'Sell', 1.0),
+            (close_idx, 'v', 'orange', 'Position Close', 0.7),
+        ]
+
     def render_history(self, return_fig=False, plot_bh_baseline=True):
         """
         Render the history of the environment.
@@ -497,205 +541,81 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         else:
             buy_and_hold_balance = None
 
-        # Check if this is a futures environment (has position history)
-        is_futures = 'positions' in history_dict
+        # Check if this is a futures environment (supports shorting)
+        is_futures = getattr(self, 'allows_short', False)
+        position_history = history_dict.get('positions', [])
 
-        if is_futures:
-            # Futures environment: 3 subplots (price, portfolio, position)
-            position_history = history_dict['positions']
-            fig, axes = plt.subplots(
-                3, 1, figsize=(12, 10), sharex=True,
-                gridspec_kw={'height_ratios': [3, 2, 1]}
-            )
-            ax1, ax2, ax3 = axes
+        fig, (ax1, ax2, ax3) = plt.subplots(
+            3, 1, figsize=(12, 10), sharex=True,
+            gridspec_kw={'height_ratios': [3, 2, 1]}
+        )
 
-            # Plot price history
-            ax1.plot(
-                time_indices, price_history,
-                label='Price History', color='blue', linewidth=1.5
-            )
+        # --- Subplot 1: Price history with action markers ---
+        ax1.plot(
+            time_indices, price_history,
+            label='Price History', color='blue', linewidth=1.5
+        )
 
-            # Plot long/short actions and position exits
-            # Get action types if available (backward compatibility)
-            action_types = history_dict.get('action_types', [])
-            if action_types:
-                # Use action_types for accurate classification
-                long_indices = [i for i, atype in enumerate(action_types) if atype == "long"]
-                short_indices = [i for i, atype in enumerate(action_types) if atype == "short"]
-
-                # Track position exits (close, liquidation, SL/TP)
-                # For exits, determine marker by checking previous position direction
-                close_long_indices = []
-                close_short_indices = []
-                exit_action_types = ["close", "liquidation", "sltp_sl", "sltp_tp"]
-
-                for i, atype in enumerate(action_types):
-                    if atype in exit_action_types:
-                        # Check previous position to determine which direction was closed
-                        # Position at index i is AFTER the close, so check position at i-1
-                        if i > 0:
-                            prev_position = position_history[i-1]
-                            if prev_position > 0:  # Was long
-                                close_long_indices.append(i)
-                            elif prev_position < 0:  # Was short
-                                close_short_indices.append(i)
-            else:
-                # Fallback to legacy action value checks
-                long_indices = [i for i, action in enumerate(action_history) if action == 1]
-                short_indices = [i for i, action in enumerate(action_history) if action == -1]
-                close_long_indices = []
-                close_short_indices = []
-
-            long_prices = [price_history[i] for i in long_indices]
-            short_prices = [price_history[i] for i in short_indices]
-            close_long_prices = [price_history[i] for i in close_long_indices]
-            close_short_prices = [price_history[i] for i in close_short_indices]
-
-            # Plot position opens
-            ax1.scatter(
-                long_indices, long_prices,
-                marker='^', color='green', s=80, label='Long Open', zorder=5
-            )
-            ax1.scatter(
-                short_indices, short_prices,
-                marker='v', color='red', s=80, label='Short Open', zorder=5
-            )
-            # Plot position closes
-            ax1.scatter(
-                close_long_indices, close_long_prices,
-                marker='v', color='orange', s=80, label='Long Close', zorder=5, alpha=0.7
-            )
-            ax1.scatter(
-                close_short_indices, close_short_prices,
-                marker='^', color='cyan', s=80, label='Short Close', zorder=5, alpha=0.7
-            )
-
-            ax1.set_ylabel('Price (USD)')
-            ax1.set_title('Price History with Long/Short Actions')
-            ax1.legend()
-            ax1.grid(True, alpha=0.3)
-
-            # Plot portfolio value
-            ax2.plot(
-                time_indices, portfolio_value_history,
-                label='Portfolio Value', color='green', linewidth=1.5
-            )
-            if plot_bh_baseline:
-                ax2.plot(
-                    time_indices, buy_and_hold_balance,
-                    label='Buy and Hold', color='purple', linestyle='--', linewidth=1.5
+        action_types = history_dict.get('action_types', [])
+        markers = self._get_action_markers(
+            action_types, action_history, position_history, is_futures
+        )
+        for indices, marker, color, label, alpha in markers:
+            if indices:
+                prices = [price_history[i] for i in indices]
+                ax1.scatter(
+                    indices, prices,
+                    marker=marker, color=color, s=80, label=label,
+                    zorder=5, alpha=alpha
                 )
-                ax2.set_title('Portfolio Value vs Buy and Hold')
-            else:
-                ax2.set_title('Portfolio Value')
-            ax2.set_ylabel('Portfolio Value (USD)')
-            ax2.legend()
-            ax2.grid(True, alpha=0.3)
 
-            # Plot exposure percentage history
-            # Calculate exposure % = (position_size * price / portfolio_value) * 100
+        action_label = 'Long/Short' if is_futures else 'Buy/Sell'
+        ax1.set_ylabel('Price (USD)')
+        ax1.set_title(f'Price History with {action_label} Actions')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+        # --- Subplot 2: Portfolio value ---
+        ax2.plot(
+            time_indices, portfolio_value_history,
+            label='Portfolio Value', color='green', linewidth=1.5
+        )
+        if plot_bh_baseline:
+            ax2.plot(
+                time_indices, buy_and_hold_balance,
+                label='Buy and Hold', color='purple', linestyle='--', linewidth=1.5
+            )
+            ax2.set_title('Portfolio Value vs Buy and Hold')
+        else:
+            ax2.set_title('Portfolio Value')
+        ax2.set_ylabel('Portfolio Value (USD)')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+
+        # --- Subplot 3: Exposure history ---
+        if position_history:
             exposure_pct = [
                 (pos * price / pv * 100) if pv > 0 else 0.0
                 for pos, price, pv in zip(position_history, price_history, portfolio_value_history)
             ]
-
             ax3.fill_between(
                 time_indices, exposure_pct, 0,
                 where=[e > 0 for e in exposure_pct],
                 color='green', alpha=0.3, label='Long'
             )
-            ax3.fill_between(
-                time_indices, exposure_pct, 0,
-                where=[e < 0 for e in exposure_pct],
-                color='red', alpha=0.3, label='Short'
-            )
+            if is_futures:
+                ax3.fill_between(
+                    time_indices, exposure_pct, 0,
+                    where=[e < 0 for e in exposure_pct],
+                    color='red', alpha=0.3, label='Short'
+                )
             ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
-            ax3.set_xlabel('Time (Index)')
             ax3.set_ylabel('Exposure (%)')
             ax3.set_title('Exposure History')
             ax3.legend()
             ax3.grid(True, alpha=0.3)
 
-        else:
-            # Long-only environment: 2 subplots (price, portfolio)
-            fig, (ax1, ax2) = plt.subplots(
-                2, 1, figsize=(10, 8), sharex=True,
-                gridspec_kw={'height_ratios': [3, 2]}
-            )
-
-            # Plot price history
-            ax1.plot(
-                time_indices, price_history,
-                label='Price History', color='blue', linewidth=2
-            )
-
-            # Plot buy/sell actions and position exits
-            # Get action types if available (backward compatibility)
-            action_types = history_dict.get('action_types', [])
-            if action_types:
-                # Use action_types for accurate classification
-                buy_indices = [i for i, atype in enumerate(action_types) if atype in ("buy", "long")]
-                sell_indices = [i for i, atype in enumerate(action_types) if atype == "sell"]
-
-                # Track position exits (close, liquidation, SL/TP)
-                # For spot long-only, all closes are selling longs
-                exit_action_types = ["close", "liquidation", "sltp_sl", "sltp_tp"]
-                close_indices = [i for i, atype in enumerate(action_types) if atype in exit_action_types]
-            else:
-                # Fallback to legacy action value checks
-                buy_indices = [i for i, action in enumerate(action_history) if action == 1]
-                sell_indices = [i for i, action in enumerate(action_history) if action == -1]
-                close_indices = []
-
-            buy_prices = [price_history[i] for i in buy_indices]
-            sell_prices = [price_history[i] for i in sell_indices]
-            close_prices = [price_history[i] for i in close_indices]
-
-            # Plot position opens
-            ax1.scatter(
-                buy_indices, buy_prices,
-                marker='^', color='green', s=100, label='Buy/Long Open'
-            )
-            ax1.scatter(
-                sell_indices, sell_prices,
-                marker='v', color='red', s=100, label='Sell'
-            )
-            # Plot position closes (for long-only, these are exits)
-            ax1.scatter(
-                close_indices, close_prices,
-                marker='v', color='orange', s=100, label='Position Close', alpha=0.7
-            )
-
-            ax1.set_ylabel('Price (USD)')
-            ax1.set_title('Price History with Buy/Sell Actions')
-            ax1.legend()
-            ax1.grid(True)
-
-            # Plot portfolio value
-            ax2.plot(
-                time_indices, portfolio_value_history,
-                label='Portfolio Value History', color='green', linestyle='-', linewidth=2
-            )
-            if plot_bh_baseline:
-                ax2.plot(
-                    time_indices, buy_and_hold_balance,
-                    label='Buy and Hold', color='purple', linestyle='-', linewidth=2
-                )
-                ax2.set_title('Portfolio Value History vs Buy and Hold')
-            else:
-                ax2.set_title('Portfolio Value History')
-
-            ax2.set_xlabel(
-                'Time (Index)' if not isinstance(time_indices[0], (str, datetime))
-                else 'Time'
-            )
-            ax2.set_ylabel('Portfolio Value (USD)')
-            ax2.legend()
-            ax2.grid(True)
-
-            # Format x-axis for timestamps if provided
-            if isinstance(time_indices[0], (str, datetime)):
-                fig.autofmt_xdate()
+        ax3.set_xlabel('Time (Index)')
 
         plt.tight_layout()
 
