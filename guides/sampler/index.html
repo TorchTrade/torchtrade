@@ -934,34 +934,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Performance Tips">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-efficient-preprocessing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Efficient Preprocessing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-appropriate-window-sizes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Appropriate Window Sizes
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1488,34 +1460,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Performance Tips">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-efficient-preprocessing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Efficient Preprocessing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-appropriate-window-sizes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Appropriate Window Sizes
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1856,25 +1800,10 @@
 </table>
 <hr />
 <h2 id="performance-tips">Performance Tips<a class="headerlink" href="#performance-tips" title="Permanent link">&para;</a></h2>
-<h3 id="1-efficient-preprocessing">1. Efficient Preprocessing<a class="headerlink" href="#1-efficient-preprocessing" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># ❌ Slow - recalculating indicators</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">slow_preprocessing</span><span class="p">(</span><span class="n">df</span><span class="p">):</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)):</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;sma&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;close&quot;</span><span class="p">][</span><span class="n">i</span><span class="o">-</span><span class="mi">20</span><span class="p">:</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="k">return</span> <span class="n">df</span>
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># ✅ Fast - vectorized operations</span>
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="k">def</span><span class="w"> </span><span class="nf">fast_preprocessing</span><span class="p">(</span><span class="n">df</span><span class="p">):</span>
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;sma&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;close&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">rolling</span><span class="p">(</span><span class="mi">20</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
-</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>    <span class="k">return</span> <span class="n">df</span>
-</span></code></pre></div>
-<h3 id="2-appropriate-window-sizes">2. Appropriate Window Sizes<a class="headerlink" href="#2-appropriate-window-sizes" title="Permanent link">&para;</a></h3>
-<p>Larger windows = more memory and computation:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Memory usage ≈ batch_size × num_envs × sum(window_sizes) × num_features × 4 bytes</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># Example: 32 batch × 8 envs × (12+8+8) windows × 10 features × 4 bytes ≈ 290 KB</span>
-</span></code></pre></div>
-<p>Keep <code>sum(window_sizes) × num_features</code> reasonable (&lt; 1000 total values per observation).</p>
+<ul>
+<li><strong>Vectorize preprocessing</strong>: Use pandas operations (<code>df["close"].rolling(20).mean()</code>) instead of loops.</li>
+<li><strong>Appropriate window sizes</strong>: Larger windows = more memory. Keep <code>sum(window_sizes) × num_features</code> &lt; 1000 total values per observation.</li>
+</ul>
 <hr />
 <h2 id="technical-reference">Technical Reference<a class="headerlink" href="#technical-reference" title="Permanent link">&para;</a></h2>
 <ul>

@@ -1327,7 +1327,7 @@
 <p>These results use default hyperparameters and are <strong>not optimized</strong>. They serve as visual examples of what training output looks like, not as performance targets.</p>
 </div>
 <h2 id="dqn-vs-ppo-sequentialtradingenv-futures-2x-leverage">DQN vs PPO — SequentialTradingEnv (Futures, 2x Leverage)<a class="headerlink" href="#dqn-vs-ppo-sequentialtradingenv-futures-2x-leverage" title="Permanent link">&para;</a></h2>
-<p>In this example we compare DQN and PPO on BTC/USD with 1Hour timeframe, <code>action_levels=[-1, 0, 1]</code>, <code>leverage=2</code>, and <strong>no transaction fees</strong> — purely to demonstrate general learning behavior. Note that without fees, policies typically overtrade since there is no cost to frequent position changes.</p>
+<p>In this example we compare DQN and PPO on BTC/USD with 1Hour timeframe, <code>action_levels=[-1, 0, 1]</code>, <code>leverage=2</code>, and <strong>no transaction fees</strong> — purely to demonstrate general learning behavior. The shown results are not realistic and should not be taken as indicative of real trading performance. Note that without fees, policies typically overtrade since there is no cost to frequent position changes.</p>
 <p>A common observation is <strong>overfitting</strong>: the policy learns to trade profitably on the training data but performance degrades on unseen test data. This is expected and highlights the importance of evaluating on held-out data and applying regularization techniques.</p>
 <h3 id="training-curves">Training Curves<a class="headerlink" href="#training-curves" title="Permanent link">&para;</a></h3>
 <p><img alt="DQN vs PPO" src="../../images/DQN-vs-PPO.png" /></p>
