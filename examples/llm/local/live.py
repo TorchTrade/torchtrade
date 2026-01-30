@@ -1,18 +1,19 @@
 """
-Live trading with LLMActor (OpenAI API) on Alpaca (paper trading).
+Live trading with LocalLLMActor on Alpaca (paper trading).
 
-Runs an OpenAI model as the trading policy on Alpaca's paper trading API,
+Runs a local LLM as the trading policy on Alpaca's paper trading API,
 collecting trajectories into a replay buffer.
 
 Usage:
-    python examples/llm/api/online.py
+    python examples/llm/local/live.py
 
 Requirements:
-    pip install openai python-dotenv
-    # Set OPENAI_API_KEY, ALPACA_API_KEY, and ALPACA_SECRET_KEY in .env
+    pip install -e ".[llm]"
+    # Set ALPACA_API_KEY and ALPACA_SECRET_KEY in .env
 """
 
 import os
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 import numpy as np
 import pandas as pd
@@ -20,7 +21,7 @@ import torch
 import tqdm
 from dotenv import load_dotenv
 
-from torchtrade.actor import FrontierLLMActor
+from torchtrade.actor import LocalLLMActor
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
@@ -44,7 +45,7 @@ def simple_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
 def main():
     print("=" * 80)
-    print("LLMActor (OpenAI API) - Live Trading (Alpaca Paper)")
+    print("LocalLLMActor - Live Trading (Alpaca Paper)")
     print("=" * 80)
 
     device = torch.device("cpu")
@@ -60,7 +61,7 @@ def main():
         paper=True,
         time_frames=["1Min"], # For testing we use 1Min
         window_sizes=[48],
-        execute_on="1Min",
+        execute_on="1Min", 
         include_base_features=True,
     )
 
@@ -73,7 +74,7 @@ def main():
 
     # Apply transforms
     unsqueeze_keys = env.market_data_keys + ["account_state"]
-    transformed_env = TransformedEnv(
+    env = TransformedEnv(
         env,
         Compose(
             InitTracker(),
@@ -84,22 +85,24 @@ def main():
         ),
     )
 
-    # Create LLMActor
-    print("Initializing LLMActor (OpenAI API)...")
-    policy = FrontierLLMActor(
-        market_data_keys=env.market_data_keys,
-        account_state_labels=env.account_state,
-        action_levels=env.action_levels,
-        model="gpt-4o-mini",
+    # Create LocalLLMActor using env attributes
+    print("Initializing LocalLLMActor (Qwen/Qwen2.5-0.5B-Instruct)...")
+    base_env = env.base_env if hasattr(env, "base_env") else env
+    policy = LocalLLMActor(
+        model="Qwen/Qwen2.5-0.5B-Instruct",
+        backend="vllm",
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        debug=True,
+        market_data_keys=base_env.market_data_keys,
+        account_state_labels=base_env.account_state,
+        action_levels=base_env.action_levels,
         symbol=config.symbol,
         execute_on=config.execute_on,
-        feature_keys=["open", "high", "low", "close", "volume"],
-        debug=True,
     )
 
     # Create collector and replay buffer
     collector = SyncDataCollector(
-        transformed_env,
+        env,
         policy,
         init_random_frames=0,
         frames_per_batch=1,
@@ -146,8 +149,8 @@ def main():
 
     pbar.close()
     collector.shutdown()
-    if not transformed_env.is_closed:
-        transformed_env.close()
+    if not env.is_closed:
+        env.close()
 
     print("\n" + "=" * 80)
     print(f"Collection complete. {collected_frames} frames in replay buffer.")
