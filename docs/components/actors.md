@@ -112,9 +112,7 @@ output = actor(observation)
 For SLTP environments, pass `action_space_type="sltp"` and `action_map=env.action_map`. See `examples/llm/local/` for offline and live examples.
 
 ```bash
-# Installation
-pip install vllm                                    # vLLM backend
-pip install transformers accelerate bitsandbytes     # transformers backend
+pip install torchtrade[llm]  # Installs vllm, transformers, bitsandbytes
 ```
 
 ---

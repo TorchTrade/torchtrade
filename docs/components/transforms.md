@@ -93,6 +93,6 @@ pip install git+https://github.com/amazon-science/chronos-forecasting.git
 
 ## See Also
 
-- [TorchRL Transforms](https://pytorch.org/rl/reference/envs.html#transforms) - Built-in transforms (DoubleToFloat, RewardSum, etc.)
+- [TorchRL Transforms](https://pytorch.org/rl/reference/envs.html#transforms) - Built-in transforms (VecNorm, ActionMask, etc.)
 - [Feature Engineering](../guides/custom-features.md) - Manual feature engineering
 - [Example: PPO + Chronos](../examples/index.md) - Training with Chronos embeddings
