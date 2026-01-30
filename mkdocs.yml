@@ -37,7 +37,7 @@ theme:
 extra:
   social:
     - icon: fontawesome/brands/github-alt
-      link: https://github.com/TorchTrade/torchtrade_envs
+      link: https://github.com/TorchTrade/torchtrade
       name: TorchTrade on GitHub
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/torchtrade/

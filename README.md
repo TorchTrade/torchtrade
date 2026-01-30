@@ -35,13 +35,13 @@ TorchTrade provides modular environments for both live trading with major exchan
 
 **For comprehensive guides, tutorials, and API reference, visit our documentation:**
 
-👉 **[TorchTrade Documentation](https://torchtrade.github.io/torchtrade_envs/)** 👈
+👉 **[TorchTrade Documentation](https://torchtrade.github.io/torchtrade/)** 👈
 
-- **[Getting Started](https://torchtrade.github.io/torchtrade_envs/getting-started/)** - Installation and first environment
-- **[Environments](https://torchtrade.github.io/torchtrade_envs/environments/offline/)** - Offline and online trading environments
-- **[Examples](https://torchtrade.github.io/torchtrade_envs/examples/)** - Training scripts for PPO, IQL, GRPO, and more
-- **[Components](https://torchtrade.github.io/torchtrade_envs/components/losses/)** - Loss functions, transforms, and actors
-- **[Advanced Customization](https://torchtrade.github.io/torchtrade_envs/guides/custom-features/)** - Custom features, rewards, and environments
+- **[Getting Started](https://torchtrade.github.io/torchtrade/getting-started/)** - Installation and first environment
+- **[Environments](https://torchtrade.github.io/torchtrade/environments/offline/)** - Offline and online trading environments
+- **[Examples](https://torchtrade.github.io/torchtrade/examples/)** - Training scripts for PPO, IQL, GRPO, and more
+- **[Components](https://torchtrade.github.io/torchtrade/components/losses/)** - Loss functions, transforms, and actors
+- **[Advanced Customization](https://torchtrade.github.io/torchtrade/guides/custom-features/)** - Custom features, rewards, and environments
 
 ---
 
@@ -103,7 +103,7 @@ uv run python examples/online_rl/ppo/train.py \
     optim.lr=1e-4
 ```
 
-For detailed tutorials, see **[Getting Started Guide](https://torchtrade.github.io/torchtrade_envs/getting-started/)**.
+For detailed tutorials, see **[Getting Started Guide](https://torchtrade.github.io/torchtrade/getting-started/)**.
 
 ---
 
@@ -122,7 +122,7 @@ TorchTrade supports live trading with major exchanges:
 
 **Need another broker?** Request support for additional platforms (OKX, Bybit, Interactive Brokers, etc.) by [creating an issue](https://github.com/TorchTrade/torchtrade/issues/new) or emailing torchtradecontact@gmail.com.
 
-See **[Online Environments Documentation](https://torchtrade.github.io/torchtrade_envs/environments/online/)** for setup guides and examples.
+See **[Online Environments Documentation](https://torchtrade.github.io/torchtrade/environments/online/)** for setup guides and examples.
 
 ---
 
@@ -174,7 +174,7 @@ All environments support both spot (`leverage=1`) and futures (`leverage>1`) tra
 | **SequentialTradingEnvSLTP** | ✅ | ❌ | Risk management with SL/TP |
 | **OneStepTradingEnv** | ✅ | ✅ | GRPO, contextual bandits |
 
-See **[Offline Environments Documentation](https://torchtrade.github.io/torchtrade_envs/environments/offline/)** for detailed guides.
+See **[Offline Environments Documentation](https://torchtrade.github.io/torchtrade/environments/offline/)** for detailed guides.
 
 </details>
 
@@ -225,7 +225,7 @@ uv run python examples/online_rl/ppo/train.py \
 - `onestep_spot` - Contextual bandit (spot)
 - `onestep_futures` - Contextual bandit (futures)
 
-See **[Examples Documentation](https://torchtrade.github.io/torchtrade_envs/examples/)** for all available examples.
+See **[Examples Documentation](https://torchtrade.github.io/torchtrade/examples/)** for all available examples.
 
 </details>
 
@@ -378,7 +378,7 @@ config = SequentialTradingEnvConfig(
 )
 ```
 
-See **[Advanced Customization](https://torchtrade.github.io/torchtrade_envs/guides/custom-features/)** for more examples.
+See **[Advanced Customization](https://torchtrade.github.io/torchtrade/guides/custom-features/)** for more examples.
 
 </details>
 
@@ -438,7 +438,7 @@ observation = {
 - Actions 1..N: BUY/LONG with (SL, TP) combinations
 - Actions N+1..2N: SHORT with (SL, TP) combinations (futures only)
 
-See **[Advanced Customization](https://torchtrade.github.io/torchtrade_envs/guides/custom-features/)** for detailed explanations.
+See **[Advanced Customization](https://torchtrade.github.io/torchtrade/guides/custom-features/)** for detailed explanations.
 
 </details>
 
