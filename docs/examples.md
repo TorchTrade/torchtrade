@@ -114,42 +114,142 @@ By centralizing all parameters in YAML, you can easily experiment with different
 python train.py env.symbol="ETH/USD" optim.lr=1e-4 loss.gamma=0.95
 ```
 
-**Example config.yaml:**
+**Example config.yaml** (PPO):
 ```yaml
-env:
-  name: SequentialTradingEnv
-  symbol: "BTC/USD"
-  time_frames: ["1Hour"]
-  window_sizes: [24]
-  execute_on: "1Hour"
-  leverage: 2
-  action_levels: [0.0, 1.0]
-  initial_cash: 10000
-  transaction_fee: 0.0
-  slippage: 0.0
-  train_envs: 5
-  eval_envs: 1
+defaults:
+  - env: sequential          # Load env/sequential.yaml (switch with env=sequential_sltp)
+  - _self_
 
 collector:
-  frames_per_batch: 100000
+  device:
+  frames_per_batch: 10000
   total_frames: 100_000_000
+
+logger:
+  mode: online
+  backend: wandb
+  project_name: TorchTrade-Online
+  group_name: ${env.name}
+  exp_name: ppo-${env.name}
+  test_interval: 1_000_000
+  num_test_episodes: 1
+
+model:
+  network_type: batchnorm_mlp
+  hidden_size: 128
+  dropout: 0.1
+  num_layers: 4
 
 optim:
   lr: 2.5e-4
+  eps: 1.0e-6
+  weight_decay: 0.0
   max_grad_norm: 0.5
+  anneal_lr: True
+  device:
 
 loss:
   gamma: 0.9
+  mini_batch_size: 3333
+  ppo_epochs: 3
+  gae_lambda: 0.95
+  clip_epsilon: 0.1
+  anneal_clip_epsilon: True
+  critic_coeff: 1.0
+  entropy_coeff: 1.0
+  loss_critic_type: l2
+```
 
-logger:
-  backend: wandb
-  project_name: TorchTrade-Online
-  exp_name: ppo
+Note how `config.yaml` uses `defaults: - env: sequential` to load the environment config from `env/sequential.yaml`. The env section is kept separate — see the `env/` configs above.
+
+**`env/` - Environment Configs**
+
+Environment configs are separate YAML files that define the trading environment. Switch environments via CLI with `env=sequential_sltp` (see [Running Examples](#running-examples)).
+
+**`env/sequential.yaml`** — Basic sequential trading (`SequentialTradingEnv`):
+```yaml
+# @package env
+name: SequentialTradingEnv
+symbol: "BTC/USD"
+time_frames: ["1Hour"]
+window_sizes: [24]
+execute_on: "1Hour"
+leverage: 2
+action_levels: [-1.0, 0.0, 1.0]
+initial_cash: 10000
+transaction_fee: 0.0
+slippage: 0.0
+bankrupt_threshold: 0.1
+include_base_features: false
+max_traj_length: null
+random_start: true
+margin_type: isolated
+maintenance_margin_rate: 0.004
+seed: 0
+train_envs: 5
+eval_envs: 1
+data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
+test_split_start: "2025-01-01"
+```
+
+**`env/sequential_sltp.yaml`** — Sequential with stop-loss/take-profit (`SequentialTradingEnvSLTP`):
+```yaml
+# @package env
+name: SequentialTradingEnvSLTP
+symbol: "BTC/USD"
+time_frames: ["1Hour"]
+window_sizes: [24]
+execute_on: "1Hour"
+leverage: 1
+action_levels: [0.0, 1.0]
+stoploss_levels: [-0.01, -0.02, -0.03, -0.04]
+takeprofit_levels: [0.02, 0.04, 0.06, 0.08, 0.1]
+include_hold_action: true
+include_close_action: false
+initial_cash: 10000
+transaction_fee: 0.0
+slippage: 0.0
+bankrupt_threshold: 0.1
+include_base_features: false
+max_traj_length: null
+random_start: true
+margin_type: isolated
+maintenance_margin_rate: 0.004
+seed: 0
+train_envs: 10
+eval_envs: 1
+data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
+test_split_start: "2025-01-01"
+```
+
+**`env/onestep.yaml`** — One-step environment for GRPO (`OneStepTradingEnv`):
+```yaml
+# @package env
+name: OneStepTradingEnv
+symbol: "BTC/USD"
+time_frames: ["1Hour"]
+window_sizes: [24]
+execute_on: "1Hour"
+leverage: 1
+initial_cash: 10000
+transaction_fee: 0.0
+slippage: 0.0
+bankrupt_threshold: 0.1
+stoploss_levels: [-0.02]
+takeprofit_levels: [0.04]
+include_hold_action: true
+seed: 0
+train_envs: 6
+eval_envs: 1
+data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
+test_split_start: "2025-01-01"
 ```
 
 **`utils.py`** - Helper functions (`make_env()`, `make_actor()`, `make_critic()`, `make_loss()`, `make_collector()`) that keep the training script clean.
 
 **`train.py`** - Main training loop: loads config via Hydra, creates components, collects data, trains, evaluates, and checkpoints.
+
+**`live.py`** - Live trading script that loads a trained policy and executes it against a live exchange API. The DQN and PPO examples include `live.py` to demonstrate the smooth transition from backtesting/training to live execution — the same policy trained offline can be deployed directly to a live environment with minimal code changes.
 
 ---
 
@@ -207,7 +307,7 @@ TorchTrade provides actor classes that allow easy creation of rule-based trading
 
 ### Live Trading
 
-Each online RL example includes a `live.py` script alongside the `train.py` script, demonstrating the smooth transition from offline backtesting to live trading. The same model architecture and `utils.py` helpers are reused — only the environment changes from an offline `SequentialTradingEnv` to a live exchange environment. This mirrors the core design philosophy: **swap the environment, keep everything else the same.**
+The DQN and PPO examples include a `live.py` script alongside the `train.py` script, demonstrating the smooth transition from offline backtesting to live trading. The same model architecture and `utils.py` helpers are reused — only the environment changes from an offline `SequentialTradingEnv` to a live exchange environment. This mirrors the core design philosophy: **swap the environment, keep everything else the same.**
 
 Live scripts support loading pre-trained weights via `--weights` and store all live transitions in a replay buffer (saved periodically for crash safety), enabling offline analysis or further training on real market data.
 

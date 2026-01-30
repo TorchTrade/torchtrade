@@ -1,6 +1,6 @@
 # Offline Environments
 
-Offline environments are designed for **training on historical data** (backtesting). These are not "offline RL" methods like CQL or IQL, but rather environments that use pre-collected market data instead of live exchange APIs.
+Offline environments are designed for **training on historical data** (backtesting). These are not "offline RL" methods like CQL or IQL, but rather environments that use pre-collected market data instead of live exchange APIs. For deploying trained policies to real exchanges, see [Online Environments](online.md).
 
 ## Unified Architecture
 
@@ -27,105 +27,45 @@ TorchTrade provides **3 unified environment classes** that each support both spo
 
 ### Action Space Control
 
-All environments support the `include_hold_action` parameter (default: `True`):
+**SequentialTradingEnv** uses `action_levels` for fractional position sizing. Each action level represents a fraction of the balance to allocate (see [Fractional Position Sizing](#fractional-position-sizing) below):
 
-- **`include_hold_action=True`** (default): Includes HOLD/no-op action in the action space
-  - Standard environments: 3 actions (Sell/Short, Hold, Buy/Long)
-  - SLTP environments: HOLD action + SL/TP combinations
+- `action_levels=[0, 1]` — Flat or 100% long (spot)
+- `action_levels=[-1, 0, 1]` — Short, flat, or long (futures)
+- `action_levels=[-1, -0.5, 0, 0.5, 1]` — 5 levels with half-sizing
 
-- **`include_hold_action=False`**: Removes HOLD action, forcing the agent to always take a trading action
-  - Standard environments: 2 actions (Sell/Short, Buy/Long)
-  - SLTP environments: Only SL/TP combinations (no HOLD)
+**SLTP environments** (`SequentialTradingEnvSLTP`, `OneStepTradingEnv`) support the `include_hold_action` parameter (default: `True`):
 
-**Use Case**: Set to `False` when you want to ensure the agent is always actively trading rather than holding neutral positions. Useful for testing aggressive strategies or ensuring the agent explores trading actions.
+- **`include_hold_action=True`** (default): Includes HOLD/no-op action in the action space (HOLD + SL/TP combinations)
+- **`include_hold_action=False`**: Removes HOLD action, forcing the agent to always take a trading action (only SL/TP combinations)
+
+**Use Case**: Set `include_hold_action=False` when you want to ensure the agent is always actively trading rather than holding neutral positions. Useful for testing aggressive strategies or ensuring the agent explores trading actions.
 
 ### Fractional Position Sizing
 
-**Non-SLTP environments** (`SequentialTradingEnv`) support **fractional position sizing** where action values directly represent the fraction of balance to allocate to positions.
+`SequentialTradingEnv` uses `action_levels` to define discrete fractional position sizes in the range [-1.0, 1.0]:
 
-#### How It Works
-
-**Action Interpretation:**
-- Action values range from **-1.0 to 1.0**
 - **Magnitude** = fraction of balance to allocate (0.5 = 50%, 1.0 = 100%)
-- **Sign** = direction (positive = long, negative = short)
-- **Zero** = market neutral (close all positions, stay in cash)
+- **Sign** = direction (positive = long, negative = short, zero = flat/close)
 
-**Position Sizing Formula:**
-```python
-# For futures environments with leverage:
-position_size = (balance × |action| × leverage) / price
-
-# For long-only environments (no leverage):
-position_size = (balance × action) / price
-```
-
-**Examples:**
-
-=== "Futures"
-    ```python
-    from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
-
-    config = SequentialTradingEnvConfig(
-        leverage=5,  # Fixed 5x leverage
-        action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # 5 discrete actions
-        initial_cash=10000
-    )
-    env = SequentialTradingEnv(df, config)
-
-    # Action interpretation with $10k balance, 5x leverage, $50k BTC price:
-    # action = -1.0  → 100% short: (10k × 1.0 × 5) / 50k = -1.0 BTC short
-    # action = -0.5  → 50% short:  (10k × 0.5 × 5) / 50k = -0.5 BTC short
-    # action =  0.0  → Market neutral: 0 BTC (flat, all cash)
-    # action =  0.5  → 50% long:   (10k × 0.5 × 5) / 50k = 0.5 BTC long
-    # action =  1.0  → 100% long:  (10k × 1.0 × 5) / 50k = 1.0 BTC long
-    ```
-
-=== "Spot"
-    ```python
-    from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
-
-    config = SequentialTradingEnvConfig(
-        action_levels=[0.0, 0.5, 1.0],  # Default: close, 50%, 100%
-        initial_cash=10000
-    )
-    env = SequentialTradingEnv(df, config)
-
-    # Action interpretation with $10k balance, $50k BTC price:
-    # action =  0.0  → Close position (go to 100% cash)
-    # action =  0.5  → 50% invested: 10k × 0.5 / 50k = 0.1 BTC
-    # action =  1.0  → 100% invested: 10k × 1.0 / 50k = 0.2 BTC
-
-    # Note: Negative actions are technically supported for backwards compatibility
-    # but are not recommended as they add redundancy (behave same as action=0)
-    ```
-
-#### Customizing Action Levels
-
-Action levels are **fully customizable**. You can specify any list of values in [-1.0, 1.0]:
+With leverage, position size = `balance × |action| × leverage / price`.
 
 ```python
-# Fine-grained control (9 actions)
-action_levels = [-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0]
-
-# More precision near neutral (7 actions) - asymmetric
-action_levels = [-1.0, -0.3, -0.1, 0.0, 0.1, 0.3, 1.0]
-
-# Conservative (no full positions, 5 actions)
-action_levels = [-0.5, -0.25, 0.0, 0.25, 0.5]
-
-# Long-only (buy-focused, 5 actions)
-action_levels = [0.0, 0.25, 0.5, 0.75, 1.0]
-
-# Very coarse (3 actions)
-action_levels = [-1.0, 0.0, 1.0]
+config = SequentialTradingEnvConfig(
+    leverage=5,
+    action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # 5 discrete actions
+    initial_cash=10000
+)
+# With $10k balance, 5x leverage, $50k BTC:
+# -1.0 → full short (1.0 BTC), 0.0 → flat, 0.5 → half long (0.5 BTC)
 ```
 
-**Default Values:**
-- Futures: `[-1.0, -0.5, 0.0, 0.5, 1.0]` (5 actions: short/neutral/long)
-- Long-only: `[0.0, 0.5, 1.0]` (3 actions: close/half/full invested)
+Action levels are fully customizable — any list of values in [-1.0, 1.0]:
 
-Note: For long-only, action=0.0 closes the position. Negative actions are technically supported for backwards compatibility but not recommended (they behave identically to action=0.0, adding redundancy to the action space).
+```python
+action_levels = [-1.0, 0.0, 1.0]              # Coarse: full short/flat/full long
+action_levels = [0.0, 0.25, 0.5, 0.75, 1.0]   # Long-only with granularity
+action_levels = [-0.5, -0.25, 0.0, 0.25, 0.5]  # Conservative, no full positions
+```
 
 ### Leverage Design
 
@@ -209,7 +149,7 @@ The core sequential trading environment supporting both spot and futures trading
         execute_on=(5, "Minute"),
 
         # Futures trading
-        leverage=10,                          # 10x leverage
+        leverage=5,                          # 10x leverage
         action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # Short/neutral/long
         initial_cash=10000,
         transaction_fee=0.0004,
@@ -265,10 +205,9 @@ config = SequentialTradingEnvSLTPConfig(
     stoploss_levels=[-0.02, -0.05],
     takeprofit_levels=[0.05, 0.10],
     include_hold_action=True,            # Optional: set False to remove HOLD
-    include_short_positions=True,        # Enable short bracket orders
 
-    # Futures parameters
-    leverage=10,
+    # Futures parameters (leverage > 1 enables short bracket orders)
+    leverage=5,
     margin_call_threshold=0.2,
 
     # Multi-timeframe setup
@@ -287,7 +226,7 @@ env = SequentialTradingEnvSLTP(df, config)
 
 ### Action Space
 
-**Formula** (with `include_short_positions=True`):
+**Formula** (futures mode, `leverage > 1`):
 - **With HOLD (include_hold_action=True)**: Discrete(1 + 2 × (num_sl × num_tp))
 - **Without HOLD (include_hold_action=False)**: Discrete(2 × (num_sl × num_tp))
 
@@ -332,10 +271,9 @@ config = OneStepTradingEnvConfig(
     stoploss_levels=[-0.02, -0.05],
     takeprofit_levels=[0.05, 0.10],
     include_hold_action=True,            # Optional: set False to remove HOLD
-    include_short_positions=True,
 
-    # Futures parameters
-    leverage=10,
+    # Futures parameters (leverage > 1 enables short bracket orders)
+    leverage=5,
     margin_call_threshold=0.2,
 
     # Rollout configuration
@@ -366,8 +304,7 @@ env.render_history()  # Display after running an episode
 fig = env.render_history(return_fig=True)  # Or get the figure
 ```
 
-- **Spot mode**: 2 subplots (price + actions, portfolio vs buy-and-hold)
-- **Futures mode**: 3 subplots (adds position history)
+All environments render 3 subplots: price + actions, portfolio vs buy-and-hold, and exposure history.
 
 See [Visualization Guide](visualization.md) for details.
 

@@ -194,16 +194,12 @@ EOF
 
 ```python
 from torchtrade.envs.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 config = AlpacaTradingEnvConfig(
     symbol="BTC/USD",
-    time_frames=[
-        TimeFrame(1, TimeFrameUnit.Minute),
-        TimeFrame(5, TimeFrameUnit.Minute),
-    ],
+    time_frames=["1Min", "5Min"],
     window_sizes=[12, 8],
-    execute_on=TimeFrame(5, TimeFrameUnit.Minute),
+    execute_on="5Min",
     paper=True  # Start with paper trading!
 )
 

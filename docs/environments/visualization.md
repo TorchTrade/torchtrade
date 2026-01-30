@@ -36,22 +36,13 @@ fig.savefig("episode_history.png")
 
 ## Visualization Types
 
-The rendered plots automatically adapt based on environment type:
+All environments render **3 subplots**:
 
-### Spot Mode (`leverage=1`)
+1. **Price History with Actions**: Shows the asset price over time with long/short actions marked as green upward triangles (long/buy) and red downward triangles (short/sell). Position closes are shown as orange (long close) and cyan (short close) markers.
+2. **Portfolio Value vs Buy-and-Hold**: Compares your agent's portfolio value against a simple buy-and-hold baseline strategy.
+3. **Exposure History**: Visualizes exposure percentage over time with green areas for long exposure, red areas for short exposure, and flat sections for no position.
 
-**2 subplots**:
-
-1. **Price History with Actions**: Shows the asset price over time with buy/sell actions marked as green upward triangles (buy) and red downward triangles (sell)
-2. **Portfolio Value vs Buy-and-Hold**: Compares your agent's portfolio value against a simple buy-and-hold baseline strategy
-
-### Futures Mode (`leverage > 1`)
-
-**3 subplots**:
-
-1. **Price History with Actions**: Shows the asset price over time with long/short actions marked as green upward triangles (long) and red downward triangles (short)
-2. **Portfolio Value vs Buy-and-Hold**: Compares your agent's portfolio value against a simple buy-and-hold baseline strategy
-3. **Position History**: Visualizes position size over time with green areas for long positions, red areas for short positions, and flat sections for no position
+![Episode History Example](../images/plot_example.png)
 
 ## Parameters
 

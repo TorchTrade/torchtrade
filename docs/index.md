@@ -25,14 +25,14 @@ TorchTrade provides modular environments for both live trading with major exchan
 
 ### Environments
 - **[Offline Environments](environments/offline.md)** - Backtesting with historical data
-  - SequentialTradingEnv, SequentialTradingEnvSLTP, OneStepTradingEnv
+    - SequentialTradingEnv, SequentialTradingEnvSLTP, OneStepTradingEnv
 - **[Online Environments](environments/online.md)** - Live trading with exchange APIs
-  - Alpaca, Binance, Bitget integrations
+    - Alpaca, Binance, Bitget integrations
 
 ### Components
-- **[Loss Functions](components/losses.md)** - Training objectives (GRPOLoss, CTRLLoss, CTRLPPOLoss)
-- **[Transforms](components/transforms.md)** - Data preprocessing (CoverageTracker, ChronosEmbeddingTransform)
-- **[Actors](components/actors.md)** - Trading policies (RuleBasedActor, LLMActor, LocalLLMActor)
+- **[Loss Functions](components/losses.md)** - Training objectives ([GRPOLoss](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/grpo_loss.py), [CTRLLoss](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/ctrl.py), [CTRLPPOLoss](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/ctrl.py))
+- **[Transforms](components/transforms.md)** - Data preprocessing ([CoverageTracker](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/coverage_tracker.py), [ChronosEmbeddingTransform](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/chronos_embedding.py))
+- **[Actors](components/actors.md)** - Trading policies ([RuleBasedActor](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/rulebased/base.py), [FrontierLLMActor](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/frontier_llm_actor.py), [LocalLLMActor](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/local_llm_actor.py))
 
 ### Advanced Customization
 - **[Feature Engineering](guides/custom-features.md)** - Add technical indicators and features
