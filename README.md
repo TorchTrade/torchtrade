@@ -1,8 +1,12 @@
-# TorchTrade
+<p align="center">
+  <img src="docs/images/torchtrade_white.png" alt="TorchTrade" width="250">
+</p>
 
-![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-![TorchRL](https://img.shields.io/badge/TorchRL-Compatible-green.svg)
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
+  <img src="https://img.shields.io/badge/TorchRL-Compatible-green.svg" alt="TorchRL">
+</p>
 
 **A machine learning framework for algorithmic trading built on [TorchRL](https://github.com/pytorch/rl).**
 
