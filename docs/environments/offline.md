@@ -8,58 +8,43 @@ TorchTrade provides **3 unified environment classes** that each support both spo
 
 | Environment | Bracket Orders | One-Step | Best For |
 |-------------|----------------|----------|----------|
-| **SequentialTradingEnv** | ❌ | ❌ | Standard sequential trading |
-| **SequentialTradingEnvSLTP** | ✅ | ❌ | Risk management with SL/TP |
-| **OneStepTradingEnv** | ✅ | ✅ | GRPO, contextual bandits |
+| **SequentialTradingEnv** | - | - | Standard sequential trading |
+| **SequentialTradingEnvSLTP** | Yes | - | Risk management with SL/TP |
+| **OneStepTradingEnv** | Yes | Yes | GRPO, contextual bandits |
 
-### Environment Categories
+**Sequential** (`SequentialTradingEnv`) — Step-by-step trading with **fractional position sizing**. Action values represent the fraction of capital to deploy (e.g., 0.5 = 50% allocation).
 
-**Sequential** (`SequentialTradingEnv`) - Step-by-step trading with **fractional position sizing**. The agent can continuously adapt its position at every timestep. Action values represent the fraction of capital to deploy (e.g., 0.5 = 50% allocation).
+**SL/TP** (`SequentialTradingEnvSLTP`) — Extends sequential with **bracket order risk management**. Each trade includes configurable stop-loss and take-profit levels with a combinatorial action space.
 
-**SL/TP** (`SequentialTradingEnvSLTP`) - Extends sequential with **bracket order risk management**. Each trade includes configurable stop-loss and take-profit trigger levels with a combinatorial action space.
+**OneStep** (`OneStepTradingEnv`) — Optimized for **fast episodic training** with [GRPO](https://arxiv.org/abs/2402.03300). The agent takes one action, and the environment simulates a rollout until SL/TP triggers or max rollout length. Policies can be deployed to `SequentialTradingEnvSLTP` for step-by-step execution.
 
-**OneStep** (`OneStepTradingEnv`) - Optimized for **fast episodic training** with algorithms like [GRPO](https://arxiv.org/abs/2402.03300). The agent takes one action, and the environment internally simulates a rollout until SL/TP triggers or max rollout length. Policies can be deployed to sequential environments for step-by-step execution.
+!!! note "Extensible Framework"
+    Users can create **custom environments** by inheriting from existing base classes. See [Building Custom Environments](../guides/custom-environment.md).
 
 ---
 
-!!! note "Extensible Framework"
-    The framework is designed to be extensible. Users can create **custom environments** by inheriting from existing base classes or implementing new ones from scratch. See [Building Custom Environments](../guides/custom-environment.md) for guidance.
+### Account State
 
-### Action Space Control
+All environments expose a universal 6-element `account_state` tensor as part of the observation:
 
-**SequentialTradingEnv** uses `action_levels` for fractional position sizing. Each action level represents a fraction of the balance to allocate (see [Fractional Position Sizing](#fractional-position-sizing) below):
+| Index | Element | Description | Spot | Futures |
+|-------|---------|-------------|------|---------|
+| 0 | `exposure_pct` | Position value / portfolio value | 0.0–1.0 | 0.0–N (with leverage) |
+| 1 | `position_direction` | Sign of position size | 0 or +1 | -1, 0, or +1 |
+| 2 | `unrealized_pnl_pct` | Unrealized P&L as % of entry price | ≥0 | Any |
+| 3 | `holding_time` | Steps since position opened | ≥0 | ≥0 |
+| 4 | `leverage` | Current leverage | 1.0 | 1–125 |
+| 5 | `distance_to_liquidation` | Normalized distance to liquidation price | 1.0 (no risk) | Calculated |
 
-- `action_levels=[0, 1]` — Flat or 100% long (spot)
-- `action_levels=[-1, 0, 1]` — Short, flat, or long (futures)
-- `action_levels=[-1, -0.5, 0, 0.5, 1]` — 5 levels with half-sizing
-
-**SLTP environments** (`SequentialTradingEnvSLTP`, `OneStepTradingEnv`) support the `include_hold_action` parameter (default: `True`):
-
-- **`include_hold_action=True`** (default): Includes HOLD/no-op action in the action space (HOLD + SL/TP combinations)
-- **`include_hold_action=False`**: Removes HOLD action, forcing the agent to always take a trading action (only SL/TP combinations)
-
-**Use Case**: Set `include_hold_action=False` when you want to ensure the agent is always actively trading rather than holding neutral positions. Useful for testing aggressive strategies or ensuring the agent explores trading actions.
+This structure is shared across offline and online environments, ensuring policies transfer seamlessly between training and live deployment.
 
 ### Fractional Position Sizing
 
-`SequentialTradingEnv` uses `action_levels` to define discrete fractional position sizes in the range [-1.0, 1.0]:
+`SequentialTradingEnv` uses `action_levels` to define discrete fractional position sizes in [-1.0, 1.0]:
 
 - **Magnitude** = fraction of balance to allocate (0.5 = 50%, 1.0 = 100%)
 - **Sign** = direction (positive = long, negative = short, zero = flat/close)
-
-With leverage, position size = `balance × |action| × leverage / price`.
-
-```python
-config = SequentialTradingEnvConfig(
-    leverage=5,
-    action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # 5 discrete actions
-    initial_cash=10000
-)
-# With $10k balance, 5x leverage, $50k BTC:
-# -1.0 → full short (1.0 BTC), 0.0 → flat, 0.5 → half long (0.5 BTC)
-```
-
-Action levels are fully customizable — any list of values in [-1.0, 1.0]:
+- With leverage: position size = `balance × |action| × leverage / price`
 
 ```python
 action_levels = [-1.0, 0.0, 1.0]              # Coarse: full short/flat/full long
@@ -67,54 +52,21 @@ action_levels = [0.0, 0.25, 0.5, 0.75, 1.0]   # Long-only with granularity
 action_levels = [-0.5, -0.25, 0.0, 0.25, 0.5]  # Conservative, no full positions
 ```
 
-### Leverage Design
+**SLTP environments** use `include_hold_action` (default `True`) to optionally include a HOLD/no-op action alongside the SL/TP bracket combinations.
 
-When `leverage > 1`, **leverage is a fixed global parameter**, not part of the action space.
+### Leverage
 
-**Design Philosophy:**
-- **Leverage** = "How much risk am I willing to take?" (configuration/risk management)
-- **Action** = "How much of my allocation should I deploy?" (learned policy)
-- These are fundamentally different questions and should be separated
+Leverage is a **fixed global parameter**, not part of the action space. `action=0.5` always means "deploy 50% of capital" regardless of leverage setting. This keeps the action space small and separates risk management (leverage) from the learned policy (position sizing).
 
-**Benefits:**
-- Smaller action space → faster convergence
-- Easy to enforce global leverage constraints
-- `action=0.5` always means "use 50% of capital" regardless of leverage
-- Matches real trader workflows (choose leverage once, then size positions)
-
-!!! warning "Timeframe Format - Critical for Model Compatibility"
-    When specifying `time_frames`, **always use canonical forms**:
-
-    - ✅ **Correct**: `["1min", "5min", "15min", "1hour", "1day"]`
-    - ❌ **Wrong**: `["1min", "5min", "15min", "60min"]`
-
-    **Why this matters:**
-
-    - `time_frames=["60min"]` creates observation key `"market_data_60Minute"`
-    - `time_frames=["1hour"]` creates observation key `"market_data_1Hour"`
-    - These are **DIFFERENT keys** - your model trained with `"60min"` won't work with config using `"1hour"`
-
-    The framework will issue a warning if you use non-canonical forms. Use the suggested canonical forms to ensure model compatibility and cleaner observation keys.
-
-    **Common conversions:**
-
-    - `60min` → use `1hour`
-    - `120min` → use `2hours`
-    - `1440min` → use `1day`
-    - `24hour` → use `1day`
+!!! warning "Timeframe Format"
+    Always use canonical forms: `["1min", "5min", "15min", "1hour", "1day"]`.
+    Non-canonical forms like `"60min"` create different observation keys (`market_data_60Minute` vs `market_data_1Hour`), breaking model compatibility.
 
 ---
 
 ## SequentialTradingEnv
 
-The core sequential trading environment supporting both spot and futures trading. The trading mode is determined by configuration: set `leverage=1` (default) for spot trading, or `leverage>1` for futures with margin management and liquidation mechanics. Use negative `action_levels` to enable short positions.
-
-### Features
-- **Spot or futures**: Configured via `leverage` parameter
-- **Fractional position sizing**: Action values represent fraction of capital to deploy
-- **Sequential episodes**: Step-by-step trading simulation
-- **Multi-timeframe observations**: Observe multiple time scales simultaneously
-- **Futures mechanics** (when `leverage > 1`): Margin management, liquidation, short positions
+The core sequential trading environment. Trading mode is determined by configuration: `leverage=1` for spot, `leverage>1` for futures.
 
 ### Configuration
 
@@ -123,12 +75,9 @@ The core sequential trading environment supporting both spot and futures trading
     from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 
     config = SequentialTradingEnvConfig(
-        # Multi-timeframe setup
         time_frames=["1min", "5min", "15min", "1hour"],
         window_sizes=[12, 8, 8, 24],
         execute_on=(5, "Minute"),
-
-        # Spot trading (default)
         action_levels=[0.0, 0.5, 1.0],    # Close / 50% / 100% long
         initial_cash=1000,
         transaction_fee=0.0025,
@@ -143,13 +92,10 @@ The core sequential trading environment supporting both spot and futures trading
     from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 
     config = SequentialTradingEnvConfig(
-        # Multi-timeframe setup
         time_frames=["1min", "5min", "15min", "1hour"],
         window_sizes=[12, 8, 8, 24],
         execute_on=(5, "Minute"),
-
-        # Futures trading
-        leverage=5,                          # 10x leverage
+        leverage=5,
         action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # Short/neutral/long
         initial_cash=10000,
         transaction_fee=0.0004,
@@ -167,23 +113,9 @@ observation = {
     "market_data_5Minute": Tensor([8, num_features]),     # 5m window
     "market_data_15Minute": Tensor([8, num_features]),    # 15m window
     "market_data_1Hour": Tensor([24, num_features]),      # 1h window
-    "account_state": Tensor([6]),                         # Universal 6-element state
+    "account_state": Tensor([6]),                         # See Account State above
 }
-
-# Account state (6 elements):
-# [exposure_pct, position_direction, unrealized_pnl_pct,
-#  holding_time, leverage, distance_to_liquidation]
-#
-# Spot mode: position_direction in {0, +1}, leverage=1.0, distance_to_liquidation=1.0
-# Futures mode: position_direction in {-1, 0, +1}, leverage=1-125, calculated distance
 ```
-
-### Action Space
-
-Actions are determined by `action_levels`. The number of discrete actions equals `len(action_levels)`:
-
-- **Spot default** `[0.0, 0.5, 1.0]` → 3 actions: close / 50% long / 100% long
-- **Futures default** `[-1.0, -0.5, 0.0, 0.5, 1.0]` → 5 actions: full short / half short / flat / half long / full long
 
 ### Liquidation (Futures)
 
@@ -193,7 +125,7 @@ When `leverage > 1`, positions are liquidated if margin is insufficient. E.g., w
 
 ## SequentialTradingEnvSLTP
 
-Extends `SequentialTradingEnv` with **bracket order risk management**. Each trade includes configurable stop-loss and take-profit trigger levels. Supports both spot and futures modes via the same `leverage` parameter.
+Extends `SequentialTradingEnv` with **bracket order risk management**. Supports both spot and futures modes via `leverage`.
 
 ### Configuration
 
@@ -201,21 +133,17 @@ Extends `SequentialTradingEnv` with **bracket order risk management**. Each trad
 from torchtrade.envs.offline import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
 
 config = SequentialTradingEnvSLTPConfig(
-    # Stop-loss / Take-profit
     stoploss_levels=[-0.02, -0.05],
     takeprofit_levels=[0.05, 0.10],
-    include_hold_action=True,            # Optional: set False to remove HOLD
+    include_hold_action=True,
 
     # Futures parameters (leverage > 1 enables short bracket orders)
     leverage=5,
     margin_call_threshold=0.2,
 
-    # Multi-timeframe setup
     time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
-
-    # Trading parameters
     initial_cash=10000,
     transaction_fee=0.0004,
     slippage=0.001,
@@ -226,40 +154,22 @@ env = SequentialTradingEnvSLTP(df, config)
 
 ### Action Space
 
-**Formula** (futures mode, `leverage > 1`):
-- **With HOLD (include_hold_action=True)**: Discrete(1 + 2 × (num_sl × num_tp))
-- **Without HOLD (include_hold_action=False)**: Discrete(2 × (num_sl × num_tp))
+With 2 SL levels, 2 TP levels, and `leverage > 1` (futures):
 
-**Example with include_hold_action=True**:
-
-With 2 SL levels and 2 TP levels:
 - **Action 0**: HOLD / Close position
 - **Actions 1-4**: LONG with SL/TP combinations
 - **Actions 5-8**: SHORT with SL/TP combinations
 
-Total: 1 + 2 × (2 × 2) = **9 actions**
-
-**Example with include_hold_action=False**:
-
-Same levels but no HOLD action:
-- **Actions 0-3**: LONG with SL/TP combinations
-- **Actions 4-7**: SHORT with SL/TP combinations
-
-Total: 2 × (2 × 2) = **8 actions**
+Formula: `1 + 2 × (num_sl × num_tp)` = **9 actions**. Without HOLD (`include_hold_action=False`): `2 × (num_sl × num_tp)` = **8 actions**.
 
 ---
 
 ## OneStepTradingEnv
 
-One-step episodic environment optimized for [GRPO](https://arxiv.org/abs/2402.03300) and contextual bandit algorithms. The agent receives a randomly sampled observation from historical data, takes a single action (long/short with SL/TP or hold), and then the environment simulates a future rollout until bracket orders are triggered or the maximum rollout length is reached, completing the episode. Supports both spot and futures modes via `leverage`.
+One-step episodic environment for [GRPO](https://arxiv.org/abs/2402.03300) and contextual bandits. The agent takes a single action, and the environment simulates a rollout until SL/TP triggers or max rollout length. Supports spot and futures via `leverage`.
 
-### Features
-- **One-step episodes**: Single decision with episodic rollout
-- **Bracket orders**: SL/TP for long and short
-- **Spot or futures**: Configured via `leverage` parameter (same as `SequentialTradingEnv`)
-
-!!! note "Deployment to Sequential Environments"
-    Policies trained on `OneStepTradingEnv` can be directly deployed to `SequentialTradingEnvSLTP` for step-by-step trading, since both environments share the same observation and action spaces. This allows fast [GRPO-like](https://arxiv.org/abs/2402.03300) training followed by sequential backtesting or live trading.
+!!! note "Deployment"
+    Policies trained on `OneStepTradingEnv` can be deployed directly to `SequentialTradingEnvSLTP` — both share the same observation and action spaces.
 
 ### Configuration
 
@@ -267,31 +177,24 @@ One-step episodic environment optimized for [GRPO](https://arxiv.org/abs/2402.03
 from torchtrade.envs.offline import OneStepTradingEnv, OneStepTradingEnvConfig
 
 config = OneStepTradingEnvConfig(
-    # Stop-loss / Take-profit
     stoploss_levels=[-0.02, -0.05],
     takeprofit_levels=[0.05, 0.10],
-    include_hold_action=True,            # Optional: set False to remove HOLD
+    include_hold_action=True,
+    rollout_steps=24,
 
     # Futures parameters (leverage > 1 enables short bracket orders)
     leverage=5,
     margin_call_threshold=0.2,
 
-    # Rollout configuration
-    rollout_steps=24,
-
-    # Multi-timeframe setup
     time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
-
-    # Trading parameters
     initial_cash=10000,
     transaction_fee=0.0004,
 )
 
 env = OneStepTradingEnv(df, config)
 ```
-
 
 ---
 
@@ -307,30 +210,6 @@ fig = env.render_history(return_fig=True)  # Or get the figure
 All environments render 3 subplots: price + actions, portfolio vs buy-and-hold, and exposure history.
 
 See [Visualization Guide](visualization.md) for details.
-
----
-
-## Choosing the Right Environment
-
-### For Beginners
-**→ SequentialTradingEnv** (spot mode, default)
-- Simple long-only trading with fractional position sizing
-- Easy to understand, good for learning RL basics
-
-### For Risk Management Research
-**→ SequentialTradingEnvSLTP**
-- Stop-loss and take-profit bracket orders
-- Study risk-reward trade-offs with combinatorial action spaces
-
-### For Fast Iteration / GRPO
-**→ OneStepTradingEnv**
-- One-step episodes with episodic rollouts
-- Fast training loops for contextual bandit-style learning
-
-### For Advanced Futures Trading
-**→ Any environment with `leverage > 1`**
-- Leverage up to 125x, margin management, liquidation mechanics
-- Long and short positions via negative `action_levels`
 
 ---
 
