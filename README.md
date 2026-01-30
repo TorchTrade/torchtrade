@@ -8,6 +8,8 @@
   <img src="https://img.shields.io/badge/TorchRL-Compatible-green.svg" alt="TorchRL">
 </p>
 
+# TorchTrade
+
 **A machine learning framework for algorithmic trading built on [TorchRL](https://github.com/pytorch/rl).**
 
 TorchTrade's goal is to provide accessible deployment of RL methods to trading. The framework supports various RL methodologies including **online RL**, **offline RL**, **model-based RL**, **contrastive learning**, and many more areas of reinforcement learning research. Beyond RL, TorchTrade integrates traditional trading methods such as **rule-based strategies**, as well as modern approaches including **LLMs** (both local models and frontier model integrations) as trading actors.
