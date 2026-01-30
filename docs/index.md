@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/torchtrade_white.png" alt="TorchTrade" width="250">
+</p>
+
 # TorchTrade Documentation
 
 Welcome to the TorchTrade documentation! TorchTrade is a machine learning framework for algorithmic trading built on TorchRL.
