@@ -29,11 +29,11 @@ class RuleBasedActor(ABC):
     takes an observation TensorDict and returns an action index.
 
     Args:
-        market_data_keys: List of market data keys to use from observation
-                         (e.g., ["market_data_1Minute_12", "market_data_5Minute_8"])
+        market_data_keys: From env.market_data_keys (e.g., ["market_data_1Hour_48"])
         features_order: Order of features in market data tensor
                        (e.g., ["close", "open", "high", "low", "volume"])
-        action_space_size: Number of discrete actions (default: 3 for sell/hold/buy)
+        account_state_labels: From env.account_state (e.g., ["exposure_pct", "position_direction", ...])
+        action_levels: From env.action_levels (e.g., [-1, 0, 1] or [0, 1])
         debug: Whether to print debug information (default: False)
     """
 
@@ -41,16 +41,30 @@ class RuleBasedActor(ABC):
         self,
         market_data_keys: Optional[List[str]] = None,
         features_order: Optional[List[str]] = None,
-        action_space_size: int = 3,
+        account_state_labels: Optional[List[str]] = None,
+        action_levels: Optional[List[float]] = None,
         debug: bool = False,
     ):
         self.market_data_keys = market_data_keys or ["market_data_1Minute_1"]
         self.features_order = features_order or ["close", "open", "high", "low", "volume"]
-        self.action_space_size = action_space_size
+        self.account_state_labels = account_state_labels or [
+            "exposure_pct", "position_direction", "unrealized_pnl_pct",
+            "holding_time", "leverage", "distance_to_liquidation"
+        ]
+        self.action_levels = action_levels or [-1, 0, 1]
         self.debug = debug
 
         # Build feature index mapping
         self.feature_idx = {feat: i for i, feat in enumerate(self.features_order)}
+
+        # Build account state index mapping
+        self.account_idx = {label: i for i, label in enumerate(self.account_state_labels)}
+
+        # Build action index mapping from action_levels
+        levels = self.action_levels
+        self.action_flat = min(range(len(levels)), key=lambda i: abs(levels[i]))
+        self.action_long = max(range(len(levels)), key=lambda i: levels[i])
+        self.action_short = min(range(len(levels)), key=lambda i: levels[i])
 
     def extract_market_data(self, observation: TensorDict) -> Dict[str, torch.Tensor]:
         """
@@ -80,6 +94,27 @@ class RuleBasedActor(ABC):
                 market_data[timeframe_name] = data
 
         return market_data
+
+    def get_account_state(self, observation: TensorDict, label: str) -> float:
+        """
+        Extract a named value from the account state tensor.
+
+        Args:
+            observation: TensorDict containing account_state
+            label: Account state label (e.g., "position_direction", "exposure_pct")
+
+        Returns:
+            Scalar float value
+        """
+        account = observation["account_state"]
+        if account.dim() == 2:
+            account = account.squeeze(0)
+        if label not in self.account_idx:
+            raise ValueError(
+                f"Account state label '{label}' not found. "
+                f"Available: {list(self.account_idx.keys())}"
+            )
+        return account[self.account_idx[label]].item()
 
     def get_feature(self, data: torch.Tensor, feature_name: str) -> torch.Tensor:
         """
@@ -114,10 +149,14 @@ class RuleBasedActor(ABC):
             Action index (0-based integer)
 
         Example:
-            For 3-action space (SeqLongOnlyEnv):
-                0 = Sell all
-                1 = Hold (do nothing)
-                2 = Buy all
+            For action_levels=[-1, 0, 1]:
+                action_short (0) = -100% (short/sell)
+                action_flat  (1) = 0% (close position)
+                action_long  (2) = +100% (long/buy)
+
+        Note:
+            Use self.action_short, self.action_flat, self.action_long for
+            action indices. Use self.get_account_state() for named account access.
         """
         pass
 

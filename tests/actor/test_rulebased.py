@@ -163,7 +163,7 @@ class TestMeanReversionActor:
 
         obs = TensorDict({
             "market_data_5Minute_50": data.unsqueeze(0),
-            "account_state": torch.tensor([1000.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0]),  # No position
+            "account_state": torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0, 1.0]),  # flat position
         }, batch_size=[])
 
         actor = MeanReversionActor(
@@ -198,7 +198,7 @@ class TestMeanReversionActor:
 
         obs = TensorDict({
             "market_data_5Minute_50": data.unsqueeze(0),
-            "account_state": torch.tensor([1000.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0]),  # No position
+            "account_state": torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0, 1.0]),  # flat position
         }, batch_size=[])
 
         actor = MeanReversionActor(
@@ -233,7 +233,7 @@ class TestMeanReversionActor:
 
         obs = TensorDict({
             "market_data_5Minute_50": data.unsqueeze(0),
-            "account_state": torch.tensor([1000.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0]),
+            "account_state": torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0, 1.0]),  # flat position
         }, batch_size=[])
 
         actor = MeanReversionActor(
@@ -267,7 +267,7 @@ class TestMeanReversionActor:
 
         obs = TensorDict({
             "market_data_5Minute_50": data.unsqueeze(0),
-            "account_state": torch.tensor([1000.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0]),
+            "account_state": torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0, 1.0]),  # flat position
         }, batch_size=[])
 
         actor = MeanReversionActor(
@@ -302,7 +302,7 @@ class TestMeanReversionActor:
         # Already have a long position
         obs = TensorDict({
             "market_data_5Minute_50": data.unsqueeze(0),
-            "account_state": torch.tensor([1000.0, 1.0, 100.0, 100.0, 100.0, 0.0, 0.0]),  # position_direction > 0
+            "account_state": torch.tensor([1.0, 1.0, 0.0, 5.0, 1.0, 1.0]),  # long position
         }, batch_size=[])
 
         actor = MeanReversionActor(

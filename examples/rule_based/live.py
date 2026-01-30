@@ -2,7 +2,8 @@
 Live trading with MeanReversionActor on Alpaca (paper trading).
 
 Runs a rule-based mean reversion strategy on Alpaca's paper trading API,
-collecting trajectories into a replay buffer.
+collecting trajectories into a replay buffer. Parameters are not tuned —
+this serves as an example of how to wire a rule-based actor to a live environment.
 
 Usage:
     python examples/rule_based/live.py

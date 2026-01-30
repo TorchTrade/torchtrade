@@ -80,6 +80,13 @@ class MeanReversionActor(RuleBasedActor):
         **kwargs
     ):
         super().__init__(**kwargs)
+
+        if self.action_levels != [-1, 0, 1]:
+            raise ValueError(
+                f"MeanReversionActor requires action_levels=[-1, 0, 1], "
+                f"got {self.action_levels}"
+            )
+
         self.bb_window = bb_window
         self.bb_std = bb_std
         self.stoch_rsi_window = stoch_rsi_window
@@ -160,9 +167,7 @@ class MeanReversionActor(RuleBasedActor):
         volume_now = self.get_feature(data, "features_volume")[-1].item()
         avg_volume = self.get_feature(data, "features_avg_volume")[-1].item()
 
-        # Get account state: [exposure_pct, position_direction, ...]
-        account = observation["account_state"]
-        position_direction = account[1].item()  # -1=short, 0=flat, +1=long
+        position_direction = self.get_account_state(observation, "position_direction")
 
         if self.debug:
             print(f"BB Position: {bb_position:.4f}, Stoch RSI K: {stoch_k_now:.2f} (prev: {stoch_k_prev:.2f}), "
@@ -171,19 +176,12 @@ class MeanReversionActor(RuleBasedActor):
 
         volume_confirmed = volume_now >= self.volume_multiplier * avg_volume
 
-        # Action mapping: action_levels=[-1, 0, 1] means
-        #   action 0 = -100% (short), action 1 = 0% (flat), action 2 = +100% (long)
-        # "Hold" means maintaining current position, not action 1 (which closes positions).
-        ACTION_SHORT = 0
-        ACTION_FLAT = 1
-        ACTION_LONG = 2
-
         # --- EXIT: Mean reversion to middle band ---
         if position_direction > 0 and bb_position > 0.5:
-            return ACTION_FLAT  # Close long — price reverted to mean
+            return self.action_flat  # Close long — price reverted to mean
 
         if position_direction < 0 and bb_position < 0.5:
-            return ACTION_FLAT  # Close short — price reverted to mean
+            return self.action_flat  # Close short — price reverted to mean
 
         # --- ENTRY: Strict signals with crossover + volume ---
         is_long_signal = (
@@ -194,7 +192,7 @@ class MeanReversionActor(RuleBasedActor):
             and volume_confirmed
         )
         if is_long_signal and position_direction <= 0:
-            return ACTION_LONG
+            return self.action_long
 
         is_short_signal = (
             bb_position > 1
@@ -204,11 +202,11 @@ class MeanReversionActor(RuleBasedActor):
             and volume_confirmed
         )
         if is_short_signal and position_direction >= 0:
-            return ACTION_SHORT
+            return self.action_short
 
         # Hold = maintain current position
         if position_direction > 0:
-            return ACTION_LONG
+            return self.action_long
         elif position_direction < 0:
-            return ACTION_SHORT
-        return ACTION_FLAT
+            return self.action_short
+        return self.action_flat
