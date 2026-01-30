@@ -289,15 +289,21 @@ Located in `examples/offline_rl/`:
 
 ### LLM Actors
 
-TorchTrade implements LLMActor that allows the integration of local LLMs for trading decision-making. You can use models directly from [HuggingFace Models](https://huggingface.co/models) or quantized models from [Unsloth](https://unsloth.ai/) for memory-efficient and fast interactions. This approach leverages the reasoning capabilities of LLMs to make trading decisions and provides fertile soil for new ideas and adaptations for trading with LLMs thanks to TorchTrade.
+TorchTrade provides LLM-based trading actors that leverage language models for trading decision-making. Both frontier API models and local models are supported, each with offline (backtesting) and online (live trading) examples.
 
 Located in `examples/llm/`:
 
-| Example | Type | Description |
-|---------|------|-------------|
-| **local/** | LocalLLMActor | Trading with local LLMs (vLLM/transformers backend) |
+| Example | Actor | Description |
+|---------|-------|-------------|
+| **frontier/offline.py** | [FrontierLLMActor](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/frontier_llm_actor.py) | Backtesting with frontier LLM APIs (OpenAI, Anthropic, etc.) |
+| **frontier/live.py** | [FrontierLLMActor](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/frontier_llm_actor.py) | Live trading with frontier LLM APIs |
+| **local/offline.py** | [LocalLLMActor](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/local_llm_actor.py) | Backtesting with local LLMs (vLLM/transformers) |
+| **local/live.py** | [LocalLLMActor](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/local_llm_actor.py) | Live trading with local LLMs |
 
-**Future Work**: We plan to provide example scripts for fine-tuning LLMs on reasoning traces from frontier models for trading. Additionally, we are working on integrating Vision-Language Models (VLMs) to process trading chart plots for decision-making.
+Local models can be loaded from [HuggingFace Models](https://huggingface.co/models) or quantized via [Unsloth](https://unsloth.ai/) for memory-efficient inference.
+
+!!! note "Future Work"
+    Fine-tuning LLMs on reasoning traces from frontier models, and integrating Vision-Language Models (VLMs) to process trading chart plots.
 
 ### Rule-Based Actors
 
