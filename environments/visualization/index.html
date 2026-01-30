@@ -265,17 +265,18 @@
   
   
   
-    <li class="md-tabs__item">
-      <a href="../../examples/" class="md-tabs__link">
-        
-  
-  
     
+    
+      <li class="md-tabs__item">
+        <a href="../../examples/" class="md-tabs__link">
+          
+  
   
   Examples
 
-      </a>
-    </li>
+        </a>
+      </li>
+    
   
 
       
@@ -445,9 +446,27 @@
   
   
   
-    <li class="md-nav__item">
-      <a href="../../examples/" class="md-nav__link">
+    
+    
+    
+    
+      
+      
         
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
   
   
   <span class="md-ellipsis">
@@ -461,7 +480,79 @@
   
   
 
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -647,34 +738,6 @@
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Visualization Types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#spot-mode-leverage1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Spot Mode (leverage=1)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#futures-mode-leverage-1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Futures Mode (leverage &gt; 1)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1164,34 +1227,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Visualization Types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#spot-mode-leverage1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Spot Mode (leverage=1)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#futures-mode-leverage-1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Futures Mode (leverage &gt; 1)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1303,20 +1338,13 @@
 </span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="n">fig</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s2">&quot;episode_history.png&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="visualization-types">Visualization Types<a class="headerlink" href="#visualization-types" title="Permanent link">&para;</a></h2>
-<p>The rendered plots automatically adapt based on environment type:</p>
-<h3 id="spot-mode-leverage1">Spot Mode (<code>leverage=1</code>)<a class="headerlink" href="#spot-mode-leverage1" title="Permanent link">&para;</a></h3>
-<p><strong>2 subplots</strong>:</p>
+<p>All environments render <strong>3 subplots</strong>:</p>
 <ol>
-<li><strong>Price History with Actions</strong>: Shows the asset price over time with buy/sell actions marked as green upward triangles (buy) and red downward triangles (sell)</li>
-<li><strong>Portfolio Value vs Buy-and-Hold</strong>: Compares your agent's portfolio value against a simple buy-and-hold baseline strategy</li>
+<li><strong>Price History with Actions</strong>: Shows the asset price over time with long/short actions marked as green upward triangles (long/buy) and red downward triangles (short/sell). Position closes are shown as orange (long close) and cyan (short close) markers.</li>
+<li><strong>Portfolio Value vs Buy-and-Hold</strong>: Compares your agent's portfolio value against a simple buy-and-hold baseline strategy.</li>
+<li><strong>Exposure History</strong>: Visualizes exposure percentage over time with green areas for long exposure, red areas for short exposure, and flat sections for no position.</li>
 </ol>
-<h3 id="futures-mode-leverage-1">Futures Mode (<code>leverage &gt; 1</code>)<a class="headerlink" href="#futures-mode-leverage-1" title="Permanent link">&para;</a></h3>
-<p><strong>3 subplots</strong>:</p>
-<ol>
-<li><strong>Price History with Actions</strong>: Shows the asset price over time with long/short actions marked as green upward triangles (long) and red downward triangles (short)</li>
-<li><strong>Portfolio Value vs Buy-and-Hold</strong>: Compares your agent's portfolio value against a simple buy-and-hold baseline strategy</li>
-<li><strong>Position History</strong>: Visualizes position size over time with green areas for long positions, red areas for short positions, and flat sections for no position</li>
-</ol>
+<p><img alt="Episode History Example" src="../../images/plot_example.png" /></p>
 <h2 id="parameters">Parameters<a class="headerlink" href="#parameters" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

@@ -267,17 +267,18 @@
   
   
   
-    <li class="md-tabs__item">
-      <a href="../examples/" class="md-tabs__link">
-        
-  
-  
     
+    
+      <li class="md-tabs__item">
+        <a href="../examples/" class="md-tabs__link">
+          
+  
   
   Examples
 
-      </a>
-    </li>
+        </a>
+      </li>
+    
   
 
       
@@ -731,9 +732,27 @@
   
   
   
-    <li class="md-nav__item">
-      <a href="../examples/" class="md-nav__link">
+    
+    
+    
+    
+      
+      
         
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
   
   
   <span class="md-ellipsis">
@@ -747,7 +766,79 @@
   
   
 
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -1652,7 +1743,7 @@
 </span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span>optim.lr<span class="o">=</span>1e-4<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">    </span>loss.gamma<span class="o">=</span><span class="m">0</span>.95
 </span></code></pre></div>
-<p>See the <strong><a href="../examples/">Examples</a></strong> page for all available algorithms (PPO, DQN, IQL, DSAC, GRPO) and usage guides.</p>
+<p>See the <strong><a href="examples.md">Examples</a></strong> page for all available algorithms (PPO, DQN, IQL, DSAC, GRPO) and usage guides.</p>
 <h2 id="common-use-cases">Common Use Cases<a class="headerlink" href="#common-use-cases" title="Permanent link">&para;</a></h2>
 <h3 id="loading-historical-data-from-huggingface">Loading Historical Data from HuggingFace<a class="headerlink" href="#loading-historical-data-from-huggingface" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">datasets</span>
@@ -1711,20 +1802,16 @@
 </span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="s">EOF</span>
 </span></code></pre></div>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.alpaca</span><span class="w"> </span><span class="kn">import</span> <span class="n">AlpacaTorchTradingEnv</span><span class="p">,</span> <span class="n">AlpacaTradingEnvConfig</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">alpaca.data.timeframe</span><span class="w"> </span><span class="kn">import</span> <span class="n">TimeFrame</span><span class="p">,</span> <span class="n">TimeFrameUnit</span>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">config</span> <span class="o">=</span> <span class="n">AlpacaTradingEnvConfig</span><span class="p">(</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="p">,</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>        <span class="n">TimeFrame</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">TimeFrameUnit</span><span class="o">.</span><span class="n">Minute</span><span class="p">),</span>
-</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>        <span class="n">TimeFrame</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="n">TimeFrameUnit</span><span class="o">.</span><span class="n">Minute</span><span class="p">),</span>
-</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="p">],</span>
-</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
-</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="n">TimeFrame</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="n">TimeFrameUnit</span><span class="o">.</span><span class="n">Minute</span><span class="p">),</span>
-</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>    <span class="n">paper</span><span class="o">=</span><span class="kc">True</span>  <span class="c1"># Start with paper trading!</span>
-</span><span id="__span-11-13"><a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="p">)</span>
-</span><span id="__span-11-14"><a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>
-</span><span id="__span-11-15"><a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="n">env</span> <span class="o">=</span> <span class="n">AlpacaTorchTradingEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">AlpacaTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="p">,</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;1Min&quot;</span><span class="p">,</span> <span class="s2">&quot;5Min&quot;</span><span class="p">],</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="s2">&quot;5Min&quot;</span><span class="p">,</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="n">paper</span><span class="o">=</span><span class="kc">True</span>  <span class="c1"># Start with paper trading!</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="p">)</span>
+</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>
+</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="n">env</span> <span class="o">=</span> <span class="n">AlpacaTorchTradingEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="binance-crypto-futures">Binance (Crypto Futures)<a class="headerlink" href="#binance-crypto-futures" title="Permanent link">&para;</a></h3>
 <p>If you want to trade on Binance, register <a href="https://accounts.binance.com/register?ref=25015935">here</a> in case you have no account. Binance also allows for demo trading, see <a href="https://www.binance.com/en/square/post/14316321292186">here</a>.</p>
@@ -1754,7 +1841,7 @@
 <ul>
 <li><strong><a href="../environments/offline/">Offline Environments</a></strong> - Deep dive into backtesting environments</li>
 <li><strong><a href="../environments/online/">Online Environments</a></strong> - Live trading with exchange APIs</li>
-<li><strong><a href="../examples/">Examples</a></strong> - Training scripts for all algorithms</li>
+<li><strong><a href="examples.md">Examples</a></strong> - Training scripts for all algorithms</li>
 </ul>
 <details class="tip">
 <summary>Troubleshooting</summary>
@@ -1819,13 +1906,13 @@
         
         
           
-          <a href="../examples/" class="md-footer__link md-footer__link--next" aria-label="Next: Examples">
+          <a href="../examples/" class="md-footer__link md-footer__link--next" aria-label="Next: Overview">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Examples
+                Overview
               </div>
             </div>
             <div class="md-footer__button md-icon">
