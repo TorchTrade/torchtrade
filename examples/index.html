@@ -1852,25 +1852,44 @@ futures</p>
 </table>
 <p><strong>Note</strong>: Thanks to the compatibility with TorchRL, you can easily add other offline RL methods like CQL, TD3+BC, and Decision Transformers from TorchRL to do offline RL with TorchTrade environments.</p>
 <h3 id="llm-actors">LLM Actors<a class="headerlink" href="#llm-actors" title="Permanent link">&para;</a></h3>
-<p>TorchTrade implements LLMActor that allows the integration of local LLMs for trading decision-making. You can use models directly from <a href="https://huggingface.co/models">HuggingFace Models</a> or quantized models from <a href="https://unsloth.ai/">Unsloth</a> for memory-efficient and fast interactions. This approach leverages the reasoning capabilities of LLMs to make trading decisions and provides fertile soil for new ideas and adaptations for trading with LLMs thanks to TorchTrade.</p>
+<p>TorchTrade provides LLM-based trading actors that leverage language models for trading decision-making. Both frontier API models and local models are supported, each with offline (backtesting) and online (live trading) examples.</p>
 <p>Located in <code>examples/llm/</code>:</p>
 <table>
 <thead>
 <tr>
 <th>Example</th>
-<th>Type</th>
+<th>Actor</th>
 <th>Description</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>local/</strong></td>
-<td>LocalLLMActor</td>
-<td>Trading with local LLMs (vLLM/transformers backend)</td>
+<td><strong>frontier/offline.py</strong></td>
+<td><a href="https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/frontier_llm_actor.py">FrontierLLMActor</a></td>
+<td>Backtesting with frontier LLM APIs (OpenAI, Anthropic, etc.)</td>
+</tr>
+<tr>
+<td><strong>frontier/live.py</strong></td>
+<td><a href="https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/frontier_llm_actor.py">FrontierLLMActor</a></td>
+<td>Live trading with frontier LLM APIs</td>
+</tr>
+<tr>
+<td><strong>local/offline.py</strong></td>
+<td><a href="https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/local_llm_actor.py">LocalLLMActor</a></td>
+<td>Backtesting with local LLMs (vLLM/transformers)</td>
+</tr>
+<tr>
+<td><strong>local/live.py</strong></td>
+<td><a href="https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/local_llm_actor.py">LocalLLMActor</a></td>
+<td>Live trading with local LLMs</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Future Work</strong>: We plan to provide example scripts for fine-tuning LLMs on reasoning traces from frontier models for trading. Additionally, we are working on integrating Vision-Language Models (VLMs) to process trading chart plots for decision-making.</p>
+<p>Local models can be loaded from <a href="https://huggingface.co/models">HuggingFace Models</a> or quantized via <a href="https://unsloth.ai/">Unsloth</a> for memory-efficient inference.</p>
+<div class="admonition note">
+<p class="admonition-title">Future Work</p>
+<p>Fine-tuning LLMs on reasoning traces from frontier models, and integrating Vision-Language Models (VLMs) to process trading chart plots.</p>
+</div>
 <h3 id="rule-based-actors">Rule-Based Actors<a class="headerlink" href="#rule-based-actors" title="Permanent link">&para;</a></h3>
 <p>TorchTrade provides actor classes that allow easy creation of rule-based trading strategies using technical indicators and market signals, for example mean reversion, breakout, and more. These rule-based actors integrate seamlessly with TorchTrade environments for both backtesting and live trading, serving as baselines or components in hybrid approaches. This is especially interesting with our <strong><a href="guides/custom-features.md">custom feature preprocessing</a></strong>, which allows you to add technical indicators and derived features to enhance rule-based strategies.</p>
 <p><strong>Future Work</strong>: We plan to provide examples of rule-based strategies and hybrid approaches that combine rule-based policies with neural network policies as actors, leveraging the strengths of both deterministic strategies and learned behaviors.</p>
