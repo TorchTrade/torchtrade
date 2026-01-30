@@ -31,13 +31,13 @@ def main():
     # Create actor first to get its preprocessing function
     execute_tf = TimeFrame(1, TimeFrameUnit.Hour)
     actor = MeanReversionActor(
-        bb_window=20,
-        bb_std=2.0,
-        stoch_rsi_window=14,
-        oversold_threshold=20.0,
-        overbought_threshold=80.0,
+        bb_window=14,
+        bb_std=1.2,
+        stoch_rsi_window=10,
+        oversold_threshold=35.0,
+        overbought_threshold=65.0,
         execute_timeframe=execute_tf,
-        debug=True,
+        debug=False,
     )
     preprocessing_fn = actor.get_preprocessing_fn()
 
@@ -64,7 +64,7 @@ def main():
     actor.feature_idx = {feat: i for i, feat in enumerate(actor.features_order)}
 
     # Run rollout
-    max_steps = 100
+    max_steps = 5000
     print(f"\nRunning rollout ({max_steps} steps)...")
     print("=" * 80)
 
