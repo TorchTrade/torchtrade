@@ -33,9 +33,9 @@ YourCustomEnv
 | `_reset()` | Initialize episode state | TensorDict with initial observation |
 | `_step(tensordict)` | Execute action, update state | TensorDict with next observation |
 | `_set_seed(seed)` | Set random seed for reproducibility | None |
-| `observation_spec` | Define observation space | CompositeSpec |
-| `action_spec` | Define action space | DiscreteTensorSpec or ContinuousTensorSpec |
-| `reward_spec` | Define reward space | UnboundedContinuousTensorSpec |
+| `observation_spec` | Define observation space | `Composite` |
+| `action_spec` | Define action space | `Categorical` or `Bounded` |
+| `reward_spec` | Define reward space | `Unbounded` |
 
 ---
 
@@ -45,7 +45,7 @@ Minimal environment from scratch:
 
 ```python
 from torchrl.envs import EnvBase
-from torchrl.data import CompositeSpec, UnboundedContinuousTensorSpec, DiscreteTensorSpec
+from torchrl.data import Categorical, Composite, Unbounded
 from tensordict import TensorDict
 import torch
 
@@ -66,13 +66,13 @@ class SimpleCustomEnv(EnvBase):
         self.entry_price = 0.0
 
         # Define specs
-        self._observation_spec = CompositeSpec({
-            "price": UnboundedContinuousTensorSpec(shape=(1,)),
-            "position": UnboundedContinuousTensorSpec(shape=(1,)),
+        self._observation_spec = Composite({
+            "price": Unbounded(shape=(1,)),
+            "position": Unbounded(shape=(1,)),
         })
 
-        self._action_spec = DiscreteTensorSpec(n=3)
-        self._reward_spec = UnboundedContinuousTensorSpec(shape=(1,))
+        self._action_spec = Categorical(n=3)
+        self._reward_spec = Unbounded(shape=(1,))
 
     def _reset(self, tensordict=None, **kwargs):
         """Reset to initial state"""
@@ -151,8 +151,8 @@ class CustomLongOnlyEnv(SequentialTradingEnv):
         self.sentiment_data = sentiment_data  # Timeseries sentiment scores
 
         # Extend observation spec
-        from torchrl.data import UnboundedContinuousTensorSpec
-        self._observation_spec["sentiment"] = UnboundedContinuousTensorSpec(shape=(1,))
+        from torchrl.data import Unbounded
+        self._observation_spec["sentiment"] = Unbounded(shape=(1,))
 
     def _reset(self, tensordict=None, **kwargs):
         """Add sentiment to observations"""
@@ -220,7 +220,7 @@ Always update observation specs when adding new fields:
 
 ```python
 # In __init__
-self._observation_spec["new_field"] = UnboundedContinuousTensorSpec(shape=(N,))
+self._observation_spec["new_field"] = Unbounded(shape=(N,))
 ```
 
 ### 3. State Management
@@ -232,7 +232,7 @@ TorchTrade provides structured state management classes for consistent state han
 The `PositionState` dataclass encapsulates position-related state in a structured way:
 
 ```python
-from torchtrade.envs.state import PositionState
+from torchtrade.envs.core.state import PositionState
 
 class CustomEnv(EnvBase):
     def __init__(self):
@@ -270,46 +270,40 @@ class CustomEnv(EnvBase):
 - Makes position state explicit and easier to track
 - Used consistently across all TorchTrade environments
 
-Implementation: `torchtrade/envs/state.py:8-30`
+Source: [`torchtrade/envs/core/state.py`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/core/state.py)
 
 **Quick Reference - HistoryTracker**:
 
-Use `HistoryTracker` or `FuturesHistoryTracker` to record episode data for analysis (available in both offline and online environments - see [State Management docs](../environments/offline.md#historytracker) for full examples):
+Use `HistoryTracker` to record episode data for analysis and visualization:
 
 ```python
-from torchtrade.envs.state import HistoryTracker, FuturesHistoryTracker
+from torchtrade.envs.core.state import HistoryTracker
 
 class CustomEnv(EnvBase):
     def __init__(self):
         super().__init__()
-        # For spot trading (leverage=1)
         self.history = HistoryTracker()
-
-        # For futures trading (leverage > 1, tracks position size)
-        # self.history = FuturesHistoryTracker()
 
     def _step(self, tensordict):
         # ... execute step logic ...
 
-        # Record step data for analysis
         self.history.record_step(
             price=current_price,
             action=action.item(),
             reward=reward,
-            portfolio_value=self.cash + self.position.position_value
+            portfolio_value=self.cash + self.position.position_value,
+            position=self.position.position_size,
+            action_type="long",  # or "short", "hold", "close", etc.
         )
-
-        # For FuturesHistoryTracker:
-        # self.history.record_step(..., position=self.position.position_size)
 
     def _reset(self, tensordict=None, **kwargs):
         self.history.reset()  # Clear history at episode start
         # ... rest of reset logic
 ```
 
-Access history for plotting or analysis: `history.to_dict()` returns `{'base_prices': [...], 'actions': [...], 'rewards': [...], 'portfolio_values': [...]}`
+Access history via `history.to_dict()` — returns prices, actions, rewards, portfolio values, positions, and action types.
 
-Implementation: `torchtrade/envs/state.py:33-148`
+Source: [`torchtrade/envs/core/state.py`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/core/state.py)
 
 ---
 
