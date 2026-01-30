@@ -411,7 +411,6 @@ class TestCTRLPPOLoss:
 
     def test_ctrl_coeff_scaling(self, mock_ppo_loss, ctrl_loss):
         """Test that CTRL coefficient scales the loss correctly."""
-        from unittest.mock import Mock
 
         # Setup mock to return specific values
         mock_ppo_loss.return_value = TensorDict(

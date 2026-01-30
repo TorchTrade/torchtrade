@@ -6,7 +6,6 @@ Tests observation fetching, preprocessing, and feature extraction using mock cli
 
 import pytest
 import numpy as np
-import pandas as pd
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass

@@ -12,7 +12,6 @@ class TestBitgetFuturesOrderClass:
         """Create order executor with mock CCXT client."""
         from torchtrade.envs.live.bitget.order_executor import (
             BitgetFuturesOrderClass,
-            TradeMode,
             MarginMode,
             PositionMode,
         )
@@ -43,7 +42,6 @@ class TestBitgetFuturesOrderClass:
         """Test that symbol formats are accepted."""
         from torchtrade.envs.live.bitget.order_executor import (
             BitgetFuturesOrderClass,
-            TradeMode,
         )
 
         with patch('torchtrade.envs.live.bitget.order_executor.ccxt.bitget', return_value=mock_ccxt_client):
@@ -62,7 +60,6 @@ class TestBitgetFuturesOrderClass:
         """Test that demo=True uses USDT-FUTURES product type."""
         from torchtrade.envs.live.bitget.order_executor import (
             BitgetFuturesOrderClass,
-            TradeMode,
         )
 
         with patch('torchtrade.envs.live.bitget.order_executor.ccxt.bitget', return_value=mock_ccxt_client):
@@ -342,7 +339,6 @@ class TestBitgetFuturesOrderClassIntegration:
         import os
         from torchtrade.envs.live.bitget.order_executor import (
             BitgetFuturesOrderClass,
-            TradeMode,
         )
 
         executor = BitgetFuturesOrderClass(

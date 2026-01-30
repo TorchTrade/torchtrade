@@ -1,7 +1,7 @@
 """Shared action map utilities for SLTP (Stop-Loss/Take-Profit) environments."""
 
 from itertools import product
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 
 def create_sltp_action_map(

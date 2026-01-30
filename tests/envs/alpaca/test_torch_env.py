@@ -5,7 +5,6 @@ Tests environment initialization, reset, step, and trading mechanics using mock 
 """
 
 import pytest
-import numpy as np
 import torch
 from tensordict import TensorDict
 

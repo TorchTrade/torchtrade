@@ -38,7 +38,6 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS
 from tensordict.nn import TensorDictModule, TensorDictSequential
-import torch.nn as nn
 
 # ====================================================================
 # Environment utils

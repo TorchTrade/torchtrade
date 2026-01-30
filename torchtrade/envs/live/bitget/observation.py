@@ -162,7 +162,6 @@ class BitgetObservationClass(BaseFuturesObservationClass):
 
 # Example usage:
 if __name__ == "__main__":
-    import os
 
     # Test with demo/testnet (no API keys needed for public data)
     print("Testing BitgetObservationClass with CCXT...")

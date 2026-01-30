@@ -1,7 +1,7 @@
 """Shared mock fixtures for exchange testing."""
 
 import pytest
-from tests.mocks import alpaca, binance, bitget
+from tests.mocks import binance, bitget
 
 # Re-export Binance fixtures
 @pytest.fixture

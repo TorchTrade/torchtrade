@@ -12,7 +12,6 @@ These tests would have caught the bugs fixed in commit 55dd3bf.
 
 import pytest
 import pandas as pd
-import numpy as np
 from torchtrade.envs.offline.sequential import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchtrade.envs.offline.sequential_sltp import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
 

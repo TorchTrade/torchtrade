@@ -1,10 +1,7 @@
 """Utility functions for Binance environments."""
 from functools import partial
-from typing import List, Union, Tuple
 
 from torchtrade.envs.utils.timeframe import (
-    TimeFrame,
-    TimeFrameUnit,
     normalize_timeframe_config,
     binance_to_timeframe,
     create_provider_parser,

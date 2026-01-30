@@ -9,7 +9,6 @@ These tests verify the bounds are respected and slippage is actually applied.
 
 import pytest
 import pandas as pd
-import numpy as np
 from torchtrade.envs.offline.sequential import SequentialTradingEnv, SequentialTradingEnvConfig
 
 

@@ -6,7 +6,6 @@ to embed time series market data into fixed-size feature vectors.
 
 from typing import List, Optional, Union
 import torch
-import torch.nn as nn
 from torchrl.envs.transforms import Transform
 from torchrl.data import Composite, Unbounded
 from tensordict import TensorDictBase

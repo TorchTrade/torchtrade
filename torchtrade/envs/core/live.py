@@ -3,7 +3,6 @@
 import time
 from abc import abstractmethod
 from datetime import datetime, timedelta
-from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from tensordict import TensorDictBase

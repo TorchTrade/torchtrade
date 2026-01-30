@@ -26,7 +26,6 @@ import torch
 import tqdm
 from dotenv import load_dotenv
 from sklearn.preprocessing import StandardScaler
-from torchrl._utils import timeit
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
 from torchrl.envs import (
@@ -41,7 +40,6 @@ from torchtrade.envs.live.binance.env import (
     BinanceFuturesTorchTradingEnv,
     BinanceFuturesTradingEnvConfig,
 )
-from torchtrade.envs.live.binance.order_executor import MarginType
 
 load_dotenv(dotenv_path=".env")
 

@@ -1,6 +1,5 @@
 """Utility functions for Bitget environments."""
 from functools import partial
-from typing import List, Union, Tuple
 
 from torchtrade.envs.utils.timeframe import (
     TimeFrame,

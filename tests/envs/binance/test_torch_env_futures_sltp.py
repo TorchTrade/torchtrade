@@ -559,7 +559,6 @@ class TestCriticalEdgeCases:
         from torchtrade.envs.live.binance.observation import BinanceObservationClass
         from torchtrade.envs.live.binance.order_executor import (
             BinanceFuturesOrderClass,
-            PositionStatus,
         )
 
         config = BinanceFuturesSLTPTradingEnvConfig(
@@ -738,7 +737,6 @@ class TestCriticalEdgeCases:
         agent cannot open new position in the same step.
         """
         env, mock_trader, _ = env_with_mocks
-        from torchtrade.envs.live.binance.order_executor import PositionStatus
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()

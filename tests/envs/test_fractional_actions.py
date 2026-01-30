@@ -14,7 +14,6 @@ import numpy as np
 import torch
 
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 # Aliases for backwards compatibility
 SeqFuturesEnv = SequentialTradingEnv

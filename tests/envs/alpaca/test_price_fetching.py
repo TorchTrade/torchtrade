@@ -7,7 +7,6 @@ from tensordict import TensorDict
 
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from tests.envs.alpaca.mocks import (
-    MockTradingClient,
     MockTrader,
     MockObserver,
 )

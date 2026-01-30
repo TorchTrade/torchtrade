@@ -267,7 +267,6 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
 
     def test_position_closed_resets_sltp(self, env, mock_trader):
         """Test that position closure resets SL/TP tracking."""
-        from torchtrade.envs.live.bitget.order_executor import PositionStatus
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()

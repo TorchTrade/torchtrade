@@ -3,7 +3,6 @@ from typing import Any, List, Union, Tuple
 import warnings
 from torchtrade.envs.utils.timeframe import (
     TimeFrame,
-    TimeFrameUnit,
     parse_timeframe_string,
     normalize_timeframe_config,
     alpaca_to_timeframe,

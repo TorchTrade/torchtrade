@@ -2,10 +2,9 @@
 
 import pytest
 import torch
-import numpy as np
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import patch
 from tensordict import TensorDict
-from torchrl.data import Composite, Bounded, Unbounded
+from torchrl.data import Composite, Bounded
 
 from torchtrade.envs.transforms import ChronosEmbeddingTransform
 from tests.envs.transforms.conftest import mock_chronos_pipeline

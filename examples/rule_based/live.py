@@ -15,7 +15,6 @@ Requirements:
 import os
 
 import numpy as np
-import pandas as pd
 import torch
 import tqdm
 from dotenv import load_dotenv

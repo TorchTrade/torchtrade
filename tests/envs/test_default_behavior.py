@@ -9,16 +9,12 @@ These tests ensure the default configurations work end-to-end without errors
 and produce reasonable trading behavior.
 """
 
-import numpy as np
 import pandas as pd
-import pytest
 import torch
 
 from torchtrade.envs.offline import (
     SequentialTradingEnv,
     SequentialTradingEnvConfig,
-    SequentialTradingEnvSLTP,
-    SequentialTradingEnvSLTPConfig,
 )
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 

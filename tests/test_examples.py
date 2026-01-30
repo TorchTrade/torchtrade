@@ -11,7 +11,6 @@ Similar to TorchRL's sota-tests approach.
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -473,11 +472,9 @@ class TestExampleImports:
         """Test importing Alpaca environments."""
         from torchtrade.envs.live.alpaca.env import (
             AlpacaTorchTradingEnv,
-            AlpacaTradingEnvConfig,
         )
         from torchtrade.envs.live.alpaca.order_executor import (
             AlpacaOrderClass,
-            TradeMode,
         )
         from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 
@@ -495,8 +492,6 @@ class TestExampleImports:
         from torchtrade.envs.offline.infrastructure.utils import (
             TimeFrame,
             TimeFrameUnit,
-            tf_to_timedelta,
-            compute_periods_per_year_crypto,
         )
         assert TimeFrame is not None
         assert TimeFrameUnit is not None

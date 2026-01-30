@@ -34,7 +34,6 @@ from utils import (
     make_collector,
 )
 
-from torchtrade.envs.transforms import CoverageTracker
 
 torch.set_float32_matmul_precision("high")
 

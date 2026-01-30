@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import wandb
 import warnings
-import pandas as pd
 import hydra
 from omegaconf import OmegaConf
 from pathlib import Path
@@ -20,7 +19,6 @@ import torch
 import tqdm
 from tensordict.nn import CudaGraphModule
 from torchrl._utils import timeit
-from torchrl.envs import set_gym_backend
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 from torchrl.objectives import group_optimizers
 from torchrl.record.loggers import generate_exp_name, get_logger

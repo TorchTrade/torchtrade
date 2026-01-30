@@ -8,7 +8,6 @@ from typing import Dict, Any, Optional
 import numpy as np
 import torch
 from torchrl.envs.transforms import Transform
-from torchrl.envs import ParallelEnv
 from tensordict import TensorDictBase
 
 # Constants

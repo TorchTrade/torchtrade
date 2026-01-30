@@ -848,10 +848,6 @@ class TestCollectorPostproc:
     def test_collector_postproc_integration(self, simple_df):
         """Test CoverageTracker as collector postproc (recommended pattern)."""
         from torchrl.collectors import SyncDataCollector
-        from torchrl.modules import ProbabilisticActor
-        from torch.distributions import Categorical
-        from tensordict.nn import TensorDictModule
-        import functools
 
         # Create env with random_start
         def make_env(df):

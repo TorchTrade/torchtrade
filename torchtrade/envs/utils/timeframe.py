@@ -9,7 +9,7 @@ and Binance environments. It includes:
 
 from enum import Enum
 from functools import total_ordering
-from typing import List, Union, Optional, Tuple
+from typing import List, Union, Tuple
 import pandas as pd
 import re
 import warnings

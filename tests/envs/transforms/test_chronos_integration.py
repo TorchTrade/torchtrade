@@ -3,7 +3,6 @@
 import pytest
 import torch
 import pandas as pd
-from unittest.mock import Mock, patch
 from torchrl.envs import TransformedEnv, Compose, InitTracker, RewardSum
 from tensordict import TensorDict
 

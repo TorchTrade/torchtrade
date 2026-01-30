@@ -1,6 +1,5 @@
 """Tests for state management dataclasses."""
 
-import pytest
 from torchtrade.envs.core.state import HistoryTracker
 
 

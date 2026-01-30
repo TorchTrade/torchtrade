@@ -1,6 +1,5 @@
 """Base class for offline trading environments."""
 
-from datetime import datetime
 from typing import Callable, List, Optional
 
 import matplotlib.pyplot as plt

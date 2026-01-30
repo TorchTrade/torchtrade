@@ -11,7 +11,6 @@ This test suite follows TorchRL best practices:
 import pytest
 import torch
 import pandas as pd
-from tensordict import TensorDict
 
 from torchtrade.envs.offline import (
     SequentialTradingEnv,

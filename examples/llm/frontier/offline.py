@@ -14,7 +14,6 @@ Requirements:
 
 import datasets
 import pandas as pd
-import torch
 
 from torchtrade.actor import FrontierLLMActor
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig

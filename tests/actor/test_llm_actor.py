@@ -1,10 +1,9 @@
 """Tests for LLMActor (OpenAI-based) covering critical gaps identified in PR review."""
 
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 import pytest
 import torch
 import warnings
-from tensordict import TensorDict
 
 # Check if openai is available
 try:

@@ -19,12 +19,11 @@ from tensordict.nn import (
     ProbabilisticTensorDictModule,
     ProbabilisticTensorDictSequential,
     set_composite_lp_aggregate,
-    TensorDictModule,
 )
 from tensordict.utils import NestedKey
 from torch import distributions as d
 
-from torchrl._utils import _standardize, logger as torchrl_logger, VERBOSE
+from torchrl._utils import logger as torchrl_logger, VERBOSE
 from torchrl.objectives.common import LossModule
 from torchrl.objectives.utils import (
     _maybe_add_or_extend_key,

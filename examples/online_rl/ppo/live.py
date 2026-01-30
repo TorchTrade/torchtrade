@@ -26,7 +26,6 @@ import torch
 import tqdm
 from dotenv import load_dotenv
 from sklearn.preprocessing import StandardScaler
-from torchrl._utils import timeit
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
 from torchrl.envs import (

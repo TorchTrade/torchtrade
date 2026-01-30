@@ -2,8 +2,7 @@
 
 import pytest
 import numpy as np
-import pandas as pd
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
@@ -98,7 +97,6 @@ class TestBinanceObservationClass:
 
     def test_invalid_interval_raises_error(self, mock_client):
         """Test that invalid timeframe raises ValueError."""
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
 
         # TimeFrame with 2 minutes is valid (converts to "2m" which is invalid for Binance)
         # This test should fail when trying to fetch data, not on init

@@ -9,7 +9,6 @@ from torchrl.data import Categorical
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import (
     BitgetFuturesOrderClass,
-    TradeMode,
     MarginMode,
     PositionMode,
 )
@@ -17,7 +16,6 @@ from torchtrade.envs.live.bitget.base import BitgetBaseTorchTradingEnv
 from torchtrade.envs.utils.fractional_sizing import (
     calculate_fractional_position,
     PositionCalculationParams,
-    round_to_step_size,
 )
 
 

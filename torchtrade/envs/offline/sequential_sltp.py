@@ -14,12 +14,12 @@ Key Features:
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union, Callable, Literal
+from typing import Dict, List, Optional, Tuple, Union, Callable
 from itertools import product
 
 import pandas as pd
 import torch
-from tensordict import TensorDict, TensorDictBase
+from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
 from torchtrade.envs.offline.sequential import (

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union, Callable
+from typing import Dict, List, Optional, Union, Callable
 import logging
 
 import torch

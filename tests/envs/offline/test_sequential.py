@@ -8,7 +8,6 @@ This file consolidates tests from:
 Uses parametrization to test both trading modes with maximum code reuse.
 """
 
-import numpy as np
 import pandas as pd
 import pytest
 import torch

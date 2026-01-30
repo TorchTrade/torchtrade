@@ -1,7 +1,7 @@
 """Tests for BinanceFuturesOrderClass."""
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 class TestBinanceFuturesOrderClass:
@@ -69,7 +69,6 @@ class TestBinanceFuturesOrderClass:
         """Create order executor with mock client."""
         from torchtrade.envs.live.binance.order_executor import (
             BinanceFuturesOrderClass,
-            TradeMode,
         )
 
         return BinanceFuturesOrderClass(
@@ -93,7 +92,6 @@ class TestBinanceFuturesOrderClass:
         """Test that symbol with slash is normalized."""
         from torchtrade.envs.live.binance.order_executor import (
             BinanceFuturesOrderClass,
-            TradeMode,
         )
 
         executor = BinanceFuturesOrderClass(

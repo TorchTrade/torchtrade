@@ -12,7 +12,6 @@ Usage:
 
 import datasets
 import pandas as pd
-import torch
 
 from torchtrade.actor import MeanReversionActor
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig

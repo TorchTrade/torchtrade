@@ -11,10 +11,7 @@ Tests critical calculations that MUST be correct:
 
 import pytest
 import pandas as pd
-import numpy as np
-import torch
 from torchtrade.envs.offline.sequential import SequentialTradingEnv, SequentialTradingEnvConfig
-from torchtrade.envs.offline.sequential_sltp import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
 
 
 @pytest.fixture

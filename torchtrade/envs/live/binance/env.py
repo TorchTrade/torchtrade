@@ -1,7 +1,6 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Union, Callable
 import logging
-import warnings
 
 import torch
 
@@ -9,11 +8,10 @@ logger = logging.getLogger(__name__)
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.utils.timeframe import TimeFrame
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
     BinanceFuturesOrderClass,
-    TradeMode,
     MarginType,
 )
 from torchtrade.envs.live.binance.base import BinanceBaseTorchTradingEnv
@@ -21,7 +19,6 @@ from torchtrade.envs.utils.fractional_sizing import (
     build_default_action_levels,
     calculate_fractional_position,
     PositionCalculationParams,
-    round_to_step_size,
 )
 
 

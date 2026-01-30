@@ -8,7 +8,7 @@ from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Bounded
 from torchrl.data import Composite
 
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, timeframe_to_seconds
+from torchtrade.envs.utils.timeframe import timeframe_to_seconds
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv

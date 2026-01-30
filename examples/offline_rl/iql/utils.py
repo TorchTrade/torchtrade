@@ -38,8 +38,6 @@ from torchtrade.models import SimpleCNNEncoder
 import copy
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
-import numpy as np
-import ta
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 # ====================================================================
 # Environment utils
