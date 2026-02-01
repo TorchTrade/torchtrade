@@ -401,7 +401,6 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         self.rollout_returns = []
         obs_dict = None  # Initialize to prevent UnboundLocalError
 
-        future_rollout_steps = 1
         while not self.truncated:
             # Get next time step
             obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
@@ -410,26 +409,27 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
             ohlcv_base_values = self.sampler.get_base_features(self.current_timestamp)
             self._cached_base_features = ohlcv_base_values
 
-            # Extract OHLCV for intrabar SL/TP detection
-            open_price = ohlcv_base_values["open"]
             close_price = ohlcv_base_values["close"]
-            high_price = ohlcv_base_values["high"]
-            low_price = ohlcv_base_values["low"]
 
-            # Accumulate step-wise return
-            self.rollout_returns.append(self.compute_return(close_price))
+            # Save trigger prices before checks (execution resets them to 0)
+            saved_sl = self.stop_loss
+            saved_tp = self.take_profit
+            saved_liq = self.liquidation_price
 
-            # Mode-aware trigger detection
+            # Check liquidation first (futures only, highest priority)
             if self.leverage > 1:
-                # Futures: check liquidation first (highest priority)
                 if trigger_result := self._check_liquidation_in_rollout(ohlcv_base_values):
+                    self.rollout_returns.append(self.compute_return(saved_liq))
                     return trigger_result, obs_dict
 
-            # Check SL/TP triggers (mode-aware)
+            # Check SL/TP triggers
             if trigger_result := self._check_sltp_triggers(ohlcv_base_values):
+                trigger_price = saved_tp if trigger_result.get("side") == "sltp_tp" else saved_sl
+                self.rollout_returns.append(self.compute_return(trigger_price))
                 return trigger_result, obs_dict
 
-            future_rollout_steps += 1
+            # No trigger — accumulate return at close price
+            self.rollout_returns.append(self.compute_return(close_price))
 
         # If loop never executed (truncated from start), get an observation
         if obs_dict is None:

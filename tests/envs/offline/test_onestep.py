@@ -238,13 +238,55 @@ class TestOneStepRolloutSimulation:
 
 
 class TestOneStepSLTPTriggers:
-    """Tests for SL/TP triggers during rollout (if supported)."""
+    """Tests for SL/TP triggers during rollout."""
 
-    @pytest.mark.skip(reason="SLTP triggers require OneStepTradingEnvSLTP variant")
-    def test_sltp_trigger_during_rollout(self):
-        """SL/TP should trigger and close position during rollout."""
-        # This would test OneStepTradingEnvSLTP variant
-        pass
+    @pytest.mark.parametrize("trigger_type,sl_pct,tp_pct", [
+        ("sl", -0.005, 0.5),   # Very tight SL, very wide TP — SL triggers
+        ("tp", -0.5, 0.005),   # Very wide SL, very tight TP — TP triggers
+    ], ids=["stop_loss", "take_profit"])
+    def test_rollout_reward_uses_trigger_price_not_close(
+        self, sample_ohlcv_df, trigger_type, sl_pct, tp_pct
+    ):
+        """Reward must be computed at SL/TP trigger price, not bar close price.
+
+        Regression test for issue #151: rollout was computing return at close
+        price before checking SL/TP triggers, biasing the reward signal.
+        """
+        import math
+
+        config = OneStepTradingEnvConfig(
+            initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            stoploss_levels=[sl_pct],
+            takeprofit_levels=[tp_pct],
+            include_hold_action=True,
+            random_start=False,
+            seed=42,
+        )
+        env = OneStepTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+
+        # Action 1 = first (and only) long SLTP action
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(1)
+        next_td = env.step(action_td)
+
+        reward = next_td["next"]["reward"].item()
+
+        # Verify trigger actually fired (not truncation)
+        assert next_td["next"]["done"].item()
+        assert not next_td["next"]["truncated"].item(), "Expected SL/TP trigger, not truncation"
+
+        # Verify reward is consistent with the accumulated rollout returns
+        assert len(env.rollout_returns) > 0, "Expected rollout to produce returns"
+        assert math.isclose(reward, sum(env.rollout_returns), rel_tol=1e-6), (
+            f"Reward {reward} != sum(rollout_returns) {sum(env.rollout_returns)}"
+        )
+        env.close()
 
 
 # ============================================================================
