@@ -250,6 +250,85 @@ class TestBinanceFuturesTradingEnvConfig:
         assert config.demo is False
 
 
+class TestBinanceFractionalPositionResizing:
+    """Tests for fractional position resizing (regression for #155)."""
+
+    @pytest.fixture
+    def mock_observer(self):
+        observer = MagicMock()
+        observer.get_keys = MagicMock(return_value=["1m_10", "5m_10"])
+        def mock_observations(return_base_ohlc=False):
+            obs = {
+                "1m_10": np.random.randn(10, 4).astype(np.float32),
+                "5m_10": np.random.randn(10, 4).astype(np.float32),
+            }
+            if return_base_ohlc:
+                obs["base_features"] = np.random.randn(10, 4).astype(np.float32)
+                obs["base_timestamps"] = np.arange(10)
+            return obs
+        observer.get_observations = MagicMock(side_effect=mock_observations)
+        observer.intervals = ["1m", "5m"]
+        observer.window_sizes = [10, 10]
+        return observer
+
+    @pytest.fixture
+    def mock_trader(self):
+        trader = MagicMock()
+        trader.cancel_open_orders = MagicMock(return_value=True)
+        trader.close_position = MagicMock(return_value=True)
+        trader.close_all_positions = MagicMock(return_value={})
+        trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0, "available_balance": 900.0,
+            "total_unrealized_profit": 0.0, "total_margin_balance": 1000.0,
+        })
+        trader.get_mark_price = MagicMock(return_value=50000.0)
+        trader.get_status = MagicMock(return_value={"position_status": None})
+        trader.trade = MagicMock(return_value=True)
+        return trader
+
+    @pytest.fixture
+    def env(self, mock_observer, mock_trader):
+        from torchtrade.envs.live.binance.env import (
+            BinanceFuturesTorchTradingEnv,
+            BinanceFuturesTradingEnvConfig,
+        )
+        config = BinanceFuturesTradingEnvConfig(
+            symbol="BTCUSDT",
+            demo=True,
+            time_frames=["1m", "5m"],
+            window_sizes=[10, 10],
+            execute_on="1m",
+            action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],
+        )
+        with patch("time.sleep"), \
+             patch("torchtrade.envs.live.binance.env.BinanceFuturesTorchTradingEnv._wait_for_next_timestamp"):
+            return BinanceFuturesTorchTradingEnv(
+                config=config, observer=mock_observer, trader=mock_trader,
+            )
+
+    @pytest.mark.parametrize("first_action,second_action,should_execute", [
+        (0.5, 1.0, True),    # Scale up long
+        (-0.5, -1.0, True),  # Scale up short
+        (1.0, 0.5, True),    # Scale down long
+        (1.0, 1.0, False),   # Same level: skip
+        (0.0, 0.0, False),   # Both flat: skip
+    ])
+    def test_fractional_resizing_executes(self, env, first_action, second_action, should_execute):
+        """Changing action level within same direction must trigger trade."""
+        trade_executed = {"executed": True, "amount": 0.01, "side": "BUY",
+                         "success": True, "closed_position": False}
+
+        with patch.object(env, '_execute_fractional_action', return_value=trade_executed) as mock_exec:
+            env.position.current_action_level = first_action
+            result = env._execute_trade_if_needed(second_action)
+
+            if should_execute:
+                mock_exec.assert_called_once_with(second_action)
+            else:
+                mock_exec.assert_not_called()
+                assert result["executed"] is False
+
+
 class TestMultipleSteps:
     """Test multiple environment steps."""
 
