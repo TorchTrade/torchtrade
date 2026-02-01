@@ -496,3 +496,33 @@ class TestSLTPRegression:
 
         # Should not crash
         assert next_td is not None
+
+    @pytest.mark.parametrize("leverage", [1, 10], ids=["spot", "futures"])
+    def test_truncation_does_not_set_terminated(self, sample_ohlcv_df, leverage):
+        """Truncated episodes (data exhaustion) must NOT set terminated=True.
+
+        Regression test for #150.
+        """
+        config = SequentialTradingEnvSLTPConfig(
+            leverage=leverage,
+            max_traj_length=5000,
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+        env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+
+        for _ in range(5000):
+            action_td = td["next"].clone() if "next" in td.keys() else td.clone()
+            action_td["action"] = torch.tensor(0)  # No action
+            td = env.step(action_td)
+            if td["next"]["done"].item():
+                break
+
+        assert td["next"]["done"].item() is True
+        assert td["next"]["truncated"].item() is True
+        assert td["next"]["terminated"].item() is False, (
+            "Truncated episode should have terminated=False (issue #150)"
+        )
+        env.close()

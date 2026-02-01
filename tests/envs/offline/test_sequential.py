@@ -570,3 +570,91 @@ class TestSequentialEnvRegression:
                 assert value.shape == expected_shape or value.numel() == expected_shape[0]
             if expected_dtype:
                 assert value.dtype == expected_dtype
+
+    @pytest.mark.parametrize("leverage,action_levels,hold_action", [
+        (1, [0, 1], 0),           # Spot
+        (10, [-1, 0, 1], 1),      # Futures
+    ], ids=["spot", "futures"])
+    def test_truncation_does_not_set_terminated(self, sample_ohlcv_df, leverage, action_levels, hold_action):
+        """Truncated episodes (data exhaustion/max steps) must NOT set terminated=True.
+
+        Regression test for #150: terminated included truncated, breaking
+        value bootstrapping in all sequential envs.
+        """
+        config = SequentialTradingEnvConfig(
+            leverage=leverage,
+            action_levels=action_levels,
+            max_traj_length=5000,  # Larger than data so episode truncates
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+        env = SequentialTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+
+        for _ in range(5000):
+            action_td = td["next"].clone() if "next" in td.keys() else td.clone()
+            action_td["action"] = torch.tensor(hold_action)
+            td = env.step(action_td)
+            if td["next"]["done"].item():
+                break
+
+        assert td["next"]["done"].item() is True
+        assert td["next"]["truncated"].item() is True
+        assert td["next"]["terminated"].item() is False, (
+            "Truncated episode should have terminated=False (issue #150)"
+        )
+        env.close()
+
+    def test_bankruptcy_sets_terminated_not_truncated(self, trending_down_df):
+        """Bankruptcy must set terminated=True, truncated=False.
+
+        Regression test for #150: ensures value bootstrapping does NOT
+        occur at true terminal states (bankruptcy).
+        """
+        config = SequentialTradingEnvConfig(
+            leverage=20,
+            action_levels=[-1, 0, 1],
+            max_traj_length=5000,
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            transaction_fee=0.0,
+            slippage=0.0,
+        )
+        env = SequentialTradingEnv(trending_down_df, config, simple_feature_fn)
+        td = env.reset()
+
+        # Open leveraged long into crashing prices
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(2)  # long
+        td = env.step(action_td)
+
+        for _ in range(500):
+            if td["next"]["done"].item():
+                break
+            action_td = td["next"].clone()
+            action_td["action"] = torch.tensor(2)  # keep long
+            td = env.step(action_td)
+
+        assert td["next"]["done"].item() is True
+        assert td["next"]["terminated"].item() is True
+        assert td["next"]["truncated"].item() is False, (
+            "Bankruptcy should have truncated=False (issue #150)"
+        )
+        env.close()
+
+    def test_normal_step_signals(self, unified_env):
+        """Normal (non-terminal) step: terminated=False, truncated=False, done=False.
+
+        Regression test for #150.
+        """
+        td = unified_env.reset()
+        close_action = 0 if unified_env.leverage == 1 else 1
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(close_action)
+        td = unified_env.step(action_td)
+
+        assert td["next"]["terminated"].item() is False
+        assert td["next"]["truncated"].item() is False
+        assert td["next"]["done"].item() is False

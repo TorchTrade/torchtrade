@@ -421,6 +421,21 @@ class TestOneStepRegression:
             next_td = onestep_env.step(action_td)
             assert next_td["next"]["done"].item()
 
+    def test_non_truncated_step_sets_terminated(self, onestep_env):
+        """Non-truncated one-step episode should set terminated=True, truncated=False.
+
+        Regression test for #150: one-step envs must distinguish terminated
+        (SL/TP trigger, hold completed) from truncated (data exhaustion).
+        """
+        td = onestep_env.reset()
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(0)  # Hold - no rollout, no truncation
+        next_td = onestep_env.step(action_td)
+
+        assert next_td["next"]["done"].item() is True
+        assert next_td["next"]["terminated"].item() is True
+        assert next_td["next"]["truncated"].item() is False
+
     def test_action_spec_immutable(self, onestep_env):
         """Action spec should not change during episode."""
         initial_spec = onestep_env.action_spec
