@@ -487,13 +487,14 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         # Update the reward in history
         self.history.rewards[-1] = reward
 
-        # Check termination
-        done = self._check_termination(new_portfolio_value)
+        # Check termination (bankruptcy) and truncation (time/data limit)
+        terminated = self._check_termination(new_portfolio_value)
+        truncated = self._check_truncation()
 
         next_tensordict.set("reward", reward)
-        next_tensordict.set("done", self.truncated or done)
-        next_tensordict.set("truncated", self.truncated)
-        next_tensordict.set("terminated", self.truncated or done)
+        next_tensordict.set("terminated", terminated)
+        next_tensordict.set("truncated", truncated)
+        next_tensordict.set("done", terminated or truncated)
 
         return next_tensordict
 
@@ -821,9 +822,13 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         return trade_info
 
     def _check_termination(self, portfolio_value: float) -> bool:
-        """Check if episode should terminate."""
+        """Check if episode should terminate (environment dynamics only, e.g. bankruptcy)."""
         bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
-        return portfolio_value < bankruptcy_threshold or self.step_counter >= self.max_steps
+        return portfolio_value < bankruptcy_threshold
+
+    def _check_truncation(self) -> bool:
+        """Check if episode should be truncated (time limit or data exhaustion)."""
+        return self.truncated or self.step_counter >= self.max_steps
 
     def close(self):
         """Clean up resources."""

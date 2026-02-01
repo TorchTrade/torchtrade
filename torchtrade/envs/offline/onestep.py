@@ -329,13 +329,14 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         # Update the reward in history
         self.history.rewards[-1] = reward
 
-        # Check termination (always done for one-step environments)
-        done = True  # One-step environment - always done after single action
-
+        # One-step environment - always done after single action
+        # But distinguish: truncated (data ran out during rollout) vs
+        # terminated (SL/TP trigger, liquidation, or hold completed normally)
+        terminated = not self.truncated
         next_tensordict.set("reward", reward)
-        next_tensordict.set("done", done)
+        next_tensordict.set("terminated", terminated)
         next_tensordict.set("truncated", self.truncated)
-        next_tensordict.set("terminated", done)
+        next_tensordict.set("done", True)
 
         return next_tensordict
 

@@ -397,13 +397,14 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         # Update the reward in history
         self.history.rewards[-1] = reward
 
-        # Check termination
-        done = self._check_termination(new_portfolio_value)
+        # Check termination (bankruptcy) and truncation (time/data limit)
+        terminated = self._check_termination(new_portfolio_value)
+        truncated = self._check_truncation()
 
         next_tensordict.set("reward", reward)
-        next_tensordict.set("done", self.truncated or done)
-        next_tensordict.set("truncated", self.truncated)
-        next_tensordict.set("terminated", self.truncated or done)
+        next_tensordict.set("terminated", terminated)
+        next_tensordict.set("truncated", truncated)
+        next_tensordict.set("done", terminated or truncated)
 
         return next_tensordict
 
