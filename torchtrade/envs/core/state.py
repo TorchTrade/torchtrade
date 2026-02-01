@@ -52,6 +52,7 @@ class PositionState:
     entry_price: float = 0.0
     unrealized_pnlpc: float = 0.0
     hold_counter: int = 0
+    current_action_level: float = 0.0
 
     def reset(self):
         """Reset all position state to initial values."""

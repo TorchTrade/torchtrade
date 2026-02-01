@@ -121,6 +121,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
 
         if trade_info["executed"]:
             self.position.current_position = 1 if trade_info["side"] == "buy" else 0
+            self.position.current_action_level = desired_action
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -171,12 +172,8 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         Returns:
             trade_info: Dict with execution details
         """
-        # Skip if already in the requested position
-        current_pos = self.position.current_position
         no_trade = {"executed": False, "amount": 0, "side": None, "success": None}
-        if desired_action > 0 and current_pos == 1:
-            return no_trade
-        if desired_action == 0 and current_pos == 0:
+        if desired_action == self.position.current_action_level:
             return no_trade
 
         return self._execute_fractional_action(desired_action)

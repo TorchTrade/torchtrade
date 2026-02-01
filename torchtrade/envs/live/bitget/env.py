@@ -174,6 +174,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
                 self.position.current_position = 0  # Closed
             elif trade_info["side"] == "sell":
                 self.position.current_position = -1  # Short
+            self.position.current_action_level = desired_action
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -371,13 +372,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         Returns:
             trade_info: Dict with execution details
         """
-        # Skip if already in the requested position
-        current_pos = self.position.current_position
-        if desired_action > 0 and current_pos == 1:
-            return self._create_trade_info(executed=False)
-        if desired_action < 0 and current_pos == -1:
-            return self._create_trade_info(executed=False)
-        if desired_action == 0 and current_pos == 0:
+        if desired_action == self.position.current_action_level:
             return self._create_trade_info(executed=False)
 
         return self._execute_fractional_action(desired_action)
