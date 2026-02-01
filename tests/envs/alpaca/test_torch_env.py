@@ -448,6 +448,55 @@ class TestAlpacaTorchTradingEnvTradeExecution:
         assert env.trader.cash == cash_after_first_buy
 
 
+class TestAlpacaFractionalPositionResizing:
+    """Tests for fractional position resizing (regression for #155)."""
+
+    @pytest.fixture
+    def env(self):
+        """Create env with fractional action levels [0.0, 0.5, 1.0]."""
+        config = AlpacaTradingEnvConfig(
+            symbol="BTC/USD",
+            window_sizes=[10],
+            action_levels=[0.0, 0.5, 1.0],
+        )
+        mock_observer = MockObserver(window_sizes=[10])
+        mock_trader = MockTrader(initial_cash=10000.0)
+        env = AlpacaTorchTradingEnv(
+            config=config,
+            observer=mock_observer,
+            trader=mock_trader,
+        )
+        env._wait_for_next_timestamp = lambda: None
+        env.reset()
+        return env
+
+    @pytest.mark.parametrize("first_action,second_action,should_execute", [
+        (0.5, 1.0, True),   # Scale up: 50% → 100% must execute
+        (1.0, 0.5, True),   # Scale down: 100% → 50% must execute
+        (1.0, 1.0, False),  # Same level: 100% → 100% must skip
+        (0.0, 0.0, False),  # Both flat: must skip
+    ])
+    def test_fractional_resizing_executes(self, env, first_action, second_action, should_execute):
+        """Changing action level within same direction must trigger trade."""
+        from unittest.mock import patch, MagicMock
+
+        trade_executed = {"executed": True, "amount": 100, "side": "buy", "success": True}
+
+        with patch.object(env, '_execute_fractional_action', return_value=trade_executed) as mock_exec:
+            # Simulate first action was already executed
+            env.position.current_action_level = first_action
+            if first_action > 0:
+                env.position.current_position = 1
+
+            result = env._execute_trade_if_needed(second_action)
+
+            if should_execute:
+                mock_exec.assert_called_once_with(second_action)
+            else:
+                mock_exec.assert_not_called()
+                assert result["executed"] is False
+
+
 class TestAlpacaTorchTradingEnvPositionTracking:
     """Tests for position tracking and holding time."""
 
