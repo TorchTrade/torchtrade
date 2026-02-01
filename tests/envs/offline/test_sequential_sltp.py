@@ -122,10 +122,22 @@ class TestSLTPActionSpace:
             ("long", -0.05, 0.10),
         }
         actual_long_combinations = {
-            env.action_map[i] for i in env.action_map
-            if env.action_map[i][0] == "long"
+            v for v in env.action_map.values() if v[0] == "long"
         }
         assert actual_long_combinations == expected_long_combinations
+
+        # Check short combinations have swapped SL/TP (issue #149)
+        if trading_mode != 1:  # futures
+            expected_short_combinations = {
+                ("short", 0.03, -0.02),   # tp_pct -> sl_pct, sl_pct -> tp_pct
+                ("short", 0.10, -0.02),
+                ("short", 0.03, -0.05),
+                ("short", 0.10, -0.05),
+            }
+            actual_short_combinations = {
+                v for v in env.action_map.values() if v[0] == "short"
+            }
+            assert actual_short_combinations == expected_short_combinations
         env.close()
 
 
@@ -248,10 +260,46 @@ class TestSLTPTriggerDetection:
         assert next_td["next"]["account_state"][1] == 0.0
         env.close()
 
-    def test_stop_loss_trigger_short_futures(self, trending_up_df, sltp_config_futures):
+    def test_stop_loss_trigger_short_futures(self, trending_up_df):
         """Short position should trigger SL on uptrend (futures only)."""
-        # Skip for now - requires additional setup for short positions
-        pytest.skip("Short position SLTP testing requires additional setup")
+        config = SequentialTradingEnvSLTPConfig(
+            leverage=10,
+            initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=400,
+            random_start=False,
+            stoploss_levels=[-0.01],  # Tight SL
+            takeprofit_levels=[0.10],  # Wide TP
+        )
+        env = SequentialTradingEnvSLTP(trending_up_df, config, simple_feature_fn)
+        td = env.reset()
+
+        # Find short action
+        short_idx = next(i for i, v in env.action_map.items() if v[0] == "short")
+
+        # Open short bracket
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(short_idx)
+        next_td = env.step(action_td)
+
+        # Verify SL is above entry (correct after fix)
+        assert env.stop_loss > env.position.entry_price
+
+        # Step until SL triggers (price going up = bad for shorts)
+        for _ in range(300):
+            if next_td["next"]["account_state"][1] == 0.0:
+                break
+            action_td_hold = next_td["next"].clone()
+            action_td_hold["action"] = torch.tensor(0)
+            next_td = env.step(action_td_hold)
+
+        assert next_td["next"]["account_state"][1] == 0.0, "SL should have triggered on uptrend"
+        env.close()
 
 
 # ============================================================================
@@ -367,6 +415,75 @@ class TestSLTPEdgeCases:
 
 class TestSLTPRegression:
     """Regression tests for known SLTP issues."""
+
+    def test_short_bracket_prices_not_inverted(self, sample_ohlcv_df):
+        """Short positions must have SL above entry and TP below entry (issue #149)."""
+        config = SequentialTradingEnvSLTPConfig(
+            leverage=10,
+            initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=100,
+            random_start=False,
+            stoploss_levels=[-0.025],
+            takeprofit_levels=[0.05],
+        )
+        env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+
+        # Find the short action in the action map
+        short_idx = next(i for i, v in env.action_map.items() if v[0] == "short")
+
+        # Open short position
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(short_idx)
+        env.step(action_td)
+
+        entry_price = env.position.entry_price
+        assert entry_price > 0, "Position should be opened"
+
+        # For shorts: SL must be ABOVE entry, TP must be BELOW entry
+        assert env.stop_loss > entry_price, (
+            f"Short SL ({env.stop_loss}) must be above entry ({entry_price})"
+        )
+        assert env.take_profit < entry_price, (
+            f"Short TP ({env.take_profit}) must be below entry ({entry_price})"
+        )
+        env.close()
+
+    def test_short_action_map_matches_live_env(self, sample_ohlcv_df):
+        """Offline short action map must match live env convention (issue #149)."""
+        from torchtrade.envs.utils.action_maps import create_sltp_action_map
+
+        sl_levels = [-0.025, -0.05]
+        tp_levels = [0.05, 0.1]
+
+        # Live env action map
+        live_map = create_sltp_action_map(
+            sl_levels, tp_levels, include_short_positions=True,
+            include_hold_action=True, include_close_action=False,
+        )
+
+        # Offline env action map
+        config = SequentialTradingEnvSLTPConfig(
+            leverage=10,
+            initial_cash=10000,
+            stoploss_levels=sl_levels,
+            takeprofit_levels=tp_levels,
+        )
+        env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+
+        # Compare short actions between live and offline
+        live_shorts = {v for v in live_map.values() if v[0] == "short"}
+        offline_shorts = {v for v in env.action_map.values() if v[0] == "short"}
+        assert live_shorts == offline_shorts, (
+            f"Offline shorts {offline_shorts} != live shorts {live_shorts}"
+        )
+        env.close()
 
     def test_no_action_when_no_position(self, sltp_env):
         """No action should work when there's no position."""

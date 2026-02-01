@@ -4,12 +4,10 @@ from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservation
 from torchtrade.envs.offline.infrastructure.utils import (
     compute_periods_per_year_crypto,
     InitialBalanceSampler,
-    build_sltp_action_map,
 )
 
 __all__ = [
     "MarketDataObservationSampler",
     "compute_periods_per_year_crypto",
     "InitialBalanceSampler",
-    "build_sltp_action_map",
 ]
