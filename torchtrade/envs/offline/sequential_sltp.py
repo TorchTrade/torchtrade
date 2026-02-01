@@ -15,7 +15,6 @@ Key Features:
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
-from itertools import product
 
 import pandas as pd
 import torch
@@ -31,6 +30,7 @@ from torchtrade.envs.utils.sltp_helpers import (
     calculate_long_bracket_prices,
     calculate_short_bracket_prices,
 )
+from torchtrade.envs.utils.action_maps import create_sltp_action_map
 
 
 @dataclass
@@ -169,45 +169,16 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
     ) -> Dict[int, Tuple]:
         """Build action map for SLTP environment.
 
-        Args:
-            stoploss_levels: List of stop-loss percentages (negative)
-            takeprofit_levels: List of take-profit percentages (positive)
-            include_hold_action: Whether to include HOLD action at index 0
-            include_close_action: Whether to include explicit CLOSE action
-            allow_short: Whether to include short positions (futures mode)
-
-        Returns:
-            Dictionary mapping action indices to tuples:
-                - Spot mode: (side, sl_pct, tp_pct) where side is "long"
-                - Futures mode: (side, sl_pct, tp_pct) where side is "long" or "short"
-                - HOLD: (None, None, None)
-                - CLOSE: ("close", None, None)
+        Delegates to the shared create_sltp_action_map to ensure consistent
+        SL/TP swapping for short positions across live and offline environments.
         """
-        action_map = {}
-        idx = 0
-
-        # Add HOLD action if requested
-        if include_hold_action:
-            action_map[0] = (None, None, None)
-            idx = 1
-
-        # Add CLOSE action if requested
-        if include_close_action:
-            action_map[idx] = ("close", None, None)
-            idx += 1
-
-        # Add long positions with all SL/TP combinations
-        for sl, tp in product(stoploss_levels, takeprofit_levels):
-            action_map[idx] = ("long", sl, tp)
-            idx += 1
-
-        # Add short positions (only for futures mode)
-        if allow_short:
-            for sl, tp in product(stoploss_levels, takeprofit_levels):
-                action_map[idx] = ("short", sl, tp)
-                idx += 1
-
-        return action_map
+        return create_sltp_action_map(
+            stoploss_levels=stoploss_levels,
+            takeprofit_levels=takeprofit_levels,
+            include_short_positions=allow_short,
+            include_hold_action=include_hold_action,
+            include_close_action=include_close_action,
+        )
 
     def _reset_position_state(self):
         """Reset position tracking state including SLTP-specific state."""
