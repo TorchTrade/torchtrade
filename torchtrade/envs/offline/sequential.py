@@ -828,7 +828,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
     def _check_truncation(self) -> bool:
         """Check if episode should be truncated (time limit or data exhaustion)."""
-        return self.truncated or self.step_counter >= self.max_steps
+        return self.truncated or self.step_counter >= self.max_traj_length
 
     def close(self):
         """Clean up resources."""

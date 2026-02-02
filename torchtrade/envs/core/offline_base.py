@@ -83,7 +83,6 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
 
         # Initialize step counter
         self.step_counter = 0
-        self.max_steps = self.sampler.get_max_steps()
 
         # Initialize state attributes (set to valid defaults, will be properly set in _reset)
         self.current_timestamp = None

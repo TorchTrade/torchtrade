@@ -606,6 +606,48 @@ class TestSequentialEnvRegression:
         )
         env.close()
 
+    @pytest.mark.parametrize("leverage,action_levels,hold_action", [
+        (1, [0, 1], 0),           # Spot
+        (10, [-1, 0, 1], 1),      # Futures
+    ], ids=["spot", "futures"])
+    def test_truncation_respects_per_episode_length_with_random_start(
+        self, sample_ohlcv_df, leverage, action_levels, hold_action
+    ):
+        """Truncation must use per-episode max_traj_length, not fixed max_steps.
+
+        Regression test for #158: _check_truncation used self.max_steps (set once
+        at init) instead of self.max_traj_length (updated per episode), causing
+        incorrect episode boundaries with random_start=True.
+        """
+        max_traj = 20
+        config = SequentialTradingEnvConfig(
+            leverage=leverage,
+            action_levels=action_levels,
+            max_traj_length=max_traj,
+            random_start=True,
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+        env = SequentialTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
+
+        for episode in range(3):
+            td = env.reset()
+            steps = 0
+            for _ in range(max_traj + 10):  # Try to exceed max_traj
+                action_td = td["next"].clone() if "next" in td.keys() else td.clone()
+                action_td["action"] = torch.tensor(hold_action)
+                td = env.step(action_td)
+                steps += 1
+                if td["next"]["done"].item():
+                    break
+
+            assert steps <= max_traj, (
+                f"Episode {episode} ran {steps} steps but max_traj_length={max_traj} (issue #158)"
+            )
+            assert td["next"]["truncated"].item() is True
+        env.close()
+
     def test_bankruptcy_sets_terminated_not_truncated(self, trending_down_df):
         """Bankruptcy must set terminated=True, truncated=False.
 
