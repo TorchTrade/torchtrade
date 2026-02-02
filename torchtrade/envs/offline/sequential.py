@@ -14,6 +14,9 @@ Key Features:
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union, Callable
+import logging
+
+logger = logging.getLogger(__name__)
 
 import pandas as pd
 import torch
@@ -624,6 +627,15 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         # Adjust position size in same direction
         return self._adjust_position_size(target_position_size, target_notional, execution_price)
 
+    def _clamp_balance(self) -> None:
+        if self.balance < -1e-10:
+            logger.warning(
+                f"Negative balance detected: {self.balance:.6f}. "
+                f"Position: {self.position.position_size}, Entry: {self.position.entry_price}. "
+                "This likely indicates an accounting bug."
+            )
+        self.balance = max(0.0, self.balance)
+
     def _open_position(
         self, side: str, position_size: float, notional_value: float, execution_price: float
     ) -> Dict:
@@ -640,7 +652,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         # For spot (leverage=1): margin_required = notional_value (full cost)
         # For futures (leverage>1): margin_required = notional_value / leverage
         self.balance -= fee + margin_required
-        self.balance = max(0.0, self.balance)
+        self._clamp_balance()
 
         # Set position
         self.position.position_size = position_size
@@ -698,7 +710,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         # Execute trade - deduct fee and additional margin
         self.balance -= fee + margin_required
-        self.balance = max(0.0, self.balance)
+        self._clamp_balance()
 
         # Calculate weighted average entry price
         current_value = abs(self.position.position_size * self.position.entry_price)
@@ -743,7 +755,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         # Update balance: add PnL, subtract fee, return freed margin
         self.balance += pnl - fee + freed_margin
-        self.balance = max(0.0, self.balance)
+        self._clamp_balance()
 
         # Update position
         self.position.position_size = target_position_size
@@ -773,7 +785,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         # Update balance: add realized PnL, subtract fee, return locked margin
         self.balance += pnl - fee + margin_to_return
-        self.balance = max(0.0, self.balance)
+        self._clamp_balance()
 
         # Reset position
         self.position.position_size = 0.0
@@ -808,7 +820,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         # Apply loss, fees, and return margin
         liquidation_fee = abs(self.position.position_size * self.liquidation_price) * self.transaction_fee
         self.balance += loss - liquidation_fee + margin_to_return
-        self.balance = max(0.0, self.balance)
+        self._clamp_balance()
         trade_info["fee_paid"] = liquidation_fee
 
         # Reset position
