@@ -193,6 +193,11 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         Uses intrabar OHLC data to detect SL/TP triggers that may occur
         within the candle, not just at the close.
 
+        NOTE: SL is checked before TP intentionally. When both could trigger
+        within the same candle, we assume the worst case (SL). This pessimistic
+        bias ensures backtesting underestimates performance, so live trading
+        can only outperform the backtest.
+
         Args:
             ohlcv: Dictionary with keys "open", "high", "low", "close", "volume"
 
