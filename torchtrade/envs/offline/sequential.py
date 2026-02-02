@@ -370,9 +370,10 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
-        # Get market data (scaffold sets current_timestamp, truncated, and caches base features)
-        obs_dict = self._get_observation_scaffold()
-        current_price = self._cached_base_features["close"]
+        # Get market data (scaffold sets current_timestamp and truncated)
+        obs_dict, base_features = self._get_observation_scaffold()
+        self._cached_base_features = base_features
+        current_price = base_features["close"]
 
         # Calculate position value (absolute value of notional)
         self.position.position_value = abs(self.position.position_size * current_price)

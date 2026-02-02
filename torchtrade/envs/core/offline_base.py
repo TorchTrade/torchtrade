@@ -349,14 +349,15 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         - self.current_timestamp: Current observation timestamp
         - self.truncated: Whether insufficient data remains to build full observation windows
           (True when approaching end of dataset, not just when completely exhausted)
-        - self._cached_base_features: Cached base features for timestamp
 
         Returns:
-            Dictionary with market data observations for each timeframe
+            Tuple of (obs_dict, base_features) where obs_dict is a dictionary with
+            market data observations for each timeframe, and base_features contains
+            the base OHLCV features for the current timestamp.
         """
         obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
-        self._cached_base_features = self.sampler.get_base_features(self.current_timestamp)
-        return obs_dict
+        base_features = self.sampler.get_base_features(self.current_timestamp)
+        return obs_dict, base_features
 
     def _update_position_metrics(self, current_price: float):
         """Update position value and unrealized PnL based on current price.
