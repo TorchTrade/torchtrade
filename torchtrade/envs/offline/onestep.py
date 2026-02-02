@@ -182,7 +182,8 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         # Get market data
         if initial or self.position.position_size == 0:
             # Initial observation or no position - get new observation
-            obs_dict = self._get_observation_scaffold()
+            obs_dict, base_features = self._get_observation_scaffold()
+            self._cached_base_features = base_features
             self.rollout_returns = []
         else:
             # Position exists - rollout until SL/TP trigger or truncation
@@ -433,7 +434,8 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
 
         # If loop never executed (truncated from start), get an observation
         if obs_dict is None:
-            obs_dict = self._get_observation_scaffold()
+            obs_dict, base_features = self._get_observation_scaffold()
+            self._cached_base_features = base_features
 
         return trade_info, obs_dict
 
