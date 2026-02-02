@@ -1384,21 +1384,6 @@ class TestUndersizedWindowPadding:
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
         )
 
-    def test_undersized_window_is_zero_padded_to_correct_shape(self, padding_sampler):
-        """Window with insufficient history should be zero-padded to declared shape."""
-        key = "1Minute"
-        # Force index to position 3: start = 3 - 10 + 1 = -6 (triggers padding)
-        padding_sampler._obs_indices[key][0] = 3
-
-        obs = padding_sampler._get_observation_sequential(0)
-        window = obs[key]
-
-        assert window.shape[0] == 10, (
-            f"BUG 5: undersized window {window.shape[0]} != declared 10"
-        )
-        assert (window[:6] == 0).all(), "Padded region should be zeros"
-        assert (window[6:] != 0).any(), "Non-padded region should contain real data"
-
     @pytest.mark.parametrize("available_bars,expected_pad", [
         (1, 9),
         (5, 5),
