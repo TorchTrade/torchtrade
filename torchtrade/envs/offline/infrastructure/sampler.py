@@ -201,6 +201,20 @@ class MarketDataObservationSampler:
         base_ts_int64 = self.execute_base_features_df.index.asi8
         self.execute_base_idx = torch.from_numpy(base_ts_int64).to(torch.long)
 
+        # Validate 1:1 correspondence between exec_times and execute_base_features_df
+        # This ensures sequential access can use direct indexing without misalignment
+        if len(self.exec_times) != len(self.execute_base_features_df):
+            raise ValueError(
+                f"exec_times ({len(self.exec_times)}) and execute_base_features_df "
+                f"({len(self.execute_base_features_df)}) have different lengths. "
+                "Sequential index access requires 1:1 row correspondence."
+            )
+        if not (exec_ts_int64 == base_ts_int64).all():
+            raise ValueError(
+                "exec_times and execute_base_features_df timestamps are not aligned. "
+                "Sequential index access requires 1:1 row correspondence."
+            )
+
     def get_random_timestamp(self, without_replacement: bool = False) -> pd.Timestamp:
         if without_replacement:
             idx = self.np_rng.choice(len(self.unseen_timestamps), size=1, replace=False)
