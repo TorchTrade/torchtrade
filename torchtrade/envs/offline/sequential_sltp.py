@@ -291,7 +291,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         # Update balance: add realized PnL, subtract fee, return locked margin
         self.balance += pnl - fee + margin_to_return
-        self.balance = max(0.0, self.balance)
+        self._clamp_balance()
 
         # Reset position and SLTP state
         self.position.position_size = 0.0
@@ -510,7 +510,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         # For spot (leverage=1): margin_required = notional_value (full cost)
         # For futures (leverage>1): margin_required = notional_value / leverage
         self.balance -= fee + margin_required
-        self.balance = max(0.0, self.balance)
+        self._clamp_balance()
 
         # Set position
         self.position.position_size = position_size if side == "long" else -abs(position_size)
