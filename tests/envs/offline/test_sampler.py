@@ -1350,3 +1350,55 @@ class TestSamplerMultiTimeframeAlignment:
 
             if truncated:
                 break
+
+
+class TestUndersizedWindowPadding:
+    """
+    Regression tests for BUG 5 (#157): Sampler returns undersized windows silently.
+
+    When _get_observation_sequential encounters a negative start index (insufficient
+    history), it must zero-pad the window to maintain the declared shape.
+    """
+
+    @pytest.fixture
+    def padding_sampler(self):
+        """Create a sampler for padding tests."""
+        n_minutes = 200
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+        timestamps = pd.date_range(start=start_time, periods=n_minutes, freq="1min")
+        close_prices = np.array([100.0 + i for i in range(n_minutes)])
+
+        df = pd.DataFrame({
+            "timestamp": timestamps,
+            "open": close_prices - 0.5,
+            "high": close_prices + 1.0,
+            "low": close_prices - 1.0,
+            "close": close_prices,
+            "volume": np.ones(n_minutes) * 1000,
+        })
+
+        return MarketDataObservationSampler(
+            df=df,
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=10,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+
+    @pytest.mark.parametrize("available_bars,expected_pad", [
+        (1, 9),
+        (5, 5),
+        (9, 1),
+        (10, 0),
+    ], ids=["1-bar-9pad", "5-bars-5pad", "9-bars-1pad", "exact-no-pad"])
+    def test_padding_size_matches_deficit(self, padding_sampler, available_bars, expected_pad):
+        """Zero-padding size should exactly fill the deficit."""
+        key = "1Minute"
+        padding_sampler._obs_indices[key][0] = available_bars - 1
+
+        obs = padding_sampler._get_observation_sequential(0)
+        window = obs[key]
+
+        assert window.shape[0] == 10
+        if expected_pad > 0:
+            assert (window[:expected_pad] == 0).all()
+        assert (window[expected_pad:] != 0).any()

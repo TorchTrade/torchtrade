@@ -239,9 +239,13 @@ class MarketDataObservationSampler:
 
             start = idx_pos - ws + 1
             if start < 0:
-                start = 0
-
-            window = arr[start: idx_pos + 1]
+                # Pad with zeros on the left to maintain declared window shape
+                window = arr[0: idx_pos + 1]
+                pad_size = ws - window.shape[0]
+                padding = torch.zeros(pad_size, window.shape[1], dtype=window.dtype)
+                window = torch.cat([padding, window], dim=0)
+            else:
+                window = arr[start: idx_pos + 1]
             obs[key] = window
 
         return obs
