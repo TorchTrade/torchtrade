@@ -99,9 +99,6 @@ class BitgetObservationClass(BaseFuturesObservationClass):
         Returns:
             Raw kline data from CCXT: list of [timestamp_ms, open, high, low, close, volume]
         """
-        # Ensure symbol is normalized (in case parent class modified it)
-        symbol = normalize_symbol(symbol)
-
         # CCXT uses standardized timeframe strings (1m, 5m, 1h, 1d)
         interval_ccxt = interval.lower()
 

@@ -39,8 +39,8 @@ class BaseFuturesObservationClass(ABC):
             client: Optional pre-configured client for dependency injection (useful for testing)
             demo: Whether to use demo/testnet environment (default: True)
         """
-        # Normalize symbol (remove slash if present)
-        self.symbol = symbol.replace("/", "")
+        # Store symbol as-is (provider-specific normalization happens in subclasses)
+        self.symbol = symbol
 
         # Normalize time_frames and window_sizes to lists
         self.time_frames = [time_frames] if isinstance(time_frames, TimeFrame) else time_frames
