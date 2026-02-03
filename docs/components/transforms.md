@@ -8,6 +8,7 @@ TorchRL transforms are composable modules that modify environment observations, 
 |-----------|---------|----------|
 | [**CoverageTracker**](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/coverage_tracker.py) | Track dataset coverage during training | Monitor exploration, detect overfitting |
 | [**ChronosEmbeddingTransform**](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/chronos_embedding.py) | Embed time series with Chronos T5 models | Replace raw OHLCV with learned representations |
+| [**TimestampTransform**](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/timestamp.py) | Add Unix timestamps to TensorDicts | Create offline datasets from live trading runs |
 
 ---
 
@@ -88,6 +89,32 @@ env = TransformedEnv(
 ```bash
 pip install git+https://github.com/amazon-science/chronos-forecasting.git
 ```
+
+---
+
+## TimestampTransform
+
+Adds Unix timestamps to TensorDicts on reset and step. Useful for creating offline datasets from live trading runs, debugging latency, and correlating trading decisions with real-world events.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `out_key` | `"timestamp"` | Key to store the timestamp |
+
+```python
+from torchrl.envs import TransformedEnv
+from torchtrade.envs.transforms import TimestampTransform
+
+env = TransformedEnv(base_env, TimestampTransform())
+
+td = env.reset()           # td["timestamp"] = 1738617600.123
+td = env.step(td)          # td["next", "timestamp"] = 1738617600.456
+
+# Convert to datetime
+from datetime import datetime
+dt = datetime.fromtimestamp(td["timestamp"])
+```
+
+**Note:** Timestamps are wall-clock time (when `step()`/`reset()` is called), not execution timeframe timestamps. For execution timestamps, use the market data timestamps in observations.
 
 ---
 
