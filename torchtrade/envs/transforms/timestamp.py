@@ -7,12 +7,16 @@ from torchrl.envs.transforms import Transform
 
 
 class TimestampTransform(Transform):
-    """Add Unix timestamps to each step/reset for dataset creation.
+    """Add Unix timestamps (UTC) to each step/reset for dataset creation.
 
     Useful for:
     - Creating offline datasets from live trading runs
     - Debugging and analyzing live trading performance
     - Correlating trading decisions with real-world events
+
+    Note:
+        Timestamps are UTC seconds since epoch (1970-01-01 00:00:00 UTC).
+        Use ``datetime.fromtimestamp(ts, tz=timezone.utc)`` for timezone-aware conversion.
 
     Usage:
         from torchrl.envs import TransformedEnv

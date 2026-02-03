@@ -67,6 +67,7 @@ def test_reset_and_step_add_timestamps(base_env, out_key):
     assert out_key in td.keys()
     reset_ts = td[out_key]
     assert isinstance(reset_ts, float)
+    assert reset_ts > 1700000000  # Sanity check: valid Unix timestamp (after 2023)
     assert before_reset <= reset_ts <= after_reset
 
     # Test step (with small delay to ensure different timestamp)
