@@ -102,6 +102,37 @@ class TestSequentialEnvInitialization:
             config = SequentialTradingEnvConfig(leverage=0.5)
             SequentialTradingEnv(sample_ohlcv_df, config)
 
+    @pytest.mark.parametrize("action_levels,leverage,should_warn", [
+        ([-1, 0, 1], 1, True),   # Negative actions + spot = warn
+        ([-1, 0, 1], 2, False),  # Negative actions + futures = no warn
+        ([0, 0.5, 1], 1, False), # No negative actions + spot = no warn
+    ])
+    def test_negative_action_levels_spot_warning(
+        self, sample_ohlcv_df, action_levels, leverage, should_warn
+    ):
+        """Warn when negative action_levels are used with leverage=1 (spot mode)."""
+        import warnings
+
+        config = SequentialTradingEnvConfig(
+            action_levels=action_levels,
+            leverage=leverage,
+            initial_cash=1000,
+        )
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            env = SequentialTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
+            env.close()
+
+            # Filter to our specific warning (ignore unrelated warnings)
+            our_warnings = [x for x in w if "Negative action_levels" in str(x.message)]
+
+            if should_warn:
+                assert len(our_warnings) == 1
+                assert "leverage=1" in str(our_warnings[0].message)
+            else:
+                assert len(our_warnings) == 0
+
 
 # ============================================================================
 # RESET TESTS

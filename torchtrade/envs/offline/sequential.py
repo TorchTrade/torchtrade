@@ -12,6 +12,7 @@ Key Features:
     - Fractional position sizing with configurable action levels
 """
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union, Callable
 import logging
@@ -184,6 +185,18 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         # Define action spec
         self.action_spec = Categorical(len(self.action_levels))
+
+        # Warn if negative action_levels with leverage=1 (shorts impossible in spot mode)
+        has_negative_actions = any(a < 0 for a in self.action_levels)
+        if has_negative_actions and self.leverage == 1:
+            warnings.warn(
+                "Negative action_levels provided with leverage=1. "
+                "Short positions are not possible in spot mode - "
+                "negative actions will be clipped to 0 (flat). "
+                "Either remove negative action_levels or set leverage > 1.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         # Build observation specs with universal 6-element account state
         account_state = [
