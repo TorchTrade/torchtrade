@@ -356,6 +356,75 @@ class TestShortPositionEntry:
             f"Short entry changed on decrease: {entry_before:.4f} → {entry_after:.4f}"
 
 
+class TestWeightedEntryDirectFormula:
+    """Direct test of weighted average formula with different prices (issue #171)."""
+
+    @pytest.mark.parametrize("first_price,second_price,first_qty,second_qty", [
+        (50000, 60000, 1.0, 0.5),   # Averaging up: 1 BTC @ 50k + 0.5 BTC @ 60k
+        (60000, 50000, 1.0, 1.0),   # Averaging down: 1 BTC @ 60k + 1 BTC @ 50k
+        (100, 200, 10.0, 5.0),      # Small prices: 10 @ 100 + 5 @ 200
+        (1000, 1100, 5.0, 5.0),     # Equal quantities at different prices
+    ])
+    def test_qty_weighted_not_notional_weighted(
+        self, constant_price_df, first_price, second_price, first_qty, second_qty
+    ):
+        """Verify entry uses qty-weighted avg, not notional-weighted.
+
+        Bug #171: The old code computed:
+          new_entry = (entry1 * notional1 + entry2 * notional2) / (notional1 + notional2)
+
+        Correct formula:
+          new_entry = (entry1 * qty1 + entry2 * qty2) / (qty1 + qty2)
+        """
+        # Calculate both formulas
+        qty_weighted = (first_price * first_qty + second_price * second_qty) / (first_qty + second_qty)
+
+        notional1 = first_qty * first_price
+        notional2 = second_qty * second_price
+        notional_weighted = (first_price * notional1 + second_price * notional2) / (notional1 + notional2)
+
+        # Use leverage to allow precise qty control
+        config = SequentialTradingEnvConfig(
+            execute_on="1Hour",
+            time_frames=["1Hour"],
+            window_sizes=[5],
+            initial_cash=1000000,  # Large cash for flexibility
+            transaction_fee=0.0,
+            slippage=0.0,
+            leverage=10,
+            action_levels=[-1, 0, 1],
+            random_start=False,
+        )
+        env = SequentialTradingEnv(constant_price_df, config)
+        env.reset()
+
+        # Manually set position state to test the formula directly
+        env.position.position_size = first_qty
+        env.position.entry_price = first_price
+        env.position.position_value = first_qty * first_price
+        env.balance = 500000  # Enough for margin
+
+        # Call _increase_position_size directly
+        target_size = first_qty + second_qty
+        target_notional = target_size * second_price
+        delta_position = second_qty
+        delta_notional = second_qty * second_price
+
+        result = env._increase_position_size(
+            target_size, target_notional, delta_position, delta_notional, second_price
+        )
+
+        assert result["executed"], "Trade should execute"
+
+        # Verify the entry price matches qty-weighted, not notional-weighted
+        actual_entry = env.position.entry_price
+
+        assert abs(actual_entry - qty_weighted) < 0.01, (
+            f"Entry should be qty-weighted ({qty_weighted:.2f}), got {actual_entry:.2f}. "
+            f"Notional-weighted would be {notional_weighted:.2f}."
+        )
+
+
 class TestDirectionFlipEntry:
     """Test entry price when flipping from long to short or vice versa."""
 

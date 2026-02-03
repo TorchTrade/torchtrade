@@ -713,14 +713,14 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self.balance -= fee + margin_required
         self._clamp_balance()
 
-        # Calculate weighted average entry price
-        current_value = abs(self.position.position_size * self.position.entry_price)
-        new_value = delta_notional
-        total_value = current_value + new_value
+        # Calculate weighted average entry price (weight by quantity, not notional)
+        old_qty = abs(self.position.position_size)
+        new_qty = abs(delta_position)
+        total_qty = old_qty + new_qty
 
-        if total_value > 0:
+        if total_qty > 0:
             self.position.entry_price = (
-                (self.position.entry_price * current_value + execution_price * new_value) / total_value
+                (self.position.entry_price * old_qty + execution_price * new_qty) / total_qty
             )
 
         # Update position
