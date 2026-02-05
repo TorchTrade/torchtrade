@@ -843,3 +843,63 @@ class TestPerTimeframeFeatures:
         assert obs_spec["market_data_5Minute_5"].shape == (5, 2)
 
         env.close()
+
+    def test_multi_step_episode_maintains_shapes(self, multi_tf_df):
+        """Observation shapes should remain consistent throughout entire episode."""
+        def process_1min(df):
+            """3 features."""
+            df = df.copy().reset_index(drop=False)
+            df["features_close"] = df["close"]
+            df["features_volume"] = df["volume"]
+            df["features_range"] = df["high"] - df["low"]
+            return df
+
+        def process_5min(df):
+            """5 features."""
+            df = df.copy().reset_index(drop=False)
+            df["features_close"] = df["close"]
+            df["features_sma"] = df["close"].rolling(3).mean().fillna(df["close"])
+            df["features_vol"] = df["close"].pct_change().rolling(3).std().fillna(0)
+            df["features_volume"] = df["volume"]
+            df["features_vma"] = df["volume"].rolling(3).mean().fillna(df["volume"])
+            return df
+
+        config = SequentialTradingEnvConfig(
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+            ],
+            window_sizes=[10, 5],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000,
+            max_traj_length=50,
+            random_start=False,
+        )
+        env = SequentialTradingEnv(
+            multi_tf_df,
+            config,
+            feature_preprocessing_fn=[process_1min, process_5min],
+        )
+
+        expected_1min_shape = (10, 3)
+        expected_5min_shape = (5, 5)
+
+        td = env.reset()
+        assert td["market_data_1Minute_10"].shape == expected_1min_shape
+        assert td["market_data_5Minute_5"].shape == expected_5min_shape
+
+        # Run through multiple steps and verify shapes remain consistent
+        for step in range(30):
+            action_td = td["next"].clone() if "next" in td.keys() else td.clone()
+            action_td["action"] = torch.tensor(1)  # Hold flat
+            td = env.step(action_td)
+
+            assert td["next"]["market_data_1Minute_10"].shape == expected_1min_shape, \
+                f"Step {step}: 1min shape mismatch"
+            assert td["next"]["market_data_5Minute_5"].shape == expected_5min_shape, \
+                f"Step {step}: 5min shape mismatch"
+
+            if td["next"]["done"].item():
+                break
+
+        env.close()
