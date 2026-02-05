@@ -203,8 +203,9 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             "exposure_pct", "position_direction", "unrealized_pnlpct",
             "holding_time", "leverage", "distance_to_liquidation"
         ]
-        num_features = len(self.sampler.get_feature_keys())
-        self._build_observation_specs(account_state, num_features)
+        # Use per-timeframe feature counts to support different feature dimensions
+        num_features_per_tf = self.sampler.get_num_features_per_timeframe()
+        self._build_observation_specs(account_state, num_features_per_tf)
 
         # Initialize futures-specific tracking state
         # (These are calculation helpers, not part of PositionState)

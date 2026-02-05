@@ -731,3 +731,99 @@ class TestSequentialEnvRegression:
         assert td["next"]["terminated"].item() is False
         assert td["next"]["truncated"].item() is False
         assert td["next"]["done"].item() is False
+
+
+# ============================================================================
+# PER-TIMEFRAME FEATURE PROCESSING TESTS (Issue #177)
+# ============================================================================
+
+
+class TestPerTimeframeFeatures:
+    """Tests for per-timeframe feature processing at environment level."""
+
+    @pytest.fixture
+    def multi_tf_df(self):
+        """Create OHLCV data for multi-timeframe testing."""
+        import numpy as np
+        n_minutes = 500
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+        timestamps = pd.date_range(start=start_time, periods=n_minutes, freq="1min")
+
+        close_prices = np.array([100.0 + i for i in range(n_minutes)])
+        return pd.DataFrame({
+            "timestamp": timestamps,
+            "open": close_prices - 0.5,
+            "high": close_prices + 1.0,
+            "low": close_prices - 1.0,
+            "close": close_prices,
+            "volume": np.ones(n_minutes) * 1000,
+        })
+
+    def test_env_with_different_feature_dimensions(self, multi_tf_df):
+        """Environment should work with different feature dimensions per timeframe.
+
+        Verifies: spec shapes, reset shapes, and shape consistency over 30 steps.
+        """
+        def process_1min(df):
+            """3 features."""
+            df = df.copy().reset_index(drop=False)
+            df["features_close"] = df["close"]
+            df["features_volume"] = df["volume"]
+            df["features_range"] = df["high"] - df["low"]
+            return df
+
+        def process_5min(df):
+            """5 features."""
+            df = df.copy().reset_index(drop=False)
+            df["features_close"] = df["close"]
+            df["features_sma"] = df["close"].rolling(3).mean().fillna(df["close"])
+            df["features_vol"] = df["close"].pct_change().rolling(3).std().fillna(0)
+            df["features_volume"] = df["volume"]
+            df["features_vma"] = df["volume"].rolling(3).mean().fillna(df["volume"])
+            return df
+
+        config = SequentialTradingEnvConfig(
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+            ],
+            window_sizes=[10, 5],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000,
+            max_traj_length=50,
+            random_start=False,
+        )
+        env = SequentialTradingEnv(
+            multi_tf_df,
+            config,
+            feature_preprocessing_fn=[process_1min, process_5min],
+        )
+
+        expected_1min_shape = (10, 3)
+        expected_5min_shape = (5, 5)
+
+        # Check observation spec shapes
+        obs_spec = env.observation_spec
+        assert obs_spec["market_data_1Minute_10"].shape == expected_1min_shape
+        assert obs_spec["market_data_5Minute_5"].shape == expected_5min_shape
+
+        # Reset and check actual observation shapes
+        td = env.reset()
+        assert td["market_data_1Minute_10"].shape == expected_1min_shape
+        assert td["market_data_5Minute_5"].shape == expected_5min_shape
+
+        # Run through multiple steps and verify shapes remain consistent
+        for step in range(30):
+            action_td = td["next"].clone() if "next" in td.keys() else td.clone()
+            action_td["action"] = torch.tensor(1)  # Hold flat
+            td = env.step(action_td)
+
+            assert td["next"]["market_data_1Minute_10"].shape == expected_1min_shape, \
+                f"Step {step}: 1min shape mismatch"
+            assert td["next"]["market_data_5Minute_5"].shape == expected_5min_shape, \
+                f"Step {step}: 5min shape mismatch"
+
+            if td["next"]["done"].item():
+                break
+
+        env.close()

@@ -1,6 +1,6 @@
 """Base class for offline trading environments."""
 
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -122,14 +122,17 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
     def _build_observation_specs(
         self,
         account_state: List[str],
-        num_features: int
+        num_features: Union[int, Dict[str, int]]
     ):
         """
         Build observation specs from sampler configuration.
 
         Args:
             account_state: List of account state field names
-            num_features: Number of features per observation window
+            num_features: Number of features per observation window.
+                         Can be a single int (same for all timeframes) or
+                         a dict mapping timeframe keys to feature counts
+                         (for per-timeframe feature dimensions).
         """
         self.observation_spec = Composite(shape=())
 
@@ -148,14 +151,29 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         market_data_keys = self.sampler.get_observation_keys()
         self.market_data_keys = []
 
+        # Validate num_features dict has all required keys
+        if isinstance(num_features, dict):
+            missing_keys = set(market_data_keys) - set(num_features.keys())
+            if missing_keys:
+                raise ValueError(
+                    f"num_features dict is missing keys for timeframes: {missing_keys}. "
+                    f"Expected keys: {market_data_keys}, got: {list(num_features.keys())}"
+                )
+
         for i, market_data_name in enumerate(market_data_keys):
             market_data_key = (
                 f"market_data_{market_data_name}_{self.config.window_sizes[i]}"
             )
+            # Get feature count for this timeframe
+            if isinstance(num_features, dict):
+                tf_num_features = num_features[market_data_name]
+            else:
+                tf_num_features = num_features
+
             market_data_spec = Bounded(
                 low=-torch.inf,
                 high=torch.inf,
-                shape=(self.config.window_sizes[i], num_features),
+                shape=(self.config.window_sizes[i], tf_num_features),
                 dtype=torch.float
             )
             self.observation_spec.set(market_data_key, market_data_spec)
