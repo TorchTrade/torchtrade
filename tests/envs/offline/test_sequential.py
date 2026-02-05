@@ -844,6 +844,23 @@ class TestPerTimeframeFeatures:
 
         env.close()
 
+    def test_feature_processing_with_no_features_raises(self, multi_tf_df):
+        """Feature processing function with no features_* columns should raise."""
+        def bad_fn(df):
+            df = df.copy().reset_index(drop=False)
+            df["not_a_feature"] = df["close"]  # Missing features_ prefix
+            return df
+
+        config = SequentialTradingEnvConfig(
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000,
+        )
+
+        with pytest.raises(ValueError, match="produced no columns"):
+            SequentialTradingEnv(multi_tf_df, config, feature_preprocessing_fn=bad_fn)
+
     def test_multi_step_episode_maintains_shapes(self, multi_tf_df):
         """Observation shapes should remain consistent throughout entire episode."""
         def process_1min(df):

@@ -97,6 +97,12 @@ class MarketDataObservationSampler:
             if proc_fn is not None:
                 resampled = proc_fn(resampled)
                 cols_to_keep = [col for col in resampled.columns if col.startswith(features_start_with)]
+                if len(cols_to_keep) == 0:
+                    raise ValueError(
+                        f"Feature processing function for timeframe {tf.obs_key_freq()} "
+                        f"produced no columns starting with '{features_start_with}'. "
+                        f"Ensure your function adds columns like 'features_close', 'features_volume', etc."
+                    )
                 cols_to_keep.append("timestamp")
                 resampled = resampled[cols_to_keep]
                 resampled = resampled.reset_index().set_index("timestamp")

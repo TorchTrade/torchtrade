@@ -1579,6 +1579,48 @@ class TestPerTimeframeFeatureProcessing:
         # 5-minute should have raw OHLCV
         assert per_tf["5Minute"] == ["open", "high", "low", "close", "volume"]
 
+    def test_feature_processing_fn_with_no_features_raises(self, multi_tf_ohlcv_df):
+        """Feature processing function returning no features_* columns should raise."""
+        def bad_fn(df):
+            df = df.copy().reset_index(drop=False)
+            df["not_a_feature"] = df["close"]  # Missing features_ prefix
+            df["also_not_a_feature"] = df["volume"]
+            return df
+
+        with pytest.raises(ValueError, match="produced no columns starting with"):
+            MarketDataObservationSampler(
+                df=multi_tf_ohlcv_df,
+                time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+                window_sizes=[10],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                feature_processing_fn=bad_fn,
+            )
+
+    def test_feature_processing_fn_partial_failure_raises(self, multi_tf_ohlcv_df):
+        """If only one timeframe's processing fails, should raise with timeframe info."""
+        def good_fn(df):
+            df = df.copy().reset_index(drop=False)
+            df["features_close"] = df["close"]
+            return df
+
+        def bad_fn(df):
+            df = df.copy().reset_index(drop=False)
+            df["not_a_feature"] = df["close"]
+            return df
+
+        with pytest.raises(ValueError, match="5Minute") as exc_info:
+            MarketDataObservationSampler(
+                df=multi_tf_ohlcv_df,
+                time_frames=[
+                    TimeFrame(1, TimeFrameUnit.Minute),
+                    TimeFrame(5, TimeFrameUnit.Minute),
+                ],
+                window_sizes=[10, 5],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                feature_processing_fn=[good_fn, bad_fn],  # Second one fails
+            )
+        assert "produced no columns" in str(exc_info.value)
+
     @pytest.mark.parametrize("fn_config,expected_1min,expected_5min", [
         (None, 5, 5),  # No processing: raw OHLCV (5 features)
         ("single", 2, 2),  # Single function: same features

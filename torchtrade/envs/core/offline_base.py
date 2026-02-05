@@ -151,6 +151,15 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         market_data_keys = self.sampler.get_observation_keys()
         self.market_data_keys = []
 
+        # Validate num_features dict has all required keys
+        if isinstance(num_features, dict):
+            missing_keys = set(market_data_keys) - set(num_features.keys())
+            if missing_keys:
+                raise ValueError(
+                    f"num_features dict is missing keys for timeframes: {missing_keys}. "
+                    f"Expected keys: {market_data_keys}, got: {list(num_features.keys())}"
+                )
+
         for i, market_data_name in enumerate(market_data_keys):
             market_data_key = (
                 f"market_data_{market_data_name}_{self.config.window_sizes[i]}"
