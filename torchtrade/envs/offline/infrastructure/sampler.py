@@ -50,8 +50,9 @@ class MarketDataObservationSampler:
             raise ValueError("window_sizes must be an int or list with same length as time_frames")
 
         # Normalize feature_processing_fn to a list (one per timeframe)
+        processing_fns: List[Optional[Callable]]
         if feature_processing_fn is None:
-            processing_fns: List[Optional[Callable]] = [None] * len(time_frames)
+            processing_fns = [None] * len(time_frames)
         elif callable(feature_processing_fn):
             # Single function: apply to all timeframes
             processing_fns = [feature_processing_fn] * len(time_frames)
