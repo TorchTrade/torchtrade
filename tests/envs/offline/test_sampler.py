@@ -1402,3 +1402,233 @@ class TestUndersizedWindowPadding:
         if expected_pad > 0:
             assert (window[:expected_pad] == 0).all()
         assert (window[expected_pad:] != 0).any()
+
+
+class TestPerTimeframeFeatureProcessing:
+    """Tests for per-timeframe feature processing functions (Issue #177)."""
+
+    @pytest.fixture
+    def multi_tf_ohlcv_df(self):
+        """Create OHLCV data for multi-timeframe testing."""
+        n_minutes = 500
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+        timestamps = pd.date_range(start=start_time, periods=n_minutes, freq="1min")
+
+        close_prices = np.array([100.0 + i for i in range(n_minutes)])
+        return pd.DataFrame({
+            "timestamp": timestamps,
+            "open": close_prices - 0.5,
+            "high": close_prices + 1.0,
+            "low": close_prices - 1.0,
+            "close": close_prices,
+            "volume": np.ones(n_minutes) * 1000,
+        })
+
+    def test_single_function_backward_compatible(self, multi_tf_ohlcv_df):
+        """Single feature processing function should work as before."""
+        def process_fn(df):
+            df = df.copy().reset_index(drop=False)
+            df["features_close"] = df["close"]
+            df["features_volume"] = df["volume"]
+            return df
+
+        sampler = MarketDataObservationSampler(
+            df=multi_tf_ohlcv_df,
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+            ],
+            window_sizes=[10, 5],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            feature_processing_fn=process_fn,
+        )
+
+        # Both timeframes should have same features
+        feature_keys = sampler.get_feature_keys()
+        assert "features_close" in feature_keys
+        assert "features_volume" in feature_keys
+        assert len(feature_keys) == 2
+
+        # get_num_features_per_timeframe should return same count for both
+        num_features = sampler.get_num_features_per_timeframe()
+        assert num_features["1Minute"] == 2
+        assert num_features["5Minute"] == 2
+
+    def test_list_of_functions_different_features(self, multi_tf_ohlcv_df):
+        """List of functions producing different features should work."""
+        def process_1min(df):
+            """3 features for high-frequency analysis."""
+            df = df.copy().reset_index(drop=False)
+            df["features_close"] = df["close"]
+            df["features_volume"] = df["volume"]
+            df["features_range"] = df["high"] - df["low"]
+            return df
+
+        def process_5min(df):
+            """5 features for trend analysis."""
+            df = df.copy().reset_index(drop=False)
+            df["features_close"] = df["close"]
+            df["features_sma_3"] = df["close"].rolling(3).mean().fillna(df["close"])
+            df["features_sma_5"] = df["close"].rolling(5).mean().fillna(df["close"])
+            df["features_volatility"] = df["close"].pct_change().rolling(3).std().fillna(0)
+            df["features_volume_ma"] = df["volume"].rolling(3).mean().fillna(df["volume"])
+            return df
+
+        sampler = MarketDataObservationSampler(
+            df=multi_tf_ohlcv_df,
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+            ],
+            window_sizes=[10, 5],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            feature_processing_fn=[process_1min, process_5min],
+        )
+
+        # get_feature_keys should raise error (different features)
+        with pytest.raises(ValueError, match="different features"):
+            sampler.get_feature_keys()
+
+        # get_num_features_per_timeframe should return different counts
+        num_features = sampler.get_num_features_per_timeframe()
+        assert num_features["1Minute"] == 3
+        assert num_features["5Minute"] == 5
+
+        # get_feature_keys_per_timeframe should return different lists
+        per_tf = sampler.get_feature_keys_per_timeframe()
+        assert len(per_tf["1Minute"]) == 3
+        assert len(per_tf["5Minute"]) == 5
+        assert "features_range" in per_tf["1Minute"]
+        assert "features_sma_3" in per_tf["5Minute"]
+
+    def test_observation_shapes_with_different_features(self, multi_tf_ohlcv_df):
+        """Observations should have correct shapes when features differ."""
+        def process_1min(df):
+            df = df.copy().reset_index(drop=False)
+            df["features_a"] = df["close"]
+            df["features_b"] = df["volume"]
+            return df
+
+        def process_5min(df):
+            df = df.copy().reset_index(drop=False)
+            df["features_x"] = df["close"]
+            df["features_y"] = df["volume"]
+            df["features_z"] = df["high"]
+            df["features_w"] = df["low"]
+            return df
+
+        sampler = MarketDataObservationSampler(
+            df=multi_tf_ohlcv_df,
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+            ],
+            window_sizes=[10, 5],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            feature_processing_fn=[process_1min, process_5min],
+        )
+        sampler.reset(random_start=False)
+
+        obs, _, _ = sampler.get_sequential_observation()
+
+        # 1-minute: (10 window, 2 features)
+        assert obs["1Minute"].shape == (10, 2)
+        # 5-minute: (5 window, 4 features)
+        assert obs["5Minute"].shape == (5, 4)
+
+    def test_mismatched_list_length_raises_error(self, multi_tf_ohlcv_df):
+        """Mismatched list length should raise ValueError."""
+        def dummy_fn(df):
+            df = df.copy().reset_index(drop=False)
+            df["features_x"] = df["close"]
+            return df
+
+        with pytest.raises(ValueError, match="must match time_frames length"):
+            MarketDataObservationSampler(
+                df=multi_tf_ohlcv_df,
+                time_frames=[
+                    TimeFrame(1, TimeFrameUnit.Minute),
+                    TimeFrame(5, TimeFrameUnit.Minute),
+                ],
+                window_sizes=[10, 5],
+                execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+                feature_processing_fn=[dummy_fn],  # Only 1 function for 2 timeframes
+            )
+
+    def test_none_in_list_skips_processing(self, multi_tf_ohlcv_df):
+        """None in the list should skip processing for that timeframe."""
+        def process_fn(df):
+            df = df.copy().reset_index(drop=False)
+            df["features_custom"] = df["close"] * 2
+            return df
+
+        sampler = MarketDataObservationSampler(
+            df=multi_tf_ohlcv_df,
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+            ],
+            window_sizes=[10, 5],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            feature_processing_fn=[process_fn, None],  # Process 1min, raw 5min
+        )
+
+        per_tf = sampler.get_feature_keys_per_timeframe()
+        # 1-minute should have custom feature
+        assert "features_custom" in per_tf["1Minute"]
+        # 5-minute should have raw OHLCV
+        assert per_tf["5Minute"] == ["open", "high", "low", "close", "volume"]
+
+    @pytest.mark.parametrize("fn_config,expected_1min,expected_5min", [
+        (None, 5, 5),  # No processing: raw OHLCV (5 features)
+        ("single", 2, 2),  # Single function: same features
+        ("list_same", 2, 2),  # List with same features
+        ("list_diff", 3, 5),  # List with different features
+    ], ids=["none", "single", "list_same", "list_diff"])
+    def test_feature_count_variants(self, multi_tf_ohlcv_df, fn_config, expected_1min, expected_5min):
+        """Test various feature processing configurations."""
+        def process_2features(df):
+            df = df.copy().reset_index(drop=False)
+            df["features_a"] = df["close"]
+            df["features_b"] = df["volume"]
+            return df
+
+        def process_3features(df):
+            df = df.copy().reset_index(drop=False)
+            df["features_a"] = df["close"]
+            df["features_b"] = df["volume"]
+            df["features_c"] = df["high"]
+            return df
+
+        def process_5features(df):
+            df = df.copy().reset_index(drop=False)
+            df["features_a"] = df["close"]
+            df["features_b"] = df["volume"]
+            df["features_c"] = df["high"]
+            df["features_d"] = df["low"]
+            df["features_e"] = df["open"]
+            return df
+
+        if fn_config is None:
+            feature_fn = None
+        elif fn_config == "single":
+            feature_fn = process_2features
+        elif fn_config == "list_same":
+            feature_fn = [process_2features, process_2features]
+        else:  # list_diff
+            feature_fn = [process_3features, process_5features]
+
+        sampler = MarketDataObservationSampler(
+            df=multi_tf_ohlcv_df,
+            time_frames=[
+                TimeFrame(1, TimeFrameUnit.Minute),
+                TimeFrame(5, TimeFrameUnit.Minute),
+            ],
+            window_sizes=[10, 5],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            feature_processing_fn=feature_fn,
+        )
+
+        num_features = sampler.get_num_features_per_timeframe()
+        assert num_features["1Minute"] == expected_1min
+        assert num_features["5Minute"] == expected_5min

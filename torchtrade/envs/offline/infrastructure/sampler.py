@@ -1,11 +1,14 @@
 from collections import deque, namedtuple
-from typing import Dict, List, Optional, Tuple, Union, Callable
+from typing import Dict, List, Optional, Tuple, Union, Callable, Sequence
 import warnings
 import numpy as np
 import pandas as pd
 import torch
 
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, tf_to_timedelta
+
+# Type alias for feature processing function(s)
+FeatureProcessingFn = Optional[Union[Callable, Sequence[Callable]]]
 
 # PERF: NamedTuple is faster than dict for attribute access
 OHLCV = namedtuple('OHLCV', ['open', 'high', 'low', 'close', 'volume'])
@@ -18,7 +21,7 @@ class MarketDataObservationSampler:
         time_frames: Union[List[TimeFrame], TimeFrame] = TimeFrame(1, TimeFrameUnit.Minute),
         window_sizes: Union[List[int], int] = 10,
         execute_on: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute),
-        feature_processing_fn: Optional[Callable] = None,
+        feature_processing_fn: FeatureProcessingFn = None,
         features_start_with: str = "features_",
         max_traj_length: Optional[int] = None,
         seed: Optional[int] = None,
@@ -46,6 +49,21 @@ class MarketDataObservationSampler:
         if len(window_sizes) != len(time_frames):
             raise ValueError("window_sizes must be an int or list with same length as time_frames")
 
+        # Normalize feature_processing_fn to a list (one per timeframe)
+        if feature_processing_fn is None:
+            processing_fns: List[Optional[Callable]] = [None] * len(time_frames)
+        elif callable(feature_processing_fn):
+            # Single function: apply to all timeframes
+            processing_fns = [feature_processing_fn] * len(time_frames)
+        else:
+            # Sequence of functions: one per timeframe
+            processing_fns = list(feature_processing_fn)
+            if len(processing_fns) != len(time_frames):
+                raise ValueError(
+                    f"feature_processing_fn list length ({len(processing_fns)}) "
+                    f"must match time_frames length ({len(time_frames)})"
+                )
+
         # Make explicit copy to avoid SettingWithCopyWarning when df is a slice
         df = df.copy()
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
@@ -61,7 +79,7 @@ class MarketDataObservationSampler:
         # Precompute resampled OHLCV DataFrames for each timeframe
         self.resampled_dfs: Dict[str, pd.DataFrame] = {}
         first_time_stamps = []
-        for tf in time_frames:
+        for tf, proc_fn in zip(time_frames, processing_fns):
             resampled = (
                 self.df.resample(tf.to_pandas_freq())
                 .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
@@ -76,8 +94,8 @@ class MarketDataObservationSampler:
                 offset = pd.Timedelta(tf.to_pandas_freq())
                 resampled.index = resampled.index + offset
 
-            if feature_processing_fn is not None:
-                resampled = feature_processing_fn(resampled)
+            if proc_fn is not None:
+                resampled = proc_fn(resampled)
                 cols_to_keep = [col for col in resampled.columns if col.startswith(features_start_with)]
                 cols_to_keep.append("timestamp")
                 resampled = resampled[cols_to_keep]
@@ -332,10 +350,41 @@ class MarketDataObservationSampler:
         return list(self.resampled_dfs.keys())
 
     def get_feature_keys(self) -> List[str]:
+        """Get feature columns (raises error if timeframes have different features).
+
+        For backward compatibility with single-function feature processing.
+        If timeframes have different features, use get_feature_keys_per_timeframe() instead.
+
+        Returns:
+            List of feature column names (shared across all timeframes)
+
+        Raises:
+            ValueError: If timeframes have different feature columns
+        """
         keys = self.get_observation_keys()
         columns = [list(self.resampled_dfs[k].columns) for k in keys]
-        assert all(c == columns[0] for c in columns), "Not all features are similar across timeframes"
+        if not all(c == columns[0] for c in columns):
+            raise ValueError(
+                "Timeframes have different features. Use get_feature_keys_per_timeframe() instead. "
+                f"Feature counts per timeframe: {self.get_num_features_per_timeframe()}"
+            )
         return columns[0]
+
+    def get_feature_keys_per_timeframe(self) -> Dict[str, List[str]]:
+        """Get feature columns for each timeframe.
+
+        Returns:
+            Dict mapping timeframe key (e.g., "1Minute") to list of feature column names
+        """
+        return {key: list(df.columns) for key, df in self.resampled_dfs.items()}
+
+    def get_num_features_per_timeframe(self) -> Dict[str, int]:
+        """Get number of features for each timeframe.
+
+        Returns:
+            Dict mapping timeframe key (e.g., "1Minute") to number of features
+        """
+        return {key: len(df.columns) for key, df in self.resampled_dfs.items()}
 
     def reset(self, random_start: bool = False) -> int:
         """Reset using index-based tracking."""
