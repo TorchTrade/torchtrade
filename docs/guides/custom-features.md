@@ -130,12 +130,81 @@ config = SequentialTradingEnvConfig(
 
 ---
 
+## Per-Timeframe Feature Processing
+
+When using multiple timeframes, you can apply **different feature processing functions** to each timeframe. This is useful when you want:
+
+- Different indicators for different timeframes (e.g., fast indicators for 1min, trend indicators for 1hour)
+- Different feature counts per timeframe
+- Raw OHLCV for some timeframes, processed features for others
+
+### Example: Different Features Per Timeframe
+
+```python
+def process_1min(df: pd.DataFrame) -> pd.DataFrame:
+    """Fast timeframe: price action features (3 features)."""
+    df["features_close"] = df["close"]
+    df["features_volume"] = df["volume"]
+    df["features_range"] = df["high"] - df["low"]
+    df.fillna(0, inplace=True)
+    return df
+
+def process_1hour(df: pd.DataFrame) -> pd.DataFrame:
+    """Slow timeframe: trend features (5 features)."""
+    df["features_close"] = df["close"]
+    df["features_sma_10"] = df["close"].rolling(10).mean()
+    df["features_sma_20"] = df["close"].rolling(20).mean()
+    df["features_volatility"] = df["close"].pct_change().rolling(10).std()
+    df["features_volume_ma"] = df["volume"].rolling(10).mean()
+    df.fillna(0, inplace=True)
+    return df
+
+config = SequentialTradingEnvConfig(
+    time_frames=["1min", "1hour"],
+    window_sizes=[30, 10],
+    execute_on="1min",
+    feature_preprocessing_fn=[process_1min, process_1hour],  # List of functions
+    initial_cash=10000,
+)
+
+env = SequentialTradingEnv(df, config)
+
+# Observation specs will have different shapes:
+# - market_data_1Minute_30: shape (30, 3)
+# - market_data_1Hour_10: shape (10, 5)
+```
+
+### Mixing Processed and Raw Data
+
+Use `None` in the list to skip processing for a timeframe (keeps raw OHLCV):
+
+```python
+config = SequentialTradingEnvConfig(
+    time_frames=["1min", "5min"],
+    window_sizes=[30, 10],
+    feature_preprocessing_fn=[process_1min, None],  # 1min processed, 5min raw OHLCV
+)
+```
+
+### Backward Compatibility
+
+A single function still works and applies to all timeframes:
+
+```python
+# These are equivalent:
+feature_preprocessing_fn=my_function
+feature_preprocessing_fn=[my_function, my_function]
+```
+
+---
+
 ## Important Rules
 
 1. **Feature prefix**: All columns MUST start with `features_` (e.g., `features_rsi_14`). Columns without this prefix are ignored.
 2. **Handle NaN**: Technical indicators produce NaN at the start. Always call `df.fillna(0, inplace=True)` (or `ffill`/`bfill`).
 3. **Return the DataFrame**: Your function must `return df`.
 4. **No lookahead bias**: Only use past data. Never use `.shift(-1)` or future values.
+5. **List length must match**: When using a list of functions, it must have the same length as `time_frames`.
 
 ---
 
