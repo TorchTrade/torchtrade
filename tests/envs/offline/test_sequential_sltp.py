@@ -720,6 +720,6 @@ class TestSLTPRegression:
         env.close()
 
     def test_check_env_specs_passes(self, sltp_env):
-        """Regression BUG 7: check_env_specs must pass — specs must match actual output shapes."""
+        """check_env_specs must pass — specs must match actual output shapes."""
         from torchrl.envs.utils import check_env_specs
         check_env_specs(sltp_env)

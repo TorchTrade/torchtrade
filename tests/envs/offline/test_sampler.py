@@ -74,7 +74,7 @@ class TestSamplerInitialization:
         ["timestamp", "open", "high", "low", "close"],
     ], ids=["shifted-columns", "wrong-names", "missing-volume"])
     def test_sampler_raises_on_wrong_columns(self, execute_timeframe, columns):
-        """Regression BUG 6: wrong columns must raise, not silently remap by position."""
+        """Wrong columns must raise, not silently remap by position."""
         n = 200
         df = pd.DataFrame(np.random.rand(n, len(columns)), columns=columns)
 
@@ -1372,7 +1372,7 @@ class TestSamplerMultiTimeframeAlignment:
 
 class TestUndersizedWindowPadding:
     """
-    Regression tests for BUG 5 (#157): Sampler returns undersized windows silently.
+    Sampler returns undersized windows silently.
 
     When _get_observation_sequential encounters a negative start index (insufficient
     history), it must zero-pad the window to maintain the declared shape.
