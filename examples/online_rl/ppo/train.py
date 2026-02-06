@@ -44,7 +44,6 @@ def main(cfg: DictConfig):  # noqa: F821
     # Create env
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
-    df.columns = ["timestamp", "open", "high", "low", "close", "volume"]
 
     # Convert timestamp column to datetime for proper filtering
     df['timestamp'] = pd.to_datetime(df['timestamp'])

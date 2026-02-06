@@ -73,7 +73,6 @@ def main(cfg: DictConfig):  # noqa: F821
     # Create env
     df = datasets.load_dataset(cfg.env.data_path)
     df = df["train"].to_pandas()
-    df.columns = ["timestamp", "open", "high", "low", "close", "volume"]
     test_df = df[0:(1440 * 14)]  # 14 days
     train_df = df[(1440 * 14):]
 
