@@ -19,7 +19,7 @@ def compute_sharpe_torch(returns: torch.Tensor, periods_per_year: float, rf_annu
 
     # Compute mean and std
     mean_excess = torch.mean(excess_returns)
-    std_excess = torch.std(excess_returns, unbiased=True)
+    std_excess = torch.std(excess_returns, unbiased=True) + 1e-9
 
     # Annualized Sharpe
     sharpe = (mean_excess / std_excess) * torch.sqrt(torch.tensor(periods_per_year, dtype=returns.dtype))
