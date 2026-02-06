@@ -68,6 +68,24 @@ class TestSamplerInitialization:
                 execute_on=execute_timeframe,
             )
 
+    @pytest.mark.parametrize("columns", [
+        ["open", "high", "low", "close", "volume", "date"],
+        ["ts", "o", "h", "l", "c", "v"],
+        ["timestamp", "open", "high", "low", "close"],
+    ], ids=["shifted-columns", "wrong-names", "missing-volume"])
+    def test_sampler_raises_on_wrong_columns(self, execute_timeframe, columns):
+        """Regression BUG 6: wrong columns must raise, not silently remap by position."""
+        n = 200
+        df = pd.DataFrame(np.random.rand(n, len(columns)), columns=columns)
+
+        with pytest.raises(ValueError, match="do not match required format"):
+            MarketDataObservationSampler(
+                df=df,
+                time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+                window_sizes=10,
+                execute_on=execute_timeframe,
+            )
+
     def test_sampler_with_single_timeframe(self, sample_ohlcv_df, execute_timeframe):
         """Sampler should work with a single TimeFrame (not a list)."""
         sampler = MarketDataObservationSampler(
