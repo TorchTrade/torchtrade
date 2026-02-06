@@ -664,7 +664,7 @@ class TestSequentialEnvRegression:
         else:
             value = next_td["next"][key]
             if expected_shape:
-                assert value.shape == expected_shape or value.numel() == expected_shape[0]
+                assert value.shape == expected_shape, f"{key}: expected shape {expected_shape}, got {value.shape}"
             if expected_dtype:
                 assert value.dtype == expected_dtype
 
@@ -797,6 +797,11 @@ class TestSequentialEnvRegression:
         assert td["next"]["terminated"].item() is False
         assert td["next"]["truncated"].item() is False
         assert td["next"]["done"].item() is False
+
+    def test_check_env_specs_passes(self, unified_env):
+        """Regression BUG 7: check_env_specs must pass — specs must match actual output shapes."""
+        from torchrl.envs.utils import check_env_specs
+        check_env_specs(unified_env)
 
 
 # ============================================================================

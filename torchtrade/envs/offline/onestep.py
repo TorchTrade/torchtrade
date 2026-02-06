@@ -334,10 +334,10 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         # But distinguish: truncated (data ran out during rollout) vs
         # terminated (SL/TP trigger, liquidation, or hold completed normally)
         terminated = not self.truncated
-        next_tensordict.set("reward", reward)
-        next_tensordict.set("terminated", terminated)
-        next_tensordict.set("truncated", self.truncated)
-        next_tensordict.set("done", True)
+        next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
+        next_tensordict.set("terminated", torch.tensor([terminated], dtype=torch.bool))
+        next_tensordict.set("truncated", torch.tensor([self.truncated], dtype=torch.bool))
+        next_tensordict.set("done", torch.tensor([True], dtype=torch.bool))
 
         return next_tensordict
 
