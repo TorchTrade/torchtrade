@@ -32,14 +32,11 @@ class MarketDataObservationSampler:
         if seed is not None:
             torch.manual_seed(seed)
         required_columns = ["timestamp", "open", "high", "low", "close", "volume"]
-        # Ensure df has expected columns
         if list(df.columns) != required_columns:
-            print("⚠️ Columns do not match the required format.")
-            print("Current columns:", list(df.columns))
-            print("Updating columns to:", required_columns)
-            df.columns = required_columns
-        else:
-            print("✅ Columns already in correct format:", required_columns)
+            raise ValueError(
+                f"DataFrame columns {list(df.columns)} do not match required format "
+                f"{required_columns}. Rename your columns before passing to the sampler."
+            )
 
         # Make sure time_frames and window_sizes are lists of same length
         if isinstance(time_frames, TimeFrame):
