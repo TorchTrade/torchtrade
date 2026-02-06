@@ -266,8 +266,8 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
     def _check_liquidation(self, ohlcv: dict) -> bool:
         """Check if current position should be liquidated using intrabar OHLCV data.
 
-        Checks open, high/low, and close against the liquidation price to catch
-        intrabar wicks that would trigger liquidation in reality.
+        Checks the bar's extreme (low for longs, high for shorts) against the
+        liquidation price to catch intrabar wicks.
         """
         if not self.has_liquidation:
             return False
@@ -275,21 +275,12 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         if self.position.position_size == 0:
             return False
 
-        open_price = ohlcv["open"]
-        high_price = ohlcv["high"]
-        low_price = ohlcv["low"]
-        close_price = ohlcv["close"]
-
         if self.position.position_size > 0:
-            # Long position - liquidated if any price touches/crosses below liquidation
-            return (open_price <= self.liquidation_price or
-                    low_price <= self.liquidation_price or
-                    close_price <= self.liquidation_price)
+            # Long position - liquidated if low touches/crosses below liquidation
+            return ohlcv["low"] <= self.liquidation_price
         else:
-            # Short position - liquidated if any price touches/crosses above liquidation
-            return (open_price >= self.liquidation_price or
-                    high_price >= self.liquidation_price or
-                    close_price >= self.liquidation_price)
+            # Short position - liquidated if high touches/crosses above liquidation
+            return ohlcv["high"] >= self.liquidation_price
 
     def _calculate_unrealized_pnl(
         self, entry_price: float, current_price: float, position_size: float
