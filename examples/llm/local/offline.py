@@ -44,7 +44,7 @@ def main():
     df = dataset["train"].to_pandas()
 
     # Convert timestamp column to datetime for proper filtering
-    df['0'] = pd.to_datetime(df['0'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
 
     # Create environment
     print("Creating environment...")
