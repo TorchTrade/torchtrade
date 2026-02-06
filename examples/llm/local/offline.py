@@ -42,9 +42,10 @@ def main():
     print("\nLoading data...")
     dataset = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
     df = dataset["train"].to_pandas()
+    df.columns = ["timestamp", "open", "high", "low", "close", "volume"]
 
     # Convert timestamp column to datetime for proper filtering
-    df['0'] = pd.to_datetime(df['0'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
 
     # Create environment
     print("Creating environment...")

@@ -27,7 +27,8 @@ def main():
     print("\nLoading data...")
     dataset = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
     df = dataset["train"].to_pandas()
-    df['0'] = pd.to_datetime(df['0'])
+    df.columns = ["timestamp", "open", "high", "low", "close", "volume"]
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
 
     # Create actor first to get its preprocessing function
     execute_tf = TimeFrame(1, TimeFrameUnit.Hour)

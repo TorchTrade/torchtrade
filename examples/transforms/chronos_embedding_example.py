@@ -40,6 +40,7 @@ def example_basic_and_multitimeframe():
 
     df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
     df = df["train"].to_pandas()
+    df.columns = ["timestamp", "open", "high", "low", "close", "volume"]
 
     # Create environment with multiple timeframes
     config = SequentialTradingEnvConfig(
@@ -99,6 +100,7 @@ def example_with_policy():
 
     df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
     df = df["train"].to_pandas()
+    df.columns = ["timestamp", "open", "high", "low", "close", "volume"]
 
     # Create environment with Chronos embedding
     config = SequentialTradingEnvConfig(
