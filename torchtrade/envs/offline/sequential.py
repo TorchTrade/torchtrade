@@ -521,10 +521,10 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         terminated = self._check_termination(new_portfolio_value)
         truncated = self._check_truncation()
 
-        next_tensordict.set("reward", reward)
-        next_tensordict.set("terminated", terminated)
-        next_tensordict.set("truncated", truncated)
-        next_tensordict.set("done", terminated or truncated)
+        next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
+        next_tensordict.set("terminated", torch.tensor([terminated], dtype=torch.bool))
+        next_tensordict.set("truncated", torch.tensor([truncated], dtype=torch.bool))
+        next_tensordict.set("done", torch.tensor([terminated or truncated], dtype=torch.bool))
 
         return next_tensordict
 

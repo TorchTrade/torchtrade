@@ -431,15 +431,15 @@ class TestOneStepRegression:
 
         assert next_td["next"]["done"].item() is True
 
-    def test_reward_is_scalar(self, onestep_env):
-        """Reward should be scalar tensor."""
+    def test_reward_shape(self, onestep_env):
+        """Reward should be shape (1,) tensor matching reward_spec."""
         td = onestep_env.reset()
         action_td = td.clone()
         action_td["action"] = torch.tensor(1)
         next_td = onestep_env.step(action_td)
 
         reward = next_td["next"]["reward"]
-        assert reward.numel() == 1
+        assert reward.shape == (1,), f"Expected shape (1,), got {reward.shape}"
 
     def test_account_state_shape_preserved(self, onestep_env):
         """Account state should maintain shape [6] throughout."""
@@ -489,3 +489,8 @@ class TestOneStepRegression:
         onestep_env.step(action_td)
 
         assert onestep_env.action_spec.n == initial_n
+
+    def test_check_env_specs_passes(self, onestep_env):
+        """Regression BUG 7: check_env_specs must pass — specs must match actual output shapes."""
+        from torchrl.envs.utils import check_env_specs
+        check_env_specs(onestep_env)
