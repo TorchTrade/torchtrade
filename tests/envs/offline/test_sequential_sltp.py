@@ -673,9 +673,10 @@ class TestSLTPRegression:
             "close": prices.copy(),
             "volume": np.ones(n) * 1000,
         })
-        # Bar 12: price crashes to 85 (below liquidation price of 90.4)
-        df.loc[12, "close"] = 85.0
+        # Bar 12: intrabar wick to 85 (below liq=90.4) but close recovers to 95
+        # Proves it's the wick, not the close, that triggers liquidation
         df.loc[12, "low"] = 85.0
+        df.loc[12, "close"] = 95.0
 
         config = SequentialTradingEnvSLTPConfig(
             leverage=10,
@@ -705,7 +706,7 @@ class TestSLTPRegression:
         liq_price = env.liquidation_price
         assert 90.0 < liq_price < 91.0, f"Liquidation price should be ~90.4, got {liq_price}"
 
-        # Step 2: Hold — sampler advances to bar 12 (close=85, below liq=90.4)
+        # Step 2: Hold — sampler advances to bar 12 (low=85, close=95; wick below liq=90.4)
         hold_td = td_next["next"].clone()
         hold_td["action"] = torch.tensor(0)
         td_next2 = env.step(hold_td)

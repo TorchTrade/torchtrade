@@ -271,7 +271,7 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         side, sl_pct, tp_pct = action_tuple
 
         # Execute action (only HOLD or open position - no closing in one-step)
-        if self._check_liquidation(cached_price):
+        if self._check_liquidation(cached_base):
             trade_info = self._execute_liquidation()
         else:
             trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
@@ -457,22 +457,11 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         if self.position.position_size == 0:
             return None
 
-        open_price = ohlcv["open"]
-        high_price = ohlcv["high"]
-        low_price = ohlcv["low"]
-        close_price = ohlcv["close"]
-
         if self.position.position_size > 0:
-            # Long position - liquidated if price drops to liquidation price
-            if (open_price <= self.liquidation_price or
-                low_price <= self.liquidation_price or
-                close_price <= self.liquidation_price):
+            if ohlcv["low"] <= self.liquidation_price:
                 return self._execute_liquidation()
         else:
-            # Short position - liquidated if price rises to liquidation price
-            if (open_price >= self.liquidation_price or
-                high_price >= self.liquidation_price or
-                close_price >= self.liquidation_price):
+            if ohlcv["high"] >= self.liquidation_price:
                 return self._execute_liquidation()
 
         return None
