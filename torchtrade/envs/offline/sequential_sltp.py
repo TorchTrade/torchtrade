@@ -319,20 +319,18 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         """Execute one environment step with SLTP logic.
 
         Priority order:
-        1. Liquidation check (futures only, highest priority)
-        2. SL/TP trigger check (bracket orders)
-        3. New action execution
+        1. Liquidation check on bar N+1 (highest priority)
+        2. SL/TP trigger check on bar N+1 (bracket orders)
+        3. New action execution at bar N price
 
-        This ordering ensures:
-        - Liquidation takes precedence over everything
-        - Bracket orders execute before new actions
-        - New actions only execute if no position closed
+        The sampler is advanced BEFORE checking SL/TP so that triggers are
+        evaluated against the first unseen bar (bar N+1), not the stale bar
+        (bar N) that the agent already observed.
         """
         self.step_counter += 1
 
-        # Cache base features and get current price
-        cached_base = self._cached_base_features
-        cached_price = cached_base["close"]
+        # Bar N price — where the agent's action would execute
+        cached_price = self._cached_base_features["close"]
 
         # Get desired action
         action_idx = tensordict["action"]
@@ -341,13 +339,18 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         action_tuple = self._action_tuple[action_idx]
         side, sl_pct, tp_pct = action_tuple
 
-        # Priority 1: Check for liquidation (futures only)
-        if self._check_liquidation(cached_price):
+        # Advance sampler to bar N+1
+        obs_dict, base_features = self._get_observation_scaffold()
+        self._cached_base_features = base_features
+        new_price = base_features["close"]
+
+        # Priority 1: Check for liquidation on bar N+1 (futures only)
+        if self._check_liquidation(new_price):
             trade_info = self._execute_liquidation()
 
-        # Priority 2: Check for SL/TP trigger (if not liquidated)
+        # Priority 2: Check for SL/TP trigger on bar N+1 (if in position)
         elif self.position.position_size != 0:
-            sltp_trigger = self._check_sltp_trigger(cached_base)
+            sltp_trigger = self._check_sltp_trigger(base_features)
             if sltp_trigger is not None:
                 # Determine execution price based on trigger type
                 if sltp_trigger == "sl":
@@ -356,10 +359,10 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
                     execution_price = self.take_profit
                 trade_info = self._execute_sltp_close(execution_price, sltp_trigger)
             else:
-                # No trigger, execute new action
+                # No trigger, execute new action at bar N price
                 trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
 
-        # Priority 3: Execute new action (if no liquidation or trigger)
+        # Priority 3: Execute new action at bar N price (if flat)
         else:
             trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
 
@@ -372,9 +375,8 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
             else:
                 self.position.current_position = 0  # Flat
 
-        # Get updated state (advances timestamp and caches new base features)
-        next_tensordict = self._get_observation()
-        new_price = self._cached_base_features["close"]
+        # Build observation with UPDATED position state (no sampler advance)
+        next_tensordict = self._build_observation_from_data(obs_dict, base_features)
         new_portfolio_value = self._get_portfolio_value(new_price)
 
         # Add coverage tracking indices (only during training with random_start)
