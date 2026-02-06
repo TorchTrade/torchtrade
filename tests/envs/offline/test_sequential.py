@@ -479,6 +479,68 @@ class TestSequentialEnvTermination:
         assert terminated, "Episode should terminate"
         env.close()
 
+    def test_liquidation_intrabar_wick(self, sample_ohlcv_df):
+        """Regression: intrabar wick that recovers must still trigger liquidation.
+
+        Bar 12 has low=85 but close=100 (wick down and recover).
+        Long at 100 with 10x leverage → liq_price ≈ 90.4.
+        Low=85 < 90.4 → must liquidate, even though close=100 > 90.4.
+        """
+        import numpy as np
+
+        n = 50
+        timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
+        prices = np.full(n, 100.0)
+
+        df = pd.DataFrame({
+            "timestamp": timestamps,
+            "open": prices.copy(),
+            "high": prices + 1.0,
+            "low": prices - 1.0,
+            "close": prices.copy(),
+            "volume": np.ones(n) * 1000,
+        })
+        # Bar 12: intrabar wick to 85, but close recovers to 100
+        df.loc[12, "low"] = 85.0
+        # close stays at 100 — this is the critical difference
+
+        config = SequentialTradingEnvConfig(
+            leverage=10,
+            initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=100,
+            random_start=False,
+        )
+        env = SequentialTradingEnv(df, config, simple_feature_fn)
+        td = env.reset()
+
+        # Step 1: Open long with 10x leverage at close=100
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(2)  # Long (futures: [-1, 0, 1])
+        td = env.step(action_td)
+
+        assert env.position.position_size > 0, "Position should be open"
+        liq_price = env.liquidation_price
+        assert 90.0 < liq_price < 91.0, f"Liq price should be ~90.4, got {liq_price}"
+
+        # Step 2: Hold — sampler advances to bar 12 (low=85, close=100)
+        hold_td = td["next"].clone()
+        hold_td["action"] = torch.tensor(1)  # Hold
+        td = env.step(hold_td)
+
+        # Position MUST be liquidated by the intrabar wick
+        assert env.position.position_size == 0, (
+            f"Position should be liquidated by intrabar wick (low=85 < liq={liq_price}), "
+            f"but position_size={env.position.position_size}"
+        )
+
+        env.close()
+
 
 # ============================================================================
 # EDGE CASES

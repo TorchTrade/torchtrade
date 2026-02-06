@@ -673,9 +673,10 @@ class TestSLTPRegression:
             "close": prices.copy(),
             "volume": np.ones(n) * 1000,
         })
-        # Bar 12: price crashes to 85 (below liquidation price of 90.4)
-        df.loc[12, "close"] = 85.0
+        # Bar 12: intrabar wick to 85 (below liq=90.4) but close recovers to 95
+        # Proves it's the wick, not the close, that triggers liquidation
         df.loc[12, "low"] = 85.0
+        df.loc[12, "close"] = 95.0
 
         config = SequentialTradingEnvSLTPConfig(
             leverage=10,

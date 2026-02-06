@@ -345,7 +345,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         new_price = base_features["close"]
 
         # Priority 1: Check for liquidation on bar N+1 (futures only)
-        if self._check_liquidation(new_price):
+        if self._check_liquidation(base_features):
             trade_info = self._execute_liquidation()
 
         # Priority 2: Check for SL/TP trigger on bar N+1 (if in position)

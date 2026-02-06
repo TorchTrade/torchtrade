@@ -263,11 +263,11 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         return max(0, liquidation_price)
 
-    def _check_liquidation(self, current_price: float) -> bool:
-        """Check if current position should be liquidated.
+    def _check_liquidation(self, ohlcv: dict) -> bool:
+        """Check if current position should be liquidated using intrabar OHLCV data.
 
-        No liquidation (leverage=1): Always returns False
-        With liquidation (leverage>1): Checks if price crossed liquidation threshold
+        Checks open, high/low, and close against the liquidation price to catch
+        intrabar wicks that would trigger liquidation in reality.
         """
         if not self.has_liquidation:
             return False
@@ -275,12 +275,21 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         if self.position.position_size == 0:
             return False
 
+        open_price = ohlcv["open"]
+        high_price = ohlcv["high"]
+        low_price = ohlcv["low"]
+        close_price = ohlcv["close"]
+
         if self.position.position_size > 0:
-            # Long position - liquidated if price below liquidation price
-            return current_price <= self.liquidation_price
+            # Long position - liquidated if any price touches/crosses below liquidation
+            return (open_price <= self.liquidation_price or
+                    low_price <= self.liquidation_price or
+                    close_price <= self.liquidation_price)
         else:
-            # Short position - liquidated if price above liquidation price
-            return current_price >= self.liquidation_price
+            # Short position - liquidated if any price touches/crosses above liquidation
+            return (open_price >= self.liquidation_price or
+                    high_price >= self.liquidation_price or
+                    close_price >= self.liquidation_price)
 
     def _calculate_unrealized_pnl(
         self, entry_price: float, current_price: float, position_size: float
@@ -473,7 +482,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         desired_action = self.action_levels[action_idx]
 
         # Check for liquidation or execute trade
-        if self._check_liquidation(cached_price):
+        if self._check_liquidation(self._cached_base_features):
             trade_info = self._execute_liquidation()
         else:
             trade_info = self._execute_trade_if_needed(desired_action, cached_price)
