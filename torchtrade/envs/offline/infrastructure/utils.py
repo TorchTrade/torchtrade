@@ -64,7 +64,7 @@ class InitialBalanceSampler:
         initial_cash: Fixed amount (int) or range [min, max] (list) for randomization
         seed: Optional random seed for reproducibility
     """
-    def __init__(self, initial_cash: Union[List[int], int], seed: Optional[int] = None):
+    def __init__(self, initial_cash: Union[List[int], int, float], seed: Optional[int] = None):
         self.initial_cash = initial_cash
         self.np_rng = np.random.default_rng(seed)
 
@@ -74,7 +74,7 @@ class InitialBalanceSampler:
         Returns:
             Initial balance as float
         """
-        if isinstance(self.initial_cash, int):
+        if isinstance(self.initial_cash, (int, float)):
             return float(self.initial_cash)
 
         return float(self.np_rng.integers(self.initial_cash[0], self.initial_cash[1]))

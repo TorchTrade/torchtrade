@@ -52,7 +52,7 @@ class SequentialTradingEnvConfig:
     time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Hour"
     window_sizes: Union[List[int], int] = 10
     execute_on: Union[str, TimeFrame] = "1Hour"
-    initial_cash: Union[Tuple[int, int], int] = 10000
+    initial_cash: Union[Tuple[int, int], int, float] = 10000
     transaction_fee: float = 0.0
     slippage: float = 0.0
     bankrupt_threshold: float = 0.1

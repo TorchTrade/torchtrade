@@ -491,6 +491,6 @@ class TestOneStepRegression:
         assert onestep_env.action_spec.n == initial_n
 
     def test_check_env_specs_passes(self, onestep_env):
-        """Regression BUG 7: check_env_specs must pass — specs must match actual output shapes."""
+        """check_env_specs must pass — specs must match actual output shapes."""
         from torchrl.envs.utils import check_env_specs
         check_env_specs(onestep_env)

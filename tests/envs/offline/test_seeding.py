@@ -178,6 +178,12 @@ class TestInitialBalanceSamplerSeeding:
         # Sequences should differ
         assert samples1 != samples2, "Different seeds should produce different sampling sequences"
 
+    def test_float_initial_cash_works(self):
+        """Float initial_cash should not crash."""
+        sampler = InitialBalanceSampler(initial_cash=10000.0, seed=42)
+        result = sampler.sample()
+        assert result == 10000.0
+
     def test_does_not_pollute_global_rng_state(self):
         """InitialBalanceSampler should not affect global NumPy RNG state."""
         # Set global state
