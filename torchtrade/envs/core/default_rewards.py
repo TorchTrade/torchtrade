@@ -76,6 +76,11 @@ def sharpe_ratio_reward(history) -> float:
         return 0.0
 
     values = np.array(history.portfolio_values)
+
+    # Guard against non-positive values (e.g. after liquidation)
+    if np.any(values <= 0):
+        return -10.0
+
     returns = np.diff(np.log(values))
 
     mean_return = returns.mean()
