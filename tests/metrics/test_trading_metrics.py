@@ -71,16 +71,15 @@ class TestSharpeRatio:
     """Test Sharpe ratio computation."""
 
     def test_positive_returns(self):
-        """Test Sharpe ratio with positive returns."""
-        # Consistent 1% returns per period
+        """Test Sharpe ratio with positive constant returns (regression: must not produce inf)."""
         returns = torch.tensor([0.01] * 100, dtype=torch.float32)
-        periods_per_year = 252  # Daily
+        periods_per_year = 252
 
         sharpe = compute_sharpe_ratio(returns, periods_per_year, rf_annual=0.0)
 
-        # With consistent returns, std should be 0, but in practice will be small
-        # Sharpe should be very high (positive)
         assert sharpe > 0
+        assert not np.isinf(sharpe), f"Sharpe should be finite, got {sharpe}"
+        assert not np.isnan(sharpe), f"Sharpe should not be NaN, got {sharpe}"
 
     def test_negative_returns(self):
         """Test Sharpe ratio with negative returns."""
@@ -90,17 +89,6 @@ class TestSharpeRatio:
         sharpe = compute_sharpe_ratio(returns, periods_per_year, rf_annual=0.0)
 
         assert sharpe < 0
-
-
-    def test_constant_returns_no_inf(self):
-        """Regression: constant returns must produce finite Sharpe, not inf."""
-        returns = torch.tensor([0.01] * 100, dtype=torch.float32)
-        periods_per_year = 252
-
-        sharpe = compute_sharpe_ratio(returns, periods_per_year, rf_annual=0.0)
-
-        assert not np.isinf(sharpe), f"Sharpe should be finite, got {sharpe}"
-        assert not np.isnan(sharpe), f"Sharpe should not be NaN, got {sharpe}"
 
     def test_zero_returns(self):
         """Test Sharpe ratio with zero returns."""
@@ -321,24 +309,13 @@ class TestMetricsIntegration:
 class TestSharpeRatioRewardSafety:
     """Regression tests for sharpe_ratio_reward numerical safety."""
 
-    def test_zero_portfolio_value_returns_negative(self):
-        """Regression: portfolio hitting zero must not produce NaN."""
+    @pytest.mark.parametrize("bad_value", [0.0, -100.0], ids=["zero", "negative"])
+    def test_non_positive_portfolio_value_returns_penalty(self, bad_value):
+        """Regression: non-positive portfolio values must return -10.0, not NaN."""
         from types import SimpleNamespace
         from torchtrade.envs.core.default_rewards import sharpe_ratio_reward
 
-        # Simulate liquidation: portfolio goes to zero
-        history = SimpleNamespace(portfolio_values=[10000, 9500, 9000, 0.0])
-        reward = sharpe_ratio_reward(history)
-
-        assert not np.isnan(reward), f"Reward should not be NaN, got {reward}"
-        assert reward == -10.0
-
-    def test_negative_portfolio_value_returns_negative(self):
-        """Regression: negative portfolio value must not produce NaN."""
-        from types import SimpleNamespace
-        from torchtrade.envs.core.default_rewards import sharpe_ratio_reward
-
-        history = SimpleNamespace(portfolio_values=[10000, 9500, 9000, -100.0])
+        history = SimpleNamespace(portfolio_values=[10000, 9500, 9000, bad_value])
         reward = sharpe_ratio_reward(history)
 
         assert not np.isnan(reward), f"Reward should not be NaN, got {reward}"
