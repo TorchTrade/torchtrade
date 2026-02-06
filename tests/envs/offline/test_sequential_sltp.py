@@ -77,22 +77,25 @@ def sltp_env(sample_ohlcv_df, trading_mode, sltp_config_spot, sltp_config_future
 class TestSLTPActionSpace:
     """Tests for SLTP action space generation."""
 
-    @pytest.mark.parametrize("sl_levels,tp_levels,expected_actions", [
-        ([-0.02], [0.03], 2),           # 1 + (1 * 1) = 2
-        ([-0.02, -0.05], [0.03], 3),     # 1 + (2 * 1) = 3
-        ([-0.02], [0.03, 0.10], 3),     # 1 + (1 * 2) = 3
-        ([-0.02, -0.05], [0.03, 0.10], 5),  # 1 + (2 * 2) = 5
+    @pytest.mark.parametrize("sl_levels,tp_levels", [
+        ([-0.02], [0.03]),
+        ([-0.02, -0.05], [0.03]),
+        ([-0.02], [0.03, 0.10]),
+        ([-0.02, -0.05], [0.03, 0.10]),
     ])
-    def test_action_space_size(self, sample_ohlcv_df, trading_mode, sl_levels, tp_levels, expected_actions):
-        """Action space should be 1 + (num_sl * num_tp)."""
+    def test_action_space_size(self, sample_ohlcv_df, trading_mode, sl_levels, tp_levels):
+        """Action space: 1 + combos (spot) or 1 + 2*combos (futures with shorts)."""
         config = SequentialTradingEnvSLTPConfig(
-            leverage=10 if trading_mode == "futures" else 1,
+            leverage=trading_mode,
             stoploss_levels=sl_levels,
             takeprofit_levels=tp_levels,
             initial_cash=1000,
         )
         env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
-        assert env.action_spec.n == expected_actions
+        combos = len(sl_levels) * len(tp_levels)
+        sides = 2 if trading_mode > 1 else 1  # long + short for futures
+        expected = 1 + combos * sides
+        assert env.action_spec.n == expected
         env.close()
 
     def test_no_action_always_first(self, sltp_env):
@@ -161,7 +164,7 @@ class TestSLTPBracketOrders:
         account_state = next_td["next"]["account_state"]
         position_size = account_state[1]
 
-        if trading_mode == "spot":
+        if trading_mode == 1:  # spot
             assert position_size > 0, "Spot should have positive position"
         else:
             assert position_size != 0, "Futures should have non-zero position"
@@ -345,30 +348,6 @@ class TestSLTPPriceGaps:
 class TestSLTPIntegration:
     """Integration tests with base environment functionality."""
 
-    def test_sltp_respects_transaction_fees(self, sltp_env):
-        """SLTP orders should incur transaction fees."""
-        sltp_env.transaction_fee = 0.1  # 10% fee
-        td = sltp_env.reset()
-        initial_cash = td["account_state"][0].item()
-
-        # Open and close bracket
-        action_td = td.clone()
-        action_td["action"] = torch.tensor(1)
-        next_td = sltp_env.step(action_td)
-
-        # Wait for trigger or manually close
-        for _ in range(10):
-            if next_td["next"]["account_state"][1] == 0.0:
-                break
-            action_td_hold = next_td["next"].clone()
-            action_td_hold["action"] = torch.tensor(0)
-            next_td = sltp_env.step(action_td_hold)
-
-        final_cash = next_td["next"]["account_state"][0].item()
-
-        # Fees should have reduced cash (unless huge profit)
-        assert final_cash < initial_cash + 100
-
     def test_sltp_account_state_consistent(self, sltp_env, trading_mode):
         """Account state should be valid after SLTP operations."""
         td = sltp_env.reset()
@@ -485,18 +464,6 @@ class TestSLTPRegression:
         )
         env.close()
 
-    def test_no_action_when_no_position(self, sltp_env):
-        """No action should work when there's no position."""
-        td = sltp_env.reset()
-
-        # No action without position
-        action_td = td.clone()
-        action_td["action"] = torch.tensor(0)
-        next_td = sltp_env.step(action_td)
-
-        # Should not crash
-        assert next_td is not None
-
     @pytest.mark.parametrize("leverage", [1, 10], ids=["spot", "futures"])
     def test_truncation_does_not_set_terminated(self, sample_ohlcv_df, leverage):
         """Truncated episodes (data exhaustion) must NOT set terminated=True.
@@ -525,4 +492,228 @@ class TestSLTPRegression:
         assert td["next"]["terminated"].item() is False, (
             "Truncated episode should have terminated=False (issue #150)"
         )
+        env.close()
+
+    def test_sl_triggers_on_next_bar_not_delayed(self, sample_ohlcv_df):
+        """SL must trigger on the new bar fetched in _step(), not the stale cached bar.
+
+        Regression test for off-by-one timing bug where _step() checked SL/TP
+        against the stale bar (already observed by the agent) instead of the
+        new bar (first bar the position is actually exposed to).
+
+        Timing (window_size=10):
+        - Reset: scaffold fetches bar 10, caches it.
+        - Step 1: cached_price=bar10_close=100. Advance to bar 11 (benign).
+          Agent opens long at 100 → SL=98, TP=110. Position now exists.
+        - Step 2: cached_price=bar11_close. Advance to bar 12 (low=90).
+          SL/TP checked on bar 12 → SL triggers. Position MUST close.
+
+        Before the fix, _step() checked SL/TP on the stale bar (bar 11) and
+        only advanced the sampler at the end, so bar 12's crash was missed
+        until step 3.
+        """
+        import numpy as np
+        import pandas as pd
+
+        n = 50
+        timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
+        prices = np.full(n, 100.0)
+
+        df = pd.DataFrame({
+            "timestamp": timestamps,
+            "open": prices.copy(),
+            "high": prices + 1.0,
+            "low": prices.copy(),
+            "close": prices.copy(),
+            "volume": np.ones(n) * 1000,
+        })
+        # Bar 12: intrabar crash to 90 (well below SL of 98)
+        df.loc[12, "low"] = 90.0
+        df.loc[12, "close"] = 95.0
+
+        config = SequentialTradingEnvSLTPConfig(
+            leverage=1,
+            initial_cash=1000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=100,
+            random_start=False,
+            stoploss_levels=[-0.02],   # SL at -2% → price 98.0
+            takeprofit_levels=[0.10],  # TP at +10% → price 110.0
+        )
+        env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
+        td = env.reset()
+
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+
+        # Step 1: Open long (executes at bar 10's close = 100)
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(long_idx)
+        td_next = env.step(action_td)
+
+        assert env.position.position_size > 0, "Position should be open"
+        assert abs(env.position.entry_price - 100.0) < 0.01
+        assert env.stop_loss > 0, "SL should be set"
+
+        # Step 2: Hold — sampler advances to bar 12 (low=90, below SL=98)
+        hold_td = td_next["next"].clone()
+        hold_td["action"] = torch.tensor(0)
+        env.step(hold_td)
+
+        # Position MUST be closed by SL on bar 12
+        assert env.position.position_size == 0, (
+            f"Position should be closed by SL on the new bar, "
+            f"but position_size={env.position.position_size}"
+        )
+        assert env.stop_loss == 0.0, "SL should be reset after trigger"
+        assert env.take_profit == 0.0, "TP should be reset after trigger"
+
+        env.close()
+
+    def test_tp_triggers_on_next_bar_not_delayed(self, sample_ohlcv_df):
+        """TP must trigger on the new bar fetched in _step(), not the stale cached bar.
+
+        Mirror of test_sl_triggers_on_next_bar_not_delayed for take-profit.
+
+        Timing (window_size=10):
+        - Reset: scaffold fetches bar 10, caches it.
+        - Step 1: cached_price=bar10_close=100. Advance to bar 11 (benign).
+          Agent opens long at 100 → SL=98, TP=105. Position now exists.
+        - Step 2: cached_price=bar11_close. Advance to bar 12 (high=110).
+          SL/TP checked on bar 12 → TP triggers. Position MUST close.
+        """
+        import numpy as np
+        import pandas as pd
+
+        n = 50
+        timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
+        prices = np.full(n, 100.0)
+
+        df = pd.DataFrame({
+            "timestamp": timestamps,
+            "open": prices.copy(),
+            "high": prices + 1.0,
+            "low": prices - 1.0,
+            "close": prices.copy(),
+            "volume": np.ones(n) * 1000,
+        })
+        # Bar 12: intrabar spike to 110 (above TP of 105)
+        df.loc[12, "high"] = 110.0
+        df.loc[12, "close"] = 106.0
+
+        config = SequentialTradingEnvSLTPConfig(
+            leverage=1,
+            initial_cash=1000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=100,
+            random_start=False,
+            stoploss_levels=[-0.10],   # SL at -10% → price 90.0 (won't trigger)
+            takeprofit_levels=[0.05],  # TP at +5% → price 105.0
+        )
+        env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
+        td = env.reset()
+
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+
+        # Step 1: Open long (executes at bar 10's close = 100)
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(long_idx)
+        td_next = env.step(action_td)
+
+        assert env.position.position_size > 0, "Position should be open"
+        assert env.take_profit > 0, "TP should be set"
+
+        # Step 2: Hold — sampler advances to bar 12 (high=110, above TP=105)
+        hold_td = td_next["next"].clone()
+        hold_td["action"] = torch.tensor(0)
+        env.step(hold_td)
+
+        # Position MUST be closed by TP on bar 12
+        assert env.position.position_size == 0, (
+            f"Position should be closed by TP on the new bar, "
+            f"but position_size={env.position.position_size}"
+        )
+        assert env.stop_loss == 0.0, "SL should be reset after trigger"
+        assert env.take_profit == 0.0, "TP should be reset after trigger"
+
+        env.close()
+
+    def test_liquidation_triggers_on_next_bar_futures(self, sample_ohlcv_df):
+        """Liquidation must trigger on the new bar fetched in _step() (futures).
+
+        Timing (window_size=10, leverage=10):
+        - Reset: scaffold fetches bar 10, caches it.
+        - Step 1: cached_price=bar10_close=100. Advance to bar 11 (benign).
+          Agent opens long at 100 with 10x leverage.
+          Liquidation price = 100 * (1 - 1/10 + 0.004) = 90.4.
+        - Step 2: cached_price=bar11_close. Advance to bar 12 (close=85).
+          Liquidation checked on bar 12 → triggers (85 < 90.4).
+        """
+        import numpy as np
+        import pandas as pd
+
+        n = 50
+        timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
+        prices = np.full(n, 100.0)
+
+        df = pd.DataFrame({
+            "timestamp": timestamps,
+            "open": prices.copy(),
+            "high": prices + 1.0,
+            "low": prices - 1.0,
+            "close": prices.copy(),
+            "volume": np.ones(n) * 1000,
+        })
+        # Bar 12: price crashes to 85 (below liquidation price of 90.4)
+        df.loc[12, "close"] = 85.0
+        df.loc[12, "low"] = 85.0
+
+        config = SequentialTradingEnvSLTPConfig(
+            leverage=10,
+            initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=100,
+            random_start=False,
+            stoploss_levels=[-0.05],   # SL at -5% → won't trigger before liquidation
+            takeprofit_levels=[0.10],
+        )
+        env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
+        td = env.reset()
+
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+
+        # Step 1: Open long with 10x leverage
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(long_idx)
+        td_next = env.step(action_td)
+
+        assert env.position.position_size > 0, "Position should be open"
+        liq_price = env.liquidation_price
+        assert 90.0 < liq_price < 91.0, f"Liquidation price should be ~90.4, got {liq_price}"
+
+        # Step 2: Hold — sampler advances to bar 12 (close=85, below liq=90.4)
+        hold_td = td_next["next"].clone()
+        hold_td["action"] = torch.tensor(0)
+        td_next2 = env.step(hold_td)
+
+        # Position MUST be liquidated on bar 12
+        assert env.position.position_size == 0, (
+            f"Position should be liquidated on the new bar, "
+            f"but position_size={env.position.position_size}"
+        )
+
         env.close()

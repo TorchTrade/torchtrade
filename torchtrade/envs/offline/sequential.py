@@ -387,6 +387,18 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         # Get market data (scaffold sets current_timestamp and truncated)
         obs_dict, base_features = self._get_observation_scaffold()
         self._cached_base_features = base_features
+        return self._build_observation_from_data(obs_dict, base_features)
+
+    def _build_observation_from_data(self, obs_dict: dict, base_features: dict) -> TensorDictBase:
+        """Build observation TensorDict from already-fetched market data.
+
+        Args:
+            obs_dict: Market data observations for each timeframe.
+            base_features: Base OHLCV features for the current timestamp.
+
+        Returns:
+            TensorDict with account state and market data.
+        """
         current_price = base_features["close"]
 
         # Calculate position value (absolute value of notional)
