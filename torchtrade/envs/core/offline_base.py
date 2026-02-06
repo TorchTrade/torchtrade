@@ -377,21 +377,6 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         base_features = self.sampler.get_base_features(self.current_timestamp)
         return obs_dict, base_features
 
-    def _update_position_metrics(self, current_price: float):
-        """Update position value and unrealized PnL based on current price.
-
-        This is common logic used by most environments to update position metrics
-        from the current price. Sets self.position.position_value and self.position.unrealized_pnlpc.
-
-        Args:
-            current_price: Current asset price
-        """
-        self.position.position_value = self.position.position_size * current_price
-        if self.position.position_size > 0:
-            self.position.unrealized_pnlpc = (current_price - self.position.entry_price) / self.position.entry_price
-        else:
-            self.position.unrealized_pnlpc = 0.0
-
     def _build_standard_observation(
         self,
         obs_dict: dict,

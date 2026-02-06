@@ -301,7 +301,6 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
             current_price=current_price,
             leverage=self.config.leverage,
             transaction_fee=fee_rate,
-            allow_short=True
         )
         position_size, notional_value, side = calculate_fractional_position(params)
 

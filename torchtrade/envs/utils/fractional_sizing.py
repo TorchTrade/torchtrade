@@ -12,7 +12,6 @@ class PositionCalculationParams:
     current_price: float
     leverage: int = 1
     transaction_fee: float = 0.0
-    allow_short: bool = True
 
 
 # Position tolerance constants

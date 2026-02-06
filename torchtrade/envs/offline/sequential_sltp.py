@@ -501,7 +501,6 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
             current_price=execution_price,
             leverage=self.leverage,
             transaction_fee=self.transaction_fee,
-            allow_short=(side == "short")
         )
         position_size, notional_value, calc_side = calculate_fractional_position(params)
 
