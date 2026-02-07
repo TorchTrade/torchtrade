@@ -53,7 +53,6 @@ def log_return_reward(history) -> float:
     if new_value <= 0:
         return -10.0
 
-    # PERF: math.log is ~3-5x faster than np.log for single floats
     return math.log(new_value / old_value)
 
 

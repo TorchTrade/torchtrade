@@ -225,7 +225,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         self._allows_short = any(a < 0 for a in self.action_levels) and self.leverage > 1
 
-        # Pre-allocate reusable tensors to avoid per-step torch.tensor() calls
         self._account_state_buf = torch.zeros(6, dtype=torch.float)
         self._account_state_buf[4] = float(self.leverage)  # leverage is constant
         self._reward_buf = torch.zeros(1, dtype=torch.float)
@@ -406,8 +405,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
-        # PERF: Use get_sequential_observation_with_ohlcv to avoid searchsorted
-        # in get_base_features (direct index lookup instead)
         obs_dict, self.current_timestamp, self.truncated, ohlcv = (
             self.sampler.get_sequential_observation_with_ohlcv()
         )
@@ -458,7 +455,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             current_price, self.liquidation_price, self.position.position_size
         )
 
-        # PERF: Write account state in-place to pre-allocated buffer
         buf = self._account_state_buf
         buf[0] = exposure_pct
         buf[1] = position_direction
@@ -514,7 +510,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         new_price = self._cached_base_features["close"]
         new_portfolio_value = self._get_portfolio_value(new_price)
 
-        # PERF: Write coverage tracking in-place to pre-allocated buffers
         if self.random_start:
             self._reset_idx_buf.fill_(self._reset_idx)
             self._state_idx_buf.fill_(self.sampler._sequential_idx)
@@ -545,7 +540,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         terminated = self._check_termination(new_portfolio_value)
         truncated = self._check_truncation()
 
-        # PERF: Write in-place to pre-allocated buffers, clone to prevent aliasing
         self._reward_buf[0] = reward
         self._terminated_buf[0] = terminated
         self._truncated_buf[0] = truncated
