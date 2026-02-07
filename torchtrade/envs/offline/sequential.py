@@ -459,7 +459,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         buf[5] = distance_to_liquidation
 
         # Combine account state and market data
-        obs_data = {self.account_state_key: buf}
+        obs_data = {self.account_state_key: buf.clone()}
         obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
 
         return TensorDict(obs_data, batch_size=())
@@ -509,8 +509,8 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         if self.random_start:
             self._reset_idx_buf.fill_(self._reset_idx)
             self._state_idx_buf.fill_(self.sampler._sequential_idx)
-            next_tensordict.set("reset_index", self._reset_idx_buf)
-            next_tensordict.set("state_index", self._state_idx_buf)
+            next_tensordict.set("reset_index", self._reset_idx_buf.clone())
+            next_tensordict.set("state_index", self._state_idx_buf.clone())
 
         # Determine action_type and binarize action for history
         action_type = trade_info.get("side") or "hold"
@@ -536,15 +536,15 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         terminated = self._check_termination(new_portfolio_value)
         truncated = self._check_truncation()
 
-        # PERF: Write in-place to pre-allocated buffers
+        # PERF: Write in-place to pre-allocated buffers, clone to prevent aliasing
         self._reward_buf[0] = reward
         self._terminated_buf[0] = terminated
         self._truncated_buf[0] = truncated
         self._done_buf[0] = terminated or truncated
-        next_tensordict.set("reward", self._reward_buf)
-        next_tensordict.set("terminated", self._terminated_buf)
-        next_tensordict.set("truncated", self._truncated_buf)
-        next_tensordict.set("done", self._done_buf)
+        next_tensordict.set("reward", self._reward_buf.clone())
+        next_tensordict.set("terminated", self._terminated_buf.clone())
+        next_tensordict.set("truncated", self._truncated_buf.clone())
+        next_tensordict.set("done", self._done_buf.clone())
 
         return next_tensordict
 

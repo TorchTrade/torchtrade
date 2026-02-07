@@ -122,7 +122,7 @@ def drawdown_penalty_reward(history) -> float:
     if old_value <= 0 or new_value <= 0:
         return -10.0
 
-    log_ret = float(np.log(new_value / old_value))
+    log_ret = math.log(new_value / old_value)
 
     # Compute drawdown from peak
     peak = float(np.max(history.portfolio_values))
