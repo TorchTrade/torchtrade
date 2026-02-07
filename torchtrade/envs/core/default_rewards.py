@@ -4,6 +4,8 @@ This module provides simple, well-tested reward functions that work with
 the history tracker interface. Users can use these as-is or create their own.
 """
 
+import math
+
 import numpy as np
 
 
@@ -51,7 +53,8 @@ def log_return_reward(history) -> float:
     if new_value <= 0:
         return -10.0
 
-    return float(np.log(new_value / old_value))
+    # PERF: math.log is ~3-5x faster than np.log for single floats
+    return math.log(new_value / old_value)
 
 
 def sharpe_ratio_reward(history) -> float:

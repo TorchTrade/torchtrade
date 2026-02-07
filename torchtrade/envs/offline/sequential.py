@@ -213,6 +213,20 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self.unrealized_pnl_pct = 0.0  # Percentage unrealized PnL
         self.liquidation_price = 0.0  # Liquidation price
 
+        # PERF: Cache allows_short (called ~4x per step, does linear scan each time)
+        self._allows_short = any(a < 0 for a in self.action_levels) and self.leverage > 1
+
+        # PERF: Pre-allocate reusable tensors to avoid per-step torch.tensor() calls
+        self._account_state_buf = torch.zeros(6, dtype=torch.float)
+        self._account_state_buf[4] = float(self.leverage)  # leverage is constant
+        self._reward_buf = torch.zeros(1, dtype=torch.float)
+        self._done_buf = torch.zeros(1, dtype=torch.bool)
+        self._terminated_buf = torch.zeros(1, dtype=torch.bool)
+        self._truncated_buf = torch.zeros(1, dtype=torch.bool)
+        if self.random_start:
+            self._reset_idx_buf = torch.zeros((), dtype=torch.long)
+            self._state_idx_buf = torch.zeros((), dtype=torch.long)
+
     @property
     def has_liquidation(self) -> bool:
         """Check if liquidation mechanics are enabled (leverage > 1)."""
@@ -228,8 +242,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         In spot mode (leverage=1), shorts are impossible regardless of action_levels.
         """
-        has_negative_actions = any(a < 0 for a in self.action_levels)
-        return has_negative_actions and self.leverage > 1
+        return self._allows_short
 
     def _reset_history(self):
         """Reset history tracking."""
@@ -384,10 +397,13 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""
-        # Get market data (scaffold sets current_timestamp and truncated)
-        obs_dict, base_features = self._get_observation_scaffold()
-        self._cached_base_features = base_features
-        return self._build_observation_from_data(obs_dict, base_features)
+        # PERF: Use get_sequential_observation_with_ohlcv to avoid searchsorted
+        # in get_base_features (direct index lookup instead)
+        obs_dict, self.current_timestamp, self.truncated, ohlcv = (
+            self.sampler.get_sequential_observation_with_ohlcv()
+        )
+        self._cached_base_features = ohlcv._asdict()
+        return self._build_observation_from_data(obs_dict, self._cached_base_features)
 
     def _build_observation_from_data(self, obs_dict: dict, base_features: dict) -> TensorDictBase:
         """Build observation TensorDict from already-fetched market data.
@@ -433,20 +449,17 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             current_price, self.liquidation_price, self.position.position_size
         )
 
-        # Universal 6-element account state
-        # [exposure_pct, position_direction, unrealized_pnl_pct,
-        #  holding_time, leverage, distance_to_liquidation]
-        account_state = torch.tensor([
-            exposure_pct,                          # Element 0: exposure_pct
-            position_direction,                    # Element 1: position_direction (-1, 0, +1)
-            self.unrealized_pnl_pct,              # Element 2: unrealized_pnl_pct
-            float(self.position.hold_counter),     # Element 3: holding_time
-            float(self.leverage),                  # Element 4: leverage
-            distance_to_liquidation,               # Element 5: distance_to_liquidation
-        ], dtype=torch.float)
+        # PERF: Write account state in-place to pre-allocated buffer
+        buf = self._account_state_buf
+        buf[0] = exposure_pct
+        buf[1] = position_direction
+        buf[2] = self.unrealized_pnl_pct
+        buf[3] = self.position.hold_counter
+        # buf[4] = leverage (constant, set in __init__)
+        buf[5] = distance_to_liquidation
 
         # Combine account state and market data
-        obs_data = {self.account_state_key: account_state}
+        obs_data = {self.account_state_key: buf}
         obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
 
         return TensorDict(obs_data, batch_size=())
@@ -492,10 +505,12 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         new_price = self._cached_base_features["close"]
         new_portfolio_value = self._get_portfolio_value(new_price)
 
-        # Add coverage tracking indices (only during training with random_start)
+        # PERF: Write coverage tracking in-place to pre-allocated buffers
         if self.random_start:
-            next_tensordict.set("reset_index", torch.tensor(self._reset_idx, dtype=torch.long))
-            next_tensordict.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
+            self._reset_idx_buf.fill_(self._reset_idx)
+            self._state_idx_buf.fill_(self.sampler._sequential_idx)
+            next_tensordict.set("reset_index", self._reset_idx_buf)
+            next_tensordict.set("state_index", self._state_idx_buf)
 
         # Determine action_type and binarize action for history
         action_type = trade_info.get("side") or "hold"
@@ -521,10 +536,15 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         terminated = self._check_termination(new_portfolio_value)
         truncated = self._check_truncation()
 
-        next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
-        next_tensordict.set("terminated", torch.tensor([terminated], dtype=torch.bool))
-        next_tensordict.set("truncated", torch.tensor([truncated], dtype=torch.bool))
-        next_tensordict.set("done", torch.tensor([terminated or truncated], dtype=torch.bool))
+        # PERF: Write in-place to pre-allocated buffers
+        self._reward_buf[0] = reward
+        self._terminated_buf[0] = terminated
+        self._truncated_buf[0] = truncated
+        self._done_buf[0] = terminated or truncated
+        next_tensordict.set("reward", self._reward_buf)
+        next_tensordict.set("terminated", self._terminated_buf)
+        next_tensordict.set("truncated", self._truncated_buf)
+        next_tensordict.set("done", self._done_buf)
 
         return next_tensordict
 
