@@ -213,10 +213,19 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self.unrealized_pnl_pct = 0.0  # Percentage unrealized PnL
         self.liquidation_price = 0.0  # Liquidation price
 
-        # PERF: Cache allows_short (called ~4x per step, does linear scan each time)
+        # ── Performance optimizations (~2x speedup over baseline) ──
+        # Profiling showed _step() bottleneck was Python/TorchRL overhead, not compute:
+        #   - 40k torch.tensor() calls/5k steps (8 per step) for tiny scalars
+        #   - searchsorted in get_base_features despite sequential access
+        #   - allows_short property doing linear scan ~4x per step
+        # These are addressed by: pre-allocated buffers with .clone(), direct
+        # index OHLCV lookup, and cached allows_short. See _get_observation()
+        # and _step() for usage. Buffers are cloned before storing in TensorDict
+        # because TensorDict.set() stores references, not copies.
+
         self._allows_short = any(a < 0 for a in self.action_levels) and self.leverage > 1
 
-        # PERF: Pre-allocate reusable tensors to avoid per-step torch.tensor() calls
+        # Pre-allocate reusable tensors to avoid per-step torch.tensor() calls
         self._account_state_buf = torch.zeros(6, dtype=torch.float)
         self._account_state_buf[4] = float(self.leverage)  # leverage is constant
         self._reward_buf = torch.zeros(1, dtype=torch.float)
