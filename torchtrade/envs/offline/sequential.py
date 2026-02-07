@@ -562,7 +562,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             current_price=current_price,
             leverage=self.leverage,
             transaction_fee=self.transaction_fee,
-            allow_short=self.allows_short
         )
         position_size, notional_value, side = calculate_fractional_position(params)
 

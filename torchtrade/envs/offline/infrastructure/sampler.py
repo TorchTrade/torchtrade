@@ -1,5 +1,6 @@
 from collections import deque, namedtuple
 from typing import Dict, List, Optional, Tuple, Union, Callable, Sequence
+import logging
 import warnings
 import numpy as np
 import pandas as pd
@@ -9,6 +10,8 @@ from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, tf_to_time
 
 # Type alias for feature processing function(s)
 FeatureProcessingFn = Optional[Union[Callable, Sequence[Callable]]]
+
+logger = logging.getLogger(__name__)
 
 # PERF: NamedTuple is faster than dict for attribute access
 OHLCV = namedtuple('OHLCV', ['open', 'high', 'low', 'close', 'volume'])
@@ -185,7 +188,7 @@ class MarketDataObservationSampler:
             raise ValueError("Window duration is too large for the given dataset, no execution times found")
 
         self.max_steps = len(self.exec_times) - 1 if self.max_traj_length is None else min(len(self.exec_times) - 1, self.max_traj_length)
-        print("Max steps:", self.max_steps)
+        logger.debug("Max steps: %d", self.max_steps)
 
         self._sequential_idx = 0
         self._end_idx = len(self.exec_times)
