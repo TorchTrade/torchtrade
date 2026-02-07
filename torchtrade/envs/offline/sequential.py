@@ -226,7 +226,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self._allows_short = any(a < 0 for a in self.action_levels) and self.leverage > 1
 
         self._account_state_buf = torch.zeros(6, dtype=torch.float)
-        self._account_state_buf[4] = float(self.leverage)  # leverage is constant
+        self._account_state_buf[4] = self.leverage  # constant
         self._reward_buf = torch.zeros(1, dtype=torch.float)
         self._done_buf = torch.zeros(1, dtype=torch.bool)
         self._terminated_buf = torch.zeros(1, dtype=torch.bool)
