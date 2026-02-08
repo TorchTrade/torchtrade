@@ -7,7 +7,7 @@ name = "torchtrade"
 version = "0.0.1"
 description = "Reinforcement learning environments for trading applications"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     {name = "Sebastian Dittert", email = "torchtradecontact@gmail.com"}
 ]
