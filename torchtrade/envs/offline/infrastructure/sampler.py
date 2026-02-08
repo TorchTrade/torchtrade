@@ -200,7 +200,11 @@ class MarketDataObservationSampler:
         # PERF: Pre-compute observation indices for each execution timestamp per timeframe
         # This allows get_observation_sequential() to use direct indexing instead of searchsorted
         self._obs_indices: Dict[str, np.ndarray] = {}
-        exec_ts_int64 = self.exec_times.asi8  # int64 nanoseconds
+        # Force nanosecond resolution for consistent int64 representation.
+        # In pandas 3.0+, .asi8 returns values in the index's native resolution
+        # (e.g., microseconds), but pd.Timestamp.value always returns nanoseconds.
+        # Using .as_unit('ns') ensures searchsorted comparisons are consistent.
+        exec_ts_int64 = self.exec_times.as_unit('ns').asi8  # int64 nanoseconds
 
         # Convert resampled dfs to torch tensors for fast slicing.
         # Also convert timestamp indices to int64 (ns) and store as torch.long for searchsorted.
@@ -212,8 +216,8 @@ class MarketDataObservationSampler:
             arr = df_tf.to_numpy(dtype=np.float32)
             self.torch_tensors[key] = torch.from_numpy(arr)  # shape (N, F)
 
-            # timestamps as int64 nanoseconds: use .asi8 on DatetimeIndex (fast)
-            ts_int64 = df_tf.index.asi8  # numpy ndarray (int64)
+            # timestamps as int64 nanoseconds (force ns for pandas 3.0+ compatibility)
+            ts_int64 = df_tf.index.as_unit('ns').asi8  # numpy ndarray (int64)
             self.torch_idx[key] = torch.from_numpy(ts_int64).to(torch.long)  # sorted 1D long tensor
 
             # Use numpy searchsorted once at init instead of torch searchsorted per step
@@ -223,7 +227,7 @@ class MarketDataObservationSampler:
         # Execute-on base features tensor + index
         base_arr = self.execute_base_features_df.to_numpy(dtype=np.float32)
         self.execute_base_tensor = torch.from_numpy(base_arr)  # shape (M, F)
-        base_ts_int64 = self.execute_base_features_df.index.asi8
+        base_ts_int64 = self.execute_base_features_df.index.as_unit('ns').asi8
         self.execute_base_idx = torch.from_numpy(base_ts_int64).to(torch.long)
 
         # Validate 1:1 correspondence between exec_times and execute_base_features_df
