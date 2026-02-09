@@ -131,6 +131,14 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
             # Pandas frequency codes (from TimeFrameUnit enum values)
             "Min": "minutes",
             "H": "hours",
+            # Lowercase variants (TimeFrameUnit.value uses lowercase)
+            "min": "minutes",
+            "h": "hours",
+            "d": "days",
+            "minute": "minutes",
+            "hour": "hours",
+            "day": "days",
+            "seconds": "seconds",
             "D": "days",
             # Lowercase variants
             "min": "minutes",
