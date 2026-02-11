@@ -803,6 +803,59 @@ class TestSequentialEnvRegression:
         from torchrl.envs.utils import check_env_specs
         check_env_specs(unified_env)
 
+    @pytest.mark.parametrize("action_levels,leverage,repeat_action_idx,expected_direction", [
+        ([0, 1], 1, 1, 1),            # Spot: repeat buy (long)
+        ([-1, 0, 1], 5, 2, 1),        # Futures: repeat long
+        ([-1, 0, 1], 5, 0, -1),       # Futures: repeat short
+    ], ids=["spot-long", "futures-long", "futures-short"])
+    def test_repeated_action_does_not_rebalance(
+        self, sample_ohlcv_df, action_levels, leverage, repeat_action_idx, expected_direction
+    ):
+        """Repeating the same action should hold, not rebalance.
+
+        Regression test for #187: fractional position sizing recalculated
+        target from drifting portfolio_value, causing constant-leverage
+        rebalancing (close_partial / increase) when the agent repeated
+        the same action.
+        """
+        config = SequentialTradingEnvConfig(
+            action_levels=action_levels,
+            leverage=leverage,
+            initial_cash=1000,
+            transaction_fee=0.0,
+            slippage=0.0,
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+        env = SequentialTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+
+        # Step 1: open position
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(repeat_action_idx)
+        td = env.step(action_td)
+
+        position_after_open = env.position.position_size
+        assert position_after_open != 0, "Position should have opened"
+
+        # Steps 2-50: repeat same action — position size must not change
+        trades_executed = 0
+        for _ in range(49):
+            action_td = td["next"].clone()
+            action_td["action"] = torch.tensor(repeat_action_idx)
+            td = env.step(action_td)
+            if td["next"]["done"].item():
+                break
+            if env.position.position_size != position_after_open:
+                trades_executed += 1
+
+        assert trades_executed == 0, (
+            f"Repeating the same action should hold, not rebalance. "
+            f"Position changed {trades_executed} times (issue #187)"
+        )
+        env.close()
+
 
 # ============================================================================
 # PER-TIMEFRAME FEATURE PROCESSING TESTS (Issue #177)
