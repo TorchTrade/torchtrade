@@ -458,6 +458,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self.unrealized_pnl = 0.0
         self.unrealized_pnl_pct = 0.0
         self.liquidation_price = 0.0
+        self._prev_action_value = None
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
@@ -600,6 +601,12 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         Returns:
             trade_info: Dict with execution details
         """
+        # If action hasn't changed and we already have a position, just hold
+        if action_value == self._prev_action_value and self.position.position_size != 0:
+            self.position.hold_counter += 1
+            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
+        self._prev_action_value = action_value
+
         # Calculate target position from action value
         target_position_size, target_notional, target_side = (
             self._calculate_fractional_position(action_value, execution_price)
