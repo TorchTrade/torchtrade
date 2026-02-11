@@ -803,13 +803,13 @@ class TestSequentialEnvRegression:
         from torchrl.envs.utils import check_env_specs
         check_env_specs(unified_env)
 
-    @pytest.mark.parametrize("action_levels,leverage,repeat_action_idx,expected_direction", [
-        ([0, 1], 1, 1, 1),            # Spot: repeat buy (long)
-        ([-1, 0, 1], 5, 2, 1),        # Futures: repeat long
-        ([-1, 0, 1], 5, 0, -1),       # Futures: repeat short
+    @pytest.mark.parametrize("action_levels,leverage,repeat_action_idx", [
+        ([0, 1], 1, 1),            # Spot: repeat buy (long)
+        ([-1, 0, 1], 5, 2),        # Futures: repeat long
+        ([-1, 0, 1], 5, 0),        # Futures: repeat short
     ], ids=["spot-long", "futures-long", "futures-short"])
     def test_repeated_action_does_not_rebalance(
-        self, sample_ohlcv_df, action_levels, leverage, repeat_action_idx, expected_direction
+        self, sample_ohlcv_df, action_levels, leverage, repeat_action_idx
     ):
         """Repeating the same action should hold, not rebalance.
 
@@ -853,6 +853,53 @@ class TestSequentialEnvRegression:
         assert trades_executed == 0, (
             f"Repeating the same action should hold, not rebalance. "
             f"Position changed {trades_executed} times (issue #187)"
+        )
+        env.close()
+
+    @pytest.mark.parametrize("action_levels,leverage,open_idx,close_idx", [
+        ([0, 1], 1, 1, 0),            # Spot: long then sell
+        ([-1, 0, 1], 5, 2, 1),        # Futures: long then close
+        ([-1, 0, 1], 5, 0, 1),        # Futures: short then close
+    ], ids=["spot-close", "futures-close-long", "futures-close-short"])
+    def test_action_change_after_repeated_holds_still_executes(
+        self, sample_ohlcv_df, action_levels, leverage, open_idx, close_idx
+    ):
+        """Changing action after repeated holds must still execute.
+
+        Regression test for #187: ensures the _prev_action_value guard
+        does not accidentally lock agents into positions they cannot exit.
+        """
+        config = SequentialTradingEnvConfig(
+            action_levels=action_levels,
+            leverage=leverage,
+            initial_cash=1000,
+            transaction_fee=0.0,
+            slippage=0.0,
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+        env = SequentialTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+
+        # Open position and repeat for 10 steps
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(open_idx)
+        td = env.step(action_td)
+        assert env.position.position_size != 0, "Position should have opened"
+
+        for _ in range(10):
+            action_td = td["next"].clone()
+            action_td["action"] = torch.tensor(open_idx)
+            td = env.step(action_td)
+
+        # Now close — must actually execute
+        action_td = td["next"].clone()
+        action_td["action"] = torch.tensor(close_idx)
+        td = env.step(action_td)
+
+        assert env.position.position_size == 0, (
+            "Position should have closed after action change (issue #187)"
         )
         env.close()
 
