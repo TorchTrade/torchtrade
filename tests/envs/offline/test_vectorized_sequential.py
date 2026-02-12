@@ -38,7 +38,7 @@ def vec_env(sample_ohlcv_df):
     """Create a vectorized env with 4 envs for general testing."""
     config = VectorizedSequentialTradingEnvConfig(
         num_envs=4,
-        action_levels=[-1, 0, 1],
+        action_levels=[-1.0, 0.0, 1.0],
         initial_cash=1000,
         time_frames=[TF_1MIN],
         window_sizes=[10],
@@ -54,13 +54,15 @@ def vec_env(sample_ohlcv_df):
     env.close()
 
 
-def _make_matched_envs(df, fee=0.0, slippage=0.0, max_traj=50, action_levels=None):
+def _make_matched_envs(
+    df, fee=0.0, slippage=0.0, max_traj=50, action_levels=None, leverage=1,
+):
     """Create scalar and N=1 vectorized envs with identical config for comparison."""
     if action_levels is None:
-        action_levels = [0, 1]  # Spot: flat/long
+        action_levels = [-1.0, 0.0, 1.0] if leverage > 1 else [0, 1]
 
     scalar_config = SequentialTradingEnvConfig(
-        leverage=1,
+        leverage=leverage,
         action_levels=action_levels,
         initial_cash=1000,
         time_frames=[TF_1MIN],
@@ -75,6 +77,7 @@ def _make_matched_envs(df, fee=0.0, slippage=0.0, max_traj=50, action_levels=Non
 
     vec_config = VectorizedSequentialTradingEnvConfig(
         num_envs=1,
+        leverage=leverage,
         action_levels=action_levels,
         initial_cash=1000,
         time_frames=[TF_1MIN],
@@ -496,6 +499,31 @@ class TestVecEnvAccountState:
         assert (account_state[:, 4] == 1.0).all(), "Leverage should be 1.0"
         assert (account_state[:, 5] == 1.0).all(), "Dist to liq should be 1.0"
 
+    def test_initial_account_state_futures_mode(self, sample_ohlcv_df):
+        """Initial account state should reflect futures mode leverage and no position risk."""
+        config = VectorizedSequentialTradingEnvConfig(
+            num_envs=3,
+            leverage=10,
+            action_levels=[-1.0, 0.0, 1.0],
+            initial_cash=1000,
+            time_frames=[TF_1MIN],
+            window_sizes=[10],
+            execute_on=TF_1MIN,
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=20,
+            random_start=False,
+        )
+        env = VectorizedSequentialTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+        account_state = td["account_state"]
+        # Leverage element should reflect config
+        assert (account_state[:, 4] == 10.0).all()
+        # Distance to liquidation should be 1.0 with no position
+        assert (account_state[:, 5] == 1.0).all()
+        env.close()
+
 
 # ============================================================================
 # EDGE CASES
@@ -504,11 +532,6 @@ class TestVecEnvAccountState:
 
 class TestVecEnvEdgeCases:
     """Edge cases and configuration validation."""
-
-    def test_leverage_not_1_raises(self, sample_ohlcv_df):
-        """Should raise error for leverage != 1."""
-        with pytest.raises(ValueError, match="leverage=1"):
-            VectorizedSequentialTradingEnvConfig(leverage=10)
 
     @pytest.mark.parametrize("invalid_fee", [-0.1, 1.5])
     def test_invalid_fee_raises(self, invalid_fee):
@@ -526,7 +549,7 @@ class TestVecEnvEdgeCases:
         """Negative action levels should be clamped to 0 for spot mode."""
         config = VectorizedSequentialTradingEnvConfig(
             num_envs=1,
-            action_levels=[-1, 0, 1],
+            action_levels=[-1.0, 0.0, 1.0],
             time_frames=[TF_1MIN],
             window_sizes=[10],
             execute_on=TF_1MIN,
@@ -652,3 +675,449 @@ class TestVecEnvCollector:
         assert collected >= total_frames, (
             f"Should collect at least {total_frames} frames, got {collected}"
         )
+
+
+# ============================================================================
+# FUTURES MODE TESTS
+# ============================================================================
+
+
+def _make_futures_env(df, num_envs=4, leverage=10, fee=0.0, max_traj=50):
+    """Create a vectorized futures env for testing."""
+    config = VectorizedSequentialTradingEnvConfig(
+        num_envs=num_envs,
+        leverage=leverage,
+        action_levels=[-1.0, 0.0, 1.0],
+        initial_cash=1000,
+        time_frames=[TF_1MIN],
+        window_sizes=[10],
+        execute_on=TF_1MIN,
+        transaction_fee=fee,
+        slippage=0.0,
+        seed=42,
+        max_traj_length=max_traj,
+        random_start=False,
+    )
+    return VectorizedSequentialTradingEnv(df, config, simple_feature_fn)
+
+
+class TestVecEnvFuturesSpecs:
+    """TorchRL spec compliance for futures mode."""
+
+    def test_check_env_specs_futures(self, sample_ohlcv_df):
+        """check_env_specs must pass for futures mode."""
+        env = _make_futures_env(sample_ohlcv_df, num_envs=4, leverage=10)
+        check_env_specs(env)
+        env.close()
+
+    def test_negative_actions_not_clamped_futures(self, sample_ohlcv_df):
+        """Negative action levels should NOT be clamped for futures mode."""
+        env = _make_futures_env(sample_ohlcv_df, num_envs=1, leverage=10)
+        assert env._action_levels_tensor[0] == -1.0, "Futures should allow negative actions"
+        assert env._action_levels_tensor[1] == 0.0
+        assert env._action_levels_tensor[2] == 1.0
+        env.close()
+
+
+class TestVecEnvFuturesPositions:
+    """Tests for futures position mechanics: longs, shorts, direction switches."""
+
+    @pytest.mark.parametrize("action_idx,expected_dir", [
+        (2, 1.0),   # action_level=+1 → long
+        (0, -1.0),  # action_level=-1 → short
+    ], ids=["long", "short"])
+    def test_open_position_direction(self, sample_ohlcv_df, action_idx, expected_dir):
+        """Opening positions should set correct direction for both long and short."""
+        env = _make_futures_env(sample_ohlcv_df)
+        td = env.reset()
+        action_td = td.clone()
+        action_td["action"] = torch.full((4,), action_idx, dtype=torch.long)
+        td = env.step(action_td)
+
+        directions = td["next"]["account_state"][:, 1]
+        assert (directions == expected_dir).all(), (
+            f"Expected direction {expected_dir}, got {directions}"
+        )
+        env.close()
+
+    def test_close_short_position(self, sample_ohlcv_df):
+        """Closing a short should set position to 0."""
+        env = _make_futures_env(sample_ohlcv_df)
+        td = env.reset()
+
+        # Open short (action 0 = -1.0)
+        action_td = td.clone()
+        action_td["action"] = torch.full((4,), 0, dtype=torch.long)
+        td = env.step(action_td)
+        assert (env._position_sizes < 0).all()
+
+        # Close (action 1 = 0.0)
+        action_td = td["next"].clone()
+        action_td["action"] = torch.full((4,), 1, dtype=torch.long)
+        td = env.step(action_td)
+
+        assert (env._position_sizes == 0).all(), "All positions should be flat"
+        assert (td["next"]["account_state"][:, 1] == 0.0).all()
+        env.close()
+
+    @pytest.mark.parametrize("first_action,second_action,expected_dir", [
+        (2, 0, -1.0),  # long → short
+        (0, 2, 1.0),   # short → long
+    ], ids=["long-to-short", "short-to-long"])
+    def test_direction_switch(
+        self, sample_ohlcv_df, first_action, second_action, expected_dir
+    ):
+        """Direction switches should close then reopen in the new direction."""
+        env = _make_futures_env(sample_ohlcv_df)
+        td = env.reset()
+
+        # Open first position
+        action_td = td.clone()
+        action_td["action"] = torch.full((4,), first_action, dtype=torch.long)
+        td = env.step(action_td)
+
+        # Switch direction
+        action_td = td["next"].clone()
+        action_td["action"] = torch.full((4,), second_action, dtype=torch.long)
+        td = env.step(action_td)
+
+        assert (td["next"]["account_state"][:, 1] == expected_dir).all(), (
+            f"Expected direction {expected_dir} after switch"
+        )
+        env.close()
+
+    def test_repeated_short_action_holds(self, sample_ohlcv_df):
+        """Repeating short action should hold, not rebalance (#187)."""
+        env = _make_futures_env(sample_ohlcv_df)
+        td = env.reset()
+
+        # Open short
+        action_td = td.clone()
+        action_td["action"] = torch.full((4,), 0, dtype=torch.long)
+        td = env.step(action_td)
+        position_after_open = env._position_sizes.clone()
+
+        # Repeat short action
+        for _ in range(10):
+            action_td = td["next"].clone()
+            action_td["action"] = torch.full((4,), 0, dtype=torch.long)
+            td = env.step(action_td)
+            if td["next"]["done"].any():
+                break
+
+        assert torch.allclose(env._position_sizes, position_after_open), (
+            "Repeated short action should hold position"
+        )
+        env.close()
+
+
+class TestVecEnvFuturesAccountState:
+    """Tests for futures account state correctness."""
+
+    @pytest.mark.parametrize("action_idx,direction", [
+        (2, "long"),
+        (0, "short"),
+    ], ids=["long", "short"])
+    def test_distance_to_liquidation_with_position(
+        self, sample_ohlcv_df, action_idx, direction
+    ):
+        """Distance to liquidation should be < 1.0 for both long and short."""
+        env = _make_futures_env(sample_ohlcv_df, leverage=10)
+        td = env.reset()
+
+        # Open position
+        action_td = td.clone()
+        action_td["action"] = torch.full((4,), action_idx, dtype=torch.long)
+        td = env.step(action_td)
+
+        # Hold to get next observation
+        action_td = td["next"].clone()
+        action_td["action"] = torch.full((4,), action_idx, dtype=torch.long)
+        td = env.step(action_td)
+
+        dist_to_liq = td["next"]["account_state"][:, 5]
+        assert (dist_to_liq > 0).all(), f"Distance should be positive ({direction})"
+        assert (dist_to_liq < 1.0).all(), (
+            f"Distance to liq should be < 1.0 with leverage ({direction}), got {dist_to_liq}"
+        )
+        env.close()
+
+    def test_unrealized_pnl_short_positive_when_price_drops(self, trending_down_df):
+        """Short position PnL should be positive when price drops."""
+        env = _make_futures_env(trending_down_df, leverage=10, max_traj=100)
+        td = env.reset()
+
+        # Open short
+        action_td = td.clone()
+        action_td["action"] = torch.full((4,), 0, dtype=torch.long)
+        td = env.step(action_td)
+
+        # Hold through downtrend
+        for _ in range(5):
+            action_td = td["next"].clone()
+            action_td["action"] = torch.full((4,), 0, dtype=torch.long)
+            td = env.step(action_td)
+            if td["next"]["done"].any():
+                break
+
+        pnl_pct = td["next"]["account_state"][:, 2]
+        # trending_down_df guarantees price drops → short PnL must be positive
+        assert (pnl_pct > 0).all(), (
+            f"Short PnL should be positive in downtrend, got {pnl_pct}"
+        )
+        env.close()
+
+    def test_liquidation_price_formula(self, sample_ohlcv_df):
+        """Liquidation prices should match the expected formula."""
+        env = _make_futures_env(sample_ohlcv_df, leverage=10)
+        td = env.reset()
+
+        # Open long
+        action_td = td.clone()
+        action_td["action"] = torch.full((4,), 2, dtype=torch.long)
+        env.step(action_td)
+
+        entry = env._entry_prices.clone()
+        liq = env._compute_liq_prices()
+        # Long liq = entry * (1 - 1/leverage + mmr)
+        # leverage=10, mmr=0.004: liq = entry * 0.904
+        expected = entry * (1 - 0.1 + 0.004)
+        assert torch.allclose(liq, expected, atol=1e-4), (
+            f"Long liq price mismatch: got {liq}, expected {expected}"
+        )
+
+        # Close and open short
+        action_td = td.clone()
+        action_td["action"] = torch.full((4,), 0, dtype=torch.long)
+        env.step(action_td)
+
+        entry_short = env._entry_prices.clone()
+        liq_short = env._compute_liq_prices()
+        # Short liq = entry * (1 + 1/leverage - mmr)
+        expected_short = entry_short * (1 + 0.1 - 0.004)
+        assert torch.allclose(liq_short, expected_short, atol=1e-4), (
+            f"Short liq price mismatch: got {liq_short}, expected {expected_short}"
+        )
+        env.close()
+
+
+class TestVecEnvFuturesLiquidation:
+    """Tests for forced liquidation mechanics."""
+
+    def test_long_liquidation_on_price_crash(self, trending_down_df):
+        """Long position should get liquidated when price crashes with high leverage."""
+        env = _make_futures_env(
+            trending_down_df, num_envs=2, leverage=20, max_traj=200
+        )
+        td = env.reset()
+
+        # Open long with 20x leverage
+        action_td = td.clone()
+        action_td["action"] = torch.full((2,), 2, dtype=torch.long)
+        td = env.step(action_td)
+        assert (env._position_sizes > 0).all(), "Should have long positions"
+
+        # Step through downtrend until done
+        for _ in range(150):
+            action_td = td["next"].clone()
+            action_td["action"] = torch.full((2,), 2, dtype=torch.long)
+            td = env.step(action_td)
+            if td["next"]["done"].all():
+                break
+
+        # At least one env should have been terminated (bankrupt from liquidation)
+        # or positions should have been liquidated (zeroed out)
+        liquidated = env._position_sizes == 0
+        terminated = td["next"]["terminated"].squeeze(-1)
+        assert liquidated.any() or terminated.any(), (
+            "High-leverage long in downtrend should trigger liquidation or termination"
+        )
+        env.close()
+
+    def test_short_liquidation_on_price_surge(self, trending_up_df):
+        """Short position should get liquidated when price surges with high leverage."""
+        env = _make_futures_env(
+            trending_up_df, num_envs=2, leverage=20, max_traj=200
+        )
+        td = env.reset()
+
+        # Open short with 20x leverage
+        action_td = td.clone()
+        action_td["action"] = torch.full((2,), 0, dtype=torch.long)
+        td = env.step(action_td)
+        assert (env._position_sizes < 0).all(), "Should have short positions"
+
+        # Step through uptrend until done
+        for _ in range(150):
+            action_td = td["next"].clone()
+            action_td["action"] = torch.full((2,), 0, dtype=torch.long)
+            td = env.step(action_td)
+            if td["next"]["done"].all():
+                break
+
+        liquidated = env._position_sizes == 0
+        terminated = td["next"]["terminated"].squeeze(-1)
+        assert liquidated.any() or terminated.any(), (
+            "High-leverage short in uptrend should trigger liquidation or termination"
+        )
+        env.close()
+
+    def test_liquidation_zeros_position_state(self, trending_down_df):
+        """After liquidation, position state should be fully zeroed."""
+        env = _make_futures_env(
+            trending_down_df, num_envs=1, leverage=20, max_traj=200
+        )
+        td = env.reset()
+
+        # Open long
+        action_td = td.clone()
+        action_td["action"] = torch.tensor([2])
+        td = env.step(action_td)
+
+        # Run until liquidation or done
+        was_liquidated = False
+        for _ in range(150):
+            had_position = env._position_sizes[0].item() != 0
+            action_td = td["next"].clone()
+            action_td["action"] = torch.tensor([2])
+            td = env.step(action_td)
+            no_position = env._position_sizes[0].item() == 0
+
+            if had_position and no_position:
+                was_liquidated = True
+                # Verify state is clean
+                assert env._entry_prices[0].item() == 0, "Entry price should be 0 after liq"
+                assert env._hold_counters[0].item() == 0, "Hold counter should be 0 after liq"
+                assert env._balances[0].item() >= 0, "Balance should be non-negative after liq"
+                break
+
+            if td["next"]["done"].all():
+                break
+
+        assert was_liquidated or td["next"]["done"].all(), (
+            "Should either liquidate or terminate in downtrend with 20x leverage"
+        )
+        env.close()
+
+
+class TestVecEnvFuturesCorrectness:
+    """Compare vectorized futures (N=1) against scalar SequentialTradingEnv."""
+
+    @pytest.mark.parametrize("action_idx,action_name", [
+        (2, "long"),
+        (0, "short"),
+    ], ids=["long", "short"])
+    def test_open_and_hold_portfolio_values_match(
+        self, sample_ohlcv_df, action_idx, action_name
+    ):
+        """Open then hold: portfolio values should match between scalar and vec."""
+        scalar_env, vec_env = _make_matched_envs(
+            sample_ohlcv_df, leverage=10
+        )
+
+        td_s = scalar_env.reset()
+        td_v = vec_env.reset()
+
+        # Open position
+        action_td_s = td_s.clone()
+        action_td_s["action"] = torch.tensor(action_idx)
+        td_s = scalar_env.step(action_td_s)
+
+        action_td_v = td_v.clone()
+        action_td_v["action"] = torch.tensor([action_idx])
+        td_v = vec_env.step(action_td_v)
+
+        # Position sizes should match
+        scalar_pos = scalar_env.position.position_size
+        vec_pos = vec_env._position_sizes[0].item()
+        assert abs(scalar_pos - vec_pos) / max(abs(scalar_pos), 1e-6) < 0.01, (
+            f"Position sizes differ: scalar={scalar_pos}, vec={vec_pos}"
+        )
+
+        # Hold and compare PVs
+        for step in range(5):
+            action_td_s = td_s["next"].clone()
+            action_td_s["action"] = torch.tensor(action_idx)
+            td_s = scalar_env.step(action_td_s)
+
+            action_td_v = td_v["next"].clone()
+            action_td_v["action"] = torch.tensor([action_idx])
+            td_v = vec_env.step(action_td_v)
+
+            scalar_pv = scalar_env._get_portfolio_value()
+            vec_pv = vec_env._portfolio_values[0].item()
+            assert abs(scalar_pv - vec_pv) / max(scalar_pv, 1.0) < 0.01, (
+                f"Step {step + 2} ({action_name}): PV mismatch: "
+                f"scalar={scalar_pv:.4f}, vec={vec_pv:.4f}"
+            )
+
+        scalar_env.close()
+        vec_env.close()
+
+    def test_direction_switch_balance_matches(self, sample_ohlcv_df):
+        """Long→short switch: balances should match between scalar and vec."""
+        scalar_env, vec_env = _make_matched_envs(
+            sample_ohlcv_df, leverage=10, fee=0.001
+        )
+
+        td_s = scalar_env.reset()
+        td_v = vec_env.reset()
+
+        # Open long (action 2)
+        action_td_s = td_s.clone()
+        action_td_s["action"] = torch.tensor(2)
+        td_s = scalar_env.step(action_td_s)
+
+        action_td_v = td_v.clone()
+        action_td_v["action"] = torch.tensor([2])
+        td_v = vec_env.step(action_td_v)
+
+        # Hold
+        for _ in range(3):
+            action_td_s = td_s["next"].clone()
+            action_td_s["action"] = torch.tensor(2)
+            td_s = scalar_env.step(action_td_s)
+
+            action_td_v = td_v["next"].clone()
+            action_td_v["action"] = torch.tensor([2])
+            td_v = vec_env.step(action_td_v)
+
+        # Switch to short (action 0)
+        action_td_s = td_s["next"].clone()
+        action_td_s["action"] = torch.tensor(0)
+        td_s = scalar_env.step(action_td_s)
+
+        action_td_v = td_v["next"].clone()
+        action_td_v["action"] = torch.tensor([0])
+        td_v = vec_env.step(action_td_v)
+
+        # Both should now be short
+        assert scalar_env.position.position_size < 0, "Scalar should be short"
+        assert vec_env._position_sizes[0].item() < 0, "Vec should be short"
+
+        # Balances should be close
+        scalar_bal = scalar_env.balance
+        vec_bal = vec_env._balances[0].item()
+        assert abs(scalar_bal - vec_bal) / max(scalar_bal, 1.0) < 0.01, (
+            f"Balance mismatch after switch: scalar={scalar_bal:.4f}, vec={vec_bal:.4f}"
+        )
+
+        scalar_env.close()
+        vec_env.close()
+
+
+class TestVecEnvFuturesCollector:
+    """Futures mode SyncDataCollector integration."""
+
+    def test_collector_futures_mode(self, sample_ohlcv_df):
+        """SyncDataCollector should work with futures mode env."""
+        env = _make_futures_env(sample_ohlcv_df, num_envs=8, leverage=10)
+        collector = SyncDataCollector(
+            env, policy=None, frames_per_batch=80, total_frames=200,
+        )
+        collected = 0
+        for td_batch in collector:
+            collected += td_batch.numel()
+        collector.shutdown()
+        env.close()
+        assert collected >= 200

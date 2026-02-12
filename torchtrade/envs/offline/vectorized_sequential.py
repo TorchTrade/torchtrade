@@ -7,8 +7,8 @@ no IPC overhead.
 Achieves orders of magnitude higher throughput than ParallelEnv for
 fast environments by eliminating inter-process communication overhead.
 
-Currently supports spot mode (leverage=1) only. Futures mode (leverage > 1,
-liquidation, shorts) will be added in a follow-up.
+Supports both spot (leverage=1) and futures (leverage>1) modes with
+liquidation, shorts, and direction switches.
 """
 
 from dataclasses import dataclass, field
@@ -29,12 +29,14 @@ from torchtrade.envs.utils.fractional_sizing import (
     POSITION_TOLERANCE_ABS,
 )
 
+from torchtrade.envs.core.common_types import MarginType
+
 
 @dataclass
 class VectorizedSequentialTradingEnvConfig:
     """Configuration for vectorized sequential trading environment.
 
-    Currently supports spot mode only (leverage=1).
+    Supports spot (leverage=1) and futures (leverage>1) modes.
     """
 
     num_envs: int = 64
@@ -59,8 +61,10 @@ class VectorizedSequentialTradingEnvConfig:
         default_factory=lambda: [-1, 0, 1]
     )
 
-    # Trading parameters (spot only)
+    # Trading parameters
     leverage: int = 1
+    margin_type: MarginType = MarginType.ISOLATED
+    maintenance_margin_rate: float = 0.004
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = (
@@ -69,11 +73,7 @@ class VectorizedSequentialTradingEnvConfig:
             )
         )
         validate_action_levels(self.action_levels)
-        if self.leverage != 1:
-            raise ValueError(
-                "VectorizedSequentialTradingEnv only supports leverage=1 (spot mode). "
-                "Futures mode will be added in a follow-up."
-            )
+
         if self.num_envs < 1:
             raise ValueError(f"num_envs must be >= 1, got {self.num_envs}")
         if not (0 <= self.transaction_fee <= 1):
@@ -93,13 +93,9 @@ class VectorizedSequentialTradingEnv(EnvBase):
     All state (balances, positions, step indices) is stored as (num_envs,) tensors
     and updated simultaneously via masked operations.
 
-    This achieves 20-400x higher throughput than ParallelEnv for fast environments
-    by eliminating inter-process communication overhead.
-
-    Currently supports spot mode (leverage=1) only:
-    - No liquidation mechanics
-    - Negative action_levels are clipped to 0 (no shorts)
-    - Distance to liquidation is always 1.0
+    Supports both spot (leverage=1) and futures (leverage>1) modes:
+    - Spot: no shorts, no liquidation, leverage=1
+    - Futures: long/short, liquidation mechanics, configurable leverage
 
     Args:
         df: OHLCV DataFrame for backtesting
@@ -124,13 +120,13 @@ class VectorizedSequentialTradingEnv(EnvBase):
         self.bankrupt_threshold = config.bankrupt_threshold
         self.action_levels = config.action_levels
 
-        # Action levels as tensor (clamp negatives for spot mode)
+        # Action levels as tensor
         self._action_levels_tensor = torch.tensor(
             config.action_levels, dtype=torch.float32
-        ).clamp(min=0.0)
-
-        # Fee multiplier (spot: leverage=1)
-        self._fee_multiplier = 1.0 + config.transaction_fee
+        )
+        # Clamp negative actions for spot mode (no shorts)
+        if config.leverage == 1:
+            self._action_levels_tensor = self._action_levels_tensor.clamp(min=0.0)
 
         # Initialize sampler (reuse existing infrastructure)
         self._sampler = MarketDataObservationSampler(
@@ -297,6 +293,37 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         return starts, ends
 
+    def _compute_portfolio_values(self, current_prices: torch.Tensor) -> torch.Tensor:
+        """Compute portfolio values for all environments.
+
+        Spot:    PV = balance + position_size * current_price
+        Futures: PV = balance + locked_margin + unrealized_pnl
+        """
+        if self.config.leverage > 1:
+            locked_margin = (
+                self._position_sizes.abs() * self._entry_prices
+            ) / self.config.leverage
+            unrealized_pnl = (
+                current_prices - self._entry_prices
+            ) * self._position_sizes
+            return self._balances + locked_margin + unrealized_pnl
+        return self._balances + self._position_sizes * current_prices
+
+    def _compute_liq_prices(self) -> torch.Tensor:
+        """Compute liquidation prices for all environments (futures only)."""
+        margin_fraction = 1.0 / float(self.config.leverage)
+        return torch.where(
+            self._position_sizes > 0,
+            self._entry_prices
+            * (1 - margin_fraction + self.config.maintenance_margin_rate),
+            torch.where(
+                self._position_sizes < 0,
+                self._entry_prices
+                * (1 + margin_fraction - self.config.maintenance_margin_rate),
+                self._zeros,
+            ),
+        ).clamp(min=0.0)
+
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset environments.
 
@@ -355,22 +382,39 @@ class VectorizedSequentialTradingEnv(EnvBase):
         """
         N = self._num_envs
 
-        # Account state (6 elements)
-        position_values = self._position_sizes * current_prices
-        pvs = self._balances + position_values
+        # Portfolio value (mode-aware)
+        pvs = self._compute_portfolio_values(current_prices)
         pvs_safe = pvs.clamp(min=1e-10)
 
-        exposure_pct = position_values.abs() / pvs_safe
+        # Exposure = |notional| / PV
+        notional_values = self._position_sizes.abs() * current_prices
+        exposure_pct = notional_values / pvs_safe
         position_direction = self._position_sizes.sign()
 
-        # Unrealized PnL % = (current - entry) / entry for longs
-        has_position = self._position_sizes > 0
+        # Unrealized PnL % = direction * (current - entry) / entry
+        has_position = self._position_sizes != 0
         entry_safe = self._entry_prices.clamp(min=1e-10)
         unrealized_pnl_pct = torch.where(
             has_position,
-            (current_prices - self._entry_prices) / entry_safe,
+            position_direction * (current_prices - self._entry_prices) / entry_safe,
             self._zeros,
         )
+
+        # Leverage and distance to liquidation
+        leverage_tensor = self._ones * float(self.config.leverage)
+        if self.config.leverage > 1:
+            liq_price = self._compute_liq_prices()
+            distance_to_liq = torch.where(
+                self._position_sizes == 0,
+                self._ones,
+                torch.where(
+                    self._position_sizes > 0,
+                    (current_prices - liq_price) / current_prices,
+                    (liq_price - current_prices) / current_prices,
+                ).clamp(min=0.0),
+            )
+        else:
+            distance_to_liq = self._ones
 
         account_state = torch.stack(
             [
@@ -378,8 +422,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
                 position_direction,
                 unrealized_pnl_pct,
                 self._hold_counters.float(),
-                self._ones,  # leverage = 1.0 (spot)
-                self._ones,  # distance_to_liquidation = 1.0 (spot)
+                leverage_tensor,
+                distance_to_liq,
             ],
             dim=-1,
         )  # (N, 6)
@@ -442,9 +486,44 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # their observation doesn't matter since they'll be auto-reset)
         self._step_indices.clamp_(max=self._total_exec_times - 1)
 
-        # 6. Get new prices and compute portfolio values
+        # 6. Get new prices and apply forced liquidations if in futures mode
         new_prices = self._base_tensor[self._step_indices, 3]  # (N,)
-        new_pvs = self._balances + self._position_sizes * new_prices
+
+        # Forced liquidation (futures only)
+        if self.config.leverage > 1:
+            liq_price = self._compute_liq_prices()
+            long_liq = (self._position_sizes > 0) & (new_prices <= liq_price)
+            short_liq = (self._position_sizes < 0) & (new_prices >= liq_price)
+            liq_mask = long_liq | short_liq
+            if liq_mask.any():
+                # PnL at liquidation price (works for both directions via signed sizes)
+                pnl = (liq_price - self._entry_prices) * self._position_sizes
+                margin_return = (
+                    self._position_sizes.abs() * self._entry_prices
+                ) / float(self.config.leverage)
+                fee = (
+                    self._position_sizes.abs() * liq_price
+                ) * self.transaction_fee
+                self._balances = torch.where(
+                    liq_mask,
+                    self._balances + pnl - fee + margin_return,
+                    self._balances,
+                )
+                self._balances.clamp_(min=0.0)
+                self._position_sizes = torch.where(
+                    liq_mask, self._zeros, self._position_sizes
+                )
+                self._entry_prices = torch.where(
+                    liq_mask, self._zeros, self._entry_prices
+                )
+                self._hold_counters = torch.where(
+                    liq_mask,
+                    torch.zeros_like(self._hold_counters),
+                    self._hold_counters,
+                )
+
+        # Compute portfolio values (mode-aware)
+        new_pvs = self._compute_portfolio_values(new_prices)
 
         # 7. Compute rewards: log(new_pv / old_pv)
         old_pvs = self._portfolio_values
@@ -456,7 +535,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
         rewards = torch.where(new_pvs <= 0, torch.full_like(rewards, -10.0), rewards)
 
         # 8. Update stored portfolio values
-        self._portfolio_values = new_pvs.clone()
+        self._portfolio_values = new_pvs
 
         # 9. Compute termination signals
         terminated = new_pvs < (self._initial_pvs * self.bankrupt_threshold)
@@ -480,14 +559,16 @@ class VectorizedSequentialTradingEnv(EnvBase):
     ):
         """Execute trades for all environments using vectorized operations.
 
-        Handles:
+        Handles both spot and futures modes:
         - Same action optimization (hold if action unchanged)
         - Tolerance-based holding (avoid churn from small price drift)
-        - Position closing and opening via masked operations
+        - Long and short positions
+        - Direction switches (long→short, short→long): close then reopen
+        - Leverage-aware margin and fee calculations
         """
         # Same action optimization (#187): if action unchanged and has position, hold
         same_action = (action_values == self._prev_action_values) & (
-            self._position_sizes > 0
+            self._position_sizes != 0
         )
         self._hold_counters[same_action] += 1
 
@@ -499,29 +580,30 @@ class VectorizedSequentialTradingEnv(EnvBase):
         if not need_trade.any():
             return
 
-        # Compute target positions for ALL envs (efficient batch operation)
-        pvs = self._balances + self._position_sizes * execution_prices
+        # Compute target positions for ALL envs
+        pvs = self._compute_portfolio_values(execution_prices)
         fraction = action_values.abs()
+        leverage = float(self.config.leverage)
+        fee_denom = 1.0 / leverage + self.transaction_fee
         capital_allocated = pvs * fraction
 
-        # Account for fees: notional = capital / (1/leverage + fee) * leverage
-        # For spot (leverage=1): notional = capital / (1 + fee)
-        margin_required = capital_allocated / self._fee_multiplier
-        notional = margin_required  # leverage=1
+        # Notional = capital / (1/leverage + fee)
+        notional = capital_allocated / fee_denom
+        # Target sizes are signed: positive=long, negative=short
         target_sizes = torch.where(
             execution_prices > 0,
-            notional / execution_prices,
+            action_values.sign() * notional / execution_prices,
             self._zeros,
         )
         # action_value == 0 → target = 0
-        target_sizes = target_sizes * (action_values > 0).float()
+        target_sizes = torch.where(action_values == 0, self._zeros, target_sizes)
 
         # Tolerance check: avoid churn from small position changes
         tolerance = (target_sizes.abs() * POSITION_TOLERANCE_PCT).clamp(
             min=POSITION_TOLERANCE_ABS
         )
         within_tol = (target_sizes - self._position_sizes).abs() < tolerance
-        hold_tol = need_trade & within_tol & (self._position_sizes > 0)
+        hold_tol = need_trade & within_tol & (self._position_sizes != 0)
         self._hold_counters[hold_tol] += 1
         need_trade = need_trade & ~hold_tol
 
@@ -529,15 +611,17 @@ class VectorizedSequentialTradingEnv(EnvBase):
             return
 
         # Close existing positions that need to change
-        close_mask = need_trade & (self._position_sizes > 0)
+        close_mask = need_trade & (self._position_sizes != 0)
         if close_mask.any():
-            # PnL = (current_price - entry_price) * position_size
+            # PnL works for both long and short via signed position_sizes:
+            # Long:  (current - entry) * (+qty) = positive if price went up
+            # Short: (current - entry) * (-qty) = positive if price went down
             pnl = (execution_prices - self._entry_prices) * self._position_sizes
-            # Fee on close notional
             close_notional = (self._position_sizes * execution_prices).abs()
             fee = close_notional * self.transaction_fee
-            # Return locked margin (spot: margin = entry_price * position_size)
-            margin_return = (self._position_sizes * self._entry_prices).abs()
+            margin_return = (
+                self._position_sizes.abs() * self._entry_prices
+            ) / leverage
 
             self._balances[close_mask] += (pnl - fee + margin_return)[close_mask]
             self._balances.clamp_(min=0.0)
@@ -545,17 +629,17 @@ class VectorizedSequentialTradingEnv(EnvBase):
             self._entry_prices[close_mask] = 0.0
             self._hold_counters[close_mask] = 0
 
-        # Open new positions where target > 0
-        open_mask = need_trade & (action_values > 0)
+        # Open new positions where action != 0 (both long and short)
+        open_mask = need_trade & (action_values != 0)
         if open_mask.any():
             # Recalculate target with updated balance (after closing)
-            pvs_new = self._balances + self._position_sizes * execution_prices
+            pvs_new = self._compute_portfolio_values(execution_prices)
             capital_new = pvs_new * fraction
-            margin_new = capital_new / self._fee_multiplier
-            notional_new = margin_new
+            notional_new = capital_new / fee_denom
+            margin_new = notional_new / leverage
             new_sizes = torch.where(
                 execution_prices > 0,
-                notional_new / execution_prices,
+                action_values.sign() * notional_new / execution_prices,
                 self._zeros,
             )
             new_fee = notional_new * self.transaction_fee
@@ -571,6 +655,6 @@ class VectorizedSequentialTradingEnv(EnvBase):
                 self._entry_prices[final_open] = execution_prices[final_open]
                 self._hold_counters[final_open] = 0
 
-    def close(self):
+    def close(self, raise_if_closed: bool = False):
         """Clean up resources."""
         pass
