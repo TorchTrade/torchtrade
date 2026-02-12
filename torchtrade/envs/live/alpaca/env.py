@@ -119,7 +119,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
 
-        if trade_info["executed"]:
+        if trade_info["executed"] and trade_info.get("success") is not False:
             self.position.current_position = 1 if trade_info["side"] == "buy" else 0
             self.position.current_action_level = desired_action
 

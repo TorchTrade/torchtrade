@@ -182,7 +182,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
         trade_info = self._execute_trade_if_needed(action_tuple)
         trade_info["position_closed"] = position_closed
 
-        if trade_info["executed"]:
+        if trade_info["executed"] and trade_info.get("success") is not False:
             if trade_info["side"] == "buy":
                 self.position.current_position = 1  # Long
             elif trade_info["side"] == "sell":
@@ -277,7 +277,13 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
             # We have an existing position that needs to be closed before opening new one
             if (side == "long" and self.position.current_position == -1) or \
                (side == "short" and self.position.current_position == 1):
-                self.trader.close_position()
+                try:
+                    close_success = self.trader.close_position()
+                except Exception as e:
+                    print(f"Close position failed for {self.config.symbol}: {e}")
+                    return trade_info
+                if not close_success:
+                    return trade_info
                 self.position.current_position = 0
 
         if side == "long":

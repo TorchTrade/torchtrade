@@ -10,13 +10,9 @@ permanent local state desynchronization from the exchange.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-import torch
-import numpy as np
-from tensordict import TensorDict
 
 from torchtrade.envs.core.state import PositionState
 
@@ -96,326 +92,211 @@ class MockTrader:
 
 
 # ---------------------------------------------------------------------------
-# Binance env tests
+# Environment factory helpers
 # ---------------------------------------------------------------------------
 
 
-class TestBinanceTradeStateSync:
-    """Test that Binance env local state stays synchronized with exchange."""
+def _make_binance_env(trader=None):
+    """Create a BinanceFuturesTorchTradingEnv with mocked dependencies."""
+    from torchtrade.envs.live.binance.env import (
+        BinanceFuturesTorchTradingEnv,
+        BinanceFuturesTradingEnvConfig,
+    )
+    from torchtrade.envs.core.state import HistoryTracker
+    from torchtrade.envs.core.default_rewards import log_return_reward
 
-    def _make_env(self, trader=None):
-        """Create a BinanceFuturesTorchTradingEnv with mocked dependencies."""
-        from torchtrade.envs.live.binance.env import (
-            BinanceFuturesTorchTradingEnv,
-            BinanceFuturesTradingEnvConfig,
-        )
+    mock_trader = trader or MockTrader()
 
-        mock_trader = trader or MockTrader()
-        mock_observer = MagicMock()
-        mock_observer.get_observations.return_value = {
-            "features_1Hour": np.random.randn(10, 4).astype(np.float32),
-        }
-        mock_observer.get_keys.return_value = ["features_1Hour"]
+    config = BinanceFuturesTradingEnvConfig(
+        symbol="BTCUSDT",
+        demo=True,
+        time_frames=["1h"],
+        window_sizes=[10],
+        execute_on="1h",
+        leverage=5,
+        action_levels=[-1.0, 0.0, 1.0],
+    )
 
-        config = BinanceFuturesTradingEnvConfig(
-            symbol="BTCUSDT",
-            demo=True,
-            time_frames=["1h"],
-            window_sizes=[10],
-            execute_on="1h",
-            leverage=5,
-            action_levels=[-1.0, 0.0, 1.0],
-        )
+    with patch.object(BinanceFuturesTorchTradingEnv, '__init__', lambda self, *a, **kw: None):
+        env = BinanceFuturesTorchTradingEnv.__new__(BinanceFuturesTorchTradingEnv)
 
-        with patch.object(BinanceFuturesTorchTradingEnv, '__init__', lambda self, *a, **kw: None):
-            env = BinanceFuturesTorchTradingEnv.__new__(BinanceFuturesTorchTradingEnv)
+    env.config = config
+    env.trader = mock_trader
+    env.action_levels = config.action_levels
+    env.position = PositionState()
+    env.initial_portfolio_value = 10000.0
+    env.history = HistoryTracker()
+    env.reward_function = log_return_reward
 
-        env.config = config
-        env.trader = mock_trader
-        env.observer = mock_observer
-        env.action_levels = config.action_levels
-        env.position = PositionState()
-        env.initial_portfolio_value = 10000.0
+    return env
 
-        from torchtrade.envs.core.state import HistoryTracker
-        env.history = HistoryTracker()
 
-        from torchtrade.envs.core.default_rewards import log_return_reward
-        env.reward_function = log_return_reward
+def _make_bitget_env(trader=None):
+    """Create a BitgetFuturesTorchTradingEnv with mocked dependencies."""
+    from torchtrade.envs.live.bitget.env import (
+        BitgetFuturesTorchTradingEnv,
+        BitgetFuturesTradingEnvConfig,
+    )
+    from torchtrade.envs.core.state import HistoryTracker
+    from torchtrade.envs.core.default_rewards import log_return_reward
 
-        return env
+    mock_trader = trader or MockTrader()
 
-    def test_successful_trade_updates_state(self):
-        """Successful trade should update current_action_level and current_position."""
+    config = BitgetFuturesTradingEnvConfig(
+        symbol="BTC/USDT:USDT",
+        demo=True,
+        time_frames=["1h"],
+        window_sizes=[10],
+        execute_on="1h",
+        leverage=5,
+        action_levels=[-1.0, 0.0, 1.0],
+    )
+
+    with patch.object(BitgetFuturesTorchTradingEnv, '__init__', lambda self, *a, **kw: None):
+        env = BitgetFuturesTorchTradingEnv.__new__(BitgetFuturesTorchTradingEnv)
+
+    env.config = config
+    env.trader = mock_trader
+    env.action_levels = config.action_levels
+    env.position = PositionState()
+    env.initial_portfolio_value = 10000.0
+    env.history = HistoryTracker()
+    env.reward_function = log_return_reward
+
+    return env
+
+
+ENV_FACTORIES = {
+    "binance": _make_binance_env,
+    "bitget": _make_bitget_env,
+}
+
+
+# ---------------------------------------------------------------------------
+# Shared tests: run identical scenarios on both Binance and Bitget
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("exchange", ["binance", "bitget"])
+class TestTradeStateSync:
+    """Trade state synchronization tests that apply to both exchanges."""
+
+    def test_successful_trade_returns_success(self, exchange):
+        """Successful trade should return executed=True, success=True."""
         trader = MockTrader(position_qty=0.0)
-        env = self._make_env(trader)
+        env = ENV_FACTORIES[exchange](trader)
 
         trade_info = env._execute_trade_if_needed(-1.0)
 
         assert trade_info["executed"] is True
         assert trade_info["success"] is True
 
-    def test_failed_trade_exception_does_not_update_state(self):
-        """Trade that raises exception should return executed=False."""
+    def test_trade_exception_returns_executed_false(self, exchange):
+        """Trade that raises exception should return executed=False, success=False."""
         trader = MockTrader(position_qty=0.0)
         trader.trade_should_raise = True
-        env = self._make_env(trader)
+        env = ENV_FACTORIES[exchange](trader)
 
-        # Bypass the guard (current_action_level=0.0, desired=-1.0)
         trade_info = env._execute_fractional_action(-1.0)
 
         assert trade_info["executed"] is False
         assert trade_info["success"] is False
 
-    def test_exception_preserves_current_action_level(self):
-        """After a failed trade, current_action_level should remain unchanged."""
+    def test_guard_allows_retry_after_failed_trade(self, exchange):
+        """After a failed trade, the guard should allow retrying the same action.
+
+        This is the core regression test for #189: if current_action_level is
+        incorrectly updated on failure, the guard permanently blocks retry.
+        """
         trader = MockTrader(position_qty=0.0)
-        trader.trade_should_raise = True
-        env = self._make_env(trader)
-
-        assert env.position.current_action_level == 0.0
-
-        trade_info = env._execute_fractional_action(-1.0)
-
-        # Simulate what _step does: only update if executed AND success
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            env.position.current_action_level = -1.0
-
-        # current_action_level must NOT have changed
-        assert env.position.current_action_level == 0.0
-
-    def test_guard_not_blocked_after_failed_trade(self):
-        """After a failed trade, the guard should allow retrying the same action."""
-        trader = MockTrader(position_qty=0.0)
-        env = self._make_env(trader)
+        env = ENV_FACTORIES[exchange](trader)
 
         # First attempt: trade raises
         trader.trade_should_raise = True
-        trade_info = env._execute_fractional_action(-1.0)
+        trade_info = env._execute_trade_if_needed(-1.0)
 
-        # Simulate _step: don't update state on failure
+        # Simulate _step logic: don't update state on failure
         if trade_info["executed"] and trade_info.get("success") is not False:
             env.position.current_action_level = -1.0
 
         assert env.position.current_action_level == 0.0
 
-        # Second attempt: trade succeeds
+        # Second attempt: trade succeeds -- guard must NOT block
         trader.trade_should_raise = False
         trade_info2 = env._execute_trade_if_needed(-1.0)
 
-        # Guard should NOT block: -1.0 != 0.0
         assert trade_info2["executed"] is True
         assert trade_info2["success"] is True
 
-    def test_close_exception_returns_executed_false(self):
+    def test_close_exception_returns_executed_false(self, exchange):
         """_handle_close_action should return executed=False if close_position raises."""
         trader = MockTrader(position_qty=0.5)
         trader.close_should_raise = True
-        env = self._make_env(trader)
+        env = ENV_FACTORIES[exchange](trader)
 
         trade_info = env._handle_close_action(0.5)
 
         assert trade_info["executed"] is False
         assert trade_info["success"] is False
+
+    def test_trade_returning_false_reports_failure(self, exchange):
+        """When trader.trade() returns False (no exception), success should be False.
+
+        This covers the case where the exchange rejects the order without raising.
+        The _step guard `if executed and success is not False` must block state update.
+        """
+        trader = MockTrader(position_qty=0.0)
+        trader.trade_should_fail = True
+        env = ENV_FACTORIES[exchange](trader)
+
+        trade_info = env._execute_fractional_action(-1.0)
+
+        assert trade_info["executed"] is True
+        assert trade_info["success"] is False
+
+
+# ---------------------------------------------------------------------------
+# Binance-specific tests
+# ---------------------------------------------------------------------------
+
+
+class TestBinanceDirectionSwitch:
+    """Binance-specific: direction switch aborts when close fails."""
 
     def test_direction_switch_aborts_on_close_failure(self):
         """Direction switch should not open opposite position if close fails."""
         trader = MockTrader(position_qty=0.5, balance=10000.0)
         trader.close_should_fail = True
-        env = self._make_env(trader)
+        env = _make_binance_env(trader)
 
-        # Try to switch from long to short
         trade_info = env._execute_fractional_action(-1.0)
 
-        # Should have aborted — position_qty should still be 0.5
         assert trader.position_qty == 0.5
-        # No opposite position opened
         assert len([t for t in trader.trades_executed if t["side"] == "SELL"]) == 0
 
-    def test_step_checks_success_before_state_update(self):
-        """_step should not update local state when success=False."""
-        trader = MockTrader(position_qty=0.0)
-        env = self._make_env(trader)
-
-        # Simulate trade_info with executed=True but success=False
-        # (This is what happens when trader.trade() returns False)
-        trade_info = {
-            "executed": True,
-            "side": "SELL",
-            "success": False,
-            "closed_position": False,
-        }
-
-        # Apply the _step state update logic
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            env.position.current_position = -1
-            env.position.current_action_level = -1.0
-
-        # State should NOT have been updated
-        assert env.position.current_position == 0.0
-        assert env.position.current_action_level == 0.0
-
 
 # ---------------------------------------------------------------------------
-# Bitget env tests
+# Bitget-specific tests: _handle_close_action updates current_position
 # ---------------------------------------------------------------------------
 
 
-class TestBitgetTradeStateSync:
-    """Test that Bitget env local state stays synchronized with exchange."""
+class TestBitgetClosePositionState:
+    """Bitget-specific: _handle_close_action conditionally updates current_position."""
 
-    def _make_env(self, trader=None):
-        """Create a BitgetFuturesTorchTradingEnv with mocked dependencies."""
-        from torchtrade.envs.live.bitget.env import (
-            BitgetFuturesTorchTradingEnv,
-            BitgetFuturesTradingEnvConfig,
-        )
-
-        mock_trader = trader or MockTrader()
-        mock_observer = MagicMock()
-        mock_observer.get_observations.return_value = {
-            "features_1Hour": np.random.randn(10, 4).astype(np.float32),
-        }
-        mock_observer.get_keys.return_value = ["features_1Hour"]
-
-        config = BitgetFuturesTradingEnvConfig(
-            symbol="BTC/USDT:USDT",
-            demo=True,
-            time_frames=["1h"],
-            window_sizes=[10],
-            execute_on="1h",
-            leverage=5,
-            action_levels=[-1.0, 0.0, 1.0],
-        )
-
-        with patch.object(BitgetFuturesTorchTradingEnv, '__init__', lambda self, *a, **kw: None):
-            env = BitgetFuturesTorchTradingEnv.__new__(BitgetFuturesTorchTradingEnv)
-
-        env.config = config
-        env.trader = mock_trader
-        env.observer = mock_observer
-        env.action_levels = config.action_levels
-        env.position = PositionState()
-        env.initial_portfolio_value = 10000.0
-
-        from torchtrade.envs.core.state import HistoryTracker
-        env.history = HistoryTracker()
-
-        from torchtrade.envs.core.default_rewards import log_return_reward
-        env.reward_function = log_return_reward
-
-        return env
-
-    def test_successful_trade_updates_state(self):
-        """Successful trade should update position state."""
-        trader = MockTrader(position_qty=0.0)
-        env = self._make_env(trader)
-
-        trade_info = env._execute_trade_if_needed(-1.0)
-
-        assert trade_info["executed"] is True
-        assert trade_info["success"] is True
-
-    def test_failed_trade_exception_does_not_update_state(self):
-        """Trade that raises exception should return executed=False."""
-        trader = MockTrader(position_qty=0.0)
-        trader.trade_should_raise = True
-        env = self._make_env(trader)
-
-        trade_info = env._execute_fractional_action(-1.0)
-
-        assert trade_info["executed"] is False
-        assert trade_info["success"] is False
-
-    def test_exception_preserves_current_action_level(self):
-        """After a failed trade, current_action_level should remain unchanged."""
-        trader = MockTrader(position_qty=0.0)
-        trader.trade_should_raise = True
-        env = self._make_env(trader)
-
-        assert env.position.current_action_level == 0.0
-
-        trade_info = env._execute_fractional_action(-1.0)
-
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            env.position.current_action_level = -1.0
-
-        assert env.position.current_action_level == 0.0
-
-    def test_guard_not_blocked_after_failed_trade(self):
-        """After a failed trade, the guard should allow retrying the same action."""
-        trader = MockTrader(position_qty=0.0)
-        env = self._make_env(trader)
-
-        # First attempt fails
-        trader.trade_should_raise = True
-        trade_info = env._execute_fractional_action(-1.0)
-
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            env.position.current_action_level = -1.0
-
-        assert env.position.current_action_level == 0.0
-
-        # Second attempt succeeds
-        trader.trade_should_raise = False
-        trade_info2 = env._execute_trade_if_needed(-1.0)
-
-        assert trade_info2["executed"] is True
-        assert trade_info2["success"] is True
-
-    def test_close_exception_returns_executed_false(self):
-        """_handle_close_action should return executed=False if close_position raises."""
+    @pytest.mark.parametrize("close_should_fail,expected_position", [
+        (True, 1),   # Failed close: position unchanged
+        (False, 0),  # Successful close: position reset to 0
+    ], ids=["close-fails", "close-succeeds"])
+    def test_close_updates_position_only_on_success(self, close_should_fail, expected_position):
+        """current_position should only be set to 0 when close succeeds."""
         trader = MockTrader(position_qty=0.5)
-        trader.close_should_raise = True
-        env = self._make_env(trader)
+        trader.close_should_fail = close_should_fail
+        env = _make_bitget_env(trader)
+        env.position.current_position = 1
 
-        trade_info = env._handle_close_action(0.5)
+        env._handle_close_action(0.5)
 
-        assert trade_info["executed"] is False
-        assert trade_info["success"] is False
-
-    def test_close_failure_does_not_update_position(self):
-        """_handle_close_action should NOT set current_position=0 if close fails."""
-        trader = MockTrader(position_qty=0.5)
-        trader.close_should_fail = True
-        env = self._make_env(trader)
-        env.position.current_position = 1  # Currently long
-
-        trade_info = env._handle_close_action(0.5)
-
-        # close returned success=False, so current_position should be unchanged
-        assert env.position.current_position == 1
-
-    def test_close_success_updates_position(self):
-        """_handle_close_action should set current_position=0 on success."""
-        trader = MockTrader(position_qty=0.5)
-        env = self._make_env(trader)
-        env.position.current_position = 1  # Currently long
-
-        trade_info = env._handle_close_action(0.5)
-
-        assert trade_info["executed"] is True
-        assert trade_info["success"] is True
-        assert env.position.current_position == 0
-
-    def test_step_checks_success_before_state_update(self):
-        """_step should not update local state when success=False."""
-        trader = MockTrader(position_qty=0.0)
-        env = self._make_env(trader)
-
-        trade_info = {
-            "executed": True,
-            "side": "sell",
-            "success": False,
-            "closed_position": False,
-        }
-
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            env.position.current_position = -1
-            env.position.current_action_level = -1.0
-
-        assert env.position.current_position == 0.0
-        assert env.position.current_action_level == 0.0
+        assert env.position.current_position == expected_position
 
 
 # ---------------------------------------------------------------------------
@@ -424,112 +305,33 @@ class TestBitgetTradeStateSync:
 
 
 class TestRegressionIssue189:
-    """Regression tests for the exact bug scenario that corrupted the offline dataset.
+    """Regression test for #189: guard correctly blocks/allows repeated actions.
 
-    The bug: a policy always outputting SHORT (-1.0) would permanently desync
-    local state after the first trade (success or failure), causing the guard
-    to block all subsequent identical actions. The observation (from exchange)
-    then diverged from the recorded action.
+    After a successful trade, current_action_level is set (correct), and
+    repeating the same action is blocked by the guard (correct). The agent
+    must transition through a different action level to re-enter.
     """
 
-    def _make_binance_env(self, trader):
-        from torchtrade.envs.live.binance.env import (
-            BinanceFuturesTorchTradingEnv,
-            BinanceFuturesTradingEnvConfig,
-        )
-
-        config = BinanceFuturesTradingEnvConfig(
-            symbol="BTCUSDT",
-            demo=True,
-            time_frames=["1h"],
-            window_sizes=[10],
-            execute_on="1h",
-            leverage=5,
-            action_levels=[-1.0, 0.0, 1.0],
-        )
-
-        with patch.object(BinanceFuturesTorchTradingEnv, '__init__', lambda self, *a, **kw: None):
-            env = BinanceFuturesTorchTradingEnv.__new__(BinanceFuturesTorchTradingEnv)
-
-        env.config = config
-        env.trader = trader
-        env.action_levels = config.action_levels
-        env.position = PositionState()
-        env.initial_portfolio_value = 10000.0
-
-        from torchtrade.envs.core.state import HistoryTracker
-        env.history = HistoryTracker()
-
-        from torchtrade.envs.core.default_rewards import log_return_reward
-        env.reward_function = log_return_reward
-
-        return env
-
-    def test_repeated_short_after_exception_not_permanently_blocked(self):
-        """The exact #189 scenario: policy always outputs SHORT, first trade fails.
-
-        Before fix: current_action_level was set to -1.0 on failure, permanently
-        blocking all future SHORT actions via the guard.
-
-        After fix: current_action_level stays at 0.0, so the guard allows retry.
-        """
+    def test_successful_trade_guard_blocks_then_allows_after_transition(self):
+        """After SHORT succeeds, repeated SHORT is blocked until FLAT transition."""
         trader = MockTrader(position_qty=0.0)
-        env = self._make_binance_env(trader)
+        env = _make_binance_env(trader)
 
-        # Step 1: SHORT trade fails with exception
-        trader.trade_should_raise = True
-        trade_info = env._execute_trade_if_needed(-1.0)
-
-        # Apply _step logic
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            env.position.current_action_level = -1.0
-
-        # Key assertion: current_action_level must NOT be -1.0
-        assert env.position.current_action_level == 0.0
-
-        # Step 2: SHORT trade should NOT be blocked by guard
-        trader.trade_should_raise = False
-        trade_info2 = env._execute_trade_if_needed(-1.0)
-
-        # This MUST succeed — before fix, this would return executed=False
-        assert trade_info2["executed"] is True
-        assert trade_info2["success"] is True
-
-    def test_repeated_short_after_success_allows_retry_on_liquidation(self):
-        """After successful SHORT, if position gets liquidated, agent should be able to re-short.
-
-        Simulates: trade succeeds → position set → liquidation resets exchange to flat →
-        agent needs to re-enter SHORT but guard blocks because current_action_level=-1.0.
-
-        This test verifies the guard behavior is correct: after a successful trade,
-        current_action_level IS set to -1.0 (correct), and repeated SHORT IS blocked
-        (correct — the agent asked for -1.0 and got -1.0).
-
-        The real issue is that the exchange may have liquidated the position, but the
-        local state doesn't know. This is a separate concern from the #189 fix.
-        """
-        trader = MockTrader(position_qty=0.0)
-        env = self._make_binance_env(trader)
-
-        # Step 1: SHORT trade succeeds
+        # Step 1: SHORT succeeds
         trade_info = env._execute_trade_if_needed(-1.0)
         if trade_info["executed"] and trade_info.get("success") is not False:
             env.position.current_action_level = -1.0
 
         assert env.position.current_action_level == -1.0
 
-        # Step 2: SHORT again — guard correctly blocks (same action level)
+        # Step 2: SHORT again -- guard correctly blocks (same action level)
         trade_info2 = env._execute_trade_if_needed(-1.0)
-        assert trade_info2["executed"] is False  # Guard blocks: -1.0 == -1.0
+        assert trade_info2["executed"] is False
 
-        # Step 3: But if we switch to FLAT first, then SHORT works
+        # Step 3: Transition to FLAT, then SHORT works
         trade_info3 = env._execute_trade_if_needed(0.0)
         if trade_info3["executed"] and trade_info3.get("success") is not False:
             env.position.current_action_level = 0.0
 
         trade_info4 = env._execute_trade_if_needed(-1.0)
         assert trade_info4["executed"] is True
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
