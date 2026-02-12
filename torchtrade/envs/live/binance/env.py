@@ -167,7 +167,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # Execute trade
         trade_info = self._execute_trade_if_needed(desired_action)
 
-        if trade_info["executed"]:
+        if trade_info["executed"] and trade_info.get("success") is not False:
             if trade_info["side"] == "BUY":
                 self.position.current_position = 1
             elif trade_info["side"] == "SELL":
@@ -248,14 +248,18 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             )
         except Exception as e:
             logger.error(f"{side} trade failed for {self.config.symbol}: quantity={quantity}, error={e}")
-            return self._create_trade_info(executed=True, success=False)
+            return self._create_trade_info(executed=False, success=False)
 
     def _handle_close_action(self, current_qty: float) -> Dict:
         """Handle close position action."""
         if current_qty == 0:
             return self._create_trade_info(executed=False)
 
-        success = self.trader.close_position()
+        try:
+            success = self.trader.close_position()
+        except Exception as e:
+            logger.error(f"Close position failed for {self.config.symbol}: {e}")
+            return self._create_trade_info(executed=False, success=False)
 
         return self._create_trade_info(
             executed=True,
@@ -481,7 +485,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             #
             # TODO: Consider tracking partial execution state for observation
             close_info = self._handle_close_action(current_qty)
-            if not close_info["executed"]:
+            if not close_info["executed"] or close_info.get("success") is False:
                 logger.warning("Direction switch failed: unable to close current position")
                 return close_info
 

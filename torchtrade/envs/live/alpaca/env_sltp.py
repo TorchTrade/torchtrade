@@ -137,7 +137,7 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         trade_info = self._execute_trade_if_needed(action_tuple)
         trade_info["position_closed"] = position_closed
 
-        if trade_info["executed"]:
+        if trade_info["executed"] and trade_info.get("success") is not False:
             self.position.current_position = 1 if trade_info["side"] == "buy" else 0
 
         if position_closed:

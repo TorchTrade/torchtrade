@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
+import logging
 
 import torch
+
+logger = logging.getLogger(__name__)
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
@@ -182,7 +185,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
         trade_info = self._execute_trade_if_needed(action_tuple)
         trade_info["position_closed"] = position_closed
 
-        if trade_info["executed"]:
+        if trade_info["executed"] and trade_info.get("success") is not False:
             if trade_info["side"] == "buy":
                 self.position.current_position = 1  # Long
             elif trade_info["side"] == "sell":
@@ -277,7 +280,13 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
             # We have an existing position that needs to be closed before opening new one
             if (side == "long" and self.position.current_position == -1) or \
                (side == "short" and self.position.current_position == 1):
-                self.trader.close_position()
+                try:
+                    close_success = self.trader.close_position()
+                except Exception as e:
+                    logger.error(f"Close position failed for {self.config.symbol}: {e}")
+                    return trade_info
+                if not close_success:
+                    return trade_info
                 self.position.current_position = 0
 
         if side == "long":
@@ -309,8 +318,9 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
                     "take_profit": take_profit_price,
                 })
             except Exception as e:
-                print(f"Long trade failed: ${self.config.quantity_per_trade} with SL={stop_loss_price:.2f}, TP={take_profit_price:.2f} - {str(e)}")
+                logger.error(f"Long trade failed for {self.config.symbol}: quantity={self.config.quantity_per_trade}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
                 trade_info["success"] = False
+                return trade_info
 
         elif side == "short":
             # Open SHORT with SL/TP bracket order
@@ -342,8 +352,9 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
                     "take_profit": take_profit_price,
                 })
             except Exception as e:
-                print(f"Short trade failed: ${self.config.quantity_per_trade} with SL={stop_loss_price:.2f}, TP={take_profit_price:.2f} - {str(e)}")
+                logger.error(f"Short trade failed for {self.config.symbol}: quantity={self.config.quantity_per_trade}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
                 trade_info["success"] = False
+                return trade_info
 
         return trade_info
 
