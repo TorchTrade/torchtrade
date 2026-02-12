@@ -14,7 +14,6 @@ liquidation, shorts, and direction switches.
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple, Union
 
-import numpy as np
 import pandas as pd
 import torch
 from tensordict import TensorDict, TensorDictBase
@@ -142,10 +141,9 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         # Extract pre-computed data from sampler
         self._market_tensors = self._sampler.torch_tensors  # {key: (N, F)}
-        self._obs_indices = self._sampler._obs_indices  # {key: np.ndarray}
+        self._obs_indices = self._sampler._obs_indices  # {key: ndarray}
         self._base_tensor = self._sampler.execute_base_tensor  # (M, F)
-        self._exec_times_arr = self._sampler._exec_times_arr
-        self._total_exec_times = len(self._exec_times_arr)
+        self._total_exec_times = len(self._sampler._exec_times_arr)
         self._time_frames = config.time_frames
         self._window_sizes = config.window_sizes
 
@@ -168,16 +166,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
             self._market_data_keys.append(key)
 
         # Build specs
-        # For batched envs, spec shapes must start with batch_size
         num_features_per_tf = self._sampler.get_num_features_per_timeframe()
-        self._account_state_names = [
-            "exposure_pct",
-            "position_direction",
-            "unrealized_pnlpct",
-            "holding_time",
-            "leverage",
-            "distance_to_liquidation",
-        ]
 
         N = self._num_envs
         batch = torch.Size([N])
@@ -312,17 +301,15 @@ class VectorizedSequentialTradingEnv(EnvBase):
     def _compute_liq_prices(self) -> torch.Tensor:
         """Compute liquidation prices for all environments (futures only)."""
         margin_fraction = 1.0 / float(self.config.leverage)
-        return torch.where(
-            self._position_sizes > 0,
-            self._entry_prices
-            * (1 - margin_fraction + self.config.maintenance_margin_rate),
-            torch.where(
-                self._position_sizes < 0,
-                self._entry_prices
-                * (1 + margin_fraction - self.config.maintenance_margin_rate),
-                self._zeros,
-            ),
-        ).clamp(min=0.0)
+        mmr = self.config.maintenance_margin_rate
+
+        long_liq = self._entry_prices * (1 - margin_fraction + mmr)
+        short_liq = self._entry_prices * (1 + margin_fraction - mmr)
+
+        liq_prices = self._zeros.clone()
+        liq_prices = torch.where(self._position_sizes > 0, long_liq, liq_prices)
+        liq_prices = torch.where(self._position_sizes < 0, short_liq, liq_prices)
+        return liq_prices.clamp(min=0.0)
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset environments.
@@ -404,14 +391,14 @@ class VectorizedSequentialTradingEnv(EnvBase):
         leverage_tensor = self._ones * float(self.config.leverage)
         if self.config.leverage > 1:
             liq_price = self._compute_liq_prices()
+            # Long: (price - liq) / price, Short: (liq - price) / price
+            raw_dist = torch.where(
+                self._position_sizes > 0,
+                (current_prices - liq_price) / current_prices,
+                (liq_price - current_prices) / current_prices,
+            ).clamp(min=0.0)
             distance_to_liq = torch.where(
-                self._position_sizes == 0,
-                self._ones,
-                torch.where(
-                    self._position_sizes > 0,
-                    (current_prices - liq_price) / current_prices,
-                    (liq_price - current_prices) / current_prices,
-                ).clamp(min=0.0),
+                self._position_sizes == 0, self._ones, raw_dist
             )
         else:
             distance_to_liq = self._ones
@@ -457,20 +444,18 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one step for all environments simultaneously."""
-        N = self._num_envs
-
         # 1. Get actions and convert to action values
-        action_indices = tensordict["action"]  # (N,)
+        action_indices = tensordict["action"]
         if action_indices.dim() > 1:
             action_indices = action_indices.squeeze(-1)
-        action_values = self._action_levels_tensor[action_indices.long()]  # (N,)
+        action_values = self._action_levels_tensor[action_indices.long()]
 
         # 2. Get current prices (trade execution prices)
-        trade_prices = self._base_tensor[self._step_indices, 3].clone()  # (N,)
+        trade_prices = self._base_tensor[self._step_indices, 3].clone()
 
         # 3. Apply slippage
         if self.slippage > 0:
-            noise = torch.empty(N).uniform_(
+            noise = torch.empty(self._num_envs).uniform_(
                 1 - self.slippage, 1 + self.slippage, generator=self._rng
             )
             trade_prices = trade_prices * noise
@@ -487,7 +472,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
         self._step_indices.clamp_(max=self._total_exec_times - 1)
 
         # 6. Get new prices and apply forced liquidations if in futures mode
-        new_prices = self._base_tensor[self._step_indices, 3]  # (N,)
+        new_prices = self._base_tensor[self._step_indices, 3]
 
         # Forced liquidation (futures only)
         if self.config.leverage > 1:

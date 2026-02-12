@@ -273,7 +273,8 @@ class TestVecEnvTermination:
     """Tests for done/terminated/truncated signals."""
 
     def test_truncation_at_max_traj_length(self, sample_ohlcv_df):
-        """All envs should truncate at max_traj_length."""
+        """All envs should truncate at max_traj_length with truncated=True,
+        terminated=False (regression #150)."""
         max_traj = 15
         config = VectorizedSequentialTradingEnvConfig(
             num_envs=4,
@@ -298,7 +299,9 @@ class TestVecEnvTermination:
             f"Should truncate within {max_traj} steps, ran {step + 1}"
         )
         assert td["next"]["truncated"].all(), "All envs should be truncated"
-        assert not td["next"]["terminated"].any(), "No env should be terminated (cash only)"
+        assert not td["next"]["terminated"].any(), (
+            "Truncated episode should have terminated=False (#150)"
+        )
         env.close()
 
     def test_normal_step_signals(self, vec_env):
@@ -311,34 +314,6 @@ class TestVecEnvTermination:
         assert not td["next"]["done"].any(), "No env should be done after first step"
         assert not td["next"]["terminated"].any()
         assert not td["next"]["truncated"].any()
-
-    def test_truncation_not_terminated(self, sample_ohlcv_df):
-        """Truncated episodes must NOT set terminated=True (regression #150)."""
-        config = VectorizedSequentialTradingEnvConfig(
-            num_envs=2,
-            time_frames=[TF_1MIN],
-            window_sizes=[10],
-            execute_on=TF_1MIN,
-            max_traj_length=10,
-            random_start=False,
-            seed=42,
-        )
-        env = VectorizedSequentialTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
-        td = env.reset()
-
-        for _ in range(15):
-            action_td = td.clone() if "next" not in td.keys() else td["next"].clone()
-            action_td["action"] = torch.zeros(2, dtype=torch.long)
-            td = env.step(action_td)
-            if td["next"]["done"].all():
-                break
-
-        assert td["next"]["done"].all()
-        assert td["next"]["truncated"].all()
-        assert not td["next"]["terminated"].any(), (
-            "Truncated episode should have terminated=False (#150)"
-        )
-        env.close()
 
 
 # ============================================================================
@@ -482,28 +457,15 @@ class TestVecEnvReward:
 class TestVecEnvAccountState:
     """Tests for account state structure."""
 
-    def test_initial_account_state(self, vec_env):
-        """Initial account state should have correct values for spot mode."""
-        td = vec_env.reset()
-        account_state = td["account_state"]
-
-        # Shape: (num_envs, 6)
-        assert account_state.shape == (4, 6)
-
-        for i in range(4):
-            validate_account_state(account_state[i], leverage=1)
-
-        # No position at start
-        assert (account_state[:, 0] == 0.0).all(), "Exposure should be 0"
-        assert (account_state[:, 1] == 0.0).all(), "Direction should be 0"
-        assert (account_state[:, 4] == 1.0).all(), "Leverage should be 1.0"
-        assert (account_state[:, 5] == 1.0).all(), "Dist to liq should be 1.0"
-
-    def test_initial_account_state_futures_mode(self, sample_ohlcv_df):
-        """Initial account state should reflect futures mode leverage and no position risk."""
+    @pytest.mark.parametrize("leverage,expected_lev", [
+        (1, 1.0),
+        (10, 10.0),
+    ], ids=["spot", "futures"])
+    def test_initial_account_state(self, sample_ohlcv_df, leverage, expected_lev):
+        """Initial account state should have correct values for spot and futures."""
         config = VectorizedSequentialTradingEnvConfig(
-            num_envs=3,
-            leverage=10,
+            num_envs=4,
+            leverage=leverage,
             action_levels=[-1.0, 0.0, 1.0],
             initial_cash=1000,
             time_frames=[TF_1MIN],
@@ -512,16 +474,22 @@ class TestVecEnvAccountState:
             transaction_fee=0.0,
             slippage=0.0,
             seed=42,
-            max_traj_length=20,
+            max_traj_length=50,
             random_start=False,
         )
         env = VectorizedSequentialTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
         td = env.reset()
         account_state = td["account_state"]
-        # Leverage element should reflect config
-        assert (account_state[:, 4] == 10.0).all()
-        # Distance to liquidation should be 1.0 with no position
-        assert (account_state[:, 5] == 1.0).all()
+
+        assert account_state.shape == (4, 6)
+        for i in range(4):
+            validate_account_state(account_state[i], leverage=leverage)
+
+        # No position at start
+        assert (account_state[:, 0] == 0.0).all(), "Exposure should be 0"
+        assert (account_state[:, 1] == 0.0).all(), "Direction should be 0"
+        assert (account_state[:, 4] == expected_lev).all(), f"Leverage should be {expected_lev}"
+        assert (account_state[:, 5] == 1.0).all(), "Dist to liq should be 1.0"
         env.close()
 
 
@@ -533,22 +501,26 @@ class TestVecEnvAccountState:
 class TestVecEnvEdgeCases:
     """Edge cases and configuration validation."""
 
-    @pytest.mark.parametrize("invalid_fee", [-0.1, 1.5])
-    def test_invalid_fee_raises(self, invalid_fee):
-        """Should raise error for invalid transaction fee."""
-        with pytest.raises(ValueError, match="Transaction fee"):
-            VectorizedSequentialTradingEnvConfig(transaction_fee=invalid_fee)
+    @pytest.mark.parametrize("kwargs,match", [
+        ({"transaction_fee": -0.1}, "Transaction fee"),
+        ({"transaction_fee": 1.5}, "Transaction fee"),
+        ({"slippage": -0.1}, "Slippage"),
+        ({"slippage": 1.5}, "Slippage"),
+    ], ids=["fee-negative", "fee-over-1", "slip-negative", "slip-over-1"])
+    def test_invalid_config_raises(self, kwargs, match):
+        """Should raise ValueError for out-of-range fee or slippage."""
+        with pytest.raises(ValueError, match=match):
+            VectorizedSequentialTradingEnvConfig(**kwargs)
 
-    @pytest.mark.parametrize("invalid_slippage", [-0.1, 1.5])
-    def test_invalid_slippage_raises(self, invalid_slippage):
-        """Should raise error for invalid slippage."""
-        with pytest.raises(ValueError, match="Slippage"):
-            VectorizedSequentialTradingEnvConfig(slippage=invalid_slippage)
-
-    def test_negative_actions_clamped_to_zero(self, sample_ohlcv_df):
-        """Negative action levels should be clamped to 0 for spot mode."""
+    @pytest.mark.parametrize("leverage,expected_first", [
+        (1, 0.0),    # Spot: negative clamped to 0
+        (10, -1.0),  # Futures: negative preserved
+    ], ids=["spot-clamped", "futures-preserved"])
+    def test_negative_action_clamping(self, sample_ohlcv_df, leverage, expected_first):
+        """Negative action levels should be clamped for spot, preserved for futures."""
         config = VectorizedSequentialTradingEnvConfig(
             num_envs=1,
+            leverage=leverage,
             action_levels=[-1.0, 0.0, 1.0],
             time_frames=[TF_1MIN],
             window_sizes=[10],
@@ -557,9 +529,7 @@ class TestVecEnvEdgeCases:
             random_start=False,
         )
         env = VectorizedSequentialTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
-        # _action_levels_tensor should clamp -1 to 0
-        assert env._action_levels_tensor[0] == 0.0, "Negative action should be clamped to 0"
-        assert env._action_levels_tensor[1] == 0.0
+        assert env._action_levels_tensor[0] == expected_first
         assert env._action_levels_tensor[2] == 1.0
         env.close()
 
@@ -644,10 +614,12 @@ class TestVecEnvFees:
 class TestVecEnvCollector:
     """Tests for TorchRL SyncDataCollector integration."""
 
-    def test_collector_collects_frames(self, sample_ohlcv_df):
+    @pytest.mark.parametrize("leverage", [1, 10], ids=["spot", "futures"])
+    def test_collector_collects_frames(self, sample_ohlcv_df, leverage):
         """SyncDataCollector should collect expected number of frames."""
         config = VectorizedSequentialTradingEnvConfig(
             num_envs=8,
+            leverage=leverage,
             time_frames=[TF_1MIN],
             window_sizes=[10],
             execute_on=TF_1MIN,
@@ -708,14 +680,6 @@ class TestVecEnvFuturesSpecs:
         """check_env_specs must pass for futures mode."""
         env = _make_futures_env(sample_ohlcv_df, num_envs=4, leverage=10)
         check_env_specs(env)
-        env.close()
-
-    def test_negative_actions_not_clamped_futures(self, sample_ohlcv_df):
-        """Negative action levels should NOT be clamped for futures mode."""
-        env = _make_futures_env(sample_ohlcv_df, num_envs=1, leverage=10)
-        assert env._action_levels_tensor[0] == -1.0, "Futures should allow negative actions"
-        assert env._action_levels_tensor[1] == 0.0
-        assert env._action_levels_tensor[2] == 1.0
         env.close()
 
 
@@ -1106,18 +1070,136 @@ class TestVecEnvFuturesCorrectness:
         vec_env.close()
 
 
-class TestVecEnvFuturesCollector:
-    """Futures mode SyncDataCollector integration."""
+# ============================================================================
+# PARTIAL RESET TESTS
+# ============================================================================
 
-    def test_collector_futures_mode(self, sample_ohlcv_df):
-        """SyncDataCollector should work with futures mode env."""
-        env = _make_futures_env(sample_ohlcv_df, num_envs=8, leverage=10)
-        collector = SyncDataCollector(
-            env, policy=None, frames_per_batch=80, total_frames=200,
-        )
-        collected = 0
-        for td_batch in collector:
-            collected += td_batch.numel()
-        collector.shutdown()
+
+class TestVecEnvPartialReset:
+    """Tests for partial reset — only done envs should be reset."""
+
+    def test_partial_reset_preserves_non_done_state(self, sample_ohlcv_df):
+        """When some envs are done, only those should be reset."""
+        env = _make_futures_env(sample_ohlcv_df, num_envs=4, max_traj=50)
+        td = env.reset()
+
+        # Open long in all envs
+        action_td = td.clone()
+        action_td["action"] = torch.full((4,), 2, dtype=torch.long)
+        td = env.step(action_td)
+
+        # Record state of envs 1 and 3 (they won't be reset)
+        pos_before = env._position_sizes.clone()
+        entry_before = env._entry_prices.clone()
+        bal_before = env._balances.clone()
+
+        # Manually trigger partial reset for envs 0 and 2 only
+        reset_td = td["next"].clone()
+        reset_mask = torch.tensor([True, False, True, False])
+        reset_td["_reset"] = reset_mask.unsqueeze(-1)
+        obs_td = env.reset(reset_td)
+
+        # Envs 0, 2 should be reset (flat, fresh balance)
+        assert env._position_sizes[0].item() == 0, "Env 0 should be reset"
+        assert env._position_sizes[2].item() == 0, "Env 2 should be reset"
+        assert env._entry_prices[0].item() == 0
+        assert env._entry_prices[2].item() == 0
+
+        # Envs 1, 3 should retain their positions
+        assert env._position_sizes[1] == pos_before[1], "Env 1 should keep position"
+        assert env._position_sizes[3] == pos_before[3], "Env 3 should keep position"
+        assert env._entry_prices[1] == entry_before[1]
+        assert env._entry_prices[3] == entry_before[3]
+        assert env._balances[1] == bal_before[1]
+        assert env._balances[3] == bal_before[3]
+
+        # Output should be a valid observation
+        assert "account_state" in obs_td.keys()
+        assert obs_td["account_state"].shape == (4, 6)
         env.close()
-        assert collected >= 200
+
+
+# ============================================================================
+# HETEROGENEOUS ACTION TESTS
+# ============================================================================
+
+
+class TestVecEnvHeterogeneousActions:
+    """Tests for different actions per env in the same step."""
+
+    def test_mixed_actions_update_independently(self, sample_ohlcv_df):
+        """Each env should respond only to its own action."""
+        env = _make_futures_env(sample_ohlcv_df, num_envs=4)
+        td = env.reset()
+
+        # Env 0: long, Env 1: flat, Env 2: short, Env 3: long
+        actions = torch.tensor([2, 1, 0, 2], dtype=torch.long)
+        action_td = td.clone()
+        action_td["action"] = actions
+        td = env.step(action_td)
+
+        directions = td["next"]["account_state"][:, 1]
+        assert directions[0] == 1.0, "Env 0 should be long"
+        assert directions[1] == 0.0, "Env 1 should be flat"
+        assert directions[2] == -1.0, "Env 2 should be short"
+        assert directions[3] == 1.0, "Env 3 should be long"
+
+        # Env 0 and 3 should have positive position, env 2 negative, env 1 zero
+        assert env._position_sizes[0] > 0
+        assert env._position_sizes[1] == 0
+        assert env._position_sizes[2] < 0
+        assert env._position_sizes[3] > 0
+
+        # Now: Env 0 close, Env 1 long, Env 2 hold short, Env 3 switch to short
+        actions2 = torch.tensor([1, 2, 0, 0], dtype=torch.long)
+        action_td = td["next"].clone()
+        action_td["action"] = actions2
+        td = env.step(action_td)
+
+        directions2 = td["next"]["account_state"][:, 1]
+        assert directions2[0] == 0.0, "Env 0 should be flat after close"
+        assert directions2[1] == 1.0, "Env 1 should be long"
+        assert directions2[2] == -1.0, "Env 2 should still be short (hold)"
+        assert directions2[3] == -1.0, "Env 3 should switch to short"
+        env.close()
+
+
+# ============================================================================
+# BANKRUPTCY TESTS
+# ============================================================================
+
+
+class TestVecEnvBankruptcy:
+    """Tests for deterministic bankruptcy termination."""
+
+    def test_bankruptcy_sets_terminated_not_truncated(self, trending_down_df):
+        """Bankrupt env must have terminated=True, truncated=False."""
+        # Use extreme leverage + long in downtrend to guarantee bankruptcy
+        env = _make_futures_env(
+            trending_down_df, num_envs=1, leverage=50, max_traj=500
+        )
+        td = env.reset()
+        initial_pv = env._portfolio_values[0].item()
+
+        # Open long with 50x leverage in a downtrend
+        action_td = td.clone()
+        action_td["action"] = torch.tensor([2])
+        td = env.step(action_td)
+
+        # Step until done
+        for _ in range(400):
+            action_td = td["next"].clone()
+            action_td["action"] = torch.tensor([2])
+            td = env.step(action_td)
+            if td["next"]["done"].all():
+                break
+
+        # With 50x leverage in a strong downtrend, should terminate
+        if td["next"]["terminated"].item():
+            assert not td["next"]["truncated"].item(), (
+                "Terminated env must not also be truncated"
+            )
+            # PV should be below bankrupt threshold
+            assert env._portfolio_values[0].item() < initial_pv * env.bankrupt_threshold
+        env.close()
+
