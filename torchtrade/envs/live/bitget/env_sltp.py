@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
+import logging
 
 import torch
+
+logger = logging.getLogger(__name__)
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
@@ -280,7 +283,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
                 try:
                     close_success = self.trader.close_position()
                 except Exception as e:
-                    print(f"Close position failed for {self.config.symbol}: {e}")
+                    logger.error(f"Close position failed for {self.config.symbol}: {e}")
                     return trade_info
                 if not close_success:
                     return trade_info
@@ -315,8 +318,9 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
                     "take_profit": take_profit_price,
                 })
             except Exception as e:
-                print(f"Long trade failed: ${self.config.quantity_per_trade} with SL={stop_loss_price:.2f}, TP={take_profit_price:.2f} - {str(e)}")
+                logger.error(f"Long trade failed for {self.config.symbol}: quantity={self.config.quantity_per_trade}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
                 trade_info["success"] = False
+                return trade_info
 
         elif side == "short":
             # Open SHORT with SL/TP bracket order
@@ -348,8 +352,9 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
                     "take_profit": take_profit_price,
                 })
             except Exception as e:
-                print(f"Short trade failed: ${self.config.quantity_per_trade} with SL={stop_loss_price:.2f}, TP={take_profit_price:.2f} - {str(e)}")
+                logger.error(f"Short trade failed for {self.config.symbol}: quantity={self.config.quantity_per_trade}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
                 trade_info["success"] = False
+                return trade_info
 
         return trade_info
 
