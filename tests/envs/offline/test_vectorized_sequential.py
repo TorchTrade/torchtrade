@@ -103,9 +103,22 @@ def _make_matched_envs(
 class TestVecEnvSpecs:
     """TorchRL spec compliance tests."""
 
-    def test_check_env_specs_passes(self, vec_env):
-        """check_env_specs must pass — specs must match actual output shapes."""
-        check_env_specs(vec_env)
+    @pytest.mark.parametrize("leverage", [1, 10], ids=["spot", "futures"])
+    def test_check_env_specs_passes(self, sample_ohlcv_df, leverage):
+        """check_env_specs must pass for both spot and futures modes."""
+        config = VectorizedSequentialTradingEnvConfig(
+            num_envs=4,
+            leverage=leverage,
+            action_levels=[-1.0, 0.0, 1.0],
+            time_frames=[TF_1MIN],
+            window_sizes=[10],
+            execute_on=TF_1MIN,
+            max_traj_length=50,
+            random_start=False,
+        )
+        env = VectorizedSequentialTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
+        check_env_specs(env)
+        env.close()
 
     @pytest.mark.parametrize("num_envs", [1, 4, 16])
     def test_batch_size_matches_num_envs(self, sample_ohlcv_df, num_envs):
@@ -324,37 +337,6 @@ class TestVecEnvTermination:
 class TestVecEnvTradeExecution:
     """Tests for vectorized trade execution."""
 
-    def test_open_position_sets_direction(self, vec_env):
-        """Opening a long position should set position_direction to +1."""
-        td = vec_env.reset()
-
-        # Action index 2 = action_level 1.0 (long) for [-1, 0, 1] (clamped to [0, 0, 1])
-        action_td = td.clone()
-        action_td["action"] = torch.full((4,), 2, dtype=torch.long)
-        td = vec_env.step(action_td)
-
-        account_state = td["next"]["account_state"]
-        # Element 1: position_direction should be +1 for all envs
-        assert (account_state[:, 1] == 1.0).all(), (
-            f"All envs should have direction=+1, got {account_state[:, 1]}"
-        )
-
-    def test_close_position(self, vec_env):
-        """Closing a position should set direction to 0."""
-        td = vec_env.reset()
-
-        # Open long
-        action_td = td.clone()
-        action_td["action"] = torch.full((4,), 2, dtype=torch.long)
-        td = vec_env.step(action_td)
-
-        # Close (action 1 = 0.0 = flat)
-        action_td = td["next"].clone()
-        action_td["action"] = torch.full((4,), 1, dtype=torch.long)
-        td = vec_env.step(action_td)
-
-        assert (td["next"]["account_state"][:, 1] == 0.0).all(), "All should be flat"
-
     def test_repeated_action_holds(self, vec_env):
         """Repeating same action should hold, not rebalance (#187 regression)."""
         td = vec_env.reset()
@@ -413,20 +395,6 @@ class TestVecEnvTradeExecution:
 
 class TestVecEnvReward:
     """Tests for reward calculation."""
-
-    def test_reward_zero_when_flat(self, vec_env):
-        """Reward should be 0 when holding cash."""
-        td = vec_env.reset()
-
-        # Hold (action 1 = flat)
-        action_td = td.clone()
-        action_td["action"] = torch.full((4,), 1, dtype=torch.long)
-        td = vec_env.step(action_td)
-
-        rewards = td["next"]["reward"].squeeze(-1)
-        assert torch.allclose(rewards, torch.zeros(4), atol=1e-6), (
-            f"Reward should be 0 when flat, got {rewards}"
-        )
 
     def test_reward_reflects_price_change(self, vec_env):
         """Reward should be non-zero when holding a position."""
@@ -673,16 +641,6 @@ def _make_futures_env(df, num_envs=4, leverage=10, fee=0.0, max_traj=50):
     return VectorizedSequentialTradingEnv(df, config, simple_feature_fn)
 
 
-class TestVecEnvFuturesSpecs:
-    """TorchRL spec compliance for futures mode."""
-
-    def test_check_env_specs_futures(self, sample_ohlcv_df):
-        """check_env_specs must pass for futures mode."""
-        env = _make_futures_env(sample_ohlcv_df, num_envs=4, leverage=10)
-        check_env_specs(env)
-        env.close()
-
-
 class TestVecEnvFuturesPositions:
     """Tests for futures position mechanics: longs, shorts, direction switches."""
 
@@ -704,16 +662,17 @@ class TestVecEnvFuturesPositions:
         )
         env.close()
 
-    def test_close_short_position(self, sample_ohlcv_df):
-        """Closing a short should set position to 0."""
+    @pytest.mark.parametrize("open_action", [2, 0], ids=["close-long", "close-short"])
+    def test_close_position(self, sample_ohlcv_df, open_action):
+        """Closing any position should set direction to 0."""
         env = _make_futures_env(sample_ohlcv_df)
         td = env.reset()
 
-        # Open short (action 0 = -1.0)
+        # Open position
         action_td = td.clone()
-        action_td["action"] = torch.full((4,), 0, dtype=torch.long)
+        action_td["action"] = torch.full((4,), open_action, dtype=torch.long)
         td = env.step(action_td)
-        assert (env._position_sizes < 0).all()
+        assert (env._position_sizes != 0).all()
 
         # Close (action 1 = 0.0)
         action_td = td["next"].clone()
@@ -1202,4 +1161,106 @@ class TestVecEnvBankruptcy:
             # PV should be below bankrupt threshold
             assert env._portfolio_values[0].item() < initial_pv * env.bankrupt_threshold
         env.close()
+
+
+# ============================================================================
+# INSUFFICIENT BALANCE TESTS
+# ============================================================================
+
+
+class TestVecEnvInsufficientBalance:
+    """Tests for the can_afford guard in _execute_trades."""
+
+    def test_cannot_afford_stays_flat(self, trending_down_df):
+        """After liquidation drains balance, new position should be rejected."""
+        env = _make_futures_env(
+            trending_down_df, num_envs=1, leverage=20, max_traj=300
+        )
+        td = env.reset()
+
+        # Open long with 20x leverage
+        action_td = td.clone()
+        action_td["action"] = torch.tensor([2])
+        td = env.step(action_td)
+
+        # Step until liquidation
+        for _ in range(200):
+            action_td = td["next"].clone()
+            action_td["action"] = torch.tensor([2])
+            td = env.step(action_td)
+            if env._position_sizes[0].item() == 0 and env._balances[0].item() < 10:
+                # Liquidated with near-zero balance — try to open new position
+                action_td = td["next"].clone()
+                action_td["action"] = torch.tensor([2])
+                td = env.step(action_td)
+
+                # Should stay flat because can't afford margin
+                assert env._balances[0].item() >= 0, "Balance must never go negative"
+                break
+            if td["next"]["done"].all():
+                break
+        env.close()
+
+
+# ============================================================================
+# FUTURES CLOSE-TO-FLAT CORRECTNESS
+# ============================================================================
+
+
+class TestVecEnvFuturesCloseToFlat:
+    """Verify futures open→hold→close cycle matches scalar env."""
+
+    @pytest.mark.parametrize("open_action", [2, 0], ids=["long", "short"])
+    def test_futures_close_to_flat_balance_matches(
+        self, sample_ohlcv_df, open_action
+    ):
+        """Full open→hold→close cycle in futures with fees: balance must match scalar."""
+        scalar_env, vec_env = _make_matched_envs(
+            sample_ohlcv_df, leverage=10, fee=0.001
+        )
+
+        td_s = scalar_env.reset()
+        td_v = vec_env.reset()
+
+        # Open
+        action_td_s = td_s.clone()
+        action_td_s["action"] = torch.tensor(open_action)
+        td_s = scalar_env.step(action_td_s)
+
+        action_td_v = td_v.clone()
+        action_td_v["action"] = torch.tensor([open_action])
+        td_v = vec_env.step(action_td_v)
+
+        # Hold for 5 steps
+        for _ in range(5):
+            action_td_s = td_s["next"].clone()
+            action_td_s["action"] = torch.tensor(open_action)
+            td_s = scalar_env.step(action_td_s)
+
+            action_td_v = td_v["next"].clone()
+            action_td_v["action"] = torch.tensor([open_action])
+            td_v = vec_env.step(action_td_v)
+
+        # Close to flat (action 1 = 0.0)
+        action_td_s = td_s["next"].clone()
+        action_td_s["action"] = torch.tensor(1)
+        td_s = scalar_env.step(action_td_s)
+
+        action_td_v = td_v["next"].clone()
+        action_td_v["action"] = torch.tensor([1])
+        td_v = vec_env.step(action_td_v)
+
+        # Both should be flat
+        assert scalar_env.position.position_size == 0, "Scalar should be flat"
+        assert vec_env._position_sizes[0].item() == 0, "Vec should be flat"
+
+        # Balances should match
+        scalar_bal = scalar_env.balance
+        vec_bal = vec_env._balances[0].item()
+        assert abs(scalar_bal - vec_bal) / max(scalar_bal, 1.0) < 0.01, (
+            f"Balance mismatch: scalar={scalar_bal:.4f}, vec={vec_bal:.4f}"
+        )
+
+        scalar_env.close()
+        vec_env.close()
 

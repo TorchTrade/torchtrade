@@ -83,6 +83,10 @@ class VectorizedSequentialTradingEnvConfig:
             raise ValueError(
                 f"Slippage must be between 0 and 1, got {self.slippage}"
             )
+        if not (1 <= self.leverage <= 125):
+            raise ValueError(
+                f"Leverage must be between 1 and 125, got {self.leverage}"
+            )
 
 
 class VectorizedSequentialTradingEnv(EnvBase):
@@ -358,19 +362,24 @@ class VectorizedSequentialTradingEnv(EnvBase):
         current_prices = self._base_tensor[self._step_indices, 3]
         return self._build_observation(current_prices)
 
-    def _build_observation(self, current_prices: torch.Tensor) -> TensorDictBase:
+    def _build_observation(
+        self,
+        current_prices: torch.Tensor,
+        portfolio_values: Optional[torch.Tensor] = None,
+    ) -> TensorDictBase:
         """Build observation TensorDict for all environments.
 
         Args:
             current_prices: (num_envs,) current close prices
+            portfolio_values: optional pre-computed PVs to avoid redundant computation
 
         Returns:
             TensorDict with batch_size=(num_envs,)
         """
         N = self._num_envs
 
-        # Portfolio value (mode-aware)
-        pvs = self._compute_portfolio_values(current_prices)
+        # Portfolio value (mode-aware) — use pre-computed if available
+        pvs = portfolio_values if portfolio_values is not None else self._compute_portfolio_values(current_prices)
         pvs_safe = pvs.clamp(min=1e-10)
 
         # Exposure = |notional| / PV
@@ -530,8 +539,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
         )
         done = terminated | truncated
 
-        # 10. Build next observation
-        obs_td = self._build_observation(new_prices)
+        # 10. Build next observation (reuse already-computed PVs)
+        obs_td = self._build_observation(new_prices, portfolio_values=new_pvs)
         obs_td.set("reward", rewards.unsqueeze(-1))
         obs_td.set("terminated", terminated.unsqueeze(-1))
         obs_td.set("truncated", truncated.unsqueeze(-1))
@@ -640,6 +649,6 @@ class VectorizedSequentialTradingEnv(EnvBase):
                 self._entry_prices[final_open] = execution_prices[final_open]
                 self._hold_counters[final_open] = 0
 
-    def close(self, raise_if_closed: bool = False):
+    def close(self):
         """Clean up resources."""
         pass
