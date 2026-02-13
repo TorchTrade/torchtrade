@@ -638,8 +638,11 @@ class VectorizedSequentialTradingEnv(EnvBase):
             )
             new_fee = notional_new * self.transaction_fee
 
-            # Check sufficient balance
-            can_afford = (margin_new + new_fee) <= self._balances
+            # Check sufficient balance (relative tolerance for float32 round-trip errors:
+            # notional = PV / fee_denom, margin = notional / lev, fee = notional * fee_rate
+            # => margin + fee should equal PV*fraction but float32 division+multiplication
+            # round-trip can overshoot by up to ~1e-4 at balance=1000)
+            can_afford = (margin_new + new_fee) <= self._balances * (1 + 1e-5)
             final_open = open_mask & can_afford
 
             if final_open.any():

@@ -677,8 +677,10 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         margin_required = notional_value / self.leverage
         fee = abs(notional_value) * self.transaction_fee
 
-        # Check if sufficient balance
-        if margin_required + fee > self.balance:
+        # Check if sufficient balance (relative tolerance for float round-trip errors:
+        # notional = PV / fee_multiplier * leverage, then margin = notional / leverage,
+        # fee = notional * fee_rate; round-trip can overshoot PV by ~1 ULP)
+        if margin_required + fee > self.balance * (1 + 1e-9):
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Deduct fee and margin
@@ -737,8 +739,8 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         fee = delta_notional * self.transaction_fee
         margin_required = delta_notional / self.leverage
 
-        # Check sufficient balance
-        if margin_required + fee > self.balance:
+        # Check sufficient balance (relative tolerance for float round-trip errors)
+        if margin_required + fee > self.balance * (1 + 1e-9):
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Execute trade - deduct fee and additional margin
