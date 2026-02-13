@@ -9,6 +9,7 @@ TorchTrade provides **3 unified environment classes** that each support both spo
 | Environment | Bracket Orders | One-Step | Best For |
 |-------------|----------------|----------|----------|
 | **SequentialTradingEnv** | - | - | Standard sequential trading |
+| **VectorizedSequentialTradingEnv** | - | - | High-throughput training (experimental) |
 | **SequentialTradingEnvSLTP** | Yes | - | Risk management with SL/TP |
 | **OneStepTradingEnv** | Yes | Yes | GRPO, contextual bandits |
 
@@ -120,6 +121,32 @@ observation = {
 ### Liquidation (Futures)
 
 When `leverage > 1`, positions are liquidated if margin is insufficient. E.g., with $10k cash at 10x leverage, a 20% loss exceeds equity and triggers liquidation.
+
+### Vectorized Version (Experimental)
+
+`VectorizedSequentialTradingEnv` is a batched tensor implementation of `SequentialTradingEnv` that processes N environments in a single `_step()` call using pure tensor operations. It achieves **20-400x higher throughput** compared to `ParallelEnv` by eliminating inter-process communication overhead.
+
+!!! warning "Experimental"
+    This environment is still experimental. While it passes extensive scalar-vectorized equivalence tests, it has not been battle-tested in production training runs. Use with caution and verify results against the standard `SequentialTradingEnv`.
+
+```python
+from torchtrade.envs.offline import VectorizedSequentialTradingEnv, VectorizedSequentialTradingEnvConfig
+
+config = VectorizedSequentialTradingEnvConfig(
+    num_envs=64,
+    time_frames=["1min", "5min", "15min", "1hour"],
+    window_sizes=[12, 8, 8, 24],
+    execute_on=(5, "Minute"),
+    action_levels=[0.0, 0.5, 1.0],
+    initial_cash=1000,
+    transaction_fee=0.0025,
+    leverage=1,  # or >1 for futures
+)
+
+env = VectorizedSequentialTradingEnv(df, config)
+```
+
+See the [PPO Vectorized example](https://github.com/TorchTrade/torchtrade/tree/main/examples/online_rl/ppo_vectorized) for a complete training setup.
 
 ---
 
