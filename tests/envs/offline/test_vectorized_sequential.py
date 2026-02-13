@@ -3,11 +3,11 @@ Tests for VectorizedSequentialTradingEnv.
 
 Verifies:
 - TorchRL spec compliance (check_env_specs)
-- Correctness against scalar SequentialTradingEnv (step-by-step comparison)
 - Truncation and done signal correctness
 - Transaction fee accounting
 - SyncDataCollector integration
 - Partial reset behavior
+- Futures position mechanics
 """
 
 import pytest
@@ -17,8 +17,6 @@ from torchrl.envs.utils import check_env_specs
 from torchrl.collectors import SyncDataCollector
 
 from torchtrade.envs.offline import (
-    SequentialTradingEnv,
-    SequentialTradingEnvConfig,
     VectorizedSequentialTradingEnv,
     VectorizedSequentialTradingEnvConfig,
 )
@@ -52,47 +50,6 @@ def vec_env(sample_ohlcv_df):
     env = VectorizedSequentialTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
     yield env
     env.close()
-
-
-def _make_matched_envs(
-    df, fee=0.0, slippage=0.0, max_traj=50, action_levels=None, leverage=1,
-):
-    """Create scalar and N=1 vectorized envs with identical config for comparison."""
-    if action_levels is None:
-        action_levels = [-1.0, 0.0, 1.0] if leverage > 1 else [0, 1]
-
-    scalar_config = SequentialTradingEnvConfig(
-        leverage=leverage,
-        action_levels=action_levels,
-        initial_cash=1000,
-        time_frames=[TF_1MIN],
-        window_sizes=[10],
-        execute_on=TF_1MIN,
-        transaction_fee=fee,
-        slippage=slippage,
-        seed=42,
-        max_traj_length=max_traj,
-        random_start=False,
-    )
-
-    vec_config = VectorizedSequentialTradingEnvConfig(
-        num_envs=1,
-        leverage=leverage,
-        action_levels=action_levels,
-        initial_cash=1000,
-        time_frames=[TF_1MIN],
-        window_sizes=[10],
-        execute_on=TF_1MIN,
-        transaction_fee=fee,
-        slippage=slippage,
-        seed=42,
-        max_traj_length=max_traj,
-        random_start=False,
-    )
-
-    scalar_env = SequentialTradingEnv(df, scalar_config, simple_feature_fn)
-    vec_env = VectorizedSequentialTradingEnv(df, vec_config, simple_feature_fn)
-    return scalar_env, vec_env
 
 
 # ============================================================================
@@ -136,145 +93,6 @@ class TestVecEnvSpecs:
         td = env.reset()
         assert td["account_state"].shape == (num_envs, 6)
         env.close()
-
-
-# ============================================================================
-# CORRECTNESS vs SCALAR ENV
-# ============================================================================
-
-
-class TestVecEnvCorrectness:
-    """Compare vectorized (N=1) against scalar SequentialTradingEnv."""
-
-    def test_hold_sequence_matches(self, sample_ohlcv_df):
-        """Hold-only sequence: portfolio value and reward should match."""
-        scalar_env, vec_env = _make_matched_envs(sample_ohlcv_df)
-
-        td_s = scalar_env.reset()
-        td_v = vec_env.reset()
-
-        # Market data should match
-        assert torch.allclose(
-            td_s["market_data_1Minute_10"],
-            td_v["market_data_1Minute_10"].squeeze(0),
-            atol=1e-5,
-        ), "Initial market data mismatch"
-
-        # Step with hold action for 10 steps
-        for step in range(10):
-            # Scalar: action index 0 = action_level 0.0 (flat)
-            action_td_s = td_s.clone() if "next" not in td_s.keys() else td_s["next"].clone()
-            action_td_s["action"] = torch.tensor(0)
-            td_s = scalar_env.step(action_td_s)
-
-            # Vectorized: action index 0 = action_level 0.0 (flat, clamped from -1)
-            action_td_v = td_v.clone() if "next" not in td_v.keys() else td_v["next"].clone()
-            action_td_v["action"] = torch.tensor([0])  # batch dim
-            td_v = vec_env.step(action_td_v)
-
-            # Holding cash: reward should be 0 for both
-            reward_s = td_s["next"]["reward"].item()
-            reward_v = td_v["next"]["reward"].squeeze().item()
-            assert abs(reward_s) < 1e-6, f"Step {step}: scalar reward should be 0 for hold, got {reward_s}"
-            assert abs(reward_v) < 1e-6, f"Step {step}: vec reward should be 0 for hold, got {reward_v}"
-
-        scalar_env.close()
-        vec_env.close()
-
-    def test_buy_and_hold_portfolio_values_match(self, sample_ohlcv_df):
-        """Buy then hold: portfolio values should track each other closely."""
-        scalar_env, vec_env = _make_matched_envs(sample_ohlcv_df, fee=0.0)
-
-        td_s = scalar_env.reset()
-        td_v = vec_env.reset()
-
-        # Step 1: Buy (action_levels=[0,1], index 1 = 1.0 = full long)
-        action_td_s = td_s.clone()
-        action_td_s["action"] = torch.tensor(1)
-        td_s = scalar_env.step(action_td_s)
-
-        action_td_v = td_v.clone()
-        action_td_v["action"] = torch.tensor([1])
-        td_v = vec_env.step(action_td_v)
-
-        # Both should have position
-        assert scalar_env.position.position_size > 0, "Scalar env should have long position"
-        assert vec_env._position_sizes[0] > 0, "Vec env should have long position"
-
-        # Position sizes should match closely
-        assert abs(scalar_env.position.position_size - vec_env._position_sizes[0].item()) < 0.01, (
-            f"Position sizes differ: scalar={scalar_env.position.position_size}, "
-            f"vec={vec_env._position_sizes[0].item()}"
-        )
-
-        # Steps 2-10: Hold position (repeat buy action = hold due to same-action opt)
-        for step in range(9):
-            action_td_s = td_s["next"].clone()
-            action_td_s["action"] = torch.tensor(1)
-            td_s = scalar_env.step(action_td_s)
-
-            action_td_v = td_v["next"].clone()
-            action_td_v["action"] = torch.tensor([1])
-            td_v = vec_env.step(action_td_v)
-
-            # Compare portfolio values
-            scalar_pv = scalar_env._get_portfolio_value()
-            vec_pv = vec_env._portfolio_values[0].item()
-            assert abs(scalar_pv - vec_pv) / max(scalar_pv, 1.0) < 0.01, (
-                f"Step {step + 2}: PV mismatch: scalar={scalar_pv:.4f}, vec={vec_pv:.4f}"
-            )
-
-        scalar_env.close()
-        vec_env.close()
-
-    def test_buy_sell_cycle_balance_matches(self, sample_ohlcv_df):
-        """Buy then sell: final balance should match between scalar and vectorized."""
-        scalar_env, vec_env = _make_matched_envs(sample_ohlcv_df, fee=0.001)
-
-        td_s = scalar_env.reset()
-        td_v = vec_env.reset()
-
-        # Buy
-        action_td_s = td_s.clone()
-        action_td_s["action"] = torch.tensor(1)
-        td_s = scalar_env.step(action_td_s)
-
-        action_td_v = td_v.clone()
-        action_td_v["action"] = torch.tensor([1])
-        td_v = vec_env.step(action_td_v)
-
-        # Hold for a few steps
-        for _ in range(3):
-            action_td_s = td_s["next"].clone()
-            action_td_s["action"] = torch.tensor(1)
-            td_s = scalar_env.step(action_td_s)
-
-            action_td_v = td_v["next"].clone()
-            action_td_v["action"] = torch.tensor([1])
-            td_v = vec_env.step(action_td_v)
-
-        # Sell (action 0 = flat)
-        action_td_s = td_s["next"].clone()
-        action_td_s["action"] = torch.tensor(0)
-        td_s = scalar_env.step(action_td_s)
-
-        action_td_v = td_v["next"].clone()
-        action_td_v["action"] = torch.tensor([0])
-        td_v = vec_env.step(action_td_v)
-
-        # After selling, both should be flat
-        assert scalar_env.position.position_size == 0, "Scalar should be flat"
-        assert vec_env._position_sizes[0].item() == 0, "Vec should be flat"
-
-        # Balances should be close (fee accounting should match)
-        scalar_bal = scalar_env.balance
-        vec_bal = vec_env._balances[0].item()
-        assert abs(scalar_bal - vec_bal) / max(scalar_bal, 1.0) < 0.01, (
-            f"Balance mismatch after buy/sell: scalar={scalar_bal:.4f}, vec={vec_bal:.4f}"
-        )
-
-        scalar_env.close()
-        vec_env.close()
 
 
 # ============================================================================
@@ -385,35 +203,6 @@ class TestVecEnvTradeExecution:
 
         assert (vec_env._position_sizes == 0).all(), (
             "Position should close after action change (#187)"
-        )
-
-
-# ============================================================================
-# REWARD TESTS
-# ============================================================================
-
-
-class TestVecEnvReward:
-    """Tests for reward calculation."""
-
-    def test_reward_reflects_price_change(self, vec_env):
-        """Reward should be non-zero when holding a position."""
-        td = vec_env.reset()
-
-        # Open long
-        action_td = td.clone()
-        action_td["action"] = torch.full((4,), 2, dtype=torch.long)
-        td = vec_env.step(action_td)
-
-        # Hold for next step — reward reflects price change
-        action_td = td["next"].clone()
-        action_td["action"] = torch.full((4,), 2, dtype=torch.long)
-        td = vec_env.step(action_td)
-
-        rewards = td["next"]["reward"].squeeze(-1)
-        # At least some rewards should be non-zero (prices change)
-        assert not torch.allclose(rewards, torch.zeros(4), atol=1e-8), (
-            "Rewards should reflect price movement"
         )
 
 
@@ -923,112 +712,6 @@ class TestVecEnvFuturesLiquidation:
         env.close()
 
 
-class TestVecEnvFuturesCorrectness:
-    """Compare vectorized futures (N=1) against scalar SequentialTradingEnv."""
-
-    @pytest.mark.parametrize("action_idx,action_name", [
-        (2, "long"),
-        (0, "short"),
-    ], ids=["long", "short"])
-    def test_open_and_hold_portfolio_values_match(
-        self, sample_ohlcv_df, action_idx, action_name
-    ):
-        """Open then hold: portfolio values should match between scalar and vec."""
-        scalar_env, vec_env = _make_matched_envs(
-            sample_ohlcv_df, leverage=10
-        )
-
-        td_s = scalar_env.reset()
-        td_v = vec_env.reset()
-
-        # Open position
-        action_td_s = td_s.clone()
-        action_td_s["action"] = torch.tensor(action_idx)
-        td_s = scalar_env.step(action_td_s)
-
-        action_td_v = td_v.clone()
-        action_td_v["action"] = torch.tensor([action_idx])
-        td_v = vec_env.step(action_td_v)
-
-        # Position sizes should match
-        scalar_pos = scalar_env.position.position_size
-        vec_pos = vec_env._position_sizes[0].item()
-        assert abs(scalar_pos - vec_pos) / max(abs(scalar_pos), 1e-6) < 0.01, (
-            f"Position sizes differ: scalar={scalar_pos}, vec={vec_pos}"
-        )
-
-        # Hold and compare PVs
-        for step in range(5):
-            action_td_s = td_s["next"].clone()
-            action_td_s["action"] = torch.tensor(action_idx)
-            td_s = scalar_env.step(action_td_s)
-
-            action_td_v = td_v["next"].clone()
-            action_td_v["action"] = torch.tensor([action_idx])
-            td_v = vec_env.step(action_td_v)
-
-            scalar_pv = scalar_env._get_portfolio_value()
-            vec_pv = vec_env._portfolio_values[0].item()
-            assert abs(scalar_pv - vec_pv) / max(scalar_pv, 1.0) < 0.01, (
-                f"Step {step + 2} ({action_name}): PV mismatch: "
-                f"scalar={scalar_pv:.4f}, vec={vec_pv:.4f}"
-            )
-
-        scalar_env.close()
-        vec_env.close()
-
-    def test_direction_switch_balance_matches(self, sample_ohlcv_df):
-        """Long→short switch: balances should match between scalar and vec."""
-        scalar_env, vec_env = _make_matched_envs(
-            sample_ohlcv_df, leverage=10, fee=0.001
-        )
-
-        td_s = scalar_env.reset()
-        td_v = vec_env.reset()
-
-        # Open long (action 2)
-        action_td_s = td_s.clone()
-        action_td_s["action"] = torch.tensor(2)
-        td_s = scalar_env.step(action_td_s)
-
-        action_td_v = td_v.clone()
-        action_td_v["action"] = torch.tensor([2])
-        td_v = vec_env.step(action_td_v)
-
-        # Hold
-        for _ in range(3):
-            action_td_s = td_s["next"].clone()
-            action_td_s["action"] = torch.tensor(2)
-            td_s = scalar_env.step(action_td_s)
-
-            action_td_v = td_v["next"].clone()
-            action_td_v["action"] = torch.tensor([2])
-            td_v = vec_env.step(action_td_v)
-
-        # Switch to short (action 0)
-        action_td_s = td_s["next"].clone()
-        action_td_s["action"] = torch.tensor(0)
-        td_s = scalar_env.step(action_td_s)
-
-        action_td_v = td_v["next"].clone()
-        action_td_v["action"] = torch.tensor([0])
-        td_v = vec_env.step(action_td_v)
-
-        # Both should now be short
-        assert scalar_env.position.position_size < 0, "Scalar should be short"
-        assert vec_env._position_sizes[0].item() < 0, "Vec should be short"
-
-        # Balances should be close
-        scalar_bal = scalar_env.balance
-        vec_bal = vec_env._balances[0].item()
-        assert abs(scalar_bal - vec_bal) / max(scalar_bal, 1.0) < 0.01, (
-            f"Balance mismatch after switch: scalar={scalar_bal:.4f}, vec={vec_bal:.4f}"
-        )
-
-        scalar_env.close()
-        vec_env.close()
-
-
 # ============================================================================
 # PARTIAL RESET TESTS
 # ============================================================================
@@ -1202,65 +885,4 @@ class TestVecEnvInsufficientBalance:
         env.close()
 
 
-# ============================================================================
-# FUTURES CLOSE-TO-FLAT CORRECTNESS
-# ============================================================================
-
-
-class TestVecEnvFuturesCloseToFlat:
-    """Verify futures open→hold→close cycle matches scalar env."""
-
-    @pytest.mark.parametrize("open_action", [2, 0], ids=["long", "short"])
-    def test_futures_close_to_flat_balance_matches(
-        self, sample_ohlcv_df, open_action
-    ):
-        """Full open→hold→close cycle in futures with fees: balance must match scalar."""
-        scalar_env, vec_env = _make_matched_envs(
-            sample_ohlcv_df, leverage=10, fee=0.001
-        )
-
-        td_s = scalar_env.reset()
-        td_v = vec_env.reset()
-
-        # Open
-        action_td_s = td_s.clone()
-        action_td_s["action"] = torch.tensor(open_action)
-        td_s = scalar_env.step(action_td_s)
-
-        action_td_v = td_v.clone()
-        action_td_v["action"] = torch.tensor([open_action])
-        td_v = vec_env.step(action_td_v)
-
-        # Hold for 5 steps
-        for _ in range(5):
-            action_td_s = td_s["next"].clone()
-            action_td_s["action"] = torch.tensor(open_action)
-            td_s = scalar_env.step(action_td_s)
-
-            action_td_v = td_v["next"].clone()
-            action_td_v["action"] = torch.tensor([open_action])
-            td_v = vec_env.step(action_td_v)
-
-        # Close to flat (action 1 = 0.0)
-        action_td_s = td_s["next"].clone()
-        action_td_s["action"] = torch.tensor(1)
-        td_s = scalar_env.step(action_td_s)
-
-        action_td_v = td_v["next"].clone()
-        action_td_v["action"] = torch.tensor([1])
-        td_v = vec_env.step(action_td_v)
-
-        # Both should be flat
-        assert scalar_env.position.position_size == 0, "Scalar should be flat"
-        assert vec_env._position_sizes[0].item() == 0, "Vec should be flat"
-
-        # Balances should match
-        scalar_bal = scalar_env.balance
-        vec_bal = vec_env._balances[0].item()
-        assert abs(scalar_bal - vec_bal) / max(scalar_bal, 1.0) < 0.01, (
-            f"Balance mismatch: scalar={scalar_bal:.4f}, vec={vec_bal:.4f}"
-        )
-
-        scalar_env.close()
-        vec_env.close()
 

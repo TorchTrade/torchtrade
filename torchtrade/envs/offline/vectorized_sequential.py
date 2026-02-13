@@ -452,42 +452,29 @@ class VectorizedSequentialTradingEnv(EnvBase):
         return TensorDict(obs_data, batch_size=[N])
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
-        """Execute one step for all environments simultaneously."""
+        """Execute one step for all environments simultaneously.
+
+        Matches scalar SequentialTradingEnv order:
+        1. Check liquidation at current bar (before trade)
+        2. Execute trades (non-liquidated envs only)
+        3. Advance step index
+        4. Compute rewards from new prices
+        """
         # 1. Get actions and convert to action values
         action_indices = tensordict["action"]
         if action_indices.dim() > 1:
             action_indices = action_indices.squeeze(-1)
         action_values = self._action_levels_tensor[action_indices.long()]
 
-        # 2. Get current prices (trade execution prices)
-        trade_prices = self._base_tensor[self._step_indices, 3].clone()
-
-        # 3. Apply slippage
-        if self.slippage > 0:
-            noise = torch.empty(self._num_envs).uniform_(
-                1 - self.slippage, 1 + self.slippage, generator=self._rng
-            )
-            trade_prices = trade_prices * noise
-
-        # 4. Execute trades
-        self._execute_trades(action_values, trade_prices)
-
-        # 5. Advance step indices and counters
-        self._step_indices += 1
-        self._step_counters += 1
-
-        # Clamp to valid range (done envs may be past the end;
-        # their observation doesn't matter since they'll be auto-reset)
-        self._step_indices.clamp_(max=self._total_exec_times - 1)
-
-        # 6. Get new prices and apply forced liquidations if in futures mode
-        new_prices = self._base_tensor[self._step_indices, 3]
-
-        # Forced liquidation (futures only)
+        # 2. Check forced liquidation BEFORE trade (futures only)
+        # Uses current bar's intrabar extremes, matching scalar env's _check_liquidation
+        liq_mask = None
         if self.config.leverage > 1:
             liq_price = self._compute_liq_prices()
-            long_liq = (self._position_sizes > 0) & (new_prices <= liq_price)
-            short_liq = (self._position_sizes < 0) & (new_prices >= liq_price)
+            low_prices = self._base_tensor[self._step_indices, 2]   # intrabar low
+            high_prices = self._base_tensor[self._step_indices, 1]  # intrabar high
+            long_liq = (self._position_sizes > 0) & (low_prices <= liq_price)
+            short_liq = (self._position_sizes < 0) & (high_prices >= liq_price)
             liq_mask = long_liq | short_liq
             if liq_mask.any():
                 # PnL at liquidation price (works for both directions via signed sizes)
@@ -515,6 +502,32 @@ class VectorizedSequentialTradingEnv(EnvBase):
                     torch.zeros_like(self._hold_counters),
                     self._hold_counters,
                 )
+
+        # 3. Get current prices (trade execution prices)
+        trade_prices = self._base_tensor[self._step_indices, 3].clone()
+
+        # 4. Apply slippage
+        if self.slippage > 0:
+            noise = torch.empty(self._num_envs).uniform_(
+                1 - self.slippage, 1 + self.slippage, generator=self._rng
+            )
+            trade_prices = trade_prices * noise
+
+        # 5. Execute trades (skip liquidated envs — scalar env skips trade after liquidation)
+        if liq_mask is not None and liq_mask.any():
+            action_values = torch.where(liq_mask, self._zeros, action_values)
+        self._execute_trades(action_values, trade_prices)
+
+        # 6. Advance step indices and counters
+        self._step_indices += 1
+        self._step_counters += 1
+
+        # Clamp to valid range (done envs may be past the end;
+        # their observation doesn't matter since they'll be auto-reset)
+        self._step_indices.clamp_(max=self._total_exec_times - 1)
+
+        # 7. Get new prices for observation and reward computation
+        new_prices = self._base_tensor[self._step_indices, 3]
 
         # Compute portfolio values (mode-aware)
         new_pvs = self._compute_portfolio_values(new_prices)

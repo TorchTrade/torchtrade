@@ -100,12 +100,12 @@ def _compare_state(scalar, vec, step, label, atol=5e-4, rtol=1e-3):
     return mismatches
 
 
-def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, label=""):
+def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, max_traj=40, label=""):
     """Run a sequence of actions through both envs and compare at every step.
 
     Returns list of all mismatches found across all steps.
     """
-    scalar, vec = _make_pair(df, leverage=leverage, fee=fee, action_levels=action_levels)
+    scalar, vec = _make_pair(df, leverage=leverage, fee=fee, action_levels=action_levels, max_traj=max_traj)
     all_mismatches = []
 
     td_s = scalar.reset()
@@ -164,6 +164,18 @@ def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, l
                     f"[{label}] Step {step+1} account_state[{name}]: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
                 )
 
+        # Compare market data observations
+        for key in td_s["next"].keys():
+            if not str(key).startswith("market_data_"):
+                continue
+            md_s = td_s["next"][key]
+            md_v = td_v["next"][key].squeeze(0)
+            if not torch.allclose(md_s, md_v, atol=atol, rtol=rtol):
+                max_diff = (md_s - md_v).abs().max().item()
+                all_mismatches.append(
+                    f"[{label}] Step {step+1} {key}: max_diff={max_diff:.6f}"
+                )
+
         # Compare internal state
         mismatches = _compare_state(scalar, vec, step + 1, label)
         for field, s_val, v_val, diff in mismatches:
@@ -200,14 +212,8 @@ class TestScalarVecEquivalenceSpot:
         mismatches = _run_sequence(sample_ohlcv_df, actions, label="spot-buy-hold")
         assert not mismatches, "\n".join(mismatches)
 
-    def test_buy_sell_buy(self, sample_ohlcv_df):
-        """Buy, hold, sell, hold, buy again."""
-        actions = [1, 1, 1, 0, 0, 0, 1, 1, 1, 0]
-        mismatches = _run_sequence(sample_ohlcv_df, actions, label="spot-buy-sell-buy")
-        assert not mismatches, "\n".join(mismatches)
-
-    def test_alternating_actions(self, sample_ohlcv_df):
-        """Alternating buy/sell every step."""
+    def test_buy_sell_cycles(self, sample_ohlcv_df):
+        """Alternating buy/sell every step — exercises open/close cycle repeatedly."""
         actions = [1, 0] * 15
         mismatches = _run_sequence(sample_ohlcv_df, actions, label="spot-alternating")
         assert not mismatches, "\n".join(mismatches)
@@ -241,51 +247,34 @@ class TestScalarVecEquivalenceFutures:
         )
         assert not mismatches, "\n".join(mismatches)
 
-    def test_long_and_hold(self, sample_ohlcv_df):
-        """Open long then hold."""
-        actions = [2] + [2] * 25  # index 2 = +1.0 = long
+    @pytest.mark.parametrize("open_idx,label", [(2, "long"), (0, "short")],
+                             ids=["long", "short"])
+    def test_open_and_hold(self, sample_ohlcv_df, open_idx, label):
+        """Open position then hold — same-action optimization path."""
+        actions = [open_idx] * 26
         mismatches = _run_sequence(
-            sample_ohlcv_df, actions, leverage=10, label="futures-long-hold"
+            sample_ohlcv_df, actions, leverage=10, label=f"futures-{label}-hold"
         )
         assert not mismatches, "\n".join(mismatches)
 
-    def test_short_and_hold(self, sample_ohlcv_df):
-        """Open short then hold."""
-        actions = [0] + [0] * 25  # index 0 = -1.0 = short
+    @pytest.mark.parametrize("open_idx,label", [(2, "long"), (0, "short")],
+                             ids=["long", "short"])
+    def test_open_hold_close(self, sample_ohlcv_df, open_idx, label):
+        """Open, hold, close to flat."""
+        actions = [open_idx] * 5 + [1, 1, 1]
         mismatches = _run_sequence(
-            sample_ohlcv_df, actions, leverage=10, label="futures-short-hold"
+            sample_ohlcv_df, actions, leverage=10, label=f"futures-{label}-close"
         )
         assert not mismatches, "\n".join(mismatches)
 
-    def test_long_close(self, sample_ohlcv_df):
-        """Long, hold, close to flat."""
-        actions = [2, 2, 2, 2, 2, 1, 1, 1]
+    @pytest.mark.parametrize("actions,label", [
+        ([2, 2, 2, 0, 0, 0], "l2s"),
+        ([0, 0, 0, 2, 2, 2], "s2l"),
+    ], ids=["l2s", "s2l"])
+    def test_direction_switch(self, sample_ohlcv_df, actions, label):
+        """Direction switch — close then reopen opposite."""
         mismatches = _run_sequence(
-            sample_ohlcv_df, actions, leverage=10, label="futures-long-close"
-        )
-        assert not mismatches, "\n".join(mismatches)
-
-    def test_short_close(self, sample_ohlcv_df):
-        """Short, hold, close to flat."""
-        actions = [0, 0, 0, 0, 0, 1, 1, 1]
-        mismatches = _run_sequence(
-            sample_ohlcv_df, actions, leverage=10, label="futures-short-close"
-        )
-        assert not mismatches, "\n".join(mismatches)
-
-    def test_direction_switch_long_to_short(self, sample_ohlcv_df):
-        """Long, hold, switch to short."""
-        actions = [2, 2, 2, 0, 0, 0]
-        mismatches = _run_sequence(
-            sample_ohlcv_df, actions, leverage=10, label="futures-l2s"
-        )
-        assert not mismatches, "\n".join(mismatches)
-
-    def test_direction_switch_short_to_long(self, sample_ohlcv_df):
-        """Short, hold, switch to long."""
-        actions = [0, 0, 0, 2, 2, 2]
-        mismatches = _run_sequence(
-            sample_ohlcv_df, actions, leverage=10, label="futures-s2l"
+            sample_ohlcv_df, actions, leverage=10, label=f"futures-{label}"
         )
         assert not mismatches, "\n".join(mismatches)
 
@@ -330,23 +319,15 @@ class TestScalarVecEquivalenceFutures:
 class TestScalarVecEquivalenceLeverages:
     """Verify equivalence across different leverage levels."""
 
+    @pytest.mark.parametrize("open_idx,direction", [(2, "long"), (0, "short")],
+                             ids=["long", "short"])
     @pytest.mark.parametrize("leverage", [2, 5, 10, 25, 50], ids=lambda l: f"lev{l}")
-    def test_long_hold_close_at_leverage(self, sample_ohlcv_df, leverage):
-        """Long→hold→close cycle at various leverage levels."""
-        actions = [2, 2, 2, 2, 2, 1, 1]
+    def test_hold_close_at_leverage(self, sample_ohlcv_df, open_idx, direction, leverage):
+        """Open→hold→close cycle at various leverage levels and directions."""
+        actions = [open_idx] * 5 + [1, 1]
         mismatches = _run_sequence(
             sample_ohlcv_df, actions, leverage=leverage, fee=0.001,
-            label=f"lev{leverage}"
-        )
-        assert not mismatches, "\n".join(mismatches)
-
-    @pytest.mark.parametrize("leverage", [2, 5, 10, 25, 50], ids=lambda l: f"lev{l}")
-    def test_short_hold_close_at_leverage(self, sample_ohlcv_df, leverage):
-        """Short→hold→close cycle at various leverage levels."""
-        actions = [0, 0, 0, 0, 0, 1, 1]
-        mismatches = _run_sequence(
-            sample_ohlcv_df, actions, leverage=leverage, fee=0.001,
-            label=f"short-lev{leverage}"
+            label=f"{direction}-lev{leverage}"
         )
         assert not mismatches, "\n".join(mismatches)
 
@@ -390,5 +371,27 @@ class TestScalarVecEquivalenceTrending:
         mismatches = _run_sequence(
             trending_up_df, actions, leverage=10, fee=0.001,
             label="short-uptrend-fees"
+        )
+        assert not mismatches, "\n".join(mismatches)
+
+
+# ============================================================================
+# LIQUIDATION EQUIVALENCE
+# ============================================================================
+
+
+class TestScalarVecEquivalenceLiquidation:
+    """Verify liquidation behavior matches between scalar and vectorized envs."""
+
+    @pytest.mark.parametrize("open_idx,direction", [(2, "long"), (0, "short")],
+                             ids=["long", "short"])
+    def test_liquidation_equivalence(self, open_idx, direction, trending_down_df, trending_up_df):
+        """Both envs should liquidate at the same step with the same balance."""
+        # Long gets liquidated in downtrend, short in uptrend
+        df = trending_down_df if direction == "long" else trending_up_df
+        actions = [open_idx] * 200
+        mismatches = _run_sequence(
+            df, actions, leverage=20, fee=0.001, max_traj=200,
+            label=f"liquidation-{direction}"
         )
         assert not mismatches, "\n".join(mismatches)
