@@ -48,4 +48,6 @@ from torchtrade.envs.live.bybit import (
     BybitFuturesTradingEnvConfig,
     BybitFuturesSLTPTorchTradingEnv,
     BybitFuturesSLTPTradingEnvConfig,
+    MarginMode,
+    PositionMode,
 )

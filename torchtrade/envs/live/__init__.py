@@ -35,6 +35,8 @@ from torchtrade.envs.live.bybit import (
     BybitFuturesTradingEnvConfig,
     BybitFuturesSLTPTorchTradingEnv,
     BybitFuturesSLTPTradingEnvConfig,
+    MarginMode,
+    PositionMode,
 )
 
 __all__ = [
@@ -63,4 +65,6 @@ __all__ = [
     "BybitFuturesTradingEnvConfig",
     "BybitFuturesSLTPTorchTradingEnv",
     "BybitFuturesSLTPTradingEnvConfig",
+    "MarginMode",
+    "PositionMode",
 ]

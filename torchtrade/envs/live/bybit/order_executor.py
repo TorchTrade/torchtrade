@@ -139,7 +139,11 @@ class BybitFuturesOrderClass:
                 )
                 logger.info(f"Position mode set to {self.position_mode.value}")
             except Exception as e:
-                logger.warning(f"Could not set position mode (may already be configured): {e}")
+                error_str = str(e).lower()
+                if "position" in error_str:
+                    logger.warning("Could not set position mode: close open positions before switching modes.")
+                else:
+                    logger.warning(f"Could not set position mode (may already be configured): {e}")
 
             # Set leverage
             self.client.set_leverage(
