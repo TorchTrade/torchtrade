@@ -14,6 +14,10 @@ from torchtrade.envs.offline.onestep import (
     OneStepTradingEnv,
     OneStepTradingEnvConfig,
 )
+from torchtrade.envs.offline.vectorized_sequential import (
+    VectorizedSequentialTradingEnv,
+    VectorizedSequentialTradingEnvConfig,
+)
 
 # Infrastructure
 from torchtrade.envs.offline.infrastructure import MarketDataObservationSampler
@@ -26,6 +30,9 @@ __all__ = [
     "SequentialTradingEnvSLTPConfig",
     "OneStepTradingEnv",
     "OneStepTradingEnvConfig",
+    # Vectorized environments
+    "VectorizedSequentialTradingEnv",
+    "VectorizedSequentialTradingEnvConfig",
     # Types
     "MarginType",
     # Infrastructure
