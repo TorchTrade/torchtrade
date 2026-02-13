@@ -87,10 +87,24 @@ class VectorizedSequentialTradingEnvConfig:
             raise ValueError(
                 f"Leverage must be between 1 and 125, got {self.leverage}"
             )
+        if not (0 < self.bankrupt_threshold < 1):
+            raise ValueError(
+                f"Bankrupt threshold must be between 0 and 1, got {self.bankrupt_threshold}"
+            )
+        if not (0 < self.maintenance_margin_rate < 1):
+            raise ValueError(
+                f"Maintenance margin rate must be between 0 and 1, got {self.maintenance_margin_rate}"
+            )
 
 
 class VectorizedSequentialTradingEnv(EnvBase):
     """Vectorized sequential trading environment.
+
+    .. warning::
+        **EXPERIMENTAL**: This environment passes extensive equivalence tests
+        against SequentialTradingEnv, but has not been battle-tested in
+        production training runs. Use with caution and verify results against
+        the scalar implementation.
 
     Processes N environments in a single _step() call using tensor operations.
     All state (balances, positions, step indices) is stored as (num_envs,) tensors
@@ -148,6 +162,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
         self._obs_indices = self._sampler._obs_indices  # {key: ndarray}
         self._base_tensor = self._sampler.execute_base_tensor  # (M, F)
         self._total_exec_times = len(self._sampler._exec_times_arr)
+        if self._total_exec_times == 0:
+            raise ValueError("Dataset has no execution times - cannot create environment")
         self._time_frames = config.time_frames
         self._window_sizes = config.window_sizes
 
@@ -464,6 +480,10 @@ class VectorizedSequentialTradingEnv(EnvBase):
         action_indices = tensordict["action"]
         if action_indices.dim() > 1:
             action_indices = action_indices.squeeze(-1)
+        if action_indices.shape[0] != self._num_envs:
+            raise ValueError(
+                f"Expected {self._num_envs} actions, got {action_indices.shape[0]}"
+            )
         action_values = self._action_levels_tensor[action_indices.long()]
 
         # 2. Check forced liquidation BEFORE trade (futures only)
@@ -651,10 +671,9 @@ class VectorizedSequentialTradingEnv(EnvBase):
             )
             new_fee = notional_new * self.transaction_fee
 
-            # Check sufficient balance (relative tolerance for float32 round-trip errors:
-            # notional = PV / fee_denom, margin = notional / lev, fee = notional * fee_rate
-            # => margin + fee should equal PV*fraction but float32 division+multiplication
-            # round-trip can overshoot by up to ~1e-4 at balance=1000)
+            # Check sufficient balance (float32 needs larger tolerance than float64:
+            # scalar env uses 1e-9 with float64, but float32 division+multiplication
+            # round-trip can overshoot by up to ~1e-4 at balance=1000, so we use 1e-5)
             can_afford = (margin_new + new_fee) <= self._balances * (1 + 1e-5)
             final_open = open_mask & can_afford
 
