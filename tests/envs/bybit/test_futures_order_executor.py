@@ -112,14 +112,54 @@ class TestBybitFuturesOrderClass:
         assert "total_unrealized_profit" in balance
         assert "total_margin_balance" in balance
 
-    def test_close_position(self, order_executor, mock_pybit_client):
-        """Test closing a position."""
+    @pytest.mark.parametrize("position_fixture,expected_side", [
+        ("mock_pybit_client", "Sell"),      # Long position -> close with Sell
+        ("mock_short_position", "Buy"),     # Short position -> close with Buy
+    ])
+    def test_close_position(self, order_executor, position_fixture, expected_side, request):
+        """Test closing long and short positions sends correct opposite side."""
+        client = request.getfixturevalue(position_fixture)
+        order_executor.client = client
         success = order_executor.close_position()
 
         assert success is True
-        call_kwargs = mock_pybit_client.place_order.call_args[1]
+        call_kwargs = client.place_order.call_args[1]
         assert call_kwargs["reduceOnly"] is True
-        assert call_kwargs["side"] == "Sell"  # Opposite of long
+        assert call_kwargs["side"] == expected_side
+
+    @pytest.mark.parametrize("close_side,expected_idx", [
+        ("Sell", 1),  # Closing long -> positionIdx=1
+        ("Buy", 2),   # Closing short -> positionIdx=2
+    ])
+    def test_close_position_hedge_mode(self, mock_pybit_client, close_side, expected_idx):
+        """Hedge mode close_position must use correct positionIdx."""
+        from torchtrade.envs.live.bybit.order_executor import (
+            BybitFuturesOrderClass, PositionMode,
+        )
+        # Setup position fixture based on which side we're closing
+        if close_side == "Sell":
+            # Long position (default mock is long)
+            pass
+        else:
+            # Short position
+            mock_pybit_client.get_positions = MagicMock(return_value={
+                "retCode": 0,
+                "result": {"list": [{
+                    "symbol": "BTCUSDT", "size": "0.001", "side": "Sell",
+                    "avgPrice": "50000.0", "markPrice": "49900.0",
+                    "unrealisedPnl": "0.1", "leverage": "10",
+                    "tradeMode": "1", "liqPrice": "55000.0", "positionValue": "49.9",
+                }]},
+            })
+
+        executor = BybitFuturesOrderClass(
+            symbol="BTCUSDT",
+            position_mode=PositionMode.HEDGE,
+            client=mock_pybit_client,
+        )
+        executor.close_position()
+        call_kwargs = mock_pybit_client.place_order.call_args[1]
+        assert call_kwargs["positionIdx"] == expected_idx
 
     def test_close_position_no_position(self, order_executor, mock_pybit_client):
         """Test closing when no position exists."""
@@ -241,6 +281,30 @@ class TestBybitFuturesOrderClass:
             "retCode": 0, "result": {"list": [ticker_data]},
         })
         assert order_executor.get_mark_price() == expected_price
+
+    @pytest.mark.parametrize("liq_price_value,expected", [
+        ("45000.0", 45000.0),  # Normal value
+        ("", 0.0),             # Empty string (Bybit returns this sometimes)
+        (None, 0.0),           # None value
+        ("0", 0.0),            # Zero string
+    ])
+    def test_get_status_liq_price_edge_cases(self, order_executor, mock_pybit_client, liq_price_value, expected):
+        """liqPrice parsing must handle empty/None/normal values from Bybit."""
+        position_data = {
+            "symbol": "BTCUSDT", "size": "0.001", "side": "Buy",
+            "avgPrice": "50000.0", "markPrice": "50100.0",
+            "unrealisedPnl": "0.1", "leverage": "10",
+            "tradeMode": "1", "positionValue": "50.1",
+        }
+        if liq_price_value is not None:
+            position_data["liqPrice"] = liq_price_value
+        # If None, don't include liqPrice key at all
+
+        mock_pybit_client.get_positions = MagicMock(return_value={
+            "retCode": 0, "result": {"list": [position_data]},
+        })
+        status = order_executor.get_status()
+        assert status["position_status"].liquidation_price == expected
 
     def test_get_mark_price_no_data_raises(self, order_executor, mock_pybit_client):
         """Missing ticker data must raise RuntimeError."""

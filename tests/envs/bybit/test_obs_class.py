@@ -2,7 +2,7 @@
 
 import pytest
 import numpy as np
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 

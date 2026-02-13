@@ -276,8 +276,7 @@ class BybitFuturesOrderClass:
                     unrealized_pnl = float(pos.get("unrealisedPnl", 0))
                     unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(qty, entry_price, mark_price)
 
-                    liq_price_str = pos.get("liqPrice", "0")
-                    liq_price = float(liq_price_str) if liq_price_str and liq_price_str != "" else 0.0
+                    liq_price = float(pos.get("liqPrice") or "0")
 
                     status["position_status"] = PositionStatus(
                         qty=qty,

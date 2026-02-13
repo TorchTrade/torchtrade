@@ -145,8 +145,6 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
                 self.position.current_position = 1
             elif trade_info["side"] == "sell":
                 self.position.current_position = -1
-            elif trade_info.get("closed_position"):
-                self.position.current_position = 0
 
         if position_closed:
             self.position.current_position = 0
