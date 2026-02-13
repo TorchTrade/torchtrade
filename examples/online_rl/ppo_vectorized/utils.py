@@ -122,6 +122,7 @@ def apply_env_transforms(env, max_steps, flatten_market_obs=True):
 def make_environment(train_df, test_df, cfg, train_num_envs=None, eval_num_envs=None,
                      max_train_traj_length=1,
                      max_eval_traj_length=1,
+                     max_train_eval_traj_length=None,
                      flatten_market_obs=True):
     """Make environments for training and evaluation."""
     # For vectorized env, num_envs is set in the config, not passed separately
@@ -148,11 +149,30 @@ def make_environment(train_df, test_df, cfg, train_num_envs=None, eval_num_envs=
         random_start=False,
     )
     eval_env = SequentialTradingEnv(test_df, eval_config, feature_preprocessing_fn=custom_preprocessing)
-    
+
     max_eval_steps = test_df.shape[0]
     eval_env = apply_env_transforms(eval_env, max_eval_steps, flatten_market_obs=flatten_market_obs)
 
-    return train_env, eval_env
+    # Create train-eval environment: scalar env on train data, fixed start for consistent comparison
+    train_eval_config = SequentialTradingEnvConfig(
+        symbol=cfg.symbol,
+        time_frames=cfg.time_frames,
+        window_sizes=cfg.window_sizes,
+        execute_on=cfg.execute_on,
+        initial_cash=cfg.initial_cash if not isinstance(cfg.initial_cash, (tuple, list)) else cfg.initial_cash[0],
+        slippage=cfg.slippage,
+        transaction_fee=cfg.transaction_fee,
+        bankrupt_threshold=cfg.bankrupt_threshold,
+        seed=cfg.seed,
+        leverage=cfg.leverage,
+        action_levels=cfg.action_levels,
+        max_traj_length=max_train_eval_traj_length or max_train_traj_length,
+        random_start=False,
+    )
+    train_eval_env = SequentialTradingEnv(train_df, train_eval_config, feature_preprocessing_fn=custom_preprocessing)
+    train_eval_env = apply_env_transforms(train_eval_env, max_train_steps, flatten_market_obs=flatten_market_obs)
+
+    return train_env, eval_env, train_eval_env
 
 
 

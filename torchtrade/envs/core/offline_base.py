@@ -538,8 +538,18 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         if plot_bh_baseline:
             initial_balance = portfolio_value_history[0]
             initial_price = price_history[0]
-            units_held = initial_balance / initial_price
-            buy_and_hold_balance = [units_held * price for price in price_history]
+            leverage = getattr(self, 'leverage', 1)
+            buy_and_hold_balance = []
+            liquidated = False
+            for price in price_history:
+                if liquidated:
+                    buy_and_hold_balance.append(0.0)
+                else:
+                    pv = initial_balance * (1 + leverage * (price / initial_price - 1))
+                    if pv <= 0:
+                        liquidated = True
+                        pv = 0.0
+                    buy_and_hold_balance.append(pv)
         else:
             buy_and_hold_balance = None
 
@@ -585,7 +595,7 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         if plot_bh_baseline:
             ax2.plot(
                 time_indices, buy_and_hold_balance,
-                label='Buy and Hold', color='purple', linestyle='--', linewidth=1.5
+                label=f'Buy and Hold ({leverage}x)', color='purple', linestyle='--', linewidth=1.5
             )
             ax2.set_title('Portfolio Value vs Buy and Hold')
         else:

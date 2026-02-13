@@ -54,6 +54,7 @@ def main(cfg: DictConfig):  # noqa: F821
 
     max_train_traj_length = cfg.collector.frames_per_batch // cfg.env.num_envs
     max_eval_traj_length = len(test_df)
+    max_train_eval_traj_length = 60 * 24 * 30  # ~1 month of 1-minute bars
 
     print("="*80)
     print("DATA SPLIT INFO:")
@@ -67,12 +68,13 @@ def main(cfg: DictConfig):  # noqa: F821
     
     # For vectorized environment, we need flattened observations
     flatten_obs = True
-    train_env, eval_env = make_environment(
+    train_env, eval_env, train_eval_env = make_environment(
         train_df,
         test_df,
         cfg.env,
         max_train_traj_length=max_train_traj_length,
         max_eval_traj_length=max_eval_traj_length,
+        max_train_eval_traj_length=max_train_eval_traj_length,
         flatten_market_obs=flatten_obs,
     )
 
@@ -326,18 +328,20 @@ def main(cfg: DictConfig):  # noqa: F821
                 if logger is not None and fig is not None:
                     metrics_to_log["eval/history"] = wandb.Image(fig)
 
-                # Evaluate on train data
-                train_rollout = train_env.rollout(
-                    max_train_traj_length,
+                # Evaluate on train data (fixed start for consistent comparison)
+                train_rollout = train_eval_env.rollout(
+                    max_train_eval_traj_length,
                     actor.to("cpu"),
                     auto_cast_to_device=False,
                     break_when_any_done=True,
                 )
                 actor.to(device)  # Move actor back to device for training
-                # Only log reward from env[0] 
-                train_eval_reward = train_rollout[0]["next", "reward"].sum().item()
+                train_eval_reward = train_rollout["next", "reward"].sum().item()
                 metrics_to_log["eval/train_reward"] = train_eval_reward
-                train_env.reset()
+                fig_train = train_eval_env.base_env.render_history(return_fig=True)
+                train_eval_env.reset()
+                if logger is not None and fig_train is not None:
+                    metrics_to_log["eval/train_history"] = wandb.Image(fig_train)
 
                 # TODO: add metric like daily profit %
                 # metrics_to_log["eval/daily_profit_pct"] =
@@ -356,6 +360,8 @@ def main(cfg: DictConfig):  # noqa: F821
     collector.shutdown()
     if not eval_env.is_closed:
         eval_env.close()
+    if not train_eval_env.is_closed:
+        train_eval_env.close()
     if not train_env.is_closed:
         train_env.close()
 
