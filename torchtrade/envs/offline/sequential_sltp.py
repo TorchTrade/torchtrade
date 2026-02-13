@@ -508,8 +508,8 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         margin_required = notional_value / self.leverage
         fee = abs(notional_value) * self.transaction_fee
 
-        # Check if sufficient balance
-        if margin_required + fee > self.balance:
+        # Check sufficient balance (relative tolerance for float round-trip errors)
+        if margin_required + fee > self.balance * (1 + 1e-9):
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Deduct fee and margin

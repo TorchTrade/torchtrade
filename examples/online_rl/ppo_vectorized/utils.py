@@ -126,8 +126,7 @@ def make_environment(train_df, test_df, cfg, train_num_envs=None, eval_num_envs=
                      flatten_market_obs=True):
     """Make environments for training and evaluation."""
     # For vectorized env, num_envs is set in the config, not passed separately
-    train_maker = lambda: env_maker(train_df, cfg, max_traj_length=max_train_traj_length, random_start=True)
-    train_env = train_maker()
+    train_env = env_maker(train_df, cfg, max_traj_length=max_train_traj_length, random_start=True)
     
     max_train_steps = train_df.shape[0]
     train_env = apply_env_transforms(train_env, max_train_steps, flatten_market_obs=flatten_market_obs)

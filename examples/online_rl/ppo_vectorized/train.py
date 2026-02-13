@@ -177,7 +177,6 @@ def main(cfg: DictConfig):  # noqa: F821
 
     def update(batch, num_network_updates):
         optim.zero_grad(set_to_none=True)
-        #num_network_updates = batch.get("updates")
         # Linearly decrease the learning rate and clip epsilon
         alpha = torch.ones((), device=device)
         if cfg_optim_anneal_lr:
@@ -186,7 +185,6 @@ def main(cfg: DictConfig):  # noqa: F821
                 group["lr"] = cfg_optim_lr * alpha
         if cfg_loss_anneal_clip_eps:
             loss_module.clip_epsilon.copy_(cfg_loss_clip_epsilon * alpha)
-        #num_network_updates = num_network_updates + 1
         # Get a data batch
         batch = batch.to(device, non_blocking=True)
 
@@ -269,13 +267,11 @@ def main(cfg: DictConfig):  # noqa: F821
 
                 batch_rewards = []
                 for k, batch in enumerate(data_buffer):
-                    #batch["updates"] = torch.tensor([num_network_updates]).unsqueeze(0).repeat(batch.shape[0], 1)
                     with timeit("update"):
                         torch.compiler.cudagraph_mark_step_begin()
                         loss, num_network_updates = update(
                             batch, num_network_updates=num_network_updates
                         )
-                    #num_network_updates += 1
                     loss = loss.clone()
                     num_network_updates = num_network_updates.clone()
                     losses[j, k] = loss.select(
