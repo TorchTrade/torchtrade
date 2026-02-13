@@ -11,6 +11,7 @@ TorchTrade provides **3 unified environment classes** that each support both spo
 | **SequentialTradingEnv** | - | - | Standard sequential trading |
 | **VectorizedSequentialTradingEnv** | - | - | High-throughput training (experimental) |
 | **SequentialTradingEnvSLTP** | Yes | - | Risk management with SL/TP |
+| **VectorizedSequentialTradingEnvSLTP** | Yes | - | High-throughput SL/TP training (experimental) |
 | **OneStepTradingEnv** | Yes | Yes | GRPO, contextual bandits |
 
 **Sequential** (`SequentialTradingEnv`) — Step-by-step trading with **fractional position sizing**. Action values represent the fraction of capital to deploy (e.g., 0.5 = 50% allocation).
@@ -147,6 +148,36 @@ env = VectorizedSequentialTradingEnv(df, config)
 ```
 
 See the [PPO Vectorized example](https://github.com/TorchTrade/torchtrade/tree/main/examples/online_rl/ppo_vectorized) for a complete training setup.
+
+### Vectorized SLTP Version (Experimental)
+
+`VectorizedSequentialTradingEnvSLTP` extends the vectorized environment with **bracket order risk management** (stop-loss/take-profit). It provides the same 20-400x throughput improvement over `ParallelEnv` while supporting SL/TP bracket orders.
+
+!!! warning "Experimental"
+    This environment is still experimental. While it passes extensive scalar-vectorized equivalence tests against `SequentialTradingEnvSLTP`, it has not been battle-tested in production training runs.
+
+```python
+from torchtrade.envs.offline import (
+    VectorizedSequentialTradingEnvSLTP,
+    VectorizedSequentialTradingEnvSLTPConfig,
+)
+
+config = VectorizedSequentialTradingEnvSLTPConfig(
+    num_envs=64,
+    stoploss_levels=[-0.02, -0.05],
+    takeprofit_levels=[0.05, 0.10],
+    time_frames=["1min", "5min", "15min", "1hour"],
+    window_sizes=[12, 8, 8, 24],
+    execute_on=(5, "Minute"),
+    initial_cash=1000,
+    transaction_fee=0.0025,
+    leverage=1,  # or >1 for futures with short bracket orders
+)
+
+env = VectorizedSequentialTradingEnvSLTP(df, config)
+```
+
+The action space matches `SequentialTradingEnvSLTP`: `1 + (num_sl × num_tp)` actions for spot, `1 + 2 × (num_sl × num_tp)` for futures.
 
 ---
 
