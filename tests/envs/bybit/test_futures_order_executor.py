@@ -434,6 +434,25 @@ class TestBybitFuturesOrderClass:
         success = order_executor.close_position()
         assert success is False
 
+    def test_get_lot_size_fetches_and_caches(self, order_executor, mock_pybit_client):
+        """get_lot_size must fetch from API and cache the result."""
+        lot_size = order_executor.get_lot_size()
+        assert lot_size["min_qty"] == 0.001
+        assert lot_size["qty_step"] == 0.001
+
+        # Second call uses cache (no additional API call)
+        lot_size2 = order_executor.get_lot_size()
+        assert lot_size2 is lot_size
+        mock_pybit_client.get_instruments_info.assert_called_once()
+
+    def test_get_lot_size_fallback_on_failure(self, order_executor, mock_pybit_client):
+        """get_lot_size must fall back to defaults if API fails."""
+        order_executor._lot_size_cache = None
+        mock_pybit_client.get_instruments_info = MagicMock(side_effect=Exception("API down"))
+        lot_size = order_executor.get_lot_size()
+        assert lot_size["min_qty"] == 0.001
+        assert lot_size["qty_step"] == 0.001
+
     def test_close_position_hedge_both_sides(self, mock_pybit_client):
         """close_position in hedge mode must close both long and short sides."""
         from torchtrade.envs.live.bybit.order_executor import (

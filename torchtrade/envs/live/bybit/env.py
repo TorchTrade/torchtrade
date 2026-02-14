@@ -253,12 +253,15 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         target_qty, _, _ = self._calculate_fractional_position(action_value, current_price)
         delta_qty = target_qty - current_qty
 
-        min_qty = 0.001
+        lot_size = self.trader.get_lot_size()
+        min_qty = lot_size["min_qty"]
+        qty_step = lot_size["qty_step"]
+
         if abs(delta_qty) < min_qty:
             return self._create_trade_info(executed=False)
 
         side = "buy" if delta_qty > 0 else "sell"
-        amount = int(abs(delta_qty) / min_qty) * min_qty
+        amount = int(abs(delta_qty) / qty_step) * qty_step
 
         if amount < min_qty:
             return self._create_trade_info(executed=False)

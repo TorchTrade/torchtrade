@@ -92,6 +92,18 @@ def mock_pybit_client():
 
     client.get_kline = MagicMock(side_effect=mock_get_kline)
 
+    # Mock instrument info (lot size)
+    client.get_instruments_info = MagicMock(return_value={
+        "retCode": 0,
+        "result": {"list": [{
+            "symbol": "BTCUSDT",
+            "lotSizeFilter": {
+                "minOrderQty": "0.001",
+                "qtyStep": "0.001",
+            },
+        }]},
+    })
+
     # Mock order management
     client.get_open_orders = MagicMock(return_value={
         "retCode": 0,
@@ -117,6 +129,10 @@ def mock_env_observer():
         return obs
 
     observer.get_observations = MagicMock(side_effect=mock_observations)
+    observer.get_features = MagicMock(return_value={
+        "observation_features": ["feature_close", "feature_open", "feature_high", "feature_low"],
+        "original_features": ["open", "high", "low", "close", "volume"],
+    })
     return observer
 
 
@@ -135,6 +151,7 @@ def mock_env_trader():
     trader.get_mark_price = MagicMock(return_value=50000.0)
     trader.get_status = MagicMock(return_value={"position_status": None})
     trader.trade = MagicMock(return_value=True)
+    trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001})
     return trader
 
 

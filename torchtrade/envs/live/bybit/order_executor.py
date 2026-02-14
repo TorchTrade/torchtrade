@@ -98,6 +98,7 @@ class BybitFuturesOrderClass:
         self.margin_mode = margin_mode
         self.position_mode = position_mode
         self.last_order_id = None
+        self._lot_size_cache: Optional[Dict[str, float]] = None
 
         # Initialize pybit client
         if client is not None:
@@ -377,6 +378,36 @@ class BybitFuturesOrderClass:
                 raise
             logger.error(f"Error getting mark price: {str(e)}")
             raise RuntimeError(f"Failed to get mark price: {e}") from e
+
+    def get_lot_size(self) -> Dict[str, float]:
+        """
+        Get and cache lot size constraints for the symbol.
+
+        Returns:
+            Dictionary with 'min_qty' and 'qty_step' for the symbol.
+        """
+        if self._lot_size_cache is not None:
+            return self._lot_size_cache
+
+        try:
+            response = self.client.get_instruments_info(
+                category="linear", symbol=self.symbol,
+            )
+            instruments = response.get("result", {}).get("list", [])
+            if instruments:
+                lot_filter = instruments[0].get("lotSizeFilter", {})
+                self._lot_size_cache = {
+                    "min_qty": float(lot_filter.get("minOrderQty", 0.001)),
+                    "qty_step": float(lot_filter.get("qtyStep", 0.001)),
+                }
+            else:
+                logger.warning(f"No instrument info for {self.symbol}, using defaults")
+                self._lot_size_cache = {"min_qty": 0.001, "qty_step": 0.001}
+        except Exception as e:
+            logger.warning(f"Failed to fetch lot size for {self.symbol}: {e}, using defaults")
+            self._lot_size_cache = {"min_qty": 0.001, "qty_step": 0.001}
+
+        return self._lot_size_cache
 
     def get_open_orders(self) -> List[Dict]:
         """Get all open orders for the symbol."""

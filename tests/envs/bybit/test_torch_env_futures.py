@@ -29,6 +29,10 @@ class TestBybitFuturesTorchTradingEnv:
             return obs
 
         observer.get_observations = MagicMock(side_effect=mock_observations)
+        observer.get_features = MagicMock(return_value={
+            "observation_features": ["feature_close", "feature_open", "feature_high", "feature_low"],
+            "original_features": ["open", "high", "low", "close", "volume"],
+        })
         return observer
 
     @pytest.fixture
@@ -46,6 +50,7 @@ class TestBybitFuturesTorchTradingEnv:
         trader.get_mark_price = MagicMock(return_value=50000.0)
         trader.get_status = MagicMock(return_value={"position_status": None})
         trader.trade = MagicMock(return_value=True)
+        trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001})
         return trader
 
     @pytest.fixture
@@ -330,6 +335,42 @@ class TestBybitNoInitSideEffects:
         mock_env_trader.cancel_open_orders = MagicMock(side_effect=Exception("API down"))
         # close() must not propagate the exception
         env.close()
+
+
+class TestBybitObservationSpecsNoNetwork:
+    """Test that _build_observation_specs doesn't make live API calls."""
+
+    def test_build_specs_uses_get_features_not_get_observations(self, mock_env_observer, mock_env_trader):
+        """_build_observation_specs must use get_features() (dummy data), not get_observations()."""
+        from torchtrade.envs.live.bybit.env import (
+            BybitFuturesTorchTradingEnv,
+            BybitFuturesTradingEnvConfig,
+        )
+
+        # Set up mock get_features (returns feature info without network call)
+        mock_env_observer.get_features = MagicMock(return_value={
+            "observation_features": ["feature_close", "feature_open", "feature_high", "feature_low"],
+            "original_features": ["open", "high", "low", "close", "volume"],
+        })
+
+        config = BybitFuturesTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+        # get_features should have been called (for spec building)
+        mock_env_observer.get_features.assert_called_once()
+        # Verify specs were built correctly
+        assert "account_state" in env.observation_spec.keys()
+        assert "market_data_1Minute_10" in env.observation_spec.keys()
 
 
 class TestBybitFractionalPositionResizing:

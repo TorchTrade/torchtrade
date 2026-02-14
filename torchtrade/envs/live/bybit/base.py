@@ -101,16 +101,7 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
         window_sizes = self.config.window_sizes
         demo = getattr(self.config, 'demo', True)
 
-        # Initialize observer
-        self.observer = observer if observer is not None else BybitObservationClass(
-            symbol=self.config.symbol,
-            time_frames=time_frames,
-            window_sizes=window_sizes,
-            feature_preprocessing_fn=self._feature_preprocessing_fn,
-            demo=demo,
-        )
-
-        # Initialize trader
+        # Initialize trader first (observer may reuse its client)
         self.trader = trader if trader is not None else BybitFuturesOrderClass(
             symbol=self.config.symbol,
             api_key=api_key,
@@ -121,11 +112,24 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
             position_mode=self.config.position_mode,
         )
 
+        # Initialize observer, sharing trader's client if available
+        if observer is not None:
+            self.observer = observer
+        else:
+            shared_client = getattr(self.trader, 'client', None)
+            self.observer = BybitObservationClass(
+                symbol=self.config.symbol,
+                time_frames=time_frames,
+                window_sizes=window_sizes,
+                feature_preprocessing_fn=self._feature_preprocessing_fn,
+                client=shared_client,
+                demo=demo,
+            )
+
     def _build_observation_specs(self):
-        """Build observation specs for account state and market data."""
-        obs = self.observer.get_observations()
-        first_key = self.observer.get_keys()[0]
-        num_features = obs[first_key].shape[1]
+        """Build observation specs for account state and market data (no network calls)."""
+        features_info = self.observer.get_features()
+        num_features = len(features_info["observation_features"])
         market_data_names = self.observer.get_keys()
 
         window_sizes = self.config.window_sizes if isinstance(self.config.window_sizes, list) else [self.config.window_sizes]
