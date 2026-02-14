@@ -18,7 +18,7 @@ TorchTrade provides modular environments for both live trading with major exchan
 - 🎯 **Multi-Timeframe Observations** - Train on 1m, 5m, 15m, 1h bars simultaneously
 - 🤖 **Multiple RL Algorithms** - PPO, DQN, IQL, GRPO, DSAC, CTRL implementations
 - 📊 **Feature Engineering** - Add technical indicators and custom features
-- 🔴 **Live Trading** - Direct Alpaca, Binance, and Bitget API integration
+- 🔴 **Live Trading** - Direct Alpaca, Binance, Bitget, and Bybit API integration
 - 🧠 **LLM Integration** - Use GPT-4o-mini or local LLMs as trading agents
 - 📐 **Rule-Based Actors** - Hard-coded strategies for imitation learning and baselines
 - 🔮 **Pretrained Encoder Transforms** - Foundation model embeddings for time series
@@ -119,8 +119,10 @@ TorchTrade supports live trading with major exchanges:
 | **BinanceFuturesSLTPTorchTradingEnv** | Binance | Crypto | ✅ | ✅ (1-125x) | ✅ |
 | **BitgetFuturesTorchTradingEnv** | Bitget | Crypto | ✅ | ✅ (1-125x) | ❌ |
 | **BitgetFuturesSLTPTorchTradingEnv** | Bitget | Crypto | ✅ | ✅ (1-125x) | ✅ |
+| **BybitFuturesTorchTradingEnv** | Bybit | Crypto | ✅ | ✅ (1-100x) | ❌ |
+| **BybitFuturesSLTPTorchTradingEnv** | Bybit | Crypto | ✅ | ✅ (1-100x) | ✅ |
 
-**Need another broker?** Request support for additional platforms (OKX, Bybit, Interactive Brokers, etc.) by [creating an issue](https://github.com/TorchTrade/torchtrade/issues/new) or emailing torchtradecontact@gmail.com.
+**Need another broker?** Request support for additional platforms (OKX, Interactive Brokers, etc.) by [creating an issue](https://github.com/TorchTrade/torchtrade/issues/new) or emailing torchtradecontact@gmail.com.
 
 See **[Online Environments Documentation](https://torchtrade.github.io/torchtrade/environments/online/)** for setup guides and examples.
 
@@ -143,6 +145,12 @@ Start live trading with these supported platforms:
 - **Features:** Futures trading with up to 125x leverage, testnet for safe testing
 - **Commission:** Maker 0.02% / Taker 0.06%
 - **Get Started:** [Sign up for Bitget](https://www.bitget.com/)
+
+**[Bybit](https://www.bybit.com/)** - Top cryptocurrency derivatives exchange
+- **Supported by:** `BybitFuturesTorchTradingEnv`, `BybitFuturesSLTPTorchTradingEnv`
+- **Features:** Futures trading with up to 100x leverage, native bracket orders (SL/TP), testnet for safe testing
+- **Commission:** Maker 0.02% / Taker 0.055%
+- **Get Started:** [Sign up for Bybit](https://www.bybit.com/)
 
 ### 📈 Stock & Crypto API
 
@@ -269,6 +277,8 @@ API_KEY=your_alpaca_api_key
 SECRET_KEY=your_alpaca_secret_key
 BINANCE_API_KEY=your_binance_api_key
 BINANCE_SECRET_KEY=your_binance_secret_key
+BYBIT_API_KEY=your_bybit_api_key
+BYBIT_API_SECRET=your_bybit_api_secret
 EOF
 
 # 6. Verify installation
