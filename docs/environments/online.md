@@ -5,17 +5,18 @@ Online environments connect to real trading APIs for paper trading or live execu
 | Offline (Training) | Live (Deployment) |
 |---------------------|-------------------|
 | SequentialTradingEnv (spot, `leverage=1`) | AlpacaTorchTradingEnv |
-| SequentialTradingEnv (futures, `leverage>1`) | BinanceFutures / BitgetFuturesTorchTradingEnv |
+| SequentialTradingEnv (futures, `leverage>1`) | BinanceFutures / BitgetFutures / BybitFuturesTorchTradingEnv |
 | SequentialTradingEnvSLTP (spot) | AlpacaSLTPTorchTradingEnv |
-| SequentialTradingEnvSLTP (futures) | BinanceFuturesSLTP / BitgetFuturesSLTPTorchTradingEnv |
+| SequentialTradingEnvSLTP (futures) | BinanceFuturesSLTP / BitgetFuturesSLTP / BybitFuturesSLTPTorchTradingEnv |
 | OneStepTradingEnv (spot) | AlpacaSLTPTorchTradingEnv |
-| OneStepTradingEnv (futures) | BinanceFuturesSLTP / BitgetFuturesSLTPTorchTradingEnv |
+| OneStepTradingEnv (futures) | BinanceFuturesSLTP / BitgetFuturesSLTP / BybitFuturesSLTPTorchTradingEnv |
 
 **Supported Exchanges:**
 
 - **[Alpaca](https://alpaca.markets/)** - Commission-free US stocks and crypto with paper trading
 - **[Binance](https://accounts.binance.com/register?ref=25015935)** - Cryptocurrency futures with high leverage and testnet
 - **[Bitget](https://www.bitget.com/)** - Cryptocurrency futures with competitive fees and testnet
+- **[Bybit](https://www.bybit.com/)** - Cryptocurrency derivatives with native bracket orders and testnet
 
 ## Overview
 
@@ -27,6 +28,8 @@ Online environments connect to real trading APIs for paper trading or live execu
 | **BinanceFuturesSLTPTorchTradingEnv** | Binance | Crypto | Yes | Yes | Yes |
 | **BitgetFuturesTorchTradingEnv** | Bitget | Crypto | Yes | Yes | - |
 | **BitgetFuturesSLTPTorchTradingEnv** | Bitget | Crypto | Yes | Yes | Yes |
+| **BybitFuturesTorchTradingEnv** | Bybit | Crypto | Yes | Yes | - |
+| **BybitFuturesSLTPTorchTradingEnv** | Bybit | Crypto | Yes | Yes | Yes |
 
 ## Fractional Position Sizing
 
@@ -38,7 +41,7 @@ Live environments use a **query-first pattern**: they query the actual exchange 
     Always use canonical timeframe forms:
 
     - Alpaca: `["1Min", "5Min", "15Min", "1Hour", "1Day"]`
-    - Binance/Bitget: `["1m", "5m", "15m", "1h", "1d"]`
+    - Binance/Bitget/Bybit: `["1m", "5m", "15m", "1h", "1d"]`
     - **Wrong**: `["60min"]`, `["60m"]`, `["24hour"]` — these create different observation keys and break model compatibility.
 
 ---
@@ -204,6 +207,76 @@ env = BitgetFuturesSLTPTorchTradingEnv(
 
 ---
 
+## Bybit Environments
+
+[Bybit](https://www.bybit.com/) provides cryptocurrency derivatives trading with native bracket order support (stop-loss/take-profit set directly on orders). TorchTrade uses [pybit](https://github.com/bybit-exchange/pybit), Bybit's official Python SDK, for direct v5 API access.
+
+!!! note "Symbol Format"
+    Bybit uses simple concatenated symbols: `"BTCUSDT"` (not `"BTC/USDT:USDT"`).
+
+### BybitFuturesTorchTradingEnv
+
+```python
+from torchtrade.envs.bybit import BybitFuturesTorchTradingEnv, BybitFuturesTradingEnvConfig
+from torchtrade.envs.bybit import MarginMode, PositionMode
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+config = BybitFuturesTradingEnvConfig(
+    symbol="BTCUSDT",
+    time_frames=["5m", "15m"],
+    window_sizes=[6, 32],
+    execute_on="1m",
+    leverage=5,
+    margin_mode=MarginMode.ISOLATED,     # ISOLATED (safer) or CROSSED
+    position_mode=PositionMode.ONE_WAY,  # ONE_WAY (simpler) or HEDGE
+    demo=True,  # Testnet (recommended!)
+)
+
+env = BybitFuturesTorchTradingEnv(
+    config,
+    api_key=os.getenv("BYBIT_API_KEY"),
+    api_secret=os.getenv("BYBIT_API_SECRET"),
+)
+```
+
+### BybitFuturesSLTPTorchTradingEnv
+
+```python
+from torchtrade.envs.bybit import BybitFuturesSLTPTorchTradingEnv, BybitFuturesSLTPTradingEnvConfig
+from torchtrade.envs.bybit import MarginMode, PositionMode
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+config = BybitFuturesSLTPTradingEnvConfig(
+    symbol="BTCUSDT",
+    time_frames=["5m", "15m"],
+    window_sizes=[6, 32],
+    execute_on="1m",
+    stoploss_levels=(-0.025, -0.05, -0.1),
+    takeprofit_levels=(0.05, 0.1, 0.2),
+    include_hold_action=True,
+    leverage=5,
+    quantity_per_trade=0.002,
+    margin_mode=MarginMode.ISOLATED,
+    position_mode=PositionMode.ONE_WAY,
+    demo=True,
+)
+
+env = BybitFuturesSLTPTorchTradingEnv(
+    config,
+    api_key=os.getenv("BYBIT_API_KEY"),
+    api_secret=os.getenv("BYBIT_API_SECRET"),
+)
+# Action space: HOLD + 2×(3 SL × 3 TP) = 19 actions (long + short)
+```
+
+---
+
 ## API Key Setup
 
 Each exchange requires API keys stored in a `.env` file:
@@ -221,25 +294,30 @@ BINANCE_SECRET_KEY=your_binance_secret_key
 BITGETACCESSAPIKEY=your_bitget_api_key
 BITGETSECRETKEY=your_bitget_secret_key
 BITGETPASSPHRASE=your_bitget_passphrase
+
+# Bybit (https://www.bybit.com/app/user/api-management)
+BYBIT_API_KEY=your_bybit_api_key
+BYBIT_API_SECRET=your_bybit_api_secret
 ```
 
 !!! warning "Always Start with Paper/Testnet Trading"
-    Set `paper=True` (Alpaca) or `demo=True` (Binance/Bitget) before using real funds. Start with low leverage (2-5x) for futures.
+    Set `paper=True` (Alpaca) or `demo=True` (Binance/Bitget/Bybit) before using real funds. Start with low leverage (2-5x) for futures.
 
 ---
 
 ## Exchange Comparison
 
-| Feature | Alpaca | Binance | Bitget |
-|---------|--------|---------|--------|
-| **Asset Types** | Stocks, Crypto | Crypto | Crypto |
-| **Futures** | - | Yes | Yes |
-| **Max Leverage** | 1x | 125x | 125x |
-| **Paper Trading** | Yes | Yes (Testnet) | Yes (Testnet) |
-| **Commission** | Free | 0.02%/0.04% | 0.02%/0.06% |
+| Feature | Alpaca | Binance | Bitget | Bybit |
+|---------|--------|---------|--------|-------|
+| **Asset Types** | Stocks, Crypto | Crypto | Crypto | Crypto |
+| **Futures** | - | Yes | Yes | Yes |
+| **Max Leverage** | 1x | 125x | 125x | 100x |
+| **Paper Trading** | Yes | Yes (Testnet) | Yes (Testnet) | Yes (Testnet) |
+| **Commission** | Free | 0.02%/0.04% | 0.02%/0.06% | 0.02%/0.055% |
+| **SDK** | Alpaca SDK | CCXT | CCXT | pybit (native) |
 
 ---
 
 ## Requesting New Exchanges
 
-Need support for another exchange? [Create an issue](https://github.com/TorchTrade/torchtrade/issues/new) or email us at torchtradecontact@gmail.com.
+Need support for another exchange (OKX, Interactive Brokers, etc.)? [Create an issue](https://github.com/TorchTrade/torchtrade/issues/new) or email us at torchtradecontact@gmail.com.
