@@ -425,3 +425,51 @@ class TestBybitSLTPActionIndexClamping:
             action_td = TensorDict({"action": torch.tensor(float("nan"))}, batch_size=())
             next_td = env.step(action_td)
             assert "reward" in next_td["next"].keys()
+
+
+class TestBybitSLTPPositionClosedClobber:
+    """Regression: position_closed must not overwrite a newly-opened position."""
+
+    @pytest.fixture
+    def env(self, mock_env_observer, mock_env_trader):
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_short_positions=True,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            return BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+    def test_new_trade_after_sltp_close_preserves_position(self, env, mock_env_trader):
+        """When SL/TP closes a position and a new trade opens in the same step,
+        the new position state must be preserved (not overwritten to 0)."""
+        from torchtrade.envs.live.bybit.order_executor import PositionStatus
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            env.position.current_position = 1  # Was long
+
+            # SL/TP triggered: first get_status call returns None (position closed),
+            # subsequent calls also return None (flat after close, before new trade fills)
+            mock_env_trader.get_status = MagicMock(return_value={"position_status": None})
+            mock_env_trader.get_mark_price = MagicMock(return_value=50000.0)
+
+            # Action index for first short action (HOLD=0, LONG_1=1, SHORT_1=2 with 1 SL x 1 TP)
+            short_action_idx = len(env.action_map) - 1  # Last action is a short
+            action_td = TensorDict({"action": torch.tensor(short_action_idx)}, batch_size=())
+            env._step(action_td)
+
+            # The new short position must NOT be overwritten to 0 by position_closed
+            assert env.position.current_position == -1

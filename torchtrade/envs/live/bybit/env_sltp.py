@@ -156,7 +156,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
             elif trade_info["side"] == "sell":
                 self.position.current_position = -1
 
-        if position_closed:
+        if position_closed and not (trade_info["executed"] and trade_info.get("success") is not False):
             self.position.current_position = 0
             self.active_stop_loss = 0.0
             self.active_take_profit = 0.0
