@@ -35,10 +35,7 @@ class BybitObservationClass(BaseFuturesObservationClass):
             client: Optional pre-configured pybit HTTP client for dependency injection
             demo: Whether to use demo/testnet environment (default: True)
         """
-        # Normalize symbol before calling parent constructor
         symbol = normalize_symbol(symbol)
-
-        # Call parent constructor with normalized symbol
         super().__init__(
             symbol=symbol,
             time_frames=time_frames,

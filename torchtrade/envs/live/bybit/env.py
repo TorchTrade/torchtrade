@@ -254,8 +254,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         if action_value == 0.0:
             if abs(current_qty) > 0:
                 return self._handle_close_action(current_qty)
-            else:
-                return self._create_trade_info(executed=False)
+            return self._create_trade_info(executed=False)
 
         target_qty, _, _ = self._calculate_fractional_position(action_value, current_price)
         delta_qty = target_qty - current_qty

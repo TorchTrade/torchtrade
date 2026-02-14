@@ -9,6 +9,8 @@ from torchtrade.envs.core.common import TradeMode
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001}
+
 
 class PositionMode(Enum):
     """
@@ -361,30 +363,22 @@ class BybitFuturesOrderClass:
         Raises:
             RuntimeError: If mark price cannot be retrieved
         """
-        try:
-            response = self.client.get_tickers(
-                category="linear",
-                symbol=self.symbol,
-            )
+        response = self.client.get_tickers(
+            category="linear",
+            symbol=self.symbol,
+        )
 
-            tickers = response.get("result", {}).get("list", [])
-            if tickers:
-                mark_price = tickers[0].get("markPrice")
-                if mark_price:
-                    return float(mark_price)
+        tickers = response.get("result", {}).get("list", [])
+        if tickers:
+            mark_price = tickers[0].get("markPrice")
+            if mark_price:
+                return float(mark_price)
 
-                # Fallback to last price
-                last_price = tickers[0].get("lastPrice")
-                if last_price:
-                    return float(last_price)
+            last_price = tickers[0].get("lastPrice")
+            if last_price:
+                return float(last_price)
 
-            raise RuntimeError(f"No ticker data for {self.symbol}")
-
-        except Exception as e:
-            if isinstance(e, RuntimeError):
-                raise
-            logger.error(f"Error getting mark price: {str(e)}")
-            raise RuntimeError(f"Failed to get mark price: {e}") from e
+        raise RuntimeError(f"No ticker data for {self.symbol}")
 
     def get_lot_size(self) -> Dict[str, float]:
         """
@@ -404,7 +398,7 @@ class BybitFuturesOrderClass:
             if ret_code is not None and int(ret_code) != 0:
                 ret_msg = response.get("retMsg", "unknown error")
                 logger.warning(f"get_instruments_info failed (retCode={ret_code}): {ret_msg}, using defaults")
-                self._lot_size_cache = {"min_qty": 0.001, "qty_step": 0.001}
+                self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
                 return self._lot_size_cache
             instruments = response.get("result", {}).get("list", [])
             if instruments:
@@ -415,10 +409,10 @@ class BybitFuturesOrderClass:
                 }
             else:
                 logger.warning(f"No instrument info for {self.symbol}, using defaults")
-                self._lot_size_cache = {"min_qty": 0.001, "qty_step": 0.001}
+                self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
         except Exception as e:
             logger.warning(f"Failed to fetch lot size for {self.symbol}: {e}, using defaults")
-            self._lot_size_cache = {"min_qty": 0.001, "qty_step": 0.001}
+            self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
 
         return self._lot_size_cache
 

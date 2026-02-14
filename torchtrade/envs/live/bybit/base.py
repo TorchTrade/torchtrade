@@ -201,11 +201,12 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Build 6-element account state
         exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
 
-        position_direction = float(
-            1 if position_size > 0
-            else -1 if position_size < 0
-            else 0
-        )
+        if position_size > 0:
+            position_direction = 1.0
+        elif position_size < 0:
+            position_direction = -1.0
+        else:
+            position_direction = 0.0
 
         if position_size == 0 or current_price == 0 or liquidation_price <= 0:
             distance_to_liquidation = 1.0
