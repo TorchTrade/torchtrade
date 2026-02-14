@@ -193,6 +193,26 @@ class TestBybitObservationClass:
         assert not np.isnan(data).any(), "Data contains NaN values"
         assert data.shape == (10, 4)
 
+    def test_parse_klines_sorts_chronologically(self, mock_pybit_client):
+        """Reverse-ordered klines from Bybit must be sorted oldest-first."""
+        from torchtrade.envs.live.bybit.observation import BybitObservationClass
+
+        observer = BybitObservationClass(
+            symbol="BTCUSDT",
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=5,
+            client=mock_pybit_client,
+        )
+
+        # Feed reverse-chronological data (newest first, like Bybit returns)
+        raw_klines = [
+            [str(1700000000000 + i * 60000), "50000", "50100", "49900", "50050", "100", "5000000"]
+            for i in [4, 3, 2, 1, 0]  # Reverse: 4min, 3min, 2min, 1min, 0min
+        ]
+        df = observer._parse_klines(raw_klines)
+        timestamps = df["timestamp"].tolist()
+        assert timestamps == sorted(timestamps), "Klines must be in chronological order"
+
 
 class TestBybitUtils:
     """Tests for Bybit utility functions."""

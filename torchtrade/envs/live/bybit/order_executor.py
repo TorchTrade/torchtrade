@@ -405,40 +405,49 @@ class BybitFuturesOrderClass:
 
     def close_position(self) -> bool:
         """
-        Close the current position by placing an opposite market order.
+        Close all open positions for the symbol.
+
+        In hedge mode, closes both long and short sides if both are open.
 
         Returns:
-            bool: True if position was closed successfully
+            bool: True if all positions were closed successfully
         """
         try:
-            status = self.get_status()
-            position = status.get("position_status")
+            response = self.client.get_positions(
+                category="linear", symbol=self.symbol,
+            )
+            positions = response.get("result", {}).get("list", [])
+            non_zero = [p for p in positions if float(p.get("size", 0)) != 0]
 
-            if position is None or position.qty == 0:
+            if not non_zero:
                 logger.debug("No open position to close")
                 return True
 
-            qty = abs(position.qty)
-            side = "Sell" if position.qty > 0 else "Buy"
+            all_closed = True
+            for pos in non_zero:
+                size = float(pos.get("size", 0))
+                pos_side = pos.get("side", "Buy")
+                close_side = "Sell" if pos_side == "Buy" else "Buy"
 
-            params = {
-                "category": "linear",
-                "symbol": self.symbol,
-                "side": side,
-                "orderType": "Market",
-                "qty": str(qty),
-                "reduceOnly": True,
-            }
+                params = {
+                    "category": "linear",
+                    "symbol": self.symbol,
+                    "side": close_side,
+                    "orderType": "Market",
+                    "qty": str(size),
+                    "reduceOnly": True,
+                }
 
-            if self.position_mode == PositionMode.HEDGE:
-                # Sell closes long (positionIdx=1), Buy closes short (positionIdx=2)
-                params["positionIdx"] = 1 if side == "Sell" else 2
-            else:
-                params["positionIdx"] = 0
+                if self.position_mode == PositionMode.HEDGE:
+                    # Sell closes long (positionIdx=1), Buy closes short (positionIdx=2)
+                    params["positionIdx"] = 1 if close_side == "Sell" else 2
+                else:
+                    params["positionIdx"] = 0
 
-            self.client.place_order(**params)
-            logger.info(f"Position closed: {qty} {side}")
-            return True
+                self.client.place_order(**params)
+                logger.info(f"Position closed: {size} {close_side}")
+
+            return all_closed
 
         except Exception as e:
             logger.warning(f"close_position order failed: {e}; re-querying position")

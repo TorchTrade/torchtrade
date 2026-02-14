@@ -433,3 +433,41 @@ class TestBybitFuturesOrderClass:
         # get_positions always returns open position
         success = order_executor.close_position()
         assert success is False
+
+    def test_close_position_hedge_both_sides(self, mock_pybit_client):
+        """close_position in hedge mode must close both long and short sides."""
+        from torchtrade.envs.live.bybit.order_executor import (
+            BybitFuturesOrderClass, PositionMode,
+        )
+
+        mock_pybit_client.get_positions = MagicMock(return_value={
+            "retCode": 0,
+            "result": {"list": [
+                {
+                    "symbol": "BTCUSDT", "size": "0.002", "side": "Buy",
+                    "avgPrice": "50000.0", "markPrice": "50100.0",
+                    "unrealisedPnl": "0.2", "leverage": "10",
+                    "tradeMode": "1", "liqPrice": "45000.0", "positionValue": "100.2",
+                },
+                {
+                    "symbol": "BTCUSDT", "size": "0.001", "side": "Sell",
+                    "avgPrice": "51000.0", "markPrice": "50100.0",
+                    "unrealisedPnl": "0.9", "leverage": "10",
+                    "tradeMode": "1", "liqPrice": "56000.0", "positionValue": "50.1",
+                },
+            ]},
+        })
+
+        executor = BybitFuturesOrderClass(
+            symbol="BTCUSDT",
+            position_mode=PositionMode.HEDGE,
+            client=mock_pybit_client,
+        )
+        success = executor.close_position()
+        assert success is True
+        assert mock_pybit_client.place_order.call_count == 2
+
+        # Verify both sides were closed with correct parameters
+        calls = mock_pybit_client.place_order.call_args_list
+        sides_closed = {c[1]["side"] for c in calls}
+        assert sides_closed == {"Sell", "Buy"}  # Sell closes long, Buy closes short

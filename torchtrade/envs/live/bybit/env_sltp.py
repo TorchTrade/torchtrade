@@ -14,7 +14,6 @@ from torchtrade.envs.live.bybit.order_executor import (
     PositionMode,
 )
 from torchtrade.envs.live.bybit.base import BybitBaseTorchTradingEnv
-from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
@@ -41,7 +40,6 @@ class BybitFuturesSLTPTradingEnvConfig:
     margin_mode: MarginMode = MarginMode.ISOLATED
     position_mode: PositionMode = PositionMode.ONE_WAY
     quantity_per_trade: float = 0.001
-    trade_mode: TradeMode = "quantity"
 
     # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
     stoploss_levels: Tuple[float, ...] = (-0.025, -0.05, -0.1)

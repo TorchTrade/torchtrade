@@ -100,6 +100,9 @@ class BybitObservationClass(BaseFuturesObservationClass):
         df[ohlcv_cols] = df[ohlcv_cols].astype(float)
         df['timestamp'] = pd.to_datetime(df['timestamp'].astype(int), unit='ms')
 
+        # Ensure chronological order (pybit returns newest first)
+        df = df.sort_values('timestamp', ascending=True, kind='stable').reset_index(drop=True)
+
         return df.drop(columns=['turnover'])
 
     def _convert_timeframe(self, timeframe: TimeFrame) -> str:

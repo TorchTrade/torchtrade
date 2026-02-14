@@ -113,13 +113,12 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Initialize trader
         self.trader = trader if trader is not None else BybitFuturesOrderClass(
             symbol=self.config.symbol,
-            trade_mode=self.config.trade_mode if hasattr(self.config, 'trade_mode') else None,
             api_key=api_key,
             api_secret=api_secret,
             demo=demo,
             leverage=self.config.leverage,
             margin_mode=self.config.margin_mode,
-            position_mode=self.config.position_mode if hasattr(self.config, 'position_mode') else None,
+            position_mode=self.config.position_mode,
         )
 
     def _build_observation_specs(self):
