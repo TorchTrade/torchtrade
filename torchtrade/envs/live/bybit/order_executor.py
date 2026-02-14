@@ -368,6 +368,11 @@ class BybitFuturesOrderClass:
             symbol=self.symbol,
         )
 
+        ret_code = response.get("retCode")
+        if ret_code is not None and int(ret_code) != 0:
+            ret_msg = response.get("retMsg", "unknown error")
+            raise RuntimeError(f"get_tickers failed (retCode={ret_code}): {ret_msg}")
+
         tickers = response.get("result", {}).get("list", [])
         if tickers:
             mark_price = tickers[0].get("markPrice")
@@ -459,6 +464,11 @@ class BybitFuturesOrderClass:
             response = self.client.get_positions(
                 category="linear", symbol=self.symbol,
             )
+            ret_code = response.get("retCode")
+            if ret_code is not None and int(ret_code) != 0:
+                ret_msg = response.get("retMsg", "unknown error")
+                logger.error(f"get_positions failed in close_position (retCode={ret_code}): {ret_msg}")
+                return False
             positions = response.get("result", {}).get("list", [])
             non_zero = [p for p in positions if float(p.get("size", 0)) != 0]
 
