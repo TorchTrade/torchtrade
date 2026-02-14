@@ -532,12 +532,17 @@ class BybitFuturesOrderClass:
             bool: True if successful
         """
         try:
-            self.client.set_leverage(
+            response = self.client.set_leverage(
                 category="linear",
                 symbol=self.symbol,
                 buyLeverage=str(leverage),
                 sellLeverage=str(leverage),
             )
+            ret_code = response.get("retCode") if isinstance(response, dict) else None
+            if ret_code is not None and int(ret_code) != 0:
+                ret_msg = response.get("retMsg", "unknown error")
+                logger.error(f"set_leverage rejected (retCode={ret_code}): {ret_msg}")
+                return False
             self.leverage = leverage
             logger.debug(f"Leverage set to {leverage}x for {self.symbol}")
             return True
@@ -556,13 +561,18 @@ class BybitFuturesOrderClass:
             bool: True if successful
         """
         try:
-            self.client.switch_margin_mode(
+            response = self.client.switch_margin_mode(
                 category="linear",
                 symbol=self.symbol,
                 tradeMode=mode.to_pybit(),
                 buyLeverage=str(self.leverage),
                 sellLeverage=str(self.leverage),
             )
+            ret_code = response.get("retCode") if isinstance(response, dict) else None
+            if ret_code is not None and int(ret_code) != 0:
+                ret_msg = response.get("retMsg", "unknown error")
+                logger.error(f"set_margin_mode rejected (retCode={ret_code}): {ret_msg}")
+                return False
             self.margin_mode = mode
             logger.info(f"Margin mode set to {mode.value} for {self.symbol}")
             return True

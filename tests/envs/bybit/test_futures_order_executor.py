@@ -183,25 +183,39 @@ class TestBybitFuturesOrderClass:
         assert call_kwargs["category"] == "linear"
         assert call_kwargs["symbol"] == "BTCUSDT"
 
-    def test_set_leverage(self, order_executor, mock_pybit_client):
-        """Test changing leverage."""
-        success = order_executor.set_leverage(20)
+    @pytest.mark.parametrize("ret_code,expected_success,expected_leverage", [
+        (0, True, 20),       # Success: leverage updated
+        (110043, False, 10), # Rejected: leverage stays at original (10)
+    ], ids=["success", "rejected"])
+    def test_set_leverage_validates_retcode(self, order_executor, mock_pybit_client, ret_code, expected_success, expected_leverage):
+        """set_leverage must validate retCode and only update local state on success."""
+        mock_pybit_client.set_leverage = MagicMock(return_value={
+            "retCode": ret_code,
+            "retMsg": "OK" if ret_code == 0 else "Leverage not modified",
+        })
+        result = order_executor.set_leverage(20)
+        assert result is expected_success
+        assert order_executor.leverage == expected_leverage
 
-        assert success is True
-        assert order_executor.leverage == 20
-        call_kwargs = mock_pybit_client.set_leverage.call_args[1]
-        assert call_kwargs["buyLeverage"] == "20"
-        assert call_kwargs["sellLeverage"] == "20"
-
-    def test_set_margin_mode(self, order_executor, mock_pybit_client):
-        """Test changing margin mode."""
+    @pytest.mark.parametrize("ret_code,expected_success,expect_mode_changed", [
+        (0, True, True),       # Success: mode updated
+        (110026, False, False), # Rejected: mode stays at original
+    ], ids=["success", "rejected"])
+    def test_set_margin_mode_validates_retcode(self, order_executor, mock_pybit_client, ret_code, expected_success, expect_mode_changed):
+        """set_margin_mode must validate retCode and only update local state on success."""
         from torchtrade.envs.live.bybit.order_executor import MarginMode
 
-        success = order_executor.set_margin_mode(MarginMode.CROSSED)
-
-        assert success is True
-        assert order_executor.margin_mode == MarginMode.CROSSED
-        mock_pybit_client.switch_margin_mode.assert_called()
+        original_mode = order_executor.margin_mode
+        mock_pybit_client.switch_margin_mode = MagicMock(return_value={
+            "retCode": ret_code,
+            "retMsg": "OK" if ret_code == 0 else "Margin mode not modified",
+        })
+        result = order_executor.set_margin_mode(MarginMode.CROSSED)
+        assert result is expected_success
+        if expect_mode_changed:
+            assert order_executor.margin_mode == MarginMode.CROSSED
+        else:
+            assert order_executor.margin_mode == original_mode
 
     def test_trade_failure_handling(self, order_executor, mock_pybit_client):
         """Test that trade failures are handled gracefully."""
