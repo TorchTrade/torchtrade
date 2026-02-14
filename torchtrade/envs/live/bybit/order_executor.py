@@ -251,14 +251,11 @@ class BybitFuturesOrderClass:
 
             positions = response.get("result", {}).get("list", [])
 
-            # Find first non-zero position (handles hedge mode)
-            pos = None
-            for p in positions:
-                if float(p.get("size", 0)) != 0:
-                    if pos is not None:
-                        logger.warning("Multiple open positions detected (hedge mode); using first non-zero")
-                        break
-                    pos = p
+            # Find non-zero positions (handles hedge mode)
+            non_zero = [p for p in positions if float(p.get("size", 0)) != 0]
+            if len(non_zero) > 1:
+                logger.warning("Multiple open positions detected (hedge mode); using first non-zero")
+            pos = non_zero[0] if non_zero else None
 
             if pos is not None:
                 size = float(pos.get("size", 0))

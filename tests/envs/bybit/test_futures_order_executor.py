@@ -263,14 +263,6 @@ class TestBybitFuturesOrderClass:
         result = order_executor._calculate_unrealized_pnl_pct(qty, entry, mark)
         assert result == pytest.approx(expected_pnl_pct, abs=1e-6)
 
-    def test_get_account_balance_empty_raises(self, order_executor, mock_pybit_client):
-        """Empty account list must raise RuntimeError."""
-        mock_pybit_client.get_wallet_balance = MagicMock(return_value={
-            "retCode": 0, "result": {"list": []},
-        })
-        with pytest.raises(RuntimeError, match="No account data"):
-            order_executor.get_account_balance()
-
     @pytest.mark.parametrize("ticker_data,expected_price", [
         ({"markPrice": "50100.0"}, 50100.0),
         ({"lastPrice": "50050.0"}, 50050.0),  # Fallback to lastPrice

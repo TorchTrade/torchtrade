@@ -204,10 +204,8 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
             else 0
         )
 
-        if position_size == 0 or current_price == 0:
+        if position_size == 0 or current_price == 0 or liquidation_price <= 0:
             distance_to_liquidation = 1.0
-        elif liquidation_price <= 0:
-            distance_to_liquidation = -1.0  # Unknown liquidation price
         else:
             if position_size > 0:
                 distance_to_liquidation = (current_price - liquidation_price) / current_price

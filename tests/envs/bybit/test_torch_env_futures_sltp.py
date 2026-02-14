@@ -130,13 +130,13 @@ class TestBybitFuturesSLTPTorchTradingEnv:
             env._step(action_td)
 
             call_kwargs = mock_env_trader.trade.call_args[1]
-            current_price = 50050.0
+            mark_price = 50000.0  # From mock_env_trader.get_mark_price()
 
-            expected_sl = current_price * (1 - 0.02)
-            expected_tp = current_price * (1 + 0.03)
+            expected_sl = mark_price * (1 - 0.02)
+            expected_tp = mark_price * (1 + 0.03)
 
-            assert call_kwargs["stop_loss"] == pytest.approx(expected_sl, rel=1e-2)
-            assert call_kwargs["take_profit"] == pytest.approx(expected_tp, rel=1e-2)
+            assert call_kwargs["stop_loss"] == pytest.approx(expected_sl, rel=1e-4)
+            assert call_kwargs["take_profit"] == pytest.approx(expected_tp, rel=1e-4)
 
     def test_active_sltp_tracking(self, env, mock_env_trader):
         """Test that active SL/TP levels are tracked after order."""

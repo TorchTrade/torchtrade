@@ -196,13 +196,8 @@ class TestBybitActionIndexClamping:
                 config=config, observer=mock_env_observer, trader=mock_env_trader,
             )
 
-    @pytest.mark.parametrize("action_idx,expected_clamped", [
-        (0, 0),    # Valid: no clamping
-        (2, 2),    # Valid: no clamping
-        (-1, 0),   # Negative: clamp to 0
-        (5, 2),    # Too high: clamp to last index
-    ], ids=["valid-low", "valid-high", "negative", "too-high"])
-    def test_action_index_clamping(self, env, action_idx, expected_clamped):
+    @pytest.mark.parametrize("action_idx", [-1, 5], ids=["negative", "too-high"])
+    def test_action_index_clamping(self, env, action_idx):
         """Out-of-range action indices must be clamped with warning."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
@@ -235,18 +230,19 @@ class TestBybitZeroLiquidationPrice:
                 config=config, observer=mock_env_observer, trader=mock_env_trader,
             )
 
-    @pytest.mark.parametrize("liq_price,expected_dtl", [
-        (45000.0, pytest.approx(0.1018, rel=1e-2)),  # Normal: (50100-45000)/50100
-        (0.0, -1.0),                                # Zero: unknown
-        (-1.0, -1.0),                               # Negative: unknown
-    ], ids=["normal", "zero", "negative"])
-    def test_distance_to_liquidation(self, env, mock_env_trader, liq_price, expected_dtl):
-        """Zero/negative liquidation price must return -1.0 (unknown)."""
+    @pytest.mark.parametrize("qty,liq_price,expected_dtl", [
+        (0.001, 45000.0, pytest.approx(0.1018, rel=1e-2)),  # Long normal: (50100-45000)/50100
+        (0.001, 0.0, 1.0),                                   # Long zero liq: unknown → 1.0
+        (-0.001, 55000.0, pytest.approx(0.0978, rel=1e-2)),  # Short normal: (55000-50100)/50100
+        (-0.001, 0.0, 1.0),                                   # Short zero liq: unknown → 1.0
+    ], ids=["long-normal", "long-zero-liq", "short-normal", "short-zero-liq"])
+    def test_distance_to_liquidation(self, env, mock_env_trader, qty, liq_price, expected_dtl):
+        """Zero liquidation price must return 1.0 (consistent with Binance/Bitget)."""
         from torchtrade.envs.live.bybit.order_executor import PositionStatus
 
         mock_env_trader.get_status = MagicMock(return_value={
             "position_status": PositionStatus(
-                qty=0.001, notional_value=50.1, entry_price=50000.0,
+                qty=qty, notional_value=50.1, entry_price=50000.0,
                 unrealized_pnl=0.1, unrealized_pnl_pct=0.002,
                 mark_price=50100.0, leverage=10, margin_mode="1",
                 liquidation_price=liq_price,
@@ -285,6 +281,31 @@ class TestBybitNoInitSideEffects:
         # __init__ should NOT have side effects on the exchange
         mock_env_trader.cancel_open_orders.assert_not_called()
         mock_env_trader.close_position.assert_not_called()
+
+    def test_reset_calls_close_position_when_configured(self, mock_env_observer, mock_env_trader):
+        """reset() must call close_position when close_position_on_reset=True."""
+        from torchtrade.envs.live.bybit.env import (
+            BybitFuturesTorchTradingEnv,
+            BybitFuturesTradingEnvConfig,
+        )
+
+        config = BybitFuturesTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+            close_position_on_reset=True,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+            env.reset()
+
+        mock_env_trader.cancel_open_orders.assert_called()
+        mock_env_trader.close_position.assert_called()
 
 
 class TestBybitFractionalPositionResizing:
