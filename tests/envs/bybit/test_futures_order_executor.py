@@ -382,3 +382,54 @@ class TestBybitFuturesOrderClass:
         })
         with pytest.raises(RuntimeError, match="UNIFIED or CONTRACT"):
             order_executor.get_account_balance()
+
+    @pytest.mark.parametrize("ret_code,ret_msg,expected", [
+        (0, "OK", True),
+        (110007, "Insufficient balance", False),
+        (10001, "Invalid parameter", False),
+    ], ids=["success", "insufficient-balance", "invalid-param"])
+    def test_trade_validates_retcode(self, order_executor, mock_pybit_client, ret_code, ret_msg, expected):
+        """trade() must return False when API returns non-zero retCode."""
+        mock_pybit_client.place_order = MagicMock(return_value={
+            "retCode": ret_code,
+            "retMsg": ret_msg,
+            "result": {"orderId": "123"} if ret_code == 0 else {},
+        })
+        result = order_executor.trade(side="buy", quantity=0.001)
+        assert result is expected
+
+    def test_close_position_requery_confirms_closed(self, order_executor, mock_pybit_client):
+        """close_position must re-query to confirm when order fails."""
+        # First get_positions call returns open position (for the close attempt)
+        # place_order raises an exception
+        # Second get_positions call returns no position (confirming it's closed)
+        call_count = {"get_positions": 0}
+
+        def mock_get_positions(**kwargs):
+            call_count["get_positions"] += 1
+            if call_count["get_positions"] == 1:
+                return {
+                    "retCode": 0,
+                    "result": {"list": [{
+                        "symbol": "BTCUSDT", "size": "0.001", "side": "Buy",
+                        "avgPrice": "50000.0", "markPrice": "50100.0",
+                        "unrealisedPnl": "0.1", "leverage": "10",
+                        "tradeMode": "1", "liqPrice": "45000.0", "positionValue": "50.1",
+                    }]},
+                }
+            # Re-query: position is now gone
+            return {"retCode": 0, "result": {"list": []}}
+
+        mock_pybit_client.get_positions = MagicMock(side_effect=mock_get_positions)
+        mock_pybit_client.place_order = MagicMock(side_effect=Exception("Order failed"))
+
+        success = order_executor.close_position()
+        assert success is True
+        assert call_count["get_positions"] == 2
+
+    def test_close_position_requery_still_open(self, order_executor, mock_pybit_client):
+        """close_position must return False when re-query shows position still open."""
+        mock_pybit_client.place_order = MagicMock(side_effect=Exception("Order failed"))
+        # get_positions always returns open position
+        success = order_executor.close_position()
+        assert success is False

@@ -219,6 +219,13 @@ class BybitFuturesOrderClass:
 
             response = self.client.place_order(**params)
 
+            # Validate API response
+            ret_code = response.get("retCode")
+            if ret_code is not None and int(ret_code) != 0:
+                ret_msg = response.get("retMsg", "unknown error")
+                logger.error(f"Order rejected (retCode={ret_code}): {ret_msg}")
+                return False
+
             # Extract order ID
             result = response.get("result", {})
             if isinstance(result, dict) and "orderId" in result:
@@ -434,12 +441,16 @@ class BybitFuturesOrderClass:
             return True
 
         except Exception as e:
-            error_msg = str(e)
-            # No position to close is not an error
-            if "position" in error_msg.lower() and ("not" in error_msg.lower() or "no" in error_msg.lower()):
-                logger.debug("No open position to close")
-                return True
-            logger.error(f"Error closing position: {error_msg}")
+            logger.warning(f"close_position order failed: {e}; re-querying position")
+            try:
+                status = self.get_status()
+                pos = status.get("position_status")
+                if pos is None or pos.qty == 0:
+                    logger.debug("Position confirmed closed after failed order")
+                    return True
+            except Exception:
+                pass
+            logger.error(f"Error closing position: {e}")
             return False
 
     def set_leverage(self, leverage: int) -> bool:
