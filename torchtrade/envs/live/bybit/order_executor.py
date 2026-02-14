@@ -125,49 +125,34 @@ class BybitFuturesOrderClass:
 
     def _setup_futures_account(self):
         """Configure futures account settings."""
+        mode = 0 if self.position_mode == PositionMode.ONE_WAY else 3
+        leverage_str = str(self.leverage)
+
         try:
-            # Set position mode
-            try:
-                if self.position_mode == PositionMode.ONE_WAY:
-                    mode = 0  # MergedSingle
-                else:
-                    mode = 3  # BothSides
-                self.client.switch_position_mode(
-                    category="linear",
-                    symbol=self.symbol,
-                    mode=mode,
-                )
-                logger.info(f"Position mode set to {self.position_mode.value}")
-            except Exception as e:
-                error_str = str(e).lower()
-                if "position" in error_str:
-                    logger.warning("Could not set position mode: close open positions before switching modes.")
-                else:
-                    logger.warning(f"Could not set position mode (may already be configured): {e}")
-
-            # Set leverage
-            self.client.set_leverage(
-                category="linear",
-                symbol=self.symbol,
-                buyLeverage=str(self.leverage),
-                sellLeverage=str(self.leverage),
+            self.client.switch_position_mode(
+                category="linear", symbol=self.symbol, mode=mode,
             )
-
-            # Set margin mode
-            try:
-                self.client.switch_margin_mode(
-                    category="linear",
-                    symbol=self.symbol,
-                    tradeMode=self.margin_mode.to_pybit(),
-                    buyLeverage=str(self.leverage),
-                    sellLeverage=str(self.leverage),
-                )
-                logger.info(f"Margin mode set to {self.margin_mode.value}")
-            except Exception as e:
-                logger.warning(f"Could not set margin mode (may already be configured): {e}")
-
+            logger.info(f"Position mode set to {self.position_mode.value}")
         except Exception as e:
-            logger.warning(f"Could not setup futures account (may already be configured): {e}")
+            logger.warning(f"Could not set position mode (may already be configured): {e}")
+
+        try:
+            self.client.set_leverage(
+                category="linear", symbol=self.symbol,
+                buyLeverage=leverage_str, sellLeverage=leverage_str,
+            )
+        except Exception as e:
+            logger.warning(f"Could not set leverage (may already be configured): {e}")
+
+        try:
+            self.client.switch_margin_mode(
+                category="linear", symbol=self.symbol,
+                tradeMode=self.margin_mode.to_pybit(),
+                buyLeverage=leverage_str, sellLeverage=leverage_str,
+            )
+            logger.info(f"Margin mode set to {self.margin_mode.value}")
+        except Exception as e:
+            logger.warning(f"Could not set margin mode (may already be configured): {e}")
 
     def trade(
         self,

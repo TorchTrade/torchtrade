@@ -192,3 +192,61 @@ class TestBybitObservationClass:
 
         assert not np.isnan(data).any(), "Data contains NaN values"
         assert data.shape == (10, 4)
+
+
+class TestBybitUtils:
+    """Tests for Bybit utility functions."""
+
+    @pytest.mark.parametrize("tf,expected", [
+        (TimeFrame(1, TimeFrameUnit.Minute), "1"),
+        (TimeFrame(15, TimeFrameUnit.Minute), "15"),
+        (TimeFrame(1, TimeFrameUnit.Hour), "60"),
+        (TimeFrame(4, TimeFrameUnit.Hour), "240"),
+        (TimeFrame(1, TimeFrameUnit.Day), "D"),
+    ])
+    def test_timeframe_to_bybit(self, tf, expected):
+        """Test TimeFrame to Bybit interval conversion."""
+        from torchtrade.envs.live.bybit.utils import timeframe_to_bybit
+        assert timeframe_to_bybit(tf) == expected
+
+    @pytest.mark.parametrize("interval,expected_value,expected_unit", [
+        ("1", 1, TimeFrameUnit.Minute),
+        ("15", 15, TimeFrameUnit.Minute),
+        ("60", 1, TimeFrameUnit.Hour),
+        ("240", 4, TimeFrameUnit.Hour),
+        ("D", 1, TimeFrameUnit.Day),
+    ])
+    def test_bybit_to_timeframe(self, interval, expected_value, expected_unit):
+        """Test Bybit interval string to TimeFrame conversion."""
+        from torchtrade.envs.live.bybit.utils import bybit_to_timeframe
+        tf = bybit_to_timeframe(interval)
+        assert tf.value == expected_value
+        assert tf.unit == expected_unit
+
+    @pytest.mark.parametrize("bad_tf", [
+        TimeFrame(2, TimeFrameUnit.Minute),
+        TimeFrame(7, TimeFrameUnit.Hour),
+    ])
+    def test_timeframe_to_bybit_invalid(self, bad_tf):
+        """Test that unsupported timeframes raise ValueError."""
+        from torchtrade.envs.live.bybit.utils import timeframe_to_bybit
+        with pytest.raises(ValueError):
+            timeframe_to_bybit(bad_tf)
+
+    def test_bybit_to_timeframe_invalid(self):
+        """Test that invalid interval string raises ValueError."""
+        from torchtrade.envs.live.bybit.utils import bybit_to_timeframe
+        with pytest.raises(ValueError):
+            bybit_to_timeframe("99")
+
+    @pytest.mark.parametrize("tf", [
+        TimeFrame(1, TimeFrameUnit.Minute),
+        TimeFrame(1, TimeFrameUnit.Hour),
+        TimeFrame(1, TimeFrameUnit.Day),
+    ])
+    def test_roundtrip_conversion(self, tf):
+        """Test that TimeFrame -> Bybit -> TimeFrame is identity."""
+        from torchtrade.envs.live.bybit.utils import timeframe_to_bybit, bybit_to_timeframe
+        result = bybit_to_timeframe(timeframe_to_bybit(tf))
+        assert result.value == tf.value
+        assert result.unit == tf.unit

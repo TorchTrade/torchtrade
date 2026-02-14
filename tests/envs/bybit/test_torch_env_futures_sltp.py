@@ -291,3 +291,54 @@ class TestBybitDuplicateActionPrevention:
         mock_trader.close_position.assert_called_once()
         mock_trader.trade.assert_called_once()
         assert mock_trader.trade.call_args.kwargs["side"] == expected_side
+
+
+class TestBybitSLTPCloseAction:
+    """Tests for close action when include_close_action=True."""
+
+    @pytest.fixture
+    def env_with_close(self, mock_env_observer, mock_env_trader):
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_close_action=True,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            return BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+    def test_close_action_in_action_map(self, env_with_close):
+        """Close action must be present in action map at index 1."""
+        assert env_with_close.action_map[0] == (None, None, None)  # HOLD
+        assert env_with_close.action_map[1] == ("close", None, None)  # CLOSE
+
+    def test_close_action_closes_position(self, env_with_close, mock_env_trader):
+        """Close action must close an existing position."""
+        env_with_close.position.current_position = 1
+
+        trade_info = env_with_close._execute_trade_if_needed(("close", None, None))
+
+        assert trade_info["executed"] is True
+        assert trade_info["closed_position"] is True
+        mock_env_trader.close_position.assert_called_once()
+        assert env_with_close.position.current_position == 0
+
+    def test_close_action_no_position(self, env_with_close, mock_env_trader):
+        """Close action with no position should be a no-op."""
+        env_with_close.position.current_position = 0
+
+        trade_info = env_with_close._execute_trade_if_needed(("close", None, None))
+
+        assert trade_info["executed"] is False
+        mock_env_trader.close_position.assert_not_called()

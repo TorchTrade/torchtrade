@@ -202,6 +202,26 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         if side is None:
             return trade_info
 
+        # CLOSE action - close any open position
+        if side == "close":
+            if self.position.current_position == 0:
+                return trade_info
+            try:
+                success = self.trader.close_position()
+            except Exception as e:
+                logger.error(f"Close position failed for {self.config.symbol}: {e}")
+                return trade_info
+            if success:
+                close_side = "sell" if self.position.current_position > 0 else "buy"
+                self.position.current_position = 0
+                self.active_stop_loss = 0.0
+                self.active_take_profit = 0.0
+                trade_info.update({
+                    "executed": True, "side": close_side,
+                    "success": True, "closed_position": True,
+                })
+            return trade_info
+
         # Check if already in same position
         position_map = {"long": 1, "short": -1}
         if side in position_map and self.position.current_position == position_map[side]:
