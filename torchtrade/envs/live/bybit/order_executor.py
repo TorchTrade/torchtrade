@@ -257,6 +257,13 @@ class BybitFuturesOrderClass:
                 symbol=self.symbol,
             )
 
+            ret_code = response.get("retCode")
+            if ret_code is not None and int(ret_code) != 0:
+                ret_msg = response.get("retMsg", "unknown error")
+                logger.error(f"get_positions failed (retCode={ret_code}): {ret_msg}")
+                status["position_status"] = None
+                return status
+
             positions = response.get("result", {}).get("list", [])
 
             # Find non-zero positions (handles hedge mode)

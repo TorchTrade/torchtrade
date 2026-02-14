@@ -124,11 +124,16 @@ def normalize_symbol(symbol: str) -> str:
     Returns:
         Normalized symbol in Bybit format (e.g., "BTCUSDT")
     """
+    symbol = symbol.strip().upper()
+
     # Strip CCXT settlement suffix
     if ":" in symbol:
         symbol = symbol.split(":")[0]
 
     # Remove slash
     symbol = symbol.replace("/", "")
+
+    if not symbol:
+        raise ValueError("Symbol cannot be empty after normalization")
 
     return symbol

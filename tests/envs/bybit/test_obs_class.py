@@ -57,6 +57,7 @@ class TestBybitObservationClass:
         ("BTCUSDT", "BTCUSDT"),
         ("BTC/USDT", "BTCUSDT"),
         ("BTC/USDT:USDT", "BTCUSDT"),
+        (" btcusdt ", "BTCUSDT"),
     ])
     def test_symbol_normalization(self, mock_pybit_client, symbol, expected):
         """Test that various symbol formats are normalized to Bybit format."""
@@ -278,6 +279,13 @@ class TestBybitUtils:
         from torchtrade.envs.live.bybit.utils import bybit_to_timeframe
         with pytest.raises(ValueError):
             bybit_to_timeframe("99")
+
+    @pytest.mark.parametrize("bad_symbol", ["", "  ", "  :  "])
+    def test_normalize_symbol_empty_raises(self, bad_symbol):
+        """Empty or whitespace-only symbols must raise ValueError."""
+        from torchtrade.envs.live.bybit.utils import normalize_symbol
+        with pytest.raises(ValueError, match="empty"):
+            normalize_symbol(bad_symbol)
 
     @pytest.mark.parametrize("tf", [
         TimeFrame(1, TimeFrameUnit.Minute),

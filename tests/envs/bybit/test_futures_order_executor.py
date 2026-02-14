@@ -33,6 +33,8 @@ class TestBybitFuturesOrderClass:
         ("BTCUSDT", "BTCUSDT"),
         ("BTC/USDT", "BTCUSDT"),
         ("BTC/USDT:USDT", "BTCUSDT"),
+        (" btcusdt ", "BTCUSDT"),
+        (" BTC/USDT ", "BTCUSDT"),
     ])
     def test_symbol_normalization(self, mock_pybit_client, symbol, expected):
         """Test that symbol formats are normalized."""
@@ -517,3 +519,13 @@ class TestBybitFuturesOrderClass:
         })
         result = order_executor.cancel_open_orders()
         assert result is expected
+
+    def test_get_status_validates_retcode(self, order_executor, mock_pybit_client):
+        """get_status must return position_status=None on non-zero retCode."""
+        mock_pybit_client.get_positions = MagicMock(return_value={
+            "retCode": 10001,
+            "retMsg": "Invalid parameter",
+            "result": {"list": []},
+        })
+        status = order_executor.get_status()
+        assert status["position_status"] is None
