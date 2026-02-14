@@ -245,11 +245,13 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
-        self.trader.cancel_open_orders()
+        if not self.trader.cancel_open_orders():
+            logger.warning("cancel_open_orders failed during reset; proceeding with potentially stale orders")
         self.history.reset()
 
         if self.config.close_position_on_reset:
-            self.trader.close_position()
+            if not self.trader.close_position():
+                logger.warning("close_position failed during reset; proceeding with residual exposure")
 
         balance = self.trader.get_account_balance()
         self.balance = balance.get("available_balance", 0)

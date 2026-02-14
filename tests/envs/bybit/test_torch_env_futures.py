@@ -320,6 +320,39 @@ class TestBybitNoInitSideEffects:
         mock_env_trader.cancel_open_orders.assert_called()
         mock_env_trader.close_position.assert_called()
 
+    @pytest.mark.parametrize("cancel_ok,close_ok", [
+        (False, True),   # cancel fails
+        (True, False),   # close fails
+        (False, False),  # both fail
+    ], ids=["cancel-fails", "close-fails", "both-fail"])
+    def test_reset_logs_warning_on_cleanup_failure(self, mock_env_observer, mock_env_trader, cancel_ok, close_ok):
+        """reset() must warn but not raise when cleanup calls return False."""
+        from torchtrade.envs.live.bybit.env import (
+            BybitFuturesTorchTradingEnv,
+            BybitFuturesTradingEnvConfig,
+        )
+
+        config = BybitFuturesTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+            close_position_on_reset=True,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+        mock_env_trader.cancel_open_orders = MagicMock(return_value=cancel_ok)
+        mock_env_trader.close_position = MagicMock(return_value=close_ok)
+
+        # Must not raise — reset proceeds despite cleanup failures
+        obs = env.reset()
+        assert obs is not None
+
     def test_close_resilient_when_cancel_raises(self, mock_env_observer, mock_env_trader):
         """close() must not raise even if cancel_open_orders fails."""
         from torchtrade.envs.live.bybit.env import (
