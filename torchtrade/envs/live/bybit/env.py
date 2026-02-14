@@ -1,4 +1,5 @@
 """Bybit Futures TorchRL trading environment with fractional position sizing."""
+import math
 from dataclasses import dataclass
 from typing import List, Optional, Union, Callable, Dict
 import logging
@@ -115,6 +116,12 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()
+        if not isinstance(action_idx, int):
+            if isinstance(action_idx, float) and math.isfinite(action_idx):
+                action_idx = int(action_idx)
+            else:
+                logger.warning(f"Invalid action index {action_idx}, defaulting to 0")
+                action_idx = 0
         if action_idx < 0 or action_idx >= len(self.action_levels):
             logger.warning(f"Action index {action_idx} out of range [0, {len(self.action_levels) - 1}], clamping")
             action_idx = max(0, min(action_idx, len(self.action_levels) - 1))
@@ -261,7 +268,9 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
             return self._create_trade_info(executed=False)
 
         side = "buy" if delta_qty > 0 else "sell"
-        amount = int(abs(delta_qty) / qty_step) * qty_step
+        # Use round() to avoid float artifacts (e.g., 0.003000000000003)
+        step_decimals = len(str(qty_step).rstrip('0').split('.')[-1]) if '.' in str(qty_step) else 0
+        amount = round(int(abs(delta_qty) / qty_step) * qty_step, step_decimals)
 
         if amount < min_qty:
             return self._create_trade_info(executed=False)

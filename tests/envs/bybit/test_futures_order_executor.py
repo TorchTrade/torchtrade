@@ -490,3 +490,30 @@ class TestBybitFuturesOrderClass:
         calls = mock_pybit_client.place_order.call_args_list
         sides_closed = {c[1]["side"] for c in calls}
         assert sides_closed == {"Sell", "Buy"}  # Sell closes long, Buy closes short
+
+    @pytest.mark.parametrize("ret_code,expected", [
+        (0, True),
+        (110007, False),
+    ], ids=["success", "rejected"])
+    def test_close_position_validates_retcode_per_leg(self, order_executor, mock_pybit_client, ret_code, expected):
+        """close_position must validate retCode per close leg and reflect in return value."""
+        mock_pybit_client.place_order = MagicMock(return_value={
+            "retCode": ret_code,
+            "retMsg": "OK" if ret_code == 0 else "Insufficient balance",
+            "result": {},
+        })
+        success = order_executor.close_position()
+        assert success is expected
+
+    @pytest.mark.parametrize("ret_code,expected", [
+        (0, True),
+        (110001, False),
+    ], ids=["success", "rejected"])
+    def test_cancel_open_orders_validates_retcode(self, order_executor, mock_pybit_client, ret_code, expected):
+        """cancel_open_orders must validate retCode from cancel_all_orders response."""
+        mock_pybit_client.cancel_all_orders = MagicMock(return_value={
+            "retCode": ret_code,
+            "retMsg": "OK" if ret_code == 0 else "Order not found",
+        })
+        result = order_executor.cancel_open_orders()
+        assert result is expected

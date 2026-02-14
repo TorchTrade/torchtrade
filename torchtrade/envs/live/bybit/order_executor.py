@@ -424,10 +424,15 @@ class BybitFuturesOrderClass:
     def cancel_open_orders(self) -> bool:
         """Cancel all open orders for the symbol."""
         try:
-            self.client.cancel_all_orders(
+            response = self.client.cancel_all_orders(
                 category="linear",
                 symbol=self.symbol,
             )
+            ret_code = response.get("retCode") if isinstance(response, dict) else None
+            if ret_code is not None and int(ret_code) != 0:
+                ret_msg = response.get("retMsg", "unknown error")
+                logger.error(f"Cancel orders rejected (retCode={ret_code}): {ret_msg}")
+                return False
             logger.debug(f"Cancelled all open orders for {self.symbol}")
             return True
         except Exception as e:
@@ -475,8 +480,14 @@ class BybitFuturesOrderClass:
                 else:
                     params["positionIdx"] = 0
 
-                self.client.place_order(**params)
-                logger.info(f"Position closed: {size} {close_side}")
+                response = self.client.place_order(**params)
+                ret_code = response.get("retCode")
+                if ret_code is not None and int(ret_code) != 0:
+                    ret_msg = response.get("retMsg", "unknown error")
+                    logger.error(f"Close order rejected (retCode={ret_code}): {ret_msg}")
+                    all_closed = False
+                else:
+                    logger.info(f"Position closed: {size} {close_side}")
 
             return all_closed
 

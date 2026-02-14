@@ -417,3 +417,11 @@ class TestBybitSLTPActionIndexClamping:
             action_td = TensorDict({"action": torch.tensor(action_idx)}, batch_size=())
             next_td = env.step(action_td)
             assert "reward" in next_td["next"].keys()
+
+    def test_nan_action_defaults_to_zero(self, env):
+        """NaN action must default to action index 0 (HOLD) without crashing."""
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            action_td = TensorDict({"action": torch.tensor(float("nan"))}, batch_size=())
+            next_td = env.step(action_td)
+            assert "reward" in next_td["next"].keys()

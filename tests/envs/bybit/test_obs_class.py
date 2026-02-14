@@ -193,6 +193,26 @@ class TestBybitObservationClass:
         assert not np.isnan(data).any(), "Data contains NaN values"
         assert data.shape == (10, 4)
 
+    def test_fetch_klines_validates_retcode(self, mock_pybit_client):
+        """_fetch_klines must raise RuntimeError on non-zero retCode."""
+        from torchtrade.envs.live.bybit.observation import BybitObservationClass
+
+        mock_pybit_client.get_kline = MagicMock(return_value={
+            "retCode": 10001,
+            "retMsg": "Invalid parameter",
+            "result": {"list": []},
+        })
+
+        observer = BybitObservationClass(
+            symbol="BTCUSDT",
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=10,
+            client=mock_pybit_client,
+        )
+
+        with pytest.raises(RuntimeError, match="retCode=10001"):
+            observer._fetch_klines("BTCUSDT", "1", 200)
+
     def test_parse_klines_sorts_chronologically(self, mock_pybit_client):
         """Reverse-ordered klines from Bybit must be sorted oldest-first."""
         from torchtrade.envs.live.bybit.observation import BybitObservationClass

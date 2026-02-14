@@ -76,6 +76,10 @@ class BybitObservationClass(BaseFuturesObservationClass):
             interval=interval,
             limit=limit,
         )
+        ret_code = response.get("retCode")
+        if ret_code is not None and int(ret_code) != 0:
+            ret_msg = response.get("retMsg", "unknown error")
+            raise RuntimeError(f"get_kline failed (retCode={ret_code}): {ret_msg}")
         return response["result"]["list"]
 
     def _parse_klines(self, raw_klines: list) -> pd.DataFrame:

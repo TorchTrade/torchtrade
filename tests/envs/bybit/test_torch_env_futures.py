@@ -211,6 +211,14 @@ class TestBybitActionIndexClamping:
             next_td = env.step(action_td)
             assert "reward" in next_td["next"].keys()
 
+    def test_nan_action_defaults_to_zero(self, env):
+        """NaN action must default to action index 0 without crashing."""
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            action_td = TensorDict({"action": torch.tensor(float("nan"))}, batch_size=())
+            next_td = env.step(action_td)
+            assert "reward" in next_td["next"].keys()
+
 
 class TestBybitZeroLiquidationPrice:
     """Test distance_to_liquidation with zero/missing liquidation price."""
@@ -418,3 +426,31 @@ class TestBybitFractionalPositionResizing:
             else:
                 mock_exec.assert_not_called()
                 assert result["executed"] is False
+
+    def test_qty_step_rounding_no_float_artifacts(self, env, mock_env_trader):
+        """Quantity must be rounded to avoid float artifacts like 0.00300000000003."""
+        from torchtrade.envs.live.bybit.order_executor import PositionStatus
+
+        mock_env_trader.get_status = MagicMock(return_value={
+            "position_status": PositionStatus(
+                qty=0.0, notional_value=0, entry_price=0,
+                unrealized_pnl=0, unrealized_pnl_pct=0,
+                mark_price=50000.0, leverage=1, margin_mode="1",
+                liquidation_price=0,
+            )
+        })
+        mock_env_trader.get_mark_price = MagicMock(return_value=50000.0)
+        mock_env_trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001})
+        mock_env_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0, "available_balance": 900.0,
+            "total_unrealized_profit": 0.0, "total_margin_balance": 1000.0,
+        })
+
+        env.reset()
+        result = env._execute_fractional_action(1.0)
+        if result["executed"]:
+            call_kwargs = mock_env_trader.trade.call_args[1]
+            qty = call_kwargs["quantity"]
+            # Verify no float artifacts (e.g., 0.00300000000003)
+            qty_str = str(qty)
+            assert len(qty_str.split('.')[-1]) <= 3, f"Float artifact in quantity: {qty}"
