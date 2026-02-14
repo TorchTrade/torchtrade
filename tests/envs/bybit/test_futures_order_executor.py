@@ -455,6 +455,18 @@ class TestBybitFuturesOrderClass:
         assert lot_size["min_qty"] == 0.001
         assert lot_size["qty_step"] == 0.001
 
+    def test_get_lot_size_validates_retcode(self, order_executor, mock_pybit_client):
+        """get_lot_size must fall back to defaults on non-zero retCode."""
+        order_executor._lot_size_cache = None
+        mock_pybit_client.get_instruments_info = MagicMock(return_value={
+            "retCode": 10001,
+            "retMsg": "Invalid parameter",
+            "result": {"list": []},
+        })
+        lot_size = order_executor.get_lot_size()
+        assert lot_size["min_qty"] == 0.001
+        assert lot_size["qty_step"] == 0.001
+
     def test_close_position_hedge_both_sides(self, mock_pybit_client):
         """close_position in hedge mode must close both long and short sides."""
         from torchtrade.envs.live.bybit.order_executor import (

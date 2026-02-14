@@ -400,6 +400,12 @@ class BybitFuturesOrderClass:
             response = self.client.get_instruments_info(
                 category="linear", symbol=self.symbol,
             )
+            ret_code = response.get("retCode")
+            if ret_code is not None and int(ret_code) != 0:
+                ret_msg = response.get("retMsg", "unknown error")
+                logger.warning(f"get_instruments_info failed (retCode={ret_code}): {ret_msg}, using defaults")
+                self._lot_size_cache = {"min_qty": 0.001, "qty_step": 0.001}
+                return self._lot_size_cache
             instruments = response.get("result", {}).get("list", [])
             if instruments:
                 lot_filter = instruments[0].get("lotSizeFilter", {})
