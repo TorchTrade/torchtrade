@@ -133,6 +133,9 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()
+        if action_idx < 0 or action_idx >= len(self.action_map):
+            logger.warning(f"Action index {action_idx} out of range [0, {len(self.action_map) - 1}], clamping")
+            action_idx = max(0, min(action_idx, len(self.action_map) - 1))
         action_tuple = self.action_map[action_idx]
 
         position_closed = self._check_position_closed()
@@ -227,9 +230,8 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         if side in position_map and self.position.current_position == position_map[side]:
             return trade_info
 
-        # Get current price
-        obs = self.observer.get_observations(return_base_ohlc=True)
-        current_price = obs["base_features"][-1, 3]  # Close price
+        # Get current mark price (more accurate than candle close for bracket orders)
+        current_price = self.trader.get_mark_price()
 
         # Close opposite position if switching directions
         # (we already returned above if same direction, so any existing position is opposite)

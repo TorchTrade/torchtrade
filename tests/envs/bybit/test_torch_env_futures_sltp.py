@@ -81,7 +81,7 @@ class TestBybitFuturesSLTPTorchTradingEnv:
     def test_observation_spec(self, env):
         """Test observation spec contains expected keys with correct shapes."""
         assert "account_state" in env.observation_spec.keys()
-        assert "market_data_1m_10" in env.observation_spec.keys()
+        assert "market_data_1Minute_10" in env.observation_spec.keys()
         assert env.observation_spec["account_state"].shape == (6,)
 
     def test_reset(self, env, mock_env_trader):
@@ -89,7 +89,7 @@ class TestBybitFuturesSLTPTorchTradingEnv:
         td = env.reset()
 
         assert "account_state" in td.keys()
-        assert "market_data_1m_10" in td.keys()
+        assert "market_data_1Minute_10" in td.keys()
         assert td["account_state"].shape == (6,)
         assert env.active_stop_loss == 0.0
         assert env.active_take_profit == 0.0
@@ -342,3 +342,78 @@ class TestBybitSLTPCloseAction:
 
         assert trade_info["executed"] is False
         mock_env_trader.close_position.assert_not_called()
+
+
+class TestBybitSLTPMarkPrice:
+    """Test that SLTP bracket orders use mark price instead of candle close."""
+
+    @pytest.fixture
+    def env(self, mock_env_observer, mock_env_trader):
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            return BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+    def test_bracket_uses_mark_price(self, env, mock_env_trader):
+        """Bracket order SL/TP must be calculated from mark price, not candle close."""
+        mock_env_trader.get_mark_price = MagicMock(return_value=51000.0)
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            # Execute a long action with SL/TP
+            env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+            call_kwargs = mock_env_trader.trade.call_args[1]
+            # SL/TP should be based on mark price (51000), not candle close (50050)
+            expected_sl = 51000.0 * (1 - 0.02)
+            expected_tp = 51000.0 * (1 + 0.03)
+            assert call_kwargs["stop_loss"] == pytest.approx(expected_sl, rel=1e-4)
+            assert call_kwargs["take_profit"] == pytest.approx(expected_tp, rel=1e-4)
+
+
+class TestBybitSLTPActionIndexClamping:
+    """Test SLTP action index clamping."""
+
+    @pytest.fixture
+    def env(self, mock_env_observer, mock_env_trader):
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            return BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+    @pytest.mark.parametrize("action_idx", [-1, 99], ids=["negative", "too-high"])
+    def test_action_index_clamping(self, env, action_idx):
+        """Out-of-range SLTP action indices must be clamped without error."""
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            action_td = TensorDict({"action": torch.tensor(action_idx)}, batch_size=())
+            next_td = env.step(action_td)
+            assert "reward" in next_td["next"].keys()

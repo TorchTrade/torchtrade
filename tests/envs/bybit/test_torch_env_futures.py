@@ -16,12 +16,12 @@ class TestBybitFuturesTorchTradingEnv:
     def mock_observer(self):
         """Create a mock observer with two timeframes."""
         observer = MagicMock()
-        observer.get_keys = MagicMock(return_value=["1m_10", "5m_10"])
+        observer.get_keys = MagicMock(return_value=["1Minute_10", "5Minute_10"])
 
         def mock_observations(return_base_ohlc=False):
             obs = {
-                "1m_10": np.random.randn(10, 4).astype(np.float32),
-                "5m_10": np.random.randn(10, 4).astype(np.float32),
+                "1Minute_10": np.random.randn(10, 4).astype(np.float32),
+                "5Minute_10": np.random.randn(10, 4).astype(np.float32),
             }
             if return_base_ohlc:
                 obs["base_features"] = np.random.randn(10, 4).astype(np.float32)
@@ -84,8 +84,8 @@ class TestBybitFuturesTorchTradingEnv:
         """Test observation spec contains expected keys with correct shapes."""
         obs_spec = env.observation_spec
         assert "account_state" in obs_spec.keys()
-        assert "market_data_1m_10" in obs_spec.keys()
-        assert "market_data_5m_10" in obs_spec.keys()
+        assert "market_data_1Minute_10" in obs_spec.keys()
+        assert "market_data_5Minute_10" in obs_spec.keys()
         assert obs_spec["account_state"].shape == (6,)
 
     def test_reset(self, env, mock_trader):
@@ -93,10 +93,10 @@ class TestBybitFuturesTorchTradingEnv:
         td = env.reset()
 
         assert "account_state" in td.keys()
-        assert "market_data_1m_10" in td.keys()
-        assert "market_data_5m_10" in td.keys()
+        assert "market_data_1Minute_10" in td.keys()
+        assert "market_data_5Minute_10" in td.keys()
         assert td["account_state"].shape == (6,)
-        assert td["market_data_1m_10"].shape == (10, 4)
+        assert td["market_data_1Minute_10"].shape == (10, 4)
         mock_trader.cancel_open_orders.assert_called()
 
     def test_step_hold_action(self, env, mock_trader):
@@ -170,6 +170,121 @@ class TestBybitFuturesTorchTradingEnv:
         assert isinstance(config.time_frames, list)
         assert isinstance(config.window_sizes, list)
         assert all(isinstance(tf, TimeFrame) for tf in config.time_frames)
+
+
+class TestBybitActionIndexClamping:
+    """Tests for action index out-of-range clamping."""
+
+    @pytest.fixture
+    def env(self, mock_env_observer, mock_env_trader):
+        from torchtrade.envs.live.bybit.env import (
+            BybitFuturesTorchTradingEnv,
+            BybitFuturesTradingEnvConfig,
+        )
+
+        config = BybitFuturesTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+            action_levels=[-1.0, 0.0, 1.0],
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            return BybitFuturesTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+    @pytest.mark.parametrize("action_idx,expected_clamped", [
+        (0, 0),    # Valid: no clamping
+        (2, 2),    # Valid: no clamping
+        (-1, 0),   # Negative: clamp to 0
+        (5, 2),    # Too high: clamp to last index
+    ], ids=["valid-low", "valid-high", "negative", "too-high"])
+    def test_action_index_clamping(self, env, action_idx, expected_clamped):
+        """Out-of-range action indices must be clamped with warning."""
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            action_td = TensorDict({"action": torch.tensor(action_idx)}, batch_size=())
+            # Should not raise IndexError
+            next_td = env.step(action_td)
+            assert "reward" in next_td["next"].keys()
+
+
+class TestBybitZeroLiquidationPrice:
+    """Test distance_to_liquidation with zero/missing liquidation price."""
+
+    @pytest.fixture
+    def env(self, mock_env_observer, mock_env_trader):
+        from torchtrade.envs.live.bybit.env import (
+            BybitFuturesTorchTradingEnv,
+            BybitFuturesTradingEnvConfig,
+        )
+
+        config = BybitFuturesTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            return BybitFuturesTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+    @pytest.mark.parametrize("liq_price,expected_dtl", [
+        (45000.0, pytest.approx(0.1018, rel=1e-2)),  # Normal: (50100-45000)/50100
+        (0.0, -1.0),                                # Zero: unknown
+        (-1.0, -1.0),                               # Negative: unknown
+    ], ids=["normal", "zero", "negative"])
+    def test_distance_to_liquidation(self, env, mock_env_trader, liq_price, expected_dtl):
+        """Zero/negative liquidation price must return -1.0 (unknown)."""
+        from torchtrade.envs.live.bybit.order_executor import PositionStatus
+
+        mock_env_trader.get_status = MagicMock(return_value={
+            "position_status": PositionStatus(
+                qty=0.001, notional_value=50.1, entry_price=50000.0,
+                unrealized_pnl=0.1, unrealized_pnl_pct=0.002,
+                mark_price=50100.0, leverage=10, margin_mode="1",
+                liquidation_price=liq_price,
+            )
+        })
+
+        td = env._get_observation()
+        distance_to_liq = td["account_state"][5].item()
+        assert distance_to_liq == expected_dtl
+
+
+class TestBybitNoInitSideEffects:
+    """Test that __init__ does not call cancel_open_orders or close_position."""
+
+    def test_init_does_not_cancel_orders(self, mock_env_observer, mock_env_trader):
+        """Environment construction must not cancel orders or close positions."""
+        from torchtrade.envs.live.bybit.env import (
+            BybitFuturesTorchTradingEnv,
+            BybitFuturesTradingEnvConfig,
+        )
+
+        config = BybitFuturesTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+            close_position_on_reset=True,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            BybitFuturesTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+        # __init__ should NOT have side effects on the exchange
+        mock_env_trader.cancel_open_orders.assert_not_called()
+        mock_env_trader.close_position.assert_not_called()
 
 
 class TestBybitFractionalPositionResizing:

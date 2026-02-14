@@ -115,6 +115,9 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()
+        if action_idx < 0 or action_idx >= len(self.action_levels):
+            logger.warning(f"Action index {action_idx} out of range [0, {len(self.action_levels) - 1}], clamping")
+            action_idx = max(0, min(action_idx, len(self.action_levels) - 1))
         desired_action = self.action_levels[action_idx]
 
         trade_info = self._execute_trade_if_needed(desired_action)

@@ -179,6 +179,9 @@ class BybitFuturesOrderClass:
         Returns:
             bool: True if order was submitted successfully
         """
+        if order_type.lower() == "limit" and limit_price is None:
+            raise ValueError("limit_price is required for limit orders")
+
         try:
             side_upper = side.capitalize()  # Bybit uses "Buy" / "Sell"
             order_type_title = order_type.capitalize()  # "Market" / "Limit"
@@ -248,34 +251,38 @@ class BybitFuturesOrderClass:
 
             positions = response.get("result", {}).get("list", [])
 
-            if positions:
-                pos = positions[0]
+            # Find first non-zero position (handles hedge mode)
+            pos = None
+            for p in positions:
+                if float(p.get("size", 0)) != 0:
+                    if pos is not None:
+                        logger.warning("Multiple open positions detected (hedge mode); using first non-zero")
+                        break
+                    pos = p
+
+            if pos is not None:
                 size = float(pos.get("size", 0))
+                side = pos.get("side", "Buy")
+                qty = size if side == "Buy" else -size
 
-                if size != 0:
-                    side = pos.get("side", "Buy")
-                    qty = size if side == "Buy" else -size
+                entry_price = float(pos.get("avgPrice", 0))
+                mark_price = float(pos.get("markPrice", entry_price))
+                unrealized_pnl = float(pos.get("unrealisedPnl", 0))
+                unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(qty, entry_price, mark_price)
 
-                    entry_price = float(pos.get("avgPrice", 0))
-                    mark_price = float(pos.get("markPrice", entry_price))
-                    unrealized_pnl = float(pos.get("unrealisedPnl", 0))
-                    unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(qty, entry_price, mark_price)
+                liq_price = float(pos.get("liqPrice") or "0")
 
-                    liq_price = float(pos.get("liqPrice") or "0")
-
-                    status["position_status"] = PositionStatus(
-                        qty=qty,
-                        notional_value=float(pos.get("positionValue", abs(size * mark_price))),
-                        entry_price=entry_price,
-                        unrealized_pnl=unrealized_pnl,
-                        unrealized_pnl_pct=unrealized_pnl_pct,
-                        mark_price=mark_price,
-                        leverage=int(float(pos.get("leverage", self.leverage))),
-                        margin_mode=pos.get("tradeMode", str(self.margin_mode.to_pybit())),
-                        liquidation_price=liq_price,
-                    )
-                else:
-                    status["position_status"] = None
+                status["position_status"] = PositionStatus(
+                    qty=qty,
+                    notional_value=float(pos.get("positionValue", abs(size * mark_price))),
+                    entry_price=entry_price,
+                    unrealized_pnl=unrealized_pnl,
+                    unrealized_pnl_pct=unrealized_pnl_pct,
+                    mark_price=mark_price,
+                    leverage=int(float(pos.get("leverage", self.leverage))),
+                    margin_mode=pos.get("tradeMode", str(self.margin_mode.to_pybit())),
+                    liquidation_price=liq_price,
+                )
             else:
                 status["position_status"] = None
 
@@ -296,11 +303,13 @@ class BybitFuturesOrderClass:
             RuntimeError: If balance cannot be retrieved
         """
         try:
-            response = self.client.get_wallet_balance(accountType="UNIFIED")
-
-            accounts = response.get("result", {}).get("list", [])
-            if not accounts:
-                raise RuntimeError("No account data returned")
+            for account_type in ("UNIFIED", "CONTRACT"):
+                response = self.client.get_wallet_balance(accountType=account_type)
+                accounts = response.get("result", {}).get("list", [])
+                if accounts:
+                    break
+            else:
+                raise RuntimeError("No account data returned from UNIFIED or CONTRACT account types")
 
             account = accounts[0]
             total_equity = float(account.get("totalEquity", 0))

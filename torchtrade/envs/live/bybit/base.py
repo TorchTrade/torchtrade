@@ -79,11 +79,6 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.execute_on_value = config.execute_on.value
         self.execute_on_unit = str(config.execute_on.unit)
 
-        # Reset settings
-        self.trader.cancel_open_orders()
-        if config.close_position_on_reset:
-            self.trader.close_position()
-
         # Get initial portfolio value
         balance = self.trader.get_account_balance()
         self.initial_portfolio_value = balance.get("total_wallet_balance", 0)
@@ -211,6 +206,8 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         if position_size == 0 or current_price == 0:
             distance_to_liquidation = 1.0
+        elif liquidation_price <= 0:
+            distance_to_liquidation = -1.0  # Unknown liquidation price
         else:
             if position_size > 0:
                 distance_to_liquidation = (current_price - liquidation_price) / current_price

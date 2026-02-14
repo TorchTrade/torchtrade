@@ -106,10 +106,10 @@ def mock_pybit_client():
 def mock_env_observer():
     """Create a mock observer for env tests (single timeframe)."""
     observer = MagicMock()
-    observer.get_keys = MagicMock(return_value=["1m_10"])
+    observer.get_keys = MagicMock(return_value=["1Minute_10"])
 
     def mock_observations(return_base_ohlc=False):
-        obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
+        obs = {"1Minute_10": np.random.randn(10, 4).astype(np.float32)}
         if return_base_ohlc:
             obs["base_features"] = np.array(
                 [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32

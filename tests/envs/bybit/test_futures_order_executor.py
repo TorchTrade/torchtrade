@@ -313,3 +313,80 @@ class TestBybitFuturesOrderClass:
         })
         with pytest.raises(RuntimeError):
             order_executor.get_mark_price()
+
+    def test_limit_order_without_price_raises(self, order_executor):
+        """Limit order without limit_price must raise ValueError."""
+        with pytest.raises(ValueError, match="limit_price is required"):
+            order_executor.trade(side="buy", quantity=0.001, order_type="limit")
+
+    def test_limit_order_with_price_succeeds(self, order_executor, mock_pybit_client):
+        """Limit order with limit_price must succeed."""
+        success = order_executor.trade(
+            side="buy", quantity=0.001, order_type="limit", limit_price=50000.0,
+        )
+        assert success is True
+        call_kwargs = mock_pybit_client.place_order.call_args[1]
+        assert call_kwargs["price"] == "50000.0"
+        assert call_kwargs["orderType"] == "Limit"
+
+    def test_get_status_hedge_mode_selects_nonzero(self, order_executor, mock_pybit_client):
+        """get_status must select first non-zero position in hedge mode."""
+        mock_pybit_client.get_positions = MagicMock(return_value={
+            "retCode": 0,
+            "result": {"list": [
+                {"symbol": "BTCUSDT", "size": "0", "side": "Buy"},
+                {
+                    "symbol": "BTCUSDT", "size": "0.002", "side": "Sell",
+                    "avgPrice": "50000.0", "markPrice": "49800.0",
+                    "unrealisedPnl": "0.4", "leverage": "10",
+                    "tradeMode": "1", "liqPrice": "55000.0", "positionValue": "99.6",
+                },
+            ]},
+        })
+        status = order_executor.get_status()
+        assert status["position_status"] is not None
+        assert status["position_status"].qty < 0  # Short
+
+    def test_get_status_empty_positions(self, order_executor, mock_pybit_client):
+        """get_status with all zero-size positions returns None."""
+        mock_pybit_client.get_positions = MagicMock(return_value={
+            "retCode": 0,
+            "result": {"list": [
+                {"symbol": "BTCUSDT", "size": "0", "side": "Buy"},
+                {"symbol": "BTCUSDT", "size": "0", "side": "Sell"},
+            ]},
+        })
+        status = order_executor.get_status()
+        assert status["position_status"] is None
+
+    def test_account_balance_fallback_to_contract(self, order_executor, mock_pybit_client):
+        """get_account_balance falls back to CONTRACT when UNIFIED returns empty."""
+        call_count = 0
+
+        def mock_wallet_balance(accountType):
+            nonlocal call_count
+            call_count += 1
+            if accountType == "UNIFIED":
+                return {"retCode": 0, "result": {"list": []}}
+            return {
+                "retCode": 0,
+                "result": {"list": [{
+                    "totalEquity": "500.0",
+                    "totalAvailableBalance": "400.0",
+                    "totalPerpUPL": "0.0",
+                    "totalMarginBalance": "500.0",
+                }]},
+            }
+
+        mock_pybit_client.get_wallet_balance = MagicMock(side_effect=mock_wallet_balance)
+        balance = order_executor.get_account_balance()
+        assert balance["total_wallet_balance"] == 500.0
+        assert call_count == 2  # Called UNIFIED then CONTRACT
+
+    def test_account_balance_both_empty_raises(self, order_executor, mock_pybit_client):
+        """get_account_balance raises when both UNIFIED and CONTRACT are empty."""
+        mock_pybit_client.get_wallet_balance = MagicMock(return_value={
+            "retCode": 0, "result": {"list": []},
+        })
+        with pytest.raises(RuntimeError, match="UNIFIED or CONTRACT"):
+            order_executor.get_account_balance()
