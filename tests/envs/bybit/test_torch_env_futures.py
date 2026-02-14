@@ -307,6 +307,30 @@ class TestBybitNoInitSideEffects:
         mock_env_trader.cancel_open_orders.assert_called()
         mock_env_trader.close_position.assert_called()
 
+    def test_close_resilient_when_cancel_raises(self, mock_env_observer, mock_env_trader):
+        """close() must not raise even if cancel_open_orders fails."""
+        from torchtrade.envs.live.bybit.env import (
+            BybitFuturesTorchTradingEnv,
+            BybitFuturesTradingEnvConfig,
+        )
+
+        config = BybitFuturesTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+        mock_env_trader.cancel_open_orders = MagicMock(side_effect=Exception("API down"))
+        # close() must not propagate the exception
+        env.close()
+
 
 class TestBybitFractionalPositionResizing:
     """Tests for fractional position resizing."""

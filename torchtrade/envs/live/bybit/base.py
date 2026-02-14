@@ -296,4 +296,7 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
         except Exception:
             pass
 
-        self.trader.cancel_open_orders()
+        try:
+            self.trader.cancel_open_orders()
+        except Exception as e:
+            logger.error(f"Failed to cancel open orders on close(): {e}")

@@ -230,7 +230,6 @@ config = BybitFuturesTradingEnvConfig(
     window_sizes=[6, 32],
     execute_on="1m",
     leverage=5,
-    quantity_per_trade=0.002,
     margin_mode=MarginMode.ISOLATED,     # ISOLATED (safer) or CROSSED
     position_mode=PositionMode.ONE_WAY,  # ONE_WAY (simpler) or HEDGE
     demo=True,  # Testnet (recommended!)
