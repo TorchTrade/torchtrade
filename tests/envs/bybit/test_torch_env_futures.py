@@ -405,27 +405,22 @@ class TestBybitFractionalPositionResizing:
                 config=config, observer=mock_env_observer, trader=mock_env_trader,
             )
 
-    @pytest.mark.parametrize("first_action,second_action,should_execute", [
-        (0.5, 1.0, True),    # Scale up long
-        (-0.5, -1.0, True),  # Scale up short
-        (1.0, 0.5, True),    # Scale down long
-        (1.0, 1.0, False),   # Same level: skip
-        (0.0, 0.0, False),   # Both flat: skip
+    @pytest.mark.parametrize("first_action,second_action", [
+        (0.5, 1.0),    # Scale up long
+        (-0.5, -1.0),  # Scale up short
+        (1.0, 0.5),    # Scale down long
+        (1.0, 1.0),    # Same level: delegates to fractional (exchange-based)
+        (0.0, 0.0),    # Both flat: delegates to fractional (exchange-based)
     ])
-    def test_fractional_resizing_executes(self, env, first_action, second_action, should_execute):
-        """Changing action level within same direction must trigger trade."""
-        trade_executed = {"executed": True, "amount": 0.01, "side": "buy",
-                         "success": True, "closed_position": False}
+    def test_fractional_resizing_always_delegates(self, env, first_action, second_action):
+        """_execute_trade_if_needed always delegates to exchange-based fractional sizing."""
+        trade_result = {"executed": True, "amount": 0.01, "side": "buy",
+                        "success": True, "closed_position": False}
 
-        with patch.object(env, '_execute_fractional_action', return_value=trade_executed) as mock_exec:
+        with patch.object(env, '_execute_fractional_action', return_value=trade_result) as mock_exec:
             env.position.current_action_level = first_action
-            result = env._execute_trade_if_needed(second_action)
-
-            if should_execute:
-                mock_exec.assert_called_once_with(second_action)
-            else:
-                mock_exec.assert_not_called()
-                assert result["executed"] is False
+            env._execute_trade_if_needed(second_action)
+            mock_exec.assert_called_once_with(second_action)
 
     def test_qty_step_rounding_no_float_artifacts(self, env, mock_env_trader):
         """Quantity must be rounded to avoid float artifacts like 0.00300000000003."""
