@@ -876,6 +876,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bybit-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bybit Environments
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Bybit Environments">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bybitfuturestorchtradingenv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BybitFuturesTorchTradingEnv
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bybitfuturessltptorchtradingenv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BybitFuturesSLTPTorchTradingEnv
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#api-key-setup" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1464,6 +1503,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bybit-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bybit Environments
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Bybit Environments">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bybitfuturestorchtradingenv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BybitFuturesTorchTradingEnv
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bybitfuturessltptorchtradingenv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BybitFuturesSLTPTorchTradingEnv
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#api-key-setup" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1580,7 +1658,7 @@
 </tr>
 <tr>
 <td>SequentialTradingEnv (futures, <code>leverage&gt;1</code>)</td>
-<td>BinanceFutures / BitgetFuturesTorchTradingEnv</td>
+<td>BinanceFutures / BitgetFutures / BybitFuturesTorchTradingEnv</td>
 </tr>
 <tr>
 <td>SequentialTradingEnvSLTP (spot)</td>
@@ -1588,7 +1666,7 @@
 </tr>
 <tr>
 <td>SequentialTradingEnvSLTP (futures)</td>
-<td>BinanceFuturesSLTP / BitgetFuturesSLTPTorchTradingEnv</td>
+<td>BinanceFuturesSLTP / BitgetFuturesSLTP / BybitFuturesSLTPTorchTradingEnv</td>
 </tr>
 <tr>
 <td>OneStepTradingEnv (spot)</td>
@@ -1596,7 +1674,7 @@
 </tr>
 <tr>
 <td>OneStepTradingEnv (futures)</td>
-<td>BinanceFuturesSLTP / BitgetFuturesSLTPTorchTradingEnv</td>
+<td>BinanceFuturesSLTP / BitgetFuturesSLTP / BybitFuturesSLTPTorchTradingEnv</td>
 </tr>
 </tbody>
 </table>
@@ -1605,6 +1683,7 @@
 <li><strong><a href="https://alpaca.markets/">Alpaca</a></strong> - Commission-free US stocks and crypto with paper trading</li>
 <li><strong><a href="https://accounts.binance.com/register?ref=25015935">Binance</a></strong> - Cryptocurrency futures with high leverage and testnet</li>
 <li><strong><a href="https://www.bitget.com/">Bitget</a></strong> - Cryptocurrency futures with competitive fees and testnet</li>
+<li><strong><a href="https://www.bybit.com/">Bybit</a></strong> - Cryptocurrency derivatives with native bracket orders and testnet</li>
 </ul>
 <h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
 <table>
@@ -1667,6 +1746,22 @@
 <td>Yes</td>
 <td>Yes</td>
 </tr>
+<tr>
+<td><strong>BybitFuturesTorchTradingEnv</strong></td>
+<td>Bybit</td>
+<td>Crypto</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>-</td>
+</tr>
+<tr>
+<td><strong>BybitFuturesSLTPTorchTradingEnv</strong></td>
+<td>Bybit</td>
+<td>Crypto</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
 </tbody>
 </table>
 <h2 id="fractional-position-sizing">Fractional Position Sizing<a class="headerlink" href="#fractional-position-sizing" title="Permanent link">&para;</a></h2>
@@ -1677,7 +1772,7 @@
 <p>Always use canonical timeframe forms:</p>
 <ul>
 <li>Alpaca: <code>["1Min", "5Min", "15Min", "1Hour", "1Day"]</code></li>
-<li>Binance/Bitget: <code>["1m", "5m", "15m", "1h", "1d"]</code></li>
+<li>Binance/Bitget/Bybit: <code>["1m", "5m", "15m", "1h", "1d"]</code></li>
 <li><strong>Wrong</strong>: <code>["60min"]</code>, <code>["60m"]</code>, <code>["24hour"]</code> — these create different observation keys and break model compatibility.</li>
 </ul>
 </div>
@@ -1817,24 +1912,90 @@
 </span><span id="__span-5-30"><a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a><span class="c1"># Action space: HOLD + 2×(3 SL × 3 TP) = 19 actions (long + short)</span>
 </span></code></pre></div>
 <hr />
+<h2 id="bybit-environments">Bybit Environments<a class="headerlink" href="#bybit-environments" title="Permanent link">&para;</a></h2>
+<p><a href="https://www.bybit.com/">Bybit</a> provides cryptocurrency derivatives trading with native bracket order support (stop-loss/take-profit set directly on orders). TorchTrade uses <a href="https://github.com/bybit-exchange/pybit">pybit</a>, Bybit's official Python SDK, for direct v5 API access.</p>
+<div class="admonition note">
+<p class="admonition-title">Symbol Format</p>
+<p>Bybit uses simple concatenated symbols: <code>"BTCUSDT"</code> (not <code>"BTC/USDT:USDT"</code>).</p>
+</div>
+<h3 id="bybitfuturestorchtradingenv">BybitFuturesTorchTradingEnv<a class="headerlink" href="#bybitfuturestorchtradingenv" title="Permanent link">&para;</a></h3>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.bybit</span><span class="w"> </span><span class="kn">import</span> <span class="n">BybitFuturesTorchTradingEnv</span><span class="p">,</span> <span class="n">BybitFuturesTradingEnvConfig</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.bybit</span><span class="w"> </span><span class="kn">import</span> <span class="n">MarginMode</span><span class="p">,</span> <span class="n">PositionMode</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">dotenv</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_dotenv</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">load_dotenv</span><span class="p">()</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">config</span> <span class="o">=</span> <span class="n">BybitFuturesTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTCUSDT&quot;</span><span class="p">,</span>
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;5m&quot;</span><span class="p">,</span> <span class="s2">&quot;15m&quot;</span><span class="p">],</span>
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">6</span><span class="p">,</span> <span class="mi">32</span><span class="p">],</span>
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="s2">&quot;1m&quot;</span><span class="p">,</span>
+</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>    <span class="n">leverage</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>    <span class="n">margin_mode</span><span class="o">=</span><span class="n">MarginMode</span><span class="o">.</span><span class="n">ISOLATED</span><span class="p">,</span>     <span class="c1"># ISOLATED (safer) or CROSSED</span>
+</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>    <span class="n">position_mode</span><span class="o">=</span><span class="n">PositionMode</span><span class="o">.</span><span class="n">ONE_WAY</span><span class="p">,</span>  <span class="c1"># ONE_WAY (simpler) or HEDGE</span>
+</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>    <span class="n">demo</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>  <span class="c1"># Testnet (recommended!)</span>
+</span><span id="__span-6-17"><a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a><span class="p">)</span>
+</span><span id="__span-6-18"><a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>
+</span><span id="__span-6-19"><a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a><span class="n">env</span> <span class="o">=</span> <span class="n">BybitFuturesTorchTradingEnv</span><span class="p">(</span>
+</span><span id="__span-6-20"><a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>    <span class="n">config</span><span class="p">,</span>
+</span><span id="__span-6-21"><a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>    <span class="n">api_key</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BYBIT_API_KEY&quot;</span><span class="p">),</span>
+</span><span id="__span-6-22"><a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>    <span class="n">api_secret</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BYBIT_API_SECRET&quot;</span><span class="p">),</span>
+</span><span id="__span-6-23"><a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a><span class="p">)</span>
+</span></code></pre></div>
+<h3 id="bybitfuturessltptorchtradingenv">BybitFuturesSLTPTorchTradingEnv<a class="headerlink" href="#bybitfuturessltptorchtradingenv" title="Permanent link">&para;</a></h3>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.bybit</span><span class="w"> </span><span class="kn">import</span> <span class="n">BybitFuturesSLTPTorchTradingEnv</span><span class="p">,</span> <span class="n">BybitFuturesSLTPTradingEnvConfig</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.bybit</span><span class="w"> </span><span class="kn">import</span> <span class="n">MarginMode</span><span class="p">,</span> <span class="n">PositionMode</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">dotenv</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_dotenv</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">load_dotenv</span><span class="p">()</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">config</span> <span class="o">=</span> <span class="n">BybitFuturesSLTPTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTCUSDT&quot;</span><span class="p">,</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;5m&quot;</span><span class="p">,</span> <span class="s2">&quot;15m&quot;</span><span class="p">],</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">6</span><span class="p">,</span> <span class="mi">32</span><span class="p">],</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="s2">&quot;1m&quot;</span><span class="p">,</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>    <span class="n">stoploss_levels</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mf">0.025</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.05</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.1</span><span class="p">),</span>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>    <span class="n">takeprofit_levels</span><span class="o">=</span><span class="p">(</span><span class="mf">0.05</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">),</span>
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>    <span class="n">include_hold_action</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>    <span class="n">leverage</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>    <span class="n">quantity_per_trade</span><span class="o">=</span><span class="mf">0.002</span><span class="p">,</span>
+</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>    <span class="n">margin_mode</span><span class="o">=</span><span class="n">MarginMode</span><span class="o">.</span><span class="n">ISOLATED</span><span class="p">,</span>
+</span><span id="__span-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>    <span class="n">position_mode</span><span class="o">=</span><span class="n">PositionMode</span><span class="o">.</span><span class="n">ONE_WAY</span><span class="p">,</span>
+</span><span id="__span-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>    <span class="n">demo</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-7-21"><a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="p">)</span>
+</span><span id="__span-7-22"><a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>
+</span><span id="__span-7-23"><a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a><span class="n">env</span> <span class="o">=</span> <span class="n">BybitFuturesSLTPTorchTradingEnv</span><span class="p">(</span>
+</span><span id="__span-7-24"><a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a>    <span class="n">config</span><span class="p">,</span>
+</span><span id="__span-7-25"><a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a>    <span class="n">api_key</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BYBIT_API_KEY&quot;</span><span class="p">),</span>
+</span><span id="__span-7-26"><a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a>    <span class="n">api_secret</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BYBIT_API_SECRET&quot;</span><span class="p">),</span>
+</span><span id="__span-7-27"><a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a><span class="p">)</span>
+</span><span id="__span-7-28"><a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a><span class="c1"># Action space: HOLD + 2×(3 SL × 3 TP) = 19 actions (long + short)</span>
+</span></code></pre></div>
+<hr />
 <h2 id="api-key-setup">API Key Setup<a class="headerlink" href="#api-key-setup" title="Permanent link">&para;</a></h2>
 <p>Each exchange requires API keys stored in a <code>.env</code> file:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Alpaca (https://alpaca.markets/signup)</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nv">API_KEY</span><span class="o">=</span>your_alpaca_api_key
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nv">SECRET_KEY</span><span class="o">=</span>your_alpaca_secret_key
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># Binance (https://www.binance.com/en/my/settings/api-management)</span>
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="nv">BINANCE_API_KEY</span><span class="o">=</span>your_binance_api_key
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="nv">BINANCE_SECRET_KEY</span><span class="o">=</span>your_binance_secret_key
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="c1"># Bitget (https://www.bitget.com/en/support/articles/360038859731)</span>
-</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="nv">BITGETACCESSAPIKEY</span><span class="o">=</span>your_bitget_api_key
-</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="nv">BITGETSECRETKEY</span><span class="o">=</span>your_bitget_secret_key
-</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="nv">BITGETPASSPHRASE</span><span class="o">=</span>your_bitget_passphrase
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Alpaca (https://alpaca.markets/signup)</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nv">API_KEY</span><span class="o">=</span>your_alpaca_api_key
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nv">SECRET_KEY</span><span class="o">=</span>your_alpaca_secret_key
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># Binance (https://www.binance.com/en/my/settings/api-management)</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="nv">BINANCE_API_KEY</span><span class="o">=</span>your_binance_api_key
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="nv">BINANCE_SECRET_KEY</span><span class="o">=</span>your_binance_secret_key
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c1"># Bitget (https://www.bitget.com/en/support/articles/360038859731)</span>
+</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="nv">BITGETACCESSAPIKEY</span><span class="o">=</span>your_bitget_api_key
+</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="nv">BITGETSECRETKEY</span><span class="o">=</span>your_bitget_secret_key
+</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="nv">BITGETPASSPHRASE</span><span class="o">=</span>your_bitget_passphrase
+</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>
+</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="c1"># Bybit (https://www.bybit.com/app/user/api-management)</span>
+</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="nv">BYBIT_API_KEY</span><span class="o">=</span>your_bybit_api_key
+</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="nv">BYBIT_API_SECRET</span><span class="o">=</span>your_bybit_api_secret
 </span></code></pre></div>
 <div class="admonition warning">
 <p class="admonition-title">Always Start with Paper/Testnet Trading</p>
-<p>Set <code>paper=True</code> (Alpaca) or <code>demo=True</code> (Binance/Bitget) before using real funds. Start with low leverage (2-5x) for futures.</p>
+<p>Set <code>paper=True</code> (Alpaca) or <code>demo=True</code> (Binance/Bitget/Bybit) before using real funds. Start with low leverage (2-5x) for futures.</p>
 </div>
 <hr />
 <h2 id="exchange-comparison">Exchange Comparison<a class="headerlink" href="#exchange-comparison" title="Permanent link">&para;</a></h2>
@@ -1845,6 +2006,7 @@
 <th>Alpaca</th>
 <th>Binance</th>
 <th>Bitget</th>
+<th>Bybit</th>
 </tr>
 </thead>
 <tbody>
@@ -1853,10 +2015,12 @@
 <td>Stocks, Crypto</td>
 <td>Crypto</td>
 <td>Crypto</td>
+<td>Crypto</td>
 </tr>
 <tr>
 <td><strong>Futures</strong></td>
 <td>-</td>
+<td>Yes</td>
 <td>Yes</td>
 <td>Yes</td>
 </tr>
@@ -1865,10 +2029,12 @@
 <td>1x</td>
 <td>125x</td>
 <td>125x</td>
+<td>100x</td>
 </tr>
 <tr>
 <td><strong>Paper Trading</strong></td>
 <td>Yes</td>
+<td>Yes (Testnet)</td>
 <td>Yes (Testnet)</td>
 <td>Yes (Testnet)</td>
 </tr>
@@ -1877,12 +2043,20 @@
 <td>Free</td>
 <td>0.02%/0.04%</td>
 <td>0.02%/0.06%</td>
+<td>0.02%/0.055%</td>
+</tr>
+<tr>
+<td><strong>SDK</strong></td>
+<td>Alpaca SDK</td>
+<td>CCXT</td>
+<td>CCXT</td>
+<td>pybit (native)</td>
 </tr>
 </tbody>
 </table>
 <hr />
 <h2 id="requesting-new-exchanges">Requesting New Exchanges<a class="headerlink" href="#requesting-new-exchanges" title="Permanent link">&para;</a></h2>
-<p>Need support for another exchange? <a href="https://github.com/TorchTrade/torchtrade/issues/new">Create an issue</a> or email us at torchtradecontact@gmail.com.</p>
+<p>Need support for another exchange (OKX, Interactive Brokers, etc.)? <a href="https://github.com/TorchTrade/torchtrade/issues/new">Create an issue</a> or email us at torchtradecontact@gmail.com.</p>
 
 
 
