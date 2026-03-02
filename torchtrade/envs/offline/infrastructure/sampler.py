@@ -34,12 +34,18 @@ class MarketDataObservationSampler:
 
         if seed is not None:
             torch.manual_seed(seed)
-        required_columns = ["timestamp", "open", "high", "low", "close", "volume"]
-        if list(df.columns) != required_columns:
+        required_columns = {"timestamp", "open", "high", "low", "close", "volume"}
+        missing = sorted(required_columns - set(df.columns))
+        if missing:
             raise ValueError(
-                f"DataFrame columns {list(df.columns)} do not match required format "
-                f"{required_columns}. Rename your columns before passing to the sampler."
+                f"DataFrame missing required columns: {missing}. "
+                f"Got columns: {list(df.columns)}"
             )
+
+        # Reorder: OHLCV first, then auxiliary (preserves row[:5] slicing for base features)
+        ohlcv_cols = ["open", "high", "low", "close", "volume"]
+        aux_cols = [c for c in df.columns if c not in required_columns]
+        df = df[["timestamp"] + ohlcv_cols + aux_cols]
 
         # Make sure time_frames and window_sizes are lists of same length
         if isinstance(time_frames, TimeFrame):
@@ -77,15 +83,22 @@ class MarketDataObservationSampler:
         self.execute_on = execute_on
         self.feature_processing_fn = feature_processing_fn
         self.features_start_with = features_start_with
-        # Precompute resampled OHLCV DataFrames for each timeframe
+        # Precompute resampled DataFrames for each timeframe
+        # OHLCV uses canonical aggregation; auxiliary columns use "last"
+        ohlcv_agg = {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+        full_agg = {**ohlcv_agg, **{c: "last" for c in aux_cols}}
+
         self.resampled_dfs: Dict[str, pd.DataFrame] = {}
         first_time_stamps = []
         for tf, proc_fn in zip(time_frames, processing_fns):
             resampled = (
                 self.df.resample(tf.to_pandas_freq())
-                .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
-                .dropna()
+                .agg(full_agg)
+                .dropna(subset=list(ohlcv_agg.keys()))
             )
+            # Forward-fill auxiliary NaN (sparse aux data persists last known value)
+            if aux_cols:
+                resampled[aux_cols] = resampled[aux_cols].ffill().fillna(0)
 
             # Fix lookahead bias: shift higher timeframe bars forward by their period
             # This ensures bars are indexed by their END time, not START time
@@ -180,6 +193,8 @@ class MarketDataObservationSampler:
                 warnings.warn(warning_msg, UserWarning, stacklevel=2)
 
         self.execute_base_features_df = execute_base_raw.ffill()[self.min_start_time:]
+        if aux_cols:
+            self.execute_base_features_df[aux_cols] = self.execute_base_features_df[aux_cols].fillna(0)
         if len(self.execute_base_features_df) == 0:
             raise ValueError("No execute_on base features available after min_start_time")
 
@@ -192,8 +207,6 @@ class MarketDataObservationSampler:
 
         self._sequential_idx = 0
         self._end_idx = len(self.exec_times)
-        # Pre-compute base OHLCV column order for fast dict creation
-        self._base_ohlcv_keys = ["open", "high", "low", "close", "volume"]
         # PERF: Store exec_times as numpy array for fast indexing (avoid pandas overhead)
         self._exec_times_arr = self.exec_times.to_numpy()
 

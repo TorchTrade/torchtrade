@@ -4,9 +4,14 @@ TorchTrade allows you to add custom technical indicators and features to your ma
 
 ## How It Works
 
-The `feature_preprocessing_fn` parameter in environment configs transforms raw OHLCV data into custom features. This function is called on each resampled timeframe during environment initialization.
+There are two ways to enrich observations:
 
-**IMPORTANT**: All feature columns must start with `features_` prefix (e.g., `features_close`, `features_rsi_14`). Only columns with this prefix will be included in the observation space.
+1. **Feature processing functions** (`feature_preprocessing_fn`) — compute derived features from OHLCV data (RSI, MACD, etc.). Covered in this guide.
+2. **Auxiliary data columns** — pass extra columns alongside OHLCV in your DataFrame (funding rate, basis, etc.). See [Understanding the Sampler](sampler.md#auxiliary-data-columns).
+
+The `feature_preprocessing_fn` parameter in environment configs transforms raw OHLCV data (plus any auxiliary columns) into custom features. This function is called on each resampled timeframe during environment initialization.
+
+**IMPORTANT**: When using `feature_preprocessing_fn`, all feature columns must start with `features_` prefix (e.g., `features_close`, `features_rsi_14`). Only columns with this prefix will be included in the observation space. Without `feature_preprocessing_fn`, raw columns (OHLCV + any auxiliary columns) are used directly as features.
 
 !!! warning "Timeframe Format Matters"
     When specifying `time_frames`, use **canonical forms** to avoid confusion:
@@ -198,9 +203,46 @@ feature_preprocessing_fn=[my_function, my_function]
 
 ---
 
+## Using Auxiliary Data in Feature Processing
+
+If your DataFrame contains auxiliary columns (funding rate, basis, open interest, etc.), they are available inside `feature_preprocessing_fn` alongside OHLCV:
+
+```python
+# DataFrame with auxiliary columns
+df = pd.DataFrame({
+    "timestamp": ..., "open": ..., "high": ..., "low": ..., "close": ..., "volume": ...,
+    "funding_rate": ...,  # auxiliary
+    "open_interest": ..., # auxiliary
+})
+
+def futures_features(df: pd.DataFrame) -> pd.DataFrame:
+    # Standard OHLCV features
+    df["features_close"] = df["close"]
+    df["features_volume"] = df["volume"]
+
+    # Features from auxiliary columns
+    df["features_funding_rate"] = df["funding_rate"]
+    df["features_oi_change"] = df["open_interest"].pct_change()
+
+    # Features combining OHLCV + auxiliary
+    df["features_basis_norm"] = df["basis"] / df["close"]
+
+    df.fillna(0, inplace=True)
+    return df
+```
+
+**Two modes of operation:**
+
+- **Without `feature_preprocessing_fn`**: All columns (OHLCV + auxiliary) flow through directly as raw features. The `features_*` prefix is not required.
+- **With `feature_preprocessing_fn`**: Only columns starting with `features_*` are included. You control exactly which columns become features.
+
+See [Auxiliary Data Columns](sampler.md#auxiliary-data-columns) for details on how auxiliary columns are resampled and handled.
+
+---
+
 ## Important Rules
 
-1. **Feature prefix**: All columns MUST start with `features_` (e.g., `features_rsi_14`). Columns without this prefix are ignored.
+1. **Feature prefix** (when using `feature_preprocessing_fn`): All output columns MUST start with `features_` (e.g., `features_rsi_14`). Columns without this prefix are ignored. Without a preprocessing function, raw columns (OHLCV + auxiliary) are used directly.
 2. **Handle NaN**: Technical indicators produce NaN at the start. Always call `df.fillna(0, inplace=True)` (or `ffill`/`bfill`).
 3. **Return the DataFrame**: Your function must `return df`.
 4. **No lookahead bias**: Only use past data. Never use `.shift(-1)` or future values.
