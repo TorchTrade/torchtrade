@@ -4,7 +4,12 @@ TorchTrade allows you to add custom technical indicators and features to your ma
 
 ## How It Works
 
-The `feature_preprocessing_fn` parameter in environment configs transforms raw OHLCV data into custom features. This function is called on each resampled timeframe during environment initialization.
+There are two ways to enrich observations:
+
+1. **Feature processing functions** (`feature_preprocessing_fn`) — compute derived features from OHLCV data (RSI, MACD, etc.). Covered in this guide.
+2. **Auxiliary data columns** — pass extra columns alongside OHLCV in your DataFrame (funding rate, basis, etc.). See [Understanding the Sampler](sampler.md#auxiliary-data-columns).
+
+The `feature_preprocessing_fn` parameter in environment configs transforms raw OHLCV data (plus any auxiliary columns) into custom features. This function is called on each resampled timeframe during environment initialization.
 
 **IMPORTANT**: All feature columns must start with `features_` prefix (e.g., `features_close`, `features_rsi_14`). Only columns with this prefix will be included in the observation space.
 
@@ -195,6 +200,38 @@ A single function still works and applies to all timeframes:
 feature_preprocessing_fn=my_function
 feature_preprocessing_fn=[my_function, my_function]
 ```
+
+---
+
+## Using Auxiliary Data in Feature Processing
+
+If your DataFrame contains auxiliary columns (funding rate, basis, open interest, etc.), they are available inside `feature_preprocessing_fn` alongside OHLCV:
+
+```python
+# DataFrame with auxiliary columns
+df = pd.DataFrame({
+    "timestamp": ..., "open": ..., "high": ..., "low": ..., "close": ..., "volume": ...,
+    "funding_rate": ...,  # auxiliary
+    "open_interest": ..., # auxiliary
+})
+
+def futures_features(df: pd.DataFrame) -> pd.DataFrame:
+    # Standard OHLCV features
+    df["features_close"] = df["close"]
+    df["features_volume"] = df["volume"]
+
+    # Features from auxiliary columns
+    df["features_funding_rate"] = df["funding_rate"]
+    df["features_oi_change"] = df["open_interest"].pct_change()
+
+    # Features combining OHLCV + auxiliary
+    df["features_basis_norm"] = df["basis"] / df["close"]
+
+    df.fillna(0, inplace=True)
+    return df
+```
+
+Without `feature_preprocessing_fn`, auxiliary columns flow through directly as raw features in the observation tensor. See [Auxiliary Data Columns](sampler.md#auxiliary-data-columns) for details.
 
 ---
 
