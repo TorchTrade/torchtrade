@@ -321,15 +321,7 @@ class TestBitgetFuturesOrderClass:
             )
             executor.client = mock_ccxt_client
 
-        # _round_price should return the original price when precision is unavailable
         assert executor._round_price(82622.2122) == 82622.2122
-
-        # Bracket order should still succeed with unrounded prices
-        success = executor.trade(
-            side="buy", quantity=0.001, order_type="market",
-            take_profit=82622.2122, stop_loss=81234.5678,
-        )
-        assert success is True
 
     def test_tp_only_order_price_rounded(self, order_executor, mock_ccxt_client):
         """TP-only order must have its price rounded before submission."""

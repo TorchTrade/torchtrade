@@ -170,7 +170,7 @@ class BitgetFuturesOrderClass:
         """Load market info to enable price rounding via CCXT."""
         try:
             self.client.load_markets()
-            logger.info(f"Market info loaded for price precision rounding")
+            logger.info("Market info loaded for price precision rounding")
         except Exception as e:
             logger.warning(f"Could not load markets for {self.symbol}: {e}")
 

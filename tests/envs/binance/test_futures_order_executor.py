@@ -168,32 +168,32 @@ class TestBinanceFuturesOrderClass:
         assert success is False
 
     def test_order_with_take_profit(self, order_executor, mock_client):
-        """Test order with take profit."""
+        """TP-only order must have its stopPrice rounded before submission."""
         success = order_executor.trade(
             side="BUY",
             quantity=0.001,
             order_type="market",
-            take_profit=52000.0,
+            take_profit=52000.1234,
         )
 
         assert success is True
-
-        # Should have called futures_create_order twice (main + TP)
         assert mock_client.futures_create_order.call_count >= 2
+        tp_call = mock_client.futures_create_order.call_args_list[1][1]
+        assert tp_call["stopPrice"] == 52000.1  # Rounded to 1 decimal
 
     def test_order_with_stop_loss(self, order_executor, mock_client):
-        """Test order with stop loss."""
+        """SL-only order must have its stopPrice rounded before submission."""
         success = order_executor.trade(
             side="BUY",
             quantity=0.001,
             order_type="market",
-            stop_loss=48000.0,
+            stop_loss=48000.5678,
         )
 
         assert success is True
-
-        # Should have called futures_create_order twice (main + SL)
         assert mock_client.futures_create_order.call_count >= 2
+        sl_call = mock_client.futures_create_order.call_args_list[1][1]
+        assert sl_call["stopPrice"] == 48000.6  # Rounded to 1 decimal
 
     def test_order_with_bracket(self, order_executor, mock_client):
         """Test order with both take profit and stop loss."""
