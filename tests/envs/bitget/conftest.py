@@ -105,6 +105,10 @@ def mock_ccxt_client():
         "average": 50000.0,
     })
 
+    # Mock market loading and price precision (CCXT handles this via load_markets)
+    client.load_markets = MagicMock(return_value={})
+    client.price_to_precision = MagicMock(side_effect=lambda symbol, price: f"{round(price, 1)}")
+
     return client
 
 

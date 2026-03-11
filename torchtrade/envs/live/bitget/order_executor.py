@@ -162,8 +162,25 @@ class BitgetFuturesOrderClass:
             except Exception as e:
                 raise ImportError(f"CCXT is required. Install with: pip install ccxt. Error: {e}")
 
-        # Setup futures account
+        # Setup futures account and load market info for price precision
         self._setup_futures_account()
+        self._load_market_precision()
+
+    def _load_market_precision(self):
+        """Load market info to enable price rounding via CCXT."""
+        try:
+            self.client.load_markets()
+            logger.info("Market info loaded for price precision rounding")
+        except Exception as e:
+            logger.warning(f"Could not load markets for {self.symbol}: {e}")
+
+    def _round_price(self, price: float) -> float:
+        """Round a price to the exchange's tick size precision using CCXT."""
+        try:
+            return float(self.client.price_to_precision(self.symbol, price))
+        except Exception as e:
+            logger.warning(f"price_to_precision failed for {self.symbol}, using unrounded price: {e}")
+            return price
 
     def _calculate_unrealized_pnl_pct(self, qty: float, entry_price: float, mark_price: float) -> float:
         """Calculate unrealized PnL percentage.
@@ -211,7 +228,7 @@ class BitgetFuturesOrderClass:
         """
         if stop_price is None:
             raise ValueError("stop_price is required for stop orders")
-        params['stopPrice'] = stop_price
+        params['stopPrice'] = self._round_price(stop_price)
         return 'market' if order_type == 'stop_market' else 'limit'
 
     def _is_no_position_error(self, error: Exception) -> bool:
@@ -352,8 +369,8 @@ class BitgetFuturesOrderClass:
                     side=side,
                     amount=quantity,
                     price=price,
-                    takeProfit=take_profit,
-                    stopLoss=stop_loss,
+                    takeProfit=self._round_price(take_profit),
+                    stopLoss=self._round_price(stop_loss),
                     params=params  # May include tradeSide='open' only in HEDGE mode
                 )
 
@@ -395,7 +412,7 @@ class BitgetFuturesOrderClass:
                     type='limit',
                     side=tp_side,
                     amount=quantity,
-                    price=take_profit,
+                    price=self._round_price(take_profit),
                     params=tp_params
                 )
                 logger.debug(f"Take profit order created at {take_profit}")
@@ -409,7 +426,7 @@ class BitgetFuturesOrderClass:
                     symbol=self.symbol,
                     side=sl_side,
                     amount=quantity,
-                    stopPrice=stop_loss,
+                    stopPrice=self._round_price(stop_loss),
                     params=sl_params
                 )
                 logger.debug(f"Stop loss order created at {stop_loss}")
