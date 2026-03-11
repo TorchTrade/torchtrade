@@ -224,8 +224,10 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
                 )
 
                 if success:
-                    self.active_stop_loss = stop_loss_price
-                    self.active_take_profit = take_profit_price
+                    # Only record SL/TP levels that actually placed on-exchange
+                    bs = getattr(self.trader, 'bracket_status', {"tp_placed": True, "sl_placed": True})
+                    self.active_stop_loss = stop_loss_price if bs["sl_placed"] else 0.0
+                    self.active_take_profit = take_profit_price if bs["tp_placed"] else 0.0
 
                 trade_info.update({
                     "executed": True,

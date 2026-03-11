@@ -47,6 +47,10 @@ class TestSyncPositionFromExchange:
         (None, 1, 0, True),
         # None + already flat = stays flat (steady-state HOLD)
         (None, 0, 0, False),
+        # Direction flip: was long, exchange shows short (external action)
+        (-0.005, 1, -1, False),
+        # Direction flip: was short, exchange shows long (external action)
+        (0.005, -1, 1, False),
     ], ids=[
         "sl_tp_closes_long",
         "sl_tp_closes_short",
@@ -57,6 +61,8 @@ class TestSyncPositionFromExchange:
         "short_matches",
         "none_closes_long",
         "none_stays_flat",
+        "direction_flip_long_to_short",
+        "direction_flip_short_to_long",
     ])
     def test_position_sync(self, env, exchange_qty, prev_pos, expected_pos, expected_closed):
         """Position state must sync from exchange, detecting closures and fixing drift."""
@@ -74,8 +80,8 @@ class TestSyncPositionFromExchange:
         assert closed == expected_closed
         assert env.position.current_position == expected_pos
 
-        # SL/TP levels should be reset on closure
-        if expected_closed:
+        # SL/TP levels should be reset on closure or direction flip
+        if expected_closed or (prev_pos != 0 and expected_pos != 0 and prev_pos != expected_pos):
             assert env.active_stop_loss == 0.0
             assert env.active_take_profit == 0.0
 

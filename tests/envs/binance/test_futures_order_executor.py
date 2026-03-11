@@ -351,17 +351,11 @@ class TestBinanceFuturesOrderClass:
 
     def test_trade_returns_true_when_tp_fails(self, order_executor, mock_client):
         """Main order success must not be masked by SL/TP failure (stacking bug root cause)."""
-        # Make TP order fail but main order succeed
-        call_count = [0]
-        original_create_order = mock_client.futures_create_order
-
-        def side_effect(**kwargs):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return original_create_order(**kwargs)  # Main order succeeds
-            raise Exception("Precision is over the maximum defined for this asset")
-
-        mock_client.futures_create_order = MagicMock(side_effect=side_effect)
+        mock_client.futures_create_order = MagicMock(side_effect=[
+            {"orderId": 12345, "status": "FILLED"},  # Main order succeeds
+            Exception("Precision is over the maximum defined for this asset"),  # TP fails
+            Exception("Precision is over the maximum defined for this asset"),  # SL fails
+        ])
 
         success = order_executor.trade(
             side="BUY",
@@ -373,6 +367,9 @@ class TestBinanceFuturesOrderClass:
 
         # Main order succeeded, so trade() must return True
         assert success is True
+        # bracket_status should reflect the failures
+        assert order_executor.bracket_status["tp_placed"] is False
+        assert order_executor.bracket_status["sl_placed"] is False
 
     def test_trade_returns_false_when_main_order_fails(self, order_executor, mock_client):
         """When the main order itself fails, trade() must return False."""

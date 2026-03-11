@@ -51,13 +51,16 @@ class SLTPMixin:
             self.active_stop_loss = 0.0
             self.active_take_profit = 0.0
 
-        # Detect state drift (position changed direction unexpectedly)
+        # Detect direction flip (e.g., long→short via external action).
+        # Reset SL/TP since the old bracket levels are stale for the new direction.
         if (prev_position != 0 and self.position.current_position != 0
                 and prev_position != self.position.current_position):
             logger.warning(
                 f"Position direction changed unexpectedly: {prev_position} -> "
                 f"{self.position.current_position}"
             )
+            self.active_stop_loss = 0.0
+            self.active_take_profit = 0.0
 
         return position_closed
 

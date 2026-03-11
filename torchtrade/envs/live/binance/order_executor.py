@@ -247,7 +247,10 @@ class BinanceFuturesOrderClass:
 
         # Main order succeeded — attempt bracket orders separately.
         # Failures here are non-fatal: the position is already open on the
-        # exchange, so we return True regardless.
+        # exchange, so we return True regardless. bracket_status tracks which
+        # legs actually placed so the env can avoid phantom SL/TP state.
+        self.bracket_status = {"tp_placed": False, "sl_placed": False}
+
         if take_profit is not None and not reduce_only:
             try:
                 tp_params = {
@@ -261,6 +264,7 @@ class BinanceFuturesOrderClass:
                 if position_side != "BOTH":
                     tp_params["positionSide"] = position_side
                 self.client.futures_create_order(**tp_params)
+                self.bracket_status["tp_placed"] = True
             except Exception as e:
                 logger.warning(f"TP order failed (position opened without TP): {e}")
 
@@ -277,6 +281,7 @@ class BinanceFuturesOrderClass:
                 if position_side != "BOTH":
                     sl_params["positionSide"] = position_side
                 self.client.futures_create_order(**sl_params)
+                self.bracket_status["sl_placed"] = True
             except Exception as e:
                 logger.warning(f"SL order failed (position opened without SL): {e}")
 

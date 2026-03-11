@@ -702,8 +702,15 @@ class TestCriticalEdgeCases:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
+            # Capture position state at trade call time to verify sync ordering
+            position_at_trade_time = []
+
+            def capture_trade(**kwargs):
+                position_at_trade_time.append(env.position.current_position)
+                return True
+
             # Simulate having a long position
-            mock_trader.trade = MagicMock(return_value=True)
+            mock_trader.trade = MagicMock(side_effect=capture_trade)
             env.position.current_position = 1
             env.active_stop_loss = 49000.0
 
@@ -717,6 +724,8 @@ class TestCriticalEdgeCases:
             # Sync detects closure first, resets current_position to 0,
             # then trade guard allows new entry → trade IS called
             mock_trader.trade.assert_called_once()
+            # Position was already 0 when trade was called (sync ran first)
+            assert position_at_trade_time == [0]
 
 
 class TestDuplicateActionPrevention:

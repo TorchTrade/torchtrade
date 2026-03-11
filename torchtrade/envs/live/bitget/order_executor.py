@@ -379,6 +379,8 @@ class BitgetFuturesOrderClass:
                 else:
                     logger.info(f"Bracket order executed: {side} {quantity} @ {order_type_lower} (TP={take_profit}, SL={stop_loss})")
 
+                # Atomic bracket — both legs placed together
+                self.bracket_status = {"tp_placed": True, "sl_placed": True}
                 return True
 
             # Standard order creation
@@ -403,6 +405,10 @@ class BitgetFuturesOrderClass:
 
         # Main order succeeded — attempt follow-up bracket orders separately.
         # Failures here are non-fatal: the position is already open.
+        # bracket_status tracks which legs actually placed so the env can
+        # avoid phantom SL/TP state.
+        self.bracket_status = {"tp_placed": False, "sl_placed": False}
+
         if take_profit is not None and stop_loss is None and not reduce_only:
             try:
                 tp_side = self._get_opposite_side(side)
@@ -415,6 +421,7 @@ class BitgetFuturesOrderClass:
                     price=self._round_price(take_profit),
                     params=tp_params
                 )
+                self.bracket_status["tp_placed"] = True
             except Exception as e:
                 logger.warning(f"TP order failed (position opened without TP): {e}")
 
@@ -429,6 +436,7 @@ class BitgetFuturesOrderClass:
                     stopPrice=self._round_price(stop_loss),
                     params=sl_params
                 )
+                self.bracket_status["sl_placed"] = True
             except Exception as e:
                 logger.warning(f"SL order failed (position opened without SL): {e}")
 
