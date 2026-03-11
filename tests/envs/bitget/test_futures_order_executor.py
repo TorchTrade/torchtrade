@@ -345,6 +345,43 @@ class TestBitgetFuturesOrderClass:
         call_args = mock_ccxt_client.create_stop_market_order.call_args
         assert call_args[1]["stopPrice"] == 48765.4  # Rounded to 1 decimal
 
+    def test_trade_returns_true_when_tp_only_fails(self, order_executor, mock_ccxt_client):
+        """Main order success must not be masked by TP-only follow-up failure."""
+        mock_ccxt_client.create_order.side_effect = [
+            {"id": "main_order_123"},  # Main order succeeds
+            Exception("Precision error"),  # TP follow-up fails
+        ]
+
+        success = order_executor.trade(
+            side="buy", quantity=0.001, order_type="market",
+            take_profit=52000.0, stop_loss=None,
+        )
+
+        assert success is True
+
+    def test_trade_returns_true_when_sl_only_fails(self, order_executor, mock_ccxt_client):
+        """Main order success must not be masked by SL-only follow-up failure."""
+        mock_ccxt_client.create_stop_market_order = MagicMock(
+            side_effect=Exception("Precision error")
+        )
+
+        success = order_executor.trade(
+            side="buy", quantity=0.001, order_type="market",
+            take_profit=None, stop_loss=48000.0,
+        )
+
+        assert success is True
+
+    def test_trade_returns_false_when_main_order_fails(self, order_executor, mock_ccxt_client):
+        """When the main order itself fails, trade() must return False."""
+        mock_ccxt_client.create_order = MagicMock(
+            side_effect=Exception("Insufficient margin")
+        )
+
+        success = order_executor.trade(side="buy", quantity=0.001)
+
+        assert success is False
+
     def test_trade_failure_handling(self, order_executor, mock_ccxt_client):
         """Test that trade failures are handled gracefully."""
         # Mock API failure

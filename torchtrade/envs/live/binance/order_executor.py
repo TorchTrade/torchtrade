@@ -241,8 +241,15 @@ class BinanceFuturesOrderClass:
             self.last_order_id = response.get("orderId")
             logger.info(f"Order executed: {response}")
 
-            # Create take profit order if specified
-            if take_profit is not None and not reduce_only:
+        except Exception as e:
+            logger.error(f"Error executing main order: {str(e)}")
+            return False
+
+        # Main order succeeded — attempt bracket orders separately.
+        # Failures here are non-fatal: the position is already open on the
+        # exchange, so we return True regardless.
+        if take_profit is not None and not reduce_only:
+            try:
                 tp_params = {
                     "symbol": self.symbol,
                     "side": "SELL" if side == "BUY" else "BUY",
@@ -254,9 +261,11 @@ class BinanceFuturesOrderClass:
                 if position_side != "BOTH":
                     tp_params["positionSide"] = position_side
                 self.client.futures_create_order(**tp_params)
+            except Exception as e:
+                logger.warning(f"TP order failed (position opened without TP): {e}")
 
-            # Create stop loss order if specified
-            if stop_loss is not None and not reduce_only:
+        if stop_loss is not None and not reduce_only:
+            try:
                 sl_params = {
                     "symbol": self.symbol,
                     "side": "SELL" if side == "BUY" else "BUY",
@@ -268,12 +277,10 @@ class BinanceFuturesOrderClass:
                 if position_side != "BOTH":
                     sl_params["positionSide"] = position_side
                 self.client.futures_create_order(**sl_params)
+            except Exception as e:
+                logger.warning(f"SL order failed (position opened without SL): {e}")
 
-            return True
-
-        except Exception as e:
-            logger.error(f"Error executing trade: {str(e)}")
-            return False
+        return True
 
     def get_status(self) -> Dict[str, Union[OrderStatus, PositionStatus, None]]:
         """

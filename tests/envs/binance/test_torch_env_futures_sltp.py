@@ -266,14 +266,15 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
             env.position.current_position = 1  # Simulate having a long position
+            env.active_stop_loss = 48000.0
+            env.active_take_profit = 52000.0
 
-            # Simulate position being closed
-            mock_trader.get_status = MagicMock(return_value={
-                "position_status": None
-            })
-
-            closed = env._check_position_closed()
+            # Exchange reports no position (SL/TP triggered)
+            closed = env._sync_position_from_exchange(None)
             assert closed is True
+            assert env.position.current_position == 0
+            assert env.active_stop_loss == 0.0
+            assert env.active_take_profit == 0.0
 
     def test_position_not_closed_detection(self, env, mock_trader):
         """Test detection when position is still open."""
@@ -282,24 +283,27 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
             env.position.current_position = 1
+            env.active_stop_loss = 48000.0
+            env.active_take_profit = 52000.0
 
-            # Position still exists
-            mock_trader.get_status = MagicMock(return_value={
-                "position_status": PositionStatus(
-                    qty=0.001,
-                    notional_value=50.0,
-                    entry_price=50000.0,
-                    unrealized_pnl=0.5,
-                    unrealized_pnl_pct=0.01,
-                    mark_price=50500.0,
-                    leverage=5,
-                    margin_type="isolated",
-                    liquidation_price=45000.0,
-                )
-            })
+            # Position still exists on exchange
+            position_status = PositionStatus(
+                qty=0.001,
+                notional_value=50.0,
+                entry_price=50000.0,
+                unrealized_pnl=0.5,
+                unrealized_pnl_pct=0.01,
+                mark_price=50500.0,
+                leverage=5,
+                margin_type="isolated",
+                liquidation_price=45000.0,
+            )
 
-            closed = env._check_position_closed()
+            closed = env._sync_position_from_exchange(position_status)
             assert closed is False
+            assert env.position.current_position == 1
+            assert env.active_stop_loss == 48000.0
+            assert env.active_take_profit == 52000.0
 
     def test_active_sltp_tracking(self, env, mock_trader):
         """Test that active SL/TP levels are tracked."""
@@ -730,18 +734,19 @@ class TestCriticalEdgeCases:
             assert trade_info["stop_loss"] >= 0
             assert trade_info["take_profit"] >= 0
 
-    def test_cannot_open_new_position_same_step_as_closure(self, env_with_mocks):
-        """Test 1-step delay between position closure and re-entry (Critical: 6/10).
+    def test_reentry_allowed_same_step_as_closure(self, env_with_mocks):
+        """When SL/TP closes a position, re-entry is allowed in the same step.
 
-        Documents intentional behavior: when SL/TP closes position,
-        agent cannot open new position in the same step.
+        The exchange-sync-first design detects the closure BEFORE the trade guard
+        runs, so current_position is already 0 when the new action is evaluated.
+        This is correct: the old position is gone, so opening a new one is valid.
         """
         env, mock_trader, _ = env_with_mocks
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            # First, open a position
+            # Simulate having a long position
             mock_trader.trade = MagicMock(return_value=True)
             env.position.current_position = 1
             env.active_stop_loss = 49000.0
@@ -751,20 +756,10 @@ class TestCriticalEdgeCases:
 
             # Agent tries to open new long in same step
             action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())
-            next_td = env.step(action_td)
+            env.step(action_td)
 
-            # Trade should NOT execute in this step (position still tracked as 1)
-            # This is because _execute_trade_if_needed checks current_position != 0
-            # and _check_position_closed happens after
-            mock_trader.trade.assert_not_called()
-
-            # But position should be reset for next step
-            assert env.position.current_position == 0
-            assert env.active_stop_loss == 0.0
-
-            # Next step should allow new trade
-            mock_trader.trade.reset_mock()
-            next_td2 = env.step(action_td)
+            # Sync detects closure first, resets current_position to 0,
+            # then trade guard allows new entry → trade IS called
             mock_trader.trade.assert_called_once()
 
 

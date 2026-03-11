@@ -172,19 +172,21 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
             current_price = self.trader.get_mark_price()
             position_size = 0.0
 
+        # Sync position state from exchange — this is the source of truth.
+        # Detects SL/TP closures AND fixes state drift from failed bracket orders.
+        position_closed = self._sync_position_from_exchange(position_status)
+
         # Get action and map to (side, SL, TP) tuple
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()
         action_tuple = self.action_map[action_idx]
 
-        # Check if position was closed by SL/TP
-        position_closed = self._check_position_closed()
-
-        # Execute trade if needed
+        # Execute trade if needed (duplicate guard uses synced state)
         trade_info = self._execute_trade_if_needed(action_tuple)
         trade_info["position_closed"] = position_closed
 
+        # Update position state from trade result
         if trade_info["executed"] and trade_info.get("success") is not False:
             if trade_info["side"] == "buy":
                 self.position.current_position = 1  # Long
@@ -192,11 +194,6 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
                 self.position.current_position = -1  # Short
             elif trade_info.get("closed_position"):
                 self.position.current_position = 0  # Closed
-
-        if position_closed:
-            self.position.current_position = 0
-            self.active_stop_loss = 0.0
-            self.active_take_profit = 0.0
 
         # Wait for next time step
         self._wait_for_next_timestamp()
