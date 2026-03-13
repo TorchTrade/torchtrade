@@ -63,8 +63,8 @@ class BitgetFuturesSLTPTradingEnvConfig:
     demo: bool = True  # Use testnet
     seed: Optional[int] = 42
     include_base_features: bool = False
-    close_position_on_init: bool = True  # Whether to close positions on startup
-    close_position_on_reset: bool = False  # Whether to close positions on env.reset()
+    close_position_on_init: bool = True
+    close_position_on_reset: bool = False
 
     def __post_init__(self):
         # Normalize timeframes using utility function

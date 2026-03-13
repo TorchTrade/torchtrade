@@ -81,7 +81,7 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         # Flatten on startup for a clean state (configurable, default: True)
         self.trader.cancel_open_orders()
-        if getattr(config, 'close_position_on_init', True):
+        if config.close_position_on_init:
             self.trader.close_position()
 
         # Get initial portfolio value
