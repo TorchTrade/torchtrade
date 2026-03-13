@@ -314,9 +314,14 @@ class TestBybitSLTPCloseAction:
 
         with patch("time.sleep"), \
              patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
-            return BybitFuturesSLTPTorchTradingEnv(
+            env = BybitFuturesSLTPTorchTradingEnv(
                 config=config, observer=mock_env_observer, trader=mock_env_trader,
             )
+
+        # Reset mock call counts from __init__ cleanup so tests only see
+        # calls from the action under test
+        mock_env_trader.reset_mock()
+        return env
 
     def test_close_action_in_action_map(self, env_with_close):
         """Close action must be present in action map at index 1."""

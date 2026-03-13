@@ -53,6 +53,7 @@ class BitgetFuturesTradingEnvConfig:
     demo: bool = True  # Use testnet for demo
     seed: Optional[int] = 42
     include_base_features: bool = False
+    close_position_on_init: bool = True  # Whether to close positions on startup
     close_position_on_reset: bool = False  # Whether to close positions on env.reset()
 
     def __post_init__(self):

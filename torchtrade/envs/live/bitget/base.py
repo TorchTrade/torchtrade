@@ -99,9 +99,9 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
             self.execute_on_value = config.execute_on.value
             self.execute_on_unit = str(config.execute_on.unit)
 
-        # Reset settings
+        # Flatten on startup for a clean state (configurable, default: True)
         self.trader.cancel_open_orders()
-        if hasattr(config, 'close_position_on_reset') and config.close_position_on_reset:
+        if getattr(config, 'close_position_on_init', True):
             self.trader.close_position()
 
         # Get initial portfolio value
