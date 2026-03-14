@@ -112,7 +112,7 @@ class BybitFuturesOrderClass:
             from pybit.unified_trading import HTTP
 
             self.client = HTTP(
-                testnet=demo,
+                demo=demo,
                 api_key=api_key,
                 api_secret=api_secret,
             )
@@ -400,7 +400,7 @@ class BybitFuturesOrderClass:
                 logger.warning(
                     "Demo account balance is 0 USDT! "
                     "Please fund your Bybit demo account at: "
-                    "https://testnet.bybit.com"
+                    "https://www.bybit.com (Demo Trading)"
                 )
 
             return result

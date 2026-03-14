@@ -49,7 +49,7 @@ class BybitObservationClass(BaseFuturesObservationClass):
         """Create Bybit API client using pybit (public endpoints, no keys needed)."""
         from pybit.unified_trading import HTTP
 
-        return HTTP(testnet=self.demo)
+        return HTTP(demo=self.demo)
 
     def _validate_timeframe(self, timeframe: TimeFrame) -> None:
         """Validate that a timeframe is supported by Bybit."""
