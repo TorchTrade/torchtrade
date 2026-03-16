@@ -90,9 +90,10 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.execute_on_value = timeframe_to_seconds(config.execute_on)
         self.execute_on_unit = "seconds"  # Binance uses simple seconds-based intervals
 
-        # Reset settings
+        # Flatten on startup for a clean state (configurable, default: True)
         self.trader.cancel_open_orders()
-        self.trader.close_position()
+        if config.close_position_on_init:
+            self.trader.close_position()
 
         # Get initial portfolio value
         balance = self.trader.get_account_balance()
@@ -300,8 +301,7 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Reset history tracking
         self.history.reset()
 
-        # Optionally close positions on reset (configurable)
-        if hasattr(self.config, 'close_position_on_reset') and self.config.close_position_on_reset:
+        if self.config.close_position_on_reset:
             self.trader.close_position()
 
         # Get current state

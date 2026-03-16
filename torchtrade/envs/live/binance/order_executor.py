@@ -1,4 +1,5 @@
 import logging
+import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Union
@@ -95,6 +96,9 @@ class BinanceFuturesOrderClass:
         self.margin_type = margin_type
         self.last_order_id = None
 
+        self._tick_size: Optional[float] = None
+        self._tick_decimals: int = 0
+
         # Initialize client
         if client is not None:
             self.client = client
@@ -109,8 +113,9 @@ class BinanceFuturesOrderClass:
             except ImportError:
                 raise ImportError("python-binance is required. Install with: pip install python-binance")
 
-        # Setup futures account
+        # Setup futures account and fetch price precision
         self._setup_futures_account()
+        self._fetch_price_precision()
 
     def _setup_futures_account(self):
         """Configure futures account settings."""
@@ -134,6 +139,33 @@ class BinanceFuturesOrderClass:
 
         except Exception as e:
             logger.warning(f"Could not setup futures account: {e}")
+
+    def _fetch_price_precision(self):
+        """Fetch and cache tick size from Binance exchange info."""
+        try:
+            info = self.client.futures_exchange_info()
+            for s in info['symbols']:
+                if s['symbol'] == self.symbol:
+                    for f in s['filters']:
+                        if f['filterType'] == 'PRICE_FILTER':
+                            tick_str = f['tickSize']
+                            self._tick_size = float(tick_str)
+                            # Derive decimal places from tick string for clean formatting
+                            if '.' in tick_str:
+                                decimal_part = tick_str.rstrip('0').split('.')[1]
+                                self._tick_decimals = len(decimal_part) if decimal_part else 0
+                            logger.info(f"Tick size for {self.symbol}: {self._tick_size} ({self._tick_decimals} decimals)")
+                            return
+            logger.warning(f"No PRICE_FILTER found for {self.symbol}, prices will not be rounded")
+        except Exception as e:
+            logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
+
+    def _round_price(self, price: float) -> float:
+        """Round a price to the nearest tick size."""
+        if self._tick_size is not None:
+            rounded = round(price / self._tick_size) * self._tick_size
+            return round(rounded, self._tick_decimals)
+        return price
 
     def trade(
         self,
@@ -196,52 +228,64 @@ class BinanceFuturesOrderClass:
             if binance_order_type == "LIMIT":
                 if limit_price is None:
                     raise ValueError("limit_price is required for limit orders")
-                order_params["price"] = limit_price
+                order_params["price"] = self._round_price(limit_price)
                 order_params["timeInForce"] = time_in_force
 
             elif binance_order_type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]:
                 if stop_price is None:
                     raise ValueError("stop_price is required for stop orders")
-                order_params["stopPrice"] = stop_price
+                order_params["stopPrice"] = self._round_price(stop_price)
 
             # Submit main order
             response = self.client.futures_create_order(**order_params)
             self.last_order_id = response.get("orderId")
             logger.info(f"Order executed: {response}")
 
-            # Create take profit order if specified
-            if take_profit is not None and not reduce_only:
+        except Exception as e:
+            logger.error(f"Error executing main order: {str(e)}")
+            return False
+
+        # Main order succeeded — attempt bracket orders separately.
+        # Failures here are non-fatal: the position is already open on the
+        # exchange, so we return True regardless. bracket_status tracks which
+        # legs actually placed so the env can avoid phantom SL/TP state.
+        self.bracket_status = {"tp_placed": False, "sl_placed": False}
+
+        if take_profit is not None and not reduce_only:
+            try:
                 tp_params = {
                     "symbol": self.symbol,
                     "side": "SELL" if side == "BUY" else "BUY",
                     "type": "TAKE_PROFIT_MARKET",
-                    "stopPrice": take_profit,
+                    "stopPrice": self._round_price(take_profit),
                     "quantity": round(quantity, 3),
                     "reduceOnly": "true",
                 }
                 if position_side != "BOTH":
                     tp_params["positionSide"] = position_side
                 self.client.futures_create_order(**tp_params)
+                self.bracket_status["tp_placed"] = True
+            except Exception as e:
+                logger.warning(f"TP order failed (position opened without TP): {e}")
 
-            # Create stop loss order if specified
-            if stop_loss is not None and not reduce_only:
+        if stop_loss is not None and not reduce_only:
+            try:
                 sl_params = {
                     "symbol": self.symbol,
                     "side": "SELL" if side == "BUY" else "BUY",
                     "type": "STOP_MARKET",
-                    "stopPrice": stop_loss,
+                    "stopPrice": self._round_price(stop_loss),
                     "quantity": round(quantity, 3),
                     "reduceOnly": "true",
                 }
                 if position_side != "BOTH":
                     sl_params["positionSide"] = position_side
                 self.client.futures_create_order(**sl_params)
+                self.bracket_status["sl_placed"] = True
+            except Exception as e:
+                logger.warning(f"SL order failed (position opened without SL): {e}")
 
-            return True
-
-        except Exception as e:
-            logger.error(f"Error executing trade: {str(e)}")
-            return False
+        return True
 
     def get_status(self) -> Dict[str, Union[OrderStatus, PositionStatus, None]]:
         """

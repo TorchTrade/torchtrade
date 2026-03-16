@@ -92,7 +92,7 @@ def mock_pybit_client():
 
     client.get_kline = MagicMock(side_effect=mock_get_kline)
 
-    # Mock instrument info (lot size)
+    # Mock instrument info (lot size + price precision)
     client.get_instruments_info = MagicMock(return_value={
         "retCode": 0,
         "result": {"list": [{
@@ -100,6 +100,9 @@ def mock_pybit_client():
             "lotSizeFilter": {
                 "minOrderQty": "0.001",
                 "qtyStep": "0.001",
+            },
+            "priceFilter": {
+                "tickSize": "0.01",
             },
         }]},
     })

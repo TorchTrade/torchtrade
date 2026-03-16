@@ -79,6 +79,11 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.execute_on_value = config.execute_on.value
         self.execute_on_unit = str(config.execute_on.unit)
 
+        # Flatten on startup for a clean state (configurable, default: True)
+        self.trader.cancel_open_orders()
+        if config.close_position_on_init:
+            self.trader.close_position()
+
         # Get initial portfolio value
         balance = self.trader.get_account_balance()
         self.initial_portfolio_value = balance.get("total_wallet_balance", 0)

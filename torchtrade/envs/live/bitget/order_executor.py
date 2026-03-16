@@ -162,8 +162,25 @@ class BitgetFuturesOrderClass:
             except Exception as e:
                 raise ImportError(f"CCXT is required. Install with: pip install ccxt. Error: {e}")
 
-        # Setup futures account
+        # Setup futures account and load market info for price precision
         self._setup_futures_account()
+        self._load_market_precision()
+
+    def _load_market_precision(self):
+        """Load market info to enable price rounding via CCXT."""
+        try:
+            self.client.load_markets()
+            logger.info("Market info loaded for price precision rounding")
+        except Exception as e:
+            logger.warning(f"Could not load markets for {self.symbol}: {e}")
+
+    def _round_price(self, price: float) -> float:
+        """Round a price to the exchange's tick size precision using CCXT."""
+        try:
+            return float(self.client.price_to_precision(self.symbol, price))
+        except Exception as e:
+            logger.warning(f"price_to_precision failed for {self.symbol}, using unrounded price: {e}")
+            return price
 
     def _calculate_unrealized_pnl_pct(self, qty: float, entry_price: float, mark_price: float) -> float:
         """Calculate unrealized PnL percentage.
@@ -211,7 +228,7 @@ class BitgetFuturesOrderClass:
         """
         if stop_price is None:
             raise ValueError("stop_price is required for stop orders")
-        params['stopPrice'] = stop_price
+        params['stopPrice'] = self._round_price(stop_price)
         return 'market' if order_type == 'stop_market' else 'limit'
 
     def _is_no_position_error(self, error: Exception) -> bool:
@@ -343,8 +360,7 @@ class BitgetFuturesOrderClass:
                 order_type_lower = self._validate_and_prepare_stop_order(order_type_lower, stop_price, params)
 
             # Use CCXT's bracket order method if both TP and SL are provided (Bitget-specific)
-            # This is the proper way to create bracket orders for both ONE_WAY and HEDGE modes
-            # Note: In ONE_WAY mode, tradeSide should be omitted (params won't include it)
+            # This is atomic — main order + SL/TP succeed or fail together
             if take_profit is not None and stop_loss is not None and not reduce_only:
                 response = self.client.create_order_with_take_profit_and_stop_loss(
                     symbol=self.symbol,
@@ -352,22 +368,22 @@ class BitgetFuturesOrderClass:
                     side=side,
                     amount=quantity,
                     price=price,
-                    takeProfit=take_profit,
-                    stopLoss=stop_loss,
-                    params=params  # May include tradeSide='open' only in HEDGE mode
+                    takeProfit=self._round_price(take_profit),
+                    stopLoss=self._round_price(stop_loss),
+                    params=params
                 )
 
-                # Extract order ID from response
                 if isinstance(response, dict) and 'id' in response:
                     self.last_order_id = response['id']
                     logger.info(f"Bracket order executed: {side} {quantity} @ {order_type_lower} (TP={take_profit}, SL={stop_loss}, ID: {self.last_order_id})")
                 else:
                     logger.info(f"Bracket order executed: {side} {quantity} @ {order_type_lower} (TP={take_profit}, SL={stop_loss})")
-                logger.debug(f"Full bracket order response: {response}")
 
+                # Atomic bracket — both legs placed together
+                self.bracket_status = {"tp_placed": True, "sl_placed": True}
                 return True
 
-            # Otherwise, use standard order creation
+            # Standard order creation
             response = self.client.create_order(
                 symbol=self.symbol,
                 type=order_type_lower,
@@ -377,48 +393,54 @@ class BitgetFuturesOrderClass:
                 params=params
             )
 
-            # Extract order ID from response
             if isinstance(response, dict) and 'id' in response:
                 self.last_order_id = response['id']
                 logger.info(f"Order executed: {side} {quantity} @ {order_type_lower} (ID: {self.last_order_id})")
             else:
                 logger.info(f"Order executed: {side} {quantity} @ {order_type_lower}")
-            logger.debug(f"Full order response: {response}")
 
-            # Create take profit order separately if only TP is specified
-            if take_profit is not None and stop_loss is None and not reduce_only:
+        except Exception as e:
+            logger.error(f"Error executing main order: {str(e)}")
+            return False
+
+        # Main order succeeded — attempt follow-up bracket orders separately.
+        # Failures here are non-fatal: the position is already open.
+        # bracket_status tracks which legs actually placed so the env can
+        # avoid phantom SL/TP state.
+        self.bracket_status = {"tp_placed": False, "sl_placed": False}
+
+        if take_profit is not None and stop_loss is None and not reduce_only:
+            try:
                 tp_side = self._get_opposite_side(side)
                 tp_params = self._build_order_params(reduce_only=True)
-
                 self.client.create_order(
                     symbol=self.symbol,
                     type='limit',
                     side=tp_side,
                     amount=quantity,
-                    price=take_profit,
+                    price=self._round_price(take_profit),
                     params=tp_params
                 )
-                logger.debug(f"Take profit order created at {take_profit}")
+                self.bracket_status["tp_placed"] = True
+            except Exception as e:
+                logger.warning(f"TP order failed (position opened without TP): {e}")
 
-            # Create stop loss order separately if only SL is specified
-            if stop_loss is not None and take_profit is None and not reduce_only:
+        if stop_loss is not None and take_profit is None and not reduce_only:
+            try:
                 sl_side = self._get_opposite_side(side)
                 sl_params = self._build_order_params(reduce_only=True)
-
                 self.client.create_stop_market_order(
                     symbol=self.symbol,
                     side=sl_side,
                     amount=quantity,
-                    stopPrice=stop_loss,
+                    stopPrice=self._round_price(stop_loss),
                     params=sl_params
                 )
-                logger.debug(f"Stop loss order created at {stop_loss}")
+                self.bracket_status["sl_placed"] = True
+            except Exception as e:
+                logger.warning(f"SL order failed (position opened without SL): {e}")
 
-            return True
-
-        except Exception as e:
-            logger.error(f"Error executing trade: {str(e)}")
-            return False
+        return True
 
     def check_both_positions_open(self) -> bool:
         """

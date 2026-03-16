@@ -402,3 +402,62 @@ class TestMultipleSteps:
                 rewards.append(next_td["next", "reward"].item())
 
             assert len(rewards) == 5
+
+
+class TestBinanceInitCleanup:
+    """Test that __init__ flattens by default and respects close_position_on_init."""
+
+    @pytest.fixture
+    def mock_observer(self):
+        observer = MagicMock()
+        observer.get_keys = MagicMock(return_value=["1m_10"])
+        observer.get_observations = MagicMock(return_value={
+            "1m_10": np.random.randn(10, 4).astype(np.float32),
+        })
+        return observer
+
+    @pytest.fixture
+    def mock_trader(self):
+        trader = MagicMock()
+        trader.cancel_open_orders = MagicMock(return_value=True)
+        trader.close_position = MagicMock(return_value=True)
+        trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0, "available_balance": 900.0,
+            "total_unrealized_profit": 0.0, "total_margin_balance": 1000.0,
+        })
+        trader.get_mark_price = MagicMock(return_value=50000.0)
+        trader.get_status = MagicMock(return_value={"position_status": None})
+        return trader
+
+    @pytest.mark.parametrize("close_on_init,expect_close", [
+        (True, True),
+        (False, False),
+    ])
+    def test_init_close_position_configurable(
+        self, mock_observer, mock_trader, close_on_init, expect_close
+    ):
+        """close_position_on_init controls whether positions are closed on startup."""
+        from torchtrade.envs.live.binance.env import (
+            BinanceFuturesTorchTradingEnv,
+            BinanceFuturesTradingEnvConfig,
+        )
+
+        config = BinanceFuturesTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+            close_position_on_init=close_on_init,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            BinanceFuturesTorchTradingEnv(
+                config=config, observer=mock_observer, trader=mock_trader,
+            )
+
+        mock_trader.cancel_open_orders.assert_called_once()
+        if expect_close:
+            mock_trader.close_position.assert_called_once()
+        else:
+            mock_trader.close_position.assert_not_called()

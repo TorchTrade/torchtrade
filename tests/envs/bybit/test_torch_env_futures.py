@@ -267,11 +267,17 @@ class TestBybitZeroLiquidationPrice:
         assert distance_to_liq == expected_dtl
 
 
-class TestBybitNoInitSideEffects:
-    """Test that __init__ does not call cancel_open_orders or close_position."""
+class TestBybitInitCleanup:
+    """Test that __init__ flattens by default and respects close_position_on_init."""
 
-    def test_init_does_not_cancel_orders(self, mock_env_observer, mock_env_trader):
-        """Environment construction must not cancel orders or close positions."""
+    @pytest.mark.parametrize("close_on_init,expect_close", [
+        (True, True),    # Default: close positions on startup
+        (False, False),  # Opt-out: keep existing positions
+    ])
+    def test_init_close_position_configurable(
+        self, mock_env_observer, mock_env_trader, close_on_init, expect_close
+    ):
+        """close_position_on_init controls whether positions are closed on startup."""
         from torchtrade.envs.live.bybit.env import (
             BybitFuturesTorchTradingEnv,
             BybitFuturesTradingEnvConfig,
@@ -282,7 +288,7 @@ class TestBybitNoInitSideEffects:
             time_frames=["1m"],
             window_sizes=[10],
             execute_on="1m",
-            close_position_on_reset=True,
+            close_position_on_init=close_on_init,
         )
 
         with patch("time.sleep"), \
@@ -291,9 +297,12 @@ class TestBybitNoInitSideEffects:
                 config=config, observer=mock_env_observer, trader=mock_env_trader,
             )
 
-        # __init__ should NOT have side effects on the exchange
-        mock_env_trader.cancel_open_orders.assert_not_called()
-        mock_env_trader.close_position.assert_not_called()
+        # cancel_open_orders always runs on init
+        mock_env_trader.cancel_open_orders.assert_called_once()
+        if expect_close:
+            mock_env_trader.close_position.assert_called_once()
+        else:
+            mock_env_trader.close_position.assert_not_called()
 
     def test_reset_calls_close_position_when_configured(self, mock_env_observer, mock_env_trader):
         """reset() must call close_position when close_position_on_reset=True."""

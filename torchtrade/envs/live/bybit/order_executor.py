@@ -1,5 +1,6 @@
 """Order executor for Bybit Futures trading using pybit."""
 import logging
+import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
@@ -101,6 +102,8 @@ class BybitFuturesOrderClass:
         self.position_mode = position_mode
         self.last_order_id = None
         self._lot_size_cache: Optional[Dict[str, float]] = None
+        self._tick_size: Optional[float] = None
+        self._tick_decimals: int = 0
 
         # Initialize pybit client
         if client is not None:
@@ -109,13 +112,66 @@ class BybitFuturesOrderClass:
             from pybit.unified_trading import HTTP
 
             self.client = HTTP(
-                testnet=demo,
+                demo=demo,
                 api_key=api_key,
                 api_secret=api_secret,
             )
 
-        # Setup futures account
+        # Setup futures account and fetch price precision
         self._setup_futures_account()
+        self._fetch_price_precision()
+
+    def _fetch_price_precision(self):
+        """Fetch and cache tick size (and lot size) from Bybit instruments info.
+
+        Populates both _tick_size and _lot_size_cache from a single API call
+        to avoid a duplicate get_instruments_info request when get_lot_size() is called later.
+        """
+        try:
+            response = self.client.get_instruments_info(
+                category="linear", symbol=self.symbol,
+            )
+            ret_code = response.get("retCode")
+            if ret_code is not None and int(ret_code) != 0:
+                logger.warning("get_instruments_info failed, prices will not be rounded")
+                return
+            instruments = response.get("result", {}).get("list", [])
+            if instruments:
+                instrument = instruments[0]
+                # Tick size for price quantization
+                price_filter = instrument.get("priceFilter", {})
+                tick_str = price_filter.get("tickSize", "0")
+                tick_size = float(tick_str)
+                if tick_size > 0:
+                    self._tick_size = tick_size
+                    # Derive decimal places from tick string for clean formatting
+                    if '.' in tick_str:
+                        decimal_part = tick_str.rstrip('0').split('.')[1]
+                        self._tick_decimals = len(decimal_part) if decimal_part else 0
+                    logger.info(f"Tick size for {self.symbol}: {self._tick_size} ({self._tick_decimals} decimals)")
+
+                # Also cache lot size to avoid a second API call from get_lot_size()
+                lot_filter = instrument.get("lotSizeFilter", {})
+                self._lot_size_cache = {
+                    "min_qty": float(lot_filter.get("minOrderQty", 0.001)),
+                    "qty_step": float(lot_filter.get("qtyStep", 0.001)),
+                }
+        except Exception as e:
+            logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
+
+    def _round_price(self, price: float) -> float:
+        """Round a price to the nearest tick size."""
+        if self._tick_size is not None:
+            rounded = round(price / self._tick_size) * self._tick_size
+            return round(rounded, self._tick_decimals)
+        return price
+
+    def _format_price(self, price: float) -> str:
+        """Round price to tick size and format as deterministic string."""
+        rounded = self._round_price(price)
+        if self._tick_size is not None:
+            return f"{rounded:.{self._tick_decimals}f}"
+        return str(rounded)
 
     def _calculate_unrealized_pnl_pct(self, qty: float, entry_price: float, mark_price: float) -> float:
         """Calculate unrealized PnL percentage."""
@@ -198,13 +254,13 @@ class BybitFuturesOrderClass:
             }
 
             if limit_price is not None:
-                params["price"] = str(limit_price)
+                params["price"] = self._format_price(limit_price)
 
             if take_profit is not None:
-                params["takeProfit"] = str(take_profit)
+                params["takeProfit"] = self._format_price(take_profit)
 
             if stop_loss is not None:
-                params["stopLoss"] = str(stop_loss)
+                params["stopLoss"] = self._format_price(stop_loss)
 
             if reduce_only:
                 params["reduceOnly"] = True
@@ -344,7 +400,7 @@ class BybitFuturesOrderClass:
                 logger.warning(
                     "Demo account balance is 0 USDT! "
                     "Please fund your Bybit demo account at: "
-                    "https://testnet.bybit.com"
+                    "https://www.bybit.com (Demo Trading)"
                 )
 
             return result

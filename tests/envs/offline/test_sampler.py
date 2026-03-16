@@ -16,7 +16,7 @@ def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy().reset_index(drop=False)
     df["features_close"] = df["close"]
     df["features_volume"] = df["volume"]
-    df.dropna(inplace=True)
+    df.fillna(0, inplace=True)
     return df
 
 
@@ -78,7 +78,7 @@ class TestSamplerInitialization:
         n = 200
         df = pd.DataFrame(np.random.rand(n, len(columns)), columns=columns)
 
-        with pytest.raises(ValueError, match="do not match required format"):
+        with pytest.raises(ValueError, match="missing required columns"):
             MarketDataObservationSampler(
                 df=df,
                 time_frames=TimeFrame(1, TimeFrameUnit.Minute),
@@ -156,6 +156,152 @@ class TestSamplerReset:
         # Should have some variation in start times
         unique_timestamps = len(set(first_timestamps))
         assert unique_timestamps > 1
+
+
+class TestAuxiliaryColumns:
+    """Tests for auxiliary (non-OHLCV) column support."""
+
+    @pytest.fixture
+    def ohlcv_with_aux_df(self):
+        """Create OHLCV + auxiliary columns (funding_rate, basis)."""
+        n_minutes = 500
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+        timestamps = pd.date_range(start=start_time, periods=n_minutes, freq="1min")
+        close_prices = np.array([100.0 + i * 0.1 for i in range(n_minutes)])
+
+        return pd.DataFrame({
+            "timestamp": timestamps,
+            "open": close_prices - 0.05,
+            "high": close_prices + 0.1,
+            "low": close_prices - 0.1,
+            "close": close_prices,
+            "volume": np.ones(n_minutes) * 1000,
+            "funding_rate": np.sin(np.arange(n_minutes) / 50) * 0.001,
+            "basis": np.cos(np.arange(n_minutes) / 30) * 0.5,
+        })
+
+    def test_auxiliary_columns_flow_through_pipeline(self, ohlcv_with_aux_df):
+        """Aux columns should be accepted, resampled, and produce correct tensor shapes."""
+        window_size = 10
+        sampler = MarketDataObservationSampler(
+            df=ohlcv_with_aux_df,
+            time_frames=TimeFrame(5, TimeFrameUnit.Minute),
+            window_sizes=window_size,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+        # Feature count: 5 OHLCV + 2 aux = 7
+        assert sampler.get_num_features_per_timeframe()["5Minute"] == 7
+        # Tensor shape matches
+        sampler.reset()
+        obs, _, _ = sampler.get_sequential_observation()
+        assert obs["5Minute"].shape == (window_size, 7)
+
+    def test_ohlcv_positional_contract_with_shuffled_input(self, ohlcv_with_aux_df):
+        """OHLCV must be first 5 columns and row[:5] slicing must return prices, not aux data."""
+        # Shuffle column order — OHLCV should still come first
+        shuffled = ohlcv_with_aux_df[["timestamp", "basis", "volume", "close", "funding_rate", "open", "high", "low"]]
+        sampler = MarketDataObservationSampler(
+            df=shuffled,
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=10,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+        assert list(sampler.df.columns[:5]) == ["open", "high", "low", "close", "volume"]
+        # Verify row[:5] slicing returns OHLCV, not aux data
+        sampler.reset()
+        _, _, _, ohlcv = sampler.get_sequential_observation_with_ohlcv()
+        assert ohlcv.open > 50  # Prices start at ~100, not funding_rate ~0.001
+        assert ohlcv.close > 50
+        assert ohlcv.volume == 1000
+
+    def test_auxiliary_resampling_uses_last(self, ohlcv_with_aux_df):
+        """Auxiliary columns should use 'last' aggregation when resampled."""
+        df = ohlcv_with_aux_df.copy()
+        df.loc[0:4, "funding_rate"] = [0.1, 0.2, 0.3, 0.4, 0.5]
+
+        sampler = MarketDataObservationSampler(
+            df=df,
+            time_frames=TimeFrame(5, TimeFrameUnit.Minute),
+            window_sizes=10,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+        # "last" of [0.1, 0.2, 0.3, 0.4, 0.5] = 0.5
+        first_funding = sampler.resampled_dfs["5Minute"]["funding_rate"].iloc[0]
+        assert abs(first_funding - 0.5) < 1e-6
+
+    def test_backward_compat_ohlcv_only(self, sample_ohlcv_df, execute_timeframe):
+        """Existing OHLCV-only DataFrames should work identically."""
+        sampler = MarketDataObservationSampler(
+            df=sample_ohlcv_df,
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=10,
+            execute_on=execute_timeframe,
+        )
+        assert sampler.get_num_features_per_timeframe()["1Minute"] == 5
+
+    def test_feature_processing_sees_auxiliary_columns(self, ohlcv_with_aux_df):
+        """Feature processing function should have access to auxiliary columns."""
+        def feature_fn(df):
+            df = df.copy().reset_index(drop=False)
+            for col in ["close", "volume", "funding_rate", "basis"]:
+                if col in df.columns:
+                    df[f"features_{col}"] = df[col]
+            df.fillna(0, inplace=True)
+            return df
+
+        sampler = MarketDataObservationSampler(
+            df=ohlcv_with_aux_df,
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=10,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            feature_processing_fn=feature_fn,
+        )
+        feature_keys = sampler.get_feature_keys()
+        assert "features_funding_rate" in feature_keys
+        assert "features_basis" in feature_keys
+
+    def test_get_base_features_returns_only_ohlcv(self, ohlcv_with_aux_df):
+        """get_base_features() must return exactly 5 OHLCV keys, not auxiliary data."""
+        sampler = MarketDataObservationSampler(
+            df=ohlcv_with_aux_df,
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=10,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+        sampler.reset()
+        ts = sampler.exec_times[sampler._sequential_idx]
+        base = sampler.get_base_features(ts)
+        assert list(base.keys()) == ["open", "high", "low", "close", "volume"]
+        assert base["close"] > 50  # Price, not funding_rate
+
+    def test_sparse_auxiliary_data_no_nan_in_tensors(self):
+        """Sparse aux data (NaN gaps) must be forward-filled, not leak NaN into tensors."""
+        n_minutes = 500
+        start_time = pd.Timestamp("2024-01-01 00:00:00")
+        timestamps = pd.date_range(start=start_time, periods=n_minutes, freq="1min")
+        close_prices = np.array([100.0 + i * 0.1 for i in range(n_minutes)])
+
+        df = pd.DataFrame({
+            "timestamp": timestamps,
+            "open": close_prices - 0.05,
+            "high": close_prices + 0.1,
+            "low": close_prices - 0.1,
+            "close": close_prices,
+            "volume": np.ones(n_minutes) * 1000,
+            "funding_rate": np.full(n_minutes, np.nan),  # all NaN except every 60 bars
+        })
+        # Set funding rate only every 60 bars (simulates 1h funding on 1m data)
+        df.loc[::60, "funding_rate"] = 0.001
+
+        sampler = MarketDataObservationSampler(
+            df=df,
+            time_frames=TimeFrame(5, TimeFrameUnit.Minute),
+            window_sizes=10,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+        sampler.reset()
+        obs, _, _ = sampler.get_sequential_observation()
+        assert not torch.isnan(obs["5Minute"]).any(), "NaN leaked into observation tensor from sparse aux data"
 
 
 class TestSamplerObservations:

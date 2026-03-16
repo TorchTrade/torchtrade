@@ -62,6 +62,17 @@ class TestBinanceFuturesOrderClass:
         client.futures_get_open_orders = MagicMock(return_value=[])
         client.futures_cancel_all_open_orders = MagicMock(return_value={})
 
+        # Mock exchange info for price precision
+        client.futures_exchange_info = MagicMock(return_value={
+            "symbols": [{
+                "symbol": "BTCUSDT",
+                "filters": [
+                    {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
+                    {"filterType": "LOT_SIZE", "stepSize": "0.001"},
+                ],
+            }]
+        })
+
         return client
 
     @pytest.fixture
@@ -131,19 +142,19 @@ class TestBinanceFuturesOrderClass:
         assert call_kwargs["side"] == "SELL"
 
     def test_limit_order(self, order_executor, mock_client):
-        """Test placing a limit order."""
+        """Test placing a limit order with price rounding."""
         success = order_executor.trade(
             side="BUY",
             quantity=0.001,
             order_type="limit",
-            limit_price=49000.0,
+            limit_price=49000.1234,
         )
 
         assert success is True
 
         call_kwargs = mock_client.futures_create_order.call_args[1]
         assert call_kwargs["type"] == "LIMIT"
-        assert call_kwargs["price"] == 49000.0
+        assert call_kwargs["price"] == 49000.1  # Rounded to 1 decimal (tick=0.10)
 
     def test_limit_order_without_price_fails(self, order_executor):
         """Test that limit order without price raises error."""
@@ -157,32 +168,32 @@ class TestBinanceFuturesOrderClass:
         assert success is False
 
     def test_order_with_take_profit(self, order_executor, mock_client):
-        """Test order with take profit."""
+        """TP-only order must have its stopPrice rounded before submission."""
         success = order_executor.trade(
             side="BUY",
             quantity=0.001,
             order_type="market",
-            take_profit=52000.0,
+            take_profit=52000.1234,
         )
 
         assert success is True
-
-        # Should have called futures_create_order twice (main + TP)
         assert mock_client.futures_create_order.call_count >= 2
+        tp_call = mock_client.futures_create_order.call_args_list[1][1]
+        assert tp_call["stopPrice"] == 52000.1  # Rounded to 1 decimal
 
     def test_order_with_stop_loss(self, order_executor, mock_client):
-        """Test order with stop loss."""
+        """SL-only order must have its stopPrice rounded before submission."""
         success = order_executor.trade(
             side="BUY",
             quantity=0.001,
             order_type="market",
-            stop_loss=48000.0,
+            stop_loss=48000.5678,
         )
 
         assert success is True
-
-        # Should have called futures_create_order twice (main + SL)
         assert mock_client.futures_create_order.call_count >= 2
+        sl_call = mock_client.futures_create_order.call_args_list[1][1]
+        assert sl_call["stopPrice"] == 48000.6  # Rounded to 1 decimal
 
     def test_order_with_bracket(self, order_executor, mock_client):
         """Test order with both take profit and stop loss."""
@@ -198,6 +209,49 @@ class TestBinanceFuturesOrderClass:
 
         # Should have called futures_create_order three times (main + TP + SL)
         assert mock_client.futures_create_order.call_count >= 3
+
+    @pytest.mark.parametrize("raw_tp,raw_sl,expected_tp,expected_sl", [
+        (84291.4358, 82622.2122, 84291.4, 82622.2),  # BTC at ~$83k: TP +1%, SL -1%
+        (50000.0, 49000.0, 50000.0, 49000.0),        # Already rounded
+        (50000.15, 49999.96, 50000.2, 50000.0),      # Quantize to nearest tick
+        (83456.78123, 82621.2147, 83456.8, 82621.2),  # Many decimals
+    ])
+    def test_bracket_order_prices_rounded_to_tick_size(self, order_executor, mock_client, raw_tp, raw_sl, expected_tp, expected_sl):
+        """SL/TP prices must be quantized to exchange tick size before submission."""
+        success = order_executor.trade(
+            side="BUY",
+            quantity=0.001,
+            order_type="market",
+            take_profit=raw_tp,
+            stop_loss=raw_sl,
+        )
+
+        assert success is True
+
+        # Find TP and SL calls by order type (not by index, to avoid brittleness)
+        calls = mock_client.futures_create_order.call_args_list
+        tp_call = next(c for c in calls if c[1].get("type") == "TAKE_PROFIT_MARKET")
+        sl_call = next(c for c in calls if c[1].get("type") == "STOP_MARKET")
+        assert tp_call[1]["stopPrice"] == expected_tp
+        assert sl_call[1]["stopPrice"] == expected_sl
+
+    def test_tick_size_fetched_at_init(self, order_executor):
+        """Tick size should be cached from exchange info at init."""
+        assert order_executor._tick_size == 0.1
+        assert order_executor._tick_decimals == 1
+
+    def test_round_price_without_precision(self, mock_client):
+        """When tick size fetch fails, prices pass through unmodified."""
+        from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+
+        # Make exchange info fail
+        mock_client.futures_exchange_info = MagicMock(side_effect=Exception("API down"))
+
+        executor = BinanceFuturesOrderClass(
+            symbol="BTCUSDT", client=mock_client,
+        )
+        assert executor._tick_size is None
+        assert executor._round_price(82622.2122) == 82622.2122  # Unmodified
 
     def test_get_status(self, order_executor, mock_client):
         """Test getting account/position status."""
@@ -293,6 +347,45 @@ class TestBinanceFuturesOrderClass:
 
         call_kwargs = mock_client.futures_create_order.call_args[1]
         assert call_kwargs["reduceOnly"] == "true"
+
+
+    def test_trade_returns_true_when_tp_fails(self, order_executor, mock_client):
+        """Main order success must not be masked by SL/TP failure (stacking bug root cause)."""
+        mock_client.futures_create_order = MagicMock(side_effect=[
+            {"orderId": 12345, "status": "FILLED"},  # Main order succeeds
+            Exception("Precision is over the maximum defined for this asset"),  # TP fails
+            Exception("Precision is over the maximum defined for this asset"),  # SL fails
+        ])
+
+        success = order_executor.trade(
+            side="BUY",
+            quantity=0.001,
+            order_type="market",
+            take_profit=52000.1234,
+            stop_loss=48000.5678,
+        )
+
+        # Main order succeeded, so trade() must return True
+        assert success is True
+        # bracket_status should reflect the failures
+        assert order_executor.bracket_status["tp_placed"] is False
+        assert order_executor.bracket_status["sl_placed"] is False
+
+    def test_trade_returns_false_when_main_order_fails(self, order_executor, mock_client):
+        """When the main order itself fails, trade() must return False."""
+        mock_client.futures_create_order = MagicMock(
+            side_effect=Exception("Insufficient margin")
+        )
+
+        success = order_executor.trade(
+            side="BUY",
+            quantity=0.001,
+            order_type="market",
+            take_profit=52000.0,
+            stop_loss=48000.0,
+        )
+
+        assert success is False
 
 
 class TestPositionStatusDataclass:

@@ -124,26 +124,24 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         position_status = status.get("position_status", None)
         current_price = position_status.current_price if position_status else 0.0
 
+        # Sync position state from exchange — this is the source of truth.
+        # Detects SL/TP closures AND fixes state drift from failed bracket orders.
+        position_closed = self._sync_position_from_exchange(position_status)
+
         # Get action and map to SL/TP tuple
         action_idx = tensordict.get("action", 0)
         if hasattr(action_idx, "item"):
             action_idx = action_idx.item()
         action_tuple = self.action_map[action_idx]
 
-        # Check if position was closed by SL/TP
-        position_closed = self._check_position_closed()
-
-        # Calculate and execute trade if needed
+        # Calculate and execute trade if needed (duplicate guard uses synced state)
         trade_info = self._execute_trade_if_needed(action_tuple)
         trade_info["position_closed"] = position_closed
 
+        # Eagerly update position from trade result so the rest of this step
+        # sees the new state without waiting for the next sync cycle.
         if trade_info["executed"] and trade_info.get("success") is not False:
             self.position.current_position = 1 if trade_info["side"] == "buy" else 0
-
-        if position_closed:
-            self.position.current_position = 0
-            self.active_stop_loss = 0.0
-            self.active_take_profit = 0.0
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -226,8 +224,10 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
                 )
 
                 if success:
-                    self.active_stop_loss = stop_loss_price
-                    self.active_take_profit = take_profit_price
+                    # Only record SL/TP levels that actually placed on-exchange
+                    bs = getattr(self.trader, 'bracket_status', {"tp_placed": True, "sl_placed": True})
+                    self.active_stop_loss = stop_loss_price if bs["sl_placed"] else 0.0
+                    self.active_take_profit = take_profit_price if bs["tp_placed"] else 0.0
 
                 trade_info.update({
                     "executed": True,

@@ -60,7 +60,8 @@ class BinanceFuturesSLTPTradingEnvConfig:
     demo: bool = True  # Use demo/testnet for paper trading
     seed: Optional[int] = 42
     include_base_features: bool = False
-    close_position_on_reset: bool = False  # Whether to close positions on env.reset()
+    close_position_on_init: bool = True
+    close_position_on_reset: bool = False
 
     def __post_init__(self):
         """Normalize timeframe configuration."""
@@ -168,19 +169,22 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
             current_price = self.trader.get_mark_price()
             position_size = 0.0
 
+        # Sync position state from exchange — this is the source of truth.
+        # Detects SL/TP closures AND fixes state drift from failed bracket orders.
+        position_closed = self._sync_position_from_exchange(position_status)
+
         # Get action and map to (side, SL, TP) tuple
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()
         action_tuple = self.action_map[action_idx]
 
-        # Check if position was closed by SL/TP
-        position_closed = self._check_position_closed()
-
-        # Execute trade if needed
+        # Execute trade if needed (duplicate guard uses synced state)
         trade_info = self._execute_trade_if_needed(action_tuple)
         trade_info["position_closed"] = position_closed
 
+        # Eagerly update position from trade result so the rest of this step
+        # sees the new state without waiting for the next sync cycle.
         if trade_info["executed"] and trade_info.get("success") is not False:
             if trade_info["side"] == "BUY":
                 self.position.current_position = 1  # Long
@@ -188,11 +192,6 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
                 self.position.current_position = -1  # Short
             elif trade_info["closed_position"]:
                 self.position.current_position = 0  # Closed
-
-        if position_closed:
-            self.position.current_position = 0
-            self.active_stop_loss = 0.0
-            self.active_take_profit = 0.0
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -306,8 +305,10 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
                 )
 
                 if success:
-                    self.active_stop_loss = stop_loss_price
-                    self.active_take_profit = take_profit_price
+                    # Only record SL/TP levels that actually placed on-exchange
+                    bs = getattr(self.trader, 'bracket_status', {"tp_placed": True, "sl_placed": True})
+                    self.active_stop_loss = stop_loss_price if bs["sl_placed"] else 0.0
+                    self.active_take_profit = take_profit_price if bs["tp_placed"] else 0.0
 
                 trade_info.update({
                     "executed": True,
@@ -338,8 +339,9 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
                 )
 
                 if success:
-                    self.active_stop_loss = stop_loss_price
-                    self.active_take_profit = take_profit_price
+                    bs = getattr(self.trader, 'bracket_status', {"tp_placed": True, "sl_placed": True})
+                    self.active_stop_loss = stop_loss_price if bs["sl_placed"] else 0.0
+                    self.active_take_profit = take_profit_price if bs["tp_placed"] else 0.0
 
                 trade_info.update({
                     "executed": True,

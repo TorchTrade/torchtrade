@@ -170,6 +170,26 @@ class TestBitgetFuturesOrderClass:
         # Should use CCXT's bracket order method
         mock_ccxt_client.create_order_with_take_profit_and_stop_loss.assert_called_once()
 
+    @pytest.mark.parametrize("raw_tp,raw_sl", [
+        (82622.2122, 84291.4358),   # Unrounded prices from percentage calc
+        (51234.5678, 48765.4321),   # Many decimal places
+    ])
+    def test_bracket_order_prices_rounded(self, order_executor, mock_ccxt_client, raw_tp, raw_sl):
+        """SL/TP prices must be rounded via CCXT price_to_precision before submission."""
+        success = order_executor.trade(
+            side="buy",
+            quantity=0.001,
+            order_type="market",
+            take_profit=raw_tp,
+            stop_loss=raw_sl,
+        )
+
+        assert success is True
+        call_kwargs = mock_ccxt_client.create_order_with_take_profit_and_stop_loss.call_args[1]
+        # price_to_precision returns string, _round_price converts back to float
+        assert call_kwargs["takeProfit"] == round(raw_tp, 1)
+        assert call_kwargs["stopLoss"] == round(raw_sl, 1)
+
     def test_get_status(self, order_executor, mock_ccxt_client):
         """Test getting order and position status."""
         # Place an order first
@@ -286,6 +306,71 @@ class TestBitgetFuturesOrderClass:
         assert order_executor.margin_mode == MarginMode.CROSSED
         # Note: set_margin_mode may not work reliably on Bitget, but we test the call
         mock_ccxt_client.set_margin_mode.assert_called()
+
+    def test_round_price_fallback_when_precision_unavailable(self, mock_ccxt_client):
+        """When price_to_precision fails, prices must pass through unmodified."""
+        from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
+
+        # Make load_markets and price_to_precision fail
+        mock_ccxt_client.load_markets = MagicMock(side_effect=Exception("Network error"))
+        mock_ccxt_client.price_to_precision = MagicMock(side_effect=Exception("No market data"))
+
+        with patch('torchtrade.envs.live.bitget.order_executor.ccxt.bitget', return_value=mock_ccxt_client):
+            executor = BitgetFuturesOrderClass(
+                symbol="BTC/USDT:USDT", api_key="k", api_secret="s", passphrase="p",
+            )
+            executor.client = mock_ccxt_client
+
+        assert executor._round_price(82622.2122) == 82622.2122
+
+    def test_tp_only_order_price_rounded(self, order_executor, mock_ccxt_client):
+        """TP-only order must have its price rounded before submission."""
+        success = order_executor.trade(
+            side="buy", quantity=0.001, order_type="market",
+            take_profit=51234.5678, stop_loss=None,
+        )
+        assert success is True
+        # TP-only path uses create_order with price param
+        call_args = mock_ccxt_client.create_order.call_args_list
+        tp_call = call_args[-1]  # Last create_order call is the TP order
+        assert tp_call[1]["price"] == 51234.6  # Rounded to 1 decimal
+
+    def test_sl_only_order_price_rounded(self, order_executor, mock_ccxt_client):
+        """SL-only order must have its stopPrice rounded before submission."""
+        success = order_executor.trade(
+            side="buy", quantity=0.001, order_type="market",
+            take_profit=None, stop_loss=48765.4321,
+        )
+        assert success is True
+        call_args = mock_ccxt_client.create_stop_market_order.call_args
+        assert call_args[1]["stopPrice"] == 48765.4  # Rounded to 1 decimal
+
+    def test_trade_returns_true_when_tp_only_fails(self, order_executor, mock_ccxt_client):
+        """Main order success must not be masked by TP-only follow-up failure."""
+        mock_ccxt_client.create_order.side_effect = [
+            {"id": "main_order_123"},  # Main order succeeds
+            Exception("Precision error"),  # TP follow-up fails
+        ]
+
+        success = order_executor.trade(
+            side="buy", quantity=0.001, order_type="market",
+            take_profit=52000.0, stop_loss=None,
+        )
+
+        assert success is True
+
+    def test_trade_returns_true_when_sl_only_fails(self, order_executor, mock_ccxt_client):
+        """Main order success must not be masked by SL-only follow-up failure."""
+        mock_ccxt_client.create_stop_market_order = MagicMock(
+            side_effect=Exception("Precision error")
+        )
+
+        success = order_executor.trade(
+            side="buy", quantity=0.001, order_type="market",
+            take_profit=None, stop_loss=48000.0,
+        )
+
+        assert success is True
 
     def test_trade_failure_handling(self, order_executor, mock_ccxt_client):
         """Test that trade failures are handled gracefully."""
