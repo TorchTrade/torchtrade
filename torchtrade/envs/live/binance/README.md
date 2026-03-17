@@ -156,7 +156,7 @@ env = BinanceFuturesTorchTradingEnv(
 )
 ```
 
-**Note**: These extra kline fields are Binance-specific. Bitget and Bybit observation classes only expose standard OHLCV and volume through their respective APIs (CCXT and pybit).
+**Note**: These extra kline fields are Binance-specific. Bitget and Bybit observation classes only expose standard OHLCV and volume through their respective APIs (CCXT and pybit). Built-in support for auxiliary data fetching (funding rate, taker buy/sell ratio, open interest) across all exchanges is planned for a future release.
 
 ## Funding Fees
 

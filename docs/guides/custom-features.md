@@ -282,7 +282,7 @@ env = BinanceFuturesTorchTradingEnv(
 
 ### Bitget and Bybit
 
-Bitget (via CCXT) and Bybit (via pybit) kline APIs return only standard OHLCV columns (`open`, `high`, `low`, `close`, `volume`). To get equivalent sentiment data on these exchanges, you would need to fetch it via separate API calls outside the observation class.
+Bitget (via CCXT) and Bybit (via pybit) kline APIs return only standard OHLCV columns (`open`, `high`, `low`, `close`, `volume`). To get equivalent sentiment data on these exchanges, you would need to fetch it via separate API calls outside the observation class. Adding built-in support for auxiliary data fetching (funding rate, taker buy/sell ratio, open interest) across all exchanges is planned for a future release.
 
 ---
 
