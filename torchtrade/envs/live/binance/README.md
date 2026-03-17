@@ -140,11 +140,11 @@ These extra fields allow you to derive sentiment features without additional API
 def my_preprocessing(df):
     df = df.copy()
     # Taker buy ratio: proportion of volume from aggressive buyers
-    df["features_taker_buy_ratio"] = df["taker_buy_base"] / df["volume"]
+    df["features_taker_buy_ratio"] = df["taker_buy_base"] / (df["volume"] + 1e-9)
     # Quote volume change
     df["features_quote_volume_pct"] = df["quote_volume"].pct_change().fillna(0)
     # Average trade size
-    df["features_avg_trade_size"] = df["volume"] / df["trades"]
+    df["features_avg_trade_size"] = df["volume"] / (df["trades"] + 1e-9)
     # Standard price features
     df["features_close"] = df["close"].pct_change().fillna(0)
     df.dropna(inplace=True)

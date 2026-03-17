@@ -264,11 +264,11 @@ def binance_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     # Taker buy ratio: proportion of volume from aggressive buyers
     # >0.5 means buyers dominate, <0.5 means sellers dominate
-    df["features_taker_buy_ratio"] = df["taker_buy_base"] / df["volume"]
+    df["features_taker_buy_ratio"] = df["taker_buy_base"] / (df["volume"] + 1e-9)
     # Quote volume change (captures dollar-volume momentum)
     df["features_quote_vol_pct"] = df["quote_volume"].pct_change().fillna(0)
     # Average trade size (large = institutional, small = retail)
-    df["features_avg_trade_size"] = df["volume"] / df["trades"]
+    df["features_avg_trade_size"] = df["volume"] / (df["trades"] + 1e-9)
     # Standard price features
     df["features_close"] = df["close"].pct_change().fillna(0)
     df.fillna(0, inplace=True)
