@@ -28,7 +28,7 @@ class TestBinanceObservationClass:
                     "100.0",    # volume
                     base_time + i * 60000 + 59999,  # close_time
                     "5000000.0",  # quote_volume
-                    100,        # trades
+                    "100",      # trades (string, matching real Binance API)
                     "50.0",     # taker_buy_base
                     "2500000.0",  # taker_buy_quote
                     "0",        # ignore
@@ -94,14 +94,6 @@ class TestBinanceObservationClass:
             client=mock_client,
         )
         assert observer.symbol == "BTCUSDT"
-
-    def test_invalid_interval_raises_error(self, mock_client):
-        """Test that invalid timeframe raises ValueError."""
-
-        # TimeFrame with 2 minutes is valid (converts to "2m" which is invalid for Binance)
-        # This test should fail when trying to fetch data, not on init
-        # Let's skip this test for now since we're using TimeFrame objects
-        pytest.skip("TimeFrame validation happens during API call, not initialization")
 
     def test_mismatched_lengths_raises_error(self, mock_client):
         """Test that mismatched time_frames and window_sizes raises error."""
@@ -179,6 +171,36 @@ class TestBinanceObservationClass:
 
         observations = observer.get_observations()
         assert observations["1Minute_10"].shape == (10, 2)  # 2 custom features
+
+    def test_custom_preprocessing_with_kline_extra_fields(self, mock_client):
+        """Custom preprocessing can derive features from Binance-specific kline fields."""
+        from torchtrade.envs.live.binance.observation import BinanceObservationClass
+
+        def kline_preprocessing(df):
+            df = df.copy()
+            df["feature_taker_ratio"] = df["taker_buy_base"] / (df["volume"] + 1e-9)
+            df["feature_quote_vol"] = df["quote_volume"].pct_change().fillna(0)
+            df["feature_avg_trade_size"] = df["volume"] / df["trades"]
+            df["feature_close"] = df["close"].pct_change().fillna(0)
+            df.dropna(inplace=True)
+            return df
+
+        observer = BinanceObservationClass(
+            symbol="BTCUSDT",
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=10,
+            client=mock_client,
+            feature_preprocessing_fn=kline_preprocessing,
+        )
+
+        # get_features() uses dummy data — verifies dummy DataFrame has extra columns
+        features = observer.get_features()
+        for f in ["feature_taker_ratio", "feature_quote_vol", "feature_avg_trade_size"]:
+            assert f in features["observation_features"]
+
+        # get_observations() uses mock kline data — verifies type casting is correct
+        observations = observer.get_observations()
+        assert observations["1Minute_10"].shape == (10, 4)
 
     def test_get_features(self, observer_single):
         """Test get_features returns feature information."""

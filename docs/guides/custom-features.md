@@ -240,6 +240,52 @@ See [Auxiliary Data Columns](sampler.md#auxiliary-data-columns) for details on h
 
 ---
 
+## Exchange-Specific Kline Fields (Live Environments)
+
+Live environments fetch kline data directly from exchange APIs. Some exchanges return additional fields beyond standard OHLCV that you can use in your `feature_preprocessing_fn`.
+
+### Binance
+
+Binance klines include extra market microstructure data:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `open`, `high`, `low`, `close` | float | Standard price data |
+| `volume` | float | Base asset volume |
+| `quote_volume` | float | Quote asset volume (e.g., USDT volume) |
+| `trades` | int | Number of trades in the candle |
+| `taker_buy_base` | float | Taker buy volume (base asset) |
+| `taker_buy_quote` | float | Taker buy volume (quote asset) |
+
+These allow you to derive sentiment and microstructure features without additional API calls:
+
+```python
+def binance_features(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    # Taker buy ratio: proportion of volume from aggressive buyers
+    # >0.5 means buyers dominate, <0.5 means sellers dominate
+    df["features_taker_buy_ratio"] = df["taker_buy_base"] / (df["volume"] + 1e-9)
+    # Quote volume change (captures dollar-volume momentum)
+    df["features_quote_vol_pct"] = df["quote_volume"].pct_change().fillna(0)
+    # Average trade size (large = institutional, small = retail)
+    df["features_avg_trade_size"] = df["volume"] / (df["trades"] + 1e-9)
+    # Standard price features
+    df["features_close"] = df["close"].pct_change().fillna(0)
+    df.fillna(0, inplace=True)
+    return df
+
+env = BinanceFuturesTorchTradingEnv(
+    config=config,
+    feature_preprocessing_fn=binance_features,
+)
+```
+
+### Bitget and Bybit
+
+Bitget (via CCXT) and Bybit (via pybit) kline APIs return only standard OHLCV columns (`open`, `high`, `low`, `close`, `volume`). To get equivalent sentiment data on these exchanges, you would need to fetch it via separate API calls outside the observation class. Adding built-in support for auxiliary data fetching (funding rate, taker buy/sell ratio, open interest) across all exchanges is planned for a future release.
+
+---
+
 ## Important Rules
 
 1. **Feature prefix** (when using `feature_preprocessing_fn`): All output columns MUST start with `features_` (e.g., `features_rsi_14`). Columns without this prefix are ignored. Without a preprocessing function, raw columns (OHLCV + auxiliary) are used directly.
