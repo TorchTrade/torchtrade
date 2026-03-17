@@ -3,6 +3,7 @@
 </p>
 
 <p align="center">
+  <a href="https://torchtrade.github.io/torchtrade.io/index.html"><img src="https://img.shields.io/badge/Website-torchtrade.io-blueviolet.svg" alt="Website"></a>
   <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
   <img src="https://img.shields.io/badge/TorchRL-Compatible-green.svg" alt="TorchRL">
@@ -24,6 +25,8 @@ TorchTrade provides modular environments for both live trading with major exchan
 - 🔮 **Pretrained Encoder Transforms** - Foundation model embeddings for time series
 - 📦 **Ready-to-Use Datasets** - Pre-processed OHLCV data at [HuggingFace/Torch-Trade](https://huggingface.co/Torch-Trade)
 - 📈 **Research to Production** - Same code for backtesting and live deployment
+- 🛠️ **[Claude Code Agents](https://code.claude.com/docs/en/sub-agents)** - Pre-built AI coding agents for developing and extending TorchTrade ([available on our website](https://torchtrade.github.io/torchtrade.io/index.html))
+- 📝 **Research Articles** - In-depth articles on RL trading strategies and framework design ([get here](https://torchtrade.github.io/torchtrade.io/index.html))
 
 > **⚠️ Work in Progress:** TorchTrade is under active development. We continuously add new features, improvements, and optimizations. Expect API changes, new environments, and enhanced functionality in future releases.
 >
@@ -31,11 +34,11 @@ TorchTrade provides modular environments for both live trading with major exchan
 
 ---
 
-## 📚 Full Documentation
+## 📚 Website & Documentation
 
-**For comprehensive guides, tutorials, and API reference, visit our documentation:**
+🌐 **[TorchTrade Website](https://torchtrade.github.io/torchtrade.io/index.html)** — Landing page with overview, features, Claude Code agents, and research articles
 
-👉 **[TorchTrade Documentation](https://torchtrade.github.io/torchtrade/)** 👈
+📖 **[TorchTrade Documentation](https://torchtrade.github.io/torchtrade/)** — Comprehensive guides, tutorials, and API reference
 
 - **[Getting Started](https://torchtrade.github.io/torchtrade/getting-started/)** - Installation and first environment
 - **[Environments](https://torchtrade.github.io/torchtrade/environments/offline/)** - Offline and online trading environments
