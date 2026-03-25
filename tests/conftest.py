@@ -249,10 +249,10 @@ def short_ohlcv_df():
     Useful for testing sampler exhaustion (issue #204) and other
     boundary conditions where data runs out before max_traj_length.
     """
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
     n = 25
     timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
-    close_prices = 100.0 * np.exp(np.cumsum(np.random.normal(0, 0.001, n)))
+    close_prices = 100.0 * np.exp(np.cumsum(rng.normal(0, 0.001, n)))
     high_prices = close_prices * 1.002
     low_prices = close_prices * 0.998
     open_prices = np.roll(close_prices, 1)
