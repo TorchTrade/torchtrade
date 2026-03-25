@@ -394,11 +394,7 @@ class TestSequentialEnvTermination:
                 break
             action_td = td.clone()
             action_td["action"] = torch.tensor(0)  # Close action for spot
-            try:
-                td = env.step(action_td)
-            except (ValueError, IndexError):
-                # Out of data
-                break
+            td = env.step(action_td)
 
         assert i < max_steps, "Should terminate before max_steps"
         env.close()
@@ -429,11 +425,7 @@ class TestSequentialEnvTermination:
                 break
             action_td = td["next"].clone()
             action_td["action"] = torch.tensor(2)  # Keep long position (futures: [-1, 0, 1])
-            try:
-                td = env.step(action_td)
-            except (ValueError, IndexError):
-                terminated = True
-                break
+            td = env.step(action_td)
 
         # Should have terminated (either liquidation, max length, or out of data)
         assert terminated, "Episode should terminate"
@@ -469,11 +461,7 @@ class TestSequentialEnvTermination:
                 break
             action_td = td["next"].clone()
             action_td["action"] = torch.tensor(0)  # Keep short position
-            try:
-                td = env.step(action_td)
-            except (ValueError, IndexError):
-                terminated = True
-                break
+            td = env.step(action_td)
 
         # Should have terminated (either liquidation, max length, or out of data)
         assert terminated, "Episode should terminate"

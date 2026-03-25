@@ -252,13 +252,19 @@ def short_ohlcv_df():
     np.random.seed(42)
     n = 25
     timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
-    close = 100.0 * np.exp(np.cumsum(np.random.normal(0, 0.001, n)))
-    high = close * 1.002
-    low = close * 0.998
-    opn = np.roll(close, 1); opn[0] = 100.0
+    close_prices = 100.0 * np.exp(np.cumsum(np.random.normal(0, 0.001, n)))
+    high_prices = close_prices * 1.002
+    low_prices = close_prices * 0.998
+    open_prices = np.roll(close_prices, 1)
+    open_prices[0] = 100.0
+
     return pd.DataFrame({
-        "timestamp": timestamps, "open": opn, "high": high,
-        "low": low, "close": close, "volume": np.ones(n),
+        "timestamp": timestamps,
+        "open": open_prices,
+        "high": high_prices,
+        "low": low_prices,
+        "close": close_prices,
+        "volume": np.ones(n),
     })
 
 
