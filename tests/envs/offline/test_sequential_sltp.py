@@ -8,8 +8,6 @@ This file consolidates tests from:
 Uses parametrization to test both trading modes with maximum code reuse.
 """
 
-import numpy as np
-import pandas as pd
 import pytest
 import torch
 
@@ -735,23 +733,8 @@ class TestSLTPRegression:
 class TestSLTPSamplerExhaustion:
     """Verify SLTP _step gracefully terminates when the sampler is exhausted."""
 
-    @pytest.fixture
-    def short_df(self):
-        """25-bar DataFrame: window_size=10 leaves ~15 usable steps."""
-        np.random.seed(42)
-        n = 25
-        timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
-        close = 100.0 * np.exp(np.cumsum(np.random.normal(0, 0.001, n)))
-        high = close * 1.002
-        low = close * 0.998
-        opn = np.roll(close, 1); opn[0] = 100.0
-        return pd.DataFrame({
-            "timestamp": timestamps, "open": opn, "high": high,
-            "low": low, "close": close, "volume": np.ones(n),
-        })
-
     @pytest.mark.parametrize("leverage", [1, 10], ids=["spot", "futures"])
-    def test_step_after_sampler_exhausted_does_not_crash(self, short_df, leverage):
+    def test_step_after_sampler_exhausted_does_not_crash(self, short_ohlcv_df, leverage):
         """Stepping past the sampler's last timestamp must return done=True,
         not raise ValueError (issue #204)."""
         config = SequentialTradingEnvSLTPConfig(
@@ -768,7 +751,7 @@ class TestSLTPSamplerExhaustion:
             stoploss_levels=[-0.01],
             takeprofit_levels=[0.02],
         )
-        env = SequentialTradingEnvSLTP(short_df, config, simple_feature_fn)
+        env = SequentialTradingEnvSLTP(short_ohlcv_df, config, simple_feature_fn)
         td = env.reset()
 
         # Action 0 = hold (no position) in SLTP envs
