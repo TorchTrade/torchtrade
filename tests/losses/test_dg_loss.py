@@ -60,7 +60,7 @@ class TestDGLoss:
         with pytest.raises(TypeError, match="Missing positional argument"):
             DGLoss(actor_network=None)
 
-    @pytest.mark.parametrize("baseline", ["invalid", "foo"])
+    @pytest.mark.parametrize("baseline", ["invalid", "expected"])
     def test_invalid_baseline_raises(self, actor_network, baseline):
         with pytest.raises(ValueError, match="baseline must be"):
             DGLoss(actor_network=actor_network, baseline=baseline)
@@ -114,27 +114,6 @@ class TestDGLoss:
         loss = DGLoss(actor_network=actor_network, baseline=baseline)
         output = loss(sample_data)
         assert torch.isfinite(output["loss_objective"])
-
-    def test_expected_baseline(self, actor_network):
-        """Expected baseline uses counterfactual rewards to compute advantage."""
-        data = TensorDict(
-            {
-                "observation": torch.randn(self.BATCH_SIZE, self.OBS_DIM),
-                "action": torch.randint(0, self.ACTION_DIM, (self.BATCH_SIZE,)),
-                "counterfactual_rewards": torch.randn(self.BATCH_SIZE, self.ACTION_DIM),
-                "next": {"reward": torch.randn(self.BATCH_SIZE, 1)},
-            },
-            batch_size=[self.BATCH_SIZE],
-        )
-        loss = DGLoss(actor_network=actor_network, baseline="expected")
-        output = loss(data)
-        assert torch.isfinite(output["loss_objective"])
-
-    def test_expected_baseline_missing_counterfactual_raises(self, actor_network, sample_data):
-        """Expected baseline without counterfactual_rewards raises clear error."""
-        loss = DGLoss(actor_network=actor_network, baseline="expected")
-        with pytest.raises(KeyError, match="counterfactual_rewards"):
-            loss(sample_data)
 
     def test_batch_size_one(self, actor_network):
         """Edge case: single-element batch (mean baseline = value itself)."""

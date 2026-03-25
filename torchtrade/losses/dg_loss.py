@@ -61,8 +61,6 @@ class DGLoss(LossModule):
         baseline: How to compute the reward baseline.
             - ``"mean"``: batch mean of rewards (default).
             - ``"none"``: no baseline (raw rewards as advantage).
-            - ``"expected"``: expected reward under current policy, requires
-              ``"counterfactual_rewards"`` key with shape (batch, n_actions).
         entropy_bonus: Whether to add an entropy bonus. Default: True.
         entropy_coeff: Coefficient for the entropy bonus. Default: 0.01.
         samples_mc_entropy: Number of samples for MC entropy estimation. Default: 1.
@@ -106,9 +104,9 @@ class DGLoss(LossModule):
         if eta <= 0:
             raise ValueError(f"eta must be > 0, got {eta}")
 
-        if baseline not in ("mean", "none", "expected"):
+        if baseline not in ("mean", "none"):
             raise ValueError(
-                f"baseline must be 'mean', 'none', or 'expected', got '{baseline}'"
+                f"baseline must be 'mean' or 'none', got '{baseline}'"
             )
 
         if reduction is None:
@@ -150,8 +148,6 @@ class DGLoss(LossModule):
         _maybe_add_or_extend_key(keys, self.actor_network.in_keys)
         _maybe_add_or_extend_key(keys, self.tensor_keys.action)
         _maybe_add_or_extend_key(keys, self.tensor_keys.reward, "next")
-        if self.baseline_type == "expected":
-            _maybe_add_or_extend_key(keys, "counterfactual_rewards")
         self._in_keys = list(dict.fromkeys(keys))
 
     @property
@@ -233,24 +229,12 @@ class DGLoss(LossModule):
                 entropy.batch_size = adv_shape
         return entropy.unsqueeze(-1)
 
-    def _compute_baseline(self, reward, dist, tensordict):
+    def _compute_baseline(self, reward):
         """Compute reward baseline for advantage estimation."""
         if self.baseline_type == "none":
             return 0.0
-        if self.baseline_type == "mean":
-            return reward.mean(0, keepdim=True)
-        # baseline_type == "expected" (validated in __init__)
-        if not hasattr(dist, "probs"):
-            raise RuntimeError(
-                "baseline='expected' requires a discrete distribution exposing .probs"
-            )
-        if "counterfactual_rewards" not in tensordict.keys(True, True):
-            raise KeyError(
-                "baseline='expected' requires 'counterfactual_rewards' in the input TensorDict"
-            )
-        probs = dist.probs  # (batch, n_actions)
-        cf_rewards = tensordict["counterfactual_rewards"]  # (batch, n_actions)
-        return (probs * cf_rewards).sum(-1, keepdim=True)
+        # baseline_type == "mean" (validated in __init__)
+        return reward.mean(0, keepdim=True)
 
     @dispatch
     def forward(self, tensordict: TensorDictBase) -> TensorDictBase:
@@ -261,7 +245,7 @@ class DGLoss(LossModule):
 
         # 2. Get reward and compute advantage
         reward = tensordict["next", self.tensor_keys.reward]  # (batch, 1)
-        baseline = self._compute_baseline(reward, dist, tensordict)
+        baseline = self._compute_baseline(reward)
         advantage = reward - baseline  # (batch, 1)
 
         # 3. Compute delight gate

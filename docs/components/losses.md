@@ -53,7 +53,7 @@ DG also drops the importance sampling machinery that GRPO needs. GRPO requires o
 |-----------|---------|-------------|
 | `actor_network` | Required | Policy network (ProbabilisticTensorDictSequential) |
 | `eta` | 1.0 | Sigmoid gate temperature (lower = sharper gating) |
-| `baseline` | `"mean"` | Baseline type: `"mean"`, `"none"`, or `"expected"` |
+| `baseline` | `"mean"` | Baseline type: `"mean"` or `"none"` |
 | `entropy_bonus` | True | Whether to add entropy regularization |
 | `entropy_coeff` | 0.01 | Entropy regularization coefficient |
 
@@ -76,7 +76,6 @@ for batch in collector:
 
 - `"mean"` — batch mean of rewards (default, simple and effective)
 - `"none"` — no baseline (raw rewards as advantage)
-- `"expected"` — expected reward under current policy: $\sum_a \pi(a|s) \cdot R(s,a)$. Requires a `"counterfactual_rewards"` key of shape `(batch, n_actions)` in the input TensorDict.
 
 **Papers:**
 
