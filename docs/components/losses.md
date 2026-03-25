@@ -69,7 +69,7 @@ for batch in collector:
     optimizer.step()
 
     # DG-specific diagnostics
-    print(f"gate: {loss_td['gate']:.3f}, advantage: {loss_td['advantage']:.3f}")
+    print(f"gate: {loss_td['gate'].item():.3f}, advantage: {loss_td['advantage'].item():.3f}")
 ```
 
 **Baseline modes:**

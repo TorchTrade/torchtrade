@@ -1,9 +1,10 @@
 """Delightful Gradient (DG) loss module.
 
-Implements the Delightful Policy Gradient from "Delightful Distributed Policy Gradient"
-(arXiv:2603.20521). Gates each policy gradient update by sigmoid(delight / η), where
-delight = advantage × surprisal. This suppresses rare failures and amplifies rare
-successes without requiring behavior probabilities (no importance sampling).
+Implements the Delightful Policy Gradient from arXiv:2603.14608, extended to
+distributed settings in arXiv:2603.20521. Gates each policy gradient update by
+sigmoid(delight / η), where delight = advantage × surprisal. This suppresses
+rare failures and amplifies rare successes without requiring behavior
+probabilities (no importance sampling).
 
 Key difference from PPO/GRPO: DG uses only the current policy's log-probabilities,
 not importance ratios. This makes it simpler and removes the need for old log-probs.
@@ -102,6 +103,9 @@ class DGLoss(LossModule):
         if actor_network is None:
             raise TypeError("Missing positional argument actor_network.")
 
+        if eta <= 0:
+            raise ValueError(f"eta must be > 0, got {eta}")
+
         if baseline not in ("mean", "none", "expected"):
             raise ValueError(
                 f"baseline must be 'mean', 'none', or 'expected', got '{baseline}'"
@@ -146,7 +150,7 @@ class DGLoss(LossModule):
         _maybe_add_or_extend_key(keys, self.actor_network.in_keys)
         _maybe_add_or_extend_key(keys, self.tensor_keys.action)
         _maybe_add_or_extend_key(keys, self.tensor_keys.reward, "next")
-        self._in_keys = list(set(keys))
+        self._in_keys = list(dict.fromkeys(keys))
 
     @property
     def in_keys(self):
@@ -230,17 +234,21 @@ class DGLoss(LossModule):
     def _compute_baseline(self, reward, dist, tensordict):
         """Compute reward baseline for advantage estimation."""
         if self.baseline_type == "none":
-            return torch.zeros_like(reward)
-        elif self.baseline_type == "mean":
+            return 0.0
+        if self.baseline_type == "mean":
             return reward.mean(0, keepdim=True)
-        elif self.baseline_type == "expected":
-            # Expected reward under current policy: sum_a π(a|s) * R(s, a)
-            # Requires counterfactual_rewards of shape (batch, n_actions)
-            probs = dist.probs  # (batch, n_actions)
-            cf_rewards = tensordict["counterfactual_rewards"]  # (batch, n_actions)
-            return (probs * cf_rewards).sum(-1, keepdim=True)
-        else:
-            raise ValueError(f"Unknown baseline type: {self.baseline_type}")
+        # baseline_type == "expected" (validated in __init__)
+        if not hasattr(dist, "probs"):
+            raise RuntimeError(
+                "baseline='expected' requires a discrete distribution exposing .probs"
+            )
+        if "counterfactual_rewards" not in tensordict.keys(True, True):
+            raise KeyError(
+                "baseline='expected' requires 'counterfactual_rewards' in the input TensorDict"
+            )
+        probs = dist.probs  # (batch, n_actions)
+        cf_rewards = tensordict["counterfactual_rewards"]  # (batch, n_actions)
+        return (probs * cf_rewards).sum(-1, keepdim=True)
 
     @dispatch
     def forward(self, tensordict: TensorDictBase) -> TensorDictBase:
@@ -250,7 +258,7 @@ class DGLoss(LossModule):
         log_prob, dist = self._get_log_prob_and_dist(tensordict)
 
         # 2. Get reward and compute advantage
-        reward = tensordict["next", "reward"]  # (batch, 1)
+        reward = tensordict["next", self.tensor_keys.reward]  # (batch, 1)
         baseline = self._compute_baseline(reward, dist, tensordict)
         advantage = reward - baseline  # (batch, 1)
 
@@ -260,8 +268,7 @@ class DGLoss(LossModule):
         gate = torch.sigmoid(delight / self.eta)  # (batch, 1)
 
         # 4. Compute gated policy gradient loss
-        # loss = -log_prob * stop_gradient(gate * advantage)
-        loss = -(log_prob.unsqueeze(-1) * (gate * advantage).detach())
+        loss = surprisal * (gate * advantage).detach()
 
         td_out = TensorDict({"loss_objective": loss})
         td_out.set("gate", gate.detach().mean())
