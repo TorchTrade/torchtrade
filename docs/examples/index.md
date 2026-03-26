@@ -331,6 +331,10 @@ Located in `examples/losses/`:
 |---------|------|-------------|
 | **dg_mnist.py** | [DGLoss](../components/losses.md#dgloss) | Compares CE, REINFORCE, and DG on MNIST-as-bandit. Plots test error, training loss, and gate dynamics. |
 
+![CE vs PG (REINFORCE) vs DG on MNIST Bandit](../images/dg_vs_reinforce.png)
+
+DG (blue) converges to 2.7% test error after 5 epochs, close to supervised CE (purple, 2.0%) and well ahead of vanilla REINFORCE (red, 5.7%). Panel (c) shows the delight gate settling near 0.5 as the policy improves and surprisal decreases.
+
 ```bash
 # Run with defaults (5 epochs, eta=1.0, mean baseline)
 python examples/losses/dg_mnist.py
