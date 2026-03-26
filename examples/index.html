@@ -670,6 +670,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#loss-function-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loss Function Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#live-trading" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1442,6 +1453,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#loss-function-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loss Function Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#live-trading" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1916,6 +1938,36 @@ futures</p>
 <p class="admonition-title">Future Work</p>
 <p>Hybrid approaches that combine rule-based policies with neural network policies as actors, leveraging the strengths of both deterministic strategies and learned behaviors.</p>
 </div>
+<h3 id="loss-function-examples">Loss Function Examples<a class="headerlink" href="#loss-function-examples" title="Permanent link">&para;</a></h3>
+<p>Standalone scripts that compare TorchTrade's custom loss functions against baselines on simple tasks, useful for sanity checking and understanding each loss.</p>
+<p>Located in <code>examples/losses/</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Example</th>
+<th>Loss</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>dg_mnist.py</strong></td>
+<td><a href="../components/losses/#dgloss">DGLoss</a></td>
+<td>Compares CE, REINFORCE, and DG on MNIST-as-bandit. Plots test error, training loss, and gate dynamics.</td>
+</tr>
+</tbody>
+</table>
+<p><img alt="CE vs PG vs GRPO vs DG on MNIST Bandit" src="../images/dg_vs_reinforce.png" /></p>
+<p>All policy gradient methods converge well below 10% after 5 epochs. CE (purple, 2.6%) is the supervised upper bound. GRPO (amber, 3.7%) and DG (blue, 3.9%) both approach CE, while REINFORCE (red, 6.4%) lags behind. GRPO uses G=32 group generation with per-image advantage normalization. DG achieves comparable results without importance sampling. Panel (c) shows the DG gate settling near 0.5 as the policy improves.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Run with defaults (5 epochs, eta=1.0, mean baseline)</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>python<span class="w"> </span>examples/losses/dg_mnist.py
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Sweep eta temperature</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>python<span class="w"> </span>examples/losses/dg_mnist.py<span class="w"> </span>--eta<span class="w"> </span><span class="m">0</span>.3
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># Skip plotting</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>python<span class="w"> </span>examples/losses/dg_mnist.py<span class="w"> </span>--no-plot
+</span></code></pre></div>
 <h3 id="live-trading">Live Trading<a class="headerlink" href="#live-trading" title="Permanent link">&para;</a></h3>
 <p>The DQN and PPO examples include a <code>live.py</code> script alongside the <code>train.py</code> script, demonstrating the smooth transition from offline backtesting to live trading. The same model architecture and <code>utils.py</code> helpers are reused — only the environment changes from an offline <code>SequentialTradingEnv</code> to a live exchange environment. This mirrors the core design philosophy: <strong>swap the environment, keep everything else the same.</strong></p>
 <p>Live scripts support loading pre-trained weights via <code>--weights</code> and store all live transitions in a replay buffer (saved periodically for crash safety), enabling offline analysis or further training on real market data.</p>
@@ -1945,14 +1997,14 @@ futures</p>
 </tbody>
 </table>
 <p><strong>Usage:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Train offline first</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>python<span class="w"> </span>examples/online_rl/dqn/train.py
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Deploy trained weights to Binance testnet</span>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>python<span class="w"> </span>examples/online_rl/dqn/live.py<span class="w"> </span>--weights<span class="w"> </span>dqn_policy_100.pth<span class="w"> </span>--demo
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
-</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># Deploy PPO to Alpaca paper trading</span>
-</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>python<span class="w"> </span>examples/online_rl/ppo/live.py<span class="w"> </span>--weights<span class="w"> </span>ppo_policy_100.pth<span class="w"> </span>--paper
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Train offline first</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>python<span class="w"> </span>examples/online_rl/dqn/train.py
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Deploy trained weights to Binance testnet</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>python<span class="w"> </span>examples/online_rl/dqn/live.py<span class="w"> </span>--weights<span class="w"> </span>dqn_policy_100.pth<span class="w"> </span>--demo
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c1"># Deploy PPO to Alpaca paper trading</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>python<span class="w"> </span>examples/online_rl/ppo/live.py<span class="w"> </span>--weights<span class="w"> </span>ppo_policy_100.pth<span class="w"> </span>--paper
 </span></code></pre></div></p>
 <h3 id="transforms">Transforms<a class="headerlink" href="#transforms" title="Permanent link">&para;</a></h3>
 <p>Inspired by work such as <a href="https://arxiv.org/abs/2203.12601">R3M</a> and <a href="https://arxiv.org/abs/2210.00030">VIP</a> that utilize large pretrained models for representation learning, we created the ChronosEmbeddingTransform using <a href="https://github.com/amazon-science/chronos-forecasting">Chronos forecasting models</a> to embed historical trading data. This demonstrates the flexibility and adaptability of TorchTrade for integrating pretrained models as transforms for enhanced feature representations.</p>
@@ -1977,25 +2029,25 @@ futures</p>
 <hr />
 <h2 id="running-examples">Running Examples<a class="headerlink" href="#running-examples" title="Permanent link">&para;</a></h2>
 <p>All examples use Hydra for configuration management with centralized environment configs:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Run with default configuration (sequential, spot, 1Hour)</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online_rl/ppo/train.py
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Switch environment via CLI</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online_rl/ppo/train.py<span class="w"> </span><span class="nv">env</span><span class="o">=</span>sequential_sltp
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online_rl/ppo/train.py<span class="w"> </span><span class="nv">env</span><span class="o">=</span>onestep
-</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
-</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="c1"># Configure for futures trading</span>
-</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online_rl/ppo/train.py<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">    </span>env.leverage<span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="w">    </span>env.action_levels<span class="o">=</span><span class="s1">&#39;[-1.0,0.0,1.0]&#39;</span>
-</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>
-</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="c1"># Override multiple parameters</span>
-</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online_rl/ppo/train.py<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="w">    </span><span class="nv">env</span><span class="o">=</span>sequential_sltp<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="w">    </span>env.symbol<span class="o">=</span><span class="s2">&quot;ETH/USD&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-9-17"><a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="w">    </span>env.leverage<span class="o">=</span><span class="m">10</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-9-18"><a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a><span class="w">    </span>optim.lr<span class="o">=</span>1e-4<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-9-19"><a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="w">    </span>loss.gamma<span class="o">=</span><span class="m">0</span>.95
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Run with default configuration (sequential, spot, 1Hour)</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online_rl/ppo/train.py
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Switch environment via CLI</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online_rl/ppo/train.py<span class="w"> </span><span class="nv">env</span><span class="o">=</span>sequential_sltp
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online_rl/ppo/train.py<span class="w"> </span><span class="nv">env</span><span class="o">=</span>onestep
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="c1"># Configure for futures trading</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online_rl/ppo/train.py<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">    </span>env.leverage<span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="w">    </span>env.action_levels<span class="o">=</span><span class="s1">&#39;[-1.0,0.0,1.0]&#39;</span>
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="c1"># Override multiple parameters</span>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/online_rl/ppo/train.py<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="w">    </span><span class="nv">env</span><span class="o">=</span>sequential_sltp<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="w">    </span>env.symbol<span class="o">=</span><span class="s2">&quot;ETH/USD&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="w">    </span>env.leverage<span class="o">=</span><span class="m">10</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-18"><a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="w">    </span>optim.lr<span class="o">=</span>1e-4<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-19"><a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a><span class="w">    </span>loss.gamma<span class="o">=</span><span class="m">0</span>.95
 </span></code></pre></div>
 <h3 id="available-environment-configs">Available Environment Configs<a class="headerlink" href="#available-environment-configs" title="Permanent link">&para;</a></h3>
 <table>
