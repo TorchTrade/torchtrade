@@ -29,6 +29,8 @@ from tensordict.nn import (
 from torch.distributions import Categorical
 from torchvision import datasets, transforms
 
+from torchrl.envs import ExplorationType, set_exploration_type
+
 from torchtrade.losses import DGLoss, GRPOLoss
 
 
@@ -210,13 +212,17 @@ def train_pg(epochs=5, lr=1e-3, batch_size=256, eval_every=10, device=None):
 
 
 def train_grpo(epochs=5, lr=1e-3, batch_size=256, eval_every=10,
-               group_size=8, device=None):
+               group_size=32, device=None):
     """GRPO with group-relative advantages. Returns metrics dict.
 
     For each image, samples `group_size` actions from the policy, computes
-    rewards for each, then normalizes advantages within each group. This is
-    the key GRPO mechanism: the batch has shape (group_size, B) and
-    mean(0) computes per-image baselines across the group.
+    rewards for each, then normalizes advantages within each group. The batch
+    has shape (group_size, B) and mean(0)/std(0) compute per-image baselines
+    across the group dimension.
+
+    G=32 ensures ~97% of images have reward variance within the group
+    (with 10 classes and ~10% initial accuracy, G=8 leaves ~43% of groups
+    with zero variance and no learning signal).
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -251,13 +257,13 @@ def train_grpo(epochs=5, lr=1e-3, batch_size=256, eval_every=10,
             images_g = images.unsqueeze(0).expand(group_size, -1, -1)
             labels_g = labels.unsqueeze(0).expand(group_size, -1)
 
-            # Sample G actions per image
+            # Sample G actions per image (must use RANDOM exploration, not MODE)
             td = TensorDict(
                 {"observation": images_g},
                 batch_size=[group_size, B],
                 device=device,
             )
-            with torch.no_grad():
+            with torch.no_grad(), set_exploration_type(ExplorationType.RANDOM):
                 with loss_module.actor_network_params.to_module(loss_module.actor_network):
                     td = loss_module.actor_network(td)
 
@@ -343,7 +349,7 @@ def train_dg(epochs=5, eta=1.0, baseline="mean", lr=1e-3, batch_size=256,
                 batch_size=[images.size(0)],
                 device=device,
             )
-            with torch.no_grad():
+            with torch.no_grad(), set_exploration_type(ExplorationType.RANDOM):
                 with loss_module.actor_network_params.to_module(loss_module.actor_network):
                     td = loss_module.actor_network(td)
 

@@ -333,7 +333,7 @@ Located in `examples/losses/`:
 
 ![CE vs PG vs GRPO vs DG on MNIST Bandit](../images/dg_vs_reinforce.png)
 
-DG (blue, 3.4%) converges close to supervised CE (purple, 2.6%) and well ahead of REINFORCE (red, 6.4%). GRPO (amber, ~90%) struggles on this bandit task because its clipped importance ratios limit per-batch updates without multi-epoch replay. Panel (c) shows the DG gate settling near 0.5 as the policy improves and surprisal decreases.
+All policy gradient methods converge well below 10% after 5 epochs. CE (purple, 2.6%) is the supervised upper bound. GRPO (amber, 3.7%) and DG (blue, 3.9%) both approach CE, while REINFORCE (red, 6.4%) lags behind. GRPO uses G=32 group generation with per-image advantage normalization. DG achieves comparable results without importance sampling. Panel (c) shows the DG gate settling near 0.5 as the policy improves.
 
 ```bash
 # Run with defaults (5 epochs, eta=1.0, mean baseline)
