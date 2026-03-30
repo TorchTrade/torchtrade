@@ -26,6 +26,15 @@ class BaseLLMActor(ABC):
         debug: Enable debug output.
     """
 
+    # Abbreviation lookup for compact prompt format
+    _FEATURE_ABBREVIATIONS = {
+        "open": "O",
+        "high": "H",
+        "low": "L",
+        "close": "C",
+        "volume": "V",
+    }
+
     def __init__(
         self,
         market_data_keys: List[str],
@@ -34,6 +43,8 @@ class BaseLLMActor(ABC):
         symbol: str = "BTC/USD",
         execute_on: Union[str, "TimeFrame"] = "1Hour",
         feature_keys: Optional[List[str]] = None,
+        prompt_format: str = "verbose",
+        price_columns: Optional[List[str]] = None,
         debug: bool = False,
     ):
         self.market_data_keys = market_data_keys
@@ -46,6 +57,8 @@ class BaseLLMActor(ABC):
         else:
             self.execute_on = str(execute_on)
         self.feature_keys = feature_keys or ["open", "high", "low", "close", "volume"]
+        self.prompt_format = prompt_format
+        self.price_columns = price_columns or ["open", "high", "low", "close"]
         self.debug = debug
 
         # Build action descriptions from action_levels
@@ -132,6 +145,12 @@ class BaseLLMActor(ABC):
         return out
 
     def _construct_market_data(self, tensordict) -> str:
+        """Dispatch to verbose or compact formatter based on self.prompt_format."""
+        if self.prompt_format == "compact":
+            return self._format_market_data_compact(tensordict)
+        return self._format_market_data_verbose(tensordict)
+
+    def _format_market_data_verbose(self, tensordict) -> str:
         out = "Current market data:\n\n"
         for key in self.market_data_keys:
             if key not in tensordict:
@@ -152,6 +171,94 @@ class BaseLLMActor(ABC):
                 row = " | ".join(f"{v:8.1f}" for v in data[t])
                 out += row + "\n"
             out += "\n"
+
+        return out
+
+    # --- Compact prompt format helpers ---
+
+    @staticmethod
+    def _parse_timeframe_header(key: str) -> str:
+        """Convert market data key to compact shorthand.
+
+        Examples:
+            market_data_1Hour_24   -> 1H(24)
+            market_data_5Minute_12 -> 5M(12)
+            market_data_1Day_30    -> 1D(30)
+        """
+        # Expected format: market_data_{value}{Unit}_{window}
+        parts = key.split("_")  # ["market", "data", "1Hour", "24"]
+        timeframe_part = parts[2]  # e.g. "1Hour", "5Minute"
+        window = parts[3]
+
+        # Extract numeric prefix and unit name
+        i = 0
+        while i < len(timeframe_part) and (timeframe_part[i].isdigit()):
+            i += 1
+        value = timeframe_part[:i]
+        unit = timeframe_part[i:]  # e.g. "Hour", "Minute", "Day"
+
+        unit_abbrev = unit[0].upper()  # H, M, D
+        return f"{value}{unit_abbrev}({window})"
+
+    @classmethod
+    def _abbreviate_feature(cls, name: str) -> str:
+        """Return abbreviated feature name for compact format."""
+        return cls._FEATURE_ABBREVIATIONS.get(name, name.upper())
+
+    def _format_market_data_compact(self, tensordict) -> str:
+        """Format market data in compact delta-encoded format.
+
+        Output example:
+            1H(24) ref:93600
+            O,H,L,C,V
+            +8,+505,-5,+499,277
+        """
+        out = ""
+        # Determine close column index for reference price
+        try:
+            close_idx = self.feature_keys.index("close")
+        except ValueError:
+            close_idx = 0
+
+        # Determine which column indices are price columns
+        price_col_indices = set()
+        for i, name in enumerate(self.feature_keys):
+            if name in self.price_columns:
+                price_col_indices.add(i)
+
+        for key in self.market_data_keys:
+            if key not in tensordict:
+                continue
+
+            data = tensordict[key].cpu().numpy()
+            if data.ndim == 3:
+                data = data.squeeze(0)
+            if data.ndim != 2 or data.shape[1] != len(self.feature_keys):
+                if self.debug:
+                    print(f"[Warning] Unexpected market data shape for {key}: {data.shape}")
+                continue
+
+            # Compute reference price: first candle's close, rounded to nearest 100
+            ref = int(round(float(data[0, close_idx]), -2))
+
+            # Timeframe header
+            shorthand = self._parse_timeframe_header(key)
+            out += f"{shorthand} ref:{ref}\n"
+
+            # Column header
+            abbrevs = [self._abbreviate_feature(name) for name in self.feature_keys]
+            out += ",".join(abbrevs) + "\n"
+
+            # Data rows
+            for t in range(data.shape[0]):
+                fields = []
+                for col_idx, val in enumerate(data[t]):
+                    if col_idx in price_col_indices:
+                        delta = int(round(float(val))) - ref
+                        fields.append(f"{delta:+d}")
+                    else:
+                        fields.append(str(int(round(float(val)))))
+                out += ",".join(fields) + "\n"
 
         return out
 
