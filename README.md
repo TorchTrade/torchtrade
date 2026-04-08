@@ -343,29 +343,31 @@ env = AlpacaTorchTradingEnv(config)
 ### LLM-Based Trading
 
 ```python
-from torchtrade.actor.frontier_llm_actor import LLMActor
+from torchtrade.actor import FrontierLLMActor
 
-# Use GPT-4o-mini as trading policy
-policy = LLMActor(model="gpt-4o-mini", debug=True)
+# Use GPT as trading policy
+policy = FrontierLLMActor(
+    model="gpt-4o-mini",
+    market_data_keys=env.market_data_keys,
+    account_state_labels=env.account_state,
+    action_levels=env.action_levels,
+    debug=True,
+)
 
 tensordict = env.reset()
 action = policy(tensordict)
-# See examples/live/alpaca/collect_live_llm.py
+# See examples/llm/frontier/offline.py
 ```
 
 ### Rule-Based Trading Strategies
 
 ```python
-from torchtrade.actor import create_expert_ensemble
+from torchtrade.actor import MeanReversionActor
 
-# Create ensemble of expert actors
-experts = create_expert_ensemble(
+# Use as baseline or for imitation learning
+actor = MeanReversionActor(
     market_data_keys=["market_data_5Minute_24"],
-    env_type="spot"
 )
-
-# Available: MomentumActor, MeanReversionActor, BreakoutActor
-# Use for imitation learning or baselines
 ```
 
 ### Feature Engineering
