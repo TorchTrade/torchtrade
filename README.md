@@ -349,7 +349,7 @@ from torchtrade.actor import FrontierLLMActor
 policy = FrontierLLMActor(
     model="gpt-4o-mini",
     market_data_keys=env.market_data_keys,
-    account_state_labels=env.account_state,
+    account_state_labels=env.account_state,  # list of label strings, e.g. ["exposure_pct", ...]
     action_levels=env.action_levels,
     debug=True,
 )

@@ -96,5 +96,6 @@ def test_api_key_resolution(api_key, expect_dotenv, expected_resolved_key):
             action_levels=ACTION_LEVELS,
         )
 
-        assert mock_dotenv.called == expect_dotenv
-        mock_cls.assert_called_once_with(api_key=expected_resolved_key)
+        assert mock_dotenv.call_count == (1 if expect_dotenv else 0)
+        assert mock_cls.call_count == 1
+        assert mock_cls.call_args.kwargs["api_key"] == expected_resolved_key
