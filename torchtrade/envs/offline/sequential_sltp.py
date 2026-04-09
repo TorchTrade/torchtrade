@@ -25,6 +25,7 @@ from torchtrade.envs.offline.sequential import (
     SequentialTradingEnv,
     SequentialTradingEnvConfig,
 )
+from torchtrade.envs.core.common import TradeMode, validate_trade_mode
 from torchtrade.envs.core.state import binarize_action_type
 from torchtrade.envs.utils.sltp_helpers import (
     calculate_long_bracket_prices,
@@ -47,10 +48,17 @@ class SequentialTradingEnvSLTPConfig(SequentialTradingEnvConfig):
     include_hold_action: bool = True  # Include HOLD action (index 0)
     include_close_action: bool = False  # Include CLOSE action (default: False for SLTP)
 
+    # Position sizing mode
+    trade_mode: TradeMode = "fractional"
+    position_fraction: float = 1.0       # Used when trade_mode="fractional" (1.0 = all-in, backward compat)
+    quantity_per_trade: float = 0.001     # Used when trade_mode in ("quantity", "notional")
+
     def __post_init__(self):
         """Validate configuration after dataclass initialization."""
         # Call parent post_init first
         super().__post_init__()
+
+        self.trade_mode = validate_trade_mode(self.trade_mode)
 
         # Convert to lists if needed
         if not isinstance(self.stoploss_levels, list):
