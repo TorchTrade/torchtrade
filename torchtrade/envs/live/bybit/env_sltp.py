@@ -18,6 +18,7 @@ from torchtrade.envs.live.bybit.base import BybitBaseTorchTradingEnv
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
+from torchtrade.envs.core.common import TradeMode
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class BybitFuturesSLTPTradingEnvConfig:
     margin_mode: MarginMode = MarginMode.ISOLATED
     position_mode: PositionMode = PositionMode.ONE_WAY
     quantity_per_trade: float = 0.001
+    trade_mode: TradeMode = "quantity"
 
     # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
     stoploss_levels: Tuple[float, ...] = (-0.025, -0.05, -0.1)
@@ -241,6 +243,12 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         # Get current mark price (more accurate than candle close for bracket orders)
         current_price = self.trader.get_mark_price()
 
+        # Resolve quantity based on trade_mode
+        if self.config.trade_mode == "notional":
+            quantity = self.config.quantity_per_trade / current_price
+        else:
+            quantity = self.config.quantity_per_trade
+
         # Close opposite position if switching directions
         # (we already returned above if same direction, so any existing position is opposite)
         if self.position.current_position != 0:
@@ -263,7 +271,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         try:
             success = self.trader.trade(
                 side=trade_side,
-                quantity=self.config.quantity_per_trade,
+                quantity=quantity,
                 order_type="market",
                 take_profit=take_profit_price,
                 stop_loss=stop_loss_price,
@@ -277,7 +285,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
 
             trade_info.update({
                 "executed": True,
-                "quantity": self.config.quantity_per_trade,
+                "quantity": quantity,
                 "side": trade_side,
                 "success": success,
                 "stop_loss": stop_loss_price,
@@ -286,7 +294,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         except Exception as e:
             logger.error(
                 f"{side.capitalize()} trade failed for {self.config.symbol}: "
-                f"quantity={self.config.quantity_per_trade}, "
+                f"quantity={quantity}, "
                 f"SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}"
             )
             trade_info["success"] = False

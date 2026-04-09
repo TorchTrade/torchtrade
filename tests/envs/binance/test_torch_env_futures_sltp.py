@@ -899,3 +899,127 @@ class TestDuplicateActionPrevention:
         mock_trader.close_position.assert_not_called()
         # Position should remain unchanged
         assert env.position.current_position == 1
+
+
+class TestBinanceSLTPNotionalTradeMode:
+    """Test notional (USD) trade mode for Binance SLTP environment."""
+
+    @pytest.fixture
+    def notional_env(self):
+        from torchtrade.envs.live.binance.env_sltp import (
+            BinanceFuturesSLTPTorchTradingEnv,
+            BinanceFuturesSLTPTradingEnvConfig,
+        )
+
+        mock_observer = MagicMock()
+        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
+
+        def mock_observations(return_base_ohlc=False):
+            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
+            if return_base_ohlc:
+                obs["base_features"] = np.array(
+                    [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
+                )
+            return obs
+
+        mock_observer.get_observations = MagicMock(side_effect=mock_observations)
+        mock_observer.intervals = ["1m"]
+        mock_observer.window_sizes = [10]
+
+        mock_trader = MagicMock()
+        mock_trader.cancel_open_orders = MagicMock(return_value=True)
+        mock_trader.close_position = MagicMock(return_value=True)
+        mock_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0,
+            "available_balance": 900.0,
+            "total_margin_balance": 1000.0,
+        })
+        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
+        mock_trader.get_status = MagicMock(return_value={"position_status": None})
+        mock_trader.trade = MagicMock(return_value=True)
+
+        config = BinanceFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_short_positions=True,
+            trade_mode="notional",
+            quantity_per_trade=500.0,  # $500 USD per trade
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BinanceFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BinanceFuturesSLTPTorchTradingEnv(
+                config=config,
+                observer=mock_observer,
+                trader=mock_trader,
+            )
+        return env, mock_trader
+
+    @pytest.mark.parametrize("action_tuple,expected_side", [
+        (("long", -0.02, 0.03), "BUY"),
+        (("short", 0.02, -0.03), "SELL"),
+    ])
+    def test_notional_converts_usd_to_quantity(self, notional_env, action_tuple, expected_side):
+        """Notional mode must convert USD to base-asset quantity using current price."""
+        env, mock_trader = notional_env
+        env.reset()
+        env._execute_trade_if_needed(action_tuple)
+
+        call_kwargs = mock_trader.trade.call_args[1]
+        assert call_kwargs["side"] == expected_side
+        # $500 / $50050 (candle close from base_features) ≈ 0.00999
+        expected_qty = 500.0 / 50050.0
+        assert call_kwargs["quantity"] == pytest.approx(expected_qty, rel=1e-4)
+
+    def test_quantity_mode_passes_raw_value(self):
+        """Quantity mode must pass quantity_per_trade directly without conversion."""
+        from torchtrade.envs.live.binance.env_sltp import (
+            BinanceFuturesSLTPTorchTradingEnv,
+            BinanceFuturesSLTPTradingEnvConfig,
+        )
+
+        mock_observer = MagicMock()
+        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
+        mock_observer.get_observations = MagicMock(return_value={
+            "1m_10": np.random.randn(10, 4).astype(np.float32),
+            "base_features": np.array(
+                [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
+            ),
+        })
+        mock_observer.intervals = ["1m"]
+        mock_observer.window_sizes = [10]
+
+        mock_trader = MagicMock()
+        mock_trader.cancel_open_orders = MagicMock(return_value=True)
+        mock_trader.close_position = MagicMock(return_value=True)
+        mock_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0, "available_balance": 900.0,
+            "total_margin_balance": 1000.0,
+        })
+        mock_trader.get_status = MagicMock(return_value={"position_status": None})
+        mock_trader.trade = MagicMock(return_value=True)
+
+        config = BinanceFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            trade_mode="quantity",
+            quantity_per_trade=0.001,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BinanceFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BinanceFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_observer, trader=mock_trader,
+            )
+
+        env.reset()
+        env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+        call_kwargs = mock_trader.trade.call_args[1]
+        assert call_kwargs["quantity"] == pytest.approx(0.001, rel=1e-6)

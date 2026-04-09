@@ -276,6 +276,12 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         obs = self.observer.get_observations(return_base_ohlc=True)
         current_price = obs["base_features"][-1, 3]  # Close price
 
+        # Resolve quantity based on trade_mode
+        if self.config.trade_mode == "notional":
+            quantity = self.config.quantity_per_trade / current_price
+        else:
+            quantity = self.config.quantity_per_trade
+
         # Close opposite position if switching directions
         if self.position.current_position != 0:
             # We have an existing position that needs to be closed before opening new one
@@ -298,7 +304,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
             try:
                 success = self.trader.trade(
                     side="BUY",
-                    quantity=self.config.quantity_per_trade,
+                    quantity=quantity,
                     order_type="market",
                     take_profit=take_profit_price,
                     stop_loss=stop_loss_price,
@@ -312,14 +318,14 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
 
                 trade_info.update({
                     "executed": True,
-                    "quantity": self.config.quantity_per_trade,
+                    "quantity": quantity,
                     "side": "BUY",
                     "success": success,
                     "stop_loss": stop_loss_price,
                     "take_profit": take_profit_price,
                 })
             except Exception as e:
-                logger.error(f"Long trade failed for {self.config.symbol}: quantity={self.config.quantity_per_trade}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
+                logger.error(f"Long trade failed for {self.config.symbol}: quantity={quantity}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
                 trade_info["success"] = False
                 return trade_info
 
@@ -332,7 +338,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
             try:
                 success = self.trader.trade(
                     side="SELL",
-                    quantity=self.config.quantity_per_trade,
+                    quantity=quantity,
                     order_type="market",
                     take_profit=take_profit_price,
                     stop_loss=stop_loss_price,
@@ -345,14 +351,14 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
 
                 trade_info.update({
                     "executed": True,
-                    "quantity": self.config.quantity_per_trade,
+                    "quantity": quantity,
                     "side": "SELL",
                     "success": success,
                     "stop_loss": stop_loss_price,
                     "take_profit": take_profit_price,
                 })
             except Exception as e:
-                logger.error(f"Short trade failed for {self.config.symbol}: quantity={self.config.quantity_per_trade}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
+                logger.error(f"Short trade failed for {self.config.symbol}: quantity={quantity}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
                 trade_info["success"] = False
                 return trade_info
 

@@ -478,3 +478,90 @@ class TestBybitSLTPPositionClosedClobber:
 
             # The new short position must NOT be overwritten to 0 by position_closed
             assert env.position.current_position == -1
+
+
+class TestBybitSLTPNotionalTradeMode:
+    """Test notional (USD) trade mode for Bybit SLTP environment."""
+
+    @pytest.fixture
+    def notional_env(self, mock_env_observer, mock_env_trader):
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_short_positions=True,
+            trade_mode="notional",
+            quantity_per_trade=500.0,  # $500 USD per trade
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            return BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+    @pytest.mark.parametrize("action_tuple,expected_side", [
+        (("long", -0.02, 0.03), "buy"),
+        (("short", 0.02, -0.03), "sell"),
+    ])
+    def test_notional_converts_usd_to_quantity(self, notional_env, mock_env_trader, action_tuple, expected_side):
+        """Notional mode must convert USD to base-asset quantity using current price."""
+        mock_env_trader.get_mark_price = MagicMock(return_value=50000.0)
+
+        with patch.object(notional_env, "_wait_for_next_timestamp"):
+            notional_env.reset()
+            notional_env._execute_trade_if_needed(action_tuple)
+
+            call_kwargs = mock_env_trader.trade.call_args[1]
+            assert call_kwargs["side"] == expected_side
+            # $500 / $50000 = 0.01 BTC
+            assert call_kwargs["quantity"] == pytest.approx(0.01, rel=1e-6)
+
+    def test_notional_quantity_varies_with_price(self, notional_env, mock_env_trader):
+        """Different prices should produce different quantities for same notional."""
+        mock_env_trader.get_mark_price = MagicMock(return_value=100000.0)
+
+        with patch.object(notional_env, "_wait_for_next_timestamp"):
+            notional_env.reset()
+            notional_env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+            call_kwargs = mock_env_trader.trade.call_args[1]
+            # $500 / $100000 = 0.005 BTC
+            assert call_kwargs["quantity"] == pytest.approx(0.005, rel=1e-6)
+
+    def test_quantity_mode_passes_raw_value(self, mock_env_observer, mock_env_trader):
+        """Quantity mode must pass quantity_per_trade directly without conversion."""
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            trade_mode="quantity",
+            quantity_per_trade=0.001,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+            call_kwargs = mock_env_trader.trade.call_args[1]
+            assert call_kwargs["quantity"] == pytest.approx(0.001, rel=1e-6)
