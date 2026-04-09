@@ -1,7 +1,26 @@
 """Tests for replay components."""
 
+import numpy as np
+import pandas as pd
 import pytest
+
+from torchtrade.envs.replay.observer import ReplayObserver
 from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+
+def _make_test_df(n=100):
+    """Create a simple test DataFrame with OHLCV data."""
+    timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
+    prices = np.linspace(50000, 51000, n)
+    return pd.DataFrame({
+        "timestamp": timestamps,
+        "open": prices,
+        "high": prices + 50,
+        "low": prices - 50,
+        "close": prices,
+        "volume": np.ones(n) * 100,
+    })
 
 
 class TestReplayOrderExecutor:
@@ -130,3 +149,75 @@ class TestReplayOrderExecutorSLTPTriggers:
         executor.close_position()
         balance = executor.get_account_balance()
         assert balance["total_wallet_balance"] == pytest.approx(10000.0 - 10.0, rel=0.01)
+
+
+class TestReplayObserver:
+    """Test ReplayObserver wrapping MarketDataObservationSampler."""
+
+    @pytest.fixture
+    def df(self):
+        return _make_test_df(100)
+
+    @pytest.fixture
+    def observer(self, df):
+        return ReplayObserver(
+            df=df,
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+
+    def test_get_keys(self, observer):
+        """get_keys returns sampler observation keys."""
+        keys = observer.get_keys()
+        assert len(keys) == 1
+
+    def test_get_observations_returns_numpy(self, observer):
+        """get_observations returns numpy arrays (not tensors)."""
+        obs = observer.get_observations()
+        key = observer.get_keys()[0]
+        assert isinstance(obs[key], np.ndarray)
+        assert obs[key].shape[0] == 10  # window_size
+
+    def test_get_observations_advances_bar(self, observer):
+        """Each call to get_observations advances to the next bar."""
+        obs1 = observer.get_observations(return_base_ohlc=True)
+        price1 = obs1["base_features"][-1, 3]  # close
+
+        obs2 = observer.get_observations(return_base_ohlc=True)
+        price2 = obs2["base_features"][-1, 3]
+
+        assert price1 != price2
+
+    def test_get_observations_with_base_ohlc(self, observer):
+        """return_base_ohlc=True includes base_features."""
+        obs = observer.get_observations(return_base_ohlc=True)
+        assert "base_features" in obs
+        assert obs["base_features"].shape == (10, 4)
+
+    def test_observer_feeds_executor(self, df):
+        """Observer calls executor.advance_bar on each get_observations."""
+        executor = ReplayOrderExecutor(initial_balance=10000.0)
+        observer = ReplayObserver(
+            df=df,
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            executor=executor,
+        )
+
+        observer.get_observations()
+        assert executor.current_price > 0
+
+    def test_reset_resets_sampler(self, observer):
+        """reset() resets to start."""
+        obs1 = observer.get_observations(return_base_ohlc=True)
+        first_price = obs1["base_features"][-1, 3]
+
+        observer.get_observations()
+        observer.get_observations()
+        observer.reset()
+
+        obs_after_reset = observer.get_observations(return_base_ohlc=True)
+        reset_price = obs_after_reset["base_features"][-1, 3]
+        assert reset_price == pytest.approx(first_price, rel=1e-4)
