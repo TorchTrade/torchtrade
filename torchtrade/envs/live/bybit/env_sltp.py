@@ -68,6 +68,9 @@ class BybitFuturesSLTPTradingEnvConfig:
 
     def __post_init__(self):
         from torchtrade.envs.live.bybit.utils import normalize_bybit_timeframe_config
+        from torchtrade.envs.core.common import validate_trade_mode
+
+        self.trade_mode = validate_trade_mode(self.trade_mode)
         self.execute_on, self.time_frames, self.window_sizes = normalize_bybit_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
@@ -246,7 +249,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         # Resolve quantity based on trade_mode
         if self.config.trade_mode == "notional":
             if current_price <= 0:
-                logger.error(f"Invalid mark price for notional sizing: {current_price} ({self.config.symbol})")
+                logger.error(f"Invalid current_price={current_price} for {self.config.symbol}")
                 trade_info["success"] = False
                 return trade_info
             quantity = float(self.config.quantity_per_trade) / current_price

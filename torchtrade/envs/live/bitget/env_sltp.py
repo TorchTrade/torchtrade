@@ -67,8 +67,10 @@ class BitgetFuturesSLTPTradingEnvConfig:
     close_position_on_reset: bool = False
 
     def __post_init__(self):
-        # Normalize timeframes using utility function
         from torchtrade.envs.live.bitget.utils import normalize_bitget_timeframe_config
+        from torchtrade.envs.core.common import validate_trade_mode
+
+        self.trade_mode = validate_trade_mode(self.trade_mode)
         self.execute_on, self.time_frames, self.window_sizes = normalize_bitget_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )

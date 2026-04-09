@@ -961,7 +961,7 @@ class TestBinanceSLTPNotionalTradeMode:
     @pytest.mark.parametrize("action_tuple,expected_side", [
         (("long", -0.02, 0.03), "BUY"),
         (("short", 0.02, -0.03), "SELL"),
-    ])
+    ], ids=["long-BUY", "short-SELL"])
     def test_notional_converts_usd_to_quantity(self, notional_env, action_tuple, expected_side):
         """Notional mode must convert USD to base-asset quantity using current price."""
         env, mock_trader = notional_env
@@ -973,6 +973,25 @@ class TestBinanceSLTPNotionalTradeMode:
         # $500 / $50050 (candle close from base_features) ≈ 0.00999
         expected_qty = 500.0 / 50050.0
         assert call_kwargs["quantity"] == pytest.approx(expected_qty, rel=1e-4)
+
+    def test_notional_zero_price_aborts_trade(self, notional_env):
+        """Zero candle close price must abort trade without calling trader.trade()."""
+        env, mock_trader = notional_env
+
+        # Override observer to return zero-price candles
+        def mock_obs_zero(return_base_ohlc=False):
+            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
+            if return_base_ohlc:
+                obs["base_features"] = np.array([[0, 0, 0, 0]] * 10, dtype=np.float32)
+            return obs
+
+        env.observer.get_observations = MagicMock(side_effect=mock_obs_zero)
+        env.reset()
+        mock_trader.reset_mock()
+        trade_info = env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+        mock_trader.trade.assert_not_called()
+        assert trade_info["success"] is False
 
     def test_quantity_mode_passes_raw_value(self):
         """Quantity mode must pass quantity_per_trade directly without conversion."""

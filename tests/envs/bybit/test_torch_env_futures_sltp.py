@@ -510,7 +510,7 @@ class TestBybitSLTPNotionalTradeMode:
     @pytest.mark.parametrize("action_tuple,expected_side", [
         (("long", -0.02, 0.03), "buy"),
         (("short", 0.02, -0.03), "sell"),
-    ])
+    ], ids=["long-buy", "short-sell"])
     def test_notional_converts_usd_to_quantity(self, notional_env, mock_env_trader, action_tuple, expected_side):
         """Notional mode must convert USD to base-asset quantity using current price."""
         mock_env_trader.get_mark_price = MagicMock(return_value=50000.0)
@@ -524,17 +524,16 @@ class TestBybitSLTPNotionalTradeMode:
             # $500 / $50000 = 0.01 BTC
             assert call_kwargs["quantity"] == pytest.approx(0.01, rel=1e-6)
 
-    def test_notional_quantity_varies_with_price(self, notional_env, mock_env_trader):
-        """Different prices should produce different quantities for same notional."""
-        mock_env_trader.get_mark_price = MagicMock(return_value=100000.0)
+    def test_notional_zero_price_aborts_trade(self, notional_env, mock_env_trader):
+        """Zero mark price must abort trade without calling trader.trade()."""
+        mock_env_trader.get_mark_price = MagicMock(return_value=0.0)
 
         with patch.object(notional_env, "_wait_for_next_timestamp"):
             notional_env.reset()
-            notional_env._execute_trade_if_needed(("long", -0.02, 0.03))
+            trade_info = notional_env._execute_trade_if_needed(("long", -0.02, 0.03))
 
-            call_kwargs = mock_env_trader.trade.call_args[1]
-            # $500 / $100000 = 0.005 BTC
-            assert call_kwargs["quantity"] == pytest.approx(0.005, rel=1e-6)
+            mock_env_trader.trade.assert_not_called()
+            assert trade_info["success"] is False
 
     def test_quantity_mode_passes_raw_value(self, mock_env_observer, mock_env_trader):
         """Quantity mode must pass quantity_per_trade directly without conversion."""
