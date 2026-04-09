@@ -199,6 +199,10 @@ config = SequentialTradingEnvSLTPConfig(
     leverage=5,
     margin_call_threshold=0.2,
 
+    # Position sizing: "fractional" (% of portfolio), "notional" (fixed USD), or "quantity" (fixed units)
+    trade_mode="fractional",     # "fractional", "notional", or "quantity"
+    position_fraction=0.1,       # 10% of portfolio per trade (fractional mode)
+
     time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),

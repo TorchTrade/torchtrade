@@ -134,6 +134,13 @@ config = BinanceFuturesSLTPTradingEnvConfig(
 #     trade_mode="notional",
 # )
 
+# For fractional portfolio-based sizing (10% of account per trade):
+# config = BinanceFuturesSLTPTradingEnvConfig(
+#     ...
+#     trade_mode="fractional",
+#     position_fraction=0.1,
+# )
+
 env = BinanceFuturesSLTPTorchTradingEnv(config)
 # Action space: HOLD + 2×(2 SL × 3 TP) = 13 actions (long + short)
 ```
@@ -199,7 +206,7 @@ config = BitgetFuturesSLTPTradingEnvConfig(
     product_type="USDT-FUTURES",
     leverage=5,
     quantity_per_trade=0.002,  # 0.002 BTC per trade (quantity mode)
-    trade_mode="quantity",     # "quantity" (base asset) or "notional" (USD)
+    trade_mode="quantity",     # "quantity", "notional", or "fractional"
     margin_mode=MarginMode.ISOLATED,
     position_mode=PositionMode.ONE_WAY,
     demo=True,
@@ -271,7 +278,7 @@ config = BybitFuturesSLTPTradingEnvConfig(
     include_hold_action=True,
     leverage=5,
     quantity_per_trade=0.002,  # 0.002 BTC per trade (quantity mode)
-    trade_mode="quantity",     # "quantity" (base asset) or "notional" (USD)
+    trade_mode="quantity",     # "quantity", "notional", or "fractional"
     margin_mode=MarginMode.ISOLATED,
     position_mode=PositionMode.ONE_WAY,
     demo=True,
