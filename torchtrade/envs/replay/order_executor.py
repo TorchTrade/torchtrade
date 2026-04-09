@@ -16,7 +16,8 @@ class PositionStatus:
     unrealized_pnl_pct: float
     mark_price: float
     leverage: int
-    margin_type: str
+    margin_type: str    # Binance-compatible
+    margin_mode: str    # Bybit-compatible
     liquidation_price: float
 
 
@@ -140,6 +141,10 @@ class ReplayOrderExecutor:
         side_upper = side.upper()
         price = self.current_price
 
+        # Close existing position first (if any) to avoid margin accounting errors
+        if self.position_qty != 0:
+            self._close_at_price(price)
+
         # Calculate margin and fee
         notional = quantity * price
         fee = notional * self.transaction_fee
@@ -194,6 +199,7 @@ class ReplayOrderExecutor:
                 mark_price=self.current_price,
                 leverage=self.leverage,
                 margin_type="ISOLATED",
+                margin_mode="isolated",
                 liquidation_price=0.0,
             )
         }

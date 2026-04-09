@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from unittest.mock import patch
 
 from torchtrade.envs.replay.observer import ReplayObserver
 from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
@@ -265,8 +266,6 @@ class TestReplayObserver:
         reset_price = obs_after_reset["base_features"][-1, 3]
         assert reset_price == pytest.approx(first_price, rel=1e-4)
 
-
-from unittest.mock import patch
 
 
 class TestReplayIntegrationWithLiveEnv:
