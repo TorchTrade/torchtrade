@@ -6,7 +6,7 @@ VectorizedSequentialTradingEnv with bracket order support.
 
 Key differences from base vectorized env:
     - SLTP timing: advance FIRST, then check triggers, then execute trades
-    - 100% capital deployment (no fractional sizing)
+    - trade_mode-aware position sizing (fractional, notional, quantity)
     - SL/TP bracket orders with intrabar trigger detection
     - SL checked before TP (pessimistic bias)
     - Triggered positions close at bracket price, not market price
@@ -20,6 +20,7 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
+from torchtrade.envs.core.common import TradeMode, validate_trade_mode
 from torchtrade.envs.offline.vectorized_sequential import (
     VectorizedSequentialTradingEnv,
     VectorizedSequentialTradingEnvConfig,
@@ -40,8 +41,14 @@ class VectorizedSequentialTradingEnvSLTPConfig(VectorizedSequentialTradingEnvCon
     takeprofit_levels: Union[List[float], Tuple[float, ...]] = (0.05, 0.1, 0.2)
     include_hold_action: bool = True
     include_close_action: bool = False
+    trade_mode: TradeMode = "fractional"
+    position_fraction: float = 1.0
+    quantity_per_trade: float = 0.001
 
     def __post_init__(self):
+        from torchtrade.envs.core.common import validate_trade_mode
+        self.trade_mode = validate_trade_mode(self.trade_mode)
+
         if not isinstance(self.stoploss_levels, list):
             self.stoploss_levels = list(self.stoploss_levels)
         if not isinstance(self.takeprofit_levels, list):
@@ -339,7 +346,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
     ):
         """Execute SLTP trades for all environments.
 
-        100% capital deployment (no fractional sizing). Handles:
+        Position sizing via trade_mode (fractional/notional/quantity). Handles:
         - Hold: side=0 or same direction as current position
         - Close: side=2 and has position
         - Direction switch: close old, open new with brackets
@@ -394,16 +401,26 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         # Open new positions (direction switches + open from flat)
         open_mask = switch_mask | open_from_flat
         if open_mask.any():
-            # 100% capital deployment
-            pvs = self._compute_portfolio_values(trade_prices)
-            fee_denom = 1.0 / leverage + self.transaction_fee
-            notional = pvs / fee_denom
+            # Position sizing based on trade_mode
+            if self.config.trade_mode == "fractional":
+                pvs = self._compute_portfolio_values(trade_prices)
+                fee_denom = 1.0 / leverage + self.transaction_fee
+                notional = pvs * self.config.position_fraction / fee_denom
+            elif self.config.trade_mode == "notional":
+                notional = torch.full_like(trade_prices, self.config.quantity_per_trade)
+            elif self.config.trade_mode == "quantity":
+                notional = torch.full_like(trade_prices, self.config.quantity_per_trade) * trade_prices
+            else:
+                raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
             # Direction: +1 for long, -1 for short
             direction = torch.where(
                 sides == 1, self._ones, -self._ones
             )
-            new_sizes = direction * notional / trade_prices
+            if self.config.trade_mode == "quantity":
+                new_sizes = direction * self.config.quantity_per_trade
+            else:
+                new_sizes = direction * notional / trade_prices
 
             margin_new = notional / leverage
             new_fee = notional * self.transaction_fee
