@@ -492,31 +492,41 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         Returns:
             Trade info dictionary
         """
-        # Use fractional sizing from parent class
-        # For spot mode, action_value represents fraction of portfolio to invest
-        # For futures mode, action_value represents leverage-adjusted position
-        if self.leverage == 1:
-            # Spot: invest 100% of portfolio (all-in strategy for SLTP)
-            action_value = 1.0
+        # Position sizing based on trade_mode
+        if self.config.trade_mode == "fractional":
+            # Fractional: use position_fraction of portfolio
+            from torchtrade.envs.utils.fractional_sizing import (
+                calculate_fractional_position,
+                PositionCalculationParams,
+            )
+
+            if self.leverage == 1:
+                action_value = self.config.position_fraction
+            else:
+                action_value = self.config.position_fraction if side == "long" else -self.config.position_fraction
+
+            portfolio_value = self._get_portfolio_value(execution_price)
+            params = PositionCalculationParams(
+                balance=portfolio_value,
+                action_value=action_value,
+                current_price=execution_price,
+                leverage=self.leverage,
+                transaction_fee=self.transaction_fee,
+            )
+            position_size, notional_value, calc_side = calculate_fractional_position(params)
+
+        elif self.config.trade_mode == "notional":
+            # Notional: fixed USD per trade
+            notional_value = float(self.config.quantity_per_trade)
+            position_size = notional_value / execution_price
+
+        elif self.config.trade_mode == "quantity":
+            # Quantity: fixed base-asset units per trade
+            position_size = float(self.config.quantity_per_trade)
+            notional_value = position_size * execution_price
+
         else:
-            # Futures: use leverage for position sizing
-            action_value = 1.0 if side == "long" else -1.0
-
-        # Calculate position size using parent's fractional logic
-        from torchtrade.envs.utils.fractional_sizing import (
-            calculate_fractional_position,
-            PositionCalculationParams,
-        )
-
-        portfolio_value = self._get_portfolio_value(execution_price)
-        params = PositionCalculationParams(
-            balance=portfolio_value,
-            action_value=action_value,
-            current_price=execution_price,
-            leverage=self.leverage,
-            transaction_fee=self.transaction_fee,
-        )
-        position_size, notional_value, calc_side = calculate_fractional_position(params)
+            raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
         # Calculate margin and fee
         margin_required = notional_value / self.leverage

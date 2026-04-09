@@ -777,3 +777,108 @@ class TestSLTPSamplerExhaustion:
         assert not result["next"]["terminated"].item()
 
         env.close()
+
+
+# ============================================================================
+# POSITION SIZING TESTS
+# ============================================================================
+
+
+class TestSLTPPositionSizing:
+    """Test trade_mode-aware position sizing for SLTP environments."""
+
+    @pytest.fixture
+    def base_config_kwargs(self):
+        return dict(
+            initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=100,
+            random_start=False,
+            leverage=10,
+            stoploss_levels=[-0.02],
+            takeprofit_levels=[0.03],
+        )
+
+    def _open_long(self, env):
+        """Helper: reset env and open a long position (action 1)."""
+        td = env.reset()
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(1)
+        env.step(action_td)
+
+    def test_fractional_position_sizing(self, sample_ohlcv_df, base_config_kwargs):
+        """Fractional mode: position_fraction=0.1 should use 10% of portfolio."""
+        config = SequentialTradingEnvSLTPConfig(
+            **base_config_kwargs,
+            trade_mode="fractional",
+            position_fraction=0.1,
+        )
+        env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+        self._open_long(env)
+        fractional_size = abs(env.position.position_size)
+
+        # Compare with all-in
+        config_allin = SequentialTradingEnvSLTPConfig(
+            **base_config_kwargs,
+            trade_mode="fractional",
+            position_fraction=1.0,
+        )
+        env_allin = SequentialTradingEnvSLTP(sample_ohlcv_df, config_allin, simple_feature_fn)
+        self._open_long(env_allin)
+        allin_size = abs(env_allin.position.position_size)
+
+        assert fractional_size == pytest.approx(allin_size * 0.1, rel=0.05)
+
+    def test_notional_position_sizing(self, sample_ohlcv_df, base_config_kwargs):
+        """Notional mode: quantity_per_trade=500 should buy $500 worth."""
+        config = SequentialTradingEnvSLTPConfig(
+            **base_config_kwargs,
+            trade_mode="notional",
+            quantity_per_trade=500.0,
+        )
+        env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+        self._open_long(env)
+
+        price = env.position.entry_price
+        expected_size = 500.0 / price
+        assert abs(env.position.position_size) == pytest.approx(expected_size, rel=0.02)
+
+    def test_quantity_position_sizing(self, sample_ohlcv_df, base_config_kwargs):
+        """Quantity mode: quantity_per_trade=0.05 should buy exactly 0.05 units."""
+        config = SequentialTradingEnvSLTPConfig(
+            **base_config_kwargs,
+            trade_mode="quantity",
+            quantity_per_trade=0.05,
+        )
+        env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+        self._open_long(env)
+
+        assert abs(env.position.position_size) == pytest.approx(0.05, rel=1e-6)
+
+    def test_default_fractional_is_backward_compatible(self, sample_ohlcv_df, base_config_kwargs):
+        """Default config (fractional, position_fraction=1.0) matches old all-in behavior."""
+        config = SequentialTradingEnvSLTPConfig(**base_config_kwargs)
+        assert config.trade_mode == "fractional"
+        assert config.position_fraction == 1.0
+
+        env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+        self._open_long(env)
+        assert env.position.position_size != 0
+
+    @pytest.mark.parametrize("trade_mode", ["fractional", "notional", "quantity"], ids=["fractional", "notional", "quantity"])
+    def test_trade_mode_opens_correct_direction(self, sample_ohlcv_df, base_config_kwargs, trade_mode):
+        """All trade modes should open long positions correctly."""
+        config = SequentialTradingEnvSLTPConfig(
+            **base_config_kwargs,
+            trade_mode=trade_mode,
+            position_fraction=0.5,
+            quantity_per_trade=0.01,
+        )
+        env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+        self._open_long(env)
+        assert env.position.position_size > 0
