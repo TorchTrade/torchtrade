@@ -40,6 +40,7 @@ class BinanceFuturesSLTPTradingEnvConfig:
     margin_type: MarginType = MarginType.ISOLATED
     quantity_per_trade: float = 0.001  # Base quantity per trade
     trade_mode: TradeMode = "quantity"
+    position_fraction: float = 1.0  # Used when trade_mode="fractional"
 
     # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
     stoploss_levels: Tuple[float, ...] = (-0.025, -0.05, -0.1)
@@ -279,7 +280,14 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         current_price = float(obs["base_features"][-1, 3])  # Close price
 
         # Resolve quantity based on trade_mode
-        if self.config.trade_mode == "notional":
+        if self.config.trade_mode == "fractional":
+            balance = self.trader.get_account_balance()["total_wallet_balance"]
+            if current_price <= 0 or balance <= 0:
+                logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
+                trade_info["success"] = False
+                return trade_info
+            quantity = balance * self.config.position_fraction * self.config.leverage / current_price
+        elif self.config.trade_mode == "notional":
             if current_price <= 0:
                 logger.error(f"Invalid current_price={current_price} for {self.config.symbol}")
                 trade_info["success"] = False

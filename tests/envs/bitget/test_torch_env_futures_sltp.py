@@ -744,3 +744,62 @@ class TestBitgetSLTPNotionalTradeMode:
 
         call_kwargs = mock_trader.trade.call_args[1]
         assert call_kwargs["quantity"] == pytest.approx(0.001, rel=1e-6)
+
+    def test_fractional_converts_balance_to_quantity(self):
+        """Fractional mode must compute quantity from balance * fraction * leverage / price."""
+        from torchtrade.envs.live.bitget.env_sltp import (
+            BitgetFuturesSLTPTorchTradingEnv,
+            BitgetFuturesSLTPTradingEnvConfig,
+        )
+
+        mock_observer = MagicMock()
+        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
+
+        def mock_observations(return_base_ohlc=False):
+            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
+            if return_base_ohlc:
+                obs["base_features"] = np.array(
+                    [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
+                )
+            return obs
+
+        mock_observer.get_observations = MagicMock(side_effect=mock_observations)
+        mock_observer.intervals = ["1m"]
+        mock_observer.window_sizes = [10]
+
+        mock_trader = MagicMock()
+        mock_trader.cancel_open_orders = MagicMock(return_value=True)
+        mock_trader.close_position = MagicMock(return_value=True)
+        mock_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0,
+            "available_balance": 900.0,
+            "total_unrealized_profit": 0.0,
+            "total_margin_balance": 1000.0,
+        })
+        mock_trader.get_status = MagicMock(return_value={"position_status": None})
+        mock_trader.trade = MagicMock(return_value=True)
+
+        config = BitgetFuturesSLTPTradingEnvConfig(
+            symbol="BTC/USDT:USDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            trade_mode="fractional",
+            position_fraction=0.1,
+            leverage=5,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BitgetFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BitgetFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_observer, trader=mock_trader,
+            )
+
+        env.reset()
+        env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+        call_kwargs = mock_trader.trade.call_args[1]
+        # balance=1000 * fraction=0.1 * leverage=5 / candle_close=50050 ≈ 0.00999
+        expected_qty = 1000.0 * 0.1 * 5 / 50050.0
+        assert call_kwargs["quantity"] == pytest.approx(expected_qty, rel=1e-4)

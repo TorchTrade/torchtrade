@@ -564,3 +564,43 @@ class TestBybitSLTPNotionalTradeMode:
 
             call_kwargs = mock_env_trader.trade.call_args[1]
             assert call_kwargs["quantity"] == pytest.approx(0.001, rel=1e-6)
+
+    def test_fractional_converts_balance_to_quantity(self, mock_env_observer, mock_env_trader):
+        """Fractional mode must compute quantity from balance * fraction * leverage / price."""
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            trade_mode="fractional",
+            position_fraction=0.1,
+            leverage=5,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+        mock_env_trader.get_mark_price = MagicMock(return_value=50000.0)
+        mock_env_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0,
+            "available_balance": 900.0,
+            "total_unrealized_profit": 0.0,
+            "total_margin_balance": 1000.0,
+        })
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+            call_kwargs = mock_env_trader.trade.call_args[1]
+            # balance=1000 * fraction=0.1 * leverage=5 / price=50000 = 0.01
+            assert call_kwargs["quantity"] == pytest.approx(0.01, rel=1e-4)
