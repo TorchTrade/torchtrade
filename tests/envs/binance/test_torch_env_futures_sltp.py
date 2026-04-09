@@ -1101,3 +1101,65 @@ class TestBinanceSLTPNotionalTradeMode:
         # balance=1000 * fraction=0.1 * leverage=5 / candle_close=50050 ≈ 0.00999
         expected_qty = 1000.0 * 0.1 * 5 / 50050.0
         assert call_kwargs["quantity"] == pytest.approx(expected_qty, rel=1e-4)
+
+
+class TestBinanceSLTPLockPosition:
+    """Test lock_position_until_sltp for Binance SLTP environment."""
+
+    @pytest.fixture
+    def locked_env(self):
+        from torchtrade.envs.live.binance.env_sltp import (
+            BinanceFuturesSLTPTorchTradingEnv,
+            BinanceFuturesSLTPTradingEnvConfig,
+        )
+
+        mock_observer = MagicMock()
+        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
+        mock_observer.get_observations = MagicMock(return_value={
+            "1m_10": np.random.randn(10, 4).astype(np.float32),
+            "base_features": np.array(
+                [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
+            ),
+        })
+        mock_observer.intervals = ["1m"]
+        mock_observer.window_sizes = [10]
+
+        mock_trader = MagicMock()
+        mock_trader.cancel_open_orders = MagicMock(return_value=True)
+        mock_trader.close_position = MagicMock(return_value=True)
+        mock_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0, "available_balance": 900.0,
+            "total_margin_balance": 1000.0,
+        })
+        mock_trader.get_status = MagicMock(return_value={"position_status": None})
+        mock_trader.trade = MagicMock(return_value=True)
+
+        config = BinanceFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_short_positions=True,
+            lock_position_until_sltp=True,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BinanceFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BinanceFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_observer, trader=mock_trader,
+            )
+        return env, mock_trader
+
+    def test_locked_ignores_switch_action(self, locked_env):
+        """With lock=True, switching direction while in position should be ignored."""
+        env, mock_trader = locked_env
+        env.reset()
+        env.position.current_position = 1
+        mock_trader.reset_mock()
+
+        trade_info = env._execute_trade_if_needed(("short", 0.02, -0.03))
+
+        assert trade_info["executed"] is False
+        mock_trader.trade.assert_not_called()
+        mock_trader.close_position.assert_not_called()

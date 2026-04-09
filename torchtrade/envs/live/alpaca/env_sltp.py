@@ -211,8 +211,12 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
 
         stop_loss_pct, take_profit_pct = action_tuple
 
-        # HOLD action or already in position
+        # HOLD action or already in position (Alpaca is long-only, so position=1 means locked)
         if action_tuple == (None, None) or self.position.current_position == 1:
+            return trade_info
+
+        # Position locking: ignore all actions while in position
+        if self.config.lock_position_until_sltp and self.position.current_position != 0:
             return trade_info
 
         # BUY with SL/TP bracket order
