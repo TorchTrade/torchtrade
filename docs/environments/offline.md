@@ -172,6 +172,10 @@ config = VectorizedSequentialTradingEnvSLTPConfig(
     initial_cash=1000,
     transaction_fee=0.0025,
     leverage=1,  # or >1 for futures with short bracket orders
+
+    # Position sizing (see Position Sizing section below)
+    trade_mode="fractional",     # "fractional", "notional", or "quantity"
+    position_fraction=0.1,       # 10% of portfolio per trade
 )
 
 env = VectorizedSequentialTradingEnvSLTP(df, config)
@@ -224,6 +228,47 @@ With 2 SL levels, 2 TP levels, and `leverage > 1` (futures):
 
 Formula: `1 + 2 × (num_sl × num_tp)` = **9 actions**. Without HOLD (`include_hold_action=False`): `2 × (num_sl × num_tp)` = **8 actions**.
 
+### Position Sizing
+
+SLTP environments support three position sizing modes via `trade_mode`. This applies to all SLTP environments: `SequentialTradingEnvSLTP`, `VectorizedSequentialTradingEnvSLTP`, and `OneStepTradingEnv`.
+
+| Mode | Config field | Formula | Use case |
+|------|-------------|---------|----------|
+| `"fractional"` | `position_fraction` | `portfolio_value × fraction × leverage / price` | Training + adaptive sizing (default) |
+| `"notional"` | `quantity_per_trade` | `quantity_per_trade / price` | Fixed USD per trade |
+| `"quantity"` | `quantity_per_trade` | `quantity_per_trade` directly | Fixed base-asset units per trade |
+
+```python
+# Fractional: risk 10% of portfolio per bracket order (default mode)
+config = SequentialTradingEnvSLTPConfig(
+    trade_mode="fractional",     # default
+    position_fraction=0.1,       # 10% of portfolio
+    leverage=5,
+    stoploss_levels=[-0.02, -0.05],
+    takeprofit_levels=[0.03, 0.06],
+    ...
+)
+
+# Notional: always trade $500 USD worth
+config = SequentialTradingEnvSLTPConfig(
+    trade_mode="notional",
+    quantity_per_trade=500.0,    # $500 per trade
+    ...
+)
+
+# Quantity: always trade exactly 0.05 BTC
+config = SequentialTradingEnvSLTPConfig(
+    trade_mode="quantity",
+    quantity_per_trade=0.05,     # 0.05 BTC per trade
+    ...
+)
+```
+
+!!! tip "Train-Deploy Consistency"
+    Live SLTP environments (Binance, Bybit, Bitget) support the same three modes with the same config fields. Train offline with `trade_mode="fractional"`, then deploy live with identical settings for consistent behavior.
+
+The default is `trade_mode="fractional"` with `position_fraction=1.0` (all-in), which preserves backward compatibility with previous versions.
+
 ---
 
 ## OneStepTradingEnv
@@ -247,6 +292,10 @@ config = OneStepTradingEnvConfig(
     # Futures parameters (leverage > 1 enables short bracket orders)
     leverage=5,
     margin_call_threshold=0.2,
+
+    # Position sizing (see Position Sizing section above)
+    trade_mode="fractional",     # "fractional", "notional", or "quantity"
+    position_fraction=0.1,       # 10% of portfolio per trade
 
     time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
