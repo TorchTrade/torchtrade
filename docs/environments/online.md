@@ -122,9 +122,17 @@ config = BinanceFuturesSLTPTradingEnvConfig(
     stoploss_levels=[-0.02, -0.05],
     takeprofit_levels=[0.03, 0.06, 0.10],
     leverage=5,
-    quantity_per_trade=0.01,
+    quantity_per_trade=0.01,  # 0.01 BTC per trade (quantity mode)
+    trade_mode="quantity",    # "quantity" (base asset) or "notional" (USD)
     demo=True,
 )
+
+# For consistent USD-sized positions regardless of BTC price:
+# config = BinanceFuturesSLTPTradingEnvConfig(
+#     ...
+#     quantity_per_trade=500.0,  # $500 per trade
+#     trade_mode="notional",
+# )
 
 env = BinanceFuturesSLTPTorchTradingEnv(config)
 # Action space: HOLD + 2×(2 SL × 3 TP) = 13 actions (long + short)
@@ -190,7 +198,8 @@ config = BitgetFuturesSLTPTradingEnvConfig(
     include_hold_action=True,
     product_type="USDT-FUTURES",
     leverage=5,
-    quantity_per_trade=0.002,
+    quantity_per_trade=0.002,  # 0.002 BTC per trade (quantity mode)
+    trade_mode="quantity",     # "quantity" (base asset) or "notional" (USD)
     margin_mode=MarginMode.ISOLATED,
     position_mode=PositionMode.ONE_WAY,
     demo=True,
@@ -261,7 +270,8 @@ config = BybitFuturesSLTPTradingEnvConfig(
     takeprofit_levels=(0.05, 0.1, 0.2),
     include_hold_action=True,
     leverage=5,
-    quantity_per_trade=0.002,
+    quantity_per_trade=0.002,  # 0.002 BTC per trade (quantity mode)
+    trade_mode="quantity",     # "quantity" (base asset) or "notional" (USD)
     margin_mode=MarginMode.ISOLATED,
     position_mode=PositionMode.ONE_WAY,
     demo=True,
