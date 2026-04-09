@@ -890,3 +890,180 @@ class TestSLTPPositionSizing:
         self._open_long(env)
         assert env.position.position_size != 0
 
+
+class TestLockPositionUntilSLTP:
+    """Test lock_position_until_sltp config option."""
+
+    @pytest.fixture
+    def locked_config(self):
+        return SequentialTradingEnvSLTPConfig(
+            initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=100,
+            random_start=False,
+            leverage=10,
+            stoploss_levels=[-0.02],
+            takeprofit_levels=[0.03],
+            lock_position_until_sltp=True,
+        )
+
+    def test_locked_position_ignores_switch_action(self, sample_ohlcv_df, locked_config):
+        """With lock=True, a short action while long should be ignored (position held)."""
+        env = SequentialTradingEnvSLTP(sample_ohlcv_df, locked_config, simple_feature_fn)
+        td = env.reset()
+
+        # Open long
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(long_idx)
+        td_next = env.step(action_td)["next"]
+        assert env.position.position_size > 0
+        initial_size = env.position.position_size
+
+        # Try to switch to short — should be ignored
+        short_idx = next(i for i, v in env.action_map.items() if v[0] == "short")
+        action_td = td_next.clone()
+        action_td["action"] = torch.tensor(short_idx)
+        env.step(action_td)
+
+        # Position should still be the same long
+        assert env.position.position_size == pytest.approx(initial_size, rel=1e-6)
+
+    def test_locked_position_ignores_close_action(self, sample_ohlcv_df):
+        """With lock=True and include_close_action=True, close action is ignored."""
+        config = SequentialTradingEnvSLTPConfig(
+            initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=100,
+            random_start=False,
+            leverage=10,
+            stoploss_levels=[-0.02],
+            takeprofit_levels=[0.03],
+            lock_position_until_sltp=True,
+            include_close_action=True,
+        )
+        env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+
+        # Open long
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(long_idx)
+        td_next = env.step(action_td)["next"]
+        assert env.position.position_size > 0
+        initial_size = env.position.position_size
+
+        # Try close action — should be ignored
+        close_idx = next(i for i, v in env.action_map.items() if v[0] == "close")
+        action_td = td_next.clone()
+        action_td["action"] = torch.tensor(close_idx)
+        env.step(action_td)
+
+        assert env.position.position_size == pytest.approx(initial_size, rel=1e-6)
+
+    def test_unlocked_allows_switch(self, sample_ohlcv_df):
+        """With lock=False (default), switching positions works normally."""
+        config = SequentialTradingEnvSLTPConfig(
+            initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=100,
+            random_start=False,
+            leverage=10,
+            stoploss_levels=[-0.02],
+            takeprofit_levels=[0.03],
+            lock_position_until_sltp=False,
+        )
+        env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+
+        # Open long
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(long_idx)
+        td_next = env.step(action_td)["next"]
+        assert env.position.position_size > 0
+
+        # Switch to short — should work
+        short_idx = next(i for i, v in env.action_map.items() if v[0] == "short")
+        action_td = td_next.clone()
+        action_td["action"] = torch.tensor(short_idx)
+        env.step(action_td)
+        assert env.position.position_size < 0
+
+    def test_sltp_still_fires_when_locked(self):
+        """With lock=True, SL/TP triggers must still close the position."""
+        import numpy as np
+        import pandas as pd
+
+        n = 50
+        timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
+        prices = np.full(n, 100.0)
+        df = pd.DataFrame({
+            "timestamp": timestamps,
+            "open": prices.copy(),
+            "high": prices + 1.0,
+            "low": prices.copy(),
+            "close": prices.copy(),
+            "volume": np.ones(n) * 1000,
+        })
+        # Bar 12: intrabar crash to 90 (below SL of 98)
+        df.loc[12, "low"] = 90.0
+        df.loc[12, "close"] = 95.0
+
+        config = SequentialTradingEnvSLTPConfig(
+            leverage=1,
+            initial_cash=1000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=100,
+            random_start=False,
+            stoploss_levels=[-0.02],   # SL at -2% → price 98.0
+            takeprofit_levels=[0.10],  # TP at +10% → price 110.0
+            lock_position_until_sltp=True,
+        )
+        env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
+        td = env.reset()
+
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+
+        # Step 1: Open long at bar 10's close = 100
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(long_idx)
+        td_next = env.step(action_td)
+        assert env.position.position_size > 0
+
+        # Step 2: Hold — bar 12 has low=90, SL=98 should trigger
+        hold_td = td_next["next"].clone()
+        hold_td["action"] = torch.tensor(0)
+        env.step(hold_td)
+
+        # Position MUST be closed by SL despite lock=True
+        assert env.position.position_size == 0, (
+            "SL must still fire when lock_position_until_sltp=True"
+        )
+        env.close()
+
+    def test_locked_default_is_false(self):
+        """Default lock_position_until_sltp should be False for backward compat."""
+        config = SequentialTradingEnvSLTPConfig()
+        assert config.lock_position_until_sltp is False
+

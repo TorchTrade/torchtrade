@@ -604,3 +604,103 @@ class TestBybitSLTPNotionalTradeMode:
             call_kwargs = mock_env_trader.trade.call_args[1]
             # balance=1000 * fraction=0.1 * leverage=5 / price=50000 = 0.01
             assert call_kwargs["quantity"] == pytest.approx(0.01, rel=1e-4)
+
+
+class TestBybitSLTPLockPosition:
+    """Test lock_position_until_sltp for Bybit SLTP environment."""
+
+    @pytest.fixture
+    def locked_env(self, mock_env_observer, mock_env_trader):
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_short_positions=True,
+            lock_position_until_sltp=True,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            return BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+    def test_locked_ignores_switch_action(self, locked_env, mock_env_trader):
+        """With lock=True, a short action while long should be ignored."""
+        with patch.object(locked_env, "_wait_for_next_timestamp"):
+            locked_env.reset()
+
+            # Open long first
+            locked_env._execute_trade_if_needed(("long", -0.02, 0.03))
+            mock_env_trader.trade.assert_called_once()
+            locked_env.position.current_position = 1
+
+            mock_env_trader.reset_mock()
+
+            # Try to switch to short — should be ignored
+            trade_info = locked_env._execute_trade_if_needed(("short", 0.02, -0.03))
+
+            assert trade_info["executed"] is False
+            mock_env_trader.trade.assert_not_called()
+            mock_env_trader.close_position.assert_not_called()
+
+    def test_locked_ignores_close_action(self, locked_env, mock_env_trader):
+        """With lock=True, close action while in position should be ignored."""
+        with patch.object(locked_env, "_wait_for_next_timestamp"):
+            locked_env.reset()
+            locked_env.position.current_position = 1
+            mock_env_trader.reset_mock()  # Clear calls from reset/init
+
+            trade_info = locked_env._execute_trade_if_needed(("close", None, None))
+
+            assert trade_info["executed"] is False
+            mock_env_trader.close_position.assert_not_called()
+
+    def test_locked_allows_open_from_flat(self, locked_env, mock_env_trader):
+        """With lock=True, opening a position from flat should still work."""
+        with patch.object(locked_env, "_wait_for_next_timestamp"):
+            locked_env.reset()
+            assert locked_env.position.current_position == 0
+
+            trade_info = locked_env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+            mock_env_trader.trade.assert_called_once()
+
+    def test_unlocked_allows_switch(self, mock_env_observer, mock_env_trader):
+        """With lock=False (default), switching positions works normally."""
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_short_positions=True,
+            lock_position_until_sltp=False,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            env.position.current_position = 1
+
+            # Switch to short — should work (calls close + trade)
+            env._execute_trade_if_needed(("short", 0.02, -0.03))
+            mock_env_trader.close_position.assert_called()
+            mock_env_trader.trade.assert_called()
