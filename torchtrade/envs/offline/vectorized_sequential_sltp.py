@@ -373,9 +373,10 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
         # Position locking: force HOLD for envs with open positions
         if self.config.lock_position_until_sltp:
-            has_position = ~is_flat & active
-            sides = sides.clone()
-            sides[has_position] = 0  # Force HOLD
+            has_position = (~is_flat) & active
+            if has_position.any():
+                sides = sides.clone()
+                sides[has_position] = 0  # Force HOLD
 
         # Hold: explicit hold or already in same direction
         hold_mask = active & (

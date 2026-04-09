@@ -921,13 +921,13 @@ class TestLockPositionUntilSLTP:
         long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
         action_td = td.clone()
         action_td["action"] = torch.tensor(long_idx)
-        env.step(action_td)
+        td_next = env.step(action_td)["next"]
         assert env.position.position_size > 0
         initial_size = env.position.position_size
 
         # Try to switch to short — should be ignored
         short_idx = next(i for i, v in env.action_map.items() if v[0] == "short")
-        action_td = td.clone()
+        action_td = td_next.clone()
         action_td["action"] = torch.tensor(short_idx)
         env.step(action_td)
 
@@ -959,13 +959,13 @@ class TestLockPositionUntilSLTP:
         long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
         action_td = td.clone()
         action_td["action"] = torch.tensor(long_idx)
-        env.step(action_td)
+        td_next = env.step(action_td)["next"]
         assert env.position.position_size > 0
         initial_size = env.position.position_size
 
         # Try close action — should be ignored
         close_idx = next(i for i, v in env.action_map.items() if v[0] == "close")
-        action_td = td.clone()
+        action_td = td_next.clone()
         action_td["action"] = torch.tensor(close_idx)
         env.step(action_td)
 
@@ -995,12 +995,12 @@ class TestLockPositionUntilSLTP:
         long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
         action_td = td.clone()
         action_td["action"] = torch.tensor(long_idx)
-        env.step(action_td)
+        td_next = env.step(action_td)["next"]
         assert env.position.position_size > 0
 
         # Switch to short — should work
         short_idx = next(i for i, v in env.action_map.items() if v[0] == "short")
-        action_td = td.clone()
+        action_td = td_next.clone()
         action_td["action"] = torch.tensor(short_idx)
         env.step(action_td)
         assert env.position.position_size < 0

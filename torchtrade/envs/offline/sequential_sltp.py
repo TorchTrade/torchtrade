@@ -387,9 +387,8 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
                     execution_price = self.take_profit
                 trade_info = self._execute_sltp_close(execution_price, sltp_trigger)
             elif self.config.lock_position_until_sltp:
-                # Position locked — ignore agent action, just hold
-                self.position.hold_counter += 1
-                trade_info = {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
+                # Position locked — ignore agent action, treat as HOLD
+                trade_info = self._execute_sltp_action(None, None, None, cached_price)
             else:
                 # No trigger, execute new action at bar N price
                 trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
