@@ -221,3 +221,65 @@ class TestReplayObserver:
         obs_after_reset = observer.get_observations(return_base_ohlc=True)
         reset_price = obs_after_reset["base_features"][-1, 3]
         assert reset_price == pytest.approx(first_price, rel=1e-4)
+
+
+from unittest.mock import patch
+
+
+class TestReplayIntegrationWithLiveEnv:
+    """Test replay components injected into a real live SLTP env."""
+
+    @pytest.fixture
+    def df(self):
+        return _make_test_df(200)
+
+    def test_replay_with_bybit_sltp_env(self, df):
+        """ReplayObserver + ReplayOrderExecutor work as drop-in for Bybit SLTP."""
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            leverage=5,
+            trade_mode="quantity",
+            quantity_per_trade=0.01,
+        )
+
+        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
+        observer = ReplayObserver(
+            df=df,
+            time_frames=config.time_frames,
+            window_sizes=config.window_sizes,
+            execute_on=config.execute_on,
+            executor=executor,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesSLTPTorchTradingEnv(
+                config=config,
+                observer=observer,
+                trader=executor,
+            )
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            td = env.reset()
+
+            import torch
+            for i in range(10):
+                action = 1 if i % 3 == 0 else 0
+                action_td = td.clone()
+                action_td["action"] = torch.tensor(action)
+                td = env.step(action_td)["next"]
+
+                assert "reward" in td.keys()
+                assert "done" in td.keys()
+
+            assert executor.current_price > 0
