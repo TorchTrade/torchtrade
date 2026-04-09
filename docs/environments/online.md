@@ -123,7 +123,7 @@ config = BinanceFuturesSLTPTradingEnvConfig(
     takeprofit_levels=[0.03, 0.06, 0.10],
     leverage=5,
     quantity_per_trade=0.01,  # 0.01 BTC per trade (quantity mode)
-    trade_mode="quantity",    # "quantity" (base asset) or "notional" (USD)
+    trade_mode="quantity",    # "quantity", "notional", or "fractional"
     demo=True,
 )
 
@@ -132,6 +132,13 @@ config = BinanceFuturesSLTPTradingEnvConfig(
 #     ...
 #     quantity_per_trade=500.0,  # $500 per trade
 #     trade_mode="notional",
+# )
+
+# For fractional portfolio-based sizing (10% of account per trade):
+# config = BinanceFuturesSLTPTradingEnvConfig(
+#     ...
+#     trade_mode="fractional",
+#     position_fraction=0.1,
 # )
 
 env = BinanceFuturesSLTPTorchTradingEnv(config)
@@ -199,7 +206,7 @@ config = BitgetFuturesSLTPTradingEnvConfig(
     product_type="USDT-FUTURES",
     leverage=5,
     quantity_per_trade=0.002,  # 0.002 BTC per trade (quantity mode)
-    trade_mode="quantity",     # "quantity" (base asset) or "notional" (USD)
+    trade_mode="quantity",     # "quantity", "notional", or "fractional"
     margin_mode=MarginMode.ISOLATED,
     position_mode=PositionMode.ONE_WAY,
     demo=True,
@@ -271,7 +278,7 @@ config = BybitFuturesSLTPTradingEnvConfig(
     include_hold_action=True,
     leverage=5,
     quantity_per_trade=0.002,  # 0.002 BTC per trade (quantity mode)
-    trade_mode="quantity",     # "quantity" (base asset) or "notional" (USD)
+    trade_mode="quantity",     # "quantity", "notional", or "fractional"
     margin_mode=MarginMode.ISOLATED,
     position_mode=PositionMode.ONE_WAY,
     demo=True,
@@ -284,6 +291,45 @@ env = BybitFuturesSLTPTorchTradingEnv(
 )
 # Action space: HOLD + 2×(3 SL × 3 TP) = 19 actions (long + short)
 ```
+
+---
+
+## Position Sizing (SLTP Environments)
+
+All live SLTP environments support three position sizing modes, matching the offline SLTP environments for train-deploy consistency.
+
+| Mode | Config field | Formula | Use case |
+|------|-------------|---------|----------|
+| `"fractional"` | `position_fraction` | `account_balance × fraction × leverage / price` | Adaptive sizing (scales with account) |
+| `"notional"` | `quantity_per_trade` | `quantity_per_trade / price` | Fixed USD per trade |
+| `"quantity"` | `quantity_per_trade` | `quantity_per_trade` directly | Fixed base-asset units per trade |
+
+```python
+# Fractional: risk 10% of account per bracket order
+config = BinanceFuturesSLTPTradingEnvConfig(
+    trade_mode="fractional",
+    position_fraction=0.1,       # 10% of account balance
+    leverage=5,
+    ...
+)
+
+# Notional: always trade $500 USD worth
+config = BinanceFuturesSLTPTradingEnvConfig(
+    trade_mode="notional",
+    quantity_per_trade=500.0,    # $500 per trade
+    ...
+)
+
+# Quantity: always trade exactly 0.001 BTC (default)
+config = BinanceFuturesSLTPTradingEnvConfig(
+    trade_mode="quantity",       # default
+    quantity_per_trade=0.001,
+    ...
+)
+```
+
+!!! note "Alpaca"
+    Alpaca SLTP supports `"fractional"` and `"notional"` modes only. `"quantity"` mode is not supported because Alpaca's bracket order API requires dollar amounts.
 
 ---
 

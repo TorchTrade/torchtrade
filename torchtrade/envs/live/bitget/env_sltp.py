@@ -43,6 +43,7 @@ class BitgetFuturesSLTPTradingEnvConfig:
     position_mode: PositionMode = PositionMode.ONE_WAY  # ONE_WAY or HEDGE
     quantity_per_trade: float = 0.001  # Base quantity per trade
     trade_mode: TradeMode = "quantity"
+    position_fraction: float = 1.0  # Used when trade_mode="fractional"
 
     # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
     stoploss_levels: Tuple[float, ...] = (-0.025, -0.05, -0.1)
@@ -71,6 +72,12 @@ class BitgetFuturesSLTPTradingEnvConfig:
         from torchtrade.envs.core.common import validate_trade_mode
 
         self.trade_mode = validate_trade_mode(self.trade_mode)
+        if self.trade_mode == "fractional":
+            if not (0 < self.position_fraction <= 1.0):
+                raise ValueError(f"position_fraction must be in (0, 1.0], got {self.position_fraction}")
+        elif self.trade_mode in ("notional", "quantity"):
+            if self.quantity_per_trade <= 0:
+                raise ValueError(f"quantity_per_trade must be positive, got {self.quantity_per_trade}")
         self.execute_on, self.time_frames, self.window_sizes = normalize_bitget_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
@@ -277,7 +284,14 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
         current_price = float(obs["base_features"][-1, 3])  # Close price
 
         # Resolve quantity based on trade_mode
-        if self.config.trade_mode == "notional":
+        if self.config.trade_mode == "fractional":
+            balance = float(self.trader.get_account_balance()["total_wallet_balance"])
+            if current_price <= 0 or balance <= 0:
+                logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
+                trade_info["success"] = False
+                return trade_info
+            quantity = balance * self.config.position_fraction * self.config.leverage / current_price
+        elif self.config.trade_mode == "notional":
             if current_price <= 0:
                 logger.error(f"Invalid current_price={current_price} for {self.config.symbol}")
                 trade_info["success"] = False

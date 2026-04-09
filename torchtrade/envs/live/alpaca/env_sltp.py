@@ -36,11 +36,21 @@ class AlpacaSLTPTradingEnvConfig:
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
     paper: bool = True
-    trade_mode: TradeMode = "notional"
+    trade_mode: TradeMode = "fractional"
+    position_fraction: float = 1.0        # Used when trade_mode="fractional" (1.0 = all-in, backward compat)
+    quantity_per_trade: float = 100.0      # Used when trade_mode="notional"
     seed: Optional[int] = 42
     include_base_features: bool = False
 
     def __post_init__(self):
+        from torchtrade.envs.core.common import validate_trade_mode
+        self.trade_mode = validate_trade_mode(self.trade_mode)
+        if self.trade_mode == "fractional":
+            if not (0 < self.position_fraction <= 1.0):
+                raise ValueError(f"position_fraction must be in (0, 1.0], got {self.position_fraction}")
+        elif self.trade_mode == "notional":
+            if self.quantity_per_trade <= 0:
+                raise ValueError(f"quantity_per_trade must be positive, got {self.quantity_per_trade}")
         self.execute_on, self.time_frames, self.window_sizes = normalize_alpaca_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
@@ -84,6 +94,10 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         """
         # Initialize base class (handles observer/trader, obs specs, portfolio value, etc.)
         super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
+
+        # Fractional mode computes USD amount, so executor uses notional API
+        if self.config.trade_mode == "fractional":
+            self.trader.trade_mode = "notional"
 
         # Set reward function
         from torchtrade.envs.core.default_rewards import log_return_reward
@@ -247,14 +261,26 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         return trade_info
 
     def _calculate_trade_amount(self, side: str) -> float:
-        """Calculate the dollar amount to trade."""
-        if self.config.trade_mode == "quantity":
-            raise NotImplementedError("quantity trade mode not implemented for SLTP env")
+        """Calculate the trade amount based on trade_mode.
 
-        if side == "buy":
-            return self.balance
+        Returns:
+            Amount in USD (for notional/fractional) or units (for quantity).
+        """
+        if side != "buy":
+            return -1  # Close full position
+
+        if self.config.trade_mode == "fractional":
+            return self.balance * self.config.position_fraction
+        elif self.config.trade_mode == "notional":
+            return float(self.config.quantity_per_trade)
+        elif self.config.trade_mode == "quantity":
+            raise NotImplementedError(
+                "quantity trade_mode is not supported for Alpaca SLTP. "
+                "Alpaca's bracket order API requires dollar amounts. "
+                "Use trade_mode='notional' or 'fractional' instead."
+            )
         else:
-            return -1
+            raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""
