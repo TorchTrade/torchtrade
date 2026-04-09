@@ -150,6 +150,49 @@ class TestReplayOrderExecutorSLTPTriggers:
         balance = executor.get_account_balance()
         assert balance["total_wallet_balance"] == pytest.approx(10000.0 - 10.0, rel=0.01)
 
+    def test_reset_restores_all_state(self):
+        """reset() must restore executor to initial state completely."""
+        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5, transaction_fee=0.001)
+        executor.advance_bar({"open": 50000, "high": 50100, "low": 49900, "close": 50000})
+        executor.trade(side="BUY", quantity=0.1, stop_loss=49000, take_profit=51000)
+
+        executor.reset()
+
+        assert executor.position_qty == 0.0
+        assert executor.entry_price == 0.0
+        assert executor.balance == 10000.0
+        assert executor.sl_price == 0.0
+        assert executor.tp_price == 0.0
+        assert executor.current_price == 0.0
+        assert executor.bracket_status == {"tp_placed": False, "sl_placed": False}
+        assert executor.last_order_id is None
+        status = executor.get_status()
+        assert status["position_status"] is None
+
+    def test_short_profit_pnl(self):
+        """Short position with price drop should produce profit."""
+        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5, transaction_fee=0.0)
+        executor.advance_bar({"open": 50000, "high": 50100, "low": 49900, "close": 50000})
+        executor.trade(side="SELL", quantity=0.1)
+        # Price drops — short profits
+        executor.advance_bar({"open": 49000, "high": 49100, "low": 48900, "close": 49000})
+        executor.close_position()
+        balance = executor.get_account_balance()
+        # PnL: -0.1 * (49000 - 50000) = +100
+        assert balance["total_wallet_balance"] > 10000.0
+
+    def test_short_loss_pnl(self):
+        """Short position with price rise should produce loss."""
+        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5, transaction_fee=0.0)
+        executor.advance_bar({"open": 50000, "high": 50100, "low": 49900, "close": 50000})
+        executor.trade(side="SELL", quantity=0.1)
+        # Price rises — short loses
+        executor.advance_bar({"open": 51000, "high": 51100, "low": 50900, "close": 51000})
+        executor.close_position()
+        balance = executor.get_account_balance()
+        # PnL: -0.1 * (51000 - 50000) = -100
+        assert balance["total_wallet_balance"] < 10000.0
+
 
 class TestReplayObserver:
     """Test ReplayObserver wrapping MarketDataObservationSampler."""
