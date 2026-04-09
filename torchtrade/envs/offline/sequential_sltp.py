@@ -48,6 +48,9 @@ class SequentialTradingEnvSLTPConfig(SequentialTradingEnvConfig):
     include_hold_action: bool = True  # Include HOLD action (index 0)
     include_close_action: bool = False  # Include CLOSE action (default: False for SLTP)
 
+    # Position locking (for OneStep policy evaluation parity)
+    lock_position_until_sltp: bool = False  # If True, ignore actions while in position
+
     # Position sizing mode
     trade_mode: TradeMode = "fractional"
     position_fraction: float = 1.0       # Used when trade_mode="fractional" (1.0 = all-in, backward compat)
@@ -383,6 +386,10 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
                 else:  # "tp"
                     execution_price = self.take_profit
                 trade_info = self._execute_sltp_close(execution_price, sltp_trigger)
+            elif self.config.lock_position_until_sltp:
+                # Position locked — ignore agent action, just hold
+                self.position.hold_counter += 1
+                trade_info = {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
             else:
                 # No trigger, execute new action at bar N price
                 trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)

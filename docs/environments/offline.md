@@ -207,6 +207,9 @@ config = SequentialTradingEnvSLTPConfig(
     trade_mode="fractional",     # "fractional", "notional", or "quantity"
     position_fraction=0.1,       # 10% of portfolio per trade (fractional mode)
 
+    # Position locking (for OneStep policy evaluation parity)
+    lock_position_until_sltp=False,  # If True, positions can only exit via SL/TP/liquidation
+
     time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
     execute_on=(5, "Minute"),
@@ -268,6 +271,19 @@ config = SequentialTradingEnvSLTPConfig(
     Live SLTP environments (Binance, Bybit, Bitget) support the same three modes with the same config fields. Train offline with `trade_mode="fractional"`, then deploy live with identical settings for consistent behavior.
 
 The default is `trade_mode="fractional"` with `position_fraction=1.0` (all-in), which preserves backward compatibility with previous versions.
+
+### Position Locking
+
+When `lock_position_until_sltp=True`, the agent's actions are ignored while a position is open. Positions can only exit via SL trigger, TP trigger, liquidation, or episode truncation — matching `OneStepTradingEnv` behavior.
+
+```python
+config = SequentialTradingEnvSLTPConfig(
+    lock_position_until_sltp=True,  # Ignore actions while in position
+    ...
+)
+```
+
+This is useful for evaluating policies trained on `OneStepTradingEnv` (where positions are inherently locked) on `SequentialTradingEnvSLTP` with matching conditions.
 
 ---
 

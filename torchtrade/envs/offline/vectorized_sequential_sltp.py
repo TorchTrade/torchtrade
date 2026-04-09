@@ -41,6 +41,7 @@ class VectorizedSequentialTradingEnvSLTPConfig(VectorizedSequentialTradingEnvCon
     takeprofit_levels: Union[List[float], Tuple[float, ...]] = (0.05, 0.1, 0.2)
     include_hold_action: bool = True
     include_close_action: bool = False
+    lock_position_until_sltp: bool = False  # If True, ignore actions while in position
     trade_mode: TradeMode = "fractional"
     position_fraction: float = 1.0
     quantity_per_trade: float = 0.001
@@ -369,6 +370,12 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         is_long = self._position_sizes > 0
         is_short = self._position_sizes < 0
         is_flat = self._position_sizes == 0
+
+        # Position locking: force HOLD for envs with open positions
+        if self.config.lock_position_until_sltp:
+            has_position = ~is_flat & active
+            sides = sides.clone()
+            sides[has_position] = 0  # Force HOLD
 
         # Hold: explicit hold or already in same direction
         hold_mask = active & (
