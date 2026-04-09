@@ -915,6 +915,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#position-sizing-sltp-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Position Sizing (SLTP Environments)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#api-key-setup" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1542,6 +1553,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#position-sizing-sltp-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Position Sizing (SLTP Environments)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#api-key-setup" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1838,7 +1860,7 @@
 </span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">takeprofit_levels</span><span class="o">=</span><span class="p">[</span><span class="mf">0.03</span><span class="p">,</span> <span class="mf">0.06</span><span class="p">,</span> <span class="mf">0.10</span><span class="p">],</span>
 </span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="n">leverage</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
 </span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="n">quantity_per_trade</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>  <span class="c1"># 0.01 BTC per trade (quantity mode)</span>
-</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">trade_mode</span><span class="o">=</span><span class="s2">&quot;quantity&quot;</span><span class="p">,</span>    <span class="c1"># &quot;quantity&quot; (base asset) or &quot;notional&quot; (USD)</span>
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">trade_mode</span><span class="o">=</span><span class="s2">&quot;quantity&quot;</span><span class="p">,</span>    <span class="c1"># &quot;quantity&quot;, &quot;notional&quot;, or &quot;fractional&quot;</span>
 </span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    <span class="n">demo</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
 </span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="p">)</span>
 </span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>
@@ -1849,8 +1871,15 @@
 </span><span id="__span-3-20"><a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="c1">#     trade_mode=&quot;notional&quot;,</span>
 </span><span id="__span-3-21"><a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a><span class="c1"># )</span>
 </span><span id="__span-3-22"><a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>
-</span><span id="__span-3-23"><a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a><span class="n">env</span> <span class="o">=</span> <span class="n">BinanceFuturesSLTPTorchTradingEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
-</span><span id="__span-3-24"><a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a><span class="c1"># Action space: HOLD + 2×(2 SL × 3 TP) = 13 actions (long + short)</span>
+</span><span id="__span-3-23"><a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a><span class="c1"># For fractional portfolio-based sizing (10% of account per trade):</span>
+</span><span id="__span-3-24"><a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a><span class="c1"># config = BinanceFuturesSLTPTradingEnvConfig(</span>
+</span><span id="__span-3-25"><a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a><span class="c1">#     ...</span>
+</span><span id="__span-3-26"><a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a><span class="c1">#     trade_mode=&quot;fractional&quot;,</span>
+</span><span id="__span-3-27"><a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a><span class="c1">#     position_fraction=0.1,</span>
+</span><span id="__span-3-28"><a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a><span class="c1"># )</span>
+</span><span id="__span-3-29"><a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>
+</span><span id="__span-3-30"><a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a><span class="n">env</span> <span class="o">=</span> <span class="n">BinanceFuturesSLTPTorchTradingEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+</span><span id="__span-3-31"><a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a><span class="c1"># Action space: HOLD + 2×(2 SL × 3 TP) = 13 actions (long + short)</span>
 </span></code></pre></div>
 <hr />
 <h2 id="bitget-environments">Bitget Environments<a class="headerlink" href="#bitget-environments" title="Permanent link">&para;</a></h2>
@@ -1906,7 +1935,7 @@
 </span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>    <span class="n">product_type</span><span class="o">=</span><span class="s2">&quot;USDT-FUTURES&quot;</span><span class="p">,</span>
 </span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>    <span class="n">leverage</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
 </span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>    <span class="n">quantity_per_trade</span><span class="o">=</span><span class="mf">0.002</span><span class="p">,</span>  <span class="c1"># 0.002 BTC per trade (quantity mode)</span>
-</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>    <span class="n">trade_mode</span><span class="o">=</span><span class="s2">&quot;quantity&quot;</span><span class="p">,</span>     <span class="c1"># &quot;quantity&quot; (base asset) or &quot;notional&quot; (USD)</span>
+</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>    <span class="n">trade_mode</span><span class="o">=</span><span class="s2">&quot;quantity&quot;</span><span class="p">,</span>     <span class="c1"># &quot;quantity&quot;, &quot;notional&quot;, or &quot;fractional&quot;</span>
 </span><span id="__span-5-20"><a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>    <span class="n">margin_mode</span><span class="o">=</span><span class="n">MarginMode</span><span class="o">.</span><span class="n">ISOLATED</span><span class="p">,</span>
 </span><span id="__span-5-21"><a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>    <span class="n">position_mode</span><span class="o">=</span><span class="n">PositionMode</span><span class="o">.</span><span class="n">ONE_WAY</span><span class="p">,</span>
 </span><span id="__span-5-22"><a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>    <span class="n">demo</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
@@ -1970,7 +1999,7 @@
 </span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>    <span class="n">include_hold_action</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
 </span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>    <span class="n">leverage</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
 </span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>    <span class="n">quantity_per_trade</span><span class="o">=</span><span class="mf">0.002</span><span class="p">,</span>  <span class="c1"># 0.002 BTC per trade (quantity mode)</span>
-</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>    <span class="n">trade_mode</span><span class="o">=</span><span class="s2">&quot;quantity&quot;</span><span class="p">,</span>     <span class="c1"># &quot;quantity&quot; (base asset) or &quot;notional&quot; (USD)</span>
+</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>    <span class="n">trade_mode</span><span class="o">=</span><span class="s2">&quot;quantity&quot;</span><span class="p">,</span>     <span class="c1"># &quot;quantity&quot;, &quot;notional&quot;, or &quot;fractional&quot;</span>
 </span><span id="__span-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>    <span class="n">margin_mode</span><span class="o">=</span><span class="n">MarginMode</span><span class="o">.</span><span class="n">ISOLATED</span><span class="p">,</span>
 </span><span id="__span-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>    <span class="n">position_mode</span><span class="o">=</span><span class="n">PositionMode</span><span class="o">.</span><span class="n">ONE_WAY</span><span class="p">,</span>
 </span><span id="__span-7-21"><a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>    <span class="n">demo</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
@@ -1984,24 +2013,83 @@
 </span><span id="__span-7-29"><a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a><span class="c1"># Action space: HOLD + 2×(3 SL × 3 TP) = 19 actions (long + short)</span>
 </span></code></pre></div>
 <hr />
+<h2 id="position-sizing-sltp-environments">Position Sizing (SLTP Environments)<a class="headerlink" href="#position-sizing-sltp-environments" title="Permanent link">&para;</a></h2>
+<p>All live SLTP environments support three position sizing modes, matching the offline SLTP environments for train-deploy consistency.</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Config field</th>
+<th>Formula</th>
+<th>Use case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"fractional"</code></td>
+<td><code>position_fraction</code></td>
+<td><code>account_balance × fraction × leverage / price</code></td>
+<td>Adaptive sizing (scales with account)</td>
+</tr>
+<tr>
+<td><code>"notional"</code></td>
+<td><code>quantity_per_trade</code></td>
+<td><code>quantity_per_trade / price</code></td>
+<td>Fixed USD per trade</td>
+</tr>
+<tr>
+<td><code>"quantity"</code></td>
+<td><code>quantity_per_trade</code></td>
+<td><code>quantity_per_trade</code> directly</td>
+<td>Fixed base-asset units per trade</td>
+</tr>
+</tbody>
+</table>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Fractional: risk 10% of account per bracket order</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">config</span> <span class="o">=</span> <span class="n">BinanceFuturesSLTPTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">trade_mode</span><span class="o">=</span><span class="s2">&quot;fractional&quot;</span><span class="p">,</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">position_fraction</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span>       <span class="c1"># 10% of account balance</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">leverage</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="o">...</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="p">)</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c1"># Notional: always trade $500 USD worth</span>
+</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="n">config</span> <span class="o">=</span> <span class="n">BinanceFuturesSLTPTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>    <span class="n">trade_mode</span><span class="o">=</span><span class="s2">&quot;notional&quot;</span><span class="p">,</span>
+</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="n">quantity_per_trade</span><span class="o">=</span><span class="mf">500.0</span><span class="p">,</span>    <span class="c1"># $500 per trade</span>
+</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>    <span class="o">...</span>
+</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="p">)</span>
+</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>
+</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="c1"># Quantity: always trade exactly 0.001 BTC (default)</span>
+</span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="n">config</span> <span class="o">=</span> <span class="n">BinanceFuturesSLTPTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>    <span class="n">trade_mode</span><span class="o">=</span><span class="s2">&quot;quantity&quot;</span><span class="p">,</span>       <span class="c1"># default</span>
+</span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>    <span class="n">quantity_per_trade</span><span class="o">=</span><span class="mf">0.001</span><span class="p">,</span>
+</span><span id="__span-8-20"><a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>    <span class="o">...</span>
+</span><span id="__span-8-21"><a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="p">)</span>
+</span></code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Alpaca</p>
+<p>Alpaca SLTP supports <code>"fractional"</code> and <code>"notional"</code> modes only. <code>"quantity"</code> mode is not supported because Alpaca's bracket order API requires dollar amounts.</p>
+</div>
+<hr />
 <h2 id="api-key-setup">API Key Setup<a class="headerlink" href="#api-key-setup" title="Permanent link">&para;</a></h2>
 <p>Each exchange requires API keys stored in a <code>.env</code> file:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Alpaca (https://alpaca.markets/signup)</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nv">API_KEY</span><span class="o">=</span>your_alpaca_api_key
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nv">SECRET_KEY</span><span class="o">=</span>your_alpaca_secret_key
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># Binance (https://www.binance.com/en/my/settings/api-management)</span>
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="nv">BINANCE_API_KEY</span><span class="o">=</span>your_binance_api_key
-</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="nv">BINANCE_SECRET_KEY</span><span class="o">=</span>your_binance_secret_key
-</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
-</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c1"># Bitget (https://www.bitget.com/en/support/articles/360038859731)</span>
-</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="nv">BITGETACCESSAPIKEY</span><span class="o">=</span>your_bitget_api_key
-</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="nv">BITGETSECRETKEY</span><span class="o">=</span>your_bitget_secret_key
-</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="nv">BITGETPASSPHRASE</span><span class="o">=</span>your_bitget_passphrase
-</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>
-</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="c1"># Bybit (https://www.bybit.com/app/user/api-management)</span>
-</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="nv">BYBIT_API_KEY</span><span class="o">=</span>your_bybit_api_key
-</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="nv">BYBIT_API_SECRET</span><span class="o">=</span>your_bybit_api_secret
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Alpaca (https://alpaca.markets/signup)</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nv">API_KEY</span><span class="o">=</span>your_alpaca_api_key
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="nv">SECRET_KEY</span><span class="o">=</span>your_alpaca_secret_key
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="c1"># Binance (https://www.binance.com/en/my/settings/api-management)</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="nv">BINANCE_API_KEY</span><span class="o">=</span>your_binance_api_key
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="nv">BINANCE_SECRET_KEY</span><span class="o">=</span>your_binance_secret_key
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="c1"># Bitget (https://www.bitget.com/en/support/articles/360038859731)</span>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="nv">BITGETACCESSAPIKEY</span><span class="o">=</span>your_bitget_api_key
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="nv">BITGETSECRETKEY</span><span class="o">=</span>your_bitget_secret_key
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="nv">BITGETPASSPHRASE</span><span class="o">=</span>your_bitget_passphrase
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>
+</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="c1"># Bybit (https://www.bybit.com/app/user/api-management)</span>
+</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="nv">BYBIT_API_KEY</span><span class="o">=</span>your_bybit_api_key
+</span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="nv">BYBIT_API_SECRET</span><span class="o">=</span>your_bybit_api_secret
 </span></code></pre></div>
 <div class="admonition warning">
 <p class="admonition-title">Always Start with Paper/Testnet Trading</p>
