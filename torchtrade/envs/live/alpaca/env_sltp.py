@@ -36,9 +36,9 @@ class AlpacaSLTPTradingEnvConfig:
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
     paper: bool = True
-    trade_mode: TradeMode = "notional"
-    position_fraction: float = 1.0        # Used when trade_mode="fractional"
-    quantity_per_trade: float = 100.0      # Used when trade_mode in ("quantity", "notional")
+    trade_mode: TradeMode = "fractional"
+    position_fraction: float = 1.0        # Used when trade_mode="fractional" (1.0 = all-in, backward compat)
+    quantity_per_trade: float = 100.0      # Used when trade_mode="notional"
     seed: Optional[int] = 42
     include_base_features: bool = False
 

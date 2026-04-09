@@ -281,7 +281,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
 
         # Resolve quantity based on trade_mode
         if self.config.trade_mode == "fractional":
-            balance = self.trader.get_account_balance()["total_wallet_balance"]
+            balance = float(self.trader.get_account_balance()["total_wallet_balance"])
             if current_price <= 0 or balance <= 0:
                 logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
                 trade_info["success"] = False

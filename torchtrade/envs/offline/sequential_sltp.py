@@ -60,6 +60,18 @@ class SequentialTradingEnvSLTPConfig(SequentialTradingEnvConfig):
 
         self.trade_mode = validate_trade_mode(self.trade_mode)
 
+        # Validate sizing parameters
+        if self.trade_mode == "fractional":
+            if not (0 < self.position_fraction <= 1.0):
+                raise ValueError(
+                    f"position_fraction must be in (0, 1.0], got {self.position_fraction}"
+                )
+        elif self.trade_mode in ("notional", "quantity"):
+            if self.quantity_per_trade <= 0:
+                raise ValueError(
+                    f"quantity_per_trade must be positive, got {self.quantity_per_trade}"
+                )
+
         # Convert to lists if needed
         if not isinstance(self.stoploss_levels, list):
             self.stoploss_levels = list(self.stoploss_levels)
@@ -517,11 +529,15 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         elif self.config.trade_mode == "notional":
             # Notional: fixed USD per trade
+            if execution_price <= 0:
+                raise ValueError(f"execution_price must be positive for notional mode, got {execution_price}")
             notional_value = float(self.config.quantity_per_trade)
             position_size = notional_value / execution_price
 
         elif self.config.trade_mode == "quantity":
             # Quantity: fixed base-asset units per trade
+            if execution_price <= 0:
+                raise ValueError(f"execution_price must be positive for quantity mode, got {execution_price}")
             position_size = float(self.config.quantity_per_trade)
             notional_value = position_size * execution_price
 

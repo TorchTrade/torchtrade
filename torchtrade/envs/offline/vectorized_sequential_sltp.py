@@ -48,6 +48,18 @@ class VectorizedSequentialTradingEnvSLTPConfig(VectorizedSequentialTradingEnvCon
     def __post_init__(self):
         self.trade_mode = validate_trade_mode(self.trade_mode)
 
+        # Validate sizing parameters
+        if self.trade_mode == "fractional":
+            if not (0 < self.position_fraction <= 1.0):
+                raise ValueError(
+                    f"position_fraction must be in (0, 1.0], got {self.position_fraction}"
+                )
+        elif self.trade_mode in ("notional", "quantity"):
+            if self.quantity_per_trade <= 0:
+                raise ValueError(
+                    f"quantity_per_trade must be positive, got {self.quantity_per_trade}"
+                )
+
         if not isinstance(self.stoploss_levels, list):
             self.stoploss_levels = list(self.stoploss_levels)
         if not isinstance(self.takeprofit_levels, list):
