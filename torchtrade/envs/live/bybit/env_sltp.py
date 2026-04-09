@@ -44,6 +44,7 @@ class BybitFuturesSLTPTradingEnvConfig:
     quantity_per_trade: float = 0.001
     trade_mode: TradeMode = "quantity"
     position_fraction: float = 1.0  # Used when trade_mode="fractional"
+    lock_position_until_sltp: bool = False  # If True, ignore actions while in position
 
     # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
     stoploss_levels: Tuple[float, ...] = (-0.025, -0.05, -0.1)
@@ -223,6 +224,10 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
 
         # HOLD action
         if side is None:
+            return trade_info
+
+        # Position locking: ignore all actions while in position
+        if self.config.lock_position_until_sltp and self.position.current_position != 0:
             return trade_info
 
         # CLOSE action - close any open position

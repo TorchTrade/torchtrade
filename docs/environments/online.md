@@ -331,6 +331,19 @@ config = BinanceFuturesSLTPTradingEnvConfig(
 !!! note "Alpaca"
     Alpaca SLTP supports `"fractional"` and `"notional"` modes only. `"quantity"` mode is not supported because Alpaca's bracket order API requires dollar amounts.
 
+### Position Locking
+
+All live SLTP environments support `lock_position_until_sltp`. When enabled, agent actions are ignored while a position is open — positions can only exit via the exchange's bracket orders (SL/TP triggers).
+
+```python
+config = BinanceFuturesSLTPTradingEnvConfig(
+    lock_position_until_sltp=True,  # Positions exit only via SL/TP
+    ...
+)
+```
+
+This is useful for deploying policies trained on `OneStepTradingEnv` where positions are inherently locked to a single decision. See the [offline Position Locking docs](offline.md#position-locking) for details.
+
 ---
 
 ## API Key Setup

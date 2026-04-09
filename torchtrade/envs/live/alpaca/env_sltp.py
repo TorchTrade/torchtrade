@@ -39,6 +39,7 @@ class AlpacaSLTPTradingEnvConfig:
     trade_mode: TradeMode = "fractional"
     position_fraction: float = 1.0        # Used when trade_mode="fractional" (1.0 = all-in, backward compat)
     quantity_per_trade: float = 100.0      # Used when trade_mode="notional"
+    lock_position_until_sltp: bool = False  # If True, ignore actions while in position
     seed: Optional[int] = 42
     include_base_features: bool = False
 
