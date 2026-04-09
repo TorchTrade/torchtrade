@@ -401,15 +401,16 @@ class TestVecSLTPLockPosition:
         env = VectorizedSequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
         td = env.reset()
 
-        # Open long (action 1)
-        td["action"] = torch.ones(1, dtype=torch.long)
+        # Open long
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+        td["action"] = torch.full((1,), long_idx, dtype=torch.long)
         td = env.step(td)["next"]
         assert env._position_sizes[0].item() > 0
         initial_size = env._position_sizes[0].item()
 
         # Try short action — should be ignored (position locked)
-        short_action = len(env.action_map) - 1
-        td["action"] = torch.full((1,), short_action, dtype=torch.long)
+        short_idx = next(i for i, v in env.action_map.items() if v[0] == "short")
+        td["action"] = torch.full((1,), short_idx, dtype=torch.long)
         env.step(td)
 
         assert env._position_sizes[0].item() == pytest.approx(initial_size, rel=1e-6)

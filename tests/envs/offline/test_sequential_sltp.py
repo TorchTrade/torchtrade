@@ -917,17 +917,18 @@ class TestLockPositionUntilSLTP:
         env = SequentialTradingEnvSLTP(sample_ohlcv_df, locked_config, simple_feature_fn)
         td = env.reset()
 
-        # Open long (action 1)
+        # Open long
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
         action_td = td.clone()
-        action_td["action"] = torch.tensor(1)
+        action_td["action"] = torch.tensor(long_idx)
         env.step(action_td)
         assert env.position.position_size > 0
         initial_size = env.position.position_size
 
         # Try to switch to short — should be ignored
-        short_action = len(env.action_map) - 1  # Last action is short
+        short_idx = next(i for i, v in env.action_map.items() if v[0] == "short")
         action_td = td.clone()
-        action_td["action"] = torch.tensor(short_action)
+        action_td["action"] = torch.tensor(short_idx)
         env.step(action_td)
 
         # Position should still be the same long
@@ -955,15 +956,17 @@ class TestLockPositionUntilSLTP:
         td = env.reset()
 
         # Open long
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
         action_td = td.clone()
-        action_td["action"] = torch.tensor(2)  # First long action (0=HOLD, 1=CLOSE, 2=first long)
+        action_td["action"] = torch.tensor(long_idx)
         env.step(action_td)
         assert env.position.position_size > 0
         initial_size = env.position.position_size
 
         # Try close action — should be ignored
+        close_idx = next(i for i, v in env.action_map.items() if v[0] == "close")
         action_td = td.clone()
-        action_td["action"] = torch.tensor(1)  # CLOSE action
+        action_td["action"] = torch.tensor(close_idx)
         env.step(action_td)
 
         assert env.position.position_size == pytest.approx(initial_size, rel=1e-6)
@@ -989,15 +992,16 @@ class TestLockPositionUntilSLTP:
         td = env.reset()
 
         # Open long
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
         action_td = td.clone()
-        action_td["action"] = torch.tensor(1)
+        action_td["action"] = torch.tensor(long_idx)
         env.step(action_td)
         assert env.position.position_size > 0
 
         # Switch to short — should work
-        short_action = len(env.action_map) - 1
+        short_idx = next(i for i, v in env.action_map.items() if v[0] == "short")
         action_td = td.clone()
-        action_td["action"] = torch.tensor(short_action)
+        action_td["action"] = torch.tensor(short_idx)
         env.step(action_td)
         assert env.position.position_size < 0
 
