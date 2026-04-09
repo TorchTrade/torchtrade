@@ -923,6 +923,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Position Sizing (SLTP Environments)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#position-locking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Position Locking
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1561,6 +1578,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Position Sizing (SLTP Environments)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#position-locking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Position Locking
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2071,25 +2105,33 @@
 <p class="admonition-title">Alpaca</p>
 <p>Alpaca SLTP supports <code>"fractional"</code> and <code>"notional"</code> modes only. <code>"quantity"</code> mode is not supported because Alpaca's bracket order API requires dollar amounts.</p>
 </div>
+<h3 id="position-locking">Position Locking<a class="headerlink" href="#position-locking" title="Permanent link">&para;</a></h3>
+<p>All live SLTP environments support <code>lock_position_until_sltp</code>. When enabled, agent actions are ignored while a position is open — positions can only exit via the exchange's bracket orders (SL/TP triggers).</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">BinanceFuturesSLTPTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="n">lock_position_until_sltp</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>  <span class="c1"># Positions exit only via SL/TP</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="o">...</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>This is useful for deploying policies trained on <code>OneStepTradingEnv</code> where positions are inherently locked to a single decision. See the <a href="../offline/#position-locking">offline Position Locking docs</a> for details.</p>
 <hr />
 <h2 id="api-key-setup">API Key Setup<a class="headerlink" href="#api-key-setup" title="Permanent link">&para;</a></h2>
 <p>Each exchange requires API keys stored in a <code>.env</code> file:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Alpaca (https://alpaca.markets/signup)</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nv">API_KEY</span><span class="o">=</span>your_alpaca_api_key
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="nv">SECRET_KEY</span><span class="o">=</span>your_alpaca_secret_key
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="c1"># Binance (https://www.binance.com/en/my/settings/api-management)</span>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="nv">BINANCE_API_KEY</span><span class="o">=</span>your_binance_api_key
-</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="nv">BINANCE_SECRET_KEY</span><span class="o">=</span>your_binance_secret_key
-</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
-</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="c1"># Bitget (https://www.bitget.com/en/support/articles/360038859731)</span>
-</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="nv">BITGETACCESSAPIKEY</span><span class="o">=</span>your_bitget_api_key
-</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="nv">BITGETSECRETKEY</span><span class="o">=</span>your_bitget_secret_key
-</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="nv">BITGETPASSPHRASE</span><span class="o">=</span>your_bitget_passphrase
-</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>
-</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="c1"># Bybit (https://www.bybit.com/app/user/api-management)</span>
-</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="nv">BYBIT_API_KEY</span><span class="o">=</span>your_bybit_api_key
-</span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="nv">BYBIT_API_SECRET</span><span class="o">=</span>your_bybit_api_secret
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Alpaca (https://alpaca.markets/signup)</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nv">API_KEY</span><span class="o">=</span>your_alpaca_api_key
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="nv">SECRET_KEY</span><span class="o">=</span>your_alpaca_secret_key
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="c1"># Binance (https://www.binance.com/en/my/settings/api-management)</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="nv">BINANCE_API_KEY</span><span class="o">=</span>your_binance_api_key
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="nv">BINANCE_SECRET_KEY</span><span class="o">=</span>your_binance_secret_key
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="c1"># Bitget (https://www.bitget.com/en/support/articles/360038859731)</span>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="nv">BITGETACCESSAPIKEY</span><span class="o">=</span>your_bitget_api_key
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="nv">BITGETSECRETKEY</span><span class="o">=</span>your_bitget_secret_key
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="nv">BITGETPASSPHRASE</span><span class="o">=</span>your_bitget_passphrase
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="c1"># Bybit (https://www.bybit.com/app/user/api-management)</span>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="nv">BYBIT_API_KEY</span><span class="o">=</span>your_bybit_api_key
+</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="nv">BYBIT_API_SECRET</span><span class="o">=</span>your_bybit_api_secret
 </span></code></pre></div>
 <div class="admonition warning">
 <p class="admonition-title">Always Start with Paper/Testnet Trading</p>
