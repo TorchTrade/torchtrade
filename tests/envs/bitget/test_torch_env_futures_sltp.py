@@ -641,7 +641,7 @@ class TestBitgetSLTPNotionalTradeMode:
         mock_trader.trade = MagicMock(return_value=True)
 
         config = BitgetFuturesSLTPTradingEnvConfig(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT:USDT",
             time_frames=["1m"],
             window_sizes=[10],
             stoploss_levels=(-0.02,),
@@ -705,7 +705,7 @@ class TestBitgetSLTPNotionalTradeMode:
         mock_trader.trade = MagicMock(return_value=True)
 
         config = BitgetFuturesSLTPTradingEnvConfig(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT:USDT",
             time_frames=["1m"],
             window_sizes=[10],
             stoploss_levels=(-0.02,),

@@ -241,13 +241,19 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
             return trade_info
 
         # Get current mark price (more accurate than candle close for bracket orders)
-        current_price = self.trader.get_mark_price()
+        current_price = float(self.trader.get_mark_price())
 
         # Resolve quantity based on trade_mode
         if self.config.trade_mode == "notional":
-            quantity = self.config.quantity_per_trade / current_price
+            if current_price <= 0:
+                logger.error(f"Invalid mark price for notional sizing: {current_price} ({self.config.symbol})")
+                trade_info["success"] = False
+                return trade_info
+            quantity = float(self.config.quantity_per_trade) / current_price
+        elif self.config.trade_mode == "quantity":
+            quantity = float(self.config.quantity_per_trade)
         else:
-            quantity = self.config.quantity_per_trade
+            raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
         # Close opposite position if switching directions
         # (we already returned above if same direction, so any existing position is opposite)

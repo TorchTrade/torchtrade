@@ -274,13 +274,19 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
 
         # Get current price for calculating absolute SL/TP levels
         obs = self.observer.get_observations(return_base_ohlc=True)
-        current_price = obs["base_features"][-1, 3]  # Close price
+        current_price = float(obs["base_features"][-1, 3])  # Close price
 
         # Resolve quantity based on trade_mode
         if self.config.trade_mode == "notional":
-            quantity = self.config.quantity_per_trade / current_price
+            if current_price <= 0:
+                logger.error(f"Invalid current_price={current_price} for {self.config.symbol}")
+                trade_info["success"] = False
+                return trade_info
+            quantity = float(self.config.quantity_per_trade) / current_price
+        elif self.config.trade_mode == "quantity":
+            quantity = float(self.config.quantity_per_trade)
         else:
-            quantity = self.config.quantity_per_trade
+            raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
         # Close opposite position if switching directions
         if self.position.current_position != 0:
