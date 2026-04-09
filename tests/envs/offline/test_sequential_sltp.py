@@ -860,6 +860,26 @@ class TestSLTPPositionSizing:
 
         assert abs(env.position.position_size) == pytest.approx(0.05, rel=1e-6)
 
+    @pytest.mark.parametrize("trade_mode,quantity_per_trade", [
+        ("notional", 500.0),
+        ("quantity", 0.05),
+    ], ids=["notional-short", "quantity-short"])
+    def test_short_position_direction(self, sample_ohlcv_df, base_config_kwargs, trade_mode, quantity_per_trade):
+        """Notional and quantity modes must open short positions with negative size."""
+        config = SequentialTradingEnvSLTPConfig(
+            **base_config_kwargs,
+            trade_mode=trade_mode,
+            quantity_per_trade=quantity_per_trade,
+        )
+        env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+        # Last action in action map is a short (with leverage=10, shorts are enabled)
+        short_action = len(env.action_map) - 1
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(short_action)
+        env.step(action_td)
+        assert env.position.position_size < 0
+
     def test_default_fractional_is_backward_compatible(self, sample_ohlcv_df, base_config_kwargs):
         """Default config (fractional, position_fraction=1.0) matches old all-in behavior."""
         config = SequentialTradingEnvSLTPConfig(**base_config_kwargs)
@@ -870,15 +890,3 @@ class TestSLTPPositionSizing:
         self._open_long(env)
         assert env.position.position_size != 0
 
-    @pytest.mark.parametrize("trade_mode", ["fractional", "notional", "quantity"], ids=["fractional", "notional", "quantity"])
-    def test_trade_mode_opens_correct_direction(self, sample_ohlcv_df, base_config_kwargs, trade_mode):
-        """All trade modes should open long positions correctly."""
-        config = SequentialTradingEnvSLTPConfig(
-            **base_config_kwargs,
-            trade_mode=trade_mode,
-            position_fraction=0.5,
-            quantity_per_trade=0.01,
-        )
-        env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
-        self._open_long(env)
-        assert env.position.position_size > 0

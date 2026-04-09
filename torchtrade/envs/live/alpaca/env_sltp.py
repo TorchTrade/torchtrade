@@ -268,7 +268,11 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         elif self.config.trade_mode == "notional":
             return float(self.config.quantity_per_trade)
         elif self.config.trade_mode == "quantity":
-            return float(self.config.quantity_per_trade)
+            raise NotImplementedError(
+                "quantity trade_mode is not supported for Alpaca SLTP. "
+                "Alpaca's bracket order API requires dollar amounts. "
+                "Use trade_mode='notional' or 'fractional' instead."
+            )
         else:
             raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 

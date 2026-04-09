@@ -46,7 +46,6 @@ class VectorizedSequentialTradingEnvSLTPConfig(VectorizedSequentialTradingEnvCon
     quantity_per_trade: float = 0.001
 
     def __post_init__(self):
-        from torchtrade.envs.core.common import validate_trade_mode
         self.trade_mode = validate_trade_mode(self.trade_mode)
 
         if not isinstance(self.stoploss_levels, list):
@@ -417,10 +416,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
             direction = torch.where(
                 sides == 1, self._ones, -self._ones
             )
-            if self.config.trade_mode == "quantity":
-                new_sizes = direction * self.config.quantity_per_trade
-            else:
-                new_sizes = direction * notional / trade_prices
+            new_sizes = direction * notional / trade_prices
 
             margin_new = notional / leverage
             new_fee = notional * self.transaction_fee
