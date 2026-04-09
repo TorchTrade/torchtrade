@@ -58,6 +58,8 @@ class ReplayObserver:
             result[key] = tensor.numpy().astype(np.float32)
 
         if return_base_ohlc:
+            # Only the last row is populated — live envs only access [-1, 3] (close price).
+            # Earlier rows are zero-filled to match the expected (window_size, 4) shape.
             ws = self.sampler.window_sizes[0]
             base_arr = np.zeros((ws, 4), dtype=np.float32)
             base_arr[-1] = [base["open"], base["high"], base["low"], base["close"]]
