@@ -344,6 +344,36 @@ config = BinanceFuturesSLTPTradingEnvConfig(
 
 This is useful for deploying policies trained on `OneStepTradingEnv` where positions are inherently locked to a single decision. See the [offline Position Locking docs](offline.md#position-locking) for details.
 
+### Replay Mode (Historical Data Simulation)
+
+All live SLTP environments support replaying historical data through the live pipeline using `ReplayObserver` and `ReplayOrderExecutor`. This is useful for:
+
+- Verifying that the live pipeline produces identical results to backtesting
+- Data-driven integration tests with real price data
+- Catching feature ordering, normalization, or action mapping bugs before deployment
+
+```python
+from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
+
+# Create replay components from historical data
+executor = ReplayOrderExecutor(initial_balance=10000, leverage=5, transaction_fee=0.0004)
+observer = ReplayObserver(
+    df=historical_df,  # DataFrame with timestamp, open, high, low, close, volume
+    time_frames=config.time_frames,
+    window_sizes=config.window_sizes,
+    execute_on=config.execute_on,
+    feature_preprocessing_fn=feature_fn,
+    executor=executor,
+)
+
+# Inject into any live SLTP env — no code changes needed
+env = BinanceFuturesSLTPTorchTradingEnv(config, observer=observer, trader=executor)
+td = env.reset()
+# Run episode with historical data through the exact live pipeline
+```
+
+The `ReplayOrderExecutor` simulates bracket order execution with intrabar SL/TP detection (checks high/low, SL before TP).
+
 ---
 
 ## API Key Setup
