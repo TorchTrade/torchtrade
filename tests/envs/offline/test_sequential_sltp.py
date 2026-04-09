@@ -1001,6 +1001,63 @@ class TestLockPositionUntilSLTP:
         env.step(action_td)
         assert env.position.position_size < 0
 
+    def test_sltp_still_fires_when_locked(self):
+        """With lock=True, SL/TP triggers must still close the position."""
+        import numpy as np
+        import pandas as pd
+
+        n = 50
+        timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
+        prices = np.full(n, 100.0)
+        df = pd.DataFrame({
+            "timestamp": timestamps,
+            "open": prices.copy(),
+            "high": prices + 1.0,
+            "low": prices.copy(),
+            "close": prices.copy(),
+            "volume": np.ones(n) * 1000,
+        })
+        # Bar 12: intrabar crash to 90 (below SL of 98)
+        df.loc[12, "low"] = 90.0
+        df.loc[12, "close"] = 95.0
+
+        config = SequentialTradingEnvSLTPConfig(
+            leverage=1,
+            initial_cash=1000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=100,
+            random_start=False,
+            stoploss_levels=[-0.02],   # SL at -2% → price 98.0
+            takeprofit_levels=[0.10],  # TP at +10% → price 110.0
+            lock_position_until_sltp=True,
+        )
+        env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
+        td = env.reset()
+
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+
+        # Step 1: Open long at bar 10's close = 100
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(long_idx)
+        td_next = env.step(action_td)
+        assert env.position.position_size > 0
+
+        # Step 2: Hold — bar 12 has low=90, SL=98 should trigger
+        hold_td = td_next["next"].clone()
+        hold_td["action"] = torch.tensor(0)
+        env.step(hold_td)
+
+        # Position MUST be closed by SL despite lock=True
+        assert env.position.position_size == 0, (
+            "SL must still fire when lock_position_until_sltp=True"
+        )
+        env.close()
+
     def test_locked_default_is_false(self):
         """Default lock_position_until_sltp should be False for backward compat."""
         config = SequentialTradingEnvSLTPConfig()
