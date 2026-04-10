@@ -461,3 +461,73 @@ class TestBinanceInitCleanup:
             mock_trader.close_position.assert_called_once()
         else:
             mock_trader.close_position.assert_not_called()
+
+
+class TestWithReplayData:
+    """Integration tests using ReplayObserver + ReplayOrderExecutor with real price data."""
+
+    @pytest.fixture
+    def replay_df(self):
+        """Create realistic OHLCV test data."""
+        import pandas as pd
+
+        n = 200
+        rng = np.random.default_rng(42)
+        base = 50000 + np.cumsum(rng.normal(0, 50, n))
+        return pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": base,
+            "high": base + np.abs(rng.normal(30, 20, n)),
+            "low": base - np.abs(rng.normal(30, 20, n)),
+            "close": base + rng.normal(0, 20, n),
+            "volume": rng.uniform(100, 1000, n),
+        })
+
+    def test_multi_step_episode_with_replay(self, replay_df):
+        """Run a multi-step episode with realistic price data."""
+        from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
+        from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
+
+        config = BinanceFuturesTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+            leverage=5,
+            demo=True,
+        )
+
+        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
+        observer = ReplayObserver(
+            df=replay_df,
+            time_frames=config.time_frames,
+            window_sizes=config.window_sizes,
+            execute_on=config.execute_on,
+            executor=executor,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BinanceFuturesTorchTradingEnv(
+                config=config, observer=observer, trader=executor,
+            )
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            td = env.reset()
+
+            for i in range(20):
+                # Cycle through action levels (hold, long, hold, short, hold, close...)
+                action_idx = i % len(env.action_levels)
+                action_td = td.clone()
+                action_td["action"] = torch.tensor(action_idx)
+                result = env.step(action_td)
+                td = result["next"]
+
+                assert "reward" in td.keys()
+                assert "done" in td.keys()
+                assert td["account_state"].shape == (6,)
+
+                if td["done"].item():
+                    break
+
+            assert executor.current_price > 0
