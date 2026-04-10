@@ -49,8 +49,10 @@ class ReplayObserver:
         """
         try:
             obs, timestamp, truncated = self.sampler.get_sequential_observation()
-        except ValueError:
-            raise StopIteration("ReplayObserver reached end of historical data")
+        except ValueError as e:
+            if "no more" in str(e).lower():
+                raise StopIteration("ReplayObserver reached end of historical data") from e
+            raise
 
         self.truncated = truncated
         base = self.sampler.get_base_features(timestamp)

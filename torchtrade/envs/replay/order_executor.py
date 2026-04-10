@@ -140,8 +140,14 @@ class ReplayOrderExecutor:
             True (always succeeds in simulation)
         """
         side_upper = side.upper()
-        price = self.current_price
+        if side_upper not in ("BUY", "SELL"):
+            raise ValueError(f"Unsupported side: {side}")
+        if order_type.lower() != "market":
+            raise ValueError(f"Unsupported order_type: {order_type}")
+        if quantity <= 0:
+            raise ValueError(f"quantity must be > 0, got {quantity}")
 
+        price = self.current_price
         if price <= 0:
             raise RuntimeError("ReplayOrderExecutor.trade() called before advance_bar() set a valid price")
 
@@ -157,6 +163,11 @@ class ReplayOrderExecutor:
         notional = quantity * price
         fee = notional * self.transaction_fee
         margin_required = notional / self.leverage
+
+        # Check sufficient balance
+        if self.balance < margin_required + fee:
+            logger.warning(f"Insufficient balance: need={margin_required + fee:.2f} have={self.balance:.2f}")
+            return False
 
         # Deduct margin and fee from balance
         self.balance -= margin_required + fee
@@ -246,6 +257,7 @@ class ReplayOrderExecutor:
         """Cancel active bracket orders."""
         self.sl_price = 0.0
         self.tp_price = 0.0
+        self.bracket_status = {"tp_placed": False, "sl_placed": False}
         return True
 
     def get_open_orders(self):

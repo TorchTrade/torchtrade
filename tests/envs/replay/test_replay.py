@@ -86,6 +86,7 @@ class TestReplayOrderExecutor:
         executor.cancel_open_orders()
         assert executor.sl_price == 0.0
         assert executor.tp_price == 0.0
+        assert executor.bracket_status == {"tp_placed": False, "sl_placed": False}
 
 
 class TestReplayOrderExecutorSLTPTriggers:
