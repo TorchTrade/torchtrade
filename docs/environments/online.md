@@ -376,6 +376,17 @@ td = env.reset()
 
 The `ReplayOrderExecutor` simulates bracket order execution with intrabar SL/TP detection (checks high/low, SL before TP).
 
+**End-of-data handling:** The observer raises `StopIteration` when historical data is exhausted. Wrap your evaluation loop accordingly:
+
+```python
+try:
+    while True:
+        action = policy(td)
+        td = env.step(action)["next"]
+except StopIteration:
+    pass  # End of historical data
+```
+
 ---
 
 ## API Key Setup
