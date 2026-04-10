@@ -1281,12 +1281,12 @@ class TestWithReplayData:
             td = env.step(action_td)["next"]
 
             # Hold for several steps -- price should move, changing portfolio value
-            rewards = []
+            balances = []
             for _ in range(10):
                 action_td = td.clone()
                 action_td["action"] = torch.tensor(0)  # HOLD
                 td = env.step(action_td)["next"]
-                rewards.append(td["reward"].item())
+                balances.append(executor.get_account_balance()["total_wallet_balance"])
 
-            # With real price movement, rewards should not all be identical
-            assert len(set(rewards)) > 1, "Rewards should vary with price movement"
+            # With real price movement, portfolio value should not stay static
+            assert max(balances) != min(balances), "Portfolio value should vary with price movement"

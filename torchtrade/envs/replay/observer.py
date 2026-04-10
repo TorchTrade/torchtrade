@@ -47,7 +47,7 @@ class ReplayObserver:
         Raises:
             StopIteration: When historical data is exhausted
         """
-        if self.sampler._sequential_idx >= self.sampler._end_idx:
+        if self._is_exhausted():
             raise StopIteration("ReplayObserver reached end of historical data")
 
         obs, timestamp, truncated = self.sampler.get_sequential_observation()
@@ -91,6 +91,15 @@ class ReplayObserver:
             "observation_features": [k for k in feature_keys if k.startswith("features_")],
             "original_features": ["open", "high", "low", "close", "volume"],
         }
+
+    def _is_exhausted(self) -> bool:
+        """Check if the sampler has no more data.
+
+        Note: Accesses sampler internals (_sequential_idx, _end_idx).
+        If MarketDataObservationSampler adds a public is_exhausted() method,
+        prefer that instead.
+        """
+        return self.sampler._sequential_idx >= self.sampler._end_idx
 
     def reset(self):
         """Reset observer to start of data."""
