@@ -1,6 +1,5 @@
 """Replay observer for historical data playback through live envs."""
 
-import logging
 from typing import Callable, Dict, List, Optional, Union
 
 import numpy as np
@@ -9,8 +8,6 @@ import pandas as pd
 from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservationSampler
 from torchtrade.envs.utils.timeframe import TimeFrame
 
-logger = logging.getLogger(__name__)
-
 
 class ReplayObserver:
     """Replay observer that feeds historical data through the live observer interface.
@@ -18,6 +15,10 @@ class ReplayObserver:
     Wraps MarketDataObservationSampler to provide bar-by-bar observation playback.
     Implements the same interface as BinanceObservationClass/BybitObservationClass
     so it can be injected into any live SLTP environment.
+
+    Note: Raises StopIteration when historical data is exhausted. Live envs do not
+    catch this — ensure replay episodes are shorter than the available data, or wrap
+    the env in a try/except StopIteration handler for long-running evaluations.
     """
 
     def __init__(
