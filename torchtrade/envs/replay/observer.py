@@ -39,10 +39,20 @@ class ReplayObserver:
         )
         self.sampler.reset(random_start=False)
         self._obs_keys = self.sampler.get_observation_keys()
+        self.truncated = False
 
     def get_observations(self, return_base_ohlc: bool = False) -> Dict[str, np.ndarray]:
-        """Get next observation by advancing the sampler one bar."""
-        obs, timestamp, truncated = self.sampler.get_sequential_observation()
+        """Get next observation by advancing the sampler one bar.
+
+        Raises:
+            StopIteration: When historical data is exhausted
+        """
+        try:
+            obs, timestamp, truncated = self.sampler.get_sequential_observation()
+        except ValueError:
+            raise StopIteration("ReplayObserver reached end of historical data")
+
+        self.truncated = truncated
         base = self.sampler.get_base_features(timestamp)
 
         if self.executor is not None:
@@ -85,5 +95,6 @@ class ReplayObserver:
     def reset(self):
         """Reset observer to start of data."""
         self.sampler.reset(random_start=False)
+        self.truncated = False
         if self.executor is not None:
             self.executor.reset()

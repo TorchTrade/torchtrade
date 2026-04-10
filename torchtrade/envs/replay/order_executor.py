@@ -111,6 +111,7 @@ class ReplayOrderExecutor:
         self.entry_price = 0.0
         self.sl_price = 0.0
         self.tp_price = 0.0
+        self.bracket_status = {"tp_placed": False, "sl_placed": False}
 
     def trade(
         self,
@@ -140,6 +141,13 @@ class ReplayOrderExecutor:
         """
         side_upper = side.upper()
         price = self.current_price
+
+        if price <= 0:
+            raise RuntimeError("ReplayOrderExecutor.trade() called before advance_bar() set a valid price")
+
+        # Handle reduce_only: close existing position, don't open new one
+        if reduce_only:
+            return self.close_position()
 
         # Close existing position first (if any) to avoid margin accounting errors
         if self.position_qty != 0:
