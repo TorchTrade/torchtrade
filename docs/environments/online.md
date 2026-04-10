@@ -346,7 +346,7 @@ This is useful for deploying policies trained on `OneStepTradingEnv` where posit
 
 ### Replay Mode (Historical Data Simulation)
 
-All live SLTP environments support replaying historical data through the live pipeline using `ReplayObserver` and `ReplayOrderExecutor`. This is useful for:
+All live environments (both SLTP and non-SLTP) support replaying historical data through the live pipeline using `ReplayObserver` and `ReplayOrderExecutor`. This is useful for:
 
 - Verifying that the live pipeline produces identical results to backtesting
 - Data-driven integration tests with real price data
@@ -366,8 +366,10 @@ observer = ReplayObserver(
     executor=executor,
 )
 
-# Inject into any live SLTP env — no code changes needed
+# Inject into any live env — no code changes needed
 env = BinanceFuturesSLTPTorchTradingEnv(config, observer=observer, trader=executor)
+# Also works with non-SLTP envs:
+# env = BinanceFuturesTorchTradingEnv(config, observer=observer, trader=executor)
 td = env.reset()
 # Run episode with historical data through the exact live pipeline
 ```
