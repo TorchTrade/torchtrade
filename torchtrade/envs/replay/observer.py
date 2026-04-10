@@ -47,12 +47,10 @@ class ReplayObserver:
         Raises:
             StopIteration: When historical data is exhausted
         """
-        try:
-            obs, timestamp, truncated = self.sampler.get_sequential_observation()
-        except ValueError as e:
-            if "no more" in str(e).lower():
-                raise StopIteration("ReplayObserver reached end of historical data") from e
-            raise
+        if self.sampler._sequential_idx >= self.sampler._end_idx:
+            raise StopIteration("ReplayObserver reached end of historical data")
+
+        obs, timestamp, truncated = self.sampler.get_sequential_observation()
 
         self.truncated = truncated
         base = self.sampler.get_base_features(timestamp)
