@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 from unittest.mock import patch
 
 from torchtrade.envs.replay.observer import ReplayObserver
@@ -268,7 +269,6 @@ class TestReplayObserver:
         assert reset_price == pytest.approx(first_price, rel=1e-4)
 
 
-
 class TestReplayIntegrationWithLiveEnv:
     """Test replay components injected into a real live SLTP env."""
 
@@ -315,7 +315,6 @@ class TestReplayIntegrationWithLiveEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             td = env.reset()
 
-            import torch
             for i in range(10):
                 action = 1 if i % 3 == 0 else 0
                 action_td = td.clone()
