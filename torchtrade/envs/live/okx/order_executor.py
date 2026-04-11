@@ -264,23 +264,14 @@ class OKXFuturesOrderClass:
 
             # Attach SL/TP as algo orders
             if take_profit is not None or stop_loss is not None:
-                attach_algo = []
+                algo_ord = {}
                 if take_profit is not None:
-                    attach_algo.append({
-                        "tpTriggerPx": self._format_price(take_profit),
-                        "tpOrdPx": "-1",  # Market price
-                    })
+                    algo_ord["tpTriggerPx"] = self._format_price(take_profit)
+                    algo_ord["tpOrdPx"] = "-1"  # Market price
                 if stop_loss is not None:
-                    # If we already have a TP entry, add SL to it
-                    if attach_algo:
-                        attach_algo[0]["slTriggerPx"] = self._format_price(stop_loss)
-                        attach_algo[0]["slOrdPx"] = "-1"
-                    else:
-                        attach_algo.append({
-                            "slTriggerPx": self._format_price(stop_loss),
-                            "slOrdPx": "-1",
-                        })
-                params["attachAlgoOrds"] = attach_algo
+                    algo_ord["slTriggerPx"] = self._format_price(stop_loss)
+                    algo_ord["slOrdPx"] = "-1"
+                params["attachAlgoOrds"] = [algo_ord]
 
             response = self.client.place_order(**params)
 
@@ -293,14 +284,9 @@ class OKXFuturesOrderClass:
             # Extract order ID
             data = response.get("data", [])
             if data and isinstance(data[0], dict):
-                order_id = data[0].get("ordId")
-                if order_id:
-                    self.last_order_id = order_id
-                    logger.info(f"Order executed: {side} {quantity} @ {order_type} (ID: {order_id})")
-                else:
-                    logger.info(f"Order executed: {side} {quantity} @ {order_type}")
-            else:
-                logger.info(f"Order executed: {side} {quantity} @ {order_type}")
+                self.last_order_id = data[0].get("ordId")
+            order_id_str = f" (ID: {self.last_order_id})" if self.last_order_id else ""
+            logger.info(f"Order executed: {side} {quantity} @ {order_type}{order_id_str}")
 
             return True
 
@@ -429,8 +415,6 @@ class OKXFuturesOrderClass:
 
             return result
 
-        except RuntimeError:
-            raise
         except Exception as e:
             logger.error(f"Error getting account balance: {str(e)}")
             raise RuntimeError(f"Failed to get account balance: {e}") from e
