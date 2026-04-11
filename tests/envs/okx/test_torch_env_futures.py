@@ -309,7 +309,7 @@ class TestOKXFractionalPositionResizing:
         })
 
         env.reset()
-        result = env._execute_fractional_action(1.0)
+        result = env._execute_fractional_action(1.0, current_qty=0.0, current_price=50000.0)
         if result["executed"]:
             qty = mock_env_trader.trade.call_args[1]["quantity"]
             qty_str = str(qty)

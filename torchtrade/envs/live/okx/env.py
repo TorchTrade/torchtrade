@@ -1,6 +1,7 @@
 """OKX Futures TorchRL trading environment with fractional position sizing."""
 import math
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_DOWN
 from typing import List, Optional, Union, Callable, Dict
 import logging
 
@@ -129,7 +130,9 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
             action_idx = max(0, min(action_idx, len(self.action_levels) - 1))
         desired_action = self.action_levels[action_idx]
 
-        trade_info = self._execute_trade_if_needed(desired_action)
+        trade_info = self._execute_trade_if_needed(
+            desired_action, current_qty=position_size, current_price=current_price,
+        )
 
         if trade_info["executed"] and trade_info.get("success") is not False:
             if trade_info.get("closed_position"):
@@ -248,11 +251,10 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         )
         return calculate_fractional_position(params)
 
-    def _execute_fractional_action(self, action_value: float) -> Dict:
+    def _execute_fractional_action(
+        self, action_value: float, *, current_qty: float, current_price: float,
+    ) -> Dict:
         """Execute action using fractional position sizing."""
-        current_qty = self._get_current_position_quantity()
-        current_price = self.trader.get_mark_price()
-
         if action_value == 0.0:
             if abs(current_qty) > 0:
                 return self._handle_close_action(current_qty)
@@ -262,25 +264,25 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         delta_qty = target_qty - current_qty
 
         lot_size = self.trader.get_lot_size()
-        min_qty = lot_size["min_qty"]
-        qty_step = lot_size["qty_step"]
+        min_qty = Decimal(str(lot_size["min_qty"]))
+        qty_step = Decimal(str(lot_size["qty_step"]))
 
-        if abs(delta_qty) < min_qty:
+        delta_d = Decimal(str(abs(delta_qty)))
+        amount_d = (delta_d / qty_step).to_integral_value(rounding=ROUND_DOWN) * qty_step
+
+        if amount_d < min_qty:
             return self._create_trade_info(executed=False)
 
         side = "buy" if delta_qty > 0 else "sell"
-        # Use round() to avoid float artifacts (e.g., 0.003000000000003)
-        step_decimals = len(str(qty_step).rstrip('0').split('.')[-1]) if '.' in str(qty_step) else 0
-        amount = round(int(abs(delta_qty) / qty_step) * qty_step, step_decimals)
+        return self._execute_market_order(side, float(amount_d))
 
-        if amount < min_qty:
-            return self._create_trade_info(executed=False)
-
-        return self._execute_market_order(side, amount)
-
-    def _execute_trade_if_needed(self, desired_action: float) -> Dict:
+    def _execute_trade_if_needed(
+        self, desired_action: float, *, current_qty: float = 0.0, current_price: float = 0.0,
+    ) -> Dict:
         """Execute trade based on desired action value."""
-        return self._execute_fractional_action(desired_action)
+        return self._execute_fractional_action(
+            desired_action, current_qty=current_qty, current_price=current_price,
+        )
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Check if episode should terminate."""

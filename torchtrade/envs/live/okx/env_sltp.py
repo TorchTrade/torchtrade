@@ -295,6 +295,8 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
             if not close_success:
                 return trade_info
             self.position.current_position = 0
+            self.active_stop_loss = 0.0
+            self.active_take_profit = 0.0
 
         # Map position side to trade side
         trade_side = "buy" if side == "long" else "sell"
@@ -314,9 +316,9 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
 
             if success:
                 # Only record SL/TP levels that actually placed on-exchange
-                bs = getattr(self.trader, 'bracket_status', {"tp_placed": True, "sl_placed": True})
-                self.active_stop_loss = stop_loss_price if bs["sl_placed"] else 0.0
-                self.active_take_profit = take_profit_price if bs["tp_placed"] else 0.0
+                bs = getattr(self.trader, 'bracket_status', None) or {}
+                self.active_stop_loss = stop_loss_price if bs.get("sl_placed", True) else 0.0
+                self.active_take_profit = take_profit_price if bs.get("tp_placed", True) else 0.0
 
             trade_info.update({
                 "executed": True,

@@ -269,13 +269,19 @@ class OKXBaseTorchTradingEnv(TorchTradeLiveEnv):
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
-        if not self.trader.cancel_open_orders():
-            logger.warning("cancel_open_orders failed during reset; proceeding with potentially stale orders")
+        try:
+            if not self.trader.cancel_open_orders():
+                logger.warning("cancel_open_orders failed during reset; proceeding with potentially stale orders")
+        except Exception as e:
+            logger.warning(f"cancel_open_orders raised during reset: {e}")
         self.history.reset()
 
         if self.config.close_position_on_reset:
-            if not self.trader.close_position():
-                logger.warning("close_position failed during reset; proceeding with residual exposure")
+            try:
+                if not self.trader.close_position():
+                    logger.warning("close_position failed during reset; proceeding with residual exposure")
+            except Exception as e:
+                logger.warning(f"close_position raised during reset: {e}")
 
         balance = self.trader.get_account_balance()
         self.balance = balance.get("available_balance", 0)

@@ -222,18 +222,23 @@ class OKXFuturesOrderClass:
         # Set position mode
         pos_mode = self.position_mode.value
         try:
-            self.account_client.set_position_mode(posMode=pos_mode)
-            logger.info(f"Position mode set to {pos_mode}")
+            res = self.account_client.set_position_mode(posMode=pos_mode)
+            if str(res.get("code", "-1")) == "0":
+                logger.info(f"Position mode set to {pos_mode}")
+            else:
+                logger.warning(f"Failed to set position mode: code={res.get('code')} msg={res.get('msg')}")
         except Exception as e:
             logger.warning(f"Could not set position mode (may already be configured): {e}")
 
         # Set leverage
         try:
-            self.account_client.set_leverage(
+            res = self.account_client.set_leverage(
                 instId=self.symbol,
                 lever=str(self.leverage),
                 mgnMode=self.margin_mode.to_okx(),
             )
+            if str(res.get("code", "-1")) != "0":
+                logger.warning(f"Failed to set leverage: code={res.get('code')} msg={res.get('msg')}")
         except Exception as e:
             logger.warning(f"Could not set leverage (may already be configured): {e}")
 
@@ -510,22 +515,33 @@ class OKXFuturesOrderClass:
 
         return self._lot_size_cache
 
-    def get_open_orders(self) -> List[Dict]:
-        """Get all open orders for the symbol."""
+    def get_open_orders(self) -> Optional[List[Dict]]:
+        """Get all open orders for the symbol.
+
+        Returns:
+            List of open orders, or None if the API call failed.
+        """
         try:
             response = self.client.get_order_list(
                 instType="SWAP",
                 instId=self.symbol,
             )
+            code = response.get("code", "-1")
+            if str(code) != "0":
+                msg = response.get("msg", "unknown error")
+                logger.error(f"get_order_list failed (code={code}): {msg}")
+                return None
             return response.get("data", [])
         except Exception as e:
             logger.error(f"Error getting open orders: {str(e)}")
-            return []
+            return None
 
     def cancel_open_orders(self) -> bool:
         """Cancel all open orders for the symbol."""
         try:
             orders = self.get_open_orders()
+            if orders is None:
+                return False
             if not orders:
                 logger.debug(f"No open orders to cancel for {self.symbol}")
                 return True
@@ -587,7 +603,7 @@ class OKXFuturesOrderClass:
                     "tdMode": self.margin_mode.to_okx(),
                     "side": close_side,
                     "ordType": "market",
-                    "sz": str(abs(raw_pos)),
+                    "sz": self._format_size(abs(raw_pos)),
                     "reduceOnly": True,
                 }
 
@@ -608,11 +624,12 @@ class OKXFuturesOrderClass:
         except Exception as e:
             logger.warning(f"close_position order failed: {e}; re-querying position")
             try:
-                status = self.get_status()
-                pos = status.get("position_status")
-                if pos is None or pos.qty == 0:
-                    logger.debug("Position confirmed closed after failed order")
-                    return True
+                resp = self.account_client.get_positions(instType="SWAP", instId=self.symbol)
+                if str(resp.get("code", "-1")) == "0":
+                    still_open = any(float(p.get("pos", 0)) != 0 for p in resp.get("data", []))
+                    if not still_open:
+                        logger.debug("Position confirmed closed after failed order")
+                        return True
             except Exception:
                 pass
             logger.error(f"Error closing position: {e}")
