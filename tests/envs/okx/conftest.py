@@ -1,6 +1,7 @@
 """Shared test fixtures for OKX tests."""
 
 import numpy as np
+import pandas as pd
 import pytest
 from unittest.mock import MagicMock
 
@@ -20,18 +21,6 @@ def mock_okx_trade_client():
             "sCode": "0",
             "sMsg": "",
         }],
-    })
-
-    # Mock order management
-    client.get_order_list = MagicMock(return_value={
-        "code": "0",
-        "msg": "",
-        "data": [],
-    })
-    client.cancel_order = MagicMock(return_value={
-        "code": "0",
-        "msg": "",
-        "data": [{"ordId": "12345", "clOrdId": "", "sCode": "0", "sMsg": ""}],
     })
 
     return client
@@ -187,37 +176,16 @@ def mock_env_trader():
 
 
 @pytest.fixture
-def mock_empty_position(mock_okx_account_client):
-    """Configure mock account client with no open position."""
-    mock_okx_account_client.get_positions = MagicMock(return_value={
-        "code": "0",
-        "msg": "",
-        "data": [{
-            "instId": "BTC-USDT-SWAP",
-            "pos": "0",
-            "posSide": "net",
-        }],
+def replay_df():
+    """Create realistic OHLCV test data for replay integration tests."""
+    n = 200
+    rng = np.random.default_rng(42)
+    base = 50000 + np.cumsum(rng.normal(0, 50, n))
+    return pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": base,
+        "high": base + np.abs(rng.normal(30, 20, n)),
+        "low": base - np.abs(rng.normal(30, 20, n)),
+        "close": base + rng.normal(0, 20, n),
+        "volume": rng.uniform(100, 1000, n),
     })
-    return mock_okx_account_client
-
-
-@pytest.fixture
-def mock_short_position(mock_okx_account_client):
-    """Configure mock account client with a short position."""
-    mock_okx_account_client.get_positions = MagicMock(return_value={
-        "code": "0",
-        "msg": "",
-        "data": [{
-            "instId": "BTC-USDT-SWAP",
-            "pos": "-0.001",
-            "posSide": "net",
-            "avgPx": "50000.0",
-            "markPx": "49900.0",
-            "upl": "0.1",
-            "lever": "10",
-            "mgnMode": "isolated",
-            "liqPx": "55000.0",
-            "notionalUsd": "49.9",
-        }],
-    })
-    return mock_okx_account_client

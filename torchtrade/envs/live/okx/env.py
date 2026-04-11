@@ -1,7 +1,6 @@
 """OKX Futures TorchRL trading environment with fractional position sizing."""
 import math
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
 from typing import List, Optional, Union, Callable, Dict
 import logging
 
@@ -168,12 +167,6 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
 
         return next_tensordict
 
-    def _get_current_position_quantity(self) -> float:
-        """Get current position quantity from trader status."""
-        status = self.trader.get_status()
-        position = status.get("position_status")
-        return position.qty if position is not None else 0.0
-
     def _create_trade_info(self, executed=False, **kwargs) -> Dict:
         """Create trade info dictionary with defaults."""
         info = {
@@ -264,17 +257,12 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         delta_qty = target_qty - current_qty
 
         lot_size = self.trader.get_lot_size()
-        min_qty = Decimal(str(lot_size["min_qty"]))
-        qty_step = Decimal(str(lot_size["qty_step"]))
-
-        delta_d = Decimal(str(abs(delta_qty)))
-        amount_d = (delta_d / qty_step).to_integral_value(rounding=ROUND_DOWN) * qty_step
-
-        if amount_d < min_qty:
+        if abs(delta_qty) < lot_size["min_qty"]:
             return self._create_trade_info(executed=False)
 
         side = "buy" if delta_qty > 0 else "sell"
-        return self._execute_market_order(side, float(amount_d))
+        # _format_size() in trade() handles lot-step quantization
+        return self._execute_market_order(side, abs(delta_qty))
 
     def _execute_trade_if_needed(
         self, desired_action: float, *, current_qty: float = 0.0, current_price: float = 0.0,

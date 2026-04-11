@@ -36,22 +36,6 @@ class TestOKXFuturesTorchTradingEnv:
         return observer
 
     @pytest.fixture
-    def mock_trader(self):
-        """Create a mock trader."""
-        trader = MagicMock()
-        trader.cancel_open_orders = MagicMock(return_value=True)
-        trader.close_position = MagicMock(return_value=True)
-        trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 1000.0, "available_balance": 900.0,
-            "total_unrealized_profit": 0.0, "total_margin_balance": 1000.0,
-        })
-        trader.get_mark_price = MagicMock(return_value=50000.0)
-        trader.get_status = MagicMock(return_value={"position_status": None})
-        trader.trade = MagicMock(return_value=True)
-        trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001})
-        return trader
-
-    @pytest.fixture
     def env_config(self):
         from torchtrade.envs.live.okx.env import OKXFuturesTradingEnvConfig
         return OKXFuturesTradingEnvConfig(
@@ -60,13 +44,13 @@ class TestOKXFuturesTorchTradingEnv:
         )
 
     @pytest.fixture
-    def env(self, env_config, mock_observer, mock_trader):
+    def env(self, env_config, mock_observer, mock_env_trader):
         from torchtrade.envs.live.okx.env import OKXFuturesTorchTradingEnv
 
         with patch("time.sleep"), \
              patch.object(OKXFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
             return OKXFuturesTorchTradingEnv(
-                config=env_config, observer=mock_observer, trader=mock_trader,
+                config=env_config, observer=mock_observer, trader=mock_env_trader,
             )
 
     def test_action_spec(self, env):
@@ -82,13 +66,13 @@ class TestOKXFuturesTorchTradingEnv:
         assert "market_data_5Minute_10" in obs_spec.keys()
         assert obs_spec["account_state"].shape == (6,)
 
-    def test_reset(self, env, mock_trader):
+    def test_reset(self, env, mock_env_trader):
         """Test environment reset returns expected keys and shapes."""
         td = env.reset()
         assert "account_state" in td.keys()
         assert td["account_state"].shape == (6,)
         assert td["market_data_1Minute_10"].shape == (10, 4)
-        mock_trader.cancel_open_orders.assert_called()
+        mock_env_trader.cancel_open_orders.assert_called()
 
     def test_step_hold_action(self, env):
         """Test step with hold action produces valid output."""
@@ -102,12 +86,12 @@ class TestOKXFuturesTorchTradingEnv:
     @pytest.mark.parametrize("action_idx,label", [
         (4, "long"), (0, "short"),
     ], ids=["long", "short"])
-    def test_step_trade_action(self, env, mock_trader, action_idx, label):
+    def test_step_trade_action(self, env, mock_env_trader, action_idx, label):
         """Test step with long/short action calls trade."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
             env.step(TensorDict({"action": torch.tensor(action_idx)}, batch_size=()))
-            mock_trader.trade.assert_called()
+            mock_env_trader.trade.assert_called()
 
     def test_reward_and_done_tensor_shapes(self, env):
         """Test that reward and done flags have correct tensor shapes."""
@@ -119,16 +103,16 @@ class TestOKXFuturesTorchTradingEnv:
             assert next_td["next"]["terminated"].shape == (1,)
             assert next_td["next"]["truncated"].shape == (1,)
 
-    def test_no_bankruptcy_when_disabled(self, env_config, mock_observer, mock_trader):
+    def test_no_bankruptcy_when_disabled(self, env_config, mock_observer, mock_env_trader):
         """Test that bankruptcy check can be disabled."""
         from torchtrade.envs.live.okx.env import OKXFuturesTorchTradingEnv
         env_config.done_on_bankruptcy = False
 
         with patch("time.sleep"), \
              patch.object(OKXFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = OKXFuturesTorchTradingEnv(config=env_config, observer=mock_observer, trader=mock_trader)
+            env = OKXFuturesTorchTradingEnv(config=env_config, observer=mock_observer, trader=mock_env_trader)
 
-        mock_trader.get_account_balance = MagicMock(return_value={
+        mock_env_trader.get_account_balance = MagicMock(return_value={
             "total_wallet_balance": 10.0, "available_balance": 10.0,
             "total_unrealized_profit": 0.0, "total_margin_balance": 10.0,
         })
@@ -274,66 +258,8 @@ class TestOKXObservationSpecsNoNetwork:
         assert "market_data_1Minute_10" in env.observation_spec.keys()
 
 
-class TestOKXFractionalPositionResizing:
-    """Tests for fractional position resizing."""
-
-    @pytest.fixture
-    def env(self, mock_env_observer, mock_env_trader):
-        from torchtrade.envs.live.okx.env import OKXFuturesTorchTradingEnv, OKXFuturesTradingEnvConfig
-
-        config = OKXFuturesTradingEnvConfig(
-            symbol="BTC-USDT-SWAP", time_frames=["1m"], window_sizes=[10],
-            execute_on="1m", action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],
-        )
-        with patch("time.sleep"), \
-             patch.object(OKXFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
-            return OKXFuturesTorchTradingEnv(config=config, observer=mock_env_observer, trader=mock_env_trader)
-
-    def test_qty_step_rounding_no_float_artifacts(self, env, mock_env_trader):
-        """Quantity must be rounded to avoid float artifacts like 0.00300000000003."""
-        from torchtrade.envs.live.okx.order_executor import PositionStatus
-
-        mock_env_trader.get_status = MagicMock(return_value={
-            "position_status": PositionStatus(
-                qty=0.0, notional_value=0, entry_price=0,
-                unrealized_pnl=0, unrealized_pnl_pct=0,
-                mark_price=50000.0, leverage=1, margin_mode="isolated",
-                liquidation_price=0,
-            )
-        })
-        mock_env_trader.get_mark_price = MagicMock(return_value=50000.0)
-        mock_env_trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001})
-        mock_env_trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 1000.0, "available_balance": 900.0,
-            "total_unrealized_profit": 0.0, "total_margin_balance": 1000.0,
-        })
-
-        env.reset()
-        result = env._execute_fractional_action(1.0, current_qty=0.0, current_price=50000.0)
-        if result["executed"]:
-            qty = mock_env_trader.trade.call_args[1]["quantity"]
-            qty_str = str(qty)
-            assert len(qty_str.split('.')[-1]) <= 3, f"Float artifact in quantity: {qty}"
-
-
 class TestWithReplayData:
     """Integration tests using ReplayObserver + ReplayOrderExecutor."""
-
-    @pytest.fixture
-    def replay_df(self):
-        import pandas as pd
-
-        n = 200
-        rng = np.random.default_rng(42)
-        base = 50000 + np.cumsum(rng.normal(0, 50, n))
-        return pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
-            "open": base,
-            "high": base + np.abs(rng.normal(30, 20, n)),
-            "low": base - np.abs(rng.normal(30, 20, n)),
-            "close": base + rng.normal(0, 20, n),
-            "volume": rng.uniform(100, 1000, n),
-        })
 
     def test_multi_step_episode_with_replay(self, replay_df):
         """Run a multi-step episode with realistic price data."""

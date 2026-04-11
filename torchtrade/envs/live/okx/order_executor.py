@@ -1,6 +1,5 @@
 """Order executor for OKX Futures trading using python-okx."""
 import logging
-import math
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN
 from enum import Enum
@@ -34,14 +33,6 @@ class MarginMode(Enum):
     """
     ISOLATED = "isolated"
     CROSS = "cross"
-
-    def to_okx(self) -> str:
-        """Convert to OKX tdMode string.
-
-        Returns:
-            "isolated" or "cross"
-        """
-        return self.value
 
 
 @dataclass
@@ -235,7 +226,7 @@ class OKXFuturesOrderClass:
             res = self.account_client.set_leverage(
                 instId=self.symbol,
                 lever=str(self.leverage),
-                mgnMode=self.margin_mode.to_okx(),
+                mgnMode=self.margin_mode.value,
             )
             if str(res.get("code", "-1")) != "0":
                 logger.warning(f"Failed to set leverage: code={res.get('code')} msg={res.get('msg')}")
@@ -273,7 +264,7 @@ class OKXFuturesOrderClass:
         try:
             params = {
                 "instId": self.symbol,
-                "tdMode": self.margin_mode.to_okx(),
+                "tdMode": self.margin_mode.value,
                 "side": side.lower(),
                 "ordType": order_type.lower(),
                 "sz": self._format_size(quantity),
@@ -384,7 +375,7 @@ class OKXFuturesOrderClass:
                     unrealized_pnl_pct=unrealized_pnl_pct,
                     mark_price=mark_price,
                     leverage=int(float(pos.get("lever") or str(self.leverage))),
-                    margin_mode=pos.get("mgnMode", self.margin_mode.to_okx()),
+                    margin_mode=pos.get("mgnMode", self.margin_mode.value),
                     liquidation_price=liq_price,
                 )
             else:
@@ -600,7 +591,7 @@ class OKXFuturesOrderClass:
 
                 params = {
                     "instId": self.symbol,
-                    "tdMode": self.margin_mode.to_okx(),
+                    "tdMode": self.margin_mode.value,
                     "side": close_side,
                     "ordType": "market",
                     "sz": self._format_size(abs(raw_pos)),
@@ -649,7 +640,7 @@ class OKXFuturesOrderClass:
             response = self.account_client.set_leverage(
                 instId=self.symbol,
                 lever=str(leverage),
-                mgnMode=self.margin_mode.to_okx(),
+                mgnMode=self.margin_mode.value,
             )
             code = response.get("code", "-1")
             if str(code) != "0":
@@ -677,7 +668,7 @@ class OKXFuturesOrderClass:
             response = self.account_client.set_leverage(
                 instId=self.symbol,
                 lever=str(self.leverage),
-                mgnMode=mode.to_okx(),
+                mgnMode=mode.value,
             )
             code = response.get("code", "-1")
             if str(code) != "0":

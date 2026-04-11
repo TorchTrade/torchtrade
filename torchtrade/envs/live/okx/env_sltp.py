@@ -315,10 +315,9 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
             )
 
             if success:
-                # Only record SL/TP levels that actually placed on-exchange
-                bs = getattr(self.trader, 'bracket_status', None) or {}
-                self.active_stop_loss = stop_loss_price if bs.get("sl_placed", True) else 0.0
-                self.active_take_profit = take_profit_price if bs.get("tp_placed", True) else 0.0
+                # OKX attachAlgoOrds is atomic — SL/TP succeed or fail with the main order
+                self.active_stop_loss = stop_loss_price
+                self.active_take_profit = take_profit_price
 
             trade_info.update({
                 "executed": True,

@@ -431,22 +431,6 @@ class TestOKXSLTPActionIndexClamping:
 class TestWithReplayData:
     """Integration tests using ReplayObserver + ReplayOrderExecutor."""
 
-    @pytest.fixture
-    def replay_df(self):
-        import pandas as pd
-
-        n = 200
-        rng = np.random.default_rng(42)
-        base = 50000 + np.cumsum(rng.normal(0, 50, n))
-        return pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
-            "open": base,
-            "high": base + np.abs(rng.normal(30, 20, n)),
-            "low": base - np.abs(rng.normal(30, 20, n)),
-            "close": base + rng.normal(0, 20, n),
-            "volume": rng.uniform(100, 1000, n),
-        })
-
     def test_multi_step_episode_with_replay(self, replay_df):
         """Run a full multi-step episode with realistic price data."""
         from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTorchTradingEnv, OKXFuturesSLTPTradingEnvConfig
