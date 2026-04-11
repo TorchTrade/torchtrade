@@ -570,18 +570,20 @@ class OKXFuturesOrderClass:
             for pos in non_zero:
                 raw_pos = float(pos.get("pos", 0))
                 pos_side = pos.get("posSide", "net")
-
                 if pos_side in ("long", "net") and raw_pos > 0:
                     close_side = "sell"
                 else:
                     close_side = "buy"
+
+                # Use raw string from exchange (strip sign) to avoid float artifacts
+                size_str = pos.get("pos", "0").lstrip("-")
 
                 params = {
                     "instId": self.symbol,
                     "tdMode": self.margin_mode.value,
                     "side": close_side,
                     "ordType": "market",
-                    "sz": self._format_size(abs(raw_pos)),
+                    "sz": size_str,
                     "reduceOnly": True,
                 }
 
