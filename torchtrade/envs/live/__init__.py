@@ -39,6 +39,16 @@ from torchtrade.envs.live.bybit import (
     PositionMode,
 )
 
+# OKX
+from torchtrade.envs.live.okx import (
+    OKXObservationClass,
+    OKXFuturesOrderClass,
+    OKXFuturesTorchTradingEnv,
+    OKXFuturesTradingEnvConfig,
+    OKXFuturesSLTPTorchTradingEnv,
+    OKXFuturesSLTPTradingEnvConfig,
+)
+
 __all__ = [
     # Alpaca
     "AlpacaObservationClass",
@@ -67,4 +77,11 @@ __all__ = [
     "BybitFuturesSLTPTradingEnvConfig",
     "MarginMode",
     "PositionMode",
+    # OKX
+    "OKXObservationClass",
+    "OKXFuturesOrderClass",
+    "OKXFuturesTorchTradingEnv",
+    "OKXFuturesTradingEnvConfig",
+    "OKXFuturesSLTPTorchTradingEnv",
+    "OKXFuturesSLTPTradingEnvConfig",
 ]
