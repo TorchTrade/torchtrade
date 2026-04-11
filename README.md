@@ -19,7 +19,7 @@ TorchTrade provides modular environments for both live trading with major exchan
 - 🎯 **Multi-Timeframe Observations** - Train on 1m, 5m, 15m, 1h bars simultaneously
 - 🤖 **Multiple RL Algorithms** - PPO, DQN, IQL, GRPO, DSAC, CTRL implementations
 - 📊 **Feature Engineering** - Add technical indicators and custom features
-- 🔴 **Live Trading** - Direct Alpaca, Binance, Bitget, and Bybit API integration
+- 🔴 **Live Trading** - Direct Alpaca, Binance, Bitget, Bybit, and OKX API integration
 - 🧠 **LLM Integration** - Use GPT-4o-mini or local LLMs as trading agents
 - 📐 **Rule-Based Actors** - Hard-coded strategies for imitation learning and baselines
 - 🔮 **Pretrained Encoder Transforms** - Foundation model embeddings for time series
@@ -124,8 +124,10 @@ TorchTrade supports live trading with major exchanges:
 | **BitgetFuturesSLTPTorchTradingEnv** | Bitget | Crypto | ✅ | ✅ (1-125x) | ✅ |
 | **BybitFuturesTorchTradingEnv** | Bybit | Crypto | ✅ | ✅ (1-100x) | ❌ |
 | **BybitFuturesSLTPTorchTradingEnv** | Bybit | Crypto | ✅ | ✅ (1-100x) | ✅ |
+| **OKXFuturesTorchTradingEnv** | OKX | Crypto | ✅ | ✅ (1-125x) | ❌ |
+| **OKXFuturesSLTPTorchTradingEnv** | OKX | Crypto | ✅ | ✅ (1-125x) | ✅ |
 
-**Need another broker?** Request support for additional platforms (OKX, Interactive Brokers, etc.) by [creating an issue](https://github.com/TorchTrade/torchtrade/issues/new) or emailing torchtradecontact@gmail.com.
+**Need another broker?** Request support for additional platforms (Interactive Brokers, Kraken, etc.) by [creating an issue](https://github.com/TorchTrade/torchtrade/issues/new) or emailing torchtradecontact@gmail.com.
 
 See **[Online Environments Documentation](https://torchtrade.github.io/torchtrade/environments/online/)** for setup guides and examples.
 
@@ -154,6 +156,12 @@ Start live trading with these supported platforms:
 - **Features:** Futures trading with up to 100x leverage, native bracket orders (SL/TP), testnet for safe testing
 - **Commission:** Maker 0.02% / Taker 0.055%
 - **Get Started:** [Sign up for Bybit](https://www.bybit.com/)
+
+**[OKX](https://www.okx.com/)** - Leading global cryptocurrency exchange
+- **Supported by:** `OKXFuturesTorchTradingEnv`, `OKXFuturesSLTPTorchTradingEnv`
+- **Features:** Futures trading with up to 125x leverage, bracket orders via attachAlgoOrds, demo trading
+- **Commission:** Maker 0.02% / Taker 0.05%
+- **Get Started:** [Sign up for OKX](https://www.okx.com/)
 
 ### 📈 Stock & Crypto API
 
@@ -282,6 +290,9 @@ BINANCE_API_KEY=your_binance_api_key
 BINANCE_SECRET_KEY=your_binance_secret_key
 BYBIT_API_KEY=your_bybit_api_key
 BYBIT_API_SECRET=your_bybit_api_secret
+OKX_API_KEY=your_okx_api_key
+OKX_API_SECRET=your_okx_api_secret
+OKX_PASSPHRASE=your_okx_passphrase
 EOF
 
 # 6. Verify installation
