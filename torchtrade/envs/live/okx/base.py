@@ -83,9 +83,18 @@ class OKXBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.execute_on_unit = str(config.execute_on.unit)
 
         # Flatten on startup for a clean state (configurable, default: True)
-        self.trader.cancel_open_orders()
+        try:
+            if not self.trader.cancel_open_orders():
+                logger.warning("cancel_open_orders failed during init")
+        except Exception as e:
+            logger.warning(f"cancel_open_orders raised during init: {e}")
+
         if config.close_position_on_init:
-            self.trader.close_position()
+            try:
+                if not self.trader.close_position():
+                    logger.warning("close_position failed during init")
+            except Exception as e:
+                logger.warning(f"close_position raised during init: {e}")
 
         # Get initial portfolio value
         balance = self.trader.get_account_balance()
@@ -167,6 +176,14 @@ class OKXBaseTorchTradingEnv(TorchTradeLiveEnv):
             )
             self.observation_spec.set(market_data_key, market_data_spec)
             self.market_data_keys.append(market_data_key)
+
+        # Base features spec (raw OHLC from first timeframe)
+        if self.config.include_base_features:
+            base_ws = window_sizes[0]
+            self.observation_spec.set(
+                "base_features",
+                Bounded(low=-torch.inf, high=torch.inf, shape=(base_ws, 4), dtype=torch.float),
+            )
 
     def _get_observation(self) -> TensorDictBase:
         """Get the current observation state."""

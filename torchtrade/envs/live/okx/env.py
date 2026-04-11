@@ -132,10 +132,10 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         trade_info = self._execute_trade_if_needed(desired_action)
 
         if trade_info["executed"] and trade_info.get("success") is not False:
-            if trade_info["side"] == "buy":
-                self.position.current_position = 1
-            elif trade_info["side"] == "sell" and trade_info.get("closed_position"):
+            if trade_info.get("closed_position"):
                 self.position.current_position = 0
+            elif trade_info["side"] == "buy":
+                self.position.current_position = 1
             elif trade_info["side"] == "sell":
                 self.position.current_position = -1
             self.position.current_action_level = desired_action

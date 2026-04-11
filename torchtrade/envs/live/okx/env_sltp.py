@@ -276,6 +276,15 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
         else:
             raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
+        # Quantize to lot size constraints
+        lot = self.trader.get_lot_size()
+        min_qty, qty_step = lot["min_qty"], lot["qty_step"]
+        quantity = math.floor(quantity / qty_step) * qty_step
+        if quantity < min_qty:
+            logger.warning(f"Quantity {quantity} below min_qty {min_qty} for {self.config.symbol}")
+            trade_info["success"] = False
+            return trade_info
+
         # Close opposite position if switching directions
         if self.position.current_position != 0:
             try:

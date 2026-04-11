@@ -1,6 +1,8 @@
 """Order executor for OKX Futures trading using python-okx."""
 import logging
+import math
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_DOWN
 from enum import Enum
 from typing import Dict, List, Optional
 
@@ -183,6 +185,29 @@ class OKXFuturesOrderClass:
             return f"{rounded:.{self._tick_decimals}f}"
         return str(rounded)
 
+    def _format_size(self, qty: float) -> str:
+        """Quantize quantity to lot size constraints and format as string.
+
+        Rounds down to nearest lot step and validates against min size.
+
+        Args:
+            qty: Raw quantity to quantize
+
+        Returns:
+            Formatted quantity string
+
+        Raises:
+            ValueError: If quantized quantity is below min_qty
+        """
+        lot = self.get_lot_size()
+        step = Decimal(str(lot["qty_step"]))
+        min_qty = Decimal(str(lot["min_qty"]))
+        q = Decimal(str(qty))
+        q = (q / step).to_integral_value(rounding=ROUND_DOWN) * step
+        if q < min_qty:
+            raise ValueError(f"qty {qty} below min_qty {min_qty} after quantizing to step {step}")
+        return format(q, "f")
+
     def _calculate_unrealized_pnl_pct(self, qty: float, entry_price: float, mark_price: float) -> float:
         """Calculate unrealized PnL percentage."""
         if entry_price <= 0:
@@ -246,7 +271,7 @@ class OKXFuturesOrderClass:
                 "tdMode": self.margin_mode.to_okx(),
                 "side": side.lower(),
                 "ordType": order_type.lower(),
-                "sz": str(quantity),
+                "sz": self._format_size(quantity),
             }
 
             if limit_price is not None:
@@ -321,7 +346,9 @@ class OKXFuturesOrderClass:
             # Find non-zero positions
             non_zero = [p for p in positions if float(p.get("pos", 0)) != 0]
             if len(non_zero) > 1:
-                logger.warning("Multiple open positions detected (long/short mode); using first non-zero")
+                logger.error("Multiple open positions in LONG_SHORT mode are not supported by this env")
+                status["position_status"] = None
+                return status
             pos = non_zero[0] if non_zero else None
 
             if pos is not None:

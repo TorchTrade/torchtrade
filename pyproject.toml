@@ -22,7 +22,7 @@ dependencies = [
     "python-binance",
     "ccxt>=4.0.0", # Replaced python-bitget with ccxt for V2 API support
     "pybit>=5.0.0",
-    "python-okx>=5.0.0",
+    "python-okx>=0.3.0",
     "python-dotenv",
     "torchrl",
     "wandb",
