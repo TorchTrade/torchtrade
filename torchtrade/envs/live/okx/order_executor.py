@@ -100,6 +100,7 @@ class OKXFuturesOrderClass:
         self.position_mode = position_mode
         self.last_order_id = None
         self._lot_size_cache: Optional[Dict[str, float]] = None
+        self._lot_size_decimals: int = 3  # Default; updated from instrument data
         self._tick_size: Optional[float] = None
         self._tick_decimals: int = 0
 
@@ -154,10 +155,14 @@ class OKXFuturesOrderClass:
                         self._tick_decimals = len(decimal_part) if decimal_part else 0
                     logger.info(f"Tick size for {self.symbol}: {self._tick_size} ({self._tick_decimals} decimals)")
 
-                # Cache lot size
+                # Cache lot size and derive decimal places from raw string
+                lot_sz_str = instrument.get("lotSz", "0.001")
+                if '.' in lot_sz_str:
+                    decimal_part = lot_sz_str.rstrip('0').split('.')[1]
+                    self._lot_size_decimals = len(decimal_part) if decimal_part else 0
                 self._lot_size_cache = {
                     "min_qty": float(instrument.get("minSz", 0.001)),
-                    "qty_step": float(instrument.get("lotSz", 0.001)),
+                    "qty_step": float(lot_sz_str),
                 }
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
@@ -177,14 +182,16 @@ class OKXFuturesOrderClass:
         return str(rounded)
 
     def _format_size(self, qty: float) -> str:
-        """Quantize quantity to lot size step and format as string."""
+        """Quantize quantity to lot size step, enforce minimum, and format as string."""
         lot = self.get_lot_size()
         step = lot["qty_step"]
+        min_qty = lot["min_qty"]
         quantized = math.floor(qty / step) * step
-        # Derive decimal places from step for clean formatting
-        step_str = str(step)
-        decimals = len(step_str.rstrip('0').split('.')[-1]) if '.' in step_str else 0
-        return f"{quantized:.{decimals}f}"
+        if quantized < min_qty:
+            quantized = min_qty
+        # Use _lot_size_decimals derived from instrument data, not str(float) which
+        # can produce scientific notation for small steps (e.g. 1e-05 → decimals=0)
+        return f"{quantized:.{self._lot_size_decimals}f}"
 
     def _calculate_unrealized_pnl_pct(self, qty: float, entry_price: float, mark_price: float) -> float:
         """Calculate unrealized PnL percentage."""
