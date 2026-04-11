@@ -5,11 +5,11 @@ Online environments connect to real trading APIs for paper trading or live execu
 | Offline (Training) | Live (Deployment) |
 |---------------------|-------------------|
 | SequentialTradingEnv (spot, `leverage=1`) | AlpacaTorchTradingEnv |
-| SequentialTradingEnv (futures, `leverage>1`) | BinanceFutures / BitgetFutures / BybitFuturesTorchTradingEnv |
+| SequentialTradingEnv (futures, `leverage>1`) | BinanceFutures / BitgetFutures / BybitFutures / OKXFuturesTorchTradingEnv |
 | SequentialTradingEnvSLTP (spot) | AlpacaSLTPTorchTradingEnv |
-| SequentialTradingEnvSLTP (futures) | BinanceFuturesSLTP / BitgetFuturesSLTP / BybitFuturesSLTPTorchTradingEnv |
+| SequentialTradingEnvSLTP (futures) | BinanceFuturesSLTP / BitgetFuturesSLTP / BybitFuturesSLTP / OKXFuturesSLTPTorchTradingEnv |
 | OneStepTradingEnv (spot) | AlpacaSLTPTorchTradingEnv |
-| OneStepTradingEnv (futures) | BinanceFuturesSLTP / BitgetFuturesSLTP / BybitFuturesSLTPTorchTradingEnv |
+| OneStepTradingEnv (futures) | BinanceFuturesSLTP / BitgetFuturesSLTP / BybitFuturesSLTP / OKXFuturesSLTPTorchTradingEnv |
 
 **Supported Exchanges:**
 
@@ -17,6 +17,7 @@ Online environments connect to real trading APIs for paper trading or live execu
 - **[Binance](https://accounts.binance.com/register?ref=25015935)** - Cryptocurrency futures with high leverage and testnet
 - **[Bitget](https://www.bitget.com/)** - Cryptocurrency futures with competitive fees and testnet
 - **[Bybit](https://www.bybit.com/)** - Cryptocurrency derivatives with native bracket orders and testnet
+- **[OKX](https://www.okx.com/)** - Global cryptocurrency exchange with bracket orders via attachAlgoOrds and demo trading
 
 ## Overview
 
@@ -30,6 +31,8 @@ Online environments connect to real trading APIs for paper trading or live execu
 | **BitgetFuturesSLTPTorchTradingEnv** | Bitget | Crypto | Yes | Yes | Yes |
 | **BybitFuturesTorchTradingEnv** | Bybit | Crypto | Yes | Yes | - |
 | **BybitFuturesSLTPTorchTradingEnv** | Bybit | Crypto | Yes | Yes | Yes |
+| **OKXFuturesTorchTradingEnv** | OKX | Crypto | Yes | Yes | - |
+| **OKXFuturesSLTPTorchTradingEnv** | OKX | Crypto | Yes | Yes | Yes |
 
 ## Fractional Position Sizing
 
@@ -41,7 +44,7 @@ Live environments use a **query-first pattern**: they query the actual exchange 
     Always use canonical timeframe forms:
 
     - Alpaca: `["1Min", "5Min", "15Min", "1Hour", "1Day"]`
-    - Binance/Bitget/Bybit: `["1m", "5m", "15m", "1h", "1d"]`
+    - Binance/Bitget/Bybit/OKX: `["1m", "5m", "15m", "1h", "1d"]`
     - **Wrong**: `["60min"]`, `["60m"]`, `["24hour"]` — these create different observation keys and break model compatibility.
 
 ---
@@ -294,6 +297,82 @@ env = BybitFuturesSLTPTorchTradingEnv(
 
 ---
 
+## OKX Environments
+
+[OKX](https://www.okx.com/) provides global cryptocurrency trading with up to 125x leverage and demo trading support. TorchTrade uses [python-okx](https://pypi.org/project/python-okx/), OKX's official Python SDK. Bracket orders (SL/TP) are placed atomically via OKX's `attachAlgoOrds` parameter.
+
+!!! note "Symbol Format"
+    OKX uses dash-separated symbols with swap suffix: `"BTC-USDT-SWAP"`. The environment auto-normalizes common formats (`"BTCUSDT"`, `"BTC/USDT"`, `"BTC-USDT"`) to the correct OKX format.
+
+!!! note "Passphrase Required"
+    OKX API requires a passphrase in addition to API key and secret.
+
+### OKXFuturesTorchTradingEnv
+
+```python
+from torchtrade.envs.live.okx import OKXFuturesTorchTradingEnv, OKXFuturesTradingEnvConfig
+from torchtrade.envs.live.okx import MarginMode, PositionMode
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+config = OKXFuturesTradingEnvConfig(
+    symbol="BTC-USDT-SWAP",
+    time_frames=["5m", "15m"],
+    window_sizes=[6, 32],
+    execute_on="1m",
+    leverage=5,
+    margin_mode=MarginMode.ISOLATED,  # ISOLATED (safer) or CROSS
+    position_mode=PositionMode.NET,   # NET (simpler) or LONG_SHORT
+    demo=True,  # Demo trading (recommended!)
+)
+
+env = OKXFuturesTorchTradingEnv(
+    config,
+    api_key=os.getenv("OKX_API_KEY"),
+    api_secret=os.getenv("OKX_API_SECRET"),
+    passphrase=os.getenv("OKX_PASSPHRASE"),
+)
+```
+
+### OKXFuturesSLTPTorchTradingEnv
+
+```python
+from torchtrade.envs.live.okx import OKXFuturesSLTPTorchTradingEnv, OKXFuturesSLTPTradingEnvConfig
+from torchtrade.envs.live.okx import MarginMode, PositionMode
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+config = OKXFuturesSLTPTradingEnvConfig(
+    symbol="BTC-USDT-SWAP",
+    time_frames=["5m", "15m"],
+    window_sizes=[6, 32],
+    execute_on="1m",
+    stoploss_levels=(-0.025, -0.05, -0.1),
+    takeprofit_levels=(0.05, 0.1, 0.2),
+    include_hold_action=True,
+    leverage=5,
+    quantity_per_trade=0.002,  # 0.002 BTC per trade (quantity mode)
+    trade_mode="quantity",     # "quantity", "notional", or "fractional"
+    margin_mode=MarginMode.ISOLATED,
+    position_mode=PositionMode.NET,
+    demo=True,
+)
+
+env = OKXFuturesSLTPTorchTradingEnv(
+    config,
+    api_key=os.getenv("OKX_API_KEY"),
+    api_secret=os.getenv("OKX_API_SECRET"),
+    passphrase=os.getenv("OKX_PASSPHRASE"),
+)
+# Action space: HOLD + 2×(3 SL × 3 TP) = 19 actions (long + short)
+```
+
+---
+
 ## Position Sizing (SLTP Environments)
 
 All live SLTP environments support three position sizing modes, matching the offline SLTP environments for train-deploy consistency.
@@ -410,26 +489,31 @@ BITGETPASSPHRASE=your_bitget_passphrase
 # Bybit (https://www.bybit.com/app/user/api-management)
 BYBIT_API_KEY=your_bybit_api_key
 BYBIT_API_SECRET=your_bybit_api_secret
+
+# OKX (https://www.okx.com/account/my-api)
+OKX_API_KEY=your_okx_api_key
+OKX_API_SECRET=your_okx_api_secret
+OKX_PASSPHRASE=your_okx_passphrase
 ```
 
 !!! warning "Always Start with Paper/Testnet Trading"
-    Set `paper=True` (Alpaca) or `demo=True` (Binance/Bitget/Bybit) before using real funds. Start with low leverage (2-5x) for futures.
+    Set `paper=True` (Alpaca) or `demo=True` (Binance/Bitget/Bybit/OKX) before using real funds. Start with low leverage (2-5x) for futures.
 
 ---
 
 ## Exchange Comparison
 
-| Feature | Alpaca | Binance | Bitget | Bybit |
-|---------|--------|---------|--------|-------|
-| **Asset Types** | Stocks, Crypto | Crypto | Crypto | Crypto |
-| **Futures** | - | Yes | Yes | Yes |
-| **Max Leverage** | 1x | 125x | 125x | 100x |
-| **Paper Trading** | Yes | Yes (Testnet) | Yes (Testnet) | Yes (Testnet) |
-| **Commission** | Free | 0.02%/0.04% | 0.02%/0.06% | 0.02%/0.055% |
-| **SDK** | Alpaca SDK | CCXT | CCXT | pybit (native) |
+| Feature | Alpaca | Binance | Bitget | Bybit | OKX |
+|---------|--------|---------|--------|-------|-----|
+| **Asset Types** | Stocks, Crypto | Crypto | Crypto | Crypto | Crypto |
+| **Futures** | - | Yes | Yes | Yes | Yes |
+| **Max Leverage** | 1x | 125x | 125x | 100x | 125x |
+| **Paper Trading** | Yes | Yes (Testnet) | Yes (Testnet) | Yes (Testnet) | Yes (Demo) |
+| **Commission** | Free | 0.02%/0.04% | 0.02%/0.06% | 0.02%/0.055% | 0.02%/0.05% |
+| **SDK** | Alpaca SDK | CCXT | CCXT | pybit (native) | python-okx (native) |
 
 ---
 
 ## Requesting New Exchanges
 
-Need support for another exchange (OKX, Interactive Brokers, etc.)? [Create an issue](https://github.com/TorchTrade/torchtrade/issues/new) or email us at torchtradecontact@gmail.com.
+Need support for another exchange (Interactive Brokers, Kraken, etc.)? [Create an issue](https://github.com/TorchTrade/torchtrade/issues/new) or email us at torchtradecontact@gmail.com.

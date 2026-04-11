@@ -39,6 +39,18 @@ from torchtrade.envs.live.bybit import (
     PositionMode,
 )
 
+# OKX (use qualified imports to avoid shadowing Bybit's MarginMode/PositionMode)
+from torchtrade.envs.live.okx import (
+    OKXObservationClass,
+    OKXFuturesOrderClass,
+    OKXFuturesTorchTradingEnv,
+    OKXFuturesTradingEnvConfig,
+    OKXFuturesSLTPTorchTradingEnv,
+    OKXFuturesSLTPTradingEnvConfig,
+    MarginMode as OKXMarginMode,
+    PositionMode as OKXPositionMode,
+)
+
 __all__ = [
     # Alpaca
     "AlpacaObservationClass",
@@ -67,4 +79,13 @@ __all__ = [
     "BybitFuturesSLTPTradingEnvConfig",
     "MarginMode",
     "PositionMode",
+    # OKX
+    "OKXObservationClass",
+    "OKXFuturesOrderClass",
+    "OKXFuturesTorchTradingEnv",
+    "OKXFuturesTradingEnvConfig",
+    "OKXFuturesSLTPTorchTradingEnv",
+    "OKXFuturesSLTPTradingEnvConfig",
+    "OKXMarginMode",
+    "OKXPositionMode",
 ]
