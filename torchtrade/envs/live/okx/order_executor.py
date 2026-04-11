@@ -1,7 +1,7 @@
 """Order executor for OKX Futures trading using python-okx."""
 import logging
+import math
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
 from enum import Enum
 from typing import Dict, List, Optional
 
@@ -177,27 +177,14 @@ class OKXFuturesOrderClass:
         return str(rounded)
 
     def _format_size(self, qty: float) -> str:
-        """Quantize quantity to lot size constraints and format as string.
-
-        Rounds down to nearest lot step and validates against min size.
-
-        Args:
-            qty: Raw quantity to quantize
-
-        Returns:
-            Formatted quantity string
-
-        Raises:
-            ValueError: If quantized quantity is below min_qty
-        """
+        """Quantize quantity to lot size step and format as string."""
         lot = self.get_lot_size()
-        step = Decimal(str(lot["qty_step"]))
-        min_qty = Decimal(str(lot["min_qty"]))
-        q = Decimal(str(qty))
-        q = (q / step).to_integral_value(rounding=ROUND_DOWN) * step
-        if q < min_qty:
-            raise ValueError(f"qty {qty} below min_qty {min_qty} after quantizing to step {step}")
-        return format(q, "f")
+        step = lot["qty_step"]
+        quantized = math.floor(qty / step) * step
+        # Derive decimal places from step for clean formatting
+        step_str = str(step)
+        decimals = len(step_str.rstrip('0').split('.')[-1]) if '.' in step_str else 0
+        return f"{quantized:.{decimals}f}"
 
     def _calculate_unrealized_pnl_pct(self, qty: float, entry_price: float, mark_price: float) -> float:
         """Calculate unrealized PnL percentage."""

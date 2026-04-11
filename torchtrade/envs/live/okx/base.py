@@ -83,18 +83,9 @@ class OKXBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.execute_on_unit = str(config.execute_on.unit)
 
         # Flatten on startup for a clean state (configurable, default: True)
-        try:
-            if not self.trader.cancel_open_orders():
-                logger.warning("cancel_open_orders failed during init")
-        except Exception as e:
-            logger.warning(f"cancel_open_orders raised during init: {e}")
-
+        self.trader.cancel_open_orders()
         if config.close_position_on_init:
-            try:
-                if not self.trader.close_position():
-                    logger.warning("close_position failed during init")
-            except Exception as e:
-                logger.warning(f"close_position raised during init: {e}")
+            self.trader.close_position()
 
         # Get initial portfolio value
         balance = self.trader.get_account_balance()
@@ -269,19 +260,13 @@ class OKXBaseTorchTradingEnv(TorchTradeLiveEnv):
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
-        try:
-            if not self.trader.cancel_open_orders():
-                logger.warning("cancel_open_orders failed during reset; proceeding with potentially stale orders")
-        except Exception as e:
-            logger.warning(f"cancel_open_orders raised during reset: {e}")
+        if not self.trader.cancel_open_orders():
+            logger.warning("cancel_open_orders failed during reset; proceeding with potentially stale orders")
         self.history.reset()
 
         if self.config.close_position_on_reset:
-            try:
-                if not self.trader.close_position():
-                    logger.warning("close_position failed during reset; proceeding with residual exposure")
-            except Exception as e:
-                logger.warning(f"close_position raised during reset: {e}")
+            if not self.trader.close_position():
+                logger.warning("close_position failed during reset; proceeding with residual exposure")
 
         balance = self.trader.get_account_balance()
         self.balance = balance.get("available_balance", 0)
