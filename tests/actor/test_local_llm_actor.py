@@ -139,3 +139,76 @@ def test_action_descriptions_match_levels(action_levels):
     assert len(actor._action_descriptions) == len(action_levels)
     prompt = actor._build_system_prompt()
     assert f"0 to {len(action_levels) - 1}" in prompt
+
+
+# ============================================================================
+# Custom prompt injection (system_prompt + user_prompt_fn)
+# ============================================================================
+
+
+def _make_actor(**overrides):
+    from torchtrade.actor import LocalLLMActor
+    return LocalLLMActor(
+        model="test-model",
+        backend="vllm",
+        market_data_keys=MARKET_DATA_KEYS,
+        account_state_labels=ACCOUNT_STATE_LABELS,
+        action_levels=ACTION_LEVELS_FUTURES,
+        symbol="BTC/USD",
+        execute_on="1Hour",
+        **overrides,
+    )
+
+
+def test_system_prompt_string_override(sample_td):
+    """A static string replaces the default system prompt verbatim."""
+    actor = _make_actor(system_prompt="CUSTOM SYSTEM")
+    with patch.object(actor, "generate", return_value="<answer>1</answer>") as mock_gen:
+        result = actor.forward(sample_td)
+
+    mock_gen.assert_called_once()
+    assert mock_gen.call_args.args[0] == "CUSTOM SYSTEM"
+    assert result["system_prompt"] == "CUSTOM SYSTEM"
+
+
+def test_system_prompt_callable_receives_actor(sample_td):
+    """A callable receives the actor and its return value is used."""
+    def build(actor):
+        return f"trade {actor.symbol} on {actor.execute_on} ({len(actor.action_levels)} actions)"
+
+    actor = _make_actor(system_prompt=build)
+    with patch.object(actor, "generate", return_value="<answer>1</answer>") as mock_gen:
+        actor.forward(sample_td)
+
+    assert mock_gen.call_args.args[0] == "trade BTC/USD on 1Hour (3 actions)"
+
+
+def test_user_prompt_fn_override(sample_td):
+    """user_prompt_fn replaces default user prompt construction."""
+    def build(actor, td):
+        return f"custom: action_levels={actor.action_levels}, has_account={('account_state' in td)}"
+
+    actor = _make_actor(user_prompt_fn=build)
+    with patch.object(actor, "generate", return_value="<answer>2</answer>") as mock_gen:
+        result = actor.forward(sample_td)
+
+    user_prompt = mock_gen.call_args.args[1]
+    assert user_prompt.startswith("custom: action_levels=[-1.0, 0.0, 1.0]")
+    assert user_prompt == result["user_prompt"]
+    # Default account-state header should NOT be present
+    assert "Current account state:" not in user_prompt
+
+
+def test_default_prompt_unchanged_when_overrides_none(sample_td):
+    """With no overrides, behavior matches the original default."""
+    actor = _make_actor()  # both overrides default to None
+    with patch.object(actor, "generate", return_value="<answer>0</answer>") as mock_gen:
+        actor.forward(sample_td)
+
+    system_prompt, user_prompt = mock_gen.call_args.args
+    # Default system prompt mentions symbol + timeframe
+    assert "BTC/USD" in system_prompt
+    assert "1Hour" in system_prompt
+    # Default user prompt has the account-state and market-data headers
+    assert "Current account state:" in user_prompt
+    assert "Current market data:" in user_prompt

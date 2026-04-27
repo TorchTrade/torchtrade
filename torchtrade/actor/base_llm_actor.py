@@ -2,11 +2,14 @@
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Callable, List, Optional, Union
 
 import torch
 
 logger = logging.getLogger(__name__)
+
+SystemPrompt = Union[str, Callable[["BaseLLMActor"], str]]
+UserPromptFn = Callable[["BaseLLMActor", "TensorDict"], str]
 
 
 class BaseLLMActor(ABC):
@@ -24,6 +27,16 @@ class BaseLLMActor(ABC):
         execute_on: Execution timeframe (e.g. "1Hour").
         feature_keys: Column names in market data tensors.
         debug: Enable debug output.
+        system_prompt: Optional override for the system prompt. Pass a string
+            for a static replacement, or a callable `f(actor) -> str` for
+            dynamic construction (e.g. to prepend extra context to the
+            default: `lambda a: extra + a._build_system_prompt()`).
+            If None, the default prompt built from `symbol`, `execute_on`,
+            and `action_levels` is used.
+        user_prompt_fn: Optional callable `f(actor, tensordict) -> str` that
+            replaces the default user prompt construction. Useful for custom
+            data layouts or formats. If None, the default prompt (account
+            state + market data tables) is used.
     """
 
     def __init__(
@@ -35,6 +48,8 @@ class BaseLLMActor(ABC):
         execute_on: str = "1Hour",
         feature_keys: Optional[List[str]] = None,
         debug: bool = False,
+        system_prompt: Optional[SystemPrompt] = None,
+        user_prompt_fn: Optional[UserPromptFn] = None,
     ):
         self.market_data_keys = market_data_keys
         self.account_state_labels = account_state_labels
@@ -43,6 +58,8 @@ class BaseLLMActor(ABC):
         self.execute_on = str(execute_on)
         self.feature_keys = feature_keys or ["open", "high", "low", "close", "volume"]
         self.debug = debug
+        self._system_prompt_override = system_prompt
+        self._user_prompt_fn = user_prompt_fn
 
         # Build action descriptions from action_levels
         self._action_descriptions = self._build_action_descriptions()
@@ -84,8 +101,12 @@ class BaseLLMActor(ABC):
 
     def forward(self, tensordict):
         """Main forward pass: construct prompts, generate, extract action, save to tensordict."""
-        system_prompt = self._build_system_prompt()
-        user_prompt = self._construct_user_prompt(tensordict)
+        system_prompt = self._resolve_system_prompt()
+        user_prompt = (
+            self._user_prompt_fn(self, tensordict)
+            if self._user_prompt_fn is not None
+            else self._construct_user_prompt(tensordict)
+        )
         self._debug("SYSTEM PROMPT", system_prompt)
         self._debug("USER PROMPT", user_prompt)
 
@@ -104,6 +125,14 @@ class BaseLLMActor(ABC):
     def _debug(self, label: str, content: str) -> None:
         if self.debug:
             print(f"{'=' * 80}\n{label}:\n{content}")
+
+    def _resolve_system_prompt(self) -> str:
+        override = self._system_prompt_override
+        if override is None:
+            return self._build_system_prompt()
+        if callable(override):
+            return override(self)
+        return override
 
     # --- Prompt construction ---
 
