@@ -1,7 +1,7 @@
-"""PolymarketBetEnv — rolling one-shot bets on a Polymarket market series.
+"""PolymarketBetEnv, rolling one-shot bets on a Polymarket market series.
 
 Pattern B (contextual-bandit shape): each step is an independent bet on a
-fresh, short-cadence binary market — bet on direction, wait for resolution,
+fresh, short-cadence binary market, bet on direction, wait for resolution,
 collect the realized payoff, then move to the next market in the series.
 
 Concrete example (5-minute Bitcoin up/down):
@@ -90,7 +90,7 @@ class PolymarketBetEnv(EnvBase):
 
     Episode ends when the scanner finds no next market (terminated), the wallet
     drops below the bankruptcy threshold (terminated), or ``max_steps`` is hit
-    (truncated). The observation deliberately omits any ``account_state`` — by
+    (truncated). The observation deliberately omits any ``account_state``, by
     the time the next decision is made, the previous bet has already resolved
     and there is no carried position to encode.
     """
@@ -126,7 +126,7 @@ class PolymarketBetEnv(EnvBase):
                 private_key=private_key, dry_run=config.dry_run
             )
 
-        # Specs — Binary for bool flags (per TorchRL spec semantics) and
+        # Specs, Binary for bool flags (per TorchRL spec semantics) and
         # reward inside a Composite so RewardSum-style transforms work.
         self.observation_spec = Composite(
             market_state=Bounded(
@@ -193,10 +193,10 @@ class PolymarketBetEnv(EnvBase):
             result = self.trader.buy(token_id=token_id, amount_usdc=stake)
             if not result.get("success"):
                 # Order failed (FOK rejection, insufficient USDC, network glitch).
-                # Do NOT book a payoff against an order we never filled — set the
+                # Do NOT book a payoff against an order we never filled, set the
                 # effective stake to zero so _compute_payoff returns 0.0.
                 logger.warning(
-                    "Order failed for %s: %s — recording as no-bet",
+                    "Order failed for %s: %s, recording as no-bet",
                     market.slug,
                     result.get("error", "unknown"),
                 )

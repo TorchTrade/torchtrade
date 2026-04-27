@@ -1,4 +1,4 @@
-"""Polymarket market scanner — fetch and filter markets from Gamma API."""
+"""Polymarket market scanner, fetch and filter markets from Gamma API."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ class MarketScannerConfig:
     categories: Optional[List[str]] = None
     min_time_to_resolution_hours: float = 24
     max_time_to_resolution_minutes: Optional[float] = None
-    # Single keyword or list — any substring match (case-insensitive) on question or slug
+    # Single keyword or list, any substring match (case-insensitive) on question or slug
     keyword: Optional[Union[str, List[str]]] = None
     # Case-sensitive prefix match on the market slug. Discover the right prefix
     # via the discovery flow (scan_markets.py) and use it as the stable identifier
@@ -97,7 +97,7 @@ class MarketScanner:
             if m.liquidity < cfg.min_liquidity:
                 continue
 
-            # Resolution duration window — also drops markets already past their
+            # Resolution duration window, also drops markets already past their
             # endDate but not yet flagged closed (Polymarket leaves resolved
             # markets in this state for a while).
             if m.end_date:
@@ -123,13 +123,13 @@ class MarketScanner:
                 if not market_labels.intersection(cfg.categories):
                     continue
 
-            # Slug prefix (case-sensitive structural match) — used both for
+            # Slug prefix (case-sensitive structural match), used both for
             # discovery and as the env's stable series identifier.
             if cfg.slug_prefix and not m.slug.startswith(cfg.slug_prefix):
                 continue
 
             # Keyword filter (case-insensitive substring on question or slug;
-            # accepts a single string or a list — matches if ANY keyword hits)
+            # accepts a single string or a list, matches if ANY keyword hits)
             if cfg.keyword:
                 needles = [cfg.keyword] if isinstance(cfg.keyword, str) else cfg.keyword
                 haystack = (m.question + " " + m.slug).lower()
@@ -140,7 +140,7 @@ class MarketScanner:
 
         # When the user is browsing for high-volume markets (no slug/duration
         # focus), sort by 24h volume desc. When they're targeting short-cadence
-        # series, the API has already returned them in chronological order —
+        # series, the API has already returned them in chronological order,
         # preserve that so the next-to-resolve markets surface first.
         if cfg.slug_prefix is None and cfg.max_time_to_resolution_minutes is None:
             filtered.sort(key=lambda m: m.volume_24h, reverse=True)
@@ -151,9 +151,9 @@ class MarketScanner:
 
         Two query strategies depending on configuration:
 
-        * **No ``slug_prefix``** — sort by 24h volume descending so high-volume
+        * **No ``slug_prefix``**, sort by 24h volume descending so high-volume
           markets surface first (general discovery / browsing).
-        * **``slug_prefix`` set** — sort by ``endDate`` ascending and use the
+        * **``slug_prefix`` set**, sort by ``endDate`` ascending and use the
           ``end_date_min=now`` server-side filter so short-cadence series
           (e.g. ``btc-updown-5m-``, which typically have $0 volume until the
           last seconds before resolution) are surfaced reliably.
@@ -163,7 +163,7 @@ class MarketScanner:
         """
         # When the user is targeting upcoming/short-cadence markets (slug_prefix
         # set, or an upper resolution bound configured), sort by endDate
-        # ascending and use the server-side end_date_min filter — short-cadence
+        # ascending and use the server-side end_date_min filter, short-cadence
         # markets (5m/15m crypto) typically have $0 volume so they never make
         # the volume-sorted top page.
         targeting_upcoming = bool(

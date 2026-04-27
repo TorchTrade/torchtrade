@@ -1,12 +1,12 @@
 # Polymarket Broker Examples
 
-Examples demonstrating `PolymarketBetEnv` — a one-shot betting environment for
+Examples demonstrating `PolymarketBetEnv`, a one-shot betting environment for
 short-cadence binary markets on [Polymarket](https://polymarket.com/).
 
 Polymarket runs continuous **5-minute, 15-minute, 1-hour, and 4-hour** crypto
 "up/down" markets (BTC, ETH, SOL) plus daily markets. Each market is a binary
 bet: did the asset go up or down over the bar? The env rolls through the
-series — bet → wait for resolution → collect payoff → next market — without
+series, bet → wait for resolution → collect payoff → next market, without
 holding any position across steps.
 
 All examples default to `dry_run=True`, so you can run them without a funded
@@ -20,7 +20,7 @@ A complete tour in five steps: **discover → identify → configure → run**.
 
 Use `scan_markets.py` to query the live Gamma API. With no flags it returns
 the highest-volume open markets. Add `--slug-prefix` once you know what you
-want — same primitive the env uses, so what you see here is what the env will
+want, same primitive the env uses, so what you see here is what the env will
 trade:
 
 ```bash
@@ -60,7 +60,7 @@ Sample output for the BTC 5m query:
 
 | Flag                       | Default | Description |
 |----------------------------|---------|-------------|
-| `--slug-prefix`            | *(none)* | Case-sensitive prefix match on the market slug — the env-side primitive. Use it once you know what you want. |
+| `--slug-prefix`            | *(none)* | Case-sensitive prefix match on the market slug, the env-side primitive. Use it once you know what you want. |
 | `--keyword`                | *(none)* | One or more case-insensitive substrings; ANY-match against question/slug. Useful for fuzzy discovery. |
 | `--min-volume`             | `0`      | Minimum 24 h volume (USD). |
 | `--min-liquidity`          | `0`      | Minimum order-book liquidity (USD). |
@@ -114,7 +114,7 @@ config = PolymarketBetEnvConfig(market_slug_prefix="eth-updown-15m-")
 
 ### 4. Inspect the observation
 
-`reset()` returns a `TensorDict` with a single key — `market_state` of the
+`reset()` returns a `TensorDict` with a single key, `market_state` of the
 freshly-picked next market:
 
 ```python
@@ -124,7 +124,7 @@ td["market_state"]
 ```
 
 There is **no** `account_state`. By the time the next `step()` runs, the
-previous bet has already resolved — there is no carried position to encode.
+previous bet has already resolved, there is no carried position to encode.
 Cumulative P&L is captured directly in the per-step rewards.
 
 ### 5. Step the env
@@ -150,16 +150,16 @@ for _ in range(config.max_steps):
 env.close()
 ```
 
-The runnable equivalent — with a random policy and progress prints — is
+The runnable equivalent, with a random policy and progress prints, is
 [`run_dry_run.py`](run_dry_run.py).
 
 ## Examples
 
-### `scan_markets.py` — discover
+### `scan_markets.py`: discover
 
 See section 1 above.
 
-### `run_dry_run.py` — bet end-to-end
+### `run_dry_run.py`: bet end-to-end
 
 ```bash
 python examples/broker/polymarket/run_dry_run.py
@@ -180,7 +180,7 @@ discrete index; an RL policy gets logits over two classes.
 
 To trade real funds:
 
-1. Set `POLYGON_PRIVATE_KEY` in `.env` — the wallet must hold USDC.e on Polygon.
+1. Set `POLYGON_PRIVATE_KEY` in `.env`, the wallet must hold USDC.e on Polygon.
 2. `pip install py-clob-client`.
 3. Set `dry_run=False` in `PolymarketBetEnvConfig`.
 

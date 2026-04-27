@@ -1,6 +1,6 @@
 """TorchRL transform that augments observations with multi-timeframe Binance OHLCV.
 
-Generic side-channel data injector — wrap any TorchRL env in
+Generic side-channel data injector, wrap any TorchRL env in
 ``TransformedEnv(env, BinanceOHLCVTransform(...))`` and the observation gains
 one tensor per ``(timeframe, window)`` pair, fetched live from Binance's public
 klines endpoint each step. No API key required (Binance allows unauthenticated
@@ -43,7 +43,7 @@ class BinanceOHLCVTransform(Transform):
         symbol: Binance symbol (default ``"BTCUSDT"``). Leading slashes are
             stripped automatically (so ``"BTC/USDT"`` works).
         time_frames: List of :class:`TimeFrame` objects. Defaults to 1m / 5m /
-            15m — sensible for a 5-minute polymarket betting env.
+            15m, sensible for a 5-minute polymarket betting env.
         window_sizes: List matching ``time_frames`` length. Defaults to
             60 / 30 / 20.
         feature_preprocessing_fn: Optional ``df -> df`` function that adds
@@ -116,7 +116,7 @@ class BinanceOHLCVTransform(Transform):
         """Set every declared key on the TensorDict.
 
         Every ``(timeframe, window)`` declared in ``transform_observation_spec``
-        is also written here — if the observer returns a partial payload, the
+        is also written here, if the observer returns a partial payload, the
         missing keys are filled with zeros and a warning is logged. Skipping
         them would let the runtime output drift from the spec, which would
         crash downstream collectors and policies that trust the spec.
@@ -129,7 +129,7 @@ class BinanceOHLCVTransform(Transform):
                 value = torch.as_tensor(np.asarray(obs[source_key]), dtype=torch.float32)
             else:
                 logger.warning(
-                    "Observer omitted key %r — filling with zeros to honor observation_spec",
+                    "Observer omitted key %r, filling with zeros to honor observation_spec",
                     source_key,
                 )
                 value = torch.zeros((window, self._n_features), dtype=torch.float32)

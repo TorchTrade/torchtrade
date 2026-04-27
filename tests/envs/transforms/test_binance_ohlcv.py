@@ -157,8 +157,8 @@ class TestBehavior:
         """Every key declared in ``transform_observation_spec`` MUST also be
         present in the runtime output, otherwise downstream collectors that
         trust the spec will crash on missing keys. If the observer omits a key,
-        the transform fills with zeros of the declared shape and logs a warning
-        — never silently drops the key."""
+        the transform fills with zeros of the declared shape and logs a
+        warning, never silently drops the key."""
         observer = _stub_observer(
             [TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute)],
             [4, 4],
@@ -173,7 +173,7 @@ class TestBehavior:
         with caplog.at_level("WARNING"):
             td = env.reset()
 
-        # Both keys present at runtime — the spec contract holds.
+        # Both keys present at runtime, the spec contract holds.
         assert "ohlcv_1Minute_4" in td.keys()
         assert "ohlcv_5Minute_4" in td.keys()
         # Provided key gets the real value
@@ -181,11 +181,11 @@ class TestBehavior:
         # Missing key gets zeros of the declared shape
         assert td["ohlcv_5Minute_4"].shape == (4, 2)
         assert torch.equal(td["ohlcv_5Minute_4"], torch.zeros((4, 2)))
-        # And the warning surfaced — silent fallback would be the wrong choice
+        # And the warning surfaced, silent fallback would be the wrong choice
         assert any("5Minute_4" in rec.message for rec in caplog.records)
 
     def test_observer_exception_propagates(self):
-        """A failure inside the observer must surface — silently substituting
+        """A failure inside the observer must surface, silently substituting
         zeros would let the policy train on bogus side-channel data."""
         observer = _stub_observer([TimeFrame(1, TimeFrameUnit.Minute)], [4])
         observer.get_observations.side_effect = RuntimeError("binance 451")
@@ -228,7 +228,7 @@ class TestConstruction:
     def test_injected_observer_is_used_directly(self):
         """When ``observer=`` is provided, the other kwargs are ignored."""
         observer = _stub_observer([TimeFrame(1, TimeFrameUnit.Minute)], [3])
-        # symbol/time_frames/window_sizes here would be wrong if applied —
+        # symbol/time_frames/window_sizes here would be wrong if applied,
         # the test passes only because the injected observer wins.
         transform = BinanceOHLCVTransform(
             observer=observer,

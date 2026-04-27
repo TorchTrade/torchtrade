@@ -377,16 +377,16 @@ env = OKXFuturesSLTPTorchTradingEnv(
 
 ## Polymarket Environment
 
-[Polymarket](https://polymarket.com/) is a decentralized prediction market on Polygon. TorchTrade currently exposes a single env, `PolymarketBetEnv`, tailored for short-cadence binary markets — Polymarket runs continuous **5-minute, 15-minute, 1-hour, and 4-hour** crypto "up/down" markets (BTC, ETH, SOL) plus daily markets. Each step is an independent bet: place direction, wait for resolution, collect realized payoff, advance to the next market in the series. There is no carried position, so the observation deliberately omits any `account_state`.
+[Polymarket](https://polymarket.com/) is a decentralized prediction market on Polygon. TorchTrade currently exposes a single env, `PolymarketBetEnv`, tailored for short-cadence binary markets, Polymarket runs continuous **5-minute, 15-minute, 1-hour, and 4-hour** crypto "up/down" markets (BTC, ETH, SOL) plus daily markets. Each step is an independent bet: place direction, wait for resolution, collect realized payoff, advance to the next market in the series. There is no carried position, so the observation deliberately omits any `account_state`.
 
-!!! info "Starter environment — more to come"
-    `PolymarketBetEnv` is intentionally a **starter env** matching the most common Polymarket use case for TorchTrade (rolling binary up/down bets). Polymarket also has multi-strike daily price markets, sports, politics, and longer-horizon markets that benefit from a different env shape. Additional Polymarket envs will be added based on user requests and as new market types appear — open an issue describing the pattern you need.
+!!! info "Starter environment, more to come"
+    `PolymarketBetEnv` is intentionally a **starter env** matching the most common Polymarket use case for TorchTrade (rolling binary up/down bets). Polymarket also has multi-strike daily price markets, sports, politics, and longer-horizon markets that benefit from a different env shape. Additional Polymarket envs will be added based on user requests and as new market types appear, open an issue describing the pattern you need.
 
 !!! note "Authentication"
     Polymarket uses a **Polygon private key**, not an API key/secret pair. The key is used to derive CLOB API credentials at runtime.
 
 !!! warning "USDC Required"
-    The wallet must hold USDC.e on Polygon to place real orders. Use `dry_run=True` to validate the pipeline without spending capital — `dry_run` works without `py-clob-client` installed.
+    The wallet must hold USDC.e on Polygon to place real orders. Use `dry_run=True` to validate the pipeline without spending capital, `dry_run` works without `py-clob-client` installed.
 
 ### PolymarketBetEnv
 
@@ -417,15 +417,15 @@ Each `step()`:
 1. Submits the bet on the current market (skipped in `dry_run`).
 2. Sleeps until the market's `endDate` plus a small grace period.
 3. Fetches the resolved outcome from Gamma (`outcomePrices` snaps to `[1, 0]` or `[0, 1]`).
-4. Computes realized payoff — a win pays `stake × (1 − fill) / fill`; a loss returns `−stake`.
+4. Computes realized payoff, a win pays `stake × (1 − fill) / fill`; a loss returns `−stake`.
 5. Picks the next active market matching `market_slug_prefix` and returns its `market_state`.
 
 ### Discovering markets and slug prefixes
 
 `MarketScanner` is the discovery tool. Use it once to identify the slug prefix that points at the series you want, then plug it into the env. Two query strategies depending on your filters:
 
-- **Browsing mode** (no `slug_prefix` and no `max_time_to_resolution_minutes`) — sorts by 24-hour volume descending, surfaces high-volume markets first. Best for "what's hot right now?".
-- **Targeting upcoming mode** (either of those is set) — sorts by `endDate` ascending and uses Gamma's `end_date_min=now` filter. Required for short-cadence series like `btc-updown-5m-`, which typically have $0 24-hour volume and never make the volume-sorted top page.
+- **Browsing mode** (no `slug_prefix` and no `max_time_to_resolution_minutes`), sorts by 24-hour volume descending, surfaces high-volume markets first. Best for "what's hot right now?".
+- **Targeting upcoming mode** (either of those is set), sorts by `endDate` ascending and uses Gamma's `end_date_min=now` filter. Required for short-cadence series like `btc-updown-5m-`, which typically have $0 24-hour volume and never make the volume-sorted top page.
 
 ```python
 from torchtrade.envs.live.polymarket import MarketScanner, MarketScannerConfig
@@ -456,8 +456,8 @@ The companion CLI is [`examples/broker/polymarket/scan_markets.py`](../../exampl
 
 | Flag | Purpose |
 |------|---------|
-| `--slug-prefix` | **Exact, structural** prefix match on the market slug (case-sensitive). This is the env-side primitive — once you've found a prefix you're happy with, it's the identifier you paste into `PolymarketBetEnvConfig.market_slug_prefix`. Examples: `btc-updown-5m-`, `bitcoin-up-or-down-`, `eth-updown-15m-`. |
-| `--keyword` | **Fuzzy, exploratory** substring match (case-insensitive, applied to both `question` and `slug`). Pass one or more terms — a market passes the filter if **any** term appears: `--keyword btc bitcoin crypto` matches anything containing `btc` OR `bitcoin` OR `crypto`. Quote multi-word terms (`--keyword "world cup"`). Use this to find a series you don't already know the prefix of, then read the matching `slug` column to identify the prefix for the env. |
+| `--slug-prefix` | **Exact, structural** prefix match on the market slug (case-sensitive). This is the env-side primitive, once you've found a prefix you're happy with, it's the identifier you paste into `PolymarketBetEnvConfig.market_slug_prefix`. Examples: `btc-updown-5m-`, `bitcoin-up-or-down-`, `eth-updown-15m-`. |
+| `--keyword` | **Fuzzy, exploratory** substring match (case-insensitive, applied to both `question` and `slug`). Pass one or more terms, a market passes the filter if **any** term appears: `--keyword btc bitcoin crypto` matches anything containing `btc` OR `bitcoin` OR `crypto`. Quote multi-word terms (`--keyword "world cup"`). Use this to find a series you don't already know the prefix of, then read the matching `slug` column to identify the prefix for the env. |
 | `--min-volume` | Minimum 24-hour USDC volume. Default `0`. Raise to skip thin markets when browsing. |
 | `--min-liquidity` | Minimum order-book liquidity in USDC. Default `0`. |
 | `--min-resolution-hours` | Lower bound on time-to-resolution. Default `0`. |
@@ -493,9 +493,9 @@ Polymarket adds and renames series occasionally; re-running `scan_markets.py` to
 
 ### Adding external context (OHLCV, microfeatures, multi-timeframe)
 
-`PolymarketBetEnv`'s default observation is intentionally minimal: a 4-element `market_state = [yes_price, spread, volume_24h, liquidity]`. For "BTC up/down in 5 min?" markets, the obvious thing to add is **live BTC OHLCV** from a spot exchange — the policy needs price action to take an informed view, not just the implied probability already baked into `yes_price`.
+`PolymarketBetEnv`'s default observation is intentionally minimal: a 4-element `market_state = [yes_price, spread, volume_24h, liquidity]`. For "BTC up/down in 5 min?" markets, the obvious thing to add is **live BTC OHLCV** from a spot exchange, the policy needs price action to take an informed view, not just the implied probability already baked into `yes_price`.
 
-The idiomatic TorchRL way to do this is `TransformedEnv` plus a small `Transform` that fetches your data each step and adds it to the observation `TensorDict`. TorchTrade ships [`BinanceOHLCVTransform`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/binance_ohlcv.py) for exactly this — wraps `BinanceObservationClass` (no API key required for public OHLCV), pulls multi-timeframe windows each step, and extends the observation spec to match.
+The idiomatic TorchRL way to do this is `TransformedEnv` plus a small `Transform` that fetches your data each step and adds it to the observation `TensorDict`. TorchTrade ships [`BinanceOHLCVTransform`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/binance_ohlcv.py) for exactly this, wraps `BinanceObservationClass` (no API key required for public OHLCV), pulls multi-timeframe windows each step, and extends the observation spec to match.
 
 #### Example: Binance OHLCV alongside the Polymarket observation
 
@@ -540,9 +540,9 @@ env = TransformedEnv(
 
 `BinanceObservationClass` accepts a `feature_preprocessing_fn(df) -> df` that returns a DataFrame with feature columns prefixed `feature_`. The default is normalized OHLC pct-change. Use it to inject:
 
-- **Technicals** — RSI, MACD, Bollinger bands, etc.
-- **Microfeatures** — order-book imbalance, recent trade-flow imbalance, realized variance.
-- **Cross-asset signals** — ETH/BTC correlation features, dollar index, anything pulled from another `requests` call.
+- **Technicals**, RSI, MACD, Bollinger bands, etc.
+- **Microfeatures**, order-book imbalance, recent trade-flow imbalance, realized variance.
+- **Cross-asset signals**, ETH/BTC correlation features, dollar index, anything pulled from another `requests` call.
 
 ```python
 import numpy as np
@@ -560,7 +560,7 @@ augment = BinanceOHLCVTransform(feature_preprocessing_fn=my_features)
 
 #### Other data sources
 
-For purely on-chain signals, custom microfeatures pipelines, or non-Binance exchanges, write your own `Transform` following the same pattern — `_reset`, `_step`, and `transform_observation_spec`. The `BinanceOHLCVTransform` source ([`torchtrade/envs/transforms/binance_ohlcv.py`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/binance_ohlcv.py)) is short enough to read and adapt.
+For purely on-chain signals, custom microfeatures pipelines, or non-Binance exchanges, write your own `Transform` following the same pattern, `_reset`, `_step`, and `transform_observation_spec`. The `BinanceOHLCVTransform` source ([`torchtrade/envs/transforms/binance_ohlcv.py`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/binance_ohlcv.py)) is short enough to read and adapt.
 
 ---
 
@@ -686,7 +686,7 @@ OKX_API_KEY=your_okx_api_key
 OKX_API_SECRET=your_okx_api_secret
 OKX_PASSPHRASE=your_okx_passphrase
 
-# Polymarket (Polygon wallet — fund with USDC.e)
+# Polymarket (Polygon wallet, fund with USDC.e)
 POLYGON_PRIVATE_KEY=your_polygon_wallet_private_key
 ```
 

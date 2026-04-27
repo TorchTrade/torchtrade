@@ -218,11 +218,11 @@ class TestStep:
     def test_failed_order_in_live_mode_books_zero_payoff(self, underlying_outcome):
         """Critical safety: a rejected/failed order must NOT produce phantom P&L.
 
-        Pins the FULL post-failure contract — not just reward — so a future
+        Pins the FULL post-failure contract, not just reward, so a future
         refactor that ``return``-s early on failure (skipping the next-market
         fetch, step counter, or done flags) breaks the test instead of silently
         breaking episode progression. Parametrized over both possible underlying
-        outcomes — a regression that booked ``-stake`` on failure (instead of 0)
+        outcomes, a regression that booked ``-stake`` on failure (instead of 0)
         would only show up in the would-have-lost case otherwise.
         """
         market = _make_market(yes_price=0.4, no_price=0.6)
@@ -244,7 +244,7 @@ class TestStep:
         assert td["reward"].item() == 0.0
         assert env.cash == pytest.approx(cash_before)
 
-        # Episode progression continues normally — these assertions catch a
+        # Episode progression continues normally, these assertions catch a
         # naive `if failure: return early_td` shortcut.
         assert env._step_count == 1
         assert not td["terminated"].item()
@@ -379,7 +379,7 @@ class TestFetchResolvedOutcome:
             assert env._fetch_resolved_outcome("0xcond") == expected
 
     def test_outgoing_request_pins_endpoint_and_params(self):
-        """Pin the Gamma API contract — endpoint URL and condition_id query param."""
+        """Pin the Gamma API contract, endpoint URL and condition_id query param."""
         env, _, _ = _make_env(mock_fetch=False)
         with patch("torchtrade.envs.live.polymarket.env.requests.get") as mock_get:
             mock_resp = MagicMock()
@@ -402,14 +402,14 @@ class TestFetchResolvedOutcome:
 
 
 class TestWaitForResolution:
-    """The real method is mocked out in _make_env — verify its branches separately."""
+    """The real method is mocked out in _make_env, verify its branches separately."""
 
     @pytest.mark.parametrize(
         "end_date_value,expect_sleep",
         [
             ("", False),
             ("garbage", False),
-            ("2000-01-01T00:00:00Z", False),  # past — sleep_seconds <= 0, no sleep
+            ("2000-01-01T00:00:00Z", False),  # past, sleep_seconds <= 0, no sleep
         ],
         ids=["empty", "malformed", "past"],
     )

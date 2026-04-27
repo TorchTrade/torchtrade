@@ -1,9 +1,9 @@
 """Order executor for Polymarket CLOB trading via py-clob-client.
 
-Minimal surface — only the operations :class:`PolymarketBetEnv` needs:
+Minimal surface, only the operations :class:`PolymarketBetEnv` needs:
 
-- :meth:`buy` — submits a fill-or-kill market order for a single side.
-- :meth:`cancel_all` — called from :meth:`PolymarketBetEnv.close`.
+- :meth:`buy`, submits a fill-or-kill market order for a single side.
+- :meth:`cancel_all`, called from :meth:`PolymarketBetEnv.close`.
 
 ``dry_run=True`` skips the CLOB client entirely, so paper-trading the env
 works without ``py-clob-client`` installed.

@@ -322,7 +322,7 @@ class TestScan:
 
     @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
     def test_scan_skips_malformed_markets_keeping_good_ones(self, mock_get):
-        """A malformed entry (missing required fields) must not poison the batch —
+        """A malformed entry (missing required fields) must not poison the batch,
         the rest of the response should still surface."""
         good = _make_raw_market(market_id="ok")
         malformed = {"id": "bad", "active": True, "closed": False}  # missing every field
@@ -430,7 +430,7 @@ class TestNextActiveMarket:
 
     @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
     def test_skips_closed_markets(self, mock_get):
-        """A closed market with a matching slug should be skipped — the env
+        """A closed market with a matching slug should be skipped, the env
         only wants markets that have not yet resolved."""
         mock_resp = MagicMock()
         mock_resp.json.return_value = [
@@ -463,7 +463,7 @@ class TestNextActiveMarket:
 
     @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
     def test_skips_malformed_then_returns_next_match(self, mock_get):
-        """Malformed prefix-matching market must not abort the lookup — keep going."""
+        """Malformed prefix-matching market must not abort the lookup, keep going."""
         malformed = {
             "id": "bad",
             "slug": "btc-updown-5m-bad",

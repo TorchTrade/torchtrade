@@ -124,7 +124,7 @@ class TestDryRunSkipsClientConstructionEvenWhenAvailable:
 
     The previous behavior constructed a real ``ClobClient`` and called
     ``set_api_creds(create_or_derive_api_creds())`` (a network roundtrip + valid
-    private key requirement) whenever the package was available — regardless of
+    private key requirement) whenever the package was available, regardless of
     ``dry_run``. Paper trading should be fully offline.
     """
 

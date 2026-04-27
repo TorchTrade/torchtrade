@@ -52,7 +52,7 @@ def main():
     )
 
     # Loop until the env says we're done (max_steps truncation or bankruptcy);
-    # no external counter — the env owns termination.
+    # no external counter, the env owns termination.
     step = 0
     while not bool(td.get("done", torch.zeros(1, dtype=torch.bool)).item()):
         step += 1

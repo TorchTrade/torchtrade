@@ -1,6 +1,6 @@
 """List active Polymarket prediction markets that pass volume/liquidity/duration filters.
 
-This script does not place any orders — it only reads from the public Gamma API.
+This script does not place any orders, it only reads from the public Gamma API.
 It is the **discovery** half of the workflow: find a market series that interests
 you, copy its slug stem, paste that into ``PolymarketBetEnvConfig.market_slug_prefix``.
 
@@ -12,7 +12,7 @@ Run with:
     python examples/broker/polymarket/scan_markets.py --keyword bitcoin
     python examples/broker/polymarket/scan_markets.py --keyword btc bitcoin crypto
 
-    # Filter by slug prefix (exact, structural — same primitive the env uses)
+    # Filter by slug prefix (exact, structural, same primitive the env uses)
     python examples/broker/polymarket/scan_markets.py --slug-prefix btc-updown-5m-
 
     # Find short-cadence markets (e.g. resolving in <30 min)
@@ -64,7 +64,7 @@ def main():
         default=None,
         metavar="STEM",
         help=(
-            "Case-sensitive prefix match on the market slug — the same identifier "
+            "Case-sensitive prefix match on the market slug, the same identifier "
             "PolymarketBetEnv uses. Use this once you know which series you want "
             "(e.g. --slug-prefix btc-updown-5m-)."
         ),
