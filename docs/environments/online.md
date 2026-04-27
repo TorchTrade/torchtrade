@@ -495,85 +495,48 @@ Polymarket adds and renames series occasionally; re-running `scan_markets.py` to
 
 `PolymarketBetEnv`'s default observation is intentionally minimal: a 4-element `market_state = [yes_price, spread, volume_24h, liquidity]`. For "BTC up/down in 5 min?" markets, the obvious thing to add is **live BTC OHLCV** from a spot exchange — the policy needs price action to take an informed view, not just the implied probability already baked into `yes_price`.
 
-The idiomatic TorchRL way to do this is `TransformedEnv` plus a small `Transform` that fetches your data each step and adds it to the observation `TensorDict`. Same pattern works for **multi-timeframe windows**, **microfeatures** (order-book imbalance, trade-flow stats), or any other side-channel signal — the env stays unchanged.
+The idiomatic TorchRL way to do this is `TransformedEnv` plus a small `Transform` that fetches your data each step and adds it to the observation `TensorDict`. TorchTrade ships [`BinanceOHLCVTransform`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/binance_ohlcv.py) for exactly this — wraps `BinanceObservationClass` (no API key required for public OHLCV), pulls multi-timeframe windows each step, and extends the observation spec to match.
 
 #### Example: Binance OHLCV alongside the Polymarket observation
 
 ```python
-import numpy as np
-import torch
-from tensordict import TensorDictBase
-from torchrl.data import Bounded, Composite
 from torchrl.envs import TransformedEnv
-from torchrl.envs.transforms import Transform
 
 from torchtrade.envs.live.polymarket import PolymarketBetEnv, PolymarketBetEnvConfig
-from torchtrade.envs.live.binance import BinanceObservationClass
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-
-
-class BinanceOHLCVAugment(Transform):
-    """Append multi-timeframe BTC OHLCV windows to PolymarketBetEnv observations.
-
-    Uses ``BinanceObservationClass`` (no API key needed for read-only OHLCV) and
-    feeds whatever ``feature_preprocessing_fn`` produces — default is normalized
-    pct-change OHLC features. Swap the preprocessing function to inject your
-    own technicals / microfeatures.
-    """
-
-    def __init__(self, symbol="BTCUSDT", time_frames=("1m", "5m", "15m"), window_sizes=(60, 30, 20)):
-        super().__init__(in_keys=[], out_keys=[])
-        unit_map = {"m": TimeFrameUnit.Minute, "h": TimeFrameUnit.Hour, "d": TimeFrameUnit.Day}
-        self._tfs = [TimeFrame(int(tf[:-1]), unit_map[tf[-1]]) for tf in time_frames]
-        self._window_sizes = list(window_sizes)
-        self._tf_strs = list(time_frames)
-        self._observer = BinanceObservationClass(
-            symbol=symbol, time_frames=self._tfs, window_sizes=self._window_sizes,
-        )
-        # discover feature width from the dummy preprocessing run
-        self._n_features = len(self._observer.get_features()["observation_features"])
-
-    def _key(self, tf: str, window: int) -> str:
-        return f"ohlcv_{tf}_{window}"
-
-    def _attach_observations(self, td: TensorDictBase) -> TensorDictBase:
-        obs = self._observer.get_observations()
-        # BinanceObservationClass keys are "{tf}_{window}" — convert to torch.float32
-        for tf_str, window in zip(self._tf_strs, self._window_sizes):
-            arr = obs[f"{self._tfs[self._tf_strs.index(tf_str)].obs_key_freq()}_{window}"]
-            td.set(self._key(tf_str, window), torch.tensor(np.asarray(arr), dtype=torch.float32))
-        return td
-
-    def _reset(self, td, td_reset):
-        return self._attach_observations(td_reset)
-
-    def _step(self, td, next_td):
-        return self._attach_observations(next_td)
-
-    def transform_observation_spec(self, observation_spec):
-        for tf_str, window in zip(self._tf_strs, self._window_sizes):
-            observation_spec.set(
-                self._key(tf_str, window),
-                Bounded(
-                    low=-float("inf"), high=float("inf"),
-                    shape=(window, self._n_features), dtype=torch.float32,
-                ),
-            )
-        return observation_spec
-
+from torchtrade.envs.transforms import BinanceOHLCVTransform
 
 config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", dry_run=True)
 env = TransformedEnv(
     PolymarketBetEnv(config),
-    BinanceOHLCVAugment(time_frames=("1m", "5m", "15m"), window_sizes=(60, 30, 20)),
+    BinanceOHLCVTransform(),  # defaults: BTCUSDT, 1m/5m/15m × 60/30/20
 )
 
 td = env.reset()
-# td now has: market_state (4,), ohlcv_1m_60 (60, n_feat), ohlcv_5m_30 (30, n_feat),
-#             ohlcv_15m_20 (20, n_feat), terminated, truncated
+# td now has:
+#   market_state         (4,)
+#   ohlcv_1Minute_60    (60, n_features)
+#   ohlcv_5Minute_30    (30, n_features)
+#   ohlcv_15Minute_20   (20, n_features)
+#   terminated, truncated
 ```
 
-#### Customizing the features
+Override the symbol, timeframes, or window sizes to suit your market:
+
+```python
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+env = TransformedEnv(
+    PolymarketBetEnv(PolymarketBetEnvConfig(market_slug_prefix="eth-updown-15m-")),
+    BinanceOHLCVTransform(
+        symbol="ETHUSDT",
+        time_frames=[TimeFrame(15, TimeFrameUnit.Minute), TimeFrame(1, TimeFrameUnit.Hour)],
+        window_sizes=[40, 24],
+        key_prefix="eth_ohlcv",  # → keys ``eth_ohlcv_15Minute_40`` etc.
+    ),
+)
+```
+
+#### Customizing the features (microfeatures / technicals / cross-asset)
 
 `BinanceObservationClass` accepts a `feature_preprocessing_fn(df) -> df` that returns a DataFrame with feature columns prefixed `feature_`. The default is normalized OHLC pct-change. Use it to inject:
 
@@ -582,6 +545,9 @@ td = env.reset()
 - **Cross-asset signals** — ETH/BTC correlation features, dollar index, anything pulled from another `requests` call.
 
 ```python
+import numpy as np
+from torchtrade.envs.transforms import BinanceOHLCVTransform
+
 def my_features(df):
     df = df.copy()
     df["feature_log_return"] = np.log(df["close"] / df["close"].shift(1)).fillna(0)
@@ -589,17 +555,12 @@ def my_features(df):
     df["feature_volume_pct"] = df["volume"] / df["volume"].rolling(20).mean()
     return df.dropna()
 
-# Inject into the observer used by BinanceOHLCVAugment
-augment = BinanceOHLCVAugment()
-augment._observer = BinanceObservationClass(
-    symbol="BTCUSDT",
-    time_frames=augment._tfs,
-    window_sizes=augment._window_sizes,
-    feature_preprocessing_fn=my_features,
-)
+augment = BinanceOHLCVTransform(feature_preprocessing_fn=my_features)
 ```
 
-For purely on-chain or bespoke signals (e.g., your own microfeatures pipeline), drop the `BinanceObservationClass` and write the data-fetch directly inside `_attach_observations`. The same `Transform` skeleton applies — only the data source changes.
+#### Other data sources
+
+For purely on-chain signals, custom microfeatures pipelines, or non-Binance exchanges, write your own `Transform` following the same pattern — `_reset`, `_step`, and `transform_observation_spec`. The `BinanceOHLCVTransform` source ([`torchtrade/envs/transforms/binance_ohlcv.py`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/binance_ohlcv.py)) is short enough to read and adapt.
 
 ---
 
