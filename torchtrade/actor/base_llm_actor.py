@@ -90,21 +90,11 @@ class BaseLLMActor(ABC):
         """Main forward pass: construct prompts, generate, extract action, save to tensordict."""
         system_prompt = self._build_system_prompt()
         user_prompt = self._construct_user_prompt(tensordict)
-
-        if self.debug:
-            print("=" * 80)
-            print("SYSTEM PROMPT:")
-            print(system_prompt)
-            print("\nUSER PROMPT:")
-            print(user_prompt)
-            print("=" * 80)
+        self._debug("SYSTEM PROMPT", system_prompt)
+        self._debug("USER PROMPT", user_prompt)
 
         response = self.generate(system_prompt, user_prompt)
-
-        if self.debug:
-            print("RESPONSE:")
-            print(response)
-            print("=" * 80)
+        self._debug("RESPONSE", response)
 
         action_idx = self._extract_action(response)
 
@@ -114,6 +104,10 @@ class BaseLLMActor(ABC):
         tensordict.set("user_prompt", user_prompt)
 
         return tensordict
+
+    def _debug(self, label: str, content: str) -> None:
+        if self.debug:
+            print(f"{'=' * 80}\n{label}:\n{content}")
 
     # --- Prompt construction ---
 
@@ -165,10 +159,8 @@ class BaseLLMActor(ABC):
             idx = int(match.group(1))
             if 0 <= idx < len(self.action_levels):
                 return idx
-            if self.debug:
-                print(f"[Warning] Action {idx} out of range, defaulting to 0")
+            logger.warning("Action %d out of range [0, %d); defaulting to 0", idx, len(self.action_levels))
             return 0
 
-        if self.debug:
-            logger.warning("No <answer> tag found in response, defaulting to action 0")
+        logger.warning("No <answer> tag found in response; defaulting to action 0")
         return 0
