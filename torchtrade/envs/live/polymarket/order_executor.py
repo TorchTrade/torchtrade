@@ -43,7 +43,10 @@ class PolymarketOrderExecutor:
         dry_run: bool = False,
     ):
         self._dry_run = dry_run
-        if dry_run and ClobClient is None:
+        # Dry-run is fully offline: never construct the live CLOB client, never
+        # derive API creds. This keeps paper-trading independent of py-clob-client
+        # availability AND of having a valid funded private key.
+        if dry_run:
             self.client = None
             return
         if ClobClient is None:

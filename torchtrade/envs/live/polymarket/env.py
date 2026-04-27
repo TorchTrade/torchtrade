@@ -190,7 +190,17 @@ class PolymarketBetEnv(EnvBase):
         token_id = market.yes_token_id if action_idx == 1 else market.no_token_id
 
         if stake > 0 and not self.config.dry_run:
-            self.trader.buy(token_id=token_id, amount_usdc=stake)
+            result = self.trader.buy(token_id=token_id, amount_usdc=stake)
+            if not result.get("success"):
+                # Order failed (FOK rejection, insufficient USDC, network glitch).
+                # Do NOT book a payoff against an order we never filled — set the
+                # effective stake to zero so _compute_payoff returns 0.0.
+                logger.warning(
+                    "Order failed for %s: %s — recording as no-bet",
+                    market.slug,
+                    result.get("error", "unknown"),
+                )
+                stake = 0.0
         elif stake > 0:
             logger.info(
                 "DRY RUN bet: side=%s stake=$%.2f price=%.3f market=%s",

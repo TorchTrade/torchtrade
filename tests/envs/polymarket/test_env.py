@@ -210,6 +210,29 @@ class TestStep:
         env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
         trader.buy.assert_not_called()
 
+    def test_failed_order_in_live_mode_books_zero_payoff(self):
+        """Critical safety: a rejected/failed order must NOT produce phantom P&L.
+
+        Previously the env discarded ``trader.buy()``'s return value and computed
+        payoff against the assumed fill — so a FOK rejection or insufficient-USDC
+        error would still be "won" or "lost" against a position that never existed.
+        """
+        market = _make_market(yes_price=0.4, no_price=0.6)
+        env, _, trader = _make_env(
+            outcomes=[1],                       # market resolves Up
+            markets=[market, _make_market()],
+            config_overrides={"dry_run": False},
+        )
+        # Force the trader to report failure
+        trader.buy.return_value = {"success": False, "error": "insufficient USDC"}
+        env.reset()
+        cash_before = env.cash
+        td = env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+
+        trader.buy.assert_called_once()         # we did try to place
+        assert td["reward"].item() == 0.0       # but no phantom payoff
+        assert env.cash == pytest.approx(cash_before)
+
     def test_cash_updates_after_win_and_loss(self):
         env, _, _ = _make_env(
             outcomes=[1, 0],

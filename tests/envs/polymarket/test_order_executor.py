@@ -103,3 +103,35 @@ class TestDryRunSkipsRealOrder:
         assert result == {"success": True, "dry_run": True}
         exe.client.create_market_order.assert_not_called()
         exe.client.post_order.assert_not_called()
+
+
+class TestDryRunSkipsClientConstructionEvenWhenAvailable:
+    """dry_run=True must not touch the network even when py-clob-client IS installed.
+
+    The previous behavior constructed a real ``ClobClient`` and called
+    ``set_api_creds(create_or_derive_api_creds())`` (a network roundtrip + valid
+    private key requirement) whenever the package was available — regardless of
+    ``dry_run``. Paper trading should be fully offline.
+    """
+
+    def test_dry_run_does_not_construct_clob_client(self):
+        mock_clob_class = MagicMock()
+        with patch(
+            "torchtrade.envs.live.polymarket.order_executor.ClobClient",
+            new=mock_clob_class,
+        ):
+            exe = PolymarketOrderExecutor(private_key="0xtest", dry_run=True)
+        assert exe.client is None
+        mock_clob_class.assert_not_called()
+
+    def test_dry_run_does_not_derive_api_creds(self):
+        """Critical: the API-creds derivation hits the wallet RPC."""
+        mock_clob_instance = MagicMock()
+        mock_clob_class = MagicMock(return_value=mock_clob_instance)
+        with patch(
+            "torchtrade.envs.live.polymarket.order_executor.ClobClient",
+            new=mock_clob_class,
+        ):
+            PolymarketOrderExecutor(private_key="0xtest", dry_run=True)
+        mock_clob_instance.create_or_derive_api_creds.assert_not_called()
+        mock_clob_instance.set_api_creds.assert_not_called()
