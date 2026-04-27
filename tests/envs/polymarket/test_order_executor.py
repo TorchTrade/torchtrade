@@ -135,3 +135,16 @@ class TestDryRunSkipsClientConstructionEvenWhenAvailable:
             PolymarketOrderExecutor(private_key="0xtest", dry_run=True)
         mock_clob_instance.create_or_derive_api_creds.assert_not_called()
         mock_clob_instance.set_api_creds.assert_not_called()
+
+    def test_dry_run_buy_returns_marker_when_package_available(self):
+        """End-to-end dry-run contract: even with py-clob-client installed,
+        ``buy()`` must return the dry-run marker without touching the network."""
+        mock_clob_class = MagicMock()
+        with patch(
+            "torchtrade.envs.live.polymarket.order_executor.ClobClient",
+            new=mock_clob_class,
+        ):
+            exe = PolymarketOrderExecutor(private_key="0xtest", dry_run=True)
+        result = exe.buy(token_id="tok", amount_usdc=10.0)
+        assert result == {"success": True, "dry_run": True}
+        mock_clob_class.assert_not_called()

@@ -82,8 +82,8 @@ class PolymarketOrderExecutor:
             return {"success": False, "error": str(e)}
 
     def cancel_all(self) -> bool:
-        """Cancel all open orders (no-op when no client). Returns False on API failure."""
-        if self.client is None:
+        """Cancel all open orders. No-op in dry-run; returns False on API failure."""
+        if self._dry_run:
             return True
         try:
             self.client.cancel_all()

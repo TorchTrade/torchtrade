@@ -210,28 +210,49 @@ class TestStep:
         env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
         trader.buy.assert_not_called()
 
-    def test_failed_order_in_live_mode_books_zero_payoff(self):
+    @pytest.mark.parametrize(
+        "underlying_outcome",
+        [1, 0],
+        ids=["would-have-won", "would-have-lost"],
+    )
+    def test_failed_order_in_live_mode_books_zero_payoff(self, underlying_outcome):
         """Critical safety: a rejected/failed order must NOT produce phantom P&L.
 
-        Previously the env discarded ``trader.buy()``'s return value and computed
-        payoff against the assumed fill — so a FOK rejection or insufficient-USDC
-        error would still be "won" or "lost" against a position that never existed.
+        Pins the FULL post-failure contract — not just reward — so a future
+        refactor that ``return``-s early on failure (skipping the next-market
+        fetch, step counter, or done flags) breaks the test instead of silently
+        breaking episode progression. Parametrized over both possible underlying
+        outcomes — a regression that booked ``-stake`` on failure (instead of 0)
+        would only show up in the would-have-lost case otherwise.
         """
         market = _make_market(yes_price=0.4, no_price=0.6)
-        env, _, trader = _make_env(
-            outcomes=[1],                       # market resolves Up
-            markets=[market, _make_market()],
+        env, scanner, trader = _make_env(
+            outcomes=[underlying_outcome],
+            markets=[market, _make_market(slug="btc-updown-5m-next")],
             config_overrides={"dry_run": False},
         )
-        # Force the trader to report failure
         trader.buy.return_value = {"success": False, "error": "insufficient USDC"}
         env.reset()
         cash_before = env.cash
+        scanner_calls_before = scanner.next_active_market.call_count
         td = env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
 
-        trader.buy.assert_called_once()         # we did try to place
-        assert td["reward"].item() == 0.0       # but no phantom payoff
+        # We tried to place the order
+        trader.buy.assert_called_once()
+
+        # No phantom P&L
+        assert td["reward"].item() == 0.0
         assert env.cash == pytest.approx(cash_before)
+
+        # Episode progression continues normally — these assertions catch a
+        # naive `if failure: return early_td` shortcut.
+        assert env._step_count == 1
+        assert not td["terminated"].item()
+        assert not td["truncated"].item()
+        assert scanner.next_active_market.call_count > scanner_calls_before
+        # Next market's state is non-zero (real market_state, not the terminal
+        # zero-tensor used for "no next market" cases).
+        assert not torch.equal(td["market_state"], torch.zeros(4))
 
     def test_cash_updates_after_win_and_loss(self):
         env, _, _ = _make_env(
