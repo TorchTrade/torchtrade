@@ -91,6 +91,18 @@ class MarketScanner:
         now = datetime.now(timezone.utc)
         filtered = []
 
+        # When the user has explicitly opted into short-cadence / upcoming
+        # targeting (slug_prefix or max_time_to_resolution_minutes set), the
+        # default 24h minimum-time-to-resolution silently filters out the
+        # entire target set. Auto-relax to 0 in that case so a one-line
+        # config still returns useful results.
+        targeting_upcoming = bool(
+            cfg.slug_prefix or cfg.max_time_to_resolution_minutes is not None
+        )
+        effective_min_minutes = (
+            0.0 if targeting_upcoming else cfg.min_time_to_resolution_hours * 60
+        )
+
         for m in markets:
             if m.volume_24h < cfg.min_volume_24h:
                 continue
@@ -109,7 +121,7 @@ class MarketScanner:
                 if minutes_remaining is not None:
                     if minutes_remaining < 0:
                         continue
-                    if minutes_remaining < cfg.min_time_to_resolution_hours * 60:
+                    if minutes_remaining < effective_min_minutes:
                         continue
                     if (
                         cfg.max_time_to_resolution_minutes is not None

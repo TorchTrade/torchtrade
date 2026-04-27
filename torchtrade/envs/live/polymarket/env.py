@@ -95,8 +95,9 @@ class PolymarketBetEnv(EnvBase):
     2. The agent picks a side (0 = Down, 1 = Up).
     3. The trader submits a market order (skipped in ``dry_run``).
     4. The env sleeps until the market's endDate plus a small grace period.
-    5. The resolved outcome is fetched from Gamma; the realized payoff is
-       computed and returned as the step's reward.
+    5. The resolved outcome is polled from the Polymarket CLOB
+       (``/midpoint`` per outcome token); the realized payoff is computed
+       and returned as the step's reward.
     6. The scanner picks the next active market matching ``market_slug_prefix``
        and its market_state becomes the next observation.
 

@@ -360,6 +360,47 @@ class TestSlugPrefix:
         assert len(scanner._filter_markets(markets)) == expected_count
 
 
+class TestAutoRelaxMinTimeWhenTargetingUpcoming:
+    """Default ``min_time_to_resolution_hours=24`` would silently filter every
+    short-cadence market out. When the user has opted into upcoming targeting
+    (``slug_prefix`` set or ``max_time_to_resolution_minutes`` set), the
+    scanner auto-relaxes the minimum to 0 so a one-line config still works.
+    """
+
+    @pytest.mark.parametrize(
+        "config_kwargs,expected_count",
+        [
+            # No targeting → 24h floor enforced (5-min market filtered out).
+            ({}, 0),
+            # slug_prefix set → floor relaxed.
+            ({"slug_prefix": "btc-updown-5m-"}, 1),
+            # max_time_to_resolution_minutes set → floor relaxed.
+            ({"max_time_to_resolution_minutes": 30}, 1),
+            # Both set → still relaxed.
+            ({"slug_prefix": "btc-updown-5m-", "max_time_to_resolution_minutes": 30}, 1),
+        ],
+        ids=["browse-default-filters-out", "slug-prefix-relaxes",
+             "max-mins-relaxes", "both-relax"],
+    )
+    def test_min_time_auto_relaxes_for_upcoming_targeting(
+        self, config_kwargs, expected_count
+    ):
+        from datetime import datetime, timedelta, timezone
+        # 5-min market resolving in 5 minutes (well under the default 24h floor).
+        end = datetime.now(timezone.utc) + timedelta(minutes=5)
+        scanner = MarketScanner(MarketScannerConfig(
+            min_volume_24h=0,
+            min_liquidity=0,
+            **config_kwargs,
+        ))
+        raw = _make_raw_market(
+            slug="btc-updown-5m-1234",
+            end_date=end.isoformat().replace("+00:00", "Z"),
+        )
+        markets = [scanner._parse_market(raw)]
+        assert len(scanner._filter_markets(markets)) == expected_count
+
+
 class TestMaxResolutionMinutes:
     @pytest.mark.parametrize(
         "max_minutes,end_offset_seconds,expected_count",
