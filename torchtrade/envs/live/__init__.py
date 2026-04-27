@@ -56,10 +56,9 @@ from torchtrade.envs.live.polymarket import (
     MarketScanner,
     MarketScannerConfig,
     PolymarketMarket,
-    PolymarketObservationClass,
     PolymarketOrderExecutor,
-    PolyTimeBarEnv,
-    PolyTimeBarEnvConfig,
+    PolymarketBetEnv,
+    PolymarketBetEnvConfig,
 )
 
 __all__ = [
@@ -103,8 +102,7 @@ __all__ = [
     "MarketScanner",
     "MarketScannerConfig",
     "PolymarketMarket",
-    "PolymarketObservationClass",
     "PolymarketOrderExecutor",
-    "PolyTimeBarEnv",
-    "PolyTimeBarEnvConfig",
+    "PolymarketBetEnv",
+    "PolymarketBetEnvConfig",
 ]

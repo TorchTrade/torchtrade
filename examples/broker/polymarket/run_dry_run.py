@@ -1,97 +1,75 @@
-"""End-to-end Polymarket dry-run example.
+"""Dry-run a few rolling Polymarket bets on a short-cadence series.
 
-Steps:
-    1. Discover an active prediction market via the Gamma API.
-    2. Construct PolyTimeBarEnv in dry-run mode (no real orders).
-    3. Run a short random-policy rollout and print the trajectory.
+Picks the next active market matching ``market_slug_prefix`` (e.g.
+``btc-updown-5m-``), bets a random direction, *waits for resolution*, collects
+the realized payoff, and rolls to the next market. ``dry_run=True`` skips real
+CLOB orders so no funded wallet is required.
 
 Run with:
-    python examples/online_rl/polymarket/run_dry_run.py
+    python examples/broker/polymarket/run_dry_run.py
+    python examples/broker/polymarket/run_dry_run.py --slug-prefix btc-updown-15m- --max-steps 4
+
+By default ``--max-steps 2`` and 5-minute markets, so the script blocks for
+roughly 10–15 minutes (two bar resolutions plus a 30 s grace each).
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 
 import torch
-from tensordict import TensorDict
 
 from torchtrade.envs.live.polymarket import (
-    MarketScanner,
-    MarketScannerConfig,
-    PolyTimeBarEnv,
-    PolyTimeBarEnvConfig,
+    PolymarketBetEnv,
+    PolymarketBetEnvConfig,
 )
 
 
-def pick_market(min_volume: float = 10_000.0, min_liquidity: float = 5_000.0):
-    """Return the most-liquid active market matching the filters, or None."""
-    scanner = MarketScanner(
-        MarketScannerConfig(
-            min_volume_24h=min_volume,
-            min_liquidity=min_liquidity,
-            max_markets=5,
-        )
-    )
-    markets = scanner.scan()
-    if not markets:
-        return None
-    return markets[0]  # already sorted by 24h volume desc
-
-
 def main():
-    market = pick_market()
-    if market is None:
-        print(
-            "No active markets matched the scanner filters. "
-            "Lower the volume/liquidity thresholds and retry."
-        )
-        return
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--slug-prefix", default="btc-updown-5m-")
+    parser.add_argument("--max-steps", type=int, default=2)
+    parser.add_argument("--bet-fraction", type=float, default=0.01)
+    parser.add_argument("--initial-cash", type=float, default=1_000.0)
+    args = parser.parse_args()
 
-    print(f"Selected market: {market.question}")
-    print(f"  slug:        {market.slug}")
-    print(f"  yes_price:   {market.yes_price:.3f}")
-    print(f"  volume_24h:  ${market.volume_24h:,.0f}")
-    print(f"  liquidity:   ${market.liquidity:,.0f}")
-    print(f"  resolves:    {market.end_date}")
-
-    config = PolyTimeBarEnvConfig(
-        market_slug=market.slug,
-        execute_on="1Hour",
-        action_levels=[-1.0, 0.0, 1.0],  # buy NO / flat / buy YES
-        max_steps=3,
-        dry_run=True,                    # no real orders
-        close_position_on_init=False,    # nothing to close in dry run
+    config = PolymarketBetEnvConfig(
+        market_slug_prefix=args.slug_prefix,
+        max_steps=args.max_steps,
+        bet_fraction=args.bet_fraction,
+        initial_cash=args.initial_cash,
+        dry_run=True,
     )
-    # Dry-run with no funded wallet → portfolio value is 0, so the default
-    # log-return reward would raise. Replace with a simple no-op for demo
-    # purposes; production code should pick a reward suited to its market.
-    env = PolyTimeBarEnv(
-        config=config,
-        private_key=os.getenv("POLYGON_PRIVATE_KEY", ""),
-        reward_function=lambda history: 0.0,
-    )
-    # Skip the bar wait so this script returns quickly.
-    env._wait_for_next_timestamp = lambda: None
+    env = PolymarketBetEnv(config, private_key=os.getenv("POLYGON_PRIVATE_KEY", ""))
 
     td = env.reset()
-    print(f"\nInitial market_state:  {td['market_state'].tolist()}")
-    print(f"Initial account_state: {td['account_state'].tolist()}")
+    print(f"slug_prefix:        {config.market_slug_prefix}")
+    print(f"initial cash:       ${env.cash:,.2f}")
+    print(
+        f"first market_state: yes_price={td['market_state'][0].item():.3f}  "
+        f"liq=${td['market_state'][3].item():,.0f}  "
+        f"resolves={env._current_market.end_date[:16]}"
+    )
 
     for step in range(config.max_steps):
-        action_idx = torch.randint(0, env.action_spec.n, ())
-        td_in = td.set("action", action_idx)
-        td = env._step(td_in)
+        action = torch.randint(0, env.action_spec.n, ())
+        side = "UP" if action.item() == 1 else "DOWN"
+        market = env._current_market
         print(
-            f"\nstep={step + 1}  action_idx={action_idx.item()}  "
-            f"reward={td['reward'].item():+.5f}  "
-            f"done={td['done'].item()}  "
-            f"position_dir={td['account_state'][1].item():+.0f}"
+            f"\nstep {step + 1}: betting {side} on {market.slug}  "
+            f"(waiting for resolution at {market.end_date[:16]})..."
+        )
+        td = env._step(td.set("action", action))
+        print(
+            f"  resolved → reward={td['reward'].item():+.4f}  "
+            f"cash=${env.cash:,.2f}  done={td['done'].item()}"
         )
         if td["done"].item():
             break
 
     env.close()
+    print(f"\nfinal cash: ${env.cash:,.2f}  (started ${args.initial_cash:,.2f})")
 
 
 if __name__ == "__main__":

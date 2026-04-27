@@ -46,8 +46,13 @@ class MarketScannerConfig:
     max_markets: int = 20
     categories: Optional[List[str]] = None
     min_time_to_resolution_hours: float = 24
+    max_time_to_resolution_minutes: Optional[float] = None
     # Single keyword or list — any substring match (case-insensitive) on question or slug
     keyword: Optional[Union[str, List[str]]] = None
+    # Case-sensitive prefix match on the market slug. Discover the right prefix
+    # via the discovery flow (scan_markets.py) and use it as the stable identifier
+    # for short-cadence recurring series (e.g. "btc-updown-5m-").
+    slug_prefix: Optional[str] = None
 
 
 class MarketScanner:
@@ -81,7 +86,7 @@ class MarketScanner:
         )
 
     def _filter_markets(self, markets: List[PolymarketMarket]) -> List[PolymarketMarket]:
-        """Filter markets by volume, liquidity, category, and time to resolution."""
+        """Filter markets by volume, liquidity, category, time, slug prefix, keyword."""
         cfg = self.config
         now = datetime.now(timezone.utc)
         filtered = []
@@ -92,21 +97,36 @@ class MarketScanner:
             if m.liquidity < cfg.min_liquidity:
                 continue
 
-            # Time to resolution check
-            if cfg.min_time_to_resolution_hours > 0 and m.end_date:
+            # Resolution duration window — also drops markets already past their
+            # endDate but not yet flagged closed (Polymarket leaves resolved
+            # markets in this state for a while).
+            if m.end_date:
                 try:
                     end_dt = datetime.fromisoformat(m.end_date.replace("Z", "+00:00"))
-                    hours_remaining = (end_dt - now).total_seconds() / 3600
-                    if hours_remaining < cfg.min_time_to_resolution_hours:
-                        continue
+                    minutes_remaining = (end_dt - now).total_seconds() / 60
                 except (ValueError, TypeError):
-                    pass  # Keep market if end_date can't be parsed
+                    minutes_remaining = None
+                if minutes_remaining is not None:
+                    if minutes_remaining < 0:
+                        continue
+                    if minutes_remaining < cfg.min_time_to_resolution_hours * 60:
+                        continue
+                    if (
+                        cfg.max_time_to_resolution_minutes is not None
+                        and minutes_remaining > cfg.max_time_to_resolution_minutes
+                    ):
+                        continue
 
             # Category filter
             if cfg.categories is not None:
                 market_labels = {tag.get("label", "") for tag in m.tags if isinstance(tag, dict)}
                 if not market_labels.intersection(cfg.categories):
                     continue
+
+            # Slug prefix (case-sensitive structural match) — used both for
+            # discovery and as the env's stable series identifier.
+            if cfg.slug_prefix and not m.slug.startswith(cfg.slug_prefix):
+                continue
 
             # Keyword filter (case-insensitive substring on question or slug;
             # accepts a single string or a list — matches if ANY keyword hits)
@@ -118,27 +138,57 @@ class MarketScanner:
 
             filtered.append(m)
 
-        # Sort by 24h volume descending and cap at max_markets
-        filtered.sort(key=lambda m: m.volume_24h, reverse=True)
+        # When the user is browsing for high-volume markets (no slug/duration
+        # focus), sort by 24h volume desc. When they're targeting short-cadence
+        # series, the API has already returned them in chronological order —
+        # preserve that so the next-to-resolve markets surface first.
+        if cfg.slug_prefix is None and cfg.max_time_to_resolution_minutes is None:
+            filtered.sort(key=lambda m: m.volume_24h, reverse=True)
         return filtered[: cfg.max_markets]
 
     def scan(self) -> List[PolymarketMarket]:
-        """Fetch active markets from Gamma API, parse and filter them."""
+        """Fetch active markets from Gamma API, parse and filter them.
+
+        Two query strategies depending on configuration:
+
+        * **No ``slug_prefix``** — sort by 24h volume descending so high-volume
+          markets surface first (general discovery / browsing).
+        * **``slug_prefix`` set** — sort by ``endDate`` ascending and use the
+          ``end_date_min=now`` server-side filter so short-cadence series
+          (e.g. ``btc-updown-5m-``, which typically have $0 volume until the
+          last seconds before resolution) are surfaced reliably.
+
+        For finding the single soonest-resolving match (used by
+        :class:`PolymarketBetEnv` each step), call :meth:`next_active_market`.
+        """
+        # When the user is targeting upcoming/short-cadence markets (slug_prefix
+        # set, or an upper resolution bound configured), sort by endDate
+        # ascending and use the server-side end_date_min filter — short-cadence
+        # markets (5m/15m crypto) typically have $0 volume so they never make
+        # the volume-sorted top page.
+        targeting_upcoming = bool(
+            self.config.slug_prefix
+            or self.config.max_time_to_resolution_minutes is not None
+        )
+        if targeting_upcoming:
+            params = {
+                "closed": "false",
+                "limit": 500,
+                "order": "endDate",
+                "ascending": "true",
+                "end_date_min": datetime.now(timezone.utc).isoformat(),
+            }
+        else:
+            params = {
+                "active": "true",
+                "closed": "false",
+                "limit": 500,
+                "order": "volume24hr",
+                "ascending": "false",
+            }
         try:
             resp = requests.get(
-                f"{GAMMA_API_BASE}/markets",
-                params={
-                    "active": "true",
-                    "closed": "false",
-                    "limit": 500,
-                    # Sort by 24h volume descending so the first page contains
-                    # the markets users actually want — without this, results
-                    # come in API-default order and high-volume markets in
-                    # niche topics (crypto, etc.) often miss the cut.
-                    "order": "volume24hr",
-                    "ascending": "false",
-                },
-                timeout=15,
+                f"{GAMMA_API_BASE}/markets", params=params, timeout=15
             )
             resp.raise_for_status()
             raw_markets = resp.json()
@@ -148,7 +198,7 @@ class MarketScanner:
 
         markets = []
         for raw in raw_markets:
-            if not raw.get("active", False) or raw.get("closed", False):
+            if raw.get("closed", False):
                 continue
             try:
                 markets.append(self._parse_market(raw))
@@ -157,3 +207,47 @@ class MarketScanner:
                 continue
 
         return self._filter_markets(markets)
+
+    def next_active_market(
+        self, slug_prefix: str, lookahead: int = 500
+    ) -> Optional[PolymarketMarket]:
+        """Return the soonest-resolving active market whose slug starts with ``slug_prefix``.
+
+        Used by :class:`PolymarketBetEnv` to pick the next bet each step.
+        Queries Gamma sorted by ``endDate`` ascending with ``end_date_min=now``
+        so already-resolved-but-still-flagged-active markets are skipped at
+        the API level, then takes the first slug-matching entry.
+
+        Returns ``None`` if no matching market exists in the lookahead window.
+        """
+        now = datetime.now(timezone.utc)
+        try:
+            resp = requests.get(
+                f"{GAMMA_API_BASE}/markets",
+                params={
+                    "closed": "false",
+                    "limit": lookahead,
+                    "order": "endDate",
+                    "ascending": "true",
+                    "end_date_min": now.isoformat(),
+                },
+                timeout=15,
+            )
+            resp.raise_for_status()
+            raw_markets = resp.json()
+        except Exception:
+            logger.exception("Failed to fetch upcoming markets from Gamma API")
+            return None
+
+        for raw in raw_markets:
+            slug = raw.get("slug", "")
+            if not slug.startswith(slug_prefix):
+                continue
+            if raw.get("closed", False):
+                continue
+            try:
+                return self._parse_market(raw)
+            except (KeyError, json.JSONDecodeError, IndexError):
+                logger.warning("Failed to parse market: %s", raw.get("id", "unknown"))
+                continue
+        return None

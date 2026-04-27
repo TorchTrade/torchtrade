@@ -377,87 +377,86 @@ env = OKXFuturesSLTPTorchTradingEnv(
 
 ## Polymarket Environment
 
-[Polymarket](https://polymarket.com/) is a decentralized prediction market on Polygon. TorchTrade wraps the [py-clob-client](https://github.com/Polymarket/py-clob-client) for order execution and the public Gamma API for market metadata. A single environment trades one market on a regular time bar, allocating a fraction of the portfolio to either the YES or NO outcome token.
+[Polymarket](https://polymarket.com/) is a decentralized prediction market on Polygon. TorchTrade exposes a single env, `PolymarketBetEnv`, tailored for short-cadence binary markets — Polymarket runs continuous **5-minute, 15-minute, 1-hour, and 4-hour** crypto "up/down" markets (BTC, ETH, SOL) plus daily markets. Each step is an independent bet: place direction, wait for resolution, collect realized payoff, advance to the next market in the series. There is no carried position, so the observation deliberately omits any `account_state`.
 
 !!! note "Authentication"
     Polymarket uses a **Polygon private key**, not an API key/secret pair. The key is used to derive CLOB API credentials at runtime.
 
 !!! warning "USDC Required"
-    The wallet must hold USDC.e on Polygon to place real orders. Use `dry_run=True` to validate the pipeline without spending capital.
+    The wallet must hold USDC.e on Polygon to place real orders. Use `dry_run=True` to validate the pipeline without spending capital — `dry_run` works without `py-clob-client` installed.
 
-### PolyTimeBarEnv
+### PolymarketBetEnv
 
 ```python
-from torchtrade.envs.live.polymarket import PolyTimeBarEnv, PolyTimeBarEnvConfig
+from torchtrade.envs.live.polymarket import PolymarketBetEnv, PolymarketBetEnvConfig
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-config = PolyTimeBarEnvConfig(
-    market_slug="will-bitcoin-exceed-100k",  # or condition_id / yes_token_id
-    execute_on="1Hour",                       # 1Minute, 5Minute, 1Hour, 1Day
-    action_levels=[-1.0, 0.0, 1.0],           # buy NO / flat / buy YES (fractions of portfolio)
-    dry_run=True,                             # paper trading (recommended!)
+config = PolymarketBetEnvConfig(
+    market_slug_prefix="btc-updown-5m-",  # discover via scan_markets.py
+    bet_fraction=0.01,                    # stake 1 % of cash per bet
+    max_steps=10,                         # 10 bets per episode
+    initial_cash=1_000.0,                 # for dry-run accounting
+    dry_run=True,                         # paper trading (recommended!)
 )
 
-env = PolyTimeBarEnv(
+env = PolymarketBetEnv(
     config=config,
     private_key=os.getenv("POLYGON_PRIVATE_KEY", ""),
 )
-# Action space: 3 discrete actions (one per action_level)
+# observation_spec: {"market_state": (5,)}
+# action_spec:      Categorical(2)  → 0 = Down, 1 = Up
 ```
 
-### Augmenting observations with external data
+Each `step()`:
+1. Submits the bet on the current market (skipped in `dry_run`).
+2. Sleeps until the market's `endDate` plus a small grace period.
+3. Fetches the resolved outcome from Gamma (`outcomePrices` snaps to `[1, 0]` or `[0, 1]`).
+4. Computes realized payoff — a win pays `stake × (1 − fill) / fill`; a loss returns `−stake`.
+5. Picks the next active market matching `market_slug_prefix` and returns its `market_state`.
 
-`PolyTimeBarEnv` accepts arbitrary `supplementary_observers` — any object that exposes:
+### Discovering markets and slug prefixes
 
-- `get_observation_spec() -> dict[str, TensorSpec]`
-- `get_observations() -> dict[str, ndarray | tensor]`
-
-This makes it easy to feed extra signals (crypto OHLCV, news embeddings, on-chain metrics, …) alongside the Polymarket market state.
-
-```python
-import numpy as np
-import torch
-from torchrl.data import Bounded
-from torchtrade.envs.live.polymarket import PolyTimeBarEnv, PolyTimeBarEnvConfig
-
-class BTCWindowObserver:
-    """Stub — replace with a live source (e.g., a BinanceObservationClass adapter)."""
-    def get_observation_spec(self):
-        return {"btc_ohlcv": Bounded(
-            low=-float("inf"), high=float("inf"), shape=(24, 4), dtype=torch.float32,
-        )}
-    def get_observations(self):
-        return {"btc_ohlcv": np.random.randn(24, 4).astype(np.float32)}
-
-env = PolyTimeBarEnv(
-    config=PolyTimeBarEnvConfig(market_slug="...", execute_on="1Hour"),
-    private_key="...",
-    supplementary_observers=[BTCWindowObserver()],
-)
-# observation now has market_state, account_state, and btc_ohlcv keys
-```
-
-A full runnable example lives in [`examples/broker/polymarket/run_with_supplementary.py`](https://github.com/TorchTrade/torchtrade/blob/main/examples/broker/polymarket/run_with_supplementary.py). Note that observer classes from other live envs (`BinanceObservationClass`, etc.) only implement `get_observations()` today — you'll need a small adapter that adds `get_observation_spec()` to plug them in.
-
-### Discovering markets
-
-Use `MarketScanner` to fetch and filter active markets from the Gamma API:
+`MarketScanner` is the discovery tool. Use it once to identify the slug prefix that points at the series you want, then plug it into the env. Live scanning a fast-cadence series at the API level uses Gamma's `endDate`-ascending sort and the `end_date_min=now` filter — short-cadence markets typically have $0 24-hour volume, so the volume-sorted browsing path would miss them.
 
 ```python
 from torchtrade.envs.live.polymarket import MarketScanner, MarketScannerConfig
 
+# Generic discovery
 scanner = MarketScanner(MarketScannerConfig(
-    min_volume_24h=10_000,
-    min_liquidity=5_000,
+    min_volume_24h=10_000.0,
     max_markets=10,
-    categories=["Sports"],          # optional tag filter
 ))
-for market in scanner.scan():
-    print(market.slug, market.yes_price, market.volume_24h)
+for m in scanner.scan():
+    print(m.slug, m.yes_price, m.volume_24h)
+
+# Lock to a series (5-minute Bitcoin)
+scanner = MarketScanner(MarketScannerConfig(slug_prefix="btc-updown-5m-"))
+for m in scanner.scan():
+    print(m.slug, m.end_date, m.liquidity)
+
+# Find any short-cadence market resolving in <30 minutes
+scanner = MarketScanner(MarketScannerConfig(max_time_to_resolution_minutes=30))
 ```
+
+The companion CLI is [`examples/broker/polymarket/scan_markets.py`](../../examples/broker/polymarket/scan_markets.py); it accepts `--slug-prefix`, `--keyword`, `--max-resolution-minutes`, and friends.
+
+### Currently active short-cadence series
+
+| Series | Cadence | Slug prefix |
+|--------|---------|-------------|
+| BTC up/down (5 min)   | 5 min  | `btc-updown-5m-` |
+| BTC up/down (15 min)  | 15 min | `btc-updown-15m-` |
+| BTC up/down (1 hour)  | 1 h    | `bitcoin-up-or-down-` |
+| BTC up/down (4 hour)  | 4 h    | `btc-updown-4h-` |
+| ETH up/down (5 min)   | 5 min  | `eth-updown-5m-` |
+| ETH up/down (15 min)  | 15 min | `eth-updown-15m-` |
+| SOL up/down (5 min)   | 5 min  | `sol-updown-5m-` |
+| BTC daily up/down     | 1 day  | `bitcoin-up-or-down-on-` |
+
+Polymarket adds and renames series occasionally; re-running `scan_markets.py` to verify the prefix before configuring the env is the safe move.
 
 ---
 

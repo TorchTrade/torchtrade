@@ -126,7 +126,7 @@ TorchTrade supports live trading with major exchanges:
 | **BybitFuturesSLTPTorchTradingEnv** | Bybit | Crypto | ✅ | ✅ (1-100x) | ✅ |
 | **OKXFuturesTorchTradingEnv** | OKX | Crypto | ✅ | ✅ (1-125x) | ❌ |
 | **OKXFuturesSLTPTorchTradingEnv** | OKX | Crypto | ✅ | ✅ (1-125x) | ✅ |
-| **PolyTimeBarEnv** | Polymarket | Prediction markets | ❌ | ❌ | ❌ |
+| **PolymarketBetEnv** | Polymarket | Prediction markets | ❌ | ❌ | ❌ |
 
 **Need another broker?** Request support for additional platforms (Interactive Brokers, Kraken, etc.) by [creating an issue](https://github.com/TorchTrade/torchtrade/issues/new) or emailing torchtradecontact@gmail.com.
 
@@ -167,8 +167,8 @@ Start live trading with these supported platforms:
 ### 🔮 Prediction Markets
 
 **[Polymarket](https://polymarket.com/)** - Decentralized prediction market on Polygon
-- **Supported by:** `PolyTimeBarEnv`
-- **Features:** Single-market YES/NO trading on regular time bars, supplementary observers (e.g., crypto OHLCV) for richer state, dry-run paper trading, Gamma API market scanner
+- **Supported by:** `PolymarketBetEnv`
+- **Features:** Rolling one-shot bets on short-cadence binary markets (BTC/ETH/SOL up-or-down at 5m / 15m / 1h / 4h / daily cadences), Gamma API market scanner, dry-run paper trading without `py-clob-client` installed
 - **Get Started:** [Browse markets at Polymarket](https://polymarket.com/)
 
 ### 📈 Stock & Crypto API

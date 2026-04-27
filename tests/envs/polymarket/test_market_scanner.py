@@ -276,7 +276,10 @@ class TestScan:
         assert results[0].market_id == "517310"
 
     @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
-    def test_scan_filters_inactive_and_closed(self, mock_get):
+    def test_scan_filters_closed_markets(self, mock_get):
+        """Closed markets are filtered out client-side. Inactive markets are kept
+        because short-cadence markets (e.g. ``btc-updown-5m-``) sit listed-but-inactive
+        until shortly before resolution and Gamma still includes them."""
         active_market = _make_raw_market(market_id="1", active=True, closed=False)
         inactive_market = _make_raw_market(market_id="2", active=False, closed=False)
         closed_market = _make_raw_market(market_id="3", active=True, closed=True)
@@ -286,14 +289,11 @@ class TestScan:
         mock_resp.raise_for_status = MagicMock()
         mock_get.return_value = mock_resp
 
-        config = MarketScannerConfig(
+        scanner = MarketScanner(MarketScannerConfig(
             min_volume_24h=0, min_liquidity=0, min_time_to_resolution_hours=0
-        )
-        scanner = MarketScanner(config)
-        results = scanner.scan()
-
-        assert len(results) == 1
-        assert results[0].market_id == "1"
+        ))
+        ids = sorted(m.market_id for m in scanner.scan())
+        assert ids == ["1", "2"]  # closed filtered, inactive kept
 
     @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
     def test_scan_returns_empty_on_api_error(self, mock_get):
@@ -302,3 +302,126 @@ class TestScan:
         scanner = MarketScanner(MarketScannerConfig())
         results = scanner.scan()
         assert results == []
+
+    @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
+    def test_scan_switches_to_endDate_sort_when_targeting_upcoming(self, mock_get):
+        """slug_prefix or max_resolution_minutes triggers chronological sort
+        + end_date_min filter so short-cadence markets surface (they have $0
+        volume and never make the volume-sorted top page)."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = []
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        scanner = MarketScanner(MarketScannerConfig(slug_prefix="btc-updown-5m-"))
+        scanner.scan()
+        params = mock_get.call_args.kwargs["params"]
+        assert params["order"] == "endDate"
+        assert params["ascending"] == "true"
+        assert "end_date_min" in params
+
+
+class TestSlugPrefix:
+    @pytest.mark.parametrize(
+        "prefix,slug,expected_count",
+        [
+            (None, "btc-updown-5m-1234", 1),
+            ("btc-updown-5m-", "btc-updown-5m-1234", 1),
+            ("btc-updown-15m-", "btc-updown-5m-1234", 0),
+            ("BTC-UPDOWN-5M-", "btc-updown-5m-1234", 0),  # case-sensitive
+            ("", "btc-updown-5m-1234", 1),                 # empty falsy → no filter
+        ],
+        ids=["no-filter", "matches", "no-match", "case-sensitive", "empty"],
+    )
+    def test_slug_prefix_filtering(self, prefix, slug, expected_count):
+        scanner = MarketScanner(MarketScannerConfig(
+            min_volume_24h=0, min_liquidity=0, min_time_to_resolution_hours=0,
+            slug_prefix=prefix,
+        ))
+        markets = [scanner._parse_market(_make_raw_market(slug=slug))]
+        assert len(scanner._filter_markets(markets)) == expected_count
+
+
+class TestMaxResolutionMinutes:
+    @pytest.mark.parametrize(
+        "max_minutes,end_offset_seconds,expected_count",
+        [
+            (None, 600, 1),    # no upper bound
+            (60, 600, 1),      # under cap (10 min)
+            (60, 3700, 0),     # over cap (62 min)
+            (5, 600, 0),       # tighter cap excludes
+        ],
+        ids=["no-cap", "under-cap", "over-cap", "tight-cap"],
+    )
+    def test_upper_bound_filtering(self, max_minutes, end_offset_seconds, expected_count):
+        from datetime import datetime, timedelta, timezone
+        end = (datetime.now(timezone.utc) + timedelta(seconds=end_offset_seconds))
+        scanner = MarketScanner(MarketScannerConfig(
+            min_volume_24h=0, min_liquidity=0, min_time_to_resolution_hours=0,
+            max_time_to_resolution_minutes=max_minutes,
+        ))
+        markets = [scanner._parse_market(
+            _make_raw_market(end_date=end.isoformat().replace("+00:00", "Z"))
+        )]
+        assert len(scanner._filter_markets(markets)) == expected_count
+
+    def test_drops_markets_already_past_end_date(self):
+        from datetime import datetime, timedelta, timezone
+        past = (datetime.now(timezone.utc) - timedelta(minutes=5))
+        scanner = MarketScanner(MarketScannerConfig(
+            min_volume_24h=0, min_liquidity=0, min_time_to_resolution_hours=0,
+        ))
+        markets = [scanner._parse_market(
+            _make_raw_market(end_date=past.isoformat().replace("+00:00", "Z"))
+        )]
+        assert scanner._filter_markets(markets) == []
+
+
+class TestNextActiveMarket:
+    """Verify next_active_market hits the correct endpoint and matches by prefix."""
+
+    @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
+    def test_returns_first_matching_market(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [
+            _make_raw_market(slug="other-market-1234", market_id="1"),
+            _make_raw_market(slug="btc-updown-5m-1111", market_id="2"),
+            _make_raw_market(slug="btc-updown-5m-2222", market_id="3"),
+        ]
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        scanner = MarketScanner()
+        result = scanner.next_active_market("btc-updown-5m-")
+        assert result is not None
+        assert result.market_id == "2"  # first matching, not first in list
+
+    @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
+    def test_returns_none_when_no_match(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [_make_raw_market(slug="something-else-1234")]
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        assert MarketScanner().next_active_market("btc-updown-5m-") is None
+
+    @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
+    def test_returns_none_on_api_error(self, mock_get):
+        mock_get.side_effect = Exception("503")
+        assert MarketScanner().next_active_market("btc-updown-5m-") is None
+
+    @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
+    def test_skips_closed_markets(self, mock_get):
+        """A closed market with a matching slug should be skipped — the env
+        only wants markets that have not yet resolved."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [
+            _make_raw_market(slug="btc-updown-5m-1111", market_id="1", closed=True),
+            _make_raw_market(slug="btc-updown-5m-2222", market_id="2", closed=False),
+        ]
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        result = MarketScanner().next_active_market("btc-updown-5m-")
+        assert result is not None
+        assert result.market_id == "2"

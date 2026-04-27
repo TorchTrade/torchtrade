@@ -1,244 +1,191 @@
 # Polymarket Broker Examples
 
-Examples demonstrating `PolyTimeBarEnv` — the live trading environment for
-[Polymarket](https://polymarket.com/) prediction markets.
+Examples demonstrating `PolymarketBetEnv` — a one-shot betting environment for
+short-cadence binary markets on [Polymarket](https://polymarket.com/).
+
+Polymarket runs continuous **5-minute, 15-minute, 1-hour, and 4-hour** crypto
+"up/down" markets (BTC, ETH, SOL) plus daily markets. Each market is a binary
+bet: did the asset go up or down over the bar? The env rolls through the
+series — bet → wait for resolution → collect payoff → next market — without
+holding any position across steps.
 
 All examples default to `dry_run=True`, so you can run them without a funded
-Polygon wallet or a real `py-clob-client` install.
+Polygon wallet or `py-clob-client` installed.
 
 ## End-to-end walkthrough
 
-A complete tour of the env in ~30 lines: pick a market, configure, step.
+A complete tour in five steps: **discover → identify → configure → run**.
 
-### 1. Find a market
+### 1. Discover what's available
 
-Use `MarketScanner` to query the public Gamma API and return the most-liquid
-active markets matching your filters:
-
-```python
-from torchtrade.envs.live.polymarket import MarketScanner, MarketScannerConfig
-
-scanner = MarketScanner(MarketScannerConfig(
-    keyword=["btc", "bitcoin"],   # any-match across question + slug
-    min_volume_24h=50_000.0,
-    min_liquidity=10_000.0,
-    max_markets=1,
-))
-market = scanner.scan()[0]
-print(market.slug, market.question, market.yes_price)
-# will-bitcoin-hit-150k-by-june-30-2026  Will Bitcoin hit $150k by June 30, 2026?  0.01
-```
-
-Each `PolymarketMarket` carries the fields you need to construct an env —
-`slug`, `condition_id`, `yes_token_id`, `no_token_id`, plus pricing/liquidity
-metadata.
-
-### 2. Configure the env
-
-`PolyTimeBarEnvConfig` is a dataclass — only `market_slug` (or `condition_id` /
-`yes_token_id`) is required. The most important knob is `action_levels`: a list
-of portfolio fractions in `[-1, 1]` that the agent's discrete action indexes
-into. Negative = NO, positive = YES, zero = flat.
-
-```python
-from torchtrade.envs.live.polymarket import PolyTimeBarEnv, PolyTimeBarEnvConfig
-
-config = PolyTimeBarEnvConfig(
-    market_slug=market.slug,
-    execute_on="1Hour",                    # one RL step per hour bar
-    action_levels=[-1.0, 0.0, 1.0],        # buy NO / flat / buy YES
-    max_steps=24,                          # 1-day episode
-    dry_run=True,                          # no real orders, no wallet needed
-    close_position_on_init=False,
-)
-env = PolyTimeBarEnv(
-    config=config,
-    private_key="",                        # only needed when dry_run=False
-    reward_function=lambda h: 0.0,         # replace with log_return_reward etc.
-)
-```
-
-### 3. Inspect the observation
-
-`reset()` returns a TensorDict with two universal keys:
-
-```python
-td = env.reset()
-td["market_state"]   # tensor([yes_price, spread, vol_24h, liquidity, time_to_resolution])  shape (5,)
-td["account_state"]  # tensor([exposure, direction, unrealized_pnl, hold_time, leverage=1, liq_dist=1])  shape (6,)
-```
-
-`account_state` follows TorchTrade's universal layout, so a policy trained on
-offline crypto envs can be plugged in here without rewiring. `leverage` and
-`distance_to_liquidation` are constant 1.0 on Polymarket (no leverage).
-
-### 4. Step the env
-
-Each `step()` does seven things in order, all in one bar:
-
-```
-1. Resolve action_idx → desired fraction (e.g. 2 → +1.0 = "100% YES")
-2. Read live YES price from CLOB
-3. Diff target vs current position; place delta order via the trader
-4. Sleep until the next bar boundary (skipped in tests / dry-run-fast)
-5. Bump the hold counter
-6. Build the next observation TensorDict
-7. Compute reward; check market-closed / bankruptcy / max_steps
-```
-
-Run it with any TorchRL-compatible loop:
-
-```python
-import torch
-from tensordict import TensorDict
-
-td = env.reset()
-for step in range(config.max_steps):
-    action_idx = torch.randint(0, env.action_spec.n, ())   # replace with policy(td)
-    td = env._step(td.set("action", action_idx))
-    if td["done"].item():
-        break
-env.close()
-```
-
-### 5. What the trader actually does
-
-In `dry_run=True` the order executor short-circuits — every `buy/sell` returns
-`{"success": True, "dry_run": True}` without touching the network. Flip
-`dry_run=False`, set `POLYGON_PRIVATE_KEY`, and `pip install py-clob-client`,
-and the same code submits real fill-or-kill market orders to
-`clob.polymarket.com`. The agent never knows the difference.
-
-The position state machine inside `_execute_trade_if_needed` always trades the
-**delta** between target and current exposure:
-
-| Current → Target              | Action                            |
-|-------------------------------|-----------------------------------|
-| flat → +0.5 YES               | buy YES with 50% of portfolio     |
-| +0.5 YES → +1.0 YES           | top up: buy more YES              |
-| +1.0 YES → -1.0 NO            | close YES, then buy NO            |
-| anything → 0.0                | close current position            |
-| same target as current        | no-op (delta < $1 floor)          |
-
-### Termination
-
-`step()` sets one of these flags:
-
-- `terminated=True` — underlying market resolved (`observer.is_market_closed()`)
-  or wallet dropped below `bankrupt_threshold * initial_balance`.
-- `truncated=True` — hit `config.max_steps`.
-
-`done = terminated or truncated`, following the standard TorchRL convention.
-
-The runnable equivalent of the snippets above is
-[`run_dry_run.py`](run_dry_run.py) — exactly the same flow, with `argparse` and
-print statements stripped out.
-
-## Examples
-
-### Discover markets
-
-List the most-liquid active markets matching a filter (volume, liquidity,
-time-to-resolution, optional keyword). No environment, no orders.
+Use `scan_markets.py` to query the live Gamma API. With no flags it returns
+the highest-volume open markets. Add `--slug-prefix` once you know what you
+want — same primitive the env uses, so what you see here is what the env will
+trade:
 
 ```bash
-# Top 10 by 24h volume
+# Browse high-volume markets
 python examples/broker/polymarket/scan_markets.py
 
-# Filter by a single keyword (case-insensitive substring on question or slug)
-python examples/broker/polymarket/scan_markets.py --keyword bitcoin
+# Look at upcoming short-cadence crypto markets
+python examples/broker/polymarket/scan_markets.py --max-resolution-minutes 30 --max 8
 
-# Filter by multiple keywords — a market passes if ANY of them matches
-python examples/broker/polymarket/scan_markets.py --keyword btc bitcoin crypto
-
-# Multi-word terms must be quoted; combine with other filters as needed
-python examples/broker/polymarket/scan_markets.py --keyword "world cup" --min-volume 50000 --max 5
+# Lock to the BTC 5-minute series
+python examples/broker/polymarket/scan_markets.py --slug-prefix btc-updown-5m- --max 5
 ```
 
-Example output:
+Sample output for the BTC 5m query:
 
 ```
-  YES |      24h vol |    liquidity | resolves     | question
-----------------------------------------------------------------------------------------------------
- 0.01 | $  1,303,675 | $  2,565,119 |   2026-07-20 | Will USA win the 2026 FIFA World Cup?
- 0.00 | $    858,344 | $    999,236 |   2026-07-01 | Will the Portland Trail Blazers win the 2026 NBA Finals?
- 0.00 | $    751,378 | $  5,583,069 |   2026-07-20 | Will Iraq win the 2026 FIFA World Cup?
- 0.16 | $    652,216 | $    362,115 |   2026-07-01 | Will the San Antonio Spurs win the 2026 NBA Finals?
- 0.14 | $    513,394 | $    111,446 |   2026-07-01 | Will the Boston Celtics win the 2026 NBA Finals?
- 0.04 | $    484,678 | $    378,936 |   2026-07-01 | Will the Los Angeles Lakers win the 2026 NBA Finals?
- 0.01 | $    451,391 | $    731,710 |   2026-07-01 | Will the Minnesota Timberwolves win the 2026 NBA Finals?
- 0.03 | $    450,139 | $    508,460 |   2026-07-01 | Will the New York Knicks win the 2026 NBA Finals?
- 0.01 | $    425,376 | $    531,424 |   2026-07-01 | Will the Atlanta Hawks win the 2026 NBA Finals?
- 0.09 | $    409,781 | $  1,402,387 |   2026-07-20 | Will Brazil win the 2026 FIFA World Cup?
+  YES |     24h vol |   liquidity |       resolves | slug
+--------------------------------------------------------------------------------------
+ 0.51 | $     1,690 | $    18,110 |       in    3m | btc-updown-5m-1777284300
+ 0.51 | $        72 | $    21,010 |       in    8m | btc-updown-5m-1777284600
+ 0.51 | $        15 | $    18,054 |       in   53m | btc-updown-5m-1777287300
+ 0.51 | $        15 | $    14,635 |       in  1.7h | btc-updown-5m-1777290300
+ 0.51 | $        10 | $    14,670 |       in  1.4h | btc-updown-5m-1777289100
 ```
-
-The output reflects the live Gamma API at run time — your numbers and rows will differ.
 
 #### Column reference
 
-| Column      | Meaning |
-|-------------|---------|
-| `YES`       | Current market price of the YES outcome token in USDC, in [0, 1]. Read it as the market's implied probability of YES resolving true (e.g. `0.16` ≈ 16 % implied probability). |
-| `24h vol`   | Total USDC traded against this market in the trailing 24 hours. Higher numbers mean tighter spreads and easier fills. |
-| `liquidity` | USDC currently resting in the order book (sum of bid + ask depth). Higher numbers mean less slippage on entry/exit. |
-| `resolves`  | Date the market is scheduled to resolve, in `YYYY-MM-DD` (UTC). Markets close to resolution have less time for moves but tighter pricing. |
-| `question`  | The human-readable question the market resolves on. Truncated to 60 characters in the table. |
-
-Rows are sorted by `24h vol` descending and capped at `--max` (default 10).
+| Column | Meaning |
+|--------|---------|
+| `YES`       | Implied probability of "Up" (the YES outcome), in `[0, 1]`. `0.51` ≈ 51 % chance. |
+| `24h vol`   | USDC traded against this market in the trailing 24 h. Short-cadence markets typically show ~$0 until minutes before resolution. |
+| `liquidity` | USDC currently resting on the order book. Higher = lower slippage. |
+| `resolves`  | Time until resolution, formatted as `Xm` / `Xh` / date. |
+| `slug`      | The market's stable identifier on Polymarket. The **prefix** (everything before the trailing timestamp / strike) is what the env locks onto. |
 
 #### CLI flags
 
-| Flag             | Default     | Description |
-|------------------|-------------|-------------|
-| `--keyword`      | *(none)*    | One or more case-insensitive substrings matched against the market `question` **or** `slug`. A market passes if **any** keyword hits — `--keyword btc bitcoin crypto` matches anything containing `btc` OR `bitcoin` OR `crypto`. Quote multi-word terms: `--keyword "world cup"`. |
-| `--min-volume`   | `10000`     | Minimum 24-hour volume in USDC. Use this to skip illiquid markets. |
-| `--min-liquidity`| `5000`      | Minimum resting order-book liquidity in USDC. |
-| `--max`          | `10`        | Maximum number of markets to print. |
+| Flag                       | Default | Description |
+|----------------------------|---------|-------------|
+| `--slug-prefix`            | *(none)* | Case-sensitive prefix match on the market slug — the env-side primitive. Use it once you know what you want. |
+| `--keyword`                | *(none)* | One or more case-insensitive substrings; ANY-match against question/slug. Useful for fuzzy discovery. |
+| `--min-volume`             | `0`      | Minimum 24 h volume (USD). |
+| `--min-liquidity`          | `0`      | Minimum order-book liquidity (USD). |
+| `--min-resolution-hours`   | `0`      | Lower bound on time-to-resolution. |
+| `--max-resolution-minutes` | *(none)* | Upper bound on time-to-resolution. Set to e.g. `30` to surface short-cadence markets that volume-sorted browsing would miss. |
+| `--max`                    | `20`     | Cap on rows printed. |
 
-The same fields are available on `MarketScannerConfig` if you want to use the scanner programmatically:
+### 2. Identify the slug prefix
+
+The `slug` column above shows individual markets like `btc-updown-5m-1777284300`.
+The trailing number is a per-market epoch; the **prefix** `btc-updown-5m-` is
+the stable series identifier. Currently active short-cadence series include:
+
+| Series | Cadence | Slug prefix |
+|--------|---------|-------------|
+| BTC up/down (5 min)   | 5 min  | `btc-updown-5m-` |
+| BTC up/down (15 min)  | 15 min | `btc-updown-15m-` |
+| BTC up/down (1 hour)  | 1 h    | `bitcoin-up-or-down-` |
+| BTC up/down (4 hour)  | 4 h    | `btc-updown-4h-` |
+| ETH up/down (5 min)   | 5 min  | `eth-updown-5m-` |
+| ETH up/down (15 min)  | 15 min | `eth-updown-15m-` |
+| SOL up/down (5 min)   | 5 min  | `sol-updown-5m-` |
+| BTC daily up/down     | 1 day  | `bitcoin-up-or-down-on-` |
+
+Polymarket's slug naming isn't perfectly consistent (5m / 15m / 4h use `btc`
+abbreviations; 1h and daily use full `bitcoin`), so re-running `scan_markets.py`
+once before configuring the env is the safe move.
+
+### 3. Configure the env
+
+Plug the prefix into `PolymarketBetEnvConfig`:
 
 ```python
-from torchtrade.envs.live.polymarket import MarketScanner, MarketScannerConfig
+from torchtrade.envs.live.polymarket import PolymarketBetEnv, PolymarketBetEnvConfig
 
-scanner = MarketScanner(MarketScannerConfig(
-    keyword=["btc", "bitcoin", "crypto"],  # or just a single string, e.g. "bitcoin"
-    min_volume_24h=50_000.0,
-    min_liquidity=10_000.0,
-    max_markets=5,
-))
-for market in scanner.scan():
-    print(market.slug, market.yes_price)
+config = PolymarketBetEnvConfig(
+    market_slug_prefix="btc-updown-5m-",   # the only required field
+    bet_fraction=0.01,                     # stake 1 % of cash per bet
+    max_steps=10,                          # 10 bets per episode
+    initial_cash=1_000.0,                  # for dry-run accounting
+    dry_run=True,                          # skip real CLOB orders
+)
+env = PolymarketBetEnv(config, private_key="")  # private_key only needed when dry_run=False
 ```
 
-### End-to-end dry run
+Swapping to ETH 15-minute is a one-line change:
 
-Pick the top market via the scanner, build `PolyTimeBarEnv` in dry-run mode,
-and run a 3-step random rollout.
+```python
+config = PolymarketBetEnvConfig(market_slug_prefix="eth-updown-15m-")
+```
+
+### 4. Inspect the observation
+
+`reset()` returns a `TensorDict` with a single key — `market_state` of the
+freshly-picked next market:
+
+```python
+td = env.reset()
+td["market_state"]
+# tensor([yes_price, spread, vol_24h, liquidity, lifetime_progress])  shape (5,)
+```
+
+There is **no** `account_state`. By the time the next `step()` runs, the
+previous bet has already resolved — there is no carried position to encode.
+Cumulative P&L is captured directly in the per-step rewards.
+
+### 5. Step the env
+
+Each `step()` does five things:
+
+```
+1. Submit the bet on the current market (skipped in dry_run)
+2. Sleep until the market's endDate + grace
+3. Fetch the resolved outcome from Gamma's metadata
+4. Compute realized payoff:  win → stake * (1 - fill) / fill, loss → -stake
+5. Pick the next active market matching market_slug_prefix and return its market_state
+```
+
+```python
+import torch
+
+td = env.reset()
+for _ in range(config.max_steps):
+    action = torch.randint(0, env.action_spec.n, ())  # 0 = Down, 1 = Up
+    td = env.step(td.set("action", action))["next"]
+    if td["done"]: break
+env.close()
+```
+
+The runnable equivalent — with a random policy and progress prints — is
+[`run_dry_run.py`](run_dry_run.py).
+
+## Examples
+
+### `scan_markets.py` — discover
+
+See section 1 above.
+
+### `run_dry_run.py` — bet end-to-end
 
 ```bash
 python examples/broker/polymarket/run_dry_run.py
+python examples/broker/polymarket/run_dry_run.py --slug-prefix btc-updown-15m- --max-steps 4
 ```
 
-### With a supplementary observer
+Note: the script blocks until each market resolves, so default 5-minute / 2-step
+takes ~10–15 minutes wall-clock. Use `--slug-prefix btc-updown-5m-` and
+`--max-steps 1` for the quickest end-to-end test.
 
-Augment the env's `market_state` with an external feature window — useful when
-a prediction market is correlated with another asset (crypto OHLCV, news embeddings,
-etc.). The example uses a tiny stub observer; swap it for a production source.
+## Action-space convention
 
-```bash
-python examples/broker/polymarket/run_with_supplementary.py
-```
+`Categorical(2)` over `{0: Down, 1: Up}`, indexing into the market's `["Up",
+"Down"]` outcomes. An LLM actor can prompt over the question text and emit a
+discrete index; an RL policy gets logits over two classes.
 
 ## Running for real
 
-To trade real funds, set:
+To trade real funds:
 
-- `POLYGON_PRIVATE_KEY` in `.env` — Polygon wallet with USDC.e
-- Install the optional CLOB client: `pip install py-clob-client`
-- Set `dry_run=False` in `PolyTimeBarEnvConfig`
+1. Set `POLYGON_PRIVATE_KEY` in `.env` — the wallet must hold USDC.e on Polygon.
+2. `pip install py-clob-client`.
+3. Set `dry_run=False` in `PolymarketBetEnvConfig`.
 
-Always start with `dry_run=True` and verify the action loop and accounting
-before flipping the switch.
+Always start with `dry_run=True` and verify the bet timing, payoff
+computation, and accounting before flipping the switch.
 
 ## See Also
 
