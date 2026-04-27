@@ -18,6 +18,7 @@ Online environments connect to real trading APIs for paper trading or live execu
 - **[Bitget](https://www.bitget.com/)** - Cryptocurrency futures with competitive fees and testnet
 - **[Bybit](https://www.bybit.com/)** - Cryptocurrency derivatives with native bracket orders and testnet
 - **[OKX](https://www.okx.com/)** - Global cryptocurrency exchange with bracket orders via attachAlgoOrds and demo trading
+- **[Polymarket](https://polymarket.com/)** - Decentralized prediction markets on Polygon (CLOB), with dry-run paper trading
 
 ## Overview
 
@@ -33,6 +34,7 @@ Online environments connect to real trading APIs for paper trading or live execu
 | **BybitFuturesSLTPTorchTradingEnv** | Bybit | Crypto | Yes | Yes | Yes |
 | **OKXFuturesTorchTradingEnv** | OKX | Crypto | Yes | Yes | - |
 | **OKXFuturesSLTPTorchTradingEnv** | OKX | Crypto | Yes | Yes | Yes |
+| **PolyTimeBarEnv** | Polymarket | Prediction markets | - | - | - |
 
 ## Fractional Position Sizing
 
@@ -373,6 +375,92 @@ env = OKXFuturesSLTPTorchTradingEnv(
 
 ---
 
+## Polymarket Environment
+
+[Polymarket](https://polymarket.com/) is a decentralized prediction market on Polygon. TorchTrade wraps the [py-clob-client](https://github.com/Polymarket/py-clob-client) for order execution and the public Gamma API for market metadata. A single environment trades one market on a regular time bar, allocating a fraction of the portfolio to either the YES or NO outcome token.
+
+!!! note "Authentication"
+    Polymarket uses a **Polygon private key**, not an API key/secret pair. The key is used to derive CLOB API credentials at runtime.
+
+!!! warning "USDC Required"
+    The wallet must hold USDC.e on Polygon to place real orders. Use `dry_run=True` to validate the pipeline without spending capital.
+
+### PolyTimeBarEnv
+
+```python
+from torchtrade.envs.live.polymarket import PolyTimeBarEnv, PolyTimeBarEnvConfig
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+config = PolyTimeBarEnvConfig(
+    market_slug="will-bitcoin-exceed-100k",  # or condition_id / yes_token_id
+    execute_on="1Hour",                       # 1Minute, 5Minute, 1Hour, 1Day
+    action_levels=[-1.0, 0.0, 1.0],           # buy NO / flat / buy YES (fractions of portfolio)
+    dry_run=True,                             # paper trading (recommended!)
+)
+
+env = PolyTimeBarEnv(
+    config=config,
+    private_key=os.getenv("POLYGON_PRIVATE_KEY", ""),
+)
+# Action space: 3 discrete actions (one per action_level)
+```
+
+### Augmenting observations with external data
+
+`PolyTimeBarEnv` accepts arbitrary `supplementary_observers` — any object that exposes:
+
+- `get_observation_spec() -> dict[str, TensorSpec]`
+- `get_observations() -> dict[str, ndarray | tensor]`
+
+This makes it easy to feed extra signals (crypto OHLCV, news embeddings, on-chain metrics, …) alongside the Polymarket market state.
+
+```python
+import numpy as np
+import torch
+from torchrl.data import Bounded
+from torchtrade.envs.live.polymarket import PolyTimeBarEnv, PolyTimeBarEnvConfig
+
+class BTCWindowObserver:
+    """Stub — replace with a live source (e.g., a BinanceObservationClass adapter)."""
+    def get_observation_spec(self):
+        return {"btc_ohlcv": Bounded(
+            low=-float("inf"), high=float("inf"), shape=(24, 4), dtype=torch.float32,
+        )}
+    def get_observations(self):
+        return {"btc_ohlcv": np.random.randn(24, 4).astype(np.float32)}
+
+env = PolyTimeBarEnv(
+    config=PolyTimeBarEnvConfig(market_slug="...", execute_on="1Hour"),
+    private_key="...",
+    supplementary_observers=[BTCWindowObserver()],
+)
+# observation now has market_state, account_state, and btc_ohlcv keys
+```
+
+A full runnable example lives in [`examples/broker/polymarket/run_with_supplementary.py`](https://github.com/TorchTrade/torchtrade/blob/main/examples/broker/polymarket/run_with_supplementary.py). Note that observer classes from other live envs (`BinanceObservationClass`, etc.) only implement `get_observations()` today — you'll need a small adapter that adds `get_observation_spec()` to plug them in.
+
+### Discovering markets
+
+Use `MarketScanner` to fetch and filter active markets from the Gamma API:
+
+```python
+from torchtrade.envs.live.polymarket import MarketScanner, MarketScannerConfig
+
+scanner = MarketScanner(MarketScannerConfig(
+    min_volume_24h=10_000,
+    min_liquidity=5_000,
+    max_markets=10,
+    categories=["Sports"],          # optional tag filter
+))
+for market in scanner.scan():
+    print(market.slug, market.yes_price, market.volume_24h)
+```
+
+---
+
 ## Position Sizing (SLTP Environments)
 
 All live SLTP environments support three position sizing modes, matching the offline SLTP environments for train-deploy consistency.
@@ -494,23 +582,26 @@ BYBIT_API_SECRET=your_bybit_api_secret
 OKX_API_KEY=your_okx_api_key
 OKX_API_SECRET=your_okx_api_secret
 OKX_PASSPHRASE=your_okx_passphrase
+
+# Polymarket (Polygon wallet — fund with USDC.e)
+POLYGON_PRIVATE_KEY=your_polygon_wallet_private_key
 ```
 
 !!! warning "Always Start with Paper/Testnet Trading"
-    Set `paper=True` (Alpaca) or `demo=True` (Binance/Bitget/Bybit/OKX) before using real funds. Start with low leverage (2-5x) for futures.
+    Set `paper=True` (Alpaca), `demo=True` (Binance/Bitget/Bybit/OKX), or `dry_run=True` (Polymarket) before using real funds. Start with low leverage (2-5x) for futures.
 
 ---
 
 ## Exchange Comparison
 
-| Feature | Alpaca | Binance | Bitget | Bybit | OKX |
-|---------|--------|---------|--------|-------|-----|
-| **Asset Types** | Stocks, Crypto | Crypto | Crypto | Crypto | Crypto |
-| **Futures** | - | Yes | Yes | Yes | Yes |
-| **Max Leverage** | 1x | 125x | 125x | 100x | 125x |
-| **Paper Trading** | Yes | Yes (Testnet) | Yes (Testnet) | Yes (Testnet) | Yes (Demo) |
-| **Commission** | Free | 0.02%/0.04% | 0.02%/0.06% | 0.02%/0.055% | 0.02%/0.05% |
-| **SDK** | Alpaca SDK | CCXT | CCXT | pybit (native) | python-okx (native) |
+| Feature | Alpaca | Binance | Bitget | Bybit | OKX | Polymarket |
+|---------|--------|---------|--------|-------|-----|------------|
+| **Asset Types** | Stocks, Crypto | Crypto | Crypto | Crypto | Crypto | Prediction markets |
+| **Futures** | - | Yes | Yes | Yes | Yes | - |
+| **Max Leverage** | 1x | 125x | 125x | 100x | 125x | 1x |
+| **Paper Trading** | Yes | Yes (Testnet) | Yes (Testnet) | Yes (Testnet) | Yes (Demo) | Yes (dry_run) |
+| **Commission** | Free | 0.02%/0.04% | 0.02%/0.06% | 0.02%/0.055% | 0.02%/0.05% | Variable (CLOB) |
+| **SDK** | Alpaca SDK | CCXT | CCXT | pybit (native) | python-okx (native) | py-clob-client |
 
 ---
 

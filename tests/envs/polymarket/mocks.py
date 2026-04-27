@@ -2,10 +2,13 @@
 """Mock infrastructure for Polymarket environment tests."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from types import SimpleNamespace
+from typing import Dict, List
 from unittest.mock import MagicMock
 
 import numpy as np
+import torch
+from torchrl.data import Bounded
 
 
 # --- Mock CLOB Client ---
@@ -19,18 +22,27 @@ class MockPosition:
     cur_cost: float = 0.0
 
 
+def _book_level(price: str, size: str) -> SimpleNamespace:
+    """Mirror the attribute-access shape that the real CLOB client returns."""
+    return SimpleNamespace(price=price, size=size)
+
+
 @dataclass
 class MockOrderBook:
-    """Simulated order book."""
-    bids: list = field(default_factory=lambda: [{"price": "0.70", "size": "1000"}])
-    asks: list = field(default_factory=lambda: [{"price": "0.73", "size": "500"}])
+    """Simulated order book whose levels expose ``.price`` / ``.size`` attributes."""
+    bids: List[SimpleNamespace] = field(
+        default_factory=lambda: [_book_level("0.70", "1000")]
+    )
+    asks: List[SimpleNamespace] = field(
+        default_factory=lambda: [_book_level("0.73", "500")]
+    )
 
 
 class MockClobClient:
     """Simulates py-clob-client's ClobClient for testing.
 
-    Tracks balance and positions locally. Supports buy/sell
-    with price-aware fill simulation.
+    Tracks balance and positions locally. Supports buy/sell with price-aware
+    fill simulation.
     """
 
     def __init__(self, initial_balance: float = 10_000.0, yes_price: float = 0.72):
@@ -127,8 +139,6 @@ class MockPolymarketObserver:
         }
 
     def get_observation_spec(self) -> dict:
-        from torchrl.data import Bounded
-        import torch
         return {
             "market_state": Bounded(
                 low=0.0, high=float("inf"), shape=(5,), dtype=torch.float32
@@ -157,27 +167,22 @@ class MockPolymarketTrader:
         raw = float(self.client.get_balance_allowance()["balance"])
         return raw / 1e6
 
-    def buy(self, token_id: str, amount_usdc: float) -> dict:
+    def _place(self, token_id: str, amount: float, side: str) -> dict:
         if self._dry_run:
             return {"success": True, "dry_run": True}
         try:
-            args = MagicMock(token_id=token_id, amount=amount_usdc, side="BUY")
-            signed = MagicMock(order=args)
+            args = SimpleNamespace(token_id=token_id, amount=amount, side=side)
+            signed = SimpleNamespace(order=args)
             result = self.client.post_order(signed)
             return {"success": True, "order": result}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def buy(self, token_id: str, amount_usdc: float) -> dict:
+        return self._place(token_id, amount_usdc, "BUY")
+
     def sell(self, token_id: str, amount_shares: float) -> dict:
-        if self._dry_run:
-            return {"success": True, "dry_run": True}
-        try:
-            args = MagicMock(token_id=token_id, amount=amount_shares, side="SELL")
-            signed = MagicMock(order=args)
-            result = self.client.post_order(signed)
-            return {"success": True, "order": result}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+        return self._place(token_id, amount_shares, "SELL")
 
     def get_positions(self) -> list:
         return self.client.get_positions()

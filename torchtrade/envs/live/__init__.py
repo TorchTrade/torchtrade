@@ -51,6 +51,17 @@ from torchtrade.envs.live.okx import (
     PositionMode as OKXPositionMode,
 )
 
+# Polymarket — prediction markets via the CLOB
+from torchtrade.envs.live.polymarket import (
+    MarketScanner,
+    MarketScannerConfig,
+    PolymarketMarket,
+    PolymarketObservationClass,
+    PolymarketOrderExecutor,
+    PolyTimeBarEnv,
+    PolyTimeBarEnvConfig,
+)
+
 __all__ = [
     # Alpaca
     "AlpacaObservationClass",
@@ -88,4 +99,12 @@ __all__ = [
     "OKXFuturesSLTPTradingEnvConfig",
     "OKXMarginMode",
     "OKXPositionMode",
+    # Polymarket
+    "MarketScanner",
+    "MarketScannerConfig",
+    "PolymarketMarket",
+    "PolymarketObservationClass",
+    "PolymarketOrderExecutor",
+    "PolyTimeBarEnv",
+    "PolyTimeBarEnvConfig",
 ]

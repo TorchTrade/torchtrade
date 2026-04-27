@@ -34,12 +34,17 @@ class PolymarketOrderExecutor:
         funder: Optional[str] = None,
         dry_run: bool = False,
     ):
+        self._dry_run = dry_run
+        if dry_run and ClobClient is None:
+            self.client = None
+            return
         if ClobClient is None:
             raise ImportError(
-                "py-clob-client is required. Install with: pip install py-clob-client"
+                "py-clob-client is required for live Polymarket trading. "
+                "Install with: pip install py-clob-client. "
+                "(Pass dry_run=True to skip the CLOB client.)"
             )
 
-        self._dry_run = dry_run
         self.client = ClobClient(
             host="https://clob.polymarket.com",
             key=private_key,
@@ -50,67 +55,41 @@ class PolymarketOrderExecutor:
         self.client.set_api_creds(self.client.create_or_derive_api_creds())
 
     def get_balance(self) -> float:
-        """Get USDC balance in dollars."""
+        """USDC balance in dollars (returns 0.0 in dry-run-without-client or on API failure)."""
+        if self.client is None:
+            return 0.0
         try:
             result = self.client.get_balance_allowance()
-            raw_balance = float(result.get("balance", 0))
-            return raw_balance / 1e6
+            return float(result.get("balance", 0)) / 1e6
         except Exception:
             logger.exception("Failed to get balance")
             return 0.0
 
-    def buy(self, token_id: str, amount_usdc: float) -> dict:
-        """Buy shares for a token.
-
-        Args:
-            token_id: The YES or NO token ID.
-            amount_usdc: Dollar amount to spend.
-
-        Returns:
-            Dict with 'success' bool and order details.
-        """
+    def _place_market(self, token_id: str, amount: float, side: str) -> dict:
         if self._dry_run:
-            logger.info("DRY RUN: buy %s for $%.2f", token_id, amount_usdc)
+            logger.info("DRY RUN: %s %.4f of %s", side, amount, token_id)
             return {"success": True, "dry_run": True}
-
         try:
-            order_args = MarketOrderArgs(
-                token_id=token_id, amount=amount_usdc, side=BUY
-            )
+            order_args = MarketOrderArgs(token_id=token_id, amount=amount, side=side)
             signed_order = self.client.create_market_order(order_args)
             result = self.client.post_order(signed_order, OrderType.FOK)
             return {"success": True, "order": result}
         except Exception as e:
-            logger.error("Buy failed for token %s: %s", token_id, e)
+            logger.error("%s failed for token %s: %s", side, token_id, e)
             return {"success": False, "error": str(e)}
+
+    def buy(self, token_id: str, amount_usdc: float) -> dict:
+        """Buy ``amount_usdc`` worth of shares for ``token_id``."""
+        return self._place_market(token_id, amount_usdc, BUY)
 
     def sell(self, token_id: str, amount_shares: float) -> dict:
-        """Sell shares for a token.
-
-        Args:
-            token_id: The YES or NO token ID.
-            amount_shares: Number of shares to sell.
-
-        Returns:
-            Dict with 'success' bool and order details.
-        """
-        if self._dry_run:
-            logger.info("DRY RUN: sell %.4f of %s", amount_shares, token_id)
-            return {"success": True, "dry_run": True}
-
-        try:
-            order_args = MarketOrderArgs(
-                token_id=token_id, amount=amount_shares, side=SELL
-            )
-            signed_order = self.client.create_market_order(order_args)
-            result = self.client.post_order(signed_order, OrderType.FOK)
-            return {"success": True, "order": result}
-        except Exception as e:
-            logger.error("Sell failed for token %s: %s", token_id, e)
-            return {"success": False, "error": str(e)}
+        """Sell ``amount_shares`` shares for ``token_id``."""
+        return self._place_market(token_id, amount_shares, SELL)
 
     def get_positions(self) -> list:
-        """Get current share holdings."""
+        """Current share holdings ([] in dry-run-without-client or on API failure)."""
+        if self.client is None:
+            return []
         try:
             return self.client.get_positions()
         except Exception:
@@ -118,7 +97,9 @@ class PolymarketOrderExecutor:
             return []
 
     def cancel_all(self) -> bool:
-        """Cancel all open orders."""
+        """Cancel all open orders (no-op when no client). Returns False on API failure."""
+        if self.client is None:
+            return True
         try:
             self.client.cancel_all()
             return True
@@ -126,19 +107,12 @@ class PolymarketOrderExecutor:
             logger.exception("Cancel all failed")
             return False
 
-    def get_yes_price(self, token_id: str) -> float:
-        """Get current midpoint price for a token."""
-        try:
-            return float(self.client.get_midpoint(token_id))
-        except Exception:
-            logger.exception("Failed to get price for %s", token_id)
-            return 0.0
-
     def close_position(self, token_id: str) -> dict:
-        """Close all shares for a token."""
+        """Sell all shares held for ``token_id``."""
+        if self.client is None:
+            return {"success": True, "already_flat": True}
         try:
-            positions = self.client.get_positions()
-            for pos in positions:
+            for pos in self.client.get_positions():
                 if pos.get("asset") == token_id:
                     size = float(pos.get("size", 0))
                     if size > 0:

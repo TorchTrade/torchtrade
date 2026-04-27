@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 
 import numpy as np
 import requests
@@ -16,12 +15,14 @@ from torchtrade.envs.live.polymarket.market_scanner import GAMMA_API_BASE
 
 logger = logging.getLogger(__name__)
 
+_MAX_HORIZON_SECONDS = 365 * 24 * 3600  # normalize time-to-resolution to (0, 1]
+
 
 class PolymarketObservationClass:
     """Fetches Polymarket market state for a single market each time bar.
 
-    Produces a 5-element market_state vector:
-    [yes_price, spread, volume_24h, liquidity, time_to_resolution]
+    Produces a 5-element ``market_state`` vector:
+    ``[yes_price, spread, volume_24h, liquidity, time_to_resolution]``.
     """
 
     def __init__(
@@ -38,76 +39,51 @@ class PolymarketObservationClass:
         self.clob_client = clob_client
         self._feature_preprocessing_fn = feature_preprocessing_fn
 
-        # Fetch initial market metadata from Gamma API
         self._market_meta = self._fetch_market_metadata()
-
-        # Resolve NO token ID from metadata
-        try:
-            token_ids = json.loads(self._market_meta.get("clobTokenIds", "[]"))
-            self.no_token_id = token_ids[1] if len(token_ids) > 1 else ""
-        except (ValueError, IndexError, TypeError):
-            self.no_token_id = ""
+        token_ids = json.loads(self._market_meta.get("clobTokenIds") or "[]")
+        self.no_token_id = token_ids[1] if len(token_ids) > 1 else ""
 
     def _fetch_market_metadata(self) -> dict:
-        """Fetch market metadata from Gamma API."""
+        """Fetch market metadata from the Gamma API."""
+        if self.market_slug:
+            params = {"slug": self.market_slug}
+        elif self.condition_id:
+            params = {"condition_id": self.condition_id}
+        else:
+            params = {"clob_token_ids": self.yes_token_id}
         try:
-            if self.market_slug:
-                resp = requests.get(
-                    f"{GAMMA_API_BASE}/markets",
-                    params={"slug": self.market_slug},
-                    timeout=15,
-                )
-            elif self.condition_id:
-                resp = requests.get(
-                    f"{GAMMA_API_BASE}/markets",
-                    params={"condition_id": self.condition_id},
-                    timeout=15,
-                )
-            else:
-                resp = requests.get(
-                    f"{GAMMA_API_BASE}/markets",
-                    params={"clob_token_ids": self.yes_token_id},
-                    timeout=15,
-                )
+            resp = requests.get(
+                f"{GAMMA_API_BASE}/markets", params=params, timeout=15
+            )
             resp.raise_for_status()
             data = resp.json()
-            if isinstance(data, list):
-                return data[0] if data else {}
-            return data
         except Exception:
             logger.exception("Failed to fetch market metadata")
             return {}
-
-    def _refresh_market_metadata(self):
-        """Refresh market metadata (called each step for freshness)."""
-        self._market_meta = self._fetch_market_metadata()
+        if isinstance(data, list):
+            return data[0] if data else {}
+        return data
 
     def get_observations(self) -> dict:
-        """Fetch current market state and return as dict.
-
-        Returns:
-            Dict with 'market_state' key -> np.ndarray of shape (5,).
-        """
-        self._refresh_market_metadata()
-
-        yes_price = self.get_yes_price()
-        spread = self._get_spread()
-        volume_24h = float(self._market_meta.get("volume24hr", 0))
-        liquidity = float(self._market_meta.get("liquidity", 0))
-        time_to_resolution = self._get_time_to_resolution()
+        """Fetch current market state. Returns dict with ``market_state`` ndarray (5,)."""
+        self._market_meta = self._fetch_market_metadata()
 
         market_state = np.array(
-            [yes_price, spread, volume_24h, liquidity, time_to_resolution],
+            [
+                self.get_yes_price(),
+                self._get_spread(),
+                float(self._market_meta.get("volume24hr", 0)),
+                float(self._market_meta.get("liquidity", 0)),
+                self._get_time_to_resolution(),
+            ],
             dtype=np.float32,
         )
-
         if self._feature_preprocessing_fn is not None:
             market_state = self._feature_preprocessing_fn(market_state)
-
         return {"market_state": market_state}
 
     def get_observation_spec(self) -> dict:
-        """Return TorchRL spec for market_state."""
+        """TorchRL spec for ``market_state`` (matches PolyTimeBarEnv)."""
         return {
             "market_state": Bounded(
                 low=0.0, high=float("inf"), shape=(5,), dtype=torch.float32
@@ -115,21 +91,20 @@ class PolymarketObservationClass:
         }
 
     def get_yes_price(self) -> float:
-        """Get current YES midpoint price from CLOB."""
+        """Current YES midpoint from CLOB; falls back to Gamma metadata."""
         if self.clob_client is not None:
             try:
                 return float(self.clob_client.get_midpoint(self.yes_token_id))
             except Exception:
-                pass
-        # Fallback to Gamma metadata
+                logger.warning("CLOB midpoint fetch failed; falling back to Gamma")
         try:
-            prices = json.loads(self._market_meta.get("outcomePrices", '["0.5","0.5"]'))
+            prices = json.loads(self._market_meta.get("outcomePrices") or '["0.5","0.5"]')
             return float(prices[0])
         except (ValueError, IndexError, TypeError):
             return 0.5
 
     def _get_spread(self) -> float:
-        """Get bid-ask spread from CLOB order book."""
+        """Bid-ask spread from CLOB order book; 0.0 if CLOB unavailable."""
         if self.clob_client is None:
             return 0.0
         try:
@@ -138,24 +113,23 @@ class PolymarketObservationClass:
             best_ask = float(book.asks[0].price) if book.asks else 1.0
             return best_ask - best_bid
         except Exception:
+            logger.warning("CLOB order-book fetch failed; reporting spread=0")
             return 0.0
 
     def _get_time_to_resolution(self) -> float:
-        """Normalized time remaining until market resolution (1.0 -> 0.0)."""
+        """Normalized time remaining until resolution (1.0 -> 0.0)."""
         end_date_str = self._market_meta.get("endDate", "")
         if not end_date_str:
             return 1.0
         try:
             end_dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
-            now = datetime.now(timezone.utc)
-            remaining = (end_dt - now).total_seconds()
-            if remaining <= 0:
-                return 0.0
-            max_seconds = 365 * 24 * 3600
-            return min(remaining / max_seconds, 1.0)
         except (ValueError, TypeError):
             return 1.0
+        remaining = (end_dt - datetime.now(timezone.utc)).total_seconds()
+        if remaining <= 0:
+            return 0.0
+        return min(remaining / _MAX_HORIZON_SECONDS, 1.0)
 
     def is_market_closed(self) -> bool:
-        """Check if the market has resolved/closed."""
+        """True once the market has resolved/closed."""
         return bool(self._market_meta.get("closed", False))
