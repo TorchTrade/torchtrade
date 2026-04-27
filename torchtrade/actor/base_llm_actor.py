@@ -34,6 +34,7 @@ class BaseLLMActor(ABC):
         symbol: str = "BTC/USD",
         execute_on: Union[str, "TimeFrame"] = "1Hour",
         feature_keys: Optional[List[str]] = None,
+        action_descriptions: Optional[List[str]] = None,
         debug: bool = False,
     ):
         self.market_data_keys = market_data_keys
@@ -48,8 +49,13 @@ class BaseLLMActor(ABC):
         self.feature_keys = feature_keys or ["open", "high", "low", "close", "volume"]
         self.debug = debug
 
-        # Build action descriptions from action_levels
-        self._action_descriptions = self._build_action_descriptions()
+        # Action descriptions: explicit override (e.g. for binary up/down envs)
+        # falls back to the auto-generated "target exposure" language.
+        self._action_descriptions = (
+            list(action_descriptions)
+            if action_descriptions is not None
+            else self._build_action_descriptions()
+        )
 
         # Pre-compile regex
         self._answer_pattern = re.compile(r"<answer>\s*(\d+)\s*</answer>", re.IGNORECASE | re.DOTALL)
@@ -121,6 +127,12 @@ class BaseLLMActor(ABC):
         return self._construct_account_state(tensordict) + self._construct_market_data(tensordict)
 
     def _construct_account_state(self, tensordict) -> str:
+        # Envs without an account_state (e.g. PolymarketBetEnv) skip this block
+        # entirely; either no labels or the key not on the tensordict means
+        # there is nothing to render.
+        if not self.account_state_labels or "account_state" not in tensordict:
+            return ""
+
         account_state = tensordict.get("account_state")
         if account_state.dim() == 2:
             account_state = account_state.squeeze(0)
@@ -140,6 +152,21 @@ class BaseLLMActor(ABC):
             data = tensordict[key].cpu().numpy()
             if data.ndim == 3:
                 data = data.squeeze(0)
+
+            # Flat 1D market state (e.g. PolymarketBetEnv's
+            # [yes_price, spread, vol_24h, liquidity]) — render as one labeled row.
+            if data.ndim == 1:
+                labels = (
+                    self.feature_keys
+                    if len(self.feature_keys) == data.shape[0]
+                    else [f"f{i}" for i in range(data.shape[0])]
+                )
+                out += f"{key}:\n"
+                for label, value in zip(labels, data, strict=True):
+                    out += f"  {label}: {value:.4f}\n"
+                out += "\n"
+                continue
+
             if data.ndim != 2 or data.shape[1] != len(self.feature_keys):
                 if self.debug:
                     print(f"[Warning] Unexpected market data shape for {key}: {data.shape}")

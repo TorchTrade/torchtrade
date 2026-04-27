@@ -19,7 +19,7 @@ TorchTrade provides modular environments for both live trading with major exchan
 - 🎯 **Multi-Timeframe Observations** - Train on 1m, 5m, 15m, 1h bars simultaneously
 - 🤖 **Multiple RL Algorithms** - PPO, DQN, IQL, GRPO, DSAC, CTRL implementations
 - 📊 **Feature Engineering** - Add technical indicators and custom features
-- 🔴 **Live Trading** - Direct Alpaca, Binance, Bitget, Bybit, and OKX API integration
+- 🔴 **Live Trading** - Direct Alpaca, Binance, Bitget, Bybit, OKX, and Polymarket integrations
 - 🧠 **LLM Integration** - Use GPT-4o-mini or local LLMs as trading agents
 - 📐 **Rule-Based Actors** - Hard-coded strategies for imitation learning and baselines
 - 🔮 **Pretrained Encoder Transforms** - Foundation model embeddings for time series
@@ -126,6 +126,7 @@ TorchTrade supports live trading with major exchanges:
 | **BybitFuturesSLTPTorchTradingEnv** | Bybit | Crypto | ✅ | ✅ (1-100x) | ✅ |
 | **OKXFuturesTorchTradingEnv** | OKX | Crypto | ✅ | ✅ (1-125x) | ❌ |
 | **OKXFuturesSLTPTorchTradingEnv** | OKX | Crypto | ✅ | ✅ (1-125x) | ✅ |
+| **PolymarketBetEnv** | Polymarket | Prediction markets | ❌ | ❌ | ❌ |
 
 **Need another broker?** Request support for additional platforms (Interactive Brokers, Kraken, etc.) by [creating an issue](https://github.com/TorchTrade/torchtrade/issues/new) or emailing torchtradecontact@gmail.com.
 
@@ -162,6 +163,13 @@ Start live trading with these supported platforms:
 - **Features:** Futures trading with up to 125x leverage, bracket orders via attachAlgoOrds, demo trading
 - **Commission:** Maker 0.02% / Taker 0.05%
 - **Get Started:** [Sign up for OKX](https://www.okx.com/)
+
+### 🔮 Prediction Markets
+
+**[Polymarket](https://polymarket.com/)** - Decentralized prediction market on Polygon
+- **Supported by:** `PolymarketBetEnv`
+- **Features:** Rolling one-shot bets on short-cadence binary markets (BTC/ETH/SOL up-or-down at 5m / 15m / 1h / 4h / daily cadences), Gamma API market scanner, dry-run paper trading without `py-clob-client` installed
+- **Get Started:** [Browse markets at Polymarket](https://polymarket.com/)
 
 ### 📈 Stock & Crypto API
 
