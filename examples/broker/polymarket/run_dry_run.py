@@ -16,6 +16,7 @@ roughly 10–15 minutes (two bar resolutions plus a 30 s grace each).
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 
 import torch
@@ -33,6 +34,11 @@ def main():
     parser.add_argument("--bet-fraction", type=float, default=0.01)
     parser.add_argument("--initial-cash", type=float, default=1_000.0)
     args = parser.parse_args()
+
+    # Surface env-level progress logs (waiting for endDate, polling for
+    # resolution, etc.) so the long-blocking phases don't look hung.
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s")
+    logging.getLogger("torchtrade.envs.live.polymarket").setLevel(logging.INFO)
 
     config = PolymarketBetEnvConfig(
         market_slug_prefix=args.slug_prefix,

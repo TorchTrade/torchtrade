@@ -277,6 +277,10 @@ class PolymarketBetEnv(EnvBase):
         target = end_dt + timedelta(seconds=self.config.resolution_grace_seconds)
         sleep_seconds = (target - datetime.now(timezone.utc)).total_seconds()
         if sleep_seconds > 0:
+            logger.info(
+                "Waiting %.0fs for market endDate %s + %.0fs grace",
+                sleep_seconds, end_date_iso, self.config.resolution_grace_seconds,
+            )
             time.sleep(sleep_seconds)
 
     def _poll_for_resolution(self, condition_id: str) -> Optional[int]:
@@ -288,13 +292,26 @@ class PolymarketBetEnv(EnvBase):
         check after the 30 s grace usually finds the market still mid-market.
         Tests should override this method to side-step the polling loop.
         """
-        deadline = time.monotonic() + self.config.resolution_max_wait_seconds
+        start = time.monotonic()
+        deadline = start + self.config.resolution_max_wait_seconds
+        attempt = 0
         while True:
+            attempt += 1
             outcome = self._fetch_resolved_outcome(condition_id)
             if outcome is not None:
+                logger.info(
+                    "Market resolved on attempt %d after %.0fs: %s won",
+                    attempt, time.monotonic() - start, "Up" if outcome == 1 else "Down",
+                )
                 return outcome
             if time.monotonic() >= deadline:
                 return None
+            logger.info(
+                "Resolution not yet propagated to Gamma (attempt %d, elapsed %.0fs); "
+                "retrying in %.0fs",
+                attempt, time.monotonic() - start,
+                self.config.resolution_poll_interval_seconds,
+            )
             time.sleep(self.config.resolution_poll_interval_seconds)
 
     def _fetch_resolved_outcome(self, condition_id: str) -> Optional[int]:
