@@ -43,6 +43,42 @@ Example output:
 
 The output reflects the live Gamma API at run time — your numbers and rows will differ.
 
+#### Column reference
+
+| Column      | Meaning |
+|-------------|---------|
+| `YES`       | Current market price of the YES outcome token in USDC, in [0, 1]. Read it as the market's implied probability of YES resolving true (e.g. `0.16` ≈ 16 % implied probability). |
+| `24h vol`   | Total USDC traded against this market in the trailing 24 hours. Higher numbers mean tighter spreads and easier fills. |
+| `liquidity` | USDC currently resting in the order book (sum of bid + ask depth). Higher numbers mean less slippage on entry/exit. |
+| `resolves`  | Date the market is scheduled to resolve, in `YYYY-MM-DD` (UTC). Markets close to resolution have less time for moves but tighter pricing. |
+| `question`  | The human-readable question the market resolves on. Truncated to 60 characters in the table. |
+
+Rows are sorted by `24h vol` descending and capped at `--max` (default 10).
+
+#### CLI flags
+
+| Flag             | Default     | Description |
+|------------------|-------------|-------------|
+| `--keyword`      | *(none)*    | Case-insensitive substring match against the market `question` **or** `slug`. Quote multi-word terms (`--keyword "world cup"`). |
+| `--min-volume`   | `10000`     | Minimum 24-hour volume in USDC. Use this to skip illiquid markets. |
+| `--min-liquidity`| `5000`      | Minimum resting order-book liquidity in USDC. |
+| `--max`          | `10`        | Maximum number of markets to print. |
+
+The same fields are available on `MarketScannerConfig` if you want to use the scanner programmatically:
+
+```python
+from torchtrade.envs.live.polymarket import MarketScanner, MarketScannerConfig
+
+scanner = MarketScanner(MarketScannerConfig(
+    keyword="bitcoin",
+    min_volume_24h=50_000.0,
+    min_liquidity=10_000.0,
+    max_markets=5,
+))
+for market in scanner.scan():
+    print(market.slug, market.yes_price)
+```
+
 ### End-to-end dry run
 
 Pick the top market via the scanner, build `PolyTimeBarEnv` in dry-run mode,
