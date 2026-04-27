@@ -26,14 +26,6 @@ from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
-def _default_time_frames() -> List[TimeFrame]:
-    return [
-        TimeFrame(1, TimeFrameUnit.Minute),
-        TimeFrame(5, TimeFrameUnit.Minute),
-        TimeFrame(15, TimeFrameUnit.Minute),
-    ]
-
-
 class BinanceOHLCVTransform(Transform):
     """Append multi-timeframe Binance OHLCV windows to an env's observation.
 
@@ -94,7 +86,11 @@ class BinanceOHLCVTransform(Transform):
         else:
             self.observer = BinanceObservationClass(
                 symbol=symbol,
-                time_frames=time_frames or _default_time_frames(),
+                time_frames=time_frames or [
+                    TimeFrame(1, TimeFrameUnit.Minute),
+                    TimeFrame(5, TimeFrameUnit.Minute),
+                    TimeFrame(15, TimeFrameUnit.Minute),
+                ],
                 window_sizes=window_sizes or [60, 30, 20],
                 feature_preprocessing_fn=feature_preprocessing_fn,
             )

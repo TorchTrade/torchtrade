@@ -186,7 +186,7 @@ class PolymarketBetEnv(EnvBase):
         action_idx = int(tensordict.get("action").item())
 
         fill_price = market.yes_price if action_idx == 1 else market.no_price
-        stake = max(self.cash * self.config.bet_fraction, 0.0)
+        stake = self.cash * self.config.bet_fraction
         token_id = market.yes_token_id if action_idx == 1 else market.no_token_id
 
         if stake > 0 and not self.config.dry_run:
@@ -201,14 +201,6 @@ class PolymarketBetEnv(EnvBase):
                     result.get("error", "unknown"),
                 )
                 stake = 0.0
-        elif stake > 0:
-            logger.info(
-                "DRY RUN bet: side=%s stake=$%.2f price=%.3f market=%s",
-                "UP" if action_idx == 1 else "DOWN",
-                stake,
-                fill_price,
-                market.slug,
-            )
 
         self._wait_for_resolution(market.end_date)
         outcome = self._fetch_resolved_outcome(market.condition_id)
@@ -231,7 +223,9 @@ class PolymarketBetEnv(EnvBase):
             obs = self._market_state(next_market)
         else:
             # Terminal: agent should not bootstrap from a stale observation.
-            obs = torch.zeros(4, dtype=torch.float32)
+            obs = torch.zeros(
+                self.observation_spec["market_state"].shape, dtype=torch.float32
+            )
 
         return TensorDict(
             {
@@ -317,5 +311,4 @@ class PolymarketBetEnv(EnvBase):
         )
 
     def close(self):
-        if self.trader is not None:
-            self.trader.cancel_all()
+        self.trader.cancel_all()

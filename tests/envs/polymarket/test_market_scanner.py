@@ -445,6 +445,23 @@ class TestNextActiveMarket:
         assert result.market_id == "2"
 
     @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
+    def test_pins_query_params_for_upcoming_lookup(self, mock_get):
+        """next_active_market is hit every step by the env; pin its outgoing
+        query params so a refactor that drops end_date_min or flips the sort
+        doesn't silently regress."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = []
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        MarketScanner().next_active_market("btc-updown-5m-")
+        params = mock_get.call_args.kwargs["params"]
+        assert params["closed"] == "false"
+        assert params["order"] == "endDate"
+        assert params["ascending"] == "true"
+        assert "end_date_min" in params
+
+    @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
     def test_skips_malformed_then_returns_next_match(self, mock_get):
         """Malformed prefix-matching market must not abort the lookup — keep going."""
         malformed = {

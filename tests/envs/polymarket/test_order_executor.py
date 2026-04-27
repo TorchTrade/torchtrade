@@ -59,6 +59,20 @@ class TestBuy:
         result = executor.buy(token_id="tok", amount_usdc=1.0)
         assert result == {"success": False, "error": "api down"}
 
+    def test_pins_buy_side_and_fok_order_type(self, executor):
+        """A BUY↔SELL or FOK↔GTC swap must fail this test, not silently pass."""
+        from torchtrade.envs.live.polymarket import order_executor as oe
+
+        executor.buy(token_id="tok_yes", amount_usdc=42.0)
+        # MarketOrderArgs called with side=BUY (the constant from the package)
+        args_call = oe.MarketOrderArgs.call_args
+        assert args_call.kwargs["side"] == oe.BUY
+        assert args_call.kwargs["token_id"] == "tok_yes"
+        assert args_call.kwargs["amount"] == 42.0
+        # post_order called with OrderType.FOK (fill-or-kill)
+        post_call = executor.client.post_order.call_args
+        assert post_call.args[1] == oe.OrderType.FOK
+
 
 class TestCancelAll:
     def test_returns_true_on_success(self, executor):

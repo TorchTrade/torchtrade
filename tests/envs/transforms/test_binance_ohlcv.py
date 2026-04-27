@@ -171,6 +171,15 @@ class TestBehavior:
         assert "ohlcv_1Minute_4" in td.keys()
         # ohlcv_5Minute_4 missing from observer output → not in td (no exception)
 
+    def test_observer_exception_propagates(self):
+        """A failure inside the observer must surface — silently substituting
+        zeros would let the policy train on bogus side-channel data."""
+        observer = _stub_observer([TimeFrame(1, TimeFrameUnit.Minute)], [4])
+        observer.get_observations.side_effect = RuntimeError("binance 451")
+        env = TransformedEnv(_make_polymarket_env(), BinanceOHLCVTransform(observer=observer))
+        with pytest.raises(RuntimeError, match="binance 451"):
+            env.reset()
+
 
 # --- Construction tests ----------------------------------------------------- #
 

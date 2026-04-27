@@ -51,17 +51,19 @@ def main():
         f"liq=${td['market_state'][3].item():,.0f}"
     )
 
-    for step in range(config.max_steps):
+    # Loop until the env says we're done (max_steps truncation or bankruptcy);
+    # no external counter — the env owns termination.
+    step = 0
+    while not bool(td.get("done", torch.zeros(1, dtype=torch.bool)).item()):
+        step += 1
         action = torch.randint(0, env.action_spec.n, ())
         side = "UP" if action.item() == 1 else "DOWN"
-        print(f"\nstep {step + 1}: betting {side} (waiting for resolution)...")
+        print(f"\nstep {step}: betting {side} (waiting for resolution)...")
         td = env.step(td.set("action", action))["next"]
         print(
             f"  resolved → reward={td['reward'].item():+.4f}  "
             f"cash=${env.cash:,.2f}  done={bool(td['done'].item())}"
         )
-        if td["done"].item():
-            break
 
     env.close()
     print(f"\nfinal cash: ${env.cash:,.2f}  (started ${args.initial_cash:,.2f})")
