@@ -153,23 +153,36 @@ class TestBehavior:
 
         assert observer.get_observations.call_count == 4
 
-    def test_missing_source_key_is_skipped_silently(self):
-        """If the underlying observer omits a (tf, window) entry, the transform
-        should not raise — it should just leave that key unset and let TorchRL's
-        spec-fill handle it. Useful for users wiring partial observers."""
+    def test_missing_source_key_filled_with_zeros_to_honor_spec(self, caplog):
+        """Every key declared in ``transform_observation_spec`` MUST also be
+        present in the runtime output, otherwise downstream collectors that
+        trust the spec will crash on missing keys. If the observer omits a key,
+        the transform fills with zeros of the declared shape and logs a warning
+        — never silently drops the key."""
         observer = _stub_observer(
             [TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute)],
             [4, 4],
             n_features=2,
         )
-        # Force the observer to only return one of the two declared keys
+        # Force the observer to omit the 5Minute_4 key
         observer.get_observations.side_effect = lambda: {
-            "1Minute_4": np.zeros((4, 2), dtype=np.float32),
+            "1Minute_4": np.ones((4, 2), dtype=np.float32),
         }
         env = TransformedEnv(_make_polymarket_env(), BinanceOHLCVTransform(observer=observer))
-        td = env.reset()
+
+        with caplog.at_level("WARNING"):
+            td = env.reset()
+
+        # Both keys present at runtime — the spec contract holds.
         assert "ohlcv_1Minute_4" in td.keys()
-        # ohlcv_5Minute_4 missing from observer output → not in td (no exception)
+        assert "ohlcv_5Minute_4" in td.keys()
+        # Provided key gets the real value
+        assert torch.allclose(td["ohlcv_1Minute_4"], torch.ones((4, 2)))
+        # Missing key gets zeros of the declared shape
+        assert td["ohlcv_5Minute_4"].shape == (4, 2)
+        assert torch.equal(td["ohlcv_5Minute_4"], torch.zeros((4, 2)))
+        # And the warning surfaced — silent fallback would be the wrong choice
+        assert any("5Minute_4" in rec.message for rec in caplog.records)
 
     def test_observer_exception_propagates(self):
         """A failure inside the observer must surface — silently substituting

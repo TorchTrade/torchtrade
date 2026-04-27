@@ -14,6 +14,7 @@ for any env where crypto OHLCV is signal-relevant. Swap the
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, List, Optional
 
 import numpy as np
@@ -24,6 +25,8 @@ from torchrl.envs.transforms import Transform
 
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+logger = logging.getLogger(__name__)
 
 
 class BinanceOHLCVTransform(Transform):
@@ -110,15 +113,27 @@ class BinanceOHLCVTransform(Transform):
         return f"{self._key_prefix}_{tf.obs_key_freq()}_{window}"
 
     def _attach_observations(self, td: TensorDictBase) -> TensorDictBase:
+        """Set every declared key on the TensorDict.
+
+        Every ``(timeframe, window)`` declared in ``transform_observation_spec``
+        is also written here — if the observer returns a partial payload, the
+        missing keys are filled with zeros and a warning is logged. Skipping
+        them would let the runtime output drift from the spec, which would
+        crash downstream collectors and policies that trust the spec.
+        """
         obs = self.observer.get_observations()
         for tf, window in zip(self.observer.time_frames, self.observer.window_sizes):
             source_key = f"{tf.obs_key_freq()}_{window}"
-            if source_key not in obs:
-                continue
-            td.set(
-                self._key(tf, window),
-                torch.as_tensor(np.asarray(obs[source_key]), dtype=torch.float32),
-            )
+            target_key = self._key(tf, window)
+            if source_key in obs:
+                value = torch.as_tensor(np.asarray(obs[source_key]), dtype=torch.float32)
+            else:
+                logger.warning(
+                    "Observer omitted key %r — filling with zeros to honor observation_spec",
+                    source_key,
+                )
+                value = torch.zeros((window, self._n_features), dtype=torch.float32)
+            td.set(target_key, value)
         return td
 
     # ------------------------------------------------------------------ #
