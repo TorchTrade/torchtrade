@@ -118,10 +118,5 @@ class LocalLLMActor(BaseLLMActor):
         if self.backend == "vllm":
             outputs = self.llm.generate([prompt], self.sampling_params)
             return outputs[0].outputs[0].text
-        else:
-            outputs = self.llm(
-                prompt, max_new_tokens=self.max_tokens,
-                temperature=self.temperature, do_sample=self.temperature > 0,
-                return_full_text=False,
-            )
-            return outputs[0]["generated_text"]
+        outputs = self.llm(prompt, return_full_text=False)
+        return outputs[0]["generated_text"]
