@@ -122,7 +122,9 @@ class BinanceOHLCVTransform(Transform):
         crash downstream collectors and policies that trust the spec.
         """
         obs = self.observer.get_observations()
-        for tf, window in zip(self.observer.time_frames, self.observer.window_sizes):
+        for tf, window in zip(
+            self.observer.time_frames, self.observer.window_sizes, strict=True
+        ):
             source_key = f"{tf.obs_key_freq()}_{window}"
             target_key = self._key(tf, window)
             if source_key in obs:
@@ -151,7 +153,9 @@ class BinanceOHLCVTransform(Transform):
         return self._attach_observations(next_tensordict)
 
     def transform_observation_spec(self, observation_spec):
-        for tf, window in zip(self.observer.time_frames, self.observer.window_sizes):
+        for tf, window in zip(
+            self.observer.time_frames, self.observer.window_sizes, strict=True
+        ):
             observation_spec.set(
                 self._key(tf, window),
                 Bounded(

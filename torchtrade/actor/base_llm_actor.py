@@ -130,7 +130,7 @@ class BaseLLMActor(ABC):
         # Envs without an account_state (e.g. PolymarketBetEnv) skip this block
         # entirely; either no labels or the key not on the tensordict means
         # there is nothing to render.
-        if not self.account_state_labels or "account_state" not in tensordict.keys():
+        if not self.account_state_labels or "account_state" not in tensordict:
             return ""
 
         account_state = tensordict.get("account_state")
@@ -162,7 +162,7 @@ class BaseLLMActor(ABC):
                     else [f"f{i}" for i in range(data.shape[0])]
                 )
                 out += f"{key}:\n"
-                for label, value in zip(labels, data):
+                for label, value in zip(labels, data, strict=True):
                     out += f"  {label}: {value:.4f}\n"
                 out += "\n"
                 continue

@@ -115,9 +115,9 @@ class PolymarketBetEnv(EnvBase):
         private_key: str = "",
         scanner: Optional[MarketScanner] = None,
         trader=None,
-        device: torch.device = torch.device("cpu"),
+        device: Optional[torch.device] = None,
     ):
-        super().__init__(device=device, batch_size=())
+        super().__init__(device=device or torch.device("cpu"), batch_size=())
 
         if not config.market_slug_prefix:
             raise ValueError(
