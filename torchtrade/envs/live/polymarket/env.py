@@ -41,6 +41,14 @@ from torchtrade.envs.live.polymarket.market_scanner import (
 
 logger = logging.getLogger(__name__)
 
+# CLOB midpoint endpoint — public, no auth required. Returns ``{"mid": "0.985"}``.
+# We use this rather than Gamma's outcomePrices because:
+# (1) Gamma evicts short-cadence markets from /markets within minutes of endDate,
+# (2) Gamma's outcomePrices appears to be a stale/cached snapshot — for an
+#     in-flight market we observed Gamma reporting [0.305, 0.695] while the
+#     CLOB midpoint for the YES token was 0.985.
+CLOB_API_BASE = "https://clob.polymarket.com"
+
 
 @dataclass
 class PolymarketBetEnvConfig:
@@ -210,7 +218,7 @@ class PolymarketBetEnv(EnvBase):
                 stake = 0.0
 
         self._wait_for_resolution(market.end_date)
-        outcome = self._poll_for_resolution(market.condition_id)
+        outcome = self._poll_for_resolution(market)
 
         if outcome is None:
             logger.warning(
@@ -283,12 +291,12 @@ class PolymarketBetEnv(EnvBase):
             )
             time.sleep(sleep_seconds)
 
-    def _poll_for_resolution(self, condition_id: str) -> Optional[int]:
-        """Repeatedly fetch the resolved outcome, retrying until settlement
-        propagates to Gamma or the wait budget is exhausted.
+    def _poll_for_resolution(self, market: PolymarketMarket) -> Optional[int]:
+        """Repeatedly fetch the resolved outcome, retrying until the market's
+        CLOB midpoint snaps to the winning side or the wait budget is exhausted.
 
         Polymarket on-chain settlement typically takes 1-5 minutes after a
-        market's endDate to flow through Gamma's API; the initial single-shot
+        market's endDate to fully snap on the CLOB; the initial single-shot
         check after the 30 s grace usually finds the market still mid-market.
         Tests should override this method to side-step the polling loop.
         """
@@ -297,7 +305,7 @@ class PolymarketBetEnv(EnvBase):
         attempt = 0
         while True:
             attempt += 1
-            outcome = self._fetch_resolved_outcome(condition_id)
+            outcome = self._fetch_resolved_outcome(market)
             if outcome is not None:
                 logger.info(
                     "Market resolved on attempt %d after %.0fs: %s won",
@@ -307,32 +315,49 @@ class PolymarketBetEnv(EnvBase):
             if time.monotonic() >= deadline:
                 return None
             logger.info(
-                "Resolution not yet propagated to Gamma (attempt %d, elapsed %.0fs); "
+                "Resolution not yet on CLOB (attempt %d, elapsed %.0fs); "
                 "retrying in %.0fs",
                 attempt, time.monotonic() - start,
                 self.config.resolution_poll_interval_seconds,
             )
             time.sleep(self.config.resolution_poll_interval_seconds)
 
-    def _fetch_resolved_outcome(self, condition_id: str) -> Optional[int]:
-        """Return 1 (Up won), 0 (Down won), or None if still unresolved."""
+    def _fetch_resolved_outcome(self, market: PolymarketMarket) -> Optional[int]:
+        """Return 1 (Up won), 0 (Down won), or None if still unresolved.
+
+        Reads CLOB midpoint per outcome token directly. The CLOB is the
+        authoritative price source — its midpoint snaps to ~$1.00 / ~$0.00
+        on the winning / losing side once the market resolves. Gamma's
+        ``outcomePrices`` field is unreliable (we observed an in-flight
+        market reporting ``[0.305, 0.695]`` on Gamma while CLOB midpoint
+        was ``0.985``), and Gamma evicts short-cadence markets from
+        ``/markets`` within minutes of endDate.
+        """
         try:
-            resp = requests.get(
-                f"{GAMMA_API_BASE}/markets",
-                params={"condition_id": condition_id},
-                timeout=15,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            market = data[0] if isinstance(data, list) and data else data
-            up, down = (float(p) for p in json.loads(market["outcomePrices"])[:2])
-        except (requests.RequestException, ValueError, TypeError, KeyError, IndexError):
+            yes_mid = self._fetch_clob_midpoint(market.yes_token_id)
+            no_mid = self._fetch_clob_midpoint(market.no_token_id)
+        except (requests.RequestException, ValueError, TypeError, KeyError):
             return None
-        if up >= 0.99 and down <= 0.01:
+        if yes_mid is None or no_mid is None:
+            return None
+        if yes_mid >= 0.99 and no_mid <= 0.01:
             return 1
-        if down >= 0.99 and up <= 0.01:
+        if no_mid >= 0.99 and yes_mid <= 0.01:
             return 0
         return None
+
+    @staticmethod
+    def _fetch_clob_midpoint(token_id: str) -> Optional[float]:
+        """One-shot CLOB midpoint query for a single outcome token."""
+        resp = requests.get(
+            f"{CLOB_API_BASE}/midpoint",
+            params={"token_id": token_id},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        mid = body.get("mid")
+        return float(mid) if mid is not None else None
 
     @staticmethod
     def _compute_payoff(

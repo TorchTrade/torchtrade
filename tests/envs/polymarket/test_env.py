@@ -354,44 +354,55 @@ class TestStep:
 # --- Outcome parsing -------------------------------------------------------- #
 
 class TestFetchResolvedOutcome:
-    @pytest.mark.parametrize(
-        "response_factory,expected",
-        [
-            (lambda: [{"outcomePrices": '["1.0", "0.0"]'}], 1),
-            (lambda: [{"outcomePrices": '["0.0", "1.0"]'}], 0),
-            (lambda: [{"outcomePrices": '["0.995", "0.005"]'}], 1),    # boundary: just at threshold
-            (lambda: [{"outcomePrices": '["0.989", "0.011"]'}], None), # boundary: just below
-            (lambda: [{"outcomePrices": '["0.99", "0.05"]'}], None),   # up at threshold but down too high
-            (lambda: [{"outcomePrices": '["0.5", "0.5"]'}], None),
-            (lambda: [{"outcomePrices": "[]"}], None),
-            (lambda: [{"outcomePrices": "not-json"}], None),
-            (lambda: [], None),
-            (lambda: {"outcomePrices": '["1.0", "0.0"]'}, 1),  # dict response (some Gamma versions)
-        ],
-        ids=["up", "down", "tight-up", "tight-up-below", "tight-up-down-too-high",
-             "midmarket", "empty", "malformed", "no-results", "dict-response"],
-    )
-    def test_outcome_parsing(self, response_factory, expected):
-        env, _, _ = _make_env(mock_fetch=False)
-        with patch("torchtrade.envs.live.polymarket.env.requests.get") as mock_get:
-            mock_resp = MagicMock()
-            mock_resp.json.return_value = response_factory()
-            mock_resp.raise_for_status = MagicMock()
-            mock_get.return_value = mock_resp
-            assert env._fetch_resolved_outcome("0xcond") == expected
+    """Reads the CLOB midpoint per outcome token, not Gamma."""
 
-    def test_outgoing_request_pins_endpoint_and_params(self):
-        """Pin the Gamma API contract, endpoint URL and condition_id query param."""
+    @pytest.mark.parametrize(
+        "yes_mid,no_mid,expected",
+        [
+            ("1.0", "0.0", 1),       # Up snapped fully
+            ("0.0", "1.0", 0),       # Down snapped fully
+            ("0.995", "0.005", 1),   # boundary: just at threshold (Up)
+            ("0.005", "0.995", 0),   # boundary: just at threshold (Down)
+            ("0.989", "0.011", None),  # below the 0.99 threshold
+            ("0.99", "0.05", None),    # Up at threshold but Down still too high
+            ("0.5", "0.5", None),      # mid-market
+        ],
+        ids=["up", "down", "tight-up", "tight-down", "below-up",
+             "asymmetric-pending", "midmarket"],
+    )
+    def test_outcome_parsing(self, yes_mid, no_mid, expected):
         env, _, _ = _make_env(mock_fetch=False)
+        m = _make_market()
+        with patch("torchtrade.envs.live.polymarket.env.requests.get") as mock_get:
+            def respond(url, params=None, **_):
+                resp = MagicMock()
+                if params["token_id"] == m.yes_token_id:
+                    resp.json.return_value = {"mid": yes_mid}
+                else:
+                    resp.json.return_value = {"mid": no_mid}
+                resp.raise_for_status = MagicMock()
+                return resp
+            mock_get.side_effect = respond
+            assert env._fetch_resolved_outcome(m) == expected
+
+    def test_outgoing_request_pins_clob_endpoint_and_token_id(self):
+        """Pin the CLOB API contract — endpoint URL and token_id query param.
+        A regression that flipped to Gamma's outcomePrices would fail this."""
+        env, _, _ = _make_env(mock_fetch=False)
+        m = _make_market()
         with patch("torchtrade.envs.live.polymarket.env.requests.get") as mock_get:
             mock_resp = MagicMock()
-            mock_resp.json.return_value = [{"outcomePrices": '["1.0", "0.0"]'}]
+            mock_resp.json.return_value = {"mid": "0.5"}
             mock_resp.raise_for_status = MagicMock()
             mock_get.return_value = mock_resp
-            env._fetch_resolved_outcome("0xcond_abc")
-        assert "gamma-api.polymarket.com" in mock_get.call_args.args[0]
-        assert "/markets" in mock_get.call_args.args[0]
-        assert mock_get.call_args.kwargs["params"]["condition_id"] == "0xcond_abc"
+            env._fetch_resolved_outcome(m)
+        # Two calls — one per outcome token
+        assert mock_get.call_count == 2
+        urls = [c.args[0] for c in mock_get.call_args_list]
+        assert all("clob.polymarket.com" in u for u in urls)
+        assert all("/midpoint" in u for u in urls)
+        token_ids = {c.kwargs["params"]["token_id"] for c in mock_get.call_args_list}
+        assert token_ids == {m.yes_token_id, m.no_token_id}
 
     def test_http_failure_returns_none(self):
         import requests
@@ -400,7 +411,17 @@ class TestFetchResolvedOutcome:
             "torchtrade.envs.live.polymarket.env.requests.get",
             side_effect=requests.ConnectionError("503"),
         ):
-            assert env._fetch_resolved_outcome("0xcond") is None
+            assert env._fetch_resolved_outcome(_make_market()) is None
+
+    def test_missing_mid_field_returns_none(self):
+        """If the CLOB response shape changes (no 'mid' key), don't crash."""
+        env, _, _ = _make_env(mock_fetch=False)
+        with patch("torchtrade.envs.live.polymarket.env.requests.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = {"unexpected": "shape"}
+            mock_resp.raise_for_status = MagicMock()
+            mock_get.return_value = mock_resp
+            assert env._fetch_resolved_outcome(_make_market()) is None
 
 
 class TestPollForResolution:
