@@ -2,9 +2,12 @@
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Callable, List, Optional, Union
+from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 import torch
+
+if TYPE_CHECKING:
+    from tensordict import TensorDict
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +39,9 @@ class BaseLLMActor(ABC):
         user_prompt_fn: Optional callable `f(actor, tensordict) -> str` that
             replaces the default user prompt construction. Useful for custom
             data layouts or formats. If None, the default prompt (account
-            state + market data tables) is used.
+            state + market data tables) is used. The callable receives the
+            live tensordict for the current step — read freely, but do NOT
+            mutate it (writes will leak into observation/action keys).
     """
 
     def __init__(
@@ -157,7 +162,7 @@ class BaseLLMActor(ABC):
                 continue
 
             data = tensordict[key].cpu().numpy()
-            if data.ndim == 3:
+            if data.ndim == 3 and data.shape[0] == 1:
                 data = data.squeeze(0)
             if data.ndim != 2 or data.shape[1] != len(self.feature_keys):
                 raise ValueError(

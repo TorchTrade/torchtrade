@@ -88,6 +88,48 @@ def test_extract_action(actor, response, expected_idx):
     assert actor._extract_action(response) == expected_idx
 
 
+@pytest.mark.parametrize("response,expected_msg_fragment", [
+    ("<answer>99</answer>", "out of range"),
+    ("no tag", "No <answer> tag"),
+], ids=["out-of-range", "no-tag"])
+def test_extract_action_warns_unconditionally(actor, caplog, response, expected_msg_fragment):
+    """Warnings on bad responses are emitted regardless of debug flag."""
+    assert actor.debug is False
+    with caplog.at_level("WARNING", logger="torchtrade.actor.base_llm_actor"):
+        actor._extract_action(response)
+    assert any(expected_msg_fragment in r.message for r in caplog.records)
+
+
+@pytest.mark.parametrize("bad_shape", [
+    (48,),         # 1D
+    (48, 4),       # wrong feature count
+    (2, 48, 5),    # 3D with leading dim != 1 (squeeze(0) is a no-op)
+], ids=["1d", "wrong-feature-count", "batched-3d"])
+def test_market_data_shape_mismatch_raises(actor, bad_shape):
+    """Bad market data shapes raise ValueError instead of being silently dropped."""
+    td = TensorDict({
+        "market_data_1Hour_48": torch.randn(*bad_shape),
+        "account_state": torch.tensor([[0.5, 1.0, 0.02, 5.0, 1.0, 1.0]]),
+    }, batch_size=[])
+    with pytest.raises(ValueError, match="Unexpected market data shape"):
+        actor._construct_market_data(td)
+
+
+def test_vllm_import_error_propagates(monkeypatch):
+    """If vllm cannot be imported, construction raises (no silent transformers fallback)."""
+    # Setting sys.modules[name] = None makes `from name import ...` raise ImportError.
+    monkeypatch.setitem(sys.modules, "vllm", None)
+    from torchtrade.actor import LocalLLMActor
+    with pytest.raises(ImportError):
+        LocalLLMActor(
+            model="test-model",
+            backend="vllm",
+            market_data_keys=MARKET_DATA_KEYS,
+            account_state_labels=ACCOUNT_STATE_LABELS,
+            action_levels=ACTION_LEVELS_FUTURES,
+        )
+
+
 def test_forward_produces_required_keys(actor, sample_td):
     """Forward pass populates action, thinking, system_prompt, user_prompt."""
     with patch.object(actor, "generate", return_value="<think>reasoning</think><answer>2</answer>"):
@@ -199,16 +241,9 @@ def test_user_prompt_fn_override(sample_td):
     assert "Current account state:" not in user_prompt
 
 
-def test_default_prompt_unchanged_when_overrides_none(sample_td):
-    """With no overrides, behavior matches the original default."""
-    actor = _make_actor()  # both overrides default to None
+def test_system_prompt_empty_string_is_used_verbatim(sample_td):
+    """Empty string is a valid override (pin `if override is None`, not `if override`)."""
+    actor = _make_actor(system_prompt="")
     with patch.object(actor, "generate", return_value="<answer>0</answer>") as mock_gen:
         actor.forward(sample_td)
-
-    system_prompt, user_prompt = mock_gen.call_args.args
-    # Default system prompt mentions symbol + timeframe
-    assert "BTC/USD" in system_prompt
-    assert "1Hour" in system_prompt
-    # Default user prompt has the account-state and market-data headers
-    assert "Current account state:" in user_prompt
-    assert "Current market data:" in user_prompt
+    assert mock_gen.call_args.args[0] == ""

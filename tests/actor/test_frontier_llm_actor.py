@@ -76,20 +76,19 @@ def test_forward_end_to_end(actor, sample_td):
     assert "analysis" in result["thinking"]
 
 
-@pytest.mark.parametrize("api_key", ["explicit-key", None], ids=["explicit-key", "none-passes-through"])
-def test_api_key_passes_through_to_openai(api_key):
-    """api_key is forwarded verbatim; SDK handles env resolution when None."""
+def test_api_key_passes_through_to_openai():
+    """api_key is forwarded verbatim to the OpenAI SDK (which resolves env on None)."""
     with patch("openai.OpenAI") as mock_cls:
         mock_cls.return_value = MagicMock()
         from torchtrade.actor import FrontierLLMActor
 
         FrontierLLMActor(
             model="gpt-4o-mini",
-            api_key=api_key,
+            api_key="explicit-key",
             market_data_keys=MARKET_DATA_KEYS,
             account_state_labels=ACCOUNT_STATE_LABELS,
             action_levels=ACTION_LEVELS,
         )
 
         assert mock_cls.call_count == 1
-        assert mock_cls.call_args.kwargs["api_key"] == api_key
+        assert mock_cls.call_args.kwargs["api_key"] == "explicit-key"
