@@ -60,7 +60,7 @@ def main():
     # Loop until the env says we're done (max_steps truncation or bankruptcy);
     # no external counter, the env owns termination.
     step = 0
-    while not bool(td.get("done", torch.zeros(1, dtype=torch.bool)).item()):
+    while not td["done"].item():
         step += 1
         action = torch.randint(0, env.action_spec.n, ())
         side = "UP" if action.item() == 1 else "DOWN"

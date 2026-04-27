@@ -18,7 +18,6 @@ Concrete example (5-minute Bitcoin up/down):
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from dataclasses import dataclass
@@ -33,7 +32,6 @@ from torchrl.data.tensor_specs import Composite
 from torchrl.envs import EnvBase
 
 from torchtrade.envs.live.polymarket.market_scanner import (
-    GAMMA_API_BASE,
     MarketScanner,
     MarketScannerConfig,
     PolymarketMarket,
@@ -41,12 +39,9 @@ from torchtrade.envs.live.polymarket.market_scanner import (
 
 logger = logging.getLogger(__name__)
 
-# CLOB midpoint endpoint — public, no auth required. Returns ``{"mid": "0.985"}``.
-# We use this rather than Gamma's outcomePrices because:
-# (1) Gamma evicts short-cadence markets from /markets within minutes of endDate,
-# (2) Gamma's outcomePrices appears to be a stale/cached snapshot — for an
-#     in-flight market we observed Gamma reporting [0.305, 0.695] while the
-#     CLOB midpoint for the YES token was 0.985.
+# Polymarket's public CLOB endpoint. Used for resolution detection — see
+# ``_fetch_resolved_outcome`` for why CLOB midpoint is preferred over
+# Gamma's outcomePrices.
 CLOB_API_BASE = "https://clob.polymarket.com"
 
 

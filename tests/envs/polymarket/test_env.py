@@ -169,24 +169,26 @@ class TestReset:
 
 class TestStep:
     @pytest.mark.parametrize(
-        "action,outcome,stake_won",
+        "action,outcome,fill_price,expected_payoff",
         [
-            (1, 1, True),   # bet Up, Up wins
-            (0, 0, True),   # bet Down, Down wins
-            (1, 0, False),  # bet Up, Down wins
-            (0, 1, False),  # bet Down, Up wins
+            (1, 1, 0.4, 100.0 * 0.6 / 0.4),    # bet Up @ 0.4, Up wins  → +150
+            (0, 0, 0.6, 100.0 * 0.4 / 0.6),    # bet Down @ 0.6, Down wins → +66.67
+            (1, 0, None, -100.0),               # bet Up, Down wins → -stake
+            (0, 1, None, -100.0),               # bet Down, Up wins → -stake
         ],
         ids=["up-wins", "down-wins", "up-loses", "down-loses"],
     )
-    def test_payoff_path(self, action, outcome, stake_won):
+    def test_payoff_path(self, action, outcome, fill_price, expected_payoff):
+        """Pin the exact payoff (not just sign) so a fill-price swap on action=0
+        — e.g. picking ``yes_price`` when the agent bet Down — would still pass
+        a sign-only check but produce the wrong magnitude. ``stake = 1000 * 0.1
+        = 100`` per ``_make_env`` defaults.
+        """
         market = _make_market(yes_price=0.4, no_price=0.6)
         env, _, _ = _make_env(outcomes=[outcome], markets=[market, _make_market()])
         env.reset()
         td = env._step(TensorDict({"action": torch.tensor(action)}, batch_size=()))
-        if stake_won:
-            assert td["reward"].item() > 0
-        else:
-            assert td["reward"].item() < 0
+        assert td["reward"].item() == pytest.approx(expected_payoff)
 
     def test_dry_run_skips_trader_buy(self):
         env, _, trader = _make_env(config_overrides={"dry_run": True})
@@ -194,13 +196,20 @@ class TestStep:
         env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
         trader.buy.assert_not_called()
 
-    def test_live_mode_calls_trader_buy(self):
+    @pytest.mark.parametrize(
+        "action,expected_token_id",
+        [(1, "tok_yes"), (0, "tok_no")],
+        ids=["bet-up-targets-yes-token", "bet-down-targets-no-token"],
+    )
+    def test_live_mode_calls_trader_buy_with_correct_token(self, action, expected_token_id):
+        """A YES↔NO token swap on either action would silently pass without
+        parametrizing both directions — so this test exercises both."""
         env, _, trader = _make_env(config_overrides={"dry_run": False})
         env.reset()
-        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+        env._step(TensorDict({"action": torch.tensor(action)}, batch_size=()))
         trader.buy.assert_called_once()
         kwargs = trader.buy.call_args.kwargs
-        assert kwargs["token_id"] == "tok_yes"
+        assert kwargs["token_id"] == expected_token_id
         assert kwargs["amount_usdc"] > 0
 
     def test_zero_stake_in_live_mode_does_not_call_trader(self):
