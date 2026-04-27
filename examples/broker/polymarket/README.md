@@ -17,6 +17,25 @@ time-to-resolution). No environment, no orders.
 python examples/broker/polymarket/scan_markets.py
 ```
 
+Example output:
+
+```
+  YES |      24h vol |    liquidity | resolves     | question
+----------------------------------------------------------------------------------------------------
+ 0.01 | $  1,303,675 | $  2,565,119 |   2026-07-20 | Will USA win the 2026 FIFA World Cup?
+ 0.00 | $    858,344 | $    999,236 |   2026-07-01 | Will the Portland Trail Blazers win the 2026 NBA Finals?
+ 0.00 | $    751,378 | $  5,583,069 |   2026-07-20 | Will Iraq win the 2026 FIFA World Cup?
+ 0.16 | $    652,216 | $    362,115 |   2026-07-01 | Will the San Antonio Spurs win the 2026 NBA Finals?
+ 0.14 | $    513,394 | $    111,446 |   2026-07-01 | Will the Boston Celtics win the 2026 NBA Finals?
+ 0.04 | $    484,678 | $    378,936 |   2026-07-01 | Will the Los Angeles Lakers win the 2026 NBA Finals?
+ 0.01 | $    451,391 | $    731,710 |   2026-07-01 | Will the Minnesota Timberwolves win the 2026 NBA Finals?
+ 0.03 | $    450,139 | $    508,460 |   2026-07-01 | Will the New York Knicks win the 2026 NBA Finals?
+ 0.01 | $    425,376 | $    531,424 |   2026-07-01 | Will the Atlanta Hawks win the 2026 NBA Finals?
+ 0.09 | $    409,781 | $  1,402,387 |   2026-07-20 | Will Brazil win the 2026 FIFA World Cup?
+```
+
+The output reflects the live Gamma API at run time — your numbers and rows will differ.
+
 ### End-to-end dry run
 
 Pick the top market via the scanner, build `PolyTimeBarEnv` in dry-run mode,
