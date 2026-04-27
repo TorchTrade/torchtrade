@@ -193,8 +193,8 @@ def test_action_descriptions_match_levels(action_levels):
 # ----------------------------------------------------------------------------
 
 
-def test_account_state_block_omitted_when_labels_empty():
-    """Empty account_state_labels skips the account-state block entirely."""
+def test_account_state_block_omitted_when_key_missing():
+    """Envs that omit the account_state key (e.g. PolymarketBetEnv) skip the block."""
     from torchtrade.actor import LocalLLMActor
     actor = LocalLLMActor(
         model="test-model",
@@ -202,20 +202,6 @@ def test_account_state_block_omitted_when_labels_empty():
         market_data_keys=["market_state"],
         account_state_labels=[],
         action_levels=[0, 1],
-    )
-    td = TensorDict({"market_state": torch.tensor([0.5, 0.02, 1500.0, 12000.0])}, batch_size=[])
-    assert actor._construct_account_state(td) == ""
-
-
-def test_account_state_block_omitted_when_key_missing():
-    """A non-empty labels list still skips the block if the key isn't on the TD."""
-    from torchtrade.actor import LocalLLMActor
-    actor = LocalLLMActor(
-        model="test-model",
-        backend="vllm",
-        market_data_keys=["market_state"],
-        account_state_labels=ACCOUNT_STATE_LABELS,
-        action_levels=ACTION_LEVELS_FUTURES,
     )
     td = TensorDict({"market_state": torch.tensor([0.5, 0.02, 1500.0, 12000.0])}, batch_size=[])
     assert actor._construct_account_state(td) == ""
@@ -239,6 +225,22 @@ def test_flat_1d_market_state_renders_as_labeled_rows():
         assert key in rendered
     assert "0.5100" in rendered
     assert "1690.0000" in rendered
+
+
+def test_flat_1d_market_state_label_mismatch_raises():
+    """1D market state with feature_keys length mismatch raises (no silent f0..fN fallback)."""
+    from torchtrade.actor import LocalLLMActor
+    actor = LocalLLMActor(
+        model="test-model",
+        backend="vllm",
+        market_data_keys=["market_state"],
+        account_state_labels=[],
+        action_levels=[0, 1],
+        feature_keys=["yes_price", "spread"],  # 2 keys
+    )
+    td = TensorDict({"market_state": torch.tensor([0.5, 0.02, 1500.0, 12000.0])}, batch_size=[])  # 4 values
+    with pytest.raises(ValueError, match="Unexpected market data shape"):
+        actor._construct_market_data(td)
 
 
 def test_action_descriptions_override_used_in_system_prompt():
@@ -327,3 +329,36 @@ def test_system_prompt_empty_string_is_used_verbatim(sample_td):
     with patch.object(actor, "generate", return_value="<answer>0</answer>") as mock_gen:
         actor.forward(sample_td)
     assert mock_gen.call_args.args[0] == ""
+
+
+def test_forward_polymarket_shape_with_user_prompt_fn():
+    """End-to-end forward() on a Polymarket-shaped envelope: no account_state,
+    1D market_state, action_descriptions override, and a user_prompt_fn.
+
+    Verifies the merge x #223 integration the PR is selling — the four features
+    compose correctly through the full forward pipeline.
+    """
+    from torchtrade.actor import LocalLLMActor
+    feature_keys = ["yes_price", "spread", "volume_24h", "liquidity"]
+    actor = LocalLLMActor(
+        model="test-model",
+        backend="vllm",
+        market_data_keys=["market_state"],
+        account_state_labels=[],
+        action_levels=[0, 1],
+        feature_keys=feature_keys,
+        action_descriptions=["Action 0 → bet DOWN", "Action 1 → bet UP"],
+        user_prompt_fn=lambda a, td: f"yes_price={td['market_state'][0].item():.2f}",
+    )
+    td = TensorDict({"market_state": torch.tensor([0.51, 0.03, 1690.0, 18110.0])}, batch_size=[])
+    with patch.object(actor, "generate", return_value="<think>up</think><answer>1</answer>") as mock_gen:
+        result = actor.forward(td)
+
+    system_prompt, user_prompt = mock_gen.call_args.args
+    # action_descriptions override flowed through to the system prompt
+    assert "bet DOWN" in system_prompt
+    assert "bet UP" in system_prompt
+    # user_prompt_fn replaced the default user prompt (no account_state/market-data tables)
+    assert user_prompt == "yes_price=0.51"
+    # forward() wrote the action correctly
+    assert result["action"].item() == 1

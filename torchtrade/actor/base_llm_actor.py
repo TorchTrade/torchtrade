@@ -151,10 +151,9 @@ class BaseLLMActor(ABC):
         return self._construct_account_state(tensordict) + self._construct_market_data(tensordict)
 
     def _construct_account_state(self, tensordict) -> str:
-        # Envs without an account_state (e.g. PolymarketBetEnv) skip this block
-        # entirely; either no labels or the key not on the tensordict means
-        # there is nothing to render.
-        if not self.account_state_labels or "account_state" not in tensordict:
+        # Envs that don't expose account_state (e.g. PolymarketBetEnv) just
+        # omit the key — skip this block.
+        if "account_state" not in tensordict:
             return ""
 
         account_state = tensordict.get("account_state")
@@ -180,13 +179,13 @@ class BaseLLMActor(ABC):
             # Flat 1D market state (e.g. PolymarketBetEnv's
             # [yes_price, spread, vol_24h, liquidity]) — render as one labeled row.
             if data.ndim == 1:
-                labels = (
-                    self.feature_keys
-                    if len(self.feature_keys) == data.shape[0]
-                    else [f"f{i}" for i in range(data.shape[0])]
-                )
+                if len(self.feature_keys) != data.shape[0]:
+                    raise ValueError(
+                        f"Unexpected market data shape for {key}: {data.shape} "
+                        f"(expected 1D with {len(self.feature_keys)} feature values)"
+                    )
                 out += f"{key}:\n"
-                for label, value in zip(labels, data, strict=True):
+                for label, value in zip(self.feature_keys, data, strict=True):
                     out += f"  {label}: {value:.4f}\n"
                 out += "\n"
                 continue
