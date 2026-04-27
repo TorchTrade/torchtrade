@@ -80,7 +80,9 @@ def _make_env(
         outcome_iter = (
             itertools.cycle([1]) if outcomes is None else iter(outcomes)
         )
-        env._fetch_resolved_outcome = MagicMock(
+        # Stub the polling loop directly — bypassing _fetch_resolved_outcome's
+        # network call AND the time.sleep inside _poll_for_resolution.
+        env._poll_for_resolution = MagicMock(
             side_effect=lambda *_a, **_k: next(outcome_iter)
         )
     return env, scanner, trader
@@ -399,6 +401,44 @@ class TestFetchResolvedOutcome:
             side_effect=requests.ConnectionError("503"),
         ):
             assert env._fetch_resolved_outcome("0xcond") is None
+
+
+class TestPollForResolution:
+    """Polling loop must retry until Gamma reports a resolved outcome."""
+
+    def _real_poll_env(self, **config_overrides):
+        env, _, _ = _make_env(config_overrides=config_overrides or None)
+        # Restore the real polling loop (the fixture stubs it for other tests).
+        env._poll_for_resolution = (
+            PolymarketBetEnv._poll_for_resolution.__get__(env, PolymarketBetEnv)
+        )
+        return env
+
+    def test_returns_first_non_none_outcome_immediately(self):
+        env = self._real_poll_env()
+        env._fetch_resolved_outcome = MagicMock(return_value=1)
+        with patch("torchtrade.envs.live.polymarket.env.time.sleep") as mock_sleep:
+            assert env._poll_for_resolution("0xcond") == 1
+        mock_sleep.assert_not_called()
+        assert env._fetch_resolved_outcome.call_count == 1
+
+    def test_retries_until_resolved(self):
+        env = self._real_poll_env()
+        # First two calls: still mid-market. Third: Up wins.
+        env._fetch_resolved_outcome = MagicMock(side_effect=[None, None, 1])
+        with patch("torchtrade.envs.live.polymarket.env.time.sleep"):
+            assert env._poll_for_resolution("0xcond") == 1
+        assert env._fetch_resolved_outcome.call_count == 3
+
+    def test_returns_none_when_max_wait_exhausted(self):
+        env = self._real_poll_env(
+            resolution_max_wait_seconds=0.1,
+            resolution_poll_interval_seconds=0.01,
+        )
+        env._fetch_resolved_outcome = MagicMock(return_value=None)
+        with patch("torchtrade.envs.live.polymarket.env.time.sleep"):
+            assert env._poll_for_resolution("0xcond") is None
+        assert env._fetch_resolved_outcome.call_count >= 1
 
 
 class TestWaitForResolution:

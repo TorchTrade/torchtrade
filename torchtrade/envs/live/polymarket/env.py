@@ -70,7 +70,14 @@ class PolymarketBetEnvConfig:
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1
     dry_run: bool = False
+    # Initial wait after a market's endDate before the FIRST resolution poll.
     resolution_grace_seconds: float = 30.0
+    # If the first poll finds the market still pre-settlement on Gamma
+    # (outcomePrices not yet [1, 0] / [0, 1]), keep polling at this interval...
+    resolution_poll_interval_seconds: float = 15.0
+    # ... up to this total budget after endDate. Polymarket on-chain settlement
+    # typically propagates to Gamma within 1-5 minutes; 10 min is a safe ceiling.
+    resolution_max_wait_seconds: float = 600.0
 
 
 class PolymarketBetEnv(EnvBase):
@@ -203,10 +210,13 @@ class PolymarketBetEnv(EnvBase):
                 stake = 0.0
 
         self._wait_for_resolution(market.end_date)
-        outcome = self._fetch_resolved_outcome(market.condition_id)
+        outcome = self._poll_for_resolution(market.condition_id)
 
         if outcome is None:
-            logger.warning("Market %s not yet resolved after wait; reward=0", market.slug)
+            logger.warning(
+                "Market %s did not resolve within %s s of endDate; reward=0",
+                market.slug, self.config.resolution_max_wait_seconds,
+            )
             payoff = 0.0
         else:
             payoff = self._compute_payoff(action_idx, fill_price, outcome, stake)
@@ -268,6 +278,24 @@ class PolymarketBetEnv(EnvBase):
         sleep_seconds = (target - datetime.now(timezone.utc)).total_seconds()
         if sleep_seconds > 0:
             time.sleep(sleep_seconds)
+
+    def _poll_for_resolution(self, condition_id: str) -> Optional[int]:
+        """Repeatedly fetch the resolved outcome, retrying until settlement
+        propagates to Gamma or the wait budget is exhausted.
+
+        Polymarket on-chain settlement typically takes 1-5 minutes after a
+        market's endDate to flow through Gamma's API; the initial single-shot
+        check after the 30 s grace usually finds the market still mid-market.
+        Tests should override this method to side-step the polling loop.
+        """
+        deadline = time.monotonic() + self.config.resolution_max_wait_seconds
+        while True:
+            outcome = self._fetch_resolved_outcome(condition_id)
+            if outcome is not None:
+                return outcome
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(self.config.resolution_poll_interval_seconds)
 
     def _fetch_resolved_outcome(self, condition_id: str) -> Optional[int]:
         """Return 1 (Up won), 0 (Down won), or None if still unresolved."""
