@@ -141,9 +141,10 @@ class BaseLLMActor(ABC):
             if data.ndim == 3:
                 data = data.squeeze(0)
             if data.ndim != 2 or data.shape[1] != len(self.feature_keys):
-                if self.debug:
-                    print(f"[Warning] Unexpected market data shape for {key}: {data.shape}")
-                continue
+                raise ValueError(
+                    f"Unexpected market data shape for {key}: {data.shape} "
+                    f"(expected 2D with {len(self.feature_keys)} feature columns)"
+                )
 
             out += f"{key}:\n\n"
             header = " | ".join(f"{k:>8}" for k in self.feature_keys)

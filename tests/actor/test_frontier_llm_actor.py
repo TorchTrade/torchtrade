@@ -76,15 +76,10 @@ def test_forward_end_to_end(actor, sample_td):
     assert "analysis" in result["thinking"]
 
 
-@pytest.mark.parametrize("api_key,expect_dotenv,expected_resolved_key", [
-    ("explicit-key", False, "explicit-key"),
-    (None, True, "env-key"),
-], ids=["explicit-key", "dotenv-fallback"])
-def test_api_key_resolution(api_key, expect_dotenv, expected_resolved_key):
-    """Uses explicit key when provided, falls back to .env otherwise."""
-    with patch("openai.OpenAI") as mock_cls, \
-         patch("dotenv.dotenv_values") as mock_dotenv:
-        mock_dotenv.return_value = {"OPENAI_API_KEY": "env-key"}
+@pytest.mark.parametrize("api_key", ["explicit-key", None], ids=["explicit-key", "none-passes-through"])
+def test_api_key_passes_through_to_openai(api_key):
+    """api_key is forwarded verbatim; SDK handles env resolution when None."""
+    with patch("openai.OpenAI") as mock_cls:
         mock_cls.return_value = MagicMock()
         from torchtrade.actor import FrontierLLMActor
 
@@ -96,6 +91,5 @@ def test_api_key_resolution(api_key, expect_dotenv, expected_resolved_key):
             action_levels=ACTION_LEVELS,
         )
 
-        assert mock_dotenv.call_count == (1 if expect_dotenv else 0)
         assert mock_cls.call_count == 1
-        assert mock_cls.call_args.kwargs["api_key"] == expected_resolved_key
+        assert mock_cls.call_args.kwargs["api_key"] == api_key

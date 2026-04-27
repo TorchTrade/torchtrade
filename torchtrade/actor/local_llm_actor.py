@@ -1,12 +1,9 @@
 """Local LLM Actor using vllm or transformers backends."""
-import logging
 from typing import Optional
 
 import torch
 
 from torchtrade.actor.base_llm_actor import BaseLLMActor
-
-logger = logging.getLogger(__name__)
 
 
 class LocalLLMActor(BaseLLMActor):
@@ -57,29 +54,24 @@ class LocalLLMActor(BaseLLMActor):
             raise ValueError(f"Unknown backend: {self.backend}. Use 'vllm' or 'transformers'")
 
     def _initialize_vllm(self):
-        try:
-            from vllm import LLM, SamplingParams
-            self.sampling_params = SamplingParams(
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                stop=["</answer>"],
-            )
-            kwargs = {
-                "model": self.model_name,
-                "trust_remote_code": True,
-                "gpu_memory_utilization": self.gpu_memory_utilization,
-            }
-            if self.quantization == "4bit":
-                kwargs["quantization"] = "bitsandbytes"
-                kwargs["load_format"] = "bitsandbytes"
-            elif self.quantization == "8bit":
-                kwargs["quantization"] = "bitsandbytes_8bit"
+        from vllm import LLM, SamplingParams
+        self.sampling_params = SamplingParams(
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            stop=["</answer>"],
+        )
+        kwargs = {
+            "model": self.model_name,
+            "trust_remote_code": True,
+            "gpu_memory_utilization": self.gpu_memory_utilization,
+        }
+        if self.quantization == "4bit":
+            kwargs["quantization"] = "bitsandbytes"
+            kwargs["load_format"] = "bitsandbytes"
+        elif self.quantization == "8bit":
+            kwargs["quantization"] = "bitsandbytes_8bit"
 
-            self.llm = LLM(**kwargs)
-        except ImportError:
-            logger.warning("vllm not available, falling back to transformers")
-            self.backend = "transformers"
-            self._initialize_transformers()
+        self.llm = LLM(**kwargs)
 
     def _initialize_transformers(self):
         try:
@@ -118,18 +110,8 @@ class LocalLLMActor(BaseLLMActor):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        tokenizer = None
-        if self.backend == "vllm" and hasattr(self.llm, "get_tokenizer"):
-            tokenizer = self.llm.get_tokenizer()
-        elif self.backend == "transformers" and self.tokenizer:
-            tokenizer = self.tokenizer
-
-        if tokenizer and hasattr(tokenizer, "apply_chat_template"):
-            try:
-                return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            except Exception:
-                pass
-        return f"{system_prompt}\n\n{user_prompt}"
+        tokenizer = self.llm.get_tokenizer() if self.backend == "vllm" else self.tokenizer
+        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
         prompt = self._format_chat_prompt(system_prompt, user_prompt)
