@@ -265,6 +265,12 @@ class TestScan:
         mock_get.assert_called_once()
         call_args = mock_get.call_args
         assert "gamma-api.polymarket.com" in call_args[0][0]
+        # Without sorting by volume24hr at the API level, niche-topic markets
+        # (e.g. crypto) get pushed past the limit window. Pin the sort params
+        # so a refactor doesn't silently regress to the unsorted default.
+        params = call_args.kwargs["params"]
+        assert params["order"] == "volume24hr"
+        assert params["ascending"] == "false"
         assert len(results) == 1
         assert isinstance(results[0], PolymarketMarket)
         assert results[0].market_id == "517310"

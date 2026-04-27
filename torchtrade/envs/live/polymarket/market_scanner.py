@@ -127,7 +127,17 @@ class MarketScanner:
         try:
             resp = requests.get(
                 f"{GAMMA_API_BASE}/markets",
-                params={"active": "true", "closed": "false", "limit": 100},
+                params={
+                    "active": "true",
+                    "closed": "false",
+                    "limit": 500,
+                    # Sort by 24h volume descending so the first page contains
+                    # the markets users actually want — without this, results
+                    # come in API-default order and high-volume markets in
+                    # niche topics (crypto, etc.) often miss the cut.
+                    "order": "volume24hr",
+                    "ascending": "false",
+                },
                 timeout=15,
             )
             resp.raise_for_status()
