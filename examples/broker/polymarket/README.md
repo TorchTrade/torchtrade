@@ -134,7 +134,8 @@ Each `step()` does five things:
 ```
 1. Submit the bet on the current market (skipped in dry_run)
 2. Sleep until the market's endDate + grace
-3. Fetch the resolved outcome from Gamma's metadata
+3. Poll the CLOB midpoint for each outcome token; resolved when YES mid >= 0.99
+   and NO mid <= 0.01 (Up won) or vice versa (Down won)
 4. Compute realized payoff:  win → stake * (1 - fill) / fill, loss → -stake
 5. Pick the next active market matching market_slug_prefix and return its market_state
 ```

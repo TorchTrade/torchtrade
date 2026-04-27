@@ -416,7 +416,7 @@ env = PolymarketBetEnv(
 Each `step()`:
 1. Submits the bet on the current market (skipped in `dry_run`).
 2. Sleeps until the market's `endDate` plus a small grace period.
-3. Fetches the resolved outcome from Gamma (`outcomePrices` snaps to `[1, 0]` or `[0, 1]`).
+3. Polls Polymarket's **CLOB** at `clob.polymarket.com/midpoint?token_id=…` for each outcome token; the market is resolved once the YES midpoint is `≥ 0.99` and the NO midpoint is `≤ 0.01` (Up won), or vice versa (Down won). The CLOB is used here rather than Gamma's `outcomePrices` because Gamma evicts short-cadence markets within minutes of `endDate` and its prices field is a stale snapshot, not a live mid.
 4. Computes realized payoff, a win pays `stake × (1 − fill) / fill`; a loss returns `−stake`.
 5. Picks the next active market matching `market_slug_prefix` and returns its `market_state`.
 

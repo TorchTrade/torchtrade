@@ -80,11 +80,13 @@ class PolymarketBetEnvConfig:
     dry_run: bool = False
     # Initial wait after a market's endDate before the FIRST resolution poll.
     resolution_grace_seconds: float = 30.0
-    # If the first poll finds the market still pre-settlement on Gamma
-    # (outcomePrices not yet [1, 0] / [0, 1]), keep polling at this interval...
+    # If the first poll finds the market still pre-settlement on the CLOB
+    # (YES + NO midpoints not yet snapped to ~$1 / ~$0), keep polling at
+    # this interval...
     resolution_poll_interval_seconds: float = 15.0
     # ... up to this total budget after endDate. Polymarket on-chain settlement
-    # typically propagates to Gamma within 1-5 minutes; 10 min is a safe ceiling.
+    # typically snaps the CLOB midpoints within 1-5 minutes of endDate;
+    # 10 min is a safe ceiling.
     resolution_max_wait_seconds: float = 600.0
 
 
