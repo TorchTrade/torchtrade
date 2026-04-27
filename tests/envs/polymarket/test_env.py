@@ -80,7 +80,7 @@ def _make_env(
         outcome_iter = (
             itertools.cycle([1]) if outcomes is None else iter(outcomes)
         )
-        # Stub the polling loop directly — bypassing _fetch_resolved_outcome's
+        # Stub the polling loop directly, bypassing _fetch_resolved_outcome's
         # network call AND the time.sleep inside _poll_for_resolution.
         env._poll_for_resolution = MagicMock(
             side_effect=lambda *_a, **_k: next(outcome_iter)
@@ -386,7 +386,7 @@ class TestFetchResolvedOutcome:
             assert env._fetch_resolved_outcome(m) == expected
 
     def test_outgoing_request_pins_clob_endpoint_and_token_id(self):
-        """Pin the CLOB API contract — endpoint URL and token_id query param.
+        """Pin the CLOB API contract, endpoint URL and token_id query param.
         A regression that flipped to Gamma's outcomePrices would fail this."""
         env, _, _ = _make_env(mock_fetch=False)
         m = _make_market()
@@ -396,7 +396,7 @@ class TestFetchResolvedOutcome:
             mock_resp.raise_for_status = MagicMock()
             mock_get.return_value = mock_resp
             env._fetch_resolved_outcome(m)
-        # Two calls — one per outcome token
+        # Two calls, one per outcome token
         assert mock_get.call_count == 2
         urls = [c.args[0] for c in mock_get.call_args_list]
         assert all("clob.polymarket.com" in u for u in urls)

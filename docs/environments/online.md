@@ -564,7 +564,7 @@ For purely on-chain signals, custom microfeatures pipelines, or non-Binance exch
 
 ### Driving the env with an LLM actor
 
-TorchTrade ships [`FrontierLLMActor`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/frontier_llm_actor.py) (OpenAI-compatible) and [`LocalLLMActor`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/local_llm_actor.py) (local HF model via vLLM). Both work directly with `PolymarketBetEnv` — pass an empty `account_state_labels` to skip that prompt section, point `market_data_keys` at `"market_state"`, and override the action descriptions to use binary up/down language:
+TorchTrade ships [`FrontierLLMActor`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/frontier_llm_actor.py) (OpenAI-compatible) and [`LocalLLMActor`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/local_llm_actor.py) (local HF model via vLLM). Both work directly with `PolymarketBetEnv`, pass an empty `account_state_labels` to skip that prompt section, point `market_data_keys` at `"market_state"`, and override the action descriptions to use binary up/down language:
 
 ```python
 import os
@@ -607,7 +607,7 @@ while not bool(td.get("done", torch.zeros(1, dtype=torch.bool)).item()):
 env.close()
 ```
 
-The actor expects responses in `<answer>N</answer>` format (handled by `BaseLLMActor._extract_action`); models that don't follow it default to action 0. Set `debug=True` on the actor to print the system prompt, user prompt, and raw model response each step — useful while tuning.
+The actor expects responses in `<answer>N</answer>` format (handled by `BaseLLMActor._extract_action`); models that don't follow it default to action 0. Set `debug=True` on the actor to print the system prompt, user prompt, and raw model response each step, useful while tuning.
 
 #### Combining with `BinanceOHLCVTransform`
 
@@ -638,7 +638,7 @@ actor = FrontierLLMActor(
 )
 ```
 
-For local inference (no API key required), swap `FrontierLLMActor` for `LocalLLMActor` — the constructor kwargs are identical.
+For local inference (no API key required), swap `FrontierLLMActor` for `LocalLLMActor`, the constructor kwargs are identical.
 
 ---
 
