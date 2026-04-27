@@ -562,6 +562,84 @@ augment = BinanceOHLCVTransform(feature_preprocessing_fn=my_features)
 
 For purely on-chain signals, custom microfeatures pipelines, or non-Binance exchanges, write your own `Transform` following the same pattern, `_reset`, `_step`, and `transform_observation_spec`. The `BinanceOHLCVTransform` source ([`torchtrade/envs/transforms/binance_ohlcv.py`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/binance_ohlcv.py)) is short enough to read and adapt.
 
+### Driving the env with an LLM actor
+
+TorchTrade ships [`FrontierLLMActor`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/frontier_llm_actor.py) (OpenAI-compatible) and [`LocalLLMActor`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/local_llm_actor.py) (local HF model via vLLM). Both work directly with `PolymarketBetEnv` — pass an empty `account_state_labels` to skip that prompt section, point `market_data_keys` at `"market_state"`, and override the action descriptions to use binary up/down language:
+
+```python
+import os
+import torch
+from dotenv import load_dotenv
+
+from torchtrade.actor import FrontierLLMActor
+from torchtrade.envs.live.polymarket import (
+    PolymarketBetEnv,
+    PolymarketBetEnvConfig,
+)
+
+load_dotenv()
+
+env = PolymarketBetEnv(
+    PolymarketBetEnvConfig(
+        market_slug_prefix="btc-updown-5m-",
+        max_steps=4,
+        dry_run=True,
+    ),
+)
+actor = FrontierLLMActor(
+    model="gpt-5-nano",                              # any OpenAI-compatible model
+    market_data_keys=["market_state"],               # the env's only obs key
+    account_state_labels=[],                         # PolymarketBetEnv has no account_state
+    action_levels=[0, 1],                            # binary action space
+    action_descriptions=[                            # override "target exposure" wording
+        "Action 0 → bet DOWN (price will be lower at resolution)",
+        "Action 1 → bet UP (price will be higher at resolution)",
+    ],
+    feature_keys=["yes_price", "spread", "volume_24h", "liquidity"],
+    symbol="BTC up/down (5 min)",
+    execute_on="5Minute",
+)
+
+td = env.reset()
+while not bool(td.get("done", torch.zeros(1, dtype=torch.bool)).item()):
+    td = actor(td)                                   # writes "action" into td
+    td = env.step(td)["next"]
+env.close()
+```
+
+The actor expects responses in `<answer>N</answer>` format (handled by `BaseLLMActor._extract_action`); models that don't follow it default to action 0. Set `debug=True` on the actor to print the system prompt, user prompt, and raw model response each step — useful while tuning.
+
+#### Combining with `BinanceOHLCVTransform`
+
+The transform exposes its OHLCV windows under keys like `ohlcv_1Minute_60`. Add those to `market_data_keys` and the actor will render them alongside `market_state` using the standard 2D-window layout (one row per bar, one column per feature):
+
+```python
+from torchrl.envs import TransformedEnv
+from torchtrade.envs.transforms import BinanceOHLCVTransform
+
+env = TransformedEnv(
+    PolymarketBetEnv(PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")),
+    BinanceOHLCVTransform(),  # defaults: 1m/5m/15m × 60/30/20
+)
+actor = FrontierLLMActor(
+    model="gpt-5-nano",
+    market_data_keys=[
+        "market_state",
+        "ohlcv_1Minute_60",
+        "ohlcv_5Minute_30",
+        "ohlcv_15Minute_20",
+    ],
+    account_state_labels=[],
+    action_levels=[0, 1],
+    action_descriptions=[
+        "Action 0 → bet DOWN",
+        "Action 1 → bet UP",
+    ],
+)
+```
+
+For local inference (no API key required), swap `FrontierLLMActor` for `LocalLLMActor` — the constructor kwargs are identical.
+
 ---
 
 ## Position Sizing (SLTP Environments)
