@@ -101,12 +101,16 @@ def test_extract_action_warns_unconditionally(actor, caplog, response, expected_
 
 
 @pytest.mark.parametrize("bad_shape", [
-    (48,),         # 1D
-    (48, 4),       # wrong feature count
+    (48, 4),       # 2D with wrong feature count
     (2, 48, 5),    # 3D with leading dim != 1 (squeeze(0) is a no-op)
-], ids=["1d", "wrong-feature-count", "batched-3d"])
+], ids=["wrong-feature-count", "batched-3d"])
 def test_market_data_shape_mismatch_raises(actor, bad_shape):
-    """Bad market data shapes raise ValueError instead of being silently dropped."""
+    """Bad market data shapes raise ValueError instead of being silently dropped.
+
+    Note: 1D is now a valid path (renders as labeled rows for envs like
+    PolymarketBetEnv), so it's tested separately via
+    test_flat_1d_market_state_renders_as_labeled_rows.
+    """
     td = TensorDict({
         "market_data_1Hour_48": torch.randn(*bad_shape),
         "account_state": torch.tensor([[0.5, 1.0, 0.02, 5.0, 1.0, 1.0]]),
@@ -183,8 +187,84 @@ def test_action_descriptions_match_levels(action_levels):
     assert f"0 to {len(action_levels) - 1}" in prompt
 
 
+# ----- Behaviors needed for envs that don't expose account_state / use flat
+# 1D market_state (e.g. PolymarketBetEnv). These let users plug FrontierLLMActor
+# / LocalLLMActor in directly without writing a Polymarket-specific subclass.
+# ----------------------------------------------------------------------------
+
+
+def test_account_state_block_omitted_when_labels_empty():
+    """Empty account_state_labels skips the account-state block entirely."""
+    from torchtrade.actor import LocalLLMActor
+    actor = LocalLLMActor(
+        model="test-model",
+        backend="vllm",
+        market_data_keys=["market_state"],
+        account_state_labels=[],
+        action_levels=[0, 1],
+    )
+    td = TensorDict({"market_state": torch.tensor([0.5, 0.02, 1500.0, 12000.0])}, batch_size=[])
+    assert actor._construct_account_state(td) == ""
+
+
+def test_account_state_block_omitted_when_key_missing():
+    """A non-empty labels list still skips the block if the key isn't on the TD."""
+    from torchtrade.actor import LocalLLMActor
+    actor = LocalLLMActor(
+        model="test-model",
+        backend="vllm",
+        market_data_keys=["market_state"],
+        account_state_labels=ACCOUNT_STATE_LABELS,
+        action_levels=ACTION_LEVELS_FUTURES,
+    )
+    td = TensorDict({"market_state": torch.tensor([0.5, 0.02, 1500.0, 12000.0])}, batch_size=[])
+    assert actor._construct_account_state(td) == ""
+
+
+def test_flat_1d_market_state_renders_as_labeled_rows():
+    """A 1D ``market_state`` is rendered as one labeled row per feature."""
+    from torchtrade.actor import LocalLLMActor
+    feature_keys = ["yes_price", "spread", "volume_24h", "liquidity"]
+    actor = LocalLLMActor(
+        model="test-model",
+        backend="vllm",
+        market_data_keys=["market_state"],
+        account_state_labels=[],
+        action_levels=[0, 1],
+        feature_keys=feature_keys,
+    )
+    td = TensorDict({"market_state": torch.tensor([0.51, 0.03, 1690.0, 18110.0])}, batch_size=[])
+    rendered = actor._construct_market_data(td)
+    for key in feature_keys:
+        assert key in rendered
+    assert "0.5100" in rendered
+    assert "1690.0000" in rendered
+
+
+def test_action_descriptions_override_used_in_system_prompt():
+    """Explicit ``action_descriptions`` replaces the auto-generated lines."""
+    from torchtrade.actor import LocalLLMActor
+    actor = LocalLLMActor(
+        model="test-model",
+        backend="vllm",
+        market_data_keys=["market_state"],
+        account_state_labels=[],
+        action_levels=[0, 1],
+        action_descriptions=[
+            "Action 0 → bet DOWN",
+            "Action 1 → bet UP",
+        ],
+    )
+    prompt = actor._build_system_prompt()
+    assert "bet DOWN" in prompt
+    assert "bet UP" in prompt
+    # Auto-generated phrases must NOT leak in
+    assert "long" not in prompt
+    assert "flat/no position" not in prompt
+
+
 # ============================================================================
-# Custom prompt injection (system_prompt + user_prompt_fn)
+# Custom prompt injection (system_prompt + user_prompt_fn) — issue #223
 # ============================================================================
 
 
