@@ -46,6 +46,7 @@ class MarketScannerConfig:
     max_markets: int = 20
     categories: Optional[List[str]] = None
     min_time_to_resolution_hours: float = 24
+    keyword: Optional[str] = None  # case-insensitive substring match on question or slug
 
 
 class MarketScanner:
@@ -104,6 +105,12 @@ class MarketScanner:
             if cfg.categories is not None:
                 market_labels = {tag.get("label", "") for tag in m.tags if isinstance(tag, dict)}
                 if not market_labels.intersection(cfg.categories):
+                    continue
+
+            # Keyword filter (case-insensitive substring on question or slug)
+            if cfg.keyword:
+                needle = cfg.keyword.lower()
+                if needle not in m.question.lower() and needle not in m.slug.lower():
                     continue
 
             filtered.append(m)

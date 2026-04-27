@@ -187,6 +187,37 @@ class TestFilterMarkets:
         filtered = scanner._filter_markets(markets)
         assert len(filtered) == expected_count
 
+    @pytest.mark.parametrize(
+        "keyword,question,slug,expected_count",
+        [
+            (None, "Will Bitcoin hit $100k?", "btc-100k", 1),       # no filter => keeps
+            ("bitcoin", "Will Bitcoin hit $100k?", "btc-100k", 1),  # matches question
+            ("BITCOIN", "Will Bitcoin hit $100k?", "btc-100k", 1),  # case-insensitive
+            ("btc", "Will Bitcoin hit $100k?", "btc-100k", 1),      # matches slug only
+            ("ethereum", "Will Bitcoin hit $100k?", "btc-100k", 0), # no match
+            ("", "Anything", "any-slug", 1),                        # empty string => no filter
+        ],
+        ids=[
+            "none-passes",
+            "match-question",
+            "case-insensitive",
+            "match-slug-only",
+            "no-match",
+            "empty-string-passes",
+        ],
+    )
+    def test_keyword_filtering(self, keyword, question, slug, expected_count):
+        config = MarketScannerConfig(
+            min_volume_24h=0,
+            min_liquidity=0,
+            min_time_to_resolution_hours=0,
+            keyword=keyword,
+        )
+        scanner = MarketScanner(config)
+        raw = _make_raw_market(question=question, slug=slug)
+        markets = [scanner._parse_market(raw)]
+        assert len(scanner._filter_markets(markets)) == expected_count
+
     def test_max_markets_limits_output(self):
         config = MarketScannerConfig(
             min_volume_24h=0,

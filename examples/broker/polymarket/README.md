@@ -11,10 +11,17 @@ Polygon wallet or a real `py-clob-client` install.
 ### Discover markets
 
 List the most-liquid active markets matching a filter (volume, liquidity,
-time-to-resolution). No environment, no orders.
+time-to-resolution, optional keyword). No environment, no orders.
 
 ```bash
+# Top 10 by 24h volume
 python examples/broker/polymarket/scan_markets.py
+
+# Filter by keyword (case-insensitive substring on question or slug)
+python examples/broker/polymarket/scan_markets.py --keyword bitcoin
+
+# Tweak filters
+python examples/broker/polymarket/scan_markets.py --keyword "world cup" --min-volume 50000 --max 5
 ```
 
 Example output:
