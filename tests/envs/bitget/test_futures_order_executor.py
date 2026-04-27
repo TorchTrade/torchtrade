@@ -405,8 +405,10 @@ class TestBitgetFuturesOrderClass:
         from torchtrade.envs.core.common import validate_trade_mode
 
         # Test that validation accepts valid values
+        assert validate_trade_mode("fractional") == "fractional"
         assert validate_trade_mode("quantity") == "quantity"
         assert validate_trade_mode("notional") == "notional"
+        assert validate_trade_mode("FRACTIONAL") == "fractional"  # Case-insensitive
         assert validate_trade_mode("QUANTITY") == "quantity"  # Case-insensitive
         assert validate_trade_mode("NOTIONAL") == "notional"  # Case-insensitive
 

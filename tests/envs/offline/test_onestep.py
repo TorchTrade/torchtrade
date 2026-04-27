@@ -184,7 +184,7 @@ class TestOneStepRolloutSimulation:
         """Buy/Long action should acquire position and hold through rollout."""
         td = onestep_env.reset()
 
-        buy_action = 2 if trading_mode == "spot" else 4
+        buy_action = 2 if trading_mode == 1 else 4
         action_td = td.clone()
         action_td["action"] = torch.tensor(buy_action)
         next_td = onestep_env.step(action_td)
@@ -378,7 +378,84 @@ class TestOneStepRewardAccumulation:
 
 class TestOneStepEdgeCases:
     """Edge case tests for OneStep environments."""
-    pass
+
+    @pytest.mark.parametrize("leverage", [1, 10], ids=["spot", "futures"])
+    def test_rollout_on_exhausted_sampler_does_not_crash(self, short_ohlcv_df, leverage):
+        """Opening a position when the sampler is one step from exhaustion must
+        not raise ValueError in _rollout() (issue #206).
+
+        Positions the sampler at the last available index before calling
+        _step() with a position-opening action. The rollout loop executes
+        one iteration, the sampler sets truncated=True, and the loop exits
+        cleanly instead of crashing on a second get_sequential_observation().
+        """
+        config = OneStepTradingEnvConfig(
+            leverage=leverage,
+            initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            stoploss_levels=[-0.025, -0.05, -0.1],
+            takeprofit_levels=[0.05, 0.1, 0.2],
+        )
+        env = OneStepTradingEnv(short_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+
+        # Force sampler to last position so _rollout() exhausts within one
+        # iteration and exits cleanly.
+        env.sampler._sequential_idx = env.sampler._end_idx - 1
+
+        action_td = td.clone()
+        # Action 1 = first long SLTP action (opens position → triggers rollout)
+        action_td["action"] = torch.tensor(1)
+        result = env.step(action_td)
+
+        assert result["next"]["done"].item()
+        assert result["next"]["truncated"].item()
+        assert not result["next"]["terminated"].item()
+
+        env.close()
+
+    @pytest.mark.parametrize("leverage", [1, 10], ids=["spot", "futures"])
+    def test_step_after_sampler_exhausted_does_not_crash(self, short_ohlcv_df, leverage):
+        """Calling _step() when self.truncated is already True must return
+        done=True gracefully, not crash (issue #206)."""
+        config = OneStepTradingEnvConfig(
+            leverage=leverage,
+            initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            random_start=False,
+            stoploss_levels=[-0.025, -0.05, -0.1],
+            takeprofit_levels=[0.05, 0.1, 0.2],
+        )
+        env = OneStepTradingEnv(short_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+
+        # Step once (always returns done=True for one-step env)
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(1)
+        result = env.step(action_td)
+        assert result["next"]["done"].item()
+
+        # Force truncated state and call _step() again — must not crash
+        env.truncated = True
+        extra_td = result["next"].clone()
+        extra_td["action"] = torch.tensor(0)
+        result2 = env.step(extra_td)
+
+        assert result2["next"]["done"].item()
+        assert result2["next"]["truncated"].item()
+        assert not result2["next"]["terminated"].item()
+
+        env.close()
 
 
 # ============================================================================

@@ -239,6 +239,36 @@ def price_gap_df():
 
 
 # ============================================================================
+# SHORT DATASETS (for sampler exhaustion / boundary tests)
+# ============================================================================
+
+@pytest.fixture
+def short_ohlcv_df():
+    """25-bar DataFrame: with window_size=10 leaves ~15 usable steps.
+
+    Useful for testing sampler exhaustion (issue #204) and other
+    boundary conditions where data runs out before max_traj_length.
+    """
+    rng = np.random.default_rng(42)
+    n = 25
+    timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
+    close_prices = 100.0 * np.exp(np.cumsum(rng.normal(0, 0.001, n)))
+    high_prices = close_prices * 1.002
+    low_prices = close_prices * 0.998
+    open_prices = np.roll(close_prices, 1)
+    open_prices[0] = 100.0
+
+    return pd.DataFrame({
+        "timestamp": timestamps,
+        "open": open_prices,
+        "high": high_prices,
+        "low": low_prices,
+        "close": close_prices,
+        "volume": np.ones(n),
+    })
+
+
+# ============================================================================
 # UNIFIED ENVIRONMENT FIXTURES (for consolidated tests)
 # ============================================================================
 

@@ -43,6 +43,8 @@ class BitgetFuturesSLTPTradingEnvConfig:
     position_mode: PositionMode = PositionMode.ONE_WAY  # ONE_WAY or HEDGE
     quantity_per_trade: float = 0.001  # Base quantity per trade
     trade_mode: TradeMode = "quantity"
+    position_fraction: float = 1.0  # Used when trade_mode="fractional"
+    lock_position_until_sltp: bool = False  # If True, ignore actions while in position
 
     # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
     stoploss_levels: Tuple[float, ...] = (-0.025, -0.05, -0.1)
@@ -67,8 +69,16 @@ class BitgetFuturesSLTPTradingEnvConfig:
     close_position_on_reset: bool = False
 
     def __post_init__(self):
-        # Normalize timeframes using utility function
         from torchtrade.envs.live.bitget.utils import normalize_bitget_timeframe_config
+        from torchtrade.envs.core.common import validate_trade_mode
+
+        self.trade_mode = validate_trade_mode(self.trade_mode)
+        if self.trade_mode == "fractional":
+            if not (0 < self.position_fraction <= 1.0):
+                raise ValueError(f"position_fraction must be in (0, 1.0], got {self.position_fraction}")
+        elif self.trade_mode in ("notional", "quantity"):
+            if self.quantity_per_trade <= 0:
+                raise ValueError(f"quantity_per_trade must be positive, got {self.quantity_per_trade}")
         self.execute_on, self.time_frames, self.window_sizes = normalize_bitget_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
@@ -265,6 +275,10 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
         if side is None:
             return trade_info
 
+        # Position locking: ignore all actions while in position
+        if self.config.lock_position_until_sltp and self.position.current_position != 0:
+            return trade_info
+
         # Check if already in same position (ignore duplicate actions)
         position_map = {"long": 1, "short": -1}
         if side in position_map and self.position.current_position == position_map[side]:
@@ -272,7 +286,26 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
 
         # Get current price for calculating absolute SL/TP levels
         obs = self.observer.get_observations(return_base_ohlc=True)
-        current_price = obs["base_features"][-1, 3]  # Close price
+        current_price = float(obs["base_features"][-1, 3])  # Close price
+
+        # Resolve quantity based on trade_mode
+        if self.config.trade_mode == "fractional":
+            balance = float(self.trader.get_account_balance()["total_wallet_balance"])
+            if current_price <= 0 or balance <= 0:
+                logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
+                trade_info["success"] = False
+                return trade_info
+            quantity = balance * self.config.position_fraction * self.config.leverage / current_price
+        elif self.config.trade_mode == "notional":
+            if current_price <= 0:
+                logger.error(f"Invalid current_price={current_price} for {self.config.symbol}")
+                trade_info["success"] = False
+                return trade_info
+            quantity = float(self.config.quantity_per_trade) / current_price
+        elif self.config.trade_mode == "quantity":
+            quantity = float(self.config.quantity_per_trade)
+        else:
+            raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
         # Close opposite position if switching directions
         if self.position.current_position != 0:
@@ -298,7 +331,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
             try:
                 success = self.trader.trade(
                     side="buy",
-                    quantity=self.config.quantity_per_trade,
+                    quantity=quantity,
                     order_type="market",
                     take_profit=take_profit_price,
                     stop_loss=stop_loss_price,
@@ -312,14 +345,14 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
 
                 trade_info.update({
                     "executed": True,
-                    "quantity": self.config.quantity_per_trade,
+                    "quantity": quantity,
                     "side": "buy",
                     "success": success,
                     "stop_loss": stop_loss_price,
                     "take_profit": take_profit_price,
                 })
             except Exception as e:
-                logger.error(f"Long trade failed for {self.config.symbol}: quantity={self.config.quantity_per_trade}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
+                logger.error(f"Long trade failed for {self.config.symbol}: quantity={quantity}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
                 trade_info["success"] = False
                 return trade_info
 
@@ -334,7 +367,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
             try:
                 success = self.trader.trade(
                     side="sell",
-                    quantity=self.config.quantity_per_trade,
+                    quantity=quantity,
                     order_type="market",
                     take_profit=take_profit_price,
                     stop_loss=stop_loss_price,
@@ -347,14 +380,14 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
 
                 trade_info.update({
                     "executed": True,
-                    "quantity": self.config.quantity_per_trade,
+                    "quantity": quantity,
                     "side": "sell",
                     "success": success,
                     "stop_loss": stop_loss_price,
                     "take_profit": take_profit_price,
                 })
             except Exception as e:
-                logger.error(f"Short trade failed for {self.config.symbol}: quantity={self.config.quantity_per_trade}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
+                logger.error(f"Short trade failed for {self.config.symbol}: quantity={quantity}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
                 trade_info["success"] = False
                 return trade_info
 

@@ -25,6 +25,7 @@ from torchtrade.envs.offline.sequential import (
     SequentialTradingEnv,
     SequentialTradingEnvConfig,
 )
+from torchtrade.envs.core.common import TradeMode, validate_trade_mode
 from torchtrade.envs.core.state import binarize_action_type
 from torchtrade.envs.utils.sltp_helpers import (
     calculate_long_bracket_prices,
@@ -47,10 +48,32 @@ class SequentialTradingEnvSLTPConfig(SequentialTradingEnvConfig):
     include_hold_action: bool = True  # Include HOLD action (index 0)
     include_close_action: bool = False  # Include CLOSE action (default: False for SLTP)
 
+    # Position locking (for OneStep policy evaluation parity)
+    lock_position_until_sltp: bool = False  # If True, ignore actions while in position
+
+    # Position sizing mode
+    trade_mode: TradeMode = "fractional"
+    position_fraction: float = 1.0       # Used when trade_mode="fractional" (1.0 = all-in, backward compat)
+    quantity_per_trade: float = 0.001     # Used when trade_mode in ("quantity", "notional")
+
     def __post_init__(self):
         """Validate configuration after dataclass initialization."""
         # Call parent post_init first
         super().__post_init__()
+
+        self.trade_mode = validate_trade_mode(self.trade_mode)
+
+        # Validate sizing parameters
+        if self.trade_mode == "fractional":
+            if not (0 < self.position_fraction <= 1.0):
+                raise ValueError(
+                    f"position_fraction must be in (0, 1.0], got {self.position_fraction}"
+                )
+        elif self.trade_mode in ("notional", "quantity"):
+            if self.quantity_per_trade <= 0:
+                raise ValueError(
+                    f"quantity_per_trade must be positive, got {self.quantity_per_trade}"
+                )
 
         # Convert to lists if needed
         if not isinstance(self.stoploss_levels, list):
@@ -329,6 +352,11 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         """
         self.step_counter += 1
 
+        # Guard: if sampler was exhausted in the previous step, terminate
+        # gracefully instead of letting get_sequential_observation() raise.
+        if self.truncated:
+            return self._build_exhaustion_response()
+
         # Bar N price — where the agent's action would execute
         cached_price = self._cached_base_features["close"]
 
@@ -358,6 +386,9 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
                 else:  # "tp"
                     execution_price = self.take_profit
                 trade_info = self._execute_sltp_close(execution_price, sltp_trigger)
+            elif self.config.lock_position_until_sltp:
+                # Position locked — ignore agent action, treat as HOLD
+                trade_info = self._execute_sltp_action(None, None, None, cached_price)
             else:
                 # No trigger, execute new action at bar N price
                 trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
@@ -381,8 +412,9 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         # Add coverage tracking indices (only during training with random_start)
         if self.random_start:
+            self._last_state_index = self.sampler._sequential_idx
             next_tensordict.set("reset_index", torch.tensor(self._reset_idx, dtype=torch.long))
-            next_tensordict.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
+            next_tensordict.set("state_index", torch.tensor(self._last_state_index, dtype=torch.long))
 
         # Determine action_type and binarize action for history
         action_type = trade_info.get("side") or "hold"
@@ -478,31 +510,45 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         Returns:
             Trade info dictionary
         """
-        # Use fractional sizing from parent class
-        # For spot mode, action_value represents fraction of portfolio to invest
-        # For futures mode, action_value represents leverage-adjusted position
-        if self.leverage == 1:
-            # Spot: invest 100% of portfolio (all-in strategy for SLTP)
-            action_value = 1.0
+        # Position sizing based on trade_mode
+        if self.config.trade_mode == "fractional":
+            # Fractional: use position_fraction of portfolio
+            from torchtrade.envs.utils.fractional_sizing import (
+                calculate_fractional_position,
+                PositionCalculationParams,
+            )
+
+            if self.leverage == 1:
+                action_value = self.config.position_fraction
+            else:
+                action_value = self.config.position_fraction if side == "long" else -self.config.position_fraction
+
+            portfolio_value = self._get_portfolio_value(execution_price)
+            params = PositionCalculationParams(
+                balance=portfolio_value,
+                action_value=action_value,
+                current_price=execution_price,
+                leverage=self.leverage,
+                transaction_fee=self.transaction_fee,
+            )
+            position_size, notional_value, calc_side = calculate_fractional_position(params)
+
+        elif self.config.trade_mode == "notional":
+            # Notional: fixed USD per trade
+            if execution_price <= 0:
+                raise ValueError(f"execution_price must be positive for notional mode, got {execution_price}")
+            notional_value = float(self.config.quantity_per_trade)
+            position_size = notional_value / execution_price
+
+        elif self.config.trade_mode == "quantity":
+            # Quantity: fixed base-asset units per trade
+            if execution_price <= 0:
+                raise ValueError(f"execution_price must be positive for quantity mode, got {execution_price}")
+            position_size = float(self.config.quantity_per_trade)
+            notional_value = position_size * execution_price
+
         else:
-            # Futures: use leverage for position sizing
-            action_value = 1.0 if side == "long" else -1.0
-
-        # Calculate position size using parent's fractional logic
-        from torchtrade.envs.utils.fractional_sizing import (
-            calculate_fractional_position,
-            PositionCalculationParams,
-        )
-
-        portfolio_value = self._get_portfolio_value(execution_price)
-        params = PositionCalculationParams(
-            balance=portfolio_value,
-            action_value=action_value,
-            current_price=execution_price,
-            leverage=self.leverage,
-            transaction_fee=self.transaction_fee,
-        )
-        position_size, notional_value, calc_side = calculate_fractional_position(params)
+            raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
         # Calculate margin and fee
         margin_required = notional_value / self.leverage

@@ -478,3 +478,357 @@ class TestBybitSLTPPositionClosedClobber:
 
             # The new short position must NOT be overwritten to 0 by position_closed
             assert env.position.current_position == -1
+
+
+class TestBybitSLTPNotionalTradeMode:
+    """Test notional (USD) trade mode for Bybit SLTP environment."""
+
+    @pytest.fixture
+    def notional_env(self, mock_env_observer, mock_env_trader):
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_short_positions=True,
+            trade_mode="notional",
+            quantity_per_trade=500.0,  # $500 USD per trade
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            return BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+    @pytest.mark.parametrize("action_tuple,expected_side", [
+        (("long", -0.02, 0.03), "buy"),
+        (("short", 0.02, -0.03), "sell"),
+    ], ids=["long-buy", "short-sell"])
+    def test_notional_converts_usd_to_quantity(self, notional_env, mock_env_trader, action_tuple, expected_side):
+        """Notional mode must convert USD to base-asset quantity using current price."""
+        mock_env_trader.get_mark_price = MagicMock(return_value=50000.0)
+
+        with patch.object(notional_env, "_wait_for_next_timestamp"):
+            notional_env.reset()
+            notional_env._execute_trade_if_needed(action_tuple)
+
+            call_kwargs = mock_env_trader.trade.call_args[1]
+            assert call_kwargs["side"] == expected_side
+            # $500 / $50000 = 0.01 BTC
+            assert call_kwargs["quantity"] == pytest.approx(0.01, rel=1e-6)
+
+    def test_notional_zero_price_aborts_trade(self, notional_env, mock_env_trader):
+        """Zero mark price must abort trade without calling trader.trade()."""
+        mock_env_trader.get_mark_price = MagicMock(return_value=0.0)
+
+        with patch.object(notional_env, "_wait_for_next_timestamp"):
+            notional_env.reset()
+            trade_info = notional_env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+            mock_env_trader.trade.assert_not_called()
+            assert trade_info["success"] is False
+
+    def test_quantity_mode_passes_raw_value(self, mock_env_observer, mock_env_trader):
+        """Quantity mode must pass quantity_per_trade directly without conversion."""
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            trade_mode="quantity",
+            quantity_per_trade=0.001,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+            call_kwargs = mock_env_trader.trade.call_args[1]
+            assert call_kwargs["quantity"] == pytest.approx(0.001, rel=1e-6)
+
+    def test_fractional_converts_balance_to_quantity(self, mock_env_observer, mock_env_trader):
+        """Fractional mode must compute quantity from balance * fraction * leverage / price."""
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            trade_mode="fractional",
+            position_fraction=0.1,
+            leverage=5,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+        mock_env_trader.get_mark_price = MagicMock(return_value=50000.0)
+        mock_env_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0,
+            "available_balance": 900.0,
+            "total_unrealized_profit": 0.0,
+            "total_margin_balance": 1000.0,
+        })
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+            call_kwargs = mock_env_trader.trade.call_args[1]
+            # balance=1000 * fraction=0.1 * leverage=5 / price=50000 = 0.01
+            assert call_kwargs["quantity"] == pytest.approx(0.01, rel=1e-4)
+
+
+class TestBybitSLTPLockPosition:
+    """Test lock_position_until_sltp for Bybit SLTP environment."""
+
+    @pytest.fixture
+    def locked_env(self, mock_env_observer, mock_env_trader):
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_short_positions=True,
+            lock_position_until_sltp=True,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            return BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+    def test_locked_ignores_switch_action(self, locked_env, mock_env_trader):
+        """With lock=True, a short action while long should be ignored."""
+        with patch.object(locked_env, "_wait_for_next_timestamp"):
+            locked_env.reset()
+
+            # Open long first
+            locked_env._execute_trade_if_needed(("long", -0.02, 0.03))
+            mock_env_trader.trade.assert_called_once()
+            locked_env.position.current_position = 1
+
+            mock_env_trader.reset_mock()
+
+            # Try to switch to short — should be ignored
+            trade_info = locked_env._execute_trade_if_needed(("short", 0.02, -0.03))
+
+            assert trade_info["executed"] is False
+            mock_env_trader.trade.assert_not_called()
+            mock_env_trader.close_position.assert_not_called()
+
+    def test_locked_ignores_close_action(self, locked_env, mock_env_trader):
+        """With lock=True, close action while in position should be ignored."""
+        with patch.object(locked_env, "_wait_for_next_timestamp"):
+            locked_env.reset()
+            locked_env.position.current_position = 1
+            mock_env_trader.reset_mock()  # Clear calls from reset/init
+
+            trade_info = locked_env._execute_trade_if_needed(("close", None, None))
+
+            assert trade_info["executed"] is False
+            mock_env_trader.close_position.assert_not_called()
+
+    def test_locked_allows_open_from_flat(self, locked_env, mock_env_trader):
+        """With lock=True, opening a position from flat should still work."""
+        with patch.object(locked_env, "_wait_for_next_timestamp"):
+            locked_env.reset()
+            assert locked_env.position.current_position == 0
+
+            trade_info = locked_env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+            mock_env_trader.trade.assert_called_once()
+
+    def test_unlocked_allows_switch(self, mock_env_observer, mock_env_trader):
+        """With lock=False (default), switching positions works normally."""
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_short_positions=True,
+            lock_position_until_sltp=False,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            env.position.current_position = 1
+
+            # Switch to short — should work (calls close + trade)
+            env._execute_trade_if_needed(("short", 0.02, -0.03))
+            mock_env_trader.close_position.assert_called()
+            mock_env_trader.trade.assert_called()
+
+
+class TestWithReplayData:
+    """Integration tests using ReplayObserver + ReplayOrderExecutor with real price data."""
+
+    @pytest.fixture
+    def replay_df(self):
+        """Create realistic OHLCV test data with price movement."""
+        import numpy as np
+        import pandas as pd
+
+        n = 200
+        timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
+        base = 50000 + np.cumsum(np.random.default_rng(42).normal(0, 50, n))
+        return pd.DataFrame({
+            "timestamp": timestamps,
+            "open": base,
+            "high": base + np.abs(np.random.default_rng(43).normal(30, 20, n)),
+            "low": base - np.abs(np.random.default_rng(44).normal(30, 20, n)),
+            "close": base + np.random.default_rng(45).normal(0, 20, n),
+            "volume": np.random.default_rng(46).uniform(100, 1000, n),
+        })
+
+    def test_multi_step_episode_with_replay(self, replay_df):
+        """Run a full multi-step episode with realistic price data."""
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+        from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            leverage=5,
+            trade_mode="quantity",
+            quantity_per_trade=0.01,
+        )
+
+        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
+        observer = ReplayObserver(
+            df=replay_df,
+            time_frames=config.time_frames,
+            window_sizes=config.window_sizes,
+            execute_on=config.execute_on,
+            executor=executor,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=observer, trader=executor,
+            )
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            td = env.reset()
+
+            for i in range(50):
+                action = [0, 1, 0, 0, len(env.action_map) - 1, 0][i % 6]
+                action_td = td.clone()
+                action_td["action"] = torch.tensor(action)
+                result = env.step(action_td)
+                td = result["next"]
+
+                assert "reward" in td.keys()
+                assert "done" in td.keys()
+                assert td["account_state"].shape == (6,)
+
+                if td["done"].item():
+                    break
+
+    def test_replay_portfolio_tracks_price_movement(self, replay_df):
+        """Portfolio value should change with price movement, not stay static."""
+        from torchtrade.envs.live.bybit.env_sltp import (
+            BybitFuturesSLTPTorchTradingEnv,
+            BybitFuturesSLTPTradingEnvConfig,
+        )
+        from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
+
+        config = BybitFuturesSLTPTradingEnvConfig(
+            symbol="BTCUSDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+            stoploss_levels=(-0.05,),
+            takeprofit_levels=(0.05,),
+            leverage=5,
+            trade_mode="quantity",
+            quantity_per_trade=0.01,
+        )
+
+        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
+        observer = ReplayObserver(
+            df=replay_df,
+            time_frames=config.time_frames,
+            window_sizes=config.window_sizes,
+            execute_on=config.execute_on,
+            executor=executor,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesSLTPTorchTradingEnv(
+                config=config, observer=observer, trader=executor,
+            )
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            td = env.reset()
+
+            # Open a long position
+            action_td = td.clone()
+            action_td["action"] = torch.tensor(1)
+            td = env.step(action_td)["next"]
+
+            # Hold for several steps -- price should move, changing portfolio value
+            balances = []
+            for _ in range(10):
+                action_td = td.clone()
+                action_td["action"] = torch.tensor(0)  # HOLD
+                td = env.step(action_td)["next"]
+                balances.append(executor.get_account_balance()["total_wallet_balance"])
+
+            # With real price movement, portfolio value should not stay static
+            assert max(balances) != min(balances), "Portfolio value should vary with price movement"

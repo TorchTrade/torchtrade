@@ -303,3 +303,115 @@ class TestVecSLTPPriority:
             "SL should have won over TP — balance should reflect a loss"
         )
         env.close()
+
+
+class TestVecSLTPPositionSizing:
+    """Test trade_mode-aware position sizing in vectorized SLTP env."""
+
+    @pytest.mark.parametrize("trade_mode,position_fraction,quantity_per_trade", [
+        ("fractional", 0.1, 0.001),
+        ("fractional", 1.0, 0.001),
+        ("notional", 1.0, 500.0),
+        ("quantity", 1.0, 0.05),
+    ], ids=["fractional-10pct", "fractional-allin", "notional-500usd", "quantity-0.05"])
+    def test_trade_mode_opens_position(self, sample_ohlcv_df, trade_mode, position_fraction, quantity_per_trade):
+        """All trade modes should successfully open positions."""
+        config = VectorizedSequentialTradingEnvSLTPConfig(
+            num_envs=2,
+            leverage=10,
+            stoploss_levels=[-0.02],
+            takeprofit_levels=[0.03],
+            initial_cash=10000,
+            time_frames=[TF_1MIN],
+            window_sizes=[10],
+            execute_on=TF_1MIN,
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=50,
+            random_start=False,
+            trade_mode=trade_mode,
+            position_fraction=position_fraction,
+            quantity_per_trade=quantity_per_trade,
+        )
+        env = VectorizedSequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+        # Action 1 = first long action
+        td["action"] = torch.ones(2, dtype=torch.long)
+        next_td = env.step(td)
+
+        # At least one env should have an open position
+        assert (env._position_sizes.abs() > 0).any()
+        env.close()
+
+    def test_fractional_sizing_scales_with_fraction(self, sample_ohlcv_df):
+        """10% fraction should produce ~10% of all-in position size."""
+        def make_env(fraction):
+            config = VectorizedSequentialTradingEnvSLTPConfig(
+                num_envs=1,
+                leverage=10,
+                stoploss_levels=[-0.02],
+                takeprofit_levels=[0.03],
+                initial_cash=10000,
+                time_frames=[TF_1MIN],
+                window_sizes=[10],
+                execute_on=TF_1MIN,
+                transaction_fee=0.0,
+                slippage=0.0,
+                seed=42,
+                max_traj_length=50,
+                random_start=False,
+                trade_mode="fractional",
+                position_fraction=fraction,
+            )
+            env = VectorizedSequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+            td = env.reset()
+            td["action"] = torch.ones(1, dtype=torch.long)
+            env.step(td)
+            size = env._position_sizes[0].abs().item()
+            env.close()
+            return size
+
+        allin_size = make_env(1.0)
+        tenth_size = make_env(0.1)
+        assert tenth_size == pytest.approx(allin_size * 0.1, rel=0.05)
+
+
+class TestVecSLTPLockPosition:
+    """Test lock_position_until_sltp in vectorized SLTP env."""
+
+    def test_locked_position_ignores_switch(self, sample_ohlcv_df):
+        """With lock=True, direction switch actions are ignored while in position."""
+        config = VectorizedSequentialTradingEnvSLTPConfig(
+            num_envs=1,
+            leverage=10,
+            stoploss_levels=[-0.02],
+            takeprofit_levels=[0.03],
+            initial_cash=10000,
+            time_frames=[TF_1MIN],
+            window_sizes=[10],
+            execute_on=TF_1MIN,
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=50,
+            random_start=False,
+            lock_position_until_sltp=True,
+        )
+        env = VectorizedSequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+
+        # Open long
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+        td["action"] = torch.full((1,), long_idx, dtype=torch.long)
+        td = env.step(td)["next"]
+        assert env._position_sizes[0].item() > 0
+        initial_size = env._position_sizes[0].item()
+
+        # Try short action — should be ignored (position locked)
+        short_idx = next(i for i, v in env.action_map.items() if v[0] == "short")
+        td["action"] = torch.full((1,), short_idx, dtype=torch.long)
+        env.step(td)
+
+        assert env._position_sizes[0].item() == pytest.approx(initial_size, rel=1e-6)
+        env.close()

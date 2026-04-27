@@ -6,7 +6,7 @@ VectorizedSequentialTradingEnv with bracket order support.
 
 Key differences from base vectorized env:
     - SLTP timing: advance FIRST, then check triggers, then execute trades
-    - 100% capital deployment (no fractional sizing)
+    - trade_mode-aware position sizing (fractional, notional, quantity)
     - SL/TP bracket orders with intrabar trigger detection
     - SL checked before TP (pessimistic bias)
     - Triggered positions close at bracket price, not market price
@@ -20,6 +20,7 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
+from torchtrade.envs.core.common import TradeMode, validate_trade_mode
 from torchtrade.envs.offline.vectorized_sequential import (
     VectorizedSequentialTradingEnv,
     VectorizedSequentialTradingEnvConfig,
@@ -40,8 +41,26 @@ class VectorizedSequentialTradingEnvSLTPConfig(VectorizedSequentialTradingEnvCon
     takeprofit_levels: Union[List[float], Tuple[float, ...]] = (0.05, 0.1, 0.2)
     include_hold_action: bool = True
     include_close_action: bool = False
+    lock_position_until_sltp: bool = False  # If True, ignore actions while in position
+    trade_mode: TradeMode = "fractional"
+    position_fraction: float = 1.0
+    quantity_per_trade: float = 0.001
 
     def __post_init__(self):
+        self.trade_mode = validate_trade_mode(self.trade_mode)
+
+        # Validate sizing parameters
+        if self.trade_mode == "fractional":
+            if not (0 < self.position_fraction <= 1.0):
+                raise ValueError(
+                    f"position_fraction must be in (0, 1.0], got {self.position_fraction}"
+                )
+        elif self.trade_mode in ("notional", "quantity"):
+            if self.quantity_per_trade <= 0:
+                raise ValueError(
+                    f"quantity_per_trade must be positive, got {self.quantity_per_trade}"
+                )
+
         if not isinstance(self.stoploss_levels, list):
             self.stoploss_levels = list(self.stoploss_levels)
         if not isinstance(self.takeprofit_levels, list):
@@ -339,7 +358,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
     ):
         """Execute SLTP trades for all environments.
 
-        100% capital deployment (no fractional sizing). Handles:
+        Position sizing via trade_mode (fractional/notional/quantity). Handles:
         - Hold: side=0 or same direction as current position
         - Close: side=2 and has position
         - Direction switch: close old, open new with brackets
@@ -351,6 +370,13 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         is_long = self._position_sizes > 0
         is_short = self._position_sizes < 0
         is_flat = self._position_sizes == 0
+
+        # Position locking: force HOLD for envs with open positions
+        if self.config.lock_position_until_sltp:
+            has_position = (~is_flat) & active
+            if has_position.any():
+                sides = sides.clone()
+                sides[has_position] = 0  # Force HOLD
 
         # Hold: explicit hold or already in same direction
         hold_mask = active & (
@@ -394,10 +420,17 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         # Open new positions (direction switches + open from flat)
         open_mask = switch_mask | open_from_flat
         if open_mask.any():
-            # 100% capital deployment
-            pvs = self._compute_portfolio_values(trade_prices)
-            fee_denom = 1.0 / leverage + self.transaction_fee
-            notional = pvs / fee_denom
+            # Position sizing based on trade_mode
+            if self.config.trade_mode == "fractional":
+                pvs = self._compute_portfolio_values(trade_prices)
+                fee_denom = 1.0 / leverage + self.transaction_fee
+                notional = pvs * self.config.position_fraction / fee_denom
+            elif self.config.trade_mode == "notional":
+                notional = torch.full_like(trade_prices, self.config.quantity_per_trade)
+            elif self.config.trade_mode == "quantity":
+                notional = torch.full_like(trade_prices, self.config.quantity_per_trade) * trade_prices
+            else:
+                raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
             # Direction: +1 for long, -1 for short
             direction = torch.where(

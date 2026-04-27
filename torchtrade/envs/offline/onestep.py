@@ -259,6 +259,11 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         """
         self.step_counter += 1
 
+        # Guard: if sampler was exhausted in the previous step, terminate
+        # gracefully instead of letting get_sequential_observation() raise.
+        if self.truncated:
+            return self._build_exhaustion_response()
+
         # Cache base features and get current price
         cached_base = self._cached_base_features
         cached_price = cached_base["close"]
@@ -294,8 +299,9 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
 
         # Add coverage tracking indices (only during training with random_start)
         if self.random_start:
+            self._last_state_index = self.sampler._sequential_idx
             next_tensordict.set("reset_index", torch.tensor(self._reset_idx, dtype=torch.long))
-            next_tensordict.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
+            next_tensordict.set("state_index", torch.tensor(self._last_state_index, dtype=torch.long))
 
         # Determine action_type and binarize action for history
         action_type = trade_info.get("side") or "hold"
@@ -432,10 +438,11 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
             # No trigger — accumulate return at close price
             self.rollout_returns.append(self.compute_return(close_price))
 
-        # If loop never executed (truncated from start), get an observation
+        # If loop never executed (truncated from start), reuse the last
+        # cached observation via timestamp lookup — does not advance the
+        # sampler's sequential index, so it cannot raise ValueError.
         if obs_dict is None:
-            obs_dict, base_features = self._get_observation_scaffold()
-            self._cached_base_features = base_features
+            obs_dict = self.sampler.get_observation(self.current_timestamp)
 
         return trade_info, obs_dict
 

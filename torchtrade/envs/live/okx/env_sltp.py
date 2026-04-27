@@ -1,4 +1,4 @@
-"""Bybit Futures TorchRL trading environment with Stop Loss and Take Profit."""
+"""OKX Futures TorchRL trading environment with Stop Loss and Take Profit."""
 import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
@@ -8,13 +8,13 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.live.bybit.observation import BybitObservationClass
-from torchtrade.envs.live.bybit.order_executor import (
-    BybitFuturesOrderClass,
+from torchtrade.envs.live.okx.observation import OKXObservationClass
+from torchtrade.envs.live.okx.order_executor import (
+    OKXFuturesOrderClass,
     MarginMode,
     PositionMode,
 )
-from torchtrade.envs.live.bybit.base import BybitBaseTorchTradingEnv
+from torchtrade.envs.live.okx.base import OKXBaseTorchTradingEnv
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
@@ -24,13 +24,13 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class BybitFuturesSLTPTradingEnvConfig:
-    """Configuration for Bybit Futures SLTP Trading Environment.
+class OKXFuturesSLTPTradingEnvConfig:
+    """Configuration for OKX Futures SLTP Trading Environment.
 
     Uses a combinatorial action space where each action represents a
     (side, stop_loss_pct, take_profit_pct) tuple for bracket orders.
     """
-    symbol: str = "BTCUSDT"
+    symbol: str = "BTC-USDT-SWAP"
 
     # Timeframes and windows
     time_frames: Union[List[Union[str, "TimeFrame"]], Union[str, "TimeFrame"]] = "1Hour"
@@ -40,7 +40,7 @@ class BybitFuturesSLTPTradingEnvConfig:
     # Trading parameters
     leverage: int = 1
     margin_mode: MarginMode = MarginMode.ISOLATED
-    position_mode: PositionMode = PositionMode.ONE_WAY
+    position_mode: PositionMode = PositionMode.NET
     quantity_per_trade: float = 0.001
     trade_mode: TradeMode = "quantity"
     position_fraction: float = 1.0  # Used when trade_mode="fractional"
@@ -69,7 +69,7 @@ class BybitFuturesSLTPTradingEnvConfig:
     close_position_on_reset: bool = False
 
     def __post_init__(self):
-        from torchtrade.envs.live.bybit.utils import normalize_bybit_timeframe_config
+        from torchtrade.envs.live.okx.utils import normalize_okx_timeframe_config
         from torchtrade.envs.core.common import validate_trade_mode
 
         self.trade_mode = validate_trade_mode(self.trade_mode)
@@ -79,16 +79,16 @@ class BybitFuturesSLTPTradingEnvConfig:
         elif self.trade_mode in ("notional", "quantity"):
             if self.quantity_per_trade <= 0:
                 raise ValueError(f"quantity_per_trade must be positive, got {self.quantity_per_trade}")
-        self.execute_on, self.time_frames, self.window_sizes = normalize_bybit_timeframe_config(
+        self.execute_on, self.time_frames, self.window_sizes = normalize_okx_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
 
 
-class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
+class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
     """
-    Bybit Futures trading environment with Stop Loss and Take Profit action spec.
+    OKX Futures trading environment with Stop Loss and Take Profit action spec.
 
-    Uses bracket orders via pybit's native takeProfit/stopLoss parameters.
+    Uses bracket orders via OKX's attachAlgoOrds parameter.
 
     Action mapping:
         - 0: HOLD (do nothing)
@@ -98,15 +98,16 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
 
     def __init__(
         self,
-        config: BybitFuturesSLTPTradingEnvConfig,
+        config: OKXFuturesSLTPTradingEnvConfig,
         api_key: str = "",
         api_secret: str = "",
+        passphrase: str = "",
         feature_preprocessing_fn: Optional[Callable] = None,
         reward_function: Optional[Callable] = None,
-        observer: Optional[BybitObservationClass] = None,
-        trader: Optional[BybitFuturesOrderClass] = None,
+        observer: Optional[OKXObservationClass] = None,
+        trader: Optional[OKXFuturesOrderClass] = None,
     ):
-        super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
+        super().__init__(config, api_key, api_secret, passphrase, feature_preprocessing_fn, observer, trader)
 
         from torchtrade.envs.core.default_rewards import log_return_reward
         self.reward_function = reward_function or log_return_reward
@@ -144,7 +145,6 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
             position_size = 0.0
 
         # Sync position state from exchange — this is the source of truth.
-        # Detects SL/TP closures AND fixes state drift from failed bracket orders.
         position_closed = self._sync_position_from_exchange(position_status)
 
         action_idx = tensordict.get("action", 0)
@@ -165,8 +165,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         trade_info = self._execute_trade_if_needed(action_tuple)
         trade_info["position_closed"] = position_closed
 
-        # Eagerly update position from trade result so the rest of this step
-        # sees the new state without waiting for the next sync cycle.
+        # Eagerly update position from trade result
         if trade_info["executed"] and trade_info.get("success") is not False:
             if trade_info.get("closed_position"):
                 self.position.current_position = 0
@@ -277,8 +276,13 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         else:
             raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
+        # Short-circuit if quantity is below exchange minimum
+        lot = self.trader.get_lot_size()
+        if quantity < lot["min_qty"]:
+            trade_info["success"] = False
+            return trade_info
+
         # Close opposite position if switching directions
-        # (we already returned above if same direction, so any existing position is opposite)
         if self.position.current_position != 0:
             try:
                 close_success = self.trader.close_position()
@@ -288,6 +292,8 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
             if not close_success:
                 return trade_info
             self.position.current_position = 0
+            self.active_stop_loss = 0.0
+            self.active_take_profit = 0.0
 
         # Map position side to trade side
         trade_side = "buy" if side == "long" else "sell"
@@ -306,10 +312,9 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
             )
 
             if success:
-                # Only record SL/TP levels that actually placed on-exchange
-                bs = getattr(self.trader, 'bracket_status', {"tp_placed": True, "sl_placed": True})
-                self.active_stop_loss = stop_loss_price if bs["sl_placed"] else 0.0
-                self.active_take_profit = take_profit_price if bs["tp_placed"] else 0.0
+                # OKX attachAlgoOrds is atomic — SL/TP succeed or fail with the main order
+                self.active_stop_loss = stop_loss_price
+                self.active_take_profit = take_profit_price
 
             trade_info.update({
                 "executed": True,

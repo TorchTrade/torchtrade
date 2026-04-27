@@ -16,7 +16,8 @@ torchtrade/envs/
 │   ├── shared/            # Shared components across providers
 │   ├── alpaca/            # Alpaca integration
 │   ├── binance/           # Binance Futures integration
-│   └── bitget/            # Bitget Futures integration
+│   ├── bitget/            # Bitget Futures integration
+│   └── bybit/             # Bybit Futures integration
 └── transforms/        # TorchRL environment transforms
 ```
 
@@ -25,15 +26,18 @@ torchtrade/envs/
 ### Offline (Backtesting)
 
 ```python
-from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
+from torchtrade.envs import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
-# Create a long-only sequential environment
-config = SeqLongOnlyEnvConfig(
-    timeframe=TimeFrame(1, TimeFrameUnit.DAY),
-    window_size=50,
+# Create a sequential trading environment
+config = SequentialTradingEnvConfig(
+    time_frames=[TimeFrame(1, TimeFrameUnit.Day)],
+    window_sizes=[50],
+    execute_on=TimeFrame(1, TimeFrameUnit.Day),
+    initial_cash=10000.0,
+    symbol="BTC/USD",
 )
-env = SeqLongOnlyEnv(df=your_dataframe, config=config)
+env = SequentialTradingEnv(df=your_dataframe, config=config)
 ```
 
 ### Live Trading
@@ -93,6 +97,7 @@ Production-ready environments for live trading:
 - **Alpaca**: US equities and crypto spot trading
 - **Binance**: Crypto futures trading
 - **Bitget**: Crypto futures trading
+- **Bybit**: Crypto futures trading
 - **Shared**: Common components (futures base observation)
 
 See [live/README.md](live/README.md) for details.
@@ -106,9 +111,9 @@ Import from the top level when possible:
 ```python
 # Good - top-level imports
 from torchtrade.envs import (
-    SeqLongOnlyEnv,
-    SeqFuturesEnv,
-    AlpacaTorchTradingEnv,
+    SequentialTradingEnv,
+    SequentialTradingEnvConfig,
+    OneStepTradingEnv,
     TimeFrame,
     TimeFrameUnit,
 )
@@ -120,10 +125,9 @@ Import directly from submodules when needed:
 
 ```python
 # Also good - direct imports
-from torchtrade.envs.offline.longonly import SeqLongOnlyEnv
+from torchtrade.envs.offline import SequentialTradingEnv
 from torchtrade.envs.live.binance import BinanceFuturesTorchTradingEnv
-from torchtrade.envs.core import TorchTradeBaseEnv
-from torchtrade.envs.utils import calculate_metrics
+from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv
 ```
 
 ## Environment Types
@@ -132,17 +136,14 @@ from torchtrade.envs.utils import calculate_metrics
 
 Multi-step environments where agents make decisions at each timestep:
 
-- `SeqLongOnlyEnv`: Long-only sequential trading
-- `SeqLongOnlySLTPEnv`: Long-only with stop-loss/take-profit
-- `SeqFuturesEnv`: Futures sequential trading
-- `SeqFuturesSLTPEnv`: Futures with stop-loss/take-profit
+- `SequentialTradingEnv`: Unified sequential trading (spot or futures via `leverage` and `action_levels`)
+- `SequentialTradingEnvSLTP`: Sequential with stop-loss/take-profit bracket orders
 
 ### One-Step Environments
 
-Simplified environments for single-step decision making:
+Simplified environments for single-step decision making (GRPO/contextual bandit):
 
-- `LongOnlyOneStepEnv`: Single-step long-only
-- `FuturesOneStepEnv`: Single-step futures
+- `OneStepTradingEnv`: Single-step trading (spot or futures via `leverage` and `action_levels`)
 
 ### Live Environments
 
@@ -154,6 +155,8 @@ Real-time trading environments with API integration:
 - `BinanceFuturesSLTPTorchTradingEnv`: Binance with SL/TP
 - `BitgetFuturesTorchTradingEnv`: Bitget Futures
 - `BitgetFuturesSLTPTorchTradingEnv`: Bitget with SL/TP
+- `BybitFuturesTorchTradingEnv`: Bybit Futures
+- `BybitFuturesSLTPTorchTradingEnv`: Bybit with SL/TP
 
 ## Design Principles
 
@@ -171,14 +174,13 @@ If you have code using the old import paths, here's how to migrate:
 |------------|------------|
 | `from torchtrade.envs.base import` | `from torchtrade.envs.core.base import` |
 | `from torchtrade.envs.timeframe import` | `from torchtrade.envs.utils.timeframe import` |
-| `from torchtrade.envs.offline.seqlongonly import` | `from torchtrade.envs.offline.longonly.sequential import` |
 | `from torchtrade.envs.alpaca.torch_env import` | `from torchtrade.envs.live.alpaca.env import` |
 | `from torchtrade.envs.binance.obs_class import` | `from torchtrade.envs.live.binance.observation import` |
 
-Or simply use the top-level imports which work with both old and new structure:
+Or simply use the top-level imports:
 
 ```python
-from torchtrade.envs import SeqLongOnlyEnv, AlpacaTorchTradingEnv
+from torchtrade.envs import SequentialTradingEnv, SequentialTradingEnvConfig
 ```
 
 ## Contributing

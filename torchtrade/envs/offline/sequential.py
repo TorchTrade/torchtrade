@@ -459,10 +459,47 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self.unrealized_pnl_pct = 0.0
         self.liquidation_price = 0.0
         self._prev_action_value = None
+        # Reset cached exhaustion response (built lazily on first post-done step)
+        self._exhaustion_td = None
+        self._last_state_index = 0
+
+    def _build_exhaustion_response(self) -> TensorDictBase:
+        """Build terminal response when sampler is already exhausted.
+
+        Called when self.truncated is True at the start of _step(), meaning
+        the sampler ran out of data in the previous step. Returns done=True
+        without advancing the sampler.
+
+        Idempotent: the response is built once and cloned on subsequent calls
+        so that repeated post-done steps don't mutate history or other state.
+        """
+        if self._exhaustion_td is not None:
+            return self._exhaustion_td.clone()
+
+        # Re-fetch observation from last timestamp (doesn't use sequential index)
+        obs_dict = self.sampler.get_observation(self.current_timestamp)
+        td = self._build_observation_from_data(obs_dict, self._cached_base_features)
+
+        if self.random_start:
+            td.set("reset_index", torch.tensor(self._reset_idx, dtype=torch.long))
+            td.set("state_index", torch.tensor(self._last_state_index, dtype=torch.long))
+
+        td.set("reward", torch.zeros(1, dtype=torch.float))
+        td.set("terminated", torch.tensor([False], dtype=torch.bool))
+        td.set("truncated", torch.tensor([True], dtype=torch.bool))
+        td.set("done", torch.tensor([True], dtype=torch.bool))
+
+        self._exhaustion_td = td.clone()
+        return td
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
         self.step_counter += 1
+
+        # Guard: if sampler was exhausted in the previous step, terminate
+        # gracefully instead of letting get_sequential_observation() raise.
+        if self.truncated:
+            return self._build_exhaustion_response()
 
         # Cache base features and get current price
         cached_price = self._cached_base_features["close"]
@@ -495,8 +532,9 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         # Add coverage tracking indices (only during training with random_start)
         if self.random_start:
+            self._last_state_index = self.sampler._sequential_idx
             next_tensordict.set("reset_index", torch.tensor(self._reset_idx, dtype=torch.long))
-            next_tensordict.set("state_index", torch.tensor(self.sampler._sequential_idx, dtype=torch.long))
+            next_tensordict.set("state_index", torch.tensor(self._last_state_index, dtype=torch.long))
 
         # Determine action_type and binarize action for history
         action_type = trade_info.get("side") or "hold"

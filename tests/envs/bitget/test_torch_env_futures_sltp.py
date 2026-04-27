@@ -601,3 +601,394 @@ class TestDuplicateActionPrevention:
         mock_trader.close_position.assert_not_called()
         # Position should remain unchanged
         assert env.position.current_position == 1
+
+
+class TestBitgetSLTPNotionalTradeMode:
+    """Test notional (USD) trade mode for Bitget SLTP environment."""
+
+    @pytest.fixture
+    def notional_env(self):
+        from torchtrade.envs.live.bitget.env_sltp import (
+            BitgetFuturesSLTPTorchTradingEnv,
+            BitgetFuturesSLTPTradingEnvConfig,
+        )
+
+        mock_observer = MagicMock()
+        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
+
+        def mock_observations(return_base_ohlc=False):
+            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
+            if return_base_ohlc:
+                obs["base_features"] = np.array(
+                    [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
+                )
+            return obs
+
+        mock_observer.get_observations = MagicMock(side_effect=mock_observations)
+        mock_observer.intervals = ["1m"]
+        mock_observer.window_sizes = [10]
+
+        mock_trader = MagicMock()
+        mock_trader.cancel_open_orders = MagicMock(return_value=True)
+        mock_trader.close_position = MagicMock(return_value=True)
+        mock_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0,
+            "available_balance": 900.0,
+            "total_margin_balance": 1000.0,
+        })
+        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
+        mock_trader.get_status = MagicMock(return_value={"position_status": None})
+        mock_trader.trade = MagicMock(return_value=True)
+
+        config = BitgetFuturesSLTPTradingEnvConfig(
+            symbol="BTC/USDT:USDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_short_positions=True,
+            trade_mode="notional",
+            quantity_per_trade=500.0,  # $500 USD per trade
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BitgetFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BitgetFuturesSLTPTorchTradingEnv(
+                config=config,
+                observer=mock_observer,
+                trader=mock_trader,
+            )
+        return env, mock_trader
+
+    @pytest.mark.parametrize("action_tuple,expected_side", [
+        (("long", -0.02, 0.03), "buy"),
+        (("short", 0.02, -0.03), "sell"),
+    ], ids=["long-buy", "short-sell"])
+    def test_notional_converts_usd_to_quantity(self, notional_env, action_tuple, expected_side):
+        """Notional mode must convert USD to base-asset quantity using current price."""
+        env, mock_trader = notional_env
+        env.reset()
+        env._execute_trade_if_needed(action_tuple)
+
+        call_kwargs = mock_trader.trade.call_args[1]
+        assert call_kwargs["side"] == expected_side
+        # $500 / $50050 (candle close from base_features) ≈ 0.00999
+        expected_qty = 500.0 / 50050.0
+        assert call_kwargs["quantity"] == pytest.approx(expected_qty, rel=1e-4)
+
+    def test_notional_zero_price_aborts_trade(self, notional_env):
+        """Zero candle close price must abort trade without calling trader.trade()."""
+        env, mock_trader = notional_env
+
+        # Override observer to return zero-price candles
+        def mock_obs_zero(return_base_ohlc=False):
+            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
+            if return_base_ohlc:
+                obs["base_features"] = np.array([[0, 0, 0, 0]] * 10, dtype=np.float32)
+            return obs
+
+        env.observer.get_observations = MagicMock(side_effect=mock_obs_zero)
+        env.reset()
+        mock_trader.reset_mock()
+        trade_info = env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+        mock_trader.trade.assert_not_called()
+        assert trade_info["success"] is False
+
+    def test_quantity_mode_passes_raw_value(self):
+        """Quantity mode must pass quantity_per_trade directly without conversion."""
+        from torchtrade.envs.live.bitget.env_sltp import (
+            BitgetFuturesSLTPTorchTradingEnv,
+            BitgetFuturesSLTPTradingEnvConfig,
+        )
+
+        mock_observer = MagicMock()
+        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
+        mock_observer.get_observations = MagicMock(return_value={
+            "1m_10": np.random.randn(10, 4).astype(np.float32),
+            "base_features": np.array(
+                [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
+            ),
+        })
+        mock_observer.intervals = ["1m"]
+        mock_observer.window_sizes = [10]
+
+        mock_trader = MagicMock()
+        mock_trader.cancel_open_orders = MagicMock(return_value=True)
+        mock_trader.close_position = MagicMock(return_value=True)
+        mock_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0, "available_balance": 900.0,
+            "total_margin_balance": 1000.0,
+        })
+        mock_trader.get_status = MagicMock(return_value={"position_status": None})
+        mock_trader.trade = MagicMock(return_value=True)
+
+        config = BitgetFuturesSLTPTradingEnvConfig(
+            symbol="BTC/USDT:USDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            trade_mode="quantity",
+            quantity_per_trade=0.001,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BitgetFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BitgetFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_observer, trader=mock_trader,
+            )
+
+        env.reset()
+        env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+        call_kwargs = mock_trader.trade.call_args[1]
+        assert call_kwargs["quantity"] == pytest.approx(0.001, rel=1e-6)
+
+    def test_fractional_converts_balance_to_quantity(self):
+        """Fractional mode must compute quantity from balance * fraction * leverage / price."""
+        from torchtrade.envs.live.bitget.env_sltp import (
+            BitgetFuturesSLTPTorchTradingEnv,
+            BitgetFuturesSLTPTradingEnvConfig,
+        )
+
+        mock_observer = MagicMock()
+        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
+
+        def mock_observations(return_base_ohlc=False):
+            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
+            if return_base_ohlc:
+                obs["base_features"] = np.array(
+                    [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
+                )
+            return obs
+
+        mock_observer.get_observations = MagicMock(side_effect=mock_observations)
+        mock_observer.intervals = ["1m"]
+        mock_observer.window_sizes = [10]
+
+        mock_trader = MagicMock()
+        mock_trader.cancel_open_orders = MagicMock(return_value=True)
+        mock_trader.close_position = MagicMock(return_value=True)
+        mock_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0,
+            "available_balance": 900.0,
+            "total_unrealized_profit": 0.0,
+            "total_margin_balance": 1000.0,
+        })
+        mock_trader.get_status = MagicMock(return_value={"position_status": None})
+        mock_trader.trade = MagicMock(return_value=True)
+
+        config = BitgetFuturesSLTPTradingEnvConfig(
+            symbol="BTC/USDT:USDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            trade_mode="fractional",
+            position_fraction=0.1,
+            leverage=5,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BitgetFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BitgetFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_observer, trader=mock_trader,
+            )
+
+        env.reset()
+        env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+        call_kwargs = mock_trader.trade.call_args[1]
+        # balance=1000 * fraction=0.1 * leverage=5 / candle_close=50050 ≈ 0.00999
+        expected_qty = 1000.0 * 0.1 * 5 / 50050.0
+        assert call_kwargs["quantity"] == pytest.approx(expected_qty, rel=1e-4)
+
+
+class TestBitgetSLTPLockPosition:
+    """Test lock_position_until_sltp for Bitget SLTP environment."""
+
+    @pytest.fixture
+    def locked_env(self):
+        from torchtrade.envs.live.bitget.env_sltp import (
+            BitgetFuturesSLTPTorchTradingEnv,
+            BitgetFuturesSLTPTradingEnvConfig,
+        )
+
+        mock_observer = MagicMock()
+        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
+        mock_observer.get_observations = MagicMock(return_value={
+            "1m_10": np.random.randn(10, 4).astype(np.float32),
+            "base_features": np.array(
+                [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
+            ),
+        })
+        mock_observer.intervals = ["1m"]
+        mock_observer.window_sizes = [10]
+
+        mock_trader = MagicMock()
+        mock_trader.cancel_open_orders = MagicMock(return_value=True)
+        mock_trader.close_position = MagicMock(return_value=True)
+        mock_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0, "available_balance": 900.0,
+            "total_margin_balance": 1000.0,
+        })
+        mock_trader.get_status = MagicMock(return_value={"position_status": None})
+        mock_trader.trade = MagicMock(return_value=True)
+
+        config = BitgetFuturesSLTPTradingEnvConfig(
+            symbol="BTC/USDT:USDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            include_short_positions=True,
+            lock_position_until_sltp=True,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BitgetFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BitgetFuturesSLTPTorchTradingEnv(
+                config=config, observer=mock_observer, trader=mock_trader,
+            )
+        return env, mock_trader
+
+    def test_locked_ignores_switch_action(self, locked_env):
+        """With lock=True, switching direction while in position should be ignored."""
+        env, mock_trader = locked_env
+        env.reset()
+        env.position.current_position = 1
+        mock_trader.reset_mock()
+
+        trade_info = env._execute_trade_if_needed(("short", 0.02, -0.03))
+
+        assert trade_info["executed"] is False
+        mock_trader.trade.assert_not_called()
+        mock_trader.close_position.assert_not_called()
+
+
+class TestWithReplayData:
+    """Integration tests using ReplayObserver + ReplayOrderExecutor with real price data."""
+
+    @pytest.fixture
+    def replay_df(self):
+        """Create realistic OHLCV test data with price movement."""
+        import pandas as pd
+
+        n = 200
+        timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
+        base = 50000 + np.cumsum(np.random.default_rng(42).normal(0, 50, n))
+        return pd.DataFrame({
+            "timestamp": timestamps,
+            "open": base,
+            "high": base + np.abs(np.random.default_rng(43).normal(30, 20, n)),
+            "low": base - np.abs(np.random.default_rng(44).normal(30, 20, n)),
+            "close": base + np.random.default_rng(45).normal(0, 20, n),
+            "volume": np.random.default_rng(46).uniform(100, 1000, n),
+        })
+
+    def test_multi_step_episode_with_replay(self, replay_df):
+        """Run a full multi-step episode with realistic price data."""
+        from torchtrade.envs.live.bitget.env_sltp import (
+            BitgetFuturesSLTPTorchTradingEnv,
+            BitgetFuturesSLTPTradingEnvConfig,
+        )
+        from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
+
+        config = BitgetFuturesSLTPTradingEnvConfig(
+            symbol="BTC/USDT:USDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+            stoploss_levels=(-0.02,),
+            takeprofit_levels=(0.03,),
+            leverage=5,
+            trade_mode="quantity",
+            quantity_per_trade=0.01,
+        )
+
+        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
+        observer = ReplayObserver(
+            df=replay_df,
+            time_frames=config.time_frames,
+            window_sizes=config.window_sizes,
+            execute_on=config.execute_on,
+            executor=executor,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BitgetFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BitgetFuturesSLTPTorchTradingEnv(
+                config=config, observer=observer, trader=executor,
+            )
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            td = env.reset()
+
+            for i in range(50):
+                action = [0, 1, 0, 0, len(env.action_map) - 1, 0][i % 6]
+                action_td = td.clone()
+                action_td["action"] = torch.tensor(action)
+                result = env.step(action_td)
+                td = result["next"]
+
+                assert "reward" in td.keys()
+                assert "done" in td.keys()
+                assert td["account_state"].shape == (6,)
+
+                if td["done"].item():
+                    break
+
+    def test_replay_portfolio_tracks_price_movement(self, replay_df):
+        """Portfolio value should change with price movement, not stay static."""
+        from torchtrade.envs.live.bitget.env_sltp import (
+            BitgetFuturesSLTPTorchTradingEnv,
+            BitgetFuturesSLTPTradingEnvConfig,
+        )
+        from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
+
+        config = BitgetFuturesSLTPTradingEnvConfig(
+            symbol="BTC/USDT:USDT",
+            time_frames=["1m"],
+            window_sizes=[10],
+            execute_on="1m",
+            stoploss_levels=(-0.05,),
+            takeprofit_levels=(0.05,),
+            leverage=5,
+            trade_mode="quantity",
+            quantity_per_trade=0.01,
+        )
+
+        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
+        observer = ReplayObserver(
+            df=replay_df,
+            time_frames=config.time_frames,
+            window_sizes=config.window_sizes,
+            execute_on=config.execute_on,
+            executor=executor,
+        )
+
+        with patch("time.sleep"), \
+             patch.object(BitgetFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BitgetFuturesSLTPTorchTradingEnv(
+                config=config, observer=observer, trader=executor,
+            )
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            td = env.reset()
+
+            # Open a long position
+            action_td = td.clone()
+            action_td["action"] = torch.tensor(1)
+            td = env.step(action_td)["next"]
+
+            # Hold for several steps -- price should move, changing portfolio value
+            balances = []
+            for _ in range(10):
+                action_td = td.clone()
+                action_td["action"] = torch.tensor(0)  # HOLD
+                td = env.step(action_td)["next"]
+                balances.append(executor.get_account_balance()["total_wallet_balance"])
+
+            # With real price movement, portfolio value should not stay static
+            assert max(balances) != min(balances), "Portfolio value should vary with price movement"

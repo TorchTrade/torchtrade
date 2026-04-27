@@ -394,11 +394,7 @@ class TestSequentialEnvTermination:
                 break
             action_td = td.clone()
             action_td["action"] = torch.tensor(0)  # Close action for spot
-            try:
-                td = env.step(action_td)
-            except (ValueError, IndexError):
-                # Out of data
-                break
+            td = env.step(action_td)
 
         assert i < max_steps, "Should terminate before max_steps"
         env.close()
@@ -429,11 +425,7 @@ class TestSequentialEnvTermination:
                 break
             action_td = td["next"].clone()
             action_td["action"] = torch.tensor(2)  # Keep long position (futures: [-1, 0, 1])
-            try:
-                td = env.step(action_td)
-            except (ValueError, IndexError):
-                terminated = True
-                break
+            td = env.step(action_td)
 
         # Should have terminated (either liquidation, max length, or out of data)
         assert terminated, "Episode should terminate"
@@ -469,11 +461,7 @@ class TestSequentialEnvTermination:
                 break
             action_td = td["next"].clone()
             action_td["action"] = torch.tensor(0)  # Keep short position
-            try:
-                td = env.step(action_td)
-            except (ValueError, IndexError):
-                terminated = True
-                break
+            td = env.step(action_td)
 
         # Should have terminated (either liquidation, max length, or out of data)
         assert terminated, "Episode should terminate"
@@ -996,5 +984,57 @@ class TestPerTimeframeFeatures:
 
             if td["next"]["done"].item():
                 break
+
+        env.close()
+
+
+# ============================================================================
+# SAMPLER EXHAUSTION TESTS (Issue #204)
+# ============================================================================
+
+
+class TestSamplerExhaustion:
+    """Verify _step gracefully terminates when the sampler is exhausted."""
+
+    @pytest.mark.parametrize("leverage", [1, 10], ids=["spot", "futures"])
+    def test_step_after_sampler_exhausted_does_not_crash(self, short_ohlcv_df, leverage):
+        """Stepping past the sampler's last timestamp must return done=True,
+        not raise ValueError (issue #204)."""
+        config = SequentialTradingEnvConfig(
+            leverage=leverage,
+            initial_cash=1000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            max_traj_length=9999,  # Large enough so sampler exhausts first
+            random_start=False,
+        )
+        env = SequentialTradingEnv(short_ohlcv_df, config, simple_feature_fn)
+        td = env.reset()
+        hold_action = 1  # flat action index (action_levels[-1,0,1] → index 1 = 0)
+
+        # Step until done
+        for _ in range(200):
+            action_td = td["next"].clone() if "next" in td.keys() else td.clone()
+            action_td["action"] = torch.tensor(hold_action)
+            td = env.step(action_td)
+            if td["next"]["done"].item():
+                break
+
+        # Env MUST be done by now (sampler exhausted)
+        assert td["next"]["done"].item()
+        assert td["next"]["truncated"].item()
+
+        # The critical test: one MORE step must not crash
+        extra_td = td["next"].clone()
+        extra_td["action"] = torch.tensor(hold_action)
+        result = env.step(extra_td)
+
+        assert result["next"]["done"].item()
+        assert result["next"]["truncated"].item()
+        assert not result["next"]["terminated"].item()
 
         env.close()
