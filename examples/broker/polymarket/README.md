@@ -120,7 +120,7 @@ freshly-picked next market:
 ```python
 td = env.reset()
 td["market_state"]
-# tensor([yes_price, spread, vol_24h, liquidity, lifetime_progress])  shape (5,)
+# tensor([yes_price, spread, vol_24h, liquidity])  shape (4,)
 ```
 
 There is **no** `account_state`. By the time the next `step()` runs, the

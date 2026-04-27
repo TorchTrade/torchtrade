@@ -34,7 +34,7 @@ Online environments connect to real trading APIs for paper trading or live execu
 | **BybitFuturesSLTPTorchTradingEnv** | Bybit | Crypto | Yes | Yes | Yes |
 | **OKXFuturesTorchTradingEnv** | OKX | Crypto | Yes | Yes | - |
 | **OKXFuturesSLTPTorchTradingEnv** | OKX | Crypto | Yes | Yes | Yes |
-| **PolyTimeBarEnv** | Polymarket | Prediction markets | - | - | - |
+| **PolymarketBetEnv** | Polymarket | Prediction markets | - | - | - |
 
 ## Fractional Position Sizing
 
@@ -406,8 +406,8 @@ env = PolymarketBetEnv(
     config=config,
     private_key=os.getenv("POLYGON_PRIVATE_KEY", ""),
 )
-# observation_spec: {"market_state": (5,)}
-# action_spec:      Categorical(2)  → 0 = Down, 1 = Up
+# observation_spec: {"market_state": (4,)}  → [yes_price, spread, vol_24h, liquidity]
+# action_spec:      Categorical(2)            → 0 = Down, 1 = Up
 ```
 
 Each `step()`:
