@@ -17,10 +17,13 @@ time-to-resolution, optional keyword). No environment, no orders.
 # Top 10 by 24h volume
 python examples/broker/polymarket/scan_markets.py
 
-# Filter by keyword (case-insensitive substring on question or slug)
+# Filter by a single keyword (case-insensitive substring on question or slug)
 python examples/broker/polymarket/scan_markets.py --keyword bitcoin
 
-# Tweak filters
+# Filter by multiple keywords — a market passes if ANY of them matches
+python examples/broker/polymarket/scan_markets.py --keyword btc bitcoin crypto
+
+# Multi-word terms must be quoted; combine with other filters as needed
 python examples/broker/polymarket/scan_markets.py --keyword "world cup" --min-volume 50000 --max 5
 ```
 
@@ -59,7 +62,7 @@ Rows are sorted by `24h vol` descending and capped at `--max` (default 10).
 
 | Flag             | Default     | Description |
 |------------------|-------------|-------------|
-| `--keyword`      | *(none)*    | Case-insensitive substring match against the market `question` **or** `slug`. Quote multi-word terms (`--keyword "world cup"`). |
+| `--keyword`      | *(none)*    | One or more case-insensitive substrings matched against the market `question` **or** `slug`. A market passes if **any** keyword hits — `--keyword btc bitcoin crypto` matches anything containing `btc` OR `bitcoin` OR `crypto`. Quote multi-word terms: `--keyword "world cup"`. |
 | `--min-volume`   | `10000`     | Minimum 24-hour volume in USDC. Use this to skip illiquid markets. |
 | `--min-liquidity`| `5000`      | Minimum resting order-book liquidity in USDC. |
 | `--max`          | `10`        | Maximum number of markets to print. |
@@ -70,7 +73,7 @@ The same fields are available on `MarketScannerConfig` if you want to use the sc
 from torchtrade.envs.live.polymarket import MarketScanner, MarketScannerConfig
 
 scanner = MarketScanner(MarketScannerConfig(
-    keyword="bitcoin",
+    keyword=["btc", "bitcoin", "crypto"],  # or just a single string, e.g. "bitcoin"
     min_volume_24h=50_000.0,
     min_liquidity=10_000.0,
     max_markets=5,

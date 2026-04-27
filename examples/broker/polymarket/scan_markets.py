@@ -5,6 +5,7 @@ This script does not place any orders — it only reads from the public Gamma AP
 Run with:
     python examples/broker/polymarket/scan_markets.py
     python examples/broker/polymarket/scan_markets.py --keyword bitcoin
+    python examples/broker/polymarket/scan_markets.py --keyword btc bitcoin crypto
     python examples/broker/polymarket/scan_markets.py --keyword "world cup" --max 5
 """
 
@@ -19,9 +20,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--keyword",
-        type=str,
+        nargs="+",
         default=None,
-        help="Case-insensitive substring match on the market question or slug.",
+        metavar="WORD",
+        help=(
+            "One or more case-insensitive substrings to match against the market "
+            "question or slug. A market passes if ANY keyword hits "
+            "(e.g. --keyword btc bitcoin crypto)."
+        ),
     )
     parser.add_argument(
         "--min-volume", type=float, default=10_000.0, help="Minimum 24h volume (USD)."
@@ -45,7 +51,7 @@ def main():
     )
     markets = scanner.scan()
     if not markets:
-        suffix = f" matching '{args.keyword}'" if args.keyword else ""
+        suffix = f" matching {args.keyword}" if args.keyword else ""
         print(f"No markets{suffix} matched the filters.")
         return
 

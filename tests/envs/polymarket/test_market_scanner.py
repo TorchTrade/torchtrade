@@ -190,12 +190,16 @@ class TestFilterMarkets:
     @pytest.mark.parametrize(
         "keyword,question,slug,expected_count",
         [
-            (None, "Will Bitcoin hit $100k?", "btc-100k", 1),       # no filter => keeps
-            ("bitcoin", "Will Bitcoin hit $100k?", "btc-100k", 1),  # matches question
-            ("BITCOIN", "Will Bitcoin hit $100k?", "btc-100k", 1),  # case-insensitive
-            ("btc", "Will Bitcoin hit $100k?", "btc-100k", 1),      # matches slug only
-            ("ethereum", "Will Bitcoin hit $100k?", "btc-100k", 0), # no match
-            ("", "Anything", "any-slug", 1),                        # empty string => no filter
+            (None, "Will Bitcoin hit $100k?", "btc-100k", 1),
+            ("bitcoin", "Will Bitcoin hit $100k?", "btc-100k", 1),
+            ("BITCOIN", "Will Bitcoin hit $100k?", "btc-100k", 1),
+            ("btc", "Will Bitcoin hit $100k?", "btc-100k", 1),
+            ("ethereum", "Will Bitcoin hit $100k?", "btc-100k", 0),
+            ("", "Anything", "any-slug", 1),
+            (["btc", "bitcoin", "crypto"], "Will Bitcoin hit $100k?", "btc-100k", 1),
+            (["eth", "ethereum"], "Will Bitcoin hit $100k?", "btc-100k", 0),
+            (["ethereum", "btc"], "Will Bitcoin hit $100k?", "btc-100k", 1),
+            ([], "Anything", "any-slug", 1),
         ],
         ids=[
             "none-passes",
@@ -204,6 +208,10 @@ class TestFilterMarkets:
             "match-slug-only",
             "no-match",
             "empty-string-passes",
+            "list-any-matches",
+            "list-no-match",
+            "list-second-matches",
+            "empty-list-passes",
         ],
     )
     def test_keyword_filtering(self, keyword, question, slug, expected_count):

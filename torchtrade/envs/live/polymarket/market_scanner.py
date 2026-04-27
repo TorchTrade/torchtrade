@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import requests
 
@@ -46,7 +46,8 @@ class MarketScannerConfig:
     max_markets: int = 20
     categories: Optional[List[str]] = None
     min_time_to_resolution_hours: float = 24
-    keyword: Optional[str] = None  # case-insensitive substring match on question or slug
+    # Single keyword or list — any substring match (case-insensitive) on question or slug
+    keyword: Optional[Union[str, List[str]]] = None
 
 
 class MarketScanner:
@@ -107,10 +108,12 @@ class MarketScanner:
                 if not market_labels.intersection(cfg.categories):
                     continue
 
-            # Keyword filter (case-insensitive substring on question or slug)
+            # Keyword filter (case-insensitive substring on question or slug;
+            # accepts a single string or a list — matches if ANY keyword hits)
             if cfg.keyword:
-                needle = cfg.keyword.lower()
-                if needle not in m.question.lower() and needle not in m.slug.lower():
+                needles = [cfg.keyword] if isinstance(cfg.keyword, str) else cfg.keyword
+                haystack = (m.question + " " + m.slug).lower()
+                if not any(n.lower() in haystack for n in needles if n):
                     continue
 
             filtered.append(m)
