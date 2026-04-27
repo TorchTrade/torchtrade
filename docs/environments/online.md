@@ -562,6 +562,9 @@ augment = BinanceOHLCVTransform(feature_preprocessing_fn=my_features)
 
 For purely on-chain signals, custom microfeatures pipelines, or non-Binance exchanges, write your own `Transform` following the same pattern, `_reset`, `_step`, and `transform_observation_spec`. The `BinanceOHLCVTransform` source ([`torchtrade/envs/transforms/binance_ohlcv.py`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/binance_ohlcv.py)) is short enough to read and adapt.
 
+!!! note "Roadmap: text and news context"
+    A natural next step for `PolymarketBetEnv` is augmenting the observation with **text-based signals** that the LLM actor can reason over directly: real-time news headlines (e.g. via the X / Twitter API or a news aggregator), on-chain whale-flow alerts, macro-event feeds, and similar. The same `Transform` skeleton applies, just with non-numeric output written into the TensorDict (e.g. as `NonTensorData` strings). Open an issue or PR with the data source you want and we can ship a `NewsContextTransform` (or similar) the same way `BinanceOHLCVTransform` was added.
+
 ### Driving the env with an LLM actor
 
 TorchTrade ships [`FrontierLLMActor`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/frontier_llm_actor.py) (OpenAI-compatible) and [`LocalLLMActor`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/local_llm_actor.py) (local HF model via vLLM). Both work directly with `PolymarketBetEnv`, pass an empty `account_state_labels` to skip that prompt section, point `market_data_keys` at `"market_state"`, and override the action descriptions to use binary up/down language:
