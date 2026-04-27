@@ -146,7 +146,7 @@ class BaseLLMActor(ABC):
 
     def _construct_account_state(self, tensordict) -> str:
         account_state = tensordict.get("account_state")
-        if account_state.dim() == 2:
+        if account_state.dim() == 2 and account_state.shape[0] == 1:
             account_state = account_state.squeeze(0)
 
         out = "Current account state:\n"

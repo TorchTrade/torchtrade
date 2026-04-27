@@ -74,36 +74,30 @@ class LocalLLMActor(BaseLLMActor):
         self.llm = LLM(**kwargs)
 
     def _initialize_transformers(self):
-        try:
-            from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+        from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
 
-            model_kwargs = {"trust_remote_code": True}
-            if self.quantization == "4bit":
-                from transformers import BitsAndBytesConfig
-                model_kwargs["quantization_config"] = BitsAndBytesConfig(
-                    load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16,
-                )
-                model_kwargs["device_map"] = "auto"
-            elif self.quantization == "8bit":
-                from transformers import BitsAndBytesConfig
-                model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
-                model_kwargs["device_map"] = "auto"
-            else:
-                model_kwargs["device_map"] = "auto" if (self.device == "cuda" and torch.cuda.is_available()) else self.device
-
-            model = AutoModelForCausalLM.from_pretrained(self.model_name, **model_kwargs)
-            self.llm = pipeline(
-                "text-generation", model=model, tokenizer=self.tokenizer,
-                max_new_tokens=self.max_tokens, temperature=self.temperature,
-                do_sample=self.temperature > 0,
+        model_kwargs = {"trust_remote_code": True}
+        if self.quantization == "4bit":
+            from transformers import BitsAndBytesConfig
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16,
             )
-        except ImportError as e:
-            raise ImportError(
-                "Neither vllm nor transformers available. "
-                "Install with: pip install 'torchtrade[llm]'"
-            ) from e
+            model_kwargs["device_map"] = "auto"
+        elif self.quantization == "8bit":
+            from transformers import BitsAndBytesConfig
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+            model_kwargs["device_map"] = "auto"
+        else:
+            model_kwargs["device_map"] = "auto" if (self.device == "cuda" and torch.cuda.is_available()) else self.device
+
+        model = AutoModelForCausalLM.from_pretrained(self.model_name, **model_kwargs)
+        self.llm = pipeline(
+            "text-generation", model=model, tokenizer=self.tokenizer,
+            max_new_tokens=self.max_tokens, temperature=self.temperature,
+            do_sample=self.temperature > 0,
+        )
 
     def _format_chat_prompt(self, system_prompt: str, user_prompt: str) -> str:
         messages = [
