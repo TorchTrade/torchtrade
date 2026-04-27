@@ -48,22 +48,17 @@ def main():
     print(f"initial cash:       ${env.cash:,.2f}")
     print(
         f"first market_state: yes_price={td['market_state'][0].item():.3f}  "
-        f"liq=${td['market_state'][3].item():,.0f}  "
-        f"resolves={env._current_market.end_date[:16]}"
+        f"liq=${td['market_state'][3].item():,.0f}"
     )
 
     for step in range(config.max_steps):
         action = torch.randint(0, env.action_spec.n, ())
         side = "UP" if action.item() == 1 else "DOWN"
-        market = env._current_market
-        print(
-            f"\nstep {step + 1}: betting {side} on {market.slug}  "
-            f"(waiting for resolution at {market.end_date[:16]})..."
-        )
-        td = env._step(td.set("action", action))
+        print(f"\nstep {step + 1}: betting {side} (waiting for resolution)...")
+        td = env.step(td.set("action", action))["next"]
         print(
             f"  resolved → reward={td['reward'].item():+.4f}  "
-            f"cash=${env.cash:,.2f}  done={td['done'].item()}"
+            f"cash=${env.cash:,.2f}  done={bool(td['done'].item())}"
         )
         if td["done"].item():
             break

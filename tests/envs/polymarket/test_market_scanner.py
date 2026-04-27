@@ -320,6 +320,24 @@ class TestScan:
         assert params["ascending"] == "true"
         assert "end_date_min" in params
 
+    @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
+    def test_scan_skips_malformed_markets_keeping_good_ones(self, mock_get):
+        """A malformed entry (missing required fields) must not poison the batch —
+        the rest of the response should still surface."""
+        good = _make_raw_market(market_id="ok")
+        malformed = {"id": "bad", "active": True, "closed": False}  # missing every field
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [malformed, good]
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        scanner = MarketScanner(MarketScannerConfig(
+            min_volume_24h=0, min_liquidity=0, min_time_to_resolution_hours=0
+        ))
+        results = scanner.scan()
+        assert len(results) == 1
+        assert results[0].market_id == "ok"
+
 
 class TestSlugPrefix:
     @pytest.mark.parametrize(
@@ -425,3 +443,24 @@ class TestNextActiveMarket:
         result = MarketScanner().next_active_market("btc-updown-5m-")
         assert result is not None
         assert result.market_id == "2"
+
+    @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
+    def test_skips_malformed_then_returns_next_match(self, mock_get):
+        """Malformed prefix-matching market must not abort the lookup — keep going."""
+        malformed = {
+            "id": "bad",
+            "slug": "btc-updown-5m-bad",
+            "active": True,
+            "closed": False,
+        }  # missing outcomePrices etc.
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [
+            malformed,
+            _make_raw_market(slug="btc-updown-5m-good", market_id="good"),
+        ]
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        result = MarketScanner().next_active_market("btc-updown-5m-")
+        assert result is not None
+        assert result.market_id == "good"

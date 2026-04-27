@@ -334,6 +334,19 @@ class TestFetchResolvedOutcome:
             mock_get.return_value = mock_resp
             assert env._fetch_resolved_outcome("0xcond") == expected
 
+    def test_outgoing_request_pins_endpoint_and_params(self):
+        """Pin the Gamma API contract — endpoint URL and condition_id query param."""
+        env, _, _ = _make_env(mock_fetch=False)
+        with patch("torchtrade.envs.live.polymarket.env.requests.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = [{"outcomePrices": '["1.0", "0.0"]'}]
+            mock_resp.raise_for_status = MagicMock()
+            mock_get.return_value = mock_resp
+            env._fetch_resolved_outcome("0xcond_abc")
+        assert "gamma-api.polymarket.com" in mock_get.call_args.args[0]
+        assert "/markets" in mock_get.call_args.args[0]
+        assert mock_get.call_args.kwargs["params"]["condition_id"] == "0xcond_abc"
+
     def test_http_failure_returns_none(self):
         import requests
         env, _, _ = _make_env(mock_fetch=False)
