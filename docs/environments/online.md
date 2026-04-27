@@ -380,7 +380,7 @@ env = OKXFuturesSLTPTorchTradingEnv(
 [Polymarket](https://polymarket.com/) is a decentralized prediction market on Polygon. TorchTrade currently exposes a single env, `PolymarketBetEnv`, tailored for short-cadence binary markets — Polymarket runs continuous **5-minute, 15-minute, 1-hour, and 4-hour** crypto "up/down" markets (BTC, ETH, SOL) plus daily markets. Each step is an independent bet: place direction, wait for resolution, collect realized payoff, advance to the next market in the series. There is no carried position, so the observation deliberately omits any `account_state`.
 
 !!! info "Starter environment — more to come"
-    `PolymarketBetEnv` is intentionally a **starter env** matching the most common Polymarket use case (rolling binary up/down bets). Polymarket also has multi-strike daily price markets, sports, politics, and longer-horizon markets that benefit from a different env shape. Additional Polymarket envs will be added based on user requests and as new market types appear — open an issue describing the pattern you need.
+    `PolymarketBetEnv` is intentionally a **starter env** matching the most common Polymarket use case for TorchTrade (rolling binary up/down bets). Polymarket also has multi-strike daily price markets, sports, politics, and longer-horizon markets that benefit from a different env shape. Additional Polymarket envs will be added based on user requests and as new market types appear — open an issue describing the pattern you need.
 
 !!! note "Authentication"
     Polymarket uses a **Polygon private key**, not an API key/secret pair. The key is used to derive CLOB API credentials at runtime.
