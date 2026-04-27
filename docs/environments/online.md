@@ -377,7 +377,10 @@ env = OKXFuturesSLTPTorchTradingEnv(
 
 ## Polymarket Environment
 
-[Polymarket](https://polymarket.com/) is a decentralized prediction market on Polygon. TorchTrade exposes a single env, `PolymarketBetEnv`, tailored for short-cadence binary markets — Polymarket runs continuous **5-minute, 15-minute, 1-hour, and 4-hour** crypto "up/down" markets (BTC, ETH, SOL) plus daily markets. Each step is an independent bet: place direction, wait for resolution, collect realized payoff, advance to the next market in the series. There is no carried position, so the observation deliberately omits any `account_state`.
+[Polymarket](https://polymarket.com/) is a decentralized prediction market on Polygon. TorchTrade currently exposes a single env, `PolymarketBetEnv`, tailored for short-cadence binary markets — Polymarket runs continuous **5-minute, 15-minute, 1-hour, and 4-hour** crypto "up/down" markets (BTC, ETH, SOL) plus daily markets. Each step is an independent bet: place direction, wait for resolution, collect realized payoff, advance to the next market in the series. There is no carried position, so the observation deliberately omits any `account_state`.
+
+!!! info "Starter environment — more to come"
+    `PolymarketBetEnv` is intentionally a **starter env** matching the most common Polymarket use case (rolling binary up/down bets). Polymarket also has multi-strike daily price markets, sports, politics, and longer-horizon markets that benefit from a different env shape. Additional Polymarket envs will be added based on user requests and as new market types appear — open an issue describing the pattern you need.
 
 !!! note "Authentication"
     Polymarket uses a **Polygon private key**, not an API key/secret pair. The key is used to derive CLOB API credentials at runtime.
@@ -419,7 +422,10 @@ Each `step()`:
 
 ### Discovering markets and slug prefixes
 
-`MarketScanner` is the discovery tool. Use it once to identify the slug prefix that points at the series you want, then plug it into the env. Live scanning a fast-cadence series at the API level uses Gamma's `endDate`-ascending sort and the `end_date_min=now` filter — short-cadence markets typically have $0 24-hour volume, so the volume-sorted browsing path would miss them.
+`MarketScanner` is the discovery tool. Use it once to identify the slug prefix that points at the series you want, then plug it into the env. Two query strategies depending on your filters:
+
+- **Browsing mode** (no `slug_prefix` and no `max_time_to_resolution_minutes`) — sorts by 24-hour volume descending, surfaces high-volume markets first. Best for "what's hot right now?".
+- **Targeting upcoming mode** (either of those is set) — sorts by `endDate` ascending and uses Gamma's `end_date_min=now` filter. Required for short-cadence series like `btc-updown-5m-`, which typically have $0 24-hour volume and never make the volume-sorted top page.
 
 ```python
 from torchtrade.envs.live.polymarket import MarketScanner, MarketScannerConfig
@@ -439,9 +445,36 @@ for m in scanner.scan():
 
 # Find any short-cadence market resolving in <30 minutes
 scanner = MarketScanner(MarketScannerConfig(max_time_to_resolution_minutes=30))
+
+# Fuzzy keyword filter (case-insensitive, OR-match across question + slug)
+scanner = MarketScanner(MarketScannerConfig(keyword=["btc", "bitcoin", "crypto"]))
 ```
 
-The companion CLI is [`examples/broker/polymarket/scan_markets.py`](../../examples/broker/polymarket/scan_markets.py); it accepts `--slug-prefix`, `--keyword`, `--max-resolution-minutes`, and friends.
+#### CLI flags
+
+The companion CLI is [`examples/broker/polymarket/scan_markets.py`](../../examples/broker/polymarket/scan_markets.py). All flags map 1:1 to fields on `MarketScannerConfig`:
+
+| Flag | Purpose |
+|------|---------|
+| `--slug-prefix` | **Exact, structural** prefix match on the market slug (case-sensitive). This is the env-side primitive — once you've found a prefix you're happy with, it's the identifier you paste into `PolymarketBetEnvConfig.market_slug_prefix`. Examples: `btc-updown-5m-`, `bitcoin-up-or-down-`, `eth-updown-15m-`. |
+| `--keyword` | **Fuzzy, exploratory** substring match (case-insensitive, applied to both `question` and `slug`). Pass one or more terms — a market passes the filter if **any** term appears: `--keyword btc bitcoin crypto` matches anything containing `btc` OR `bitcoin` OR `crypto`. Quote multi-word terms (`--keyword "world cup"`). Use this to find a series you don't already know the prefix of, then read the matching `slug` column to identify the prefix for the env. |
+| `--min-volume` | Minimum 24-hour USDC volume. Default `0`. Raise to skip thin markets when browsing. |
+| `--min-liquidity` | Minimum order-book liquidity in USDC. Default `0`. |
+| `--min-resolution-hours` | Lower bound on time-to-resolution. Default `0`. |
+| `--max-resolution-minutes` | Upper bound on time-to-resolution. Default unset. Set to e.g. `30` to surface short-cadence markets that volume-sorted browsing would otherwise miss. |
+| `--max` | Cap on rows printed. Default `20`. |
+
+Typical workflow: discover with `--keyword`, identify the slug stem, then verify with `--slug-prefix`:
+
+```bash
+# 1. Fuzzy: "what crypto markets exist resolving soon?"
+python examples/broker/polymarket/scan_markets.py --keyword btc bitcoin --max-resolution-minutes 30
+
+# 2. Identify a stem in the output (e.g. btc-updown-5m-) and verify
+python examples/broker/polymarket/scan_markets.py --slug-prefix btc-updown-5m- --max 5
+
+# 3. Plug that stem into PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
+```
 
 ### Currently active short-cadence series
 
@@ -457,6 +490,116 @@ The companion CLI is [`examples/broker/polymarket/scan_markets.py`](../../exampl
 | BTC daily up/down     | 1 day  | `bitcoin-up-or-down-on-` |
 
 Polymarket adds and renames series occasionally; re-running `scan_markets.py` to verify the prefix before configuring the env is the safe move.
+
+### Adding external context (OHLCV, microfeatures, multi-timeframe)
+
+`PolymarketBetEnv`'s default observation is intentionally minimal: a 4-element `market_state = [yes_price, spread, volume_24h, liquidity]`. For "BTC up/down in 5 min?" markets, the obvious thing to add is **live BTC OHLCV** from a spot exchange — the policy needs price action to take an informed view, not just the implied probability already baked into `yes_price`.
+
+The idiomatic TorchRL way to do this is `TransformedEnv` plus a small `Transform` that fetches your data each step and adds it to the observation `TensorDict`. Same pattern works for **multi-timeframe windows**, **microfeatures** (order-book imbalance, trade-flow stats), or any other side-channel signal — the env stays unchanged.
+
+#### Example: Binance OHLCV alongside the Polymarket observation
+
+```python
+import numpy as np
+import torch
+from tensordict import TensorDictBase
+from torchrl.data import Bounded, Composite
+from torchrl.envs import TransformedEnv
+from torchrl.envs.transforms import Transform
+
+from torchtrade.envs.live.polymarket import PolymarketBetEnv, PolymarketBetEnvConfig
+from torchtrade.envs.live.binance import BinanceObservationClass
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+
+class BinanceOHLCVAugment(Transform):
+    """Append multi-timeframe BTC OHLCV windows to PolymarketBetEnv observations.
+
+    Uses ``BinanceObservationClass`` (no API key needed for read-only OHLCV) and
+    feeds whatever ``feature_preprocessing_fn`` produces — default is normalized
+    pct-change OHLC features. Swap the preprocessing function to inject your
+    own technicals / microfeatures.
+    """
+
+    def __init__(self, symbol="BTCUSDT", time_frames=("1m", "5m", "15m"), window_sizes=(60, 30, 20)):
+        super().__init__(in_keys=[], out_keys=[])
+        unit_map = {"m": TimeFrameUnit.Minute, "h": TimeFrameUnit.Hour, "d": TimeFrameUnit.Day}
+        self._tfs = [TimeFrame(int(tf[:-1]), unit_map[tf[-1]]) for tf in time_frames]
+        self._window_sizes = list(window_sizes)
+        self._tf_strs = list(time_frames)
+        self._observer = BinanceObservationClass(
+            symbol=symbol, time_frames=self._tfs, window_sizes=self._window_sizes,
+        )
+        # discover feature width from the dummy preprocessing run
+        self._n_features = len(self._observer.get_features()["observation_features"])
+
+    def _key(self, tf: str, window: int) -> str:
+        return f"ohlcv_{tf}_{window}"
+
+    def _attach_observations(self, td: TensorDictBase) -> TensorDictBase:
+        obs = self._observer.get_observations()
+        # BinanceObservationClass keys are "{tf}_{window}" — convert to torch.float32
+        for tf_str, window in zip(self._tf_strs, self._window_sizes):
+            arr = obs[f"{self._tfs[self._tf_strs.index(tf_str)].obs_key_freq()}_{window}"]
+            td.set(self._key(tf_str, window), torch.tensor(np.asarray(arr), dtype=torch.float32))
+        return td
+
+    def _reset(self, td, td_reset):
+        return self._attach_observations(td_reset)
+
+    def _step(self, td, next_td):
+        return self._attach_observations(next_td)
+
+    def transform_observation_spec(self, observation_spec):
+        for tf_str, window in zip(self._tf_strs, self._window_sizes):
+            observation_spec.set(
+                self._key(tf_str, window),
+                Bounded(
+                    low=-float("inf"), high=float("inf"),
+                    shape=(window, self._n_features), dtype=torch.float32,
+                ),
+            )
+        return observation_spec
+
+
+config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", dry_run=True)
+env = TransformedEnv(
+    PolymarketBetEnv(config),
+    BinanceOHLCVAugment(time_frames=("1m", "5m", "15m"), window_sizes=(60, 30, 20)),
+)
+
+td = env.reset()
+# td now has: market_state (4,), ohlcv_1m_60 (60, n_feat), ohlcv_5m_30 (30, n_feat),
+#             ohlcv_15m_20 (20, n_feat), terminated, truncated
+```
+
+#### Customizing the features
+
+`BinanceObservationClass` accepts a `feature_preprocessing_fn(df) -> df` that returns a DataFrame with feature columns prefixed `feature_`. The default is normalized OHLC pct-change. Use it to inject:
+
+- **Technicals** — RSI, MACD, Bollinger bands, etc.
+- **Microfeatures** — order-book imbalance, recent trade-flow imbalance, realized variance.
+- **Cross-asset signals** — ETH/BTC correlation features, dollar index, anything pulled from another `requests` call.
+
+```python
+def my_features(df):
+    df = df.copy()
+    df["feature_log_return"] = np.log(df["close"] / df["close"].shift(1)).fillna(0)
+    df["feature_rolling_vol"] = df["feature_log_return"].rolling(20).std().fillna(0)
+    df["feature_volume_pct"] = df["volume"] / df["volume"].rolling(20).mean()
+    return df.dropna()
+
+# Inject into the observer used by BinanceOHLCVAugment
+augment = BinanceOHLCVAugment()
+augment._observer = BinanceObservationClass(
+    symbol="BTCUSDT",
+    time_frames=augment._tfs,
+    window_sizes=augment._window_sizes,
+    feature_preprocessing_fn=my_features,
+)
+```
+
+For purely on-chain or bespoke signals (e.g., your own microfeatures pipeline), drop the `BinanceObservationClass` and write the data-fetch directly inside `_attach_observations`. The same `Transform` skeleton applies — only the data source changes.
 
 ---
 
