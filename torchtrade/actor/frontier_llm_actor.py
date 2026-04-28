@@ -10,7 +10,8 @@ class FrontierLLMActor(BaseLLMActor):
 
     Args:
         model: Model identifier (e.g., "gpt-4o-mini", "gpt-5-nano").
-        api_key: OpenAI API key. If None, reads OPENAI_API_KEY from .env.
+        api_key: OpenAI API key. If None, the OpenAI SDK reads OPENAI_API_KEY
+            from the environment (load it yourself with python-dotenv if needed).
         All other args are inherited from BaseLLMActor.
     """
 
@@ -24,9 +25,6 @@ class FrontierLLMActor(BaseLLMActor):
         self.model = model
 
         from openai import OpenAI
-        if api_key is None:
-            from dotenv import dotenv_values
-            api_key = dotenv_values(".env").get("OPENAI_API_KEY")
         self.llm = OpenAI(api_key=api_key)
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:

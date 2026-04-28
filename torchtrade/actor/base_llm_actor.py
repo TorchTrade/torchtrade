@@ -2,11 +2,17 @@
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import List, Optional, Union
+from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 import torch
 
+if TYPE_CHECKING:
+    from tensordict import TensorDict
+
 logger = logging.getLogger(__name__)
+
+SystemPrompt = Union[str, Callable[["BaseLLMActor"], str]]
+UserPromptFn = Callable[["BaseLLMActor", "TensorDict"], str]
 
 
 class BaseLLMActor(ABC):
@@ -24,6 +30,18 @@ class BaseLLMActor(ABC):
         execute_on: Execution timeframe (e.g. "1Hour").
         feature_keys: Column names in market data tensors.
         debug: Enable debug output.
+        system_prompt: Optional override for the system prompt. Pass a string
+            for a static replacement, or a callable `f(actor) -> str` for
+            dynamic construction (e.g. to prepend extra context to the
+            default: `lambda a: extra + a._build_system_prompt()`).
+            If None, the default prompt built from `symbol`, `execute_on`,
+            and `action_levels` is used.
+        user_prompt_fn: Optional callable `f(actor, tensordict) -> str` that
+            replaces the default user prompt construction. Useful for custom
+            data layouts or formats. If None, the default prompt (account
+            state + market data tables) is used. The callable receives the
+            live tensordict for the current step — read freely, but do NOT
+            mutate it (writes will leak into observation/action keys).
     """
 
     def __init__(
@@ -32,22 +50,27 @@ class BaseLLMActor(ABC):
         account_state_labels: List[str],
         action_levels: List[float],
         symbol: str = "BTC/USD",
-        execute_on: Union[str, "TimeFrame"] = "1Hour",
+        execute_on: object = "1Hour",
         feature_keys: Optional[List[str]] = None,
         action_descriptions: Optional[List[str]] = None,
         debug: bool = False,
+        system_prompt: Optional[SystemPrompt] = None,
+        user_prompt_fn: Optional[UserPromptFn] = None,
     ):
         self.market_data_keys = market_data_keys
         self.account_state_labels = account_state_labels
         self.action_levels = action_levels
         self.symbol = symbol
-        # Accept TimeFrame objects — format as e.g. "1Hour"
-        if hasattr(execute_on, 'value') and hasattr(execute_on, 'unit'):
-            self.execute_on = f"{execute_on.value}{execute_on.unit.name}"
-        else:
-            self.execute_on = str(execute_on)
+        # Accept TimeFrame objects from env configs — they normalize execute_on
+        # in __post_init__, so callers passing config.execute_on get a TimeFrame.
+        # obs_key_freq() renders "1Hour"-style strings; str() would leak repr.
+        self.execute_on = (
+            execute_on.obs_key_freq() if hasattr(execute_on, "obs_key_freq") else str(execute_on)
+        )
         self.feature_keys = feature_keys or ["open", "high", "low", "close", "volume"]
         self.debug = debug
+        self._system_prompt_override = system_prompt
+        self._user_prompt_fn = user_prompt_fn
 
         # Action descriptions: explicit override (e.g. for binary up/down envs)
         # falls back to the auto-generated "target exposure" language.
@@ -94,23 +117,17 @@ class BaseLLMActor(ABC):
 
     def forward(self, tensordict):
         """Main forward pass: construct prompts, generate, extract action, save to tensordict."""
-        system_prompt = self._build_system_prompt()
-        user_prompt = self._construct_user_prompt(tensordict)
-
-        if self.debug:
-            print("=" * 80)
-            print("SYSTEM PROMPT:")
-            print(system_prompt)
-            print("\nUSER PROMPT:")
-            print(user_prompt)
-            print("=" * 80)
+        system_prompt = self._resolve_system_prompt()
+        user_prompt = (
+            self._user_prompt_fn(self, tensordict)
+            if self._user_prompt_fn is not None
+            else self._construct_user_prompt(tensordict)
+        )
+        self._debug("SYSTEM PROMPT", system_prompt)
+        self._debug("USER PROMPT", user_prompt)
 
         response = self.generate(system_prompt, user_prompt)
-
-        if self.debug:
-            print("RESPONSE:")
-            print(response)
-            print("=" * 80)
+        self._debug("RESPONSE", response)
 
         action_idx = self._extract_action(response)
 
@@ -121,20 +138,31 @@ class BaseLLMActor(ABC):
 
         return tensordict
 
+    def _debug(self, label: str, content: str) -> None:
+        if self.debug:
+            print(f"{'=' * 80}\n{label}:\n{content}")
+
+    def _resolve_system_prompt(self) -> str:
+        override = self._system_prompt_override
+        if override is None:
+            return self._build_system_prompt()
+        if callable(override):
+            return override(self)
+        return override
+
     # --- Prompt construction ---
 
     def _construct_user_prompt(self, tensordict) -> str:
         return self._construct_account_state(tensordict) + self._construct_market_data(tensordict)
 
     def _construct_account_state(self, tensordict) -> str:
-        # Envs without an account_state (e.g. PolymarketBetEnv) skip this block
-        # entirely; either no labels or the key not on the tensordict means
-        # there is nothing to render.
-        if not self.account_state_labels or "account_state" not in tensordict:
+        # Envs that don't expose account_state (e.g. PolymarketBetEnv) just
+        # omit the key — skip this block.
+        if "account_state" not in tensordict:
             return ""
 
         account_state = tensordict.get("account_state")
-        if account_state.dim() == 2:
+        if account_state.dim() == 2 and account_state.shape[0] == 1:
             account_state = account_state.squeeze(0)
 
         out = "Current account state:\n"
@@ -150,27 +178,28 @@ class BaseLLMActor(ABC):
                 continue
 
             data = tensordict[key].cpu().numpy()
-            if data.ndim == 3:
+            if data.ndim == 3 and data.shape[0] == 1:
                 data = data.squeeze(0)
 
             # Flat 1D market state (e.g. PolymarketBetEnv's
             # [yes_price, spread, vol_24h, liquidity]) — render as one labeled row.
             if data.ndim == 1:
-                labels = (
-                    self.feature_keys
-                    if len(self.feature_keys) == data.shape[0]
-                    else [f"f{i}" for i in range(data.shape[0])]
-                )
+                if len(self.feature_keys) != data.shape[0]:
+                    raise ValueError(
+                        f"Unexpected market data shape for {key}: {data.shape} "
+                        f"(expected 1D with {len(self.feature_keys)} feature values)"
+                    )
                 out += f"{key}:\n"
-                for label, value in zip(labels, data, strict=True):
+                for label, value in zip(self.feature_keys, data, strict=True):
                     out += f"  {label}: {value:.4f}\n"
                 out += "\n"
                 continue
 
             if data.ndim != 2 or data.shape[1] != len(self.feature_keys):
-                if self.debug:
-                    print(f"[Warning] Unexpected market data shape for {key}: {data.shape}")
-                continue
+                raise ValueError(
+                    f"Unexpected market data shape for {key}: {data.shape} "
+                    f"(expected 2D with {len(self.feature_keys)} feature columns)"
+                )
 
             out += f"{key}:\n\n"
             header = " | ".join(f"{k:>8}" for k in self.feature_keys)
@@ -191,10 +220,8 @@ class BaseLLMActor(ABC):
             idx = int(match.group(1))
             if 0 <= idx < len(self.action_levels):
                 return idx
-            if self.debug:
-                print(f"[Warning] Action {idx} out of range, defaulting to 0")
+            logger.warning("Action %d out of range [0, %d); defaulting to 0", idx, len(self.action_levels))
             return 0
 
-        if self.debug:
-            logger.warning("No <answer> tag found in response, defaulting to action 0")
+        logger.warning("No <answer> tag found in response; defaulting to action 0")
         return 0
