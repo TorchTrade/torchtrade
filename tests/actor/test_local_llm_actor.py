@@ -331,6 +331,33 @@ def test_system_prompt_empty_string_is_used_verbatim(sample_td):
     assert mock_gen.call_args.args[0] == ""
 
 
+def test_execute_on_timeframe_object_renders_obs_key_freq():
+    """Regression: env configs normalize execute_on to a TimeFrame object in
+    __post_init__, and LLM examples pass config.execute_on into the actor.
+    Plain str(TimeFrame(...)) leaks "TimeFrame(1, TimeFrameUnit.Hour)" into the
+    prompt — must use obs_key_freq() to render "1Hour"-style strings.
+    """
+    from torchtrade.actor import LocalLLMActor
+    from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+    def make(tf):
+        return LocalLLMActor(
+            model="test-model",
+            backend="vllm",
+            market_data_keys=MARKET_DATA_KEYS,
+            account_state_labels=ACCOUNT_STATE_LABELS,
+            action_levels=ACTION_LEVELS_FUTURES,
+            symbol="BTC/USD",
+            execute_on=tf,
+        )
+
+    actor = make(TimeFrame(1, TimeFrameUnit.Hour))
+    assert actor.execute_on == "1Hour"
+    assert "1Hour" in actor._build_system_prompt()
+
+    assert make(TimeFrame(5, TimeFrameUnit.Minute)).execute_on == "5Minute"
+
+
 def test_forward_polymarket_shape_with_user_prompt_fn():
     """End-to-end forward() on a Polymarket-shaped envelope: no account_state,
     1D market_state, action_descriptions override, and a user_prompt_fn.

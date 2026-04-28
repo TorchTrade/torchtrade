@@ -50,7 +50,7 @@ class BaseLLMActor(ABC):
         account_state_labels: List[str],
         action_levels: List[float],
         symbol: str = "BTC/USD",
-        execute_on: str = "1Hour",
+        execute_on: object = "1Hour",
         feature_keys: Optional[List[str]] = None,
         action_descriptions: Optional[List[str]] = None,
         debug: bool = False,
@@ -61,7 +61,12 @@ class BaseLLMActor(ABC):
         self.account_state_labels = account_state_labels
         self.action_levels = action_levels
         self.symbol = symbol
-        self.execute_on = str(execute_on)
+        # Accept TimeFrame objects from env configs — they normalize execute_on
+        # in __post_init__, so callers passing config.execute_on get a TimeFrame.
+        # obs_key_freq() renders "1Hour"-style strings; str() would leak repr.
+        self.execute_on = (
+            execute_on.obs_key_freq() if hasattr(execute_on, "obs_key_freq") else str(execute_on)
+        )
         self.feature_keys = feature_keys or ["open", "high", "low", "close", "volume"]
         self.debug = debug
         self._system_prompt_override = system_prompt
