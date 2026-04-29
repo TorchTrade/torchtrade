@@ -17,9 +17,9 @@ GAMMA_API_BASE = "https://gamma-api.polymarket.com"
 
 # Retry policy for transient Gamma API failures. A long-running env hits this
 # endpoint every step (~5 min cadence for short-cadence series); a single
-# 15-second ReadTimeout used to terminate the entire run. Worst-case wall clock
-# under the defaults: 3 attempts * 15s timeout + 1s + 2s sleep ≈ 48s, well
-# under the market cadence so retries never push us past the next resolution.
+# 15-second ReadTimeout used to terminate the entire run. Worst case under the
+# defaults (every attempt times out): 3 * 15s timeout + 1s + 2s sleep ≈ 48s,
+# well under the market cadence so retries never push us past the next resolution.
 _RETRY_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = 1.0
 
@@ -30,7 +30,7 @@ def _fetch_json_with_retry(
     timeout: float = 15.0,
     attempts: int = _RETRY_ATTEMPTS,
     backoff: float = _RETRY_BACKOFF_SECONDS,
-) -> list | dict:
+) -> list:
     """GET ``url`` and return parsed JSON, retrying transient failures.
 
     Retries with exponential backoff on ``requests.Timeout``,

@@ -281,11 +281,12 @@ class PolymarketBetEnv(EnvBase):
     def _fetch_next_market(self) -> Optional[PolymarketMarket]:
         """Get the next upcoming market, sleeping and retrying on ``None``.
 
-        Issue #225 second-half fix, the scanner's per-call retry handles brief
-        Gamma blips (~48s budget), but a longer outage during a 24h unattended
-        run would still terminate the episode. For continuous short-cadence
-        series, ``None`` is almost always "API unreachable" rather than "series
-        ended", so we sleep and retry a few times before giving up.
+        Complements the scanner's per-call retry (which handles brief blips
+        within a ~48 s budget), a longer Gamma outage during a 24h unattended
+        run would still terminate the episode without this layer. For
+        continuous short-cadence series, ``None`` is almost always "API
+        unreachable" rather than "series ended", so we sleep and retry a few
+        times before giving up.
         """
         for attempt in range(1, self.config.next_market_max_attempts + 1):
             market = self.scanner.next_active_market(self.config.market_slug_prefix)
