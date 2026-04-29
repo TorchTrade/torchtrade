@@ -4,11 +4,13 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from torchtrade.envs.live.polymarket.market_scanner import (
     MarketScanner,
     MarketScannerConfig,
     PolymarketMarket,
+    _fetch_json_with_retry,
 )
 
 
@@ -522,3 +524,103 @@ class TestNextActiveMarket:
         result = MarketScanner().next_active_market("btc-updown-5m-")
         assert result is not None
         assert result.market_id == "good"
+
+
+def _http_error_response(status_code: int) -> MagicMock:
+    """Build a mock response whose raise_for_status raises HTTPError with the given code."""
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.raise_for_status.side_effect = requests.HTTPError(response=resp)
+    return resp
+
+
+def _success_response(payload):
+    resp = MagicMock()
+    resp.json.return_value = payload
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+class TestFetchJsonWithRetry:
+    """Issue #225: a single 15s ReadTimeout from Gamma used to terminate a 24h
+    PolymarketBetEnv run. The helper retries transient failures so the run
+    survives the inevitable network blip."""
+
+    @pytest.mark.parametrize(
+        "transient_exc",
+        [requests.Timeout("read timeout=15"), requests.ConnectionError("conn reset")],
+        ids=["timeout", "connection-error"],
+    )
+    @patch("torchtrade.envs.live.polymarket.market_scanner.time.sleep")
+    @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
+    def test_recovers_after_transient_failure(self, mock_get, mock_sleep, transient_exc):
+        """Two transient failures, then success → returns the JSON body. This is
+        the direct repro of issue #225, parametrized over both transient classes
+        so a regression that drops one (e.g. removes ConnectionError) is caught."""
+        mock_get.side_effect = [transient_exc, transient_exc, _success_response([{"id": "ok"}])]
+        result = _fetch_json_with_retry("https://example/x", params={}, backoff=0)
+        assert result == [{"id": "ok"}]
+        assert mock_get.call_count == 3
+
+    @patch("torchtrade.envs.live.polymarket.market_scanner.time.sleep")
+    @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
+    def test_5xx_triggers_retry(self, mock_get, mock_sleep):
+        """5xx is a server-side blip, retry like any other transient. Separate
+        from the Timeout/ConnectionError path because it goes through a different
+        except clause in the helper."""
+        mock_get.side_effect = [_http_error_response(503), _success_response([])]
+        result = _fetch_json_with_retry("https://example/x", params={}, backoff=0)
+        assert result == []
+        assert mock_get.call_count == 2
+
+    @patch("torchtrade.envs.live.polymarket.market_scanner.time.sleep")
+    @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
+    def test_4xx_does_not_retry(self, mock_get, mock_sleep):
+        """4xx indicates a real client bug (bad params, auth), not a transient
+        blip. Fail-fast so the bug surfaces instead of being masked by retries."""
+        mock_get.return_value = _http_error_response(400)
+        with pytest.raises(requests.HTTPError):
+            _fetch_json_with_retry("https://example/x", params={}, backoff=0)
+        assert mock_get.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @patch("torchtrade.envs.live.polymarket.market_scanner.time.sleep")
+    @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
+    def test_exhausted_attempts_raises_last_exception(self, mock_get, mock_sleep):
+        """After ``attempts`` failures, the last exception propagates. The public
+        scanner methods catch this and degrade gracefully (return [] / None)."""
+        mock_get.side_effect = requests.Timeout("read timeout=15")
+        with pytest.raises(requests.Timeout):
+            _fetch_json_with_retry("https://example/x", params={}, attempts=3, backoff=0)
+        assert mock_get.call_count == 3
+
+
+class TestPublicMethodsRecoverFromTransientFailure:
+    """Wiring check, both call sites must actually go through the retry helper.
+    Without these, a future refactor that bypasses the helper at one call site
+    would silently re-introduce issue #225 for that path."""
+
+    @pytest.mark.parametrize(
+        "method_name,assert_result",
+        [
+            ("scan", lambda r: len(r) == 1 and r[0].slug.startswith("btc-updown-5m-")),
+            ("next_active_market", lambda r: r is not None and r.slug.startswith("btc-updown-5m-")),
+        ],
+        ids=["scan", "next_active_market"],
+    )
+    @patch("torchtrade.envs.live.polymarket.market_scanner.time.sleep")
+    @patch("torchtrade.envs.live.polymarket.market_scanner.requests.get")
+    def test_recovers_from_single_timeout(
+        self, mock_get, mock_sleep, method_name, assert_result
+    ):
+        mock_get.side_effect = [
+            requests.Timeout("read timeout=15"),
+            _success_response([_make_raw_market(slug="btc-updown-5m-1234")]),
+        ]
+        scanner = MarketScanner(MarketScannerConfig(
+            min_volume_24h=0, min_liquidity=0, slug_prefix="btc-updown-5m-",
+        ))
+        method = getattr(scanner, method_name)
+        result = method("btc-updown-5m-") if method_name == "next_active_market" else method()
+        assert assert_result(result)
+        assert mock_get.call_count == 2

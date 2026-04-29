@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional, Union
@@ -13,6 +14,52 @@ import requests
 logger = logging.getLogger(__name__)
 
 GAMMA_API_BASE = "https://gamma-api.polymarket.com"
+
+# Retry policy for transient Gamma API failures. A long-running env hits this
+# endpoint every step (~5 min cadence for short-cadence series); a single
+# 15-second ReadTimeout used to terminate the entire run. Worst-case wall clock
+# under the defaults: 3 attempts * 15s timeout + 1s + 2s sleep ≈ 48s, well
+# under the market cadence so retries never push us past the next resolution.
+_RETRY_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = 1.0
+
+
+def _fetch_json_with_retry(
+    url: str,
+    params: dict,
+    timeout: float = 15.0,
+    attempts: int = _RETRY_ATTEMPTS,
+    backoff: float = _RETRY_BACKOFF_SECONDS,
+) -> list | dict:
+    """GET ``url`` and return parsed JSON, retrying transient failures.
+
+    Retries with exponential backoff on ``requests.Timeout``,
+    ``requests.ConnectionError``, and 5xx HTTP responses. 4xx errors propagate
+    immediately, those indicate a real client bug (bad params, auth) and
+    retrying would mask them.
+
+    Raises the last transient exception if all attempts fail.
+    """
+    for i in range(attempts):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_exc = exc
+        except requests.HTTPError as exc:
+            status = getattr(exc.response, "status_code", 0)
+            if not (500 <= status < 600):
+                raise
+            last_exc = exc
+        if i + 1 == attempts:
+            raise last_exc
+        sleep_for = backoff * (2 ** i)
+        logger.warning(
+            "Transient Gamma API failure (attempt %d/%d): %s, retrying in %.1fs",
+            i + 1, attempts, last_exc, sleep_for,
+        )
+        time.sleep(sleep_for)
 
 
 @dataclass
@@ -199,11 +246,9 @@ class MarketScanner:
                 "ascending": "false",
             }
         try:
-            resp = requests.get(
-                f"{GAMMA_API_BASE}/markets", params=params, timeout=15
+            raw_markets = _fetch_json_with_retry(
+                f"{GAMMA_API_BASE}/markets", params=params
             )
-            resp.raise_for_status()
-            raw_markets = resp.json()
         except Exception:
             logger.exception("Failed to fetch markets from Gamma API")
             return []
@@ -234,7 +279,7 @@ class MarketScanner:
         """
         now = datetime.now(timezone.utc)
         try:
-            resp = requests.get(
+            raw_markets = _fetch_json_with_retry(
                 f"{GAMMA_API_BASE}/markets",
                 params={
                     "closed": "false",
@@ -243,10 +288,7 @@ class MarketScanner:
                     "ascending": "true",
                     "end_date_min": now.isoformat(),
                 },
-                timeout=15,
             )
-            resp.raise_for_status()
-            raw_markets = resp.json()
         except Exception:
             logger.exception("Failed to fetch upcoming markets from Gamma API")
             return None
