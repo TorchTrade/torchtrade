@@ -3,10 +3,17 @@
 </p>
 
 <p align="center">
-  <a href="https://torchtrade.github.io/torchtrade.io/index.html"><img src="https://img.shields.io/badge/Website-torchtrade.io-blueviolet.svg" alt="Website"></a>
+  <a href="https://torchtrade.github.io/torchtrade.io/index.html">
+    <img src="https://img.shields.io/badge/Website-torchtrade.io-blueviolet.svg" alt="Website">
+  </a>
+
   <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
   <img src="https://img.shields.io/badge/TorchRL-Compatible-green.svg" alt="TorchRL">
+
+<a href="https://github.com/sponsors/TorchTrade">
+  <img src="https://img.shields.io/badge/Sponsor-TorchTrade-ea4aaa.svg" alt="Sponsor">
+</a>
 </p>
 
 # TorchTrade
