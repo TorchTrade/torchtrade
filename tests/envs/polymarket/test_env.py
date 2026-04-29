@@ -2,7 +2,7 @@
 
 import itertools
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 import torch
@@ -61,6 +61,9 @@ def _make_env(
         "initial_cash": 1_000.0,
         "bet_fraction": 0.1,
         "dry_run": True,
+        # Skip the 30s real-time wait between env-level next-market retries so
+        # tests that exercise the None path don't burn 60+ seconds each.
+        "next_market_retry_sleep_seconds": 0,
     }
     cfg_kwargs.update(config_overrides or {})
     config = PolymarketBetEnvConfig(**cfg_kwargs)
@@ -159,10 +162,12 @@ class TestReset:
         assert env._step_count == 0
 
     def test_raises_when_no_markets(self):
+        """Reset still raises after the env-level retry budget is exhausted."""
         env, scanner, _ = _make_env()
-        scanner.next_active_market.side_effect = [None]
+        scanner.next_active_market.side_effect = [None] * env.config.next_market_max_attempts
         with pytest.raises(RuntimeError, match="No active markets"):
             env.reset()
+        assert scanner.next_active_market.call_count == env.config.next_market_max_attempts
 
 
 # --- Step ------------------------------------------------------------------- #
@@ -330,15 +335,53 @@ class TestStep:
         assert not td["truncated"].item()
 
     def test_no_next_market_terminates_with_zero_obs(self):
-        """When the scanner finds no follow-up market, terminate and emit zeros."""
-        env, _, _ = _make_env(
+        """Termination only fires after env-level retries are exhausted."""
+        attempts = 3
+        env, scanner, _ = _make_env(
             outcomes=[1],
-            markets=[_make_market(), None],
+            markets=[_make_market()] + [None] * attempts,
+            config_overrides={"next_market_max_attempts": attempts},
         )
         env.reset()
+        reset_calls = scanner.next_active_market.call_count
         td = env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
         assert td["terminated"].item()
         assert torch.equal(td["market_state"], torch.zeros(4))
+        assert scanner.next_active_market.call_count - reset_calls == attempts
+
+    def test_recovers_when_scanner_returns_none_then_market(self):
+        """Transient None from scanner triggers retry, not termination."""
+        env, scanner, _ = _make_env(
+            outcomes=[1],
+            markets=[_make_market(), None, _make_market(slug="btc-updown-5m-recovered")],
+            config_overrides={"next_market_max_attempts": 3},
+        )
+        env.reset()
+        reset_calls = scanner.next_active_market.call_count
+        td = env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+        assert not td["terminated"].item()
+        assert not torch.equal(td["market_state"], torch.zeros(4))
+        assert scanner.next_active_market.call_count - reset_calls == 2
+
+    def test_retry_sleep_honors_configured_value_and_skips_after_final(self):
+        """Pin the backoff contract: configured sleep value reaches time.sleep,
+        and there is no extra sleep after the final failed attempt. Catches a
+        regression that hardcodes the sleep or moves it outside the loop guard
+        — neither shows up in tests with sleep defaulted to 0."""
+        attempts = 3
+        sleep_seconds = 7.5  # non-default to expose a hardcoded value
+        env, _, _ = _make_env(
+            outcomes=[1],
+            markets=[_make_market()] + [None] * attempts,
+            config_overrides={
+                "next_market_max_attempts": attempts,
+                "next_market_retry_sleep_seconds": sleep_seconds,
+            },
+        )
+        env.reset()
+        with patch("torchtrade.envs.live.polymarket.env.time.sleep") as mock_sleep:
+            env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+        assert mock_sleep.call_args_list == [call(sleep_seconds)] * (attempts - 1)
 
     def test_unresolved_outcome_yields_zero_reward(self):
         env, _, _ = _make_env(outcomes=[None])

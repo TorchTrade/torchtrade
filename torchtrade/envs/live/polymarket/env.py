@@ -83,6 +83,14 @@ class PolymarketBetEnvConfig:
     # typically snaps the CLOB midpoints within 1-5 minutes of endDate;
     # 10 min is a safe ceiling.
     resolution_max_wait_seconds: float = 600.0
+    # When the scanner returns no upcoming market, retry at the env level after
+    # this sleep. The scanner's internal retry budget (~48s) covers brief blips;
+    # this layer covers minutes-long Gamma outages where the underlying series
+    # is still running. For continuous short-cadence series (e.g. 5-min crypto),
+    # "no next market" is almost always "API unreachable" rather than "series
+    # ended", so a few sleep+retry rounds before terminating saves the run.
+    next_market_max_attempts: int = 3
+    next_market_retry_sleep_seconds: float = 30.0
 
 
 class PolymarketBetEnv(EnvBase):
@@ -101,7 +109,8 @@ class PolymarketBetEnv(EnvBase):
     6. The scanner picks the next active market matching ``market_slug_prefix``
        and its market_state becomes the next observation.
 
-    Episode ends when the scanner finds no next market (terminated), the wallet
+    Episode ends when the scanner finds no next market across
+    ``next_market_max_attempts`` env-level retries (terminated), the wallet
     drops below the bankruptcy threshold (terminated), or ``max_steps`` is hit
     (truncated). The observation deliberately omits any ``account_state``, by
     the time the next decision is made, the previous bet has already resolved
@@ -270,7 +279,29 @@ class PolymarketBetEnv(EnvBase):
         )
 
     def _fetch_next_market(self) -> Optional[PolymarketMarket]:
-        return self.scanner.next_active_market(self.config.market_slug_prefix)
+        """Get the next upcoming market, sleeping and retrying on ``None``.
+
+        Complements the scanner's per-call retry (which handles brief blips
+        within a ~48 s budget), a longer Gamma outage during a 24h unattended
+        run would still terminate the episode without this layer. For
+        continuous short-cadence series, ``None`` is almost always "API
+        unreachable" rather than "series ended", so we sleep and retry a few
+        times before giving up.
+        """
+        for attempt in range(1, self.config.next_market_max_attempts + 1):
+            market = self.scanner.next_active_market(self.config.market_slug_prefix)
+            if market is not None:
+                return market
+            if attempt < self.config.next_market_max_attempts:
+                logger.warning(
+                    "No upcoming market for slug_prefix=%r (attempt %d/%d), "
+                    "sleeping %.0fs before retrying",
+                    self.config.market_slug_prefix, attempt,
+                    self.config.next_market_max_attempts,
+                    self.config.next_market_retry_sleep_seconds,
+                )
+                time.sleep(self.config.next_market_retry_sleep_seconds)
+        return None
 
     def _wait_for_resolution(self, end_date_iso: str) -> None:
         """Sleep until ``end_date_iso + grace``. Tests should override this."""
