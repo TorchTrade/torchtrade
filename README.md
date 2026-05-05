@@ -14,6 +14,10 @@
 <a href="https://github.com/sponsors/TorchTrade">
   <img src="https://img.shields.io/badge/Sponsor-TorchTrade-ea4aaa.svg" alt="Sponsor">
 </a>
+
+<a href="https://discord.gg/5YZbMmX2">
+  <img src="https://img.shields.io/badge/Discord-Join%20Chat-5865F2.svg?logo=discord&logoColor=white" alt="Discord">
+</a>
 </p>
 
 # TorchTrade
