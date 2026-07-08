@@ -2,7 +2,6 @@
 
 import functools
 
-import pandas as pd
 import pytest
 import torch
 from tensordict import TensorDict
@@ -470,34 +469,48 @@ class TestGroupRelativePGLossGroupingInvariant:
                 f"reset_index (proving a valid GRPO group), got {column.tolist()}"
             )
 
-    def test_advantage_matches_group_relative_computation(self, grouped_batch):
-        """GroupRelativePGLoss's advantage must match per-column mean/std normalization."""
+    def test_advantage_normalized_over_group_axis_not_time_axis(self, grouped_batch):
+        """The loss must normalize advantage over dim 0 (the group axis), not dim 1.
+
+        Uses reduction="none" so loss_objective is per-element. With a freshly
+        collected on-policy batch the importance ratio is 1, so
+        loss_objective == -advantage element-wise. We inject a synthetic reward
+        crafted so that per-group (dim 0) and per-time-step (dim 1) normalization
+        give different tensors, then assert the loss matches the dim-0 version and
+        NOT the dim-1 version. A future edit swapping .mean(0)/.std(0) for the
+        wrong axis (the exact regression this class guards against) would flip
+        which assertion passes -- a scalar-mean check could not catch that,
+        because mean-centering makes the total mean ~0 regardless of axis.
+        """
         data, actor, n_group, t_steps = grouped_batch
 
-        # Inject a synthetic, controlled reward so the check is exact and
-        # deterministic rather than depending on what an untrained random
-        # policy happened to earn. Distinct per-column values with real
-        # spread so the invariant (per-column std != 0) is actually exercised.
+        # Row 0 is constant so dim-1 normalization differs sharply from dim-0;
+        # every column (dim 0) still has real spread so dim-0 advantage is
+        # well-defined and finite.
         synthetic_reward = torch.tensor(
-            [[1.0, 10.0, -5.0], [2.0, 12.0, -3.0], [3.0, 8.0, -4.0], [4.0, 6.0, -8.0]]
+            [[5.0, 5.0, 5.0], [1.0, 2.0, 3.0], [2.0, 4.0, 6.0], [3.0, 1.0, 2.0]]
         ).unsqueeze(-1)
         assert synthetic_reward.shape == torch.Size([n_group, t_steps, 1])
         data["next", "reward"] = synthetic_reward
 
-        expected_advantage = (
+        adv_group_axis = (
             synthetic_reward - synthetic_reward.mean(0, keepdim=True)
         ) / (synthetic_reward.std(0, keepdim=True) + 1e-8)
+        adv_time_axis = (
+            synthetic_reward - synthetic_reward.mean(1, keepdim=True)
+        ) / (synthetic_reward.std(1, keepdim=True) + 1e-8)
 
-        # Sanity check on the test's own fixture data: per-column std must be
-        # meaningfully non-zero, otherwise this test would pass trivially.
-        per_column_std = expected_advantage.squeeze(-1).std(0, unbiased=False)
-        assert (per_column_std > 0.5).all()
+        # The two axes must give genuinely different advantages, otherwise the
+        # assertions below could not distinguish a correct loss from a broken one.
+        assert not torch.allclose(adv_group_axis, adv_time_axis, atol=1e-4)
 
-        loss = GroupRelativePGLoss(actor_network=actor)
+        loss = GroupRelativePGLoss(
+            actor_network=actor, reduction="none", entropy_bonus=False
+        )
         output = loss(data)
 
-        assert torch.allclose(
-            torch.as_tensor(output["advantage"].item()),
-            expected_advantage.mean(),
-            atol=1e-5,
-        )
+        # Fresh on-policy batch => importance ratio == 1 => per-element
+        # loss_objective == -advantage.
+        per_element_loss = output["loss_objective"].squeeze()
+        assert torch.allclose(per_element_loss, (-adv_group_axis).squeeze(), atol=1e-4)
+        assert not torch.allclose(per_element_loss, (-adv_time_axis).squeeze(), atol=1e-4)
