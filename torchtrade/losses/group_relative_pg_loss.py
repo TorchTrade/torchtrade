@@ -352,8 +352,9 @@ class GroupRelativePGLoss(LossModule):
         # static_seed=True AND every parallel copy is constructed with an
         # identical config seed (see examples/online_rl/grpo/utils.py's
         # make_environment). Break either of those and this silently degrades
-        # to zero-signal training with no error: a single env (dim-0 size 1)
-        # makes every advantage exactly 0; mismatched per-worker seeds or a
+        # to zero-signal or NaN training with no error: a single env (dim-0
+        # size 1) makes every advantage NaN, because the unbiased std over a
+        # size-1 axis divides by zero; mismatched per-worker seeds or a
         # pre-flattened batch mix unrelated states into one "group".
         advantage = (tensordict["next", "reward"] - tensordict["next", "reward"].mean(0, keepdim=True))/(tensordict["next", "reward"].std(0, keepdim=True) + 1e-8)
 
