@@ -1,5 +1,8 @@
 """Tests for GroupRelativePGLoss module."""
 
+import functools
+
+import pandas as pd
 import pytest
 import torch
 from tensordict import TensorDict
@@ -10,7 +13,20 @@ from tensordict.nn import (
 )
 from torch import nn
 from torch.distributions import Categorical
+from torchrl.collectors import SyncDataCollector
+from torchrl.envs import (
+    Compose,
+    EnvCreator,
+    FlattenObservation,
+    InitTracker,
+    SerialEnv,
+    StepCounter,
+    TransformedEnv,
+)
+from torchrl.modules import ProbabilisticActor
 
+from torchtrade.envs.offline.onestep import OneStepTradingEnv, OneStepTradingEnvConfig
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.losses import GroupRelativePGLoss
 
 
@@ -341,3 +357,147 @@ class TestGroupRelativePGLoss:
         """Test that reset method exists and works."""
         loss = GroupRelativePGLoss(actor_network=actor_network)
         loss.reset()  # Should not raise any errors
+
+
+class TestGroupRelativePGLossGroupingInvariant:
+    """Regression test for the group-relative-advantage invariant.
+
+    GroupRelativePGLoss.forward() normalizes reward across dim 0 of the
+    input batch. This is only correct group-relative (GRPO-style) advantage
+    normalization when dim 0 is a genuine "K samples of the same state" axis
+    -- which requires a SerialEnv/ParallelEnv built with static_seed=True AND
+    every parallel copy constructed with an identical config seed. These
+    tests exercise the real env+collector pipeline (not synthetic random
+    tensors) to prove that invariant actually holds, then verify the loss's
+    reported advantage matches a hand-computed group-relative value.
+    """
+
+    @staticmethod
+    def _feature_fn(df):
+        df = df.copy().reset_index(drop=False)
+        df["features_close"] = df["close"]
+        df["features_volume"] = df["volume"]
+        df.fillna(0, inplace=True)
+        return df
+
+    @staticmethod
+    def _env_maker(df, seed):
+        config = OneStepTradingEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000,
+            transaction_fee=0.0,
+            slippage=0.0,
+            max_traj_length=100,
+            seed=seed,
+            stoploss_levels=[-0.02],
+            takeprofit_levels=[0.04],
+            include_hold_action=True,
+        )
+        return OneStepTradingEnv(
+            df, config, feature_preprocessing_fn=TestGroupRelativePGLossGroupingInvariant._feature_fn
+        )
+
+    @pytest.fixture
+    def grouped_batch(self, large_ohlcv_df):
+        """A real collected batch with a genuine GRPO group structure.
+
+        4 SerialEnv copies of OneStepTradingEnv, all built with the same
+        seed and static_seed=True -- so at every collected time-step, all
+        4 copies sample the identical underlying market state (dim 0 =
+        group axis), while different time-steps sample different states
+        (dim 1 = distinct groups).
+        """
+        n_group = 4
+        maker = functools.partial(self._env_maker, large_ohlcv_df, 0)
+        serial_env = SerialEnv(n_group, EnvCreator(maker))
+        serial_env.set_seed(0, static_seed=True)
+
+        env = TransformedEnv(
+            serial_env,
+            Compose(
+                InitTracker(),
+                StepCounter(max_steps=large_ohlcv_df.shape[0]),
+                FlattenObservation(in_keys=["market_data_1Minute_10"], first_dim=-2, last_dim=-1),
+            ),
+        )
+
+        market_key = "market_data_1Minute_10"
+        market_dim = env.observation_spec[market_key].shape[-1]
+        account_dim = env.observation_spec["account_state"].shape[-1]
+
+        class _TinyPolicyNet(nn.Module):
+            def __init__(self, in_dim, n_actions):
+                super().__init__()
+                self.net = nn.Linear(in_dim, n_actions)
+
+            def forward(self, market, account):
+                return self.net(torch.cat([market, account], dim=-1))
+
+        policy_net = TensorDictModule(
+            _TinyPolicyNet(market_dim + account_dim, env.action_spec.n),
+            in_keys=[market_key, "account_state"],
+            out_keys=["logits"],
+        )
+        actor = ProbabilisticActor(
+            policy_net,
+            in_keys=["logits"],
+            spec=env.full_action_spec_unbatched,
+            distribution_class=Categorical,
+            return_log_prob=True,
+        )
+
+        t_steps = 3
+        collector = SyncDataCollector(
+            env, actor, frames_per_batch=n_group * t_steps, total_frames=n_group * t_steps, device="cpu"
+        )
+        data = next(iter(collector))
+        collector.shutdown()
+        return data, actor, n_group, t_steps
+
+    def test_reset_index_constant_within_group(self, grouped_batch):
+        """Every parallel-env slot must see the identical state within a time-step column."""
+        data, _actor, n_group, t_steps = grouped_batch
+        assert data.batch_size == torch.Size([n_group, t_steps])
+
+        reset_idx = data["reset_index"]
+        for t in range(t_steps):
+            column = reset_idx[:, t]
+            assert (column == column[0]).all(), (
+                f"time-step {t}: expected all {n_group} parallel envs to share the same "
+                f"reset_index (proving a valid GRPO group), got {column.tolist()}"
+            )
+
+    def test_advantage_matches_group_relative_computation(self, grouped_batch):
+        """GroupRelativePGLoss's advantage must match per-column mean/std normalization."""
+        data, actor, n_group, t_steps = grouped_batch
+
+        # Inject a synthetic, controlled reward so the check is exact and
+        # deterministic rather than depending on what an untrained random
+        # policy happened to earn. Distinct per-column values with real
+        # spread so the invariant (per-column std != 0) is actually exercised.
+        synthetic_reward = torch.tensor(
+            [[1.0, 10.0, -5.0], [2.0, 12.0, -3.0], [3.0, 8.0, -4.0], [4.0, 6.0, -8.0]]
+        ).unsqueeze(-1)
+        assert synthetic_reward.shape == torch.Size([n_group, t_steps, 1])
+        data["next", "reward"] = synthetic_reward
+
+        expected_advantage = (
+            synthetic_reward - synthetic_reward.mean(0, keepdim=True)
+        ) / (synthetic_reward.std(0, keepdim=True) + 1e-8)
+
+        # Sanity check on the test's own fixture data: per-column std must be
+        # meaningfully non-zero, otherwise this test would pass trivially.
+        per_column_std = expected_advantage.squeeze(-1).std(0, unbiased=False)
+        assert (per_column_std > 0.5).all()
+
+        loss = GroupRelativePGLoss(actor_network=actor)
+        output = loss(data)
+
+        assert torch.allclose(
+            torch.as_tensor(output["advantage"].item()),
+            expected_advantage.mean(),
+            atol=1e-5,
+        )
