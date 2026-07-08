@@ -33,7 +33,7 @@ from torchrl.objectives.utils import (
 )
 
 
-class GRPOLoss(LossModule):
+class GroupRelativePGLoss(LossModule):
 
     @dataclass
     class _AcceptedKeys:
@@ -346,6 +346,15 @@ class GRPOLoss(LossModule):
     @dispatch
     def forward(self, tensordict: TensorDictBase) -> TensorDictBase:
         tensordict = tensordict.clone(False)
+        # Group-relative normalization assumes dim 0 of the incoming batch is a
+        # genuine "K samples of the same state" GRPO group axis. That only holds
+        # when the collector's env is a ParallelEnv/SerialEnv built with
+        # static_seed=True AND every parallel copy is constructed with an
+        # identical config seed (see examples/online_rl/grpo/utils.py's
+        # make_environment). Break either of those and this silently degrades
+        # to zero-signal training with no error: a single env (dim-0 size 1)
+        # makes every advantage exactly 0; mismatched per-worker seeds or a
+        # pre-flattened batch mix unrelated states into one "group".
         advantage = (tensordict["next", "reward"] - tensordict["next", "reward"].mean(0, keepdim=True))/(tensordict["next", "reward"].std(0, keepdim=True) + 1e-8)
 
         log_weight, dist, kl_approx = self._log_weight(

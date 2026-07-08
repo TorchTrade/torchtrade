@@ -31,7 +31,7 @@ from torchvision import datasets, transforms
 
 from torchrl.envs import ExplorationType, set_exploration_type
 
-from torchtrade.losses import DGLoss, GRPOLoss
+from torchtrade.losses import DGLoss, GroupRelativePGLoss
 
 
 def make_mlp(obs_dim=784, n_actions=10, hidden=128):
@@ -228,7 +228,7 @@ def train_grpo(epochs=5, lr=1e-3, batch_size=256, eval_every=10,
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     actor = make_actor().to(device)
-    loss_module = GRPOLoss(
+    loss_module = GroupRelativePGLoss(
         actor_network=actor,
         entropy_bonus=True,
         entropy_coeff=0.01,
