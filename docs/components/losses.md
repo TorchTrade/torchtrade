@@ -7,7 +7,7 @@ TorchTrade provides specialized loss functions for training RL trading agents, b
 | Loss Function | Type | Use Case |
 |---------------|------|----------|
 | [**DGLoss**](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/dg_loss.py) | Policy Gradient | Delight-gated updates — no importance sampling needed |
-| [**GRPOLoss**](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/grpo_loss.py) | Policy Gradient | One-step RL with SLTP environments |
+| [**GroupRelativePGLoss**](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/group_relative_pg_loss.py) | Policy Gradient | One-step RL with SLTP environments |
 | [**CTRLLoss**](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/ctrl.py) | Representation Learning | Self-supervised encoder training |
 | [**CTRLPPOLoss**](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/ctrl.py) | Combined | Joint policy + representation learning |
 
@@ -86,9 +86,13 @@ for batch in collector:
 
 ---
 
-## GRPOLoss
+## GroupRelativePGLoss
 
-Group Relative Policy Optimization for one-step RL. Designed for `OneStepTradingEnv` where episodes are single decisions with SL/TP bracket orders. Normalizes advantages within each batch: `advantage = (reward - mean) / std`.
+Group Relative Policy Optimization for one-step RL with **numeric discrete-action agents** (e.g. a CNN+MLP categorical policy over `action_levels`) — not for LLM/text-generating actors. Designed for `OneStepTradingEnv` where episodes are single decisions with SL/TP bracket orders.
+
+Normalizes advantage within each batch: `advantage = (reward - mean) / std`, computed across dim 0 of the incoming tensordict. This is only correct *group-relative* normalization because dim 0 is engineered to be a genuine "K samples of the same state" axis: `examples/online_rl/grpo/utils.py`'s `make_environment` builds a `ParallelEnv` with `static_seed=True`, and every parallel copy is constructed with an identical config `seed` — so at each collected time-step, all parallel copies sample the same underlying market state, differing only in the policy's sampled action. Breaking that setup (a single env, mismatched per-worker seeds, or flattening the batch before the loss runs) silently degrades training to a zero-signal baseline with no error raised.
+
+**Not related to `torchrl.objectives.llm.GRPOLoss`.** TorchRL's own LLM-specific `GRPOLoss` requires an `LLMWrapperBase` actor (it dispatches through LLM-only methods and reads a token-level `dist.mask`) and expects advantage precomputed via `MCAdvantage` (which itself requires a string prompt). Neither applies here — passing torchtrade's numeric actor to `torchrl.objectives.llm.GRPOLoss` raises `RuntimeError: TensorDictSequential does not support keyword arguments other than 'tensordict_out' or in_keys...`. Use `GroupRelativePGLoss` for numeric trading agents; only reach for `torchrl.objectives.llm.GRPOLoss` if training an LLM's own weights via RL.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -97,9 +101,9 @@ Group Relative Policy Optimization for one-step RL. Designed for `OneStepTrading
 | `epsilon_low` / `epsilon_high` | 0.2 | Clipping bounds for policy ratio |
 
 ```python
-from torchtrade.losses import GRPOLoss
+from torchtrade.losses import GroupRelativePGLoss
 
-loss_module = GRPOLoss(actor_network=actor, entropy_coeff=0.01)
+loss_module = GroupRelativePGLoss(actor_network=actor, entropy_coeff=0.01)
 
 for batch in collector:
     loss_td = loss_module(batch)

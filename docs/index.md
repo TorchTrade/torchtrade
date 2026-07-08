@@ -34,7 +34,7 @@ TorchTrade provides modular environments for both live trading with major exchan
     - Alpaca, Binance, Bitget integrations
 
 ### Components
-- **[Loss Functions](components/losses.md)** - Training objectives ([GRPOLoss](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/grpo_loss.py), [CTRLLoss](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/ctrl.py), [CTRLPPOLoss](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/ctrl.py))
+- **[Loss Functions](components/losses.md)** - Training objectives ([GroupRelativePGLoss](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/group_relative_pg_loss.py), [CTRLLoss](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/ctrl.py), [CTRLPPOLoss](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/ctrl.py))
 - **[Transforms](components/transforms.md)** - Data preprocessing ([CoverageTracker](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/coverage_tracker.py), [ChronosEmbeddingTransform](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/transforms/chronos_embedding.py))
 - **[Actors](components/actors.md)** - Trading policies ([RuleBasedActor](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/rulebased/base.py), [FrontierLLMActor](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/frontier_llm_actor.py), [LocalLLMActor](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/actor/local_llm_actor.py))
 
