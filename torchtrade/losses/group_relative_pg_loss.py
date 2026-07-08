@@ -347,15 +347,17 @@ class GroupRelativePGLoss(LossModule):
     def forward(self, tensordict: TensorDictBase) -> TensorDictBase:
         tensordict = tensordict.clone(False)
         # Group-relative normalization assumes dim 0 of the incoming batch is a
-        # genuine "K samples of the same state" GRPO group axis. That only holds
-        # when the collector's env is a ParallelEnv/SerialEnv built with
-        # static_seed=True AND every parallel copy is constructed with an
-        # identical config seed (see examples/online_rl/grpo/utils.py's
-        # make_environment). Break either of those and this silently degrades
-        # to zero-signal or NaN training with no error: a single env (dim-0
-        # size 1) makes every advantage NaN, because the unbiased std over a
-        # size-1 axis divides by zero; mismatched per-worker seeds or a
-        # pre-flattened batch mix unrelated states into one "group".
+        # genuine "K samples of the same state" GRPO group axis. In the reference
+        # setup (examples/online_rl/grpo/utils.py's make_environment) that axis is
+        # the parallel-env axis: every parallel copy of OneStepTradingEnv is built
+        # with the SAME config seed, so each constructs an identical internal RNG
+        # and samples the same episode-start state, and because the env is
+        # one-step (every step returns done=True) all copies reset in lockstep at
+        # each collected step. Break that and this silently degrades with no
+        # error: a single env (dim-0 size 1) makes every advantage NaN, because
+        # the unbiased std over a size-1 axis divides by zero; differing config
+        # seeds across copies or a pre-flattened batch mix unrelated states into
+        # one "group".
         advantage = (tensordict["next", "reward"] - tensordict["next", "reward"].mean(0, keepdim=True))/(tensordict["next", "reward"].std(0, keepdim=True) + 1e-8)
 
         log_weight, dist, kl_approx = self._log_weight(

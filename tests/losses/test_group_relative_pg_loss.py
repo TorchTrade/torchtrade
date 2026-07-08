@@ -28,6 +28,8 @@ from torchtrade.envs.offline.onestep import OneStepTradingEnv, OneStepTradingEnv
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.losses import GroupRelativePGLoss
 
+from tests.conftest import simple_feature_fn
+
 
 class TestGroupRelativePGLoss:
     """Test suite for GroupRelativePGLoss."""
@@ -364,20 +366,14 @@ class TestGroupRelativePGLossGroupingInvariant:
     GroupRelativePGLoss.forward() normalizes reward across dim 0 of the
     input batch. This is only correct group-relative (GRPO-style) advantage
     normalization when dim 0 is a genuine "K samples of the same state" axis
-    -- which requires a SerialEnv/ParallelEnv built with static_seed=True AND
-    every parallel copy constructed with an identical config seed. These
-    tests exercise the real env+collector pipeline (not synthetic random
-    tensors) to prove that invariant actually holds, then verify the loss's
-    reported advantage matches a hand-computed group-relative value.
+    -- which holds because every parallel copy of the env is constructed with
+    the same config seed (so each builds an identical internal RNG and samples
+    the same episode-start state) and, being one-step, all copies reset in
+    lockstep. These tests exercise the real env+collector pipeline (not
+    synthetic random tensors) to prove that invariant actually holds, then
+    verify the loss's reported advantage matches a hand-computed group-relative
+    value.
     """
-
-    @staticmethod
-    def _feature_fn(df):
-        df = df.copy().reset_index(drop=False)
-        df["features_close"] = df["close"]
-        df["features_volume"] = df["volume"]
-        df.fillna(0, inplace=True)
-        return df
 
     @staticmethod
     def _env_maker(df, seed):
@@ -396,7 +392,7 @@ class TestGroupRelativePGLossGroupingInvariant:
             include_hold_action=True,
         )
         return OneStepTradingEnv(
-            df, config, feature_preprocessing_fn=TestGroupRelativePGLossGroupingInvariant._feature_fn
+            df, config, feature_preprocessing_fn=simple_feature_fn
         )
 
     @pytest.fixture
@@ -404,10 +400,14 @@ class TestGroupRelativePGLossGroupingInvariant:
         """A real collected batch with a genuine GRPO group structure.
 
         4 SerialEnv copies of OneStepTradingEnv, all built with the same
-        seed and static_seed=True -- so at every collected time-step, all
-        4 copies sample the identical underlying market state (dim 0 =
-        group axis), while different time-steps sample different states
-        (dim 1 = distinct groups).
+        config seed -- so each constructs an identical internal RNG and, being
+        one-step (always done=True), resets in lockstep. At every collected
+        time-step all 4 copies therefore sample the identical underlying market
+        state (dim 0 = group axis), while different time-steps sample different
+        states (dim 1 = distinct groups). (set_seed(static_seed=True) below
+        mirrors the production make_environment call but is not what creates the
+        groups -- the sampler draws reset positions from a local RNG seeded at
+        construction, unaffected by set_seed.)
         """
         n_group = 4
         maker = functools.partial(self._env_maker, large_ohlcv_df, 0)
