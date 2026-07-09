@@ -12,7 +12,7 @@ from tensordict.nn import (
 )
 from torch import nn
 from torch.distributions import Categorical
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
 from torchrl.envs import (
     Compose,
     EnvCreator,
@@ -449,7 +449,7 @@ class TestGroupRelativePGLossGroupingInvariant:
         )
 
         t_steps = 3
-        collector = SyncDataCollector(
+        collector = Collector(
             env, actor, frames_per_batch=n_group * t_steps, total_frames=n_group * t_steps, device="cpu"
         )
         data = next(iter(collector))

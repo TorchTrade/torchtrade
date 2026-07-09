@@ -820,7 +820,7 @@ class TestParallelEnvironmentCoverage:
 
         The recommended pattern is shown in examples/online/ppo_futures/:
         - Create coverage_tracker = CoverageTracker()
-        - Pass as postproc to SyncDataCollector
+        - Pass as postproc to Collector
         - Do NOT add to environment transforms
 
         Direct reset() calls on ParallelEnv don't work because ParallelEnv's
@@ -847,7 +847,7 @@ class TestCollectorPostproc:
 
     def test_collector_postproc_integration(self, simple_df):
         """Test CoverageTracker as collector postproc (recommended pattern)."""
-        from torchrl.collectors import SyncDataCollector
+        from torchrl.collectors import Collector
 
         # Create env with random_start
         def make_env(df):
@@ -894,7 +894,7 @@ class TestCollectorPostproc:
 
         # Create collector with coverage tracker as postproc
         # Use large total_frames to avoid auto-close
-        collector = SyncDataCollector(
+        collector = Collector(
             transformed_env,
             policy,
             frames_per_batch=100,

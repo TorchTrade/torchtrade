@@ -26,7 +26,7 @@ import torch
 import tqdm
 from dotenv import load_dotenv
 from sklearn.preprocessing import StandardScaler
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
 from torchrl.envs import (
     Compose,
@@ -199,7 +199,7 @@ def main():
     )
 
     # Run live
-    collector = SyncDataCollector(
+    collector = Collector(
         env,
         policy,
         frames_per_batch=1,

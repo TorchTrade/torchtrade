@@ -10,7 +10,7 @@ from torchrl.envs import (
     TransformedEnv,
     StepCounter,
 )
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
 import torchrl
 import torch
 from torchrl.modules import (
@@ -411,7 +411,7 @@ def make_collector(cfg, train_env, actor_model_explore, compile_mode, device="cp
         compile_mode: Compilation mode for the policy
         device: Device for data collection (default: "cpu", can use "cuda" now that VecNormV2 is removed)
     """
-    collector = SyncDataCollector(
+    collector = Collector(
         train_env,
         actor_model_explore,
         frames_per_batch=cfg.collector.frames_per_batch,

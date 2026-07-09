@@ -467,7 +467,7 @@ class TestOneStepIntegration:
     """Integration tests with TorchRL ecosystem."""
 
     def test_compatible_with_collector(self, onestep_env):
-        """Should work with SyncDataCollector."""
+        """Should work with Collector."""
         # This is a conceptual test - actual collector integration
         # would require imports and more setup
         td = onestep_env.reset()

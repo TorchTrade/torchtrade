@@ -16,7 +16,7 @@ from torchrl.envs import (
 )
 
 from torchtrade.envs.transforms import CoverageTracker
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
 
 from torchrl.modules import (
@@ -197,7 +197,7 @@ def make_collector(cfg, train_env, policy, compile_mode=None, postproc=None):
     """Make data collector."""
     device = cfg.collector.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    collector = SyncDataCollector(
+    collector = Collector(
         train_env,
         policy,
         frames_per_batch=cfg.collector.frames_per_batch,
