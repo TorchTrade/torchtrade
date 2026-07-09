@@ -1038,6 +1038,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#action-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Action Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#extending-the-tool-use-seam" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extending: the tool-use seam
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1308,6 +1330,28 @@
     <span class="md-ellipsis">
       
         Batched / Parallel-Env Inference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#action-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Action Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#extending-the-tool-use-seam" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extending: the tool-use seam
       
     </span>
   </a>
@@ -1606,6 +1650,29 @@ tensordict. A single, unbatched observation still works exactly as before, so
 existing offline/live scripts require no changes. <code>generate_batch</code> is the
 extension point for adding batched generation to new backends. See
 <code>examples/llm/local/parallel.py</code> for a full example.</p>
+<h3 id="action-extraction">Action Extraction<a class="headerlink" href="#action-extraction" title="Permanent link">&para;</a></h3>
+<p>Both LLM actors parse the model's chosen action from a <code>&lt;answer&gt;N&lt;/answer&gt;</code> tag.
+That logic lives in one reusable pure function:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.actor.parsers</span><span class="w"> </span><span class="kn">import</span> <span class="n">extract_action</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">idx</span> <span class="o">=</span> <span class="n">extract_action</span><span class="p">(</span><span class="s2">&quot;&lt;think&gt;...&lt;/think&gt;&lt;answer&gt;2&lt;/answer&gt;&quot;</span><span class="p">,</span> <span class="n">num_actions</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>  <span class="c1"># -&gt; 2</span>
+</span></code></pre></div>
+<p>It returns the integer <code>N</code> when <code>0 &lt;= N &lt; num_actions</code>, and falls back to action
+<code>0</code> (logging a warning) when the tag is missing or out of range — a trading agent
+must always emit a valid action.</p>
+<h3 id="extending-the-tool-use-seam">Extending: the tool-use seam<a class="headerlink" href="#extending-the-tool-use-seam" title="Permanent link">&para;</a></h3>
+<p><code>BaseLLMActor.forward()</code> calls a <code>_resolve_tools(system_prompt, user_prompts,
+responses)</code> hook between generation and action extraction. The default is a no-op
+(returns <code>responses</code> unchanged), so standard single-shot actors are unaffected.
+To add tool use, override it:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolAugmentedActor</span><span class="p">(</span><span class="n">LocalLLMActor</span><span class="p">):</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_resolve_tools</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">system_prompt</span><span class="p">,</span> <span class="n">user_prompts</span><span class="p">,</span> <span class="n">responses</span><span class="p">):</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>        <span class="c1"># detect &lt;tool&gt;...&lt;/tool&gt; in each response, execute the tool, append the</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>        <span class="c1"># result to the conversation, and re-generate the ones that called a tool</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_tool_loop</span><span class="p">(</span><span class="n">system_prompt</span><span class="p">,</span> <span class="n">user_prompts</span><span class="p">,</span> <span class="n">responses</span><span class="p">)</span>
+</span></code></pre></div>
+<p>The multi-turn tool-execution loop itself (parsing <code>&lt;tool&gt;</code> calls, dispatching to
+broker/data APIs, re-prompting) ships with the upcoming tool-use feature.</p>
 <hr />
 <h2 id="see-also">See Also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
