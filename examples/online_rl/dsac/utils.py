@@ -8,7 +8,7 @@ import torch
 from tensordict.nn import InteractionType
 
 from torch import optim
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
 from torchrl.data import (
     Composite,
     TensorDictPrioritizedReplayBuffer,
@@ -219,7 +219,7 @@ def make_collector(cfg, train_env, actor_model_explore, compile_mode, device="cp
         device: Device for data collection (default: "cpu", can use "cuda" now that VecNormV2 is removed)
         postproc: Optional postprocessing transform (e.g., CoverageTracker)
     """
-    collector = SyncDataCollector(
+    collector = Collector(
         train_env,
         actor_model_explore,
         frames_per_batch=cfg.collector.frames_per_batch,

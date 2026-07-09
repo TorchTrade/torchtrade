@@ -5,7 +5,7 @@ Verifies:
 - TorchRL spec compliance (check_env_specs)
 - Truncation and done signal correctness
 - Transaction fee accounting
-- SyncDataCollector integration
+- Collector integration
 - Partial reset behavior
 - Futures position mechanics
 """
@@ -14,7 +14,7 @@ import pytest
 import torch
 
 from torchrl.envs.utils import check_env_specs
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
 
 from torchtrade.envs.offline import (
     VectorizedSequentialTradingEnv,
@@ -369,11 +369,11 @@ class TestVecEnvFees:
 
 
 class TestVecEnvCollector:
-    """Tests for TorchRL SyncDataCollector integration."""
+    """Tests for TorchRL Collector integration."""
 
     @pytest.mark.parametrize("leverage", [1, 10], ids=["spot", "futures"])
     def test_collector_collects_frames(self, sample_ohlcv_df, leverage):
-        """SyncDataCollector should collect expected number of frames."""
+        """Collector should collect expected number of frames."""
         config = VectorizedSequentialTradingEnvConfig(
             num_envs=8,
             leverage=leverage,
@@ -387,7 +387,7 @@ class TestVecEnvCollector:
         env = VectorizedSequentialTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
 
         total_frames = 200
-        collector = SyncDataCollector(
+        collector = Collector(
             env,
             policy=None,
             frames_per_batch=80,

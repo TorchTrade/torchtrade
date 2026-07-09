@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from torchtrade.actor import MeanReversionActor
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
 from torchrl.envs import Compose, DoubleToFloat, TransformedEnv
 from torchrl.envs.transforms import InitTracker, RewardSum, StepCounter, UnsqueezeTransform
@@ -90,7 +90,7 @@ def main():
     )
 
     # Create collector and replay buffer
-    collector = SyncDataCollector(
+    collector = Collector(
         env,
         actor,
         init_random_frames=0,

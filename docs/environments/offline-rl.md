@@ -24,7 +24,7 @@ TorchTrade provides an example implementation of offline RL using **Implicit Q-L
 ```python
 # Example: Training IQL on pre-collected dataset
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
 
 # 1. Create environment (for evaluation only)
@@ -51,11 +51,11 @@ For a complete implementation, see [examples/offline/iql/](https://github.com/To
 
 ```python
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
 
 # Collect trajectories with any policy (random, rule-based, pre-trained)
-collector = SyncDataCollector(
+collector = Collector(
     env,
     policy,
     frames_per_batch=10000,

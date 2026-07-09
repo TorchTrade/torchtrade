@@ -17,7 +17,7 @@ from torchrl.envs import (
 )
 
 from torchtrade.envs.transforms import CoverageTracker
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
 
 from torchrl.modules import (
     MLP,
@@ -421,7 +421,7 @@ def make_collector(cfg, train_env, actor_model_explore, compile_mode, postproc=N
     Args:
         device: Device for data collection (default: "cpu", can use "cuda" now that VecNormV2 is removed)
     """
-    collector = SyncDataCollector(
+    collector = Collector(
         train_env,
         actor_model_explore,
         frames_per_batch=cfg.collector.frames_per_batch,

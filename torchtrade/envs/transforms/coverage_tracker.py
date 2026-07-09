@@ -32,7 +32,7 @@ class CoverageTracker(Transform):
     - Detecting overfitting to specific market conditions
 
     Usage:
-        from torchrl.collectors import SyncDataCollector
+        from torchrl.collectors import Collector
         from torchrl.envs import TransformedEnv, Compose, InitTracker, DoubleToFloat, RewardSum
         from torchtrade.envs.transforms import CoverageTracker
 
@@ -50,7 +50,7 @@ class CoverageTracker(Transform):
         coverage_tracker = CoverageTracker()
 
         # Use coverage tracker as postproc in collector
-        collector = SyncDataCollector(
+        collector = Collector(
             env,
             policy,
             frames_per_batch=1000,
@@ -80,7 +80,7 @@ class CoverageTracker(Transform):
     def __init__(self):
         """Initialize the CoverageTracker transform.
 
-        CoverageTracker should be used as a postproc in SyncDataCollector.
+        CoverageTracker should be used as a postproc in Collector.
         It reads reset_index and state_index from collected batches and aggregates coverage statistics.
         """
         super().__init__()
@@ -242,7 +242,7 @@ class CoverageTracker(Transform):
     def forward(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Process collected batch and aggregate coverage from reset and state indices.
 
-        This method is called by SyncDataCollector's postproc after data collection.
+        This method is called by Collector's postproc after data collection.
         It reads both reset_index and state_index from the batch and updates coverage statistics.
 
         Args:

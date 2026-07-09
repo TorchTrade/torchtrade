@@ -24,11 +24,11 @@ dependencies = [
     "pybit>=5.0.0",
     "python-okx>=0.3.0",
     "python-dotenv",
-    # Pin the RL stack to the 0.10 line: torchrl 0.11 dropped the top-level
-    # `from torchrl.collectors import SyncDataCollector` import path this repo
-    # relies on in ~18 places. tensordict is pinned in lockstep to avoid skew.
-    "torchrl>=0.10,<0.11",
-    "tensordict>=0.10,<0.11",
+    # RL stack pinned in lockstep (torchrl + tensordict MUST move together — a
+    # skew is what silently broke CI before this pin). torchrl 0.13 removed the
+    # `SyncDataCollector` alias (use `Collector`); torch floor (2.1.0) is met by 2.9.0.
+    "torchrl>=0.13,<0.14",
+    "tensordict>=0.13,<0.14",
     "wandb",
     "tqdm",
     "hydra-core",

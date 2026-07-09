@@ -25,7 +25,7 @@ from torchrl.envs import GymEnv
 env = GymEnv("CartPole-v1")
 
 # Everything else stays the same
-collector = SyncDataCollector(env, policy, ...)
+collector = Collector(env, policy, ...)
 loss_module = A2CLoss(actor, critic, ...)
 optimizer = torch.optim.Adam(loss_module.parameters(), lr=1e-3)
 
@@ -43,7 +43,7 @@ from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvCo
 env = SequentialTradingEnv(df, SequentialTradingEnvConfig(...))
 
 # Everything else stays EXACTLY the same
-collector = SyncDataCollector(env, policy, ...)
+collector = Collector(env, policy, ...)
 loss_module = A2CLoss(actor, critic, ...)
 optimizer = torch.optim.Adam(loss_module.parameters(), lr=1e-3)
 
