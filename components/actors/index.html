@@ -1024,6 +1024,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="LocalLLMActor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#batched-parallel-env-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batched / Parallel-Env Inference
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1282,6 +1299,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="LocalLLMActor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#batched-parallel-env-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batched / Parallel-Env Inference
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1564,6 +1598,14 @@
 <p>For SLTP environments, pass <code>action_space_type="sltp"</code> and <code>action_map=env.action_map</code>. See <code>examples/llm/local/</code> for offline and live examples.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span>torchtrade<span class="o">[</span>llm<span class="o">]</span><span class="w">  </span><span class="c1"># Installs vllm, transformers, bitsandbytes</span>
 </span></code></pre></div>
+<h3 id="batched-parallel-env-inference">Batched / Parallel-Env Inference<a class="headerlink" href="#batched-parallel-env-inference" title="Permanent link">&para;</a></h3>
+<p><code>LocalLLMActor</code> accepts a batched tensordict (<code>batch_size=[N]</code>), such as one
+produced by <code>ParallelEnv</code>, and generates N trading decisions in a single pass:
+it builds N prompts, runs one vLLM call, and writes N actions back into the
+tensordict. A single, unbatched observation still works exactly as before, so
+existing offline/live scripts require no changes. <code>generate_batch</code> is the
+extension point for adding batched generation to new backends. See
+<code>examples/llm/local/parallel.py</code> for a full example.</p>
 <hr />
 <h2 id="see-also">See Also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
