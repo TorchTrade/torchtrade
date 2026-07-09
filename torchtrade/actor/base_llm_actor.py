@@ -1,10 +1,12 @@
 """Base LLM Actor with environment-driven prompt construction and action extraction."""
+import json
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 import torch
 
-from torchtrade.actor.parsers import extract_action
+from torchtrade.actor.parsers import extract_action, parse_tool_calls
+from torchtrade.actor.tools import Tool
 
 if TYPE_CHECKING:
     from tensordict import TensorDict
@@ -40,6 +42,13 @@ class BaseLLMActor(ABC):
             state + market data tables) is used. The callable receives the
             live tensordict for the current step — read freely, but do NOT
             mutate it (writes will leak into observation/action keys).
+        tools: Optional list of `Tool` instances the LLM may call mid-reasoning
+            (e.g. `GoogleNewsTool`). When non-empty, the system prompt gains a
+            tool-calling protocol block. If None/empty, prompt behavior is
+            unchanged (no-tools path).
+        max_tool_iters: Maximum number of tool-call round-trips per step
+            (advertised in the prompt; enforced by the tool-loop, added in a
+            later task).
     """
 
     def __init__(
@@ -54,6 +63,8 @@ class BaseLLMActor(ABC):
         debug: bool = False,
         system_prompt: Optional[SystemPrompt] = None,
         user_prompt_fn: Optional[UserPromptFn] = None,
+        tools: Optional[List[Tool]] = None,
+        max_tool_iters: int = 3,
     ):
         self.market_data_keys = market_data_keys
         self.account_state_labels = account_state_labels
@@ -69,6 +80,9 @@ class BaseLLMActor(ABC):
         self.debug = debug
         self._system_prompt_override = system_prompt
         self._user_prompt_fn = user_prompt_fn
+        self.tools = list(tools) if tools else []
+        self._tools_by_name = {t.name: t for t in self.tools}
+        self.max_tool_iters = max_tool_iters
 
         # Action descriptions: explicit override (e.g. for binary up/down envs)
         # falls back to the auto-generated "target exposure" language.
@@ -184,6 +198,41 @@ class BaseLLMActor(ABC):
         """
         return responses
 
+    def _build_tools_prompt(self) -> str:
+        tool_list = "\n".join(f"  - {t.description}" for t in self.tools)
+        return (
+            "You may call tools before deciding. Available tools:\n"
+            f"{tool_list}\n\n"
+            'To call a tool, output exactly: <tool name="<tool>">{"arg": "value"}</tool> '
+            "and stop. You will receive a <tool_results>...</tool_results> block, then continue.\n"
+            f"You may call tools up to {self.max_tool_iters} times. Finish with <answer>N</answer>."
+        )
+
+    def _run_tool_calls(self, calls: List[dict]) -> str:
+        lines = ["<tool_results>"]
+        for idx, call in enumerate(calls, 1):
+            name = call["name"]
+            tool = self._tools_by_name.get(name)
+            if tool is None:
+                lines.append(f"Tool {name} (call {idx}) failed:")
+                lines.append(f"  Error: unknown tool '{name}'")
+                continue
+            try:
+                result = tool.run(**call["args"])
+                lines.append(f"Tool {name} (call {idx}) succeeded:")
+                lines.append(f"  Result: {json.dumps(result)}")
+            except Exception as exc:  # per-tool guard; never crash a live step
+                lines.append(f"Tool {name} (call {idx}) failed:")
+                lines.append(f"  Error: {exc}")
+        lines.append("</tool_results>")
+        return "\n".join(lines)
+
+    def _linearize(self, base_prompt: str, response: str, results: str) -> str:
+        return (
+            f"{base_prompt}\n\n{response}\n{results}\n\n"
+            "Continue your analysis. When ready, respond with <answer>N</answer>."
+        )
+
     def _debug(self, label: str, content: str) -> None:
         if self.debug:
             print(f"{'=' * 80}\n{label}:\n{content}")
@@ -191,10 +240,14 @@ class BaseLLMActor(ABC):
     def _resolve_system_prompt(self) -> str:
         override = self._system_prompt_override
         if override is None:
-            return self._build_system_prompt()
-        if callable(override):
-            return override(self)
-        return override
+            base = self._build_system_prompt()
+        elif callable(override):
+            base = override(self)
+        else:
+            base = override
+        if self.tools:
+            base = base + "\n\n" + self._build_tools_prompt()
+        return base
 
     # --- Prompt construction ---
 

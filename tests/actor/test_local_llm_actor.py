@@ -434,3 +434,63 @@ def test_batched_forward_end_to_end_vllm(actor):
     assert result["action"].shape == torch.Size([3])
     assert result["action"].tolist() == [0, 1, 2]   # distinct -> proves per-element mapping
     assert len(result["thinking"]) == 3
+
+
+# ============================================================================
+# Tool config, system-prompt tools block, dispatch helpers (C1, Task 3)
+# ============================================================================
+
+
+from torchtrade.actor.tools import Tool
+
+
+class _EchoTool(Tool):
+    name = "echo"
+    description = "echo(text): returns the text"
+    def run(self, text="hi", **kw):
+        return f"echoed: {text}"
+
+
+class _BoomTool(Tool):
+    name = "boom"
+    description = "boom(): always fails"
+    def run(self, **kw):
+        raise RuntimeError("kaboom")
+
+
+@pytest.fixture
+def tool_actor():
+    from torchtrade.actor import LocalLLMActor
+    return LocalLLMActor(
+        model="test-model", backend="vllm",
+        market_data_keys=MARKET_DATA_KEYS,
+        account_state_labels=ACCOUNT_STATE_LABELS,
+        action_levels=ACTION_LEVELS_FUTURES,
+        symbol="BTC/USD",
+        tools=[_EchoTool(), _BoomTool()],
+        max_tool_iters=2,
+    )
+
+
+def test_tools_prompt_lists_tools_and_protocol(tool_actor):
+    prompt = tool_actor._resolve_system_prompt()
+    assert "echo(text)" in prompt                 # tool description present
+    assert '<tool name=' in prompt                # protocol shown
+    assert "<answer>" in prompt                   # base contract retained
+
+
+def test_run_tool_calls_success_and_errors(tool_actor):
+    out = tool_actor._run_tool_calls([
+        {"name": "echo", "args": {"text": "yo"}, "tag": None},
+        {"name": "nope", "args": {}, "tag": None},     # unknown tool
+        {"name": "boom", "args": {}, "tag": None},     # raises
+    ])
+    assert out.startswith("<tool_results>") and out.rstrip().endswith("</tool_results>")
+    assert "echoed: yo" in out
+    assert "Tool nope (call 2) failed" in out and "unknown tool" in out.lower()
+    assert "Tool boom (call 3) failed" in out and "kaboom" in out
+
+
+def test_no_tools_actor_prompt_unchanged(actor):
+    # actor fixture has no tools -> system prompt has no tool section
+    assert "<tool name=" not in actor._resolve_system_prompt()
