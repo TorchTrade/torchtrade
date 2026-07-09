@@ -24,12 +24,12 @@ Tracks which portions of the dataset are visited during training with random epi
 
 ```python
 from torchtrade.envs.transforms import CoverageTracker
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
 
 # Use as postproc in collector (NOT in environment transform chain)
 coverage_tracker = CoverageTracker()
 
-collector = SyncDataCollector(
+collector = Collector(
     env, policy,
     frames_per_batch=1000,
     total_frames=100000,
