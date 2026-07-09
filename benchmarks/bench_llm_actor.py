@@ -163,12 +163,33 @@ def main():
             print(f"{name:14s} N={n:<3d} wall={stats['wall_s']*1000:8.1f}ms "
                   f"decisions/s={stats['decisions_per_s']:8.2f} "
                   f"tokens/s={stats['tokens_per_s']:8.1f}")
-        # free the engine before building the next (vLLM holds GPU memory)
+        # Free the engine before building the next: vLLM/Ray hold GPU memory
+        # and Ray workers that `del` alone does not reliably release.
+        try:
+            if hasattr(handle, "shutdown"):
+                handle.shutdown()
+        except Exception:  # noqa: BLE001 - best-effort teardown for a bench script
+            pass
         del run, handle
+        import gc
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:  # noqa: BLE001
+            pass
 
     print("\nengine,N,wall_s,decisions_per_s,tokens_per_s")
     for r in rows:
         print(f"{r[0]},{r[1]},{r[2]:.6f},{r[3]:.3f},{r[4]:.3f}")
+
+    try:
+        import ray
+        if ray.is_initialized():
+            ray.shutdown()
+    except ImportError:
+        pass
 
 
 if __name__ == "__main__":
