@@ -134,6 +134,30 @@ def test_forward_clamps_out_of_range_action(actor, sample_td):
     assert result["action"].item() == 0
 
 
+def test_vllm_sampling_includes_stop_str_in_output():
+    """Regression: vLLM defaults include_stop_str_in_output=False, which strips the
+    '</answer>' stop string from output — but the parser regex requires the closing
+    tag, so without this flag every live response fails to parse and defaults to 0."""
+    captured = {}
+
+    class CapturingSamplingParams:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    sys.modules["vllm"].SamplingParams = CapturingSamplingParams
+
+    from torchtrade.actor import LocalLLMActor
+    LocalLLMActor(
+        model="test-model",
+        backend="vllm",
+        market_data_keys=MARKET_DATA_KEYS,
+        account_state_labels=ACCOUNT_STATE_LABELS,
+        action_levels=ACTION_LEVELS_FUTURES,
+    )
+    assert captured["include_stop_str_in_output"] is True
+    assert "</answer>" in captured["stop"]
+
+
 def test_system_prompt_reflects_action_levels(actor):
     """System prompt describes actions from action_levels, not hardcoded buy/sell/hold."""
     prompt = actor._build_system_prompt()
