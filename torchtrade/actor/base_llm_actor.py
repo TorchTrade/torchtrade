@@ -174,13 +174,16 @@ class BaseLLMActor(ABC):
 
         return tensordict
 
-    def _resolve_tools(self, system_prompt, user_prompts, responses):
+    def _resolve_tools(
+        self, system_prompt: str, user_prompts: List[str], responses: List[str]
+    ) -> List[str]:
         """Extension point for tool-augmented multi-turn resolution.
 
         Default: no tools — returns responses unchanged (single-shot, batched).
-        Group C overrides this to detect <tool>...</tool> in a response, execute
-        the tool, append the result to the conversation, and re-generate the
-        conversations that made a tool call — returning the final responses.
+        A tool-augmented subclass overrides this to detect <tool>...</tool> in a
+        response, execute the tool, append the result to the conversation, and
+        re-generate the conversations that made a tool call — returning the final
+        responses.
         """
         return responses
 
