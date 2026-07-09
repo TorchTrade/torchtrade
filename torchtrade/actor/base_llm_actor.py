@@ -109,32 +109,68 @@ class BaseLLMActor(ABC):
         )
 
     @abstractmethod
+    def generate_batch(self, system_prompt: str, user_prompts: list) -> list:
+        """Generate one response per user prompt.
+
+        Given a shared system prompt and a list of N user prompts, return a
+        list of N response strings (same order). Subclasses implement this;
+        N=1 is the single-observation case.
+        """
+
     def generate(self, system_prompt: str, user_prompt: str) -> str:
-        """Generate a response given system and user prompts. Subclasses implement this."""
+        """Single-prompt convenience wrapping generate_batch (kept for callers)."""
+        return self.generate_batch(system_prompt, [user_prompt])[0]
 
     def __call__(self, tensordict):
         return self.forward(tensordict)
 
-    def forward(self, tensordict):
-        """Main forward pass: construct prompts, generate, extract action, save to tensordict."""
-        system_prompt = self._resolve_system_prompt()
-        user_prompt = (
+    def _build_user_prompt(self, tensordict) -> str:
+        return (
             self._user_prompt_fn(self, tensordict)
             if self._user_prompt_fn is not None
             else self._construct_user_prompt(tensordict)
         )
+
+    def forward(self, tensordict):
+        """Construct N prompts, generate, extract N actions, write to tensordict.
+
+        Handles an unbatched tensordict (batch_size=[]) as N=1 with scalar
+        outputs identical to the pre-batching behavior, and a 1-D batched
+        tensordict (batch_size=[N], e.g. from ParallelEnv) as N independent
+        decisions generated in one generate_batch call.
+        """
+        batched = tensordict.batch_dims > 0
+        if batched:
+            if tensordict.batch_dims != 1:
+                raise ValueError(
+                    f"LLM actor supports batch_dims 0 or 1, got batch_size="
+                    f"{tuple(tensordict.batch_size)}. Flatten to a single batch dim first."
+                )
+            n = int(tensordict.batch_size[0])
+            sub_tds = [tensordict[i] for i in range(n)]
+        else:
+            sub_tds = [tensordict]
+
+        system_prompt = self._resolve_system_prompt()
+        user_prompts = [self._build_user_prompt(st) for st in sub_tds]
         self._debug("SYSTEM PROMPT", system_prompt)
-        self._debug("USER PROMPT", user_prompt)
+        self._debug("USER PROMPTS", "\n---\n".join(user_prompts))
 
-        response = self.generate(system_prompt, user_prompt)
-        self._debug("RESPONSE", response)
+        responses = self.generate_batch(system_prompt, user_prompts)
+        self._debug("RESPONSES", "\n---\n".join(responses))
 
-        action_idx = self._extract_action(response)
+        actions = [self._extract_action(r) for r in responses]
 
-        tensordict.set("action", torch.tensor(action_idx, dtype=torch.long))
-        tensordict.set("thinking", response)
-        tensordict.set("system_prompt", system_prompt)
-        tensordict.set("user_prompt", user_prompt)
+        if batched:
+            tensordict.set("action", torch.tensor(actions, dtype=torch.long))
+            tensordict.set("thinking", list(responses))
+            tensordict.set("system_prompt", [system_prompt] * n)
+            tensordict.set("user_prompt", list(user_prompts))
+        else:
+            tensordict.set("action", torch.tensor(actions[0], dtype=torch.long))
+            tensordict.set("thinking", responses[0])
+            tensordict.set("system_prompt", system_prompt)
+            tensordict.set("user_prompt", user_prompts[0])
 
         return tensordict
 

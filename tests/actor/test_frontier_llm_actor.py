@@ -76,6 +76,28 @@ def test_forward_end_to_end(actor, sample_td):
     assert "analysis" in result["thinking"]
 
 
+def test_generate_batch_preserves_order(monkeypatch):
+    """generate_batch returns responses aligned to input prompt order."""
+    from torchtrade.actor import FrontierLLMActor
+
+    # Build actor with a stubbed OpenAI client
+    actor = FrontierLLMActor(
+        model="test",
+        market_data_keys=["market_data_1Hour_48"],
+        account_state_labels=["exposure_pct"],
+        action_levels=[-1.0, 0.0, 1.0],
+    )
+
+    def fake_create(model, instructions, input):
+        resp = type("R", (), {})()
+        resp.output_text = f"<answer>{input[-1]}</answer>"  # echo last char of prompt
+        return resp
+
+    actor.llm.responses.create = fake_create
+    out = actor.generate_batch("sys", ["prompt0", "prompt1", "prompt2"])
+    assert out == ["<answer>0</answer>", "<answer>1</answer>", "<answer>2</answer>"]
+
+
 def test_api_key_passes_through_to_openai():
     """api_key is forwarded verbatim to the OpenAI SDK (which resolves env on None)."""
     with patch("openai.OpenAI") as mock_cls:

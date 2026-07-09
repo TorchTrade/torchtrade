@@ -27,10 +27,19 @@ class FrontierLLMActor(BaseLLMActor):
         from openai import OpenAI
         self.llm = OpenAI(api_key=api_key)
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
-        response = self.llm.responses.create(
-            model=self.model,
-            instructions=system_prompt,
-            input=user_prompt,
-        )
-        return response.output_text
+    def generate_batch(self, system_prompt: str, user_prompts: list) -> list:
+        def _one(user_prompt: str) -> str:
+            response = self.llm.responses.create(
+                model=self.model,
+                instructions=system_prompt,
+                input=user_prompt,
+            )
+            return response.output_text
+
+        if len(user_prompts) == 1:
+            return [_one(user_prompts[0])]
+
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(len(user_prompts), 16)) as ex:
+            # executor.map preserves input order
+            return list(ex.map(_one, user_prompts))

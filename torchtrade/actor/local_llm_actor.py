@@ -107,10 +107,12 @@ class LocalLLMActor(BaseLLMActor):
         tokenizer = self.llm.get_tokenizer() if self.backend == "vllm" else self.tokenizer
         return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
-        prompt = self._format_chat_prompt(system_prompt, user_prompt)
+    def generate_batch(self, system_prompt: str, user_prompts: list) -> list:
+        prompts = [self._format_chat_prompt(system_prompt, u) for u in user_prompts]
         if self.backend == "vllm":
-            outputs = self.llm.generate([prompt], self.sampling_params)
-            return outputs[0].outputs[0].text
-        outputs = self.llm(prompt, return_full_text=False)
-        return outputs[0]["generated_text"]
+            # vLLM continuous-batches the whole list in one call (no Ray).
+            outputs = self.llm.generate(prompts, self.sampling_params)
+            return [o.outputs[0].text for o in outputs]
+        # transformers pipeline accepts a list of prompts and returns a list.
+        outputs = self.llm(prompts, return_full_text=False)
+        return [o[0]["generated_text"] for o in outputs]
