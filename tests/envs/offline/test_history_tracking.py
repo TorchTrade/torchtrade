@@ -23,16 +23,8 @@ from torchtrade.envs.offline import (
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 # Import TorchRL testing utilities
-try:
-    from torchrl.testing import get_default_devices
-    from torchrl.envs.utils import check_env_specs
-    HAS_TORCHRL_TESTING = True
-except ImportError:
-    HAS_TORCHRL_TESTING = False
-
-    def get_default_devices():
-        """Fallback if torchrl.testing not available."""
-        return [torch.device("cpu")]
+from torchrl.testing import get_default_devices
+from torchrl.envs.utils import check_env_specs
 
 
 def simple_feature_fn(df: pd.DataFrame) -> pd.DataFrame:
@@ -66,8 +58,7 @@ class TestSequentialTradingEnvHistory:
         )
 
         # Validate environment specs
-        if HAS_TORCHRL_TESTING:
-            check_env_specs(env)
+        check_env_specs(env)
 
         td = env.reset()
 
@@ -182,8 +173,7 @@ class TestSequentialTradingEnvHistoryFutures:
         )
 
         # Validate specs
-        if HAS_TORCHRL_TESTING:
-            check_env_specs(env)
+        check_env_specs(env)
 
         td = env.reset()
 
@@ -231,8 +221,7 @@ class TestSequentialTradingEnvSLTPHistory:
         )
 
         # Validate specs
-        if HAS_TORCHRL_TESTING:
-            check_env_specs(env)
+        check_env_specs(env)
 
         td = env.reset()
 
@@ -332,8 +321,7 @@ class TestOneStepTradingEnvHistory:
         )
 
         # Validate specs
-        if HAS_TORCHRL_TESTING:
-            check_env_specs(env)
+        check_env_specs(env)
 
         td = env.reset()
 
