@@ -115,6 +115,16 @@ For SLTP environments, pass `action_space_type="sltp"` and `action_map=env.actio
 pip install torchtrade[llm]  # Installs vllm, transformers, bitsandbytes
 ```
 
+### Batched / Parallel-Env Inference
+
+`LocalLLMActor` accepts a batched tensordict (`batch_size=[N]`), such as one
+produced by `ParallelEnv`, and generates N trading decisions in a single pass:
+it builds N prompts, runs one vLLM call, and writes N actions back into the
+tensordict. A single, unbatched observation still works exactly as before, so
+existing offline/live scripts require no changes. `generate_batch` is the
+extension point for adding batched generation to new backends. See
+`examples/llm/local/parallel.py` for a full example.
+
 ---
 
 ## See Also

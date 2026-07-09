@@ -29,6 +29,18 @@ python examples/llm/local/live.py
 
 Requires `ALPACA_API_KEY` and `ALPACA_SECRET_KEY` in `.env`.
 
+### Parallel Multi-Symbol Inference (`parallel.py`)
+
+Run one LLM policy across N environments in a single batched generation pass:
+
+```bash
+python examples/llm/local/parallel.py
+```
+
+`LocalLLMActor` now accepts a batched tensordict (`batch_size=[N]`, e.g. from
+`ParallelEnv`) and builds N prompts, generates them in one vLLM call, and writes
+N actions. A single, unbatched observation still works exactly as before.
+
 ## Recommended Models
 
 For production use, we recommend larger models (7B+) or fine-tuning on trading data. The examples use a 0.5B model for fast demonstration, but it will not produce good trading decisions out of the box.
