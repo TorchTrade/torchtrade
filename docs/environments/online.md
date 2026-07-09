@@ -610,7 +610,7 @@ while not bool(td.get("done", torch.zeros(1, dtype=torch.bool)).item()):
 env.close()
 ```
 
-The actor expects responses in `<answer>N</answer>` format (handled by `BaseLLMActor._extract_action`); models that don't follow it default to action 0. Set `debug=True` on the actor to print the system prompt, user prompt, and raw model response each step, useful while tuning.
+The actor expects responses in `<answer>N</answer>` format (handled by `torchtrade.actor.parsers.extract_action`); models that don't follow it default to action 0. Set `debug=True` on the actor to print the system prompt, user prompt, and raw model response each step, useful while tuning.
 
 #### Combining with `BinanceOHLCVTransform`
 
