@@ -11,9 +11,9 @@ pip install -e ".[llm,bench]"   # vllm + ray; needs a CUDA GPU
 # One engine per process keeps VRAM clean on small GPUs; VLLM_PLUGINS="" avoids
 # torchrl's (incompatible) vLLM plugin poisoning engine init on vllm >= 0.13.
 VLLM_PLUGINS="" python benchmarks/bench_llm_actor.py --engines ours-current \
-    --batch-sizes 1 4 16 32 --trials 5 --gpu-memory-utilization 0.7
+    --models Qwen/Qwen2.5-0.5B-Instruct --batch-sizes 1 4 16 32 --trials 20 --gpu-memory-utilization 0.7
 VLLM_PLUGINS="" python benchmarks/bench_llm_actor.py --engines ours-batched \
-    --batch-sizes 1 4 16 32 --trials 5 --gpu-memory-utilization 0.7
+    --models Qwen/Qwen2.5-0.5B-Instruct --batch-sizes 1 4 16 32 --trials 20 --gpu-memory-utilization 0.7
 ```
 
 ## Method
@@ -39,23 +39,35 @@ Measured 2026-07-09 on **NVIDIA RTX 4060 Laptop GPU (8 GB)**, model `Qwen/Qwen2.
 `--trials 5 --gpu-memory-utilization 0.7`, one engine per process. Stack:
 torch 2.9.0+cu128, vllm 0.13.0, ray 2.56.0, torchrl 0.10.1, tensordict 0.10.0.
 
-| engine | N | wall (ms) | decisions/s | speedup vs current |
-|--------|---|-----------|-------------|--------------------|
-| ours-current | 1 | 13.0 | 77.0 | 1.0× |
-| ours-current | 4 | 51.1 | 78.3 | 1.0× |
-| ours-current | 16 | 204.6 | 78.2 | 1.0× |
-| ours-current | 32 | 417.2 | 76.7 | 1.0× |
-| **ours-batched** | 1 | 13.0 | 77.0 | **1.0×** |
-| **ours-batched** | 4 | 20.2 | 197.7 | **2.5×** |
-| **ours-batched** | 16 | 28.4 | 562.4 | **7.2×** |
-| **ours-batched** | 32 | 46.3 | 691.5 | **9.0×** |
-| torchrl-sync | — | — | — | **could not run** (see below) |
-| torchrl-async | — | — | — | **could not run** (see below) |
+`--trials 20`. `tokens/s` is **real generated tokens** (counted with the model's HF tokenizer),
+`p50/p95/p99` are batch-completion latency (time until all N decisions are ready).
+
+| engine | N | wall (ms) | decisions/s | tokens/s | p50/p95/p99 (ms) | speedup |
+|--------|---|-----------|-------------|----------|------------------|---------|
+| ours-current | 1 | 13.1 | 76.2 | 76.0 | 13.1 / 13.8 / 13.9 | 1.0× |
+| ours-current | 4 | 52.3 | 76.4 | 76.4 | 52.3 / 54.0 / 54.6 | 1.0× |
+| ours-current | 16 | 212.4 | 75.3 | 75.0 | 212 / 235 / 242 | 1.0× |
+| ours-current | 32 | 421.1 | 76.0 | 75.7 | 421 / 446 / 447 | 1.0× |
+| **ours-batched** | 1 | 14.2 | 70.7 | 70.1 | 14.2 / 15.1 / 15.4 | 0.9× |
+| **ours-batched** | 4 | 21.1 | 189.5 | 188.4 | 21.1 / 23.0 / 23.4 | **2.5×** |
+| **ours-batched** | 16 | 30.2 | 529.2 | 528.4 | 30.2 / 42.5 / 47.6 | **7.0×** |
+| **ours-batched** | 32 | 47.6 | 672.3 | 669.3 | 47.6 / 52.3 / 54.7 | **8.8×** |
+| torchrl-sync | — | — | — | — | — | **could not run** (see below) |
+| torchrl-async | — | — | — | — | — | **could not run** (see below) |
 
 **Headline:** batched generation scales throughput ~linearly with N up to ~9× at N=32
-(417 ms → 46 ms), while the sequential path is flat at ~77 decisions/s. At N=1 the two
-are identical — batching adds nothing and costs nothing for single-symbol/sequential use,
-so the improvement is a pure win with no regression.
+(421 ms → 48 ms), while the sequential path is flat at ~76 decisions/s. At N=1 the two are
+within noise (batching adds a tiny fixed overhead, no benefit with nothing to batch) — so the
+improvement is a pure win for parallel-env / multi-symbol use with no regression for single-obs.
+
+**On tokens/s:** here `tokens/s ≈ decisions/s` because Qwen-0.5B is too small to actually reason —
+with `stop=["</answer>"]` it emits ~1 token per decision. tokens/s only becomes a distinct,
+meaningful throughput metric with a model that produces real `<think>` reasoning traces; see the
+model-size sweep (pending, to be run on larger hardware) for 4B/7B numbers where it diverges.
+
+**Prefill/decode split:** reported `n/a` on this stack — vLLM 0.13's v1 engine does not populate
+per-request `RequestMetrics` timestamps. Forcing the legacy engine (`VLLM_USE_V1=0`) is the likely
+way to recover the split on the larger-hardware run.
 
 ### The torchrl-native legs could not run (a finding in itself)
 
