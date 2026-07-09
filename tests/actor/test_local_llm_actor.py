@@ -126,9 +126,10 @@ def test_forward_produces_required_keys(actor, sample_td):
 
 
 def test_forward_clamps_out_of_range_action(actor, sample_td):
-    """Actor passes num_actions=len(action_levels) to the parser, so an
-    out-of-range model answer clamps to 0 — pins the actor->parser wiring."""
-    with patch.object(actor, "generate_batch", return_value=["<answer>9</answer>"]):
+    """Actor passes num_actions=len(action_levels) to the parser, so the first
+    out-of-range index (3 for a 3-action actor) clamps to 0 — pins the
+    actor->parser wiring to exactly len(action_levels)."""
+    with patch.object(actor, "generate_batch", return_value=["<answer>3</answer>"]):
         result = actor.forward(sample_td)
     assert result["action"].item() == 0
 
