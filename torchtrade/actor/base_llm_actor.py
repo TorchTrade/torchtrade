@@ -1,5 +1,4 @@
 """Base LLM Actor with environment-driven prompt construction and action extraction."""
-import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
@@ -9,8 +8,6 @@ from torchtrade.actor.parsers import extract_action
 
 if TYPE_CHECKING:
     from tensordict import TensorDict
-
-logger = logging.getLogger(__name__)
 
 SystemPrompt = Union[str, Callable[["BaseLLMActor"], str]]
 UserPromptFn = Callable[["BaseLLMActor", "TensorDict"], str]
