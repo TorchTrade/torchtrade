@@ -36,11 +36,14 @@ def mock_vllm_backend():
                 f"{msgs[0]['content']}\n\n{msgs[1]['content']}")
             return tok
         def generate(self, prompts, sampling_params):
-            out = Mock()
-            out.text = "<think>analysis</think><answer>1</answer>"
-            req = Mock()
-            req.outputs = [out]
-            return [req]
+            reqs = []
+            for _ in prompts:
+                out = Mock()
+                out.text = "<think>analysis</think><answer>1</answer>"
+                req = Mock()
+                req.outputs = [out]
+                reqs.append(req)
+            return reqs
 
     vllm_module.LLM = MockVLLM
     vllm_module.SamplingParams = Mock
@@ -136,7 +139,7 @@ def test_vllm_import_error_propagates(monkeypatch):
 
 def test_forward_produces_required_keys(actor, sample_td):
     """Forward pass populates action, thinking, system_prompt, user_prompt."""
-    with patch.object(actor, "generate", return_value="<think>reasoning</think><answer>2</answer>"):
+    with patch.object(actor, "generate_batch", return_value=["<think>reasoning</think><answer>2</answer>"]):
         result = actor.forward(sample_td)
 
     assert result["action"].item() == 2
@@ -287,7 +290,7 @@ def _make_actor(**overrides):
 def test_system_prompt_string_override(sample_td):
     """A static string replaces the default system prompt verbatim."""
     actor = _make_actor(system_prompt="CUSTOM SYSTEM")
-    with patch.object(actor, "generate", return_value="<answer>1</answer>") as mock_gen:
+    with patch.object(actor, "generate_batch", return_value=["<answer>1</answer>"]) as mock_gen:
         result = actor.forward(sample_td)
 
     mock_gen.assert_called_once()
@@ -301,7 +304,7 @@ def test_system_prompt_callable_receives_actor(sample_td):
         return f"trade {actor.symbol} on {actor.execute_on} ({len(actor.action_levels)} actions)"
 
     actor = _make_actor(system_prompt=build)
-    with patch.object(actor, "generate", return_value="<answer>1</answer>") as mock_gen:
+    with patch.object(actor, "generate_batch", return_value=["<answer>1</answer>"]) as mock_gen:
         actor.forward(sample_td)
 
     assert mock_gen.call_args.args[0] == "trade BTC/USD on 1Hour (3 actions)"
@@ -313,10 +316,10 @@ def test_user_prompt_fn_override(sample_td):
         return f"custom: action_levels={actor.action_levels}, has_account={('account_state' in td)}"
 
     actor = _make_actor(user_prompt_fn=build)
-    with patch.object(actor, "generate", return_value="<answer>2</answer>") as mock_gen:
+    with patch.object(actor, "generate_batch", return_value=["<answer>2</answer>"]) as mock_gen:
         result = actor.forward(sample_td)
 
-    user_prompt = mock_gen.call_args.args[1]
+    user_prompt = mock_gen.call_args.args[1][0]
     assert user_prompt.startswith("custom: action_levels=[-1.0, 0.0, 1.0]")
     assert user_prompt == result["user_prompt"]
     # Default account-state header should NOT be present
@@ -326,7 +329,7 @@ def test_user_prompt_fn_override(sample_td):
 def test_system_prompt_empty_string_is_used_verbatim(sample_td):
     """Empty string is a valid override (pin `if override is None`, not `if override`)."""
     actor = _make_actor(system_prompt="")
-    with patch.object(actor, "generate", return_value="<answer>0</answer>") as mock_gen:
+    with patch.object(actor, "generate_batch", return_value=["<answer>0</answer>"]) as mock_gen:
         actor.forward(sample_td)
     assert mock_gen.call_args.args[0] == ""
 
@@ -378,14 +381,38 @@ def test_forward_polymarket_shape_with_user_prompt_fn():
         user_prompt_fn=lambda a, td: f"yes_price={td['market_state'][0].item():.2f}",
     )
     td = TensorDict({"market_state": torch.tensor([0.51, 0.03, 1690.0, 18110.0])}, batch_size=[])
-    with patch.object(actor, "generate", return_value="<think>up</think><answer>1</answer>") as mock_gen:
+    with patch.object(actor, "generate_batch", return_value=["<think>up</think><answer>1</answer>"]) as mock_gen:
         result = actor.forward(td)
 
-    system_prompt, user_prompt = mock_gen.call_args.args
+    system_prompt, user_prompts = mock_gen.call_args.args
     # action_descriptions override flowed through to the system prompt
     assert "bet DOWN" in system_prompt
     assert "bet UP" in system_prompt
     # user_prompt_fn replaced the default user prompt (no account_state/market-data tables)
-    assert user_prompt == "yes_price=0.51"
+    assert user_prompts[0] == "yes_price=0.51"
     # forward() wrote the action correctly
     assert result["action"].item() == 1
+
+
+def test_vllm_generate_batch_returns_one_per_prompt(actor):
+    """generate_batch feeds all prompts to vllm.generate once and returns N texts."""
+    prompts = ["p0", "p1", "p2"]
+    with patch.object(actor.llm, "generate", wraps=actor.llm.generate) as spy:
+        out = actor.generate_batch("sys", prompts)
+    assert len(out) == 3
+    assert all("<answer>1</answer>" in o for o in out)
+    # one batched call, not three
+    spy.assert_called_once()
+    called_prompts = spy.call_args.args[0]
+    assert len(called_prompts) == 3
+
+
+def test_batched_forward_end_to_end_vllm(actor):
+    """A [N]-batched td flows through forward() -> N actions via one vllm call."""
+    td = TensorDict({
+        "market_data_1Hour_48": torch.randn(3, 48, 5),
+        "account_state": torch.randn(3, 6),
+    }, batch_size=[3])
+    result = actor.forward(td)
+    assert result["action"].shape == torch.Size([3])
+    assert result["action"].tolist() == [1, 1, 1]
