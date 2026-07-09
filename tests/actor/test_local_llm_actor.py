@@ -565,3 +565,25 @@ def test_tool_loop_tool_failure_does_not_crash(tool_actor, sample_td):
     with patch.object(tool_actor, "generate_batch", side_effect=calls):
         result = tool_actor.forward(sample_td)            # must not raise
     assert result["action"].item() == 1
+
+
+def test_tool_loop_accumulates_context_across_rounds(tool_actor, sample_td):
+    """Round N's prompt must carry ALL prior <tool_results>, not just the base
+    prompt — pins that _linearize threads the growing conversation (convo[i])."""
+    scripts = [
+        ['<tool name="echo">{"text": "first"}</tool>'],   # round 1: tool call
+        ['<tool name="echo">{"text": "second"}</tool>'],  # round 2: tool call
+        ["<answer>1</answer>"],                            # round 3: answer
+    ]
+    prompts_seen = []
+
+    def fake_gen(system, prompts):
+        prompts_seen.append(prompts[0])
+        return scripts[len(prompts_seen) - 1]
+
+    with patch.object(tool_actor, "generate_batch", side_effect=fake_gen):
+        result = tool_actor.forward(sample_td)
+    assert result["action"].item() == 1
+    # the final regeneration prompt must contain BOTH prior tool results
+    assert "echoed: first" in prompts_seen[-1]
+    assert "echoed: second" in prompts_seen[-1]

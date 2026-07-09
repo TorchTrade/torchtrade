@@ -1,5 +1,4 @@
 """Base LLM Actor with environment-driven prompt construction and action extraction."""
-import json
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
@@ -47,8 +46,7 @@ class BaseLLMActor(ABC):
             tool-calling protocol block. If None/empty, prompt behavior is
             unchanged (no-tools path).
         max_tool_iters: Maximum number of tool-call round-trips per step
-            (advertised in the prompt; enforced by the tool-loop, added in a
-            later task).
+            (advertised in the prompt and enforced by the tool loop).
     """
 
     def __init__(
@@ -198,21 +196,20 @@ class BaseLLMActor(ABC):
         """
         if not self.tools:
             return responses
-        convo = dict(enumerate(user_prompts))
+        convo = list(user_prompts)
         for _ in range(self.max_tool_iters):
-            pending = {}
+            pending = []
             for i, resp in enumerate(responses):
                 _, calls = parse_tool_calls(resp)
                 if not calls:
                     continue
                 results = self._run_tool_calls(calls)
                 convo[i] = self._linearize(convo[i], resp, results)
-                pending[i] = convo[i]
+                pending.append(i)
             if not pending:
                 break
-            idx = list(pending)
-            regen = self.generate_batch(system_prompt, [pending[i] for i in idx])
-            for j, i in enumerate(idx):
+            regen = self.generate_batch(system_prompt, [convo[i] for i in pending])
+            for j, i in enumerate(pending):
                 responses[i] = regen[j]
         return responses
 
@@ -238,7 +235,7 @@ class BaseLLMActor(ABC):
             try:
                 result = tool.run(**call["args"])
                 lines.append(f"Tool {name} (call {idx}) succeeded:")
-                lines.append(f"  Result: {json.dumps(result)}")
+                lines.append(f"  Result: {result}")
             except Exception as exc:  # per-tool guard; never crash a live step
                 lines.append(f"Tool {name} (call {idx}) failed:")
                 lines.append(f"  Error: {exc}")
