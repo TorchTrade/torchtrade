@@ -29,9 +29,12 @@ python examples/llm/local/live.py
 
 Requires `ALPACA_API_KEY` and `ALPACA_SECRET_KEY` in `.env`.
 
-### Parallel Multi-Symbol Inference (`parallel.py`)
+### Parallel-Env Batched Inference (`parallel.py`)
 
-Run one LLM policy across N environments in a single batched generation pass:
+Run one LLM policy across N parallel envs in a single batched generation pass.
+This example uses one data source with different random-start windows per
+env; trading multiple symbols follows the same pattern, just with a different
+dataframe/symbol passed to each env instead:
 
 ```bash
 python examples/llm/local/parallel.py
