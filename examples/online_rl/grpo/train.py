@@ -20,7 +20,7 @@ from omegaconf import OmegaConf
 from pathlib import Path
 from torchrl._utils import compile_with_warmup
 import datasets
-from torchtrade.losses import GRPOLoss
+from torchtrade.losses import GroupRelativePGLoss
 
 OmegaConf.register_new_resolver("script_dir", lambda: str(Path(__file__).resolve().parent))
 
@@ -114,7 +114,7 @@ def main(cfg: DictConfig):  # noqa: F821
     )
 
     # Create loss module
-    loss_module = GRPOLoss(
+    loss_module = GroupRelativePGLoss(
         actor_network=actor,
         entropy_coeff=cfg.loss.entropy_coef,
     )

@@ -216,4 +216,6 @@ outputs/
 CLAUDE.md
 .claude
 data_preprocessing.ipynb
+LLM-TorchRL-Feature-Integration.md
+docs/superpowers/
 
