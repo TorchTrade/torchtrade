@@ -949,10 +949,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#grpoloss" class="md-nav__link">
+  <a href="#grouprelativepgloss" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GRPOLoss
+        GroupRelativePGLoss
       
     </span>
   </a>
@@ -1275,10 +1275,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#grpoloss" class="md-nav__link">
+  <a href="#grouprelativepgloss" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GRPOLoss
+        GroupRelativePGLoss
       
     </span>
   </a>
@@ -1404,7 +1404,7 @@
 <td>Delight-gated updates — no importance sampling needed</td>
 </tr>
 <tr>
-<td><a href="https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/grpo_loss.py"><strong>GRPOLoss</strong></a></td>
+<td><a href="https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/group_relative_pg_loss.py"><strong>GroupRelativePGLoss</strong></a></td>
 <td>Policy Gradient</td>
 <td>One-step RL with SLTP environments</td>
 </tr>
@@ -1530,8 +1530,10 @@
 </ul>
 <p><strong>Example:</strong> See <a href="https://github.com/TorchTrade/torchtrade/blob/main/examples/losses/dg_mnist.py"><code>examples/losses/dg_mnist.py</code></a> for a comparison of CE, REINFORCE, and DG on MNIST framed as a bandit problem.</p>
 <hr />
-<h2 id="grpoloss">GRPOLoss<a class="headerlink" href="#grpoloss" title="Permanent link">&para;</a></h2>
-<p>Group Relative Policy Optimization for one-step RL. Designed for <code>OneStepTradingEnv</code> where episodes are single decisions with SL/TP bracket orders. Normalizes advantages within each batch: <code>advantage = (reward - mean) / std</code>.</p>
+<h2 id="grouprelativepgloss">GroupRelativePGLoss<a class="headerlink" href="#grouprelativepgloss" title="Permanent link">&para;</a></h2>
+<p>Group Relative Policy Optimization for one-step RL with <strong>numeric discrete-action agents</strong> (e.g. a CNN+MLP categorical policy over <code>action_levels</code>) — not for LLM/text-generating actors. Designed for <code>OneStepTradingEnv</code> where episodes are single decisions with SL/TP bracket orders.</p>
+<p>Normalizes advantage within each batch: <code>advantage = (reward - mean) / std</code>, computed across dim 0 of the incoming tensordict. This is only correct <em>group-relative</em> normalization because dim 0 is engineered to be a genuine "K samples of the same state" axis. In <code>examples/online_rl/grpo/utils.py</code>'s <code>make_environment</code>, every parallel copy of <code>OneStepTradingEnv</code> is constructed with the same config <code>seed</code>, so each builds an identical internal RNG and samples the same episode-start state; because the env is one-step (every step returns <code>done=True</code>), all copies reset in lockstep. So at each collected time-step, all parallel copies share the same underlying market state, differing only in the policy's sampled action. Breaking that setup — a single env (whose size-1 group axis makes the advantage NaN), differing config seeds across copies, or flattening the batch before the loss runs — silently degrades training to a zero-signal or NaN baseline with no error raised.</p>
+<p><strong>Not related to <code>torchrl.objectives.llm.GRPOLoss</code>.</strong> TorchRL's own LLM-specific <code>GRPOLoss</code> requires an <code>LLMWrapperBase</code> actor (it dispatches through LLM-only methods and reads a token-level <code>dist.mask</code>) and expects advantage precomputed via <code>MCAdvantage</code> (which itself requires a string prompt). Neither applies here — passing torchtrade's numeric actor to <code>torchrl.objectives.llm.GRPOLoss</code> raises <code>RuntimeError: TensorDictSequential does not support keyword arguments other than 'tensordict_out' or in_keys...</code>. Use <code>GroupRelativePGLoss</code> for numeric trading agents; only reach for <code>torchrl.objectives.llm.GRPOLoss</code> if training an LLM's own weights via RL.</p>
 <table>
 <thead>
 <tr>
@@ -1558,9 +1560,9 @@
 </tr>
 </tbody>
 </table>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.losses</span><span class="w"> </span><span class="kn">import</span> <span class="n">GRPOLoss</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.losses</span><span class="w"> </span><span class="kn">import</span> <span class="n">GroupRelativePGLoss</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">loss_module</span> <span class="o">=</span> <span class="n">GRPOLoss</span><span class="p">(</span><span class="n">actor_network</span><span class="o">=</span><span class="n">actor</span><span class="p">,</span> <span class="n">entropy_coeff</span><span class="o">=</span><span class="mf">0.01</span><span class="p">)</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">loss_module</span> <span class="o">=</span> <span class="n">GroupRelativePGLoss</span><span class="p">(</span><span class="n">actor_network</span><span class="o">=</span><span class="n">actor</span><span class="p">,</span> <span class="n">entropy_coeff</span><span class="o">=</span><span class="mf">0.01</span><span class="p">)</span>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
 </span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">collector</span><span class="p">:</span>
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">loss_td</span> <span class="o">=</span> <span class="n">loss_module</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
