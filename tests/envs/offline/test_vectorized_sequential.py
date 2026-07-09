@@ -14,7 +14,7 @@ import pytest
 import torch
 
 from torchrl.envs.utils import check_env_specs
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
 
 from torchtrade.envs.offline import (
     VectorizedSequentialTradingEnv,
@@ -387,7 +387,7 @@ class TestVecEnvCollector:
         env = VectorizedSequentialTradingEnv(sample_ohlcv_df, config, simple_feature_fn)
 
         total_frames = 200
-        collector = SyncDataCollector(
+        collector = Collector(
             env,
             policy=None,
             frames_per_batch=80,
