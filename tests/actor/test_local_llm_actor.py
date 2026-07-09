@@ -494,3 +494,55 @@ def test_run_tool_calls_success_and_errors(tool_actor):
 def test_no_tools_actor_prompt_unchanged(actor):
     # actor fixture has no tools -> system prompt has no tool section
     assert "<tool name=" not in actor._resolve_system_prompt()
+
+
+# ============================================================================
+# Multi-turn tool loop (C1, Task 4)
+# ============================================================================
+
+
+def test_tool_loop_call_then_answer(tool_actor, sample_td):
+    """A tool call is executed, its result injected, then the model answers."""
+    calls = [
+        ['<tool name="echo">{"text": "news"}</tool>'],   # round 1: tool call
+        ["<answer>2</answer>"],                            # round 2: final answer
+    ]
+    with patch.object(tool_actor, "generate_batch", side_effect=calls) as gen:
+        result = tool_actor.forward(sample_td)
+    assert result["action"].item() == 2
+    assert gen.call_count == 2                            # one extra generation for the tool round
+
+
+def test_tool_loop_batching_only_regenerates_pending(tool_actor):
+    """A1 preservation: only the tool-calling conversation is re-generated."""
+    td = TensorDict({
+        "market_data_1Hour_48": torch.randn(3, 48, 5),
+        "account_state": torch.zeros(3, 6),
+    }, batch_size=[3])
+    round1 = ['<answer>0</answer>', '<tool name="echo">{}</tool>', '<answer>1</answer>']
+    round2 = ['<answer>2</answer>']                       # only the 1 pending conv
+    seen = []
+    def fake_gen(system, prompts):
+        seen.append(list(prompts))
+        return round1 if len(seen) == 1 else round2
+    with patch.object(tool_actor, "generate_batch", side_effect=fake_gen):
+        result = tool_actor.forward(td)
+    assert len(seen) == 2
+    assert len(seen[1]) == 1                              # 2nd call regenerates ONLY the pending one
+    assert result["action"].tolist() == [0, 2, 1]
+
+
+def test_tool_loop_max_iters_defaults_to_zero(tool_actor, sample_td):
+    """Runaway tool caller hits the cap and safely defaults to action 0."""
+    with patch.object(tool_actor, "generate_batch",
+                      return_value=['<tool name="echo">{}</tool>']) as gen:
+        result = tool_actor.forward(sample_td)
+    assert result["action"].item() == 0                  # never emitted <answer>
+    assert gen.call_count == 1 + tool_actor.max_tool_iters
+
+
+def test_tool_loop_tool_failure_does_not_crash(tool_actor, sample_td):
+    calls = [['<tool name="boom">{}</tool>'], ["<answer>1</answer>"]]
+    with patch.object(tool_actor, "generate_batch", side_effect=calls):
+        result = tool_actor.forward(sample_td)            # must not raise
+    assert result["action"].item() == 1

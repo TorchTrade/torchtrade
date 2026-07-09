@@ -188,14 +188,32 @@ class BaseLLMActor(ABC):
     def _resolve_tools(
         self, system_prompt: str, user_prompts: List[str], responses: List[str]
     ) -> List[str]:
-        """Extension point for tool-augmented multi-turn resolution.
+        """Run the multi-turn tool loop when tools are configured.
 
-        Default: no tools — returns responses unchanged (single-shot, batched).
-        A tool-augmented subclass overrides this to detect <tool>...</tool> in a
-        response, execute the tool, append the result to the conversation, and
-        re-generate the conversations that made a tool call — returning the final
-        responses.
+        Default (no tools): returns responses unchanged. Otherwise, each round
+        finds responses containing a <tool> call, executes the tools, injects a
+        <tool_results> block, and RE-GENERATES only those conversations in one
+        batched call — preserving the single-batched-call throughput for the
+        conversations that answered directly.
         """
+        if not self.tools:
+            return responses
+        convo = dict(enumerate(user_prompts))
+        for _ in range(self.max_tool_iters):
+            pending = {}
+            for i, resp in enumerate(responses):
+                _, calls = parse_tool_calls(resp)
+                if not calls:
+                    continue
+                results = self._run_tool_calls(calls)
+                convo[i] = self._linearize(convo[i], resp, results)
+                pending[i] = convo[i]
+            if not pending:
+                break
+            idx = list(pending)
+            regen = self.generate_batch(system_prompt, [pending[i] for i in idx])
+            for j, i in enumerate(idx):
+                responses[i] = regen[j]
         return responses
 
     def _build_tools_prompt(self) -> str:
