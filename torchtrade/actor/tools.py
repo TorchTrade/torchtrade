@@ -64,5 +64,8 @@ class GoogleNewsTool(Tool):
             return f"No recent news for '{q}'."
         lines = [f"Top news for '{q}':"]
         for i, e in enumerate(entries[: self.top_n], 1):
-            lines.append(f"{i}. {e['title']} — {e['source']} · {e['published']}".rstrip(" ·"))
+            title = e.get("title", "")
+            source = e.get("source", "")
+            published = e.get("published", "")
+            lines.append(f"{i}. {title} — {source} · {published}".rstrip(" ·"))
         return "\n".join(lines)
