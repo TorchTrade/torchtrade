@@ -57,14 +57,19 @@ def _median_stats(fn, prompts, trials, warmup):
     }
 
 
-def engine_ours_current(model, max_tokens, temperature):
-    """N sequential single-prompt generate() calls (today's behavior at N>1)."""
+def _build_local_actor(model, max_tokens, temperature):
+    """Construct the LocalLLMActor shared by the ours-current/ours-batched engines."""
     from torchtrade.actor import LocalLLMActor
-    actor = LocalLLMActor(
+    return LocalLLMActor(
         model=model, backend="vllm", max_tokens=max_tokens, temperature=temperature,
         market_data_keys=["market_data_1Hour_48"], account_state_labels=["exposure_pct"],
         action_levels=[-1.0, 0.0, 1.0],
     )
+
+
+def engine_ours_current(model, max_tokens, temperature):
+    """N sequential single-prompt generate() calls (today's behavior at N>1)."""
+    actor = _build_local_actor(model, max_tokens, temperature)
     def run(prompts):
         return [actor.generate(SYSTEM_PROMPT, p) for p in prompts]
     return run, actor
@@ -72,12 +77,7 @@ def engine_ours_current(model, max_tokens, temperature):
 
 def engine_ours_batched(model, max_tokens, temperature):
     """One native-vLLM batched generate_batch call."""
-    from torchtrade.actor import LocalLLMActor
-    actor = LocalLLMActor(
-        model=model, backend="vllm", max_tokens=max_tokens, temperature=temperature,
-        market_data_keys=["market_data_1Hour_48"], account_state_labels=["exposure_pct"],
-        action_levels=[-1.0, 0.0, 1.0],
-    )
+    actor = _build_local_actor(model, max_tokens, temperature)
     def run(prompts):
         return actor.generate_batch(SYSTEM_PROMPT, prompts)
     return run, actor
@@ -99,10 +99,11 @@ def engine_torchrl_sync(model, max_tokens, temperature):
     import vllm
     from torchrl.modules.llm import vLLMWrapper
     llm = vllm.LLM(model=model)
+    generate_kwargs = {"max_new_tokens": max_tokens, "temperature": temperature,
+                       "stop": ["</answer>"]}
     wrapper = vLLMWrapper(
         llm, input_mode="text", generate=True, return_log_probs=False,
-        generate_kwargs={"max_new_tokens": max_tokens, "temperature": temperature,
-                         "stop": ["</answer>"]},
+        generate_kwargs=generate_kwargs,
     )
     return _wrapped_engine_run(wrapper), llm
 
@@ -115,10 +116,11 @@ def engine_torchrl_async(model, max_tokens, temperature, num_replicas):
     if not ray.is_initialized():
         ray.init()
     engine = AsyncVLLM.from_pretrained(model, num_devices=1, num_replicas=num_replicas)
+    generate_kwargs = {"max_new_tokens": max_tokens, "temperature": temperature,
+                       "stop": ["</answer>"]}
     wrapper = vLLMWrapper(
         engine, input_mode="text", generate=True, return_log_probs=False,
-        generate_kwargs={"max_new_tokens": max_tokens, "temperature": temperature,
-                         "stop": ["</answer>"]},
+        generate_kwargs=generate_kwargs,
     )
     return _wrapped_engine_run(wrapper), engine
 

@@ -408,11 +408,20 @@ def test_vllm_generate_batch_returns_one_per_prompt(actor):
 
 
 def test_batched_forward_end_to_end_vllm(actor):
-    """A [N]-batched td flows through forward() -> N actions via one vllm call."""
+    """A [N]-batched td -> N DISTINCT actions via one vllm call (per-element alignment)."""
+    def gen(prompts, sampling_params):
+        reqs = []
+        for i, _ in enumerate(prompts):
+            out = Mock(); out.text = f"<think>x</think><answer>{i % 3}</answer>"
+            req = Mock(); req.outputs = [out]
+            reqs.append(req)
+        return reqs
     td = TensorDict({
         "market_data_1Hour_48": torch.randn(3, 48, 5),
         "account_state": torch.randn(3, 6),
     }, batch_size=[3])
-    result = actor.forward(td)
+    with patch.object(actor.llm, "generate", side_effect=gen):
+        result = actor.forward(td)
     assert result["action"].shape == torch.Size([3])
-    assert result["action"].tolist() == [1, 1, 1]
+    assert result["action"].tolist() == [0, 1, 2]   # distinct -> proves per-element mapping
+    assert len(result["thinking"]) == 3

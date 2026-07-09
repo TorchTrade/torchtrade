@@ -83,6 +83,16 @@ def test_batched_forward_builds_n_prompts_and_actions(n):
     # each sub-prompt was built independently (contains the account-state header)
     for p in actor.last_user_prompts:
         assert "exposure_pct" in p
+    # batched non-tensor writes (thinking/user_prompt/system_prompt) are N-length
+    # NonTensorStacks; indexing an element returns the underlying string directly.
+    expected_answers = [0, 1, 2][:n]
+    assert len(td["thinking"]) == n
+    for i, expected in enumerate(expected_answers):
+        assert f"<answer>{expected}</answer>" in td["thinking"][i]
+    assert len(td["user_prompt"]) == n
+    for i in range(n):
+        assert "exposure_pct" in td["user_prompt"][i]
+    assert len(td["system_prompt"]) == n
 
 
 def test_batched_malformed_response_falls_back_per_element():
@@ -96,6 +106,17 @@ def test_batched_malformed_response_falls_back_per_element():
                          account_state_labels=ACCOUNT_LABELS, action_levels=ACTION_LEVELS)
     td = actor.forward(_batched_td(3))
     assert td["action"].tolist() == [1, 0, 2]
+
+
+def test_multidim_batch_raises():
+    """forward() rejects batch_dims > 1 (only [] or [N] supported)."""
+    actor = _actor(answers=[0])
+    td = TensorDict({
+        MARKET_KEY: torch.randn(2, 3, 48, 5),
+        "account_state": torch.randn(2, 3, 6),
+    }, batch_size=[2, 3])
+    with pytest.raises(ValueError, match="batch_dims 0 or 1"):
+        actor.forward(td)
 
 
 def test_generate_convenience_wraps_generate_batch():
