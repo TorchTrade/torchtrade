@@ -162,25 +162,95 @@ the longest 128-token reasoning trace):
 - **Prefill/decode split is `n/a`** everywhere — vLLM 0.13/0.14's v1 engine does not populate
   per-request `RequestMetrics` timestamps. Retry with `VLLM_USE_V1=0` to recover it.
 
+## TorchRL-native head-to-head (measured on DGX Spark)
+
+The earlier "could not run" for the native legs was our repo's `torchrl==0.10.1` (hard-imports
+`vllm.worker.worker.Worker`, gone in vllm>=0.13). Inside the Spark container we installed
+**torchrl 0.13.2** (`pip install --no-deps torchrl tensordict pyvers orjson`), whose
+`vLLMWrapper` DOES load against vllm 0.14, and benchmarked it **apples-to-apples**: same
+chat template, same `SamplingParams` (temperature, max_tokens, `stop=["</answer>"]`). A greedy
+side-by-side confirmed both paths generate identical content (the wrapper only appends the
+`<|im_end|>` EOS token in its re-decode, which we strip before counting). Script:
+`benchmarks/bench_torchrl_native.py`.
+
+**`torchrl-sync` (`vLLMWrapper` over `vllm.LLM`) is ~25–30% slower than our direct batched
+path** — clean at 0.5B (trivial 1-token output → pure speed, no length confound):
+
+| N | ours-batched (dec/s) | torchrl-sync (dec/s) | torchrl overhead |
+|---|----------------------|----------------------|------------------|
+| 16 | 632 | 433 | −31% |
+| 32 | 1008 | 782 | −22% |
+| 64 | 1372 | 1025 | −25% |
+| 128 | 1767 | 1254 | −29% |
+
+Both wrap the **same vLLM engine**, so this gap is pure wrapper cost (TensorDict I/O + token
+re-decode). At 3B/7B the two track within the (large) sampling-length variance — `tokens/s`
+is *not* a reliable head-to-head there because temperature=0.7 makes the two sample
+different-length reasoning; `decisions/s` at 0.5B is the unconfounded comparison. **Takeaway:
+TorchRL-native is not faster for inference — it is measurably slower.**
+
+**`torchrl-async` (`AsyncVLLM`, the RL-training / multi-replica path) does not load** on this
+stack: `ImportError: cannot import name 'WeightTransferConfig' from 'vllm.config'`
+(torchrl 0.13.2's async backend vs vllm 0.14). So the one capability that would justify
+adopting native — async generation + in-place weight-sync for on-policy RL — could not even be
+measured, and is tightly coupled to a specific torchrl↔vllm pairing.
+
+### Capability matrix
+
+| Capability | TorchTrade batched actor (this PR) | TorchRL-native |
+|---|---|---|
+| Batched inference throughput | ✅ native vLLM, fastest measured | ✅ same vLLM, **~25–30% slower** |
+| Extra dependencies | **none** | torchrl 0.11+ (backlog E1) + `ray` |
+| Native token log-probs (for RL) | ❌ | ✅ (`LogProbs` tensorclass) |
+| `LLMCollector` / `GRPOLoss` / replay-buffer integration | ❌ | ✅ (the real draw) |
+| In-place weight-sync for RL rollout loops | ❌ (full engine reload, ~20–30 s) | ⚠️ in principle — **blocked on vllm 0.14 here** |
+| Multi-GPU serving replicas | ❌ | ✅ (multi-GPU; not testable on single-GPU GB10) |
+
+See `benchmarks/plots/` for the rendered figures (batching-win bar + throughput-scaling per model).
+
 ## What do we actually need from TorchRL natively? (recommendation)
 
-Backed by the measurements above:
+Now backed by a measured head-to-head, not conjecture:
 
-1. **Keep our own batched actor — it is the win, today, with no extra dependency.**
-   `ours-batched` delivers up to ~9× throughput via native vLLM continuous batching and needs
-   no Ray and no torchrl LLM stack. This is the change to ship now.
-2. **Do NOT adopt torchrl's native `vLLMWrapper`/`AsyncVLLM` on the current stack — it does not
-   even import.** torchrl 0.10.1's vLLM integration is pinned (by a hard `vllm.worker.worker`
-   import) to an older vLLM than the one that pairs with our `torch 2.9.0`. Using the native path
-   requires first upgrading to **torchrl 0.11+** (backlog item **E1** — which we already deferred
-   because 0.11 changed `torchrl.collectors.SyncDataCollector`). So E1 is a hard prerequisite for
-   any native-vLLM adoption, and this benchmark could not measure whether native would out-perform
-   our own batched path until that upgrade lands.
-3. **The `AsyncVLLM`/Ray path's value remains future multi-replica scaling + weight-sync during RL
-   training** (backlog B1 / RL-trainable LLM), not single-symbol sequential inference — and it is
-   gated behind E1 as well. Revisit only when that training use case is concrete.
+1. **Ship our batched actor (this PR) — it is the throughput win, today, with no new dependency.**
+   Native vLLM continuous batching, up to ~27× (0.5B) / ~30× tokens/s (7B) over the sequential
+   path. Nothing to adopt from TorchRL to get it.
+2. **Do NOT adopt TorchRL-native for inference speed — it is measurably *slower*.** `vLLMWrapper`
+   wraps the same vLLM engine and adds ~25–30% overhead (TensorDict I/O + token re-decode), and it
+   requires the `torchrl 0.11+` upgrade (backlog **E1**) plus `ray`. There is no throughput reason
+   to take that on.
+3. **TorchRL-native's only real draw is RL-training integration** — native token log-probs,
+   `LLMCollector`/`GRPOLoss`/replay-buffer plumbing, and `AsyncVLLM` in-place weight-sync for
+   on-policy rollout loops. That is the path to *training* an LLM trading policy (backlog **B1**),
+   not serving one. But it is doubly gated: behind E1, **and** behind fragile torchrl↔vllm version
+   coupling — the `AsyncVLLM` path did not even import against vllm 0.14 here
+   (`WeightTransferConfig` ImportError).
 
-**Bottom line:** the batched-actor improvement stands on its own (measured ~9× at N=32). Native
-TorchRL vLLM integration is not adoptable without the torchrl 0.11 upgrade (E1); re-run this
-benchmark's `torchrl-sync`/`torchrl-async` legs after E1 to decide whether native beats our own
-batched path.
+**Bottom line / the statement for the PR:** this PR delivers the inference win outright, with zero
+new dependencies. Adopting TorchRL-native buys us *nothing* for inference (it's slower) — its value
+is exclusively for a *future* RL-trained LLM policy, and even that is not turnkey (needs E1 + a
+working torchrl+vllm pin). Recommendation: **merge the batched actor now; defer TorchRL-native
+until we actually build the RL-training loop (B1), and treat getting a working `AsyncVLLM`+vllm
+combination as its own spike.**
+
+---
+
+## For the announcement (X post draft)
+
+> ⚡ New in TorchTrade: **batched LLM inference** for the trading actor.
+>
+> One vLLM call decides for N symbols at once instead of N sequential calls. On an NVIDIA DGX
+> Spark (GB10): **up to 27× throughput** (Qwen2.5-0.5B) and **~30× tokens/sec** on a 7B model —
+> because a batch of N decisions completes in ~the time of a single one. Run more symbols live,
+> or backtest an LLM policy far faster, on the same GPU. No new dependencies.
+>
+> We also benchmarked TorchRL's native vLLM path head-to-head (apples-to-apples, same prompts &
+> sampling): it wraps the same engine and runs ~25–30% slower. Its value isn't speed — it's the
+> plumbing to *train* the LLM policy with RL (log-probs, collectors, weight-sync). That's the next
+> chapter.
+>
+> [attach `benchmarks/plots/fig_batching_win_tokens_per_s.png` + `fig_scaling_decisions_per_s.png`]
+
+Plots (`benchmarks/plots/`): `fig_batching_win_tokens_per_s.png` (hero bar), plus
+`fig_scaling_{tokens,decisions}_per_s.png` (throughput vs batch size per model). Regenerate with
+`python benchmarks/plot_bench.py benchmarks/data/spark_combined.csv --out benchmarks/plots`.
