@@ -1,10 +1,11 @@
 """Base LLM Actor with environment-driven prompt construction and action extraction."""
 import logging
-import re
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 import torch
+
+from torchtrade.actor.parsers import extract_action
 
 if TYPE_CHECKING:
     from tensordict import TensorDict
@@ -79,9 +80,6 @@ class BaseLLMActor(ABC):
             if action_descriptions is not None
             else self._build_action_descriptions()
         )
-
-        # Pre-compile regex
-        self._answer_pattern = re.compile(r"<answer>\s*(\d+)\s*</answer>", re.IGNORECASE | re.DOTALL)
 
     def _build_action_descriptions(self) -> List[str]:
         """Build human-readable descriptions for each action index."""
@@ -159,7 +157,9 @@ class BaseLLMActor(ABC):
         responses = self.generate_batch(system_prompt, user_prompts)
         self._debug("RESPONSES", "\n---\n".join(responses))
 
-        actions = [self._extract_action(r) for r in responses]
+        responses = self._resolve_tools(system_prompt, user_prompts, responses)
+
+        actions = [extract_action(r, len(self.action_levels)) for r in responses]
 
         if batched:
             tensordict.set("action", torch.tensor(actions, dtype=torch.long))
@@ -173,6 +173,16 @@ class BaseLLMActor(ABC):
             tensordict.set("user_prompt", user_prompts[0])
 
         return tensordict
+
+    def _resolve_tools(self, system_prompt, user_prompts, responses):
+        """Extension point for tool-augmented multi-turn resolution.
+
+        Default: no tools — returns responses unchanged (single-shot, batched).
+        Group C overrides this to detect <tool>...</tool> in a response, execute
+        the tool, append the result to the conversation, and re-generate the
+        conversations that made a tool call — returning the final responses.
+        """
+        return responses
 
     def _debug(self, label: str, content: str) -> None:
         if self.debug:
@@ -246,18 +256,3 @@ class BaseLLMActor(ABC):
             out += "\n"
 
         return out
-
-    # --- Action extraction ---
-
-    def _extract_action(self, response: str) -> int:
-        """Extract action index from <answer>N</answer> tag."""
-        match = self._answer_pattern.search(response)
-        if match:
-            idx = int(match.group(1))
-            if 0 <= idx < len(self.action_levels):
-                return idx
-            logger.warning("Action %d out of range [0, %d); defaulting to 0", idx, len(self.action_levels))
-            return 0
-
-        logger.warning("No <answer> tag found in response; defaulting to action 0")
-        return 0

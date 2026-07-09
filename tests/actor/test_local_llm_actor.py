@@ -79,30 +79,6 @@ def sample_td():
 # ============================================================================
 
 
-@pytest.mark.parametrize("response,expected_idx", [
-    ("<think>go long</think><answer>2</answer>", 2),
-    ("<answer>0</answer>", 0),
-    ("<ANSWER> 1 </ANSWER>", 1),  # case-insensitive, whitespace
-    ("<answer>99</answer>", 0),   # out of range → default 0
-    ("no tags here", 0),          # missing tag → default 0
-], ids=["valid-long", "valid-short", "case-whitespace", "out-of-range", "no-tag"])
-def test_extract_action(actor, response, expected_idx):
-    """Action extraction maps <answer>N</answer> to correct index, with safe fallbacks."""
-    assert actor._extract_action(response) == expected_idx
-
-
-@pytest.mark.parametrize("response,expected_msg_fragment", [
-    ("<answer>99</answer>", "out of range"),
-    ("no tag", "No <answer> tag"),
-], ids=["out-of-range", "no-tag"])
-def test_extract_action_warns_unconditionally(actor, caplog, response, expected_msg_fragment):
-    """Warnings on bad responses are emitted regardless of debug flag."""
-    assert actor.debug is False
-    with caplog.at_level("WARNING", logger="torchtrade.actor.base_llm_actor"):
-        actor._extract_action(response)
-    assert any(expected_msg_fragment in r.message for r in caplog.records)
-
-
 @pytest.mark.parametrize("bad_shape", [
     (48, 4),       # 2D with wrong feature count
     (2, 48, 5),    # 3D with leading dim != 1 (squeeze(0) is a no-op)

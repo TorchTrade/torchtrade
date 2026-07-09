@@ -125,6 +125,39 @@ existing offline/live scripts require no changes. `generate_batch` is the
 extension point for adding batched generation to new backends. See
 `examples/llm/local/parallel.py` for a full example.
 
+### Action Extraction
+
+Both LLM actors parse the model's chosen action from a `<answer>N</answer>` tag.
+That logic lives in one reusable pure function:
+
+```python
+from torchtrade.actor.parsers import extract_action
+
+idx = extract_action("<think>...</think><answer>2</answer>", num_actions=3)  # -> 2
+```
+
+It returns the integer `N` when `0 <= N < num_actions`, and falls back to action
+`0` (logging a warning) when the tag is missing or out of range — a trading agent
+must always emit a valid action.
+
+### Extending: the tool-use seam
+
+`BaseLLMActor.forward()` calls a `_resolve_tools(system_prompt, user_prompts,
+responses)` hook between generation and action extraction. The default is a no-op
+(returns `responses` unchanged), so standard single-shot actors are unaffected.
+To add tool use, override it:
+
+```python
+class ToolAugmentedActor(LocalLLMActor):
+    def _resolve_tools(self, system_prompt, user_prompts, responses):
+        # detect <tool>...</tool> in each response, execute the tool, append the
+        # result to the conversation, and re-generate the ones that called a tool
+        return self._run_tool_loop(system_prompt, user_prompts, responses)
+```
+
+The multi-turn tool-execution loop itself (parsing `<tool>` calls, dispatching to
+broker/data APIs, re-prompting) ships with the upcoming tool-use feature.
+
 ---
 
 ## See Also
