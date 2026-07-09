@@ -56,9 +56,6 @@ llm = [
 chronos = [
     "chronos-forecasting",
 ]
-bench = [
-    "ray>=2.0",
-]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

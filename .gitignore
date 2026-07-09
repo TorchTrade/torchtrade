@@ -219,3 +219,13 @@ data_preprocessing.ipynb
 LLM-TorchRL-Feature-Integration.md
 docs/superpowers/
 
+# LLM-actor benchmark investigation artifacts — kept local, never in the repo
+benchmarks/data/
+benchmarks/plots/
+benchmarks/bench_llm_actor.py
+benchmarks/bench_vllm_standalone.py
+benchmarks/bench_torchrl_native.py
+benchmarks/plot_bench.py
+benchmarks/llm_actor_comparison.md
+tests/benchmarks/
+
