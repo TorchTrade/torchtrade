@@ -159,7 +159,7 @@ class BaseLLMActor(ABC):
 
         responses = self._resolve_tools(system_prompt, user_prompts, responses)
 
-        actions = [extract_action(r, len(self.action_levels)) for r in responses]
+        actions = [extract_action(r, num_actions=len(self.action_levels)) for r in responses]
 
         if batched:
             tensordict.set("action", torch.tensor(actions, dtype=torch.long))

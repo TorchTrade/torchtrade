@@ -125,6 +125,14 @@ def test_forward_produces_required_keys(actor, sample_td):
     assert "exposure_pct" in result["user_prompt"]
 
 
+def test_forward_clamps_out_of_range_action(actor, sample_td):
+    """Actor passes num_actions=len(action_levels) to the parser, so an
+    out-of-range model answer clamps to 0 — pins the actor->parser wiring."""
+    with patch.object(actor, "generate_batch", return_value=["<answer>9</answer>"]):
+        result = actor.forward(sample_td)
+    assert result["action"].item() == 0
+
+
 def test_system_prompt_reflects_action_levels(actor):
     """System prompt describes actions from action_levels, not hardcoded buy/sell/hold."""
     prompt = actor._build_system_prompt()
