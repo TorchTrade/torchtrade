@@ -134,10 +134,14 @@ def test_forward_clamps_out_of_range_action(actor, sample_td):
     assert result["action"].item() == 0
 
 
-def test_vllm_sampling_includes_stop_str_in_output():
-    """Regression: vLLM defaults include_stop_str_in_output=False, which strips the
-    '</answer>' stop string from output — but the parser regex requires the closing
-    tag, so without this flag every live response fails to parse and defaults to 0."""
+def test_vllm_stop_includes_tool_tag():
+    """The tool loop needs generation to halt at </tool> as well as </answer>.
+
+    Also pins include_stop_str_in_output=True: vLLM defaults it to False, which
+    strips the stop string from the returned text — but the action/tool parsers'
+    regexes require the closing tag, so without this flag every live response
+    fails to parse and silently defaults to action 0.
+    """
     captured = {}
 
     class CapturingSamplingParams:
@@ -148,14 +152,29 @@ def test_vllm_sampling_includes_stop_str_in_output():
 
     from torchtrade.actor import LocalLLMActor
     LocalLLMActor(
-        model="test-model",
-        backend="vllm",
+        model="test-model", backend="vllm",
         market_data_keys=MARKET_DATA_KEYS,
         account_state_labels=ACCOUNT_STATE_LABELS,
         action_levels=ACTION_LEVELS_FUTURES,
     )
-    assert captured["include_stop_str_in_output"] is True
+    assert "</tool>" in captured["stop"]
     assert "</answer>" in captured["stop"]
+    assert captured["include_stop_str_in_output"] is True
+
+
+def test_tools_with_transformers_backend_raises():
+    """Tool use requires vLLM's </tool> stop; the transformers backend can't halt
+    there, so configuring tools with it must fail loud rather than degrade silently."""
+    from torchtrade.actor import LocalLLMActor
+    from torchtrade.actor.tools import GoogleNewsTool
+    with pytest.raises(ValueError, match="Tool use requires backend='vllm'"):
+        LocalLLMActor(
+            model="test-model", backend="transformers",
+            market_data_keys=MARKET_DATA_KEYS,
+            account_state_labels=ACCOUNT_STATE_LABELS,
+            action_levels=ACTION_LEVELS_FUTURES,
+            tools=[GoogleNewsTool(symbol="BTC/USD")],
+        )
 
 
 def test_system_prompt_reflects_action_levels(actor):

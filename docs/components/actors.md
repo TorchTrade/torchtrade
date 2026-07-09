@@ -140,23 +140,32 @@ It returns the integer `N` when `0 <= N < num_actions`, and falls back to action
 `0` (logging a warning) when the tag is missing or out of range — a trading agent
 must always emit a valid action.
 
-### Extending: the tool-use seam
+### Tool use
 
-`BaseLLMActor.forward()` calls a `_resolve_tools(system_prompt, user_prompts,
-responses)` hook between generation and action extraction. The default is a no-op
-(returns `responses` unchanged), so standard single-shot actors are unaffected.
-To add tool use, override it:
+Configure `tools=[...]` to let the actor call tools before deciding. Tools run
+only when configured (live path); without them the actor is single-shot as before.
 
 ```python
-class ToolAugmentedActor(LocalLLMActor):
-    def _resolve_tools(self, system_prompt, user_prompts, responses):
-        # detect <tool>...</tool> in each response, execute the tool, append the
-        # result to the conversation, and re-generate the ones that called a tool
-        return self._run_tool_loop(system_prompt, user_prompts, responses)
+from torchtrade.actor import LocalLLMActor
+from torchtrade.actor.tools import GoogleNewsTool
+
+actor = LocalLLMActor(
+    model="Qwen/Qwen2.5-0.5B-Instruct", backend="vllm",
+    market_data_keys=env.market_data_keys,
+    account_state_labels=env.account_state,
+    action_levels=env.action_levels,
+    symbol="BTC/USD",
+    tools=[GoogleNewsTool(symbol="BTC/USD")],
+    max_tool_iters=3,
+)
 ```
 
-The multi-turn tool-execution loop itself (parsing `<tool>` calls, dispatching to
-broker/data APIs, re-prompting) ships with the upcoming tool-use feature.
+The model calls a tool with `<tool name="google_news">{"query": "Bitcoin"}</tool>`
+(torchrl `XMLBlockParser` convention) and receives a `<tool_results>...</tool_results>`
+block, then continues until it emits `<answer>N</answer>`. Only conversations that
+call a tool are re-generated, so batched multi-symbol inference stays efficient.
+Tool use requires `backend="vllm"` (the transformers backend can't halt at
+`</tool>`) and the `[llm]` extra (adds `feedparser`).
 
 ---
 
