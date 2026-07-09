@@ -57,27 +57,28 @@ def _median_stats(fn, prompts, trials, warmup):
     }
 
 
-def _build_local_actor(model, max_tokens, temperature):
+def _build_local_actor(model, max_tokens, temperature, gpu_memory_utilization=0.9):
     """Construct the LocalLLMActor shared by the ours-current/ours-batched engines."""
     from torchtrade.actor import LocalLLMActor
     return LocalLLMActor(
         model=model, backend="vllm", max_tokens=max_tokens, temperature=temperature,
+        gpu_memory_utilization=gpu_memory_utilization,
         market_data_keys=["market_data_1Hour_48"], account_state_labels=["exposure_pct"],
         action_levels=[-1.0, 0.0, 1.0],
     )
 
 
-def engine_ours_current(model, max_tokens, temperature):
+def engine_ours_current(model, max_tokens, temperature, gpu_memory_utilization):
     """N sequential single-prompt generate() calls (today's behavior at N>1)."""
-    actor = _build_local_actor(model, max_tokens, temperature)
+    actor = _build_local_actor(model, max_tokens, temperature, gpu_memory_utilization)
     def run(prompts):
         return [actor.generate(SYSTEM_PROMPT, p) for p in prompts]
     return run, actor
 
 
-def engine_ours_batched(model, max_tokens, temperature):
+def engine_ours_batched(model, max_tokens, temperature, gpu_memory_utilization):
     """One native-vLLM batched generate_batch call."""
-    actor = _build_local_actor(model, max_tokens, temperature)
+    actor = _build_local_actor(model, max_tokens, temperature, gpu_memory_utilization)
     def run(prompts):
         return actor.generate_batch(SYSTEM_PROMPT, prompts)
     return run, actor
@@ -94,11 +95,11 @@ def _wrapped_engine_run(wrapper):
     return run
 
 
-def engine_torchrl_sync(model, max_tokens, temperature):
+def engine_torchrl_sync(model, max_tokens, temperature, gpu_memory_utilization):
     """vLLMWrapper over a sync vllm.LLM (text mode, no log-probs)."""
     import vllm
     from torchrl.modules.llm import vLLMWrapper
-    llm = vllm.LLM(model=model)
+    llm = vllm.LLM(model=model, gpu_memory_utilization=gpu_memory_utilization)
     generate_kwargs = {"max_new_tokens": max_tokens, "temperature": temperature,
                        "stop": ["</answer>"]}
     wrapper = vLLMWrapper(
@@ -108,7 +109,7 @@ def engine_torchrl_sync(model, max_tokens, temperature):
     return _wrapped_engine_run(wrapper), llm
 
 
-def engine_torchrl_async(model, max_tokens, temperature, num_replicas):
+def engine_torchrl_async(model, max_tokens, temperature, num_replicas, gpu_memory_utilization):
     """vLLMWrapper over an AsyncVLLM (Ray) engine. Caller guards for ray import."""
     import ray
     from torchrl.modules.llm import vLLMWrapper
@@ -135,6 +136,12 @@ def parse_args():
     p.add_argument("--max-tokens", type=int, default=128)
     p.add_argument("--temperature", type=float, default=0.7)
     p.add_argument("--num-replicas", type=int, default=2)
+    p.add_argument("--gpu-memory-utilization", type=float, default=0.9,
+                   help="Fraction of GPU memory per engine (lower it on small GPUs).")
+    p.add_argument("--engines", nargs="+", default=None,
+                   choices=["ours-current", "ours-batched", "torchrl-sync", "torchrl-async"],
+                   help="Subset of engines to run (default: all available). Run one per "
+                        "process on small GPUs to avoid sequential-load OOM.")
     return p.parse_args()
 
 
@@ -142,22 +149,30 @@ def main():
     args = parse_args()
     rows = []  # (engine, N, wall_s, decisions_per_s, tokens_per_s)
 
-    engines = [
-        ("ours-current", lambda: engine_ours_current(args.model, args.max_tokens, args.temperature)),
-        ("ours-batched", lambda: engine_ours_batched(args.model, args.max_tokens, args.temperature)),
-        ("torchrl-sync", lambda: engine_torchrl_sync(args.model, args.max_tokens, args.temperature)),
+    gmu = args.gpu_memory_utilization
+    registry = [
+        ("ours-current", lambda: engine_ours_current(args.model, args.max_tokens, args.temperature, gmu)),
+        ("ours-batched", lambda: engine_ours_batched(args.model, args.max_tokens, args.temperature, gmu)),
+        ("torchrl-sync", lambda: engine_torchrl_sync(args.model, args.max_tokens, args.temperature, gmu)),
     ]
     try:
         import ray  # noqa: F401
-        engines.append(("torchrl-async",
-                        lambda: engine_torchrl_async(args.model, args.max_tokens,
-                                                     args.temperature, args.num_replicas)))
+        registry.append(("torchrl-async",
+                         lambda: engine_torchrl_async(args.model, args.max_tokens,
+                                                      args.temperature, args.num_replicas, gmu)))
     except ImportError:
         warnings.warn("ray not installed; skipping the torchrl-async (AsyncVLLM) engine. "
                       "Install with: pip install -e '.[bench]'")
 
+    engines = [(n, b) for (n, b) in registry if args.engines is None or n in args.engines]
+
     for name, builder in engines:
-        run, handle = builder()
+        try:
+            run, handle = builder()
+        except Exception as e:  # noqa: BLE001 - skip an engine we can't construct (missing dep, version mismatch, OOM)
+            warnings.warn(f"skipping engine '{name}': failed to construct "
+                          f"({type(e).__name__}: {e})")
+            continue
         for n in args.batch_sizes:
             prompts = make_prompts(n)
             stats = _median_stats(run, prompts, args.trials, args.warmup)
