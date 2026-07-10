@@ -95,6 +95,13 @@ def save_lora_adapter(hf, adapter_dir, step):
     return LoRARequest(f"step_{step}", step + 1, path)
 
 
+def _base_load_kwargs():
+    """HF `from_pretrained` dtype kwarg. Use `torch_dtype`, NOT `dtype`: the [llm] extra floor is
+    transformers>=4.30, and `dtype` was only accepted from ~4.56 — `torch_dtype` works across the
+    whole declared range. Kept as the single source of the kwarg name so a revert can't slip in."""
+    return {"torch_dtype": torch.bfloat16}
+
+
 def build_train_policy(model_name, tokenizer, method="qlora", lora_r=16, lora_alpha=32,
                        peft_config=None, device="cuda"):
     """LoRA/QLoRA HF model wrapped as a torchrl TransformersWrapper(generate=False).
@@ -109,7 +116,7 @@ def build_train_policy(model_name, tokenizer, method="qlora", lora_r=16, lora_al
     from torchrl.modules.llm import TransformersWrapper
 
     cfg = build_peft_config(method, lora_r=lora_r, lora_alpha=lora_alpha, peft_config=peft_config)
-    load_kwargs = {"dtype": torch.bfloat16}
+    load_kwargs = _base_load_kwargs()
     if cfg["load_in_4bit"]:
         from transformers import BitsAndBytesConfig
         load_kwargs["quantization_config"] = BitsAndBytesConfig(

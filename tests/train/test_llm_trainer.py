@@ -11,6 +11,14 @@ def test_rejects_num_generations_below_two():
         LLMTrainer(df=None, config=None, num_generations=1)
 
 
+def test_base_load_kwargs_uses_transformers_compatible_dtype():
+    """Regression: transformers>=4.30 (the [llm] floor) accepts torch_dtype, not dtype (added
+    ~4.56), so build_train_policy must pass torch_dtype to from_pretrained."""
+    from torchtrade.train.models import _base_load_kwargs
+    kw = _base_load_kwargs()
+    assert "torch_dtype" in kw and "dtype" not in kw
+
+
 def test_rejects_unknown_method():
     with pytest.raises(ValueError, match="method"):
         LLMTrainer(df=None, config=None, method="bogus")

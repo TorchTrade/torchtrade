@@ -6,6 +6,8 @@ from torchtrade.train.peft_config import build_peft_config
     ("full", False, False), ("lora", True, False), ("qlora", True, True),
 ], ids=["full", "lora", "qlora"])
 def test_method_maps_to_config(method, has_lora, in_4bit):
+    if has_lora:
+        pytest.importorskip("peft")  # lora/qlora build a real LoraConfig; peft is an [llm] extra
     cfg = build_peft_config(method, lora_r=8, lora_alpha=16)
     assert cfg["load_in_4bit"] is in_4bit
     if has_lora:
