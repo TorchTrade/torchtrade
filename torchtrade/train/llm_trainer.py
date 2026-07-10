@@ -68,7 +68,7 @@ class LLMTrainer:
             user_prompt_fn=self.user_prompt_fn,
         )
 
-    def _render_group_prompts(self, score_env, pb, feature_fn):
+    def _render_group_prompts(self, score_env, pb):
         """Pick `max_steps` bars, render each bar's prompt, and repeat it K times so each
         consecutive K-block is one bar's GRPO group."""
         prompts, bar_indices = [], []
@@ -83,7 +83,6 @@ class LLMTrainer:
         return sysp, prompts, bar_indices
 
     def train(self):
-        from tensordict import TensorDict  # noqa: F401
         from transformers import AutoTokenizer
         from torchrl.data import LazyStackStorage, ReplayBuffer, SamplerWithoutReplacement
         from torchrl.objectives.llm import MCAdvantage
@@ -99,12 +98,13 @@ class LLMTrainer:
         pb = self._build_prompt_actor(score_env)
 
         tokenizer = AutoTokenizer.from_pretrained(self.model)
-        if tokenizer.pad_token == tokenizer.eos_token:
-            tokenizer.pad_token = "PAD"
+        if tokenizer.pad_token is None or tokenizer.pad_token == tokenizer.eos_token:
+            tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
         tokenizer.padding_side = "left"
 
-        sysp, prompts, bar_indices = self._render_group_prompts(score_env, pb, None)
-        env = make_trading_env(score_env, tokenizer, prompts, bar_indices, sysp, num_actions, self.K)
+        sysp, prompts, bar_indices = self._render_group_prompts(score_env, pb)
+        env = make_trading_env(score_env, tokenizer, prompts, bar_indices, sysp, num_actions,
+                               self.K, reward_fn=self.reward_fn)
 
         engine, infer = build_inference_policy(self.model, tokenizer,
                                                gpu_memory_utilization=self.gpu_memory_utilization,
@@ -128,6 +128,9 @@ class LLMTrainer:
         for step in range(self.max_steps):
             data = env.rollout(1, infer)
             rewards = data.get(("next", "reward")).flatten().tolist()
+            # MCAdvantage computes the group-relative advantage at extend() time (grouped by
+            # the shared prompt), so it is baked in before sampling; rb.sample(K) is just a
+            # minibatch draw (K here == group size only by convenience).
             rb.extend(data.reshape(-1))
             batch = rb.sample(self.K).to(device)
             loss = loss_fn(batch)

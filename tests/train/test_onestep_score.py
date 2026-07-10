@@ -110,8 +110,7 @@ def test_score_bar_index_max_valid_succeeds(sample_ohlcv_df):
     assert isinstance(result, float)
 
 
-@pytest.mark.parametrize("action", [0, 1, 2])
-def test_obs_at_matches_reset_obs(sample_ohlcv_df, action):
+def test_obs_at_matches_reset_obs(sample_ohlcv_df):
     """obs_at(bar_index) returns the same market observation a reset landing on that bar
     yields — the deterministic per-bar prompt source used by the GRPO trainer."""
     env = _make_onestep_env(sample_ohlcv_df)

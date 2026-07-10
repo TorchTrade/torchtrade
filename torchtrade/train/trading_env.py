@@ -14,21 +14,20 @@ from torchrl.data import Composite, Unbounded
 from torchrl.envs import StepCounter, Transform
 from torchrl.envs.llm import ChatEnv
 
-from torchtrade.actor.parsers import extract_action
+from torchtrade.train.reward import TradingReward
 
 
 class TradingRewardParser(Transform):
-    """Reward Transform: parse the assistant completion's <answer>N</answer> and score it
-    at its bar via `score_env.score(bar_index, action)` (the OneStepTradingEnv reward oracle).
+    """Reward Transform: parse the assistant completion's <answer>N</answer> and score it at
+    its bar via `TradingReward` (the OneStepTradingEnv.score oracle, or a custom `reward_fn`).
 
     Reads the completion from the INPUT tensordict's ("history", "full") (the last turn's
     content) — in a one-step env the completion lives there, not under "next".
     """
 
-    def __init__(self, score_env, num_actions: int):
+    def __init__(self, score_env, num_actions: int, reward_fn=None):
         super().__init__(in_keys=[("history", "full"), "bar_index"], out_keys=["reward"])
-        self.score_env = score_env
-        self.num_actions = num_actions
+        self.reward = TradingReward(score_env, num_actions, reward_fn)
 
     @staticmethod
     def _response_text(history_item) -> str:
@@ -41,10 +40,7 @@ class TradingRewardParser(Transform):
         history = tensordict.get(("history", "full"))
         bars = tensordict.get("bar_index")
         bars = bars.tolist() if hasattr(bars, "tolist") else [bars]
-        rewards = [
-            float(self.score_env.score(int(b), extract_action(self._response_text(h), num_actions=self.num_actions)))
-            for h, b in zip(list(history), bars)
-        ]
+        rewards = [self.reward(self._response_text(h), int(b)) for h, b in zip(list(history), bars)]
         next_tensordict.set("reward", torch.tensor(rewards).reshape(next_tensordict.batch_size + (1, 1)))
         return next_tensordict
 
@@ -53,7 +49,8 @@ class TradingRewardParser(Transform):
         return reward_spec
 
 
-def make_trading_env(score_env, tokenizer, prompts, bar_indices, system_prompt, num_actions, group_size):
+def make_trading_env(score_env, tokenizer, prompts, bar_indices, system_prompt, num_actions,
+                     group_size, reward_fn=None):
     """Build the trading ChatEnv: a dataloader of (prompt, bar_index) rows -> ChatEnv (history
     mode) -> StepCounter(1) -> TradingRewardParser. `group_size` prompts are consumed per batch
     to form the GRPO group (K completions of the same bar when `prompts` repeats a bar K times).
@@ -73,5 +70,5 @@ def make_trading_env(score_env, tokenizer, prompts, bar_indices, system_prompt, 
         system_prompt=system_prompt, tokenizer=tokenizer, batch_size=(group_size,),
     )
     return env.append_transform(StepCounter(max_steps=1)).append_transform(
-        TradingRewardParser(score_env, num_actions)
+        TradingRewardParser(score_env, num_actions, reward_fn)
     )
