@@ -69,6 +69,7 @@ def build_inference_policy(model_name, tokenizer, gpu_memory_utilization=0.3,
     llm_kwargs = dict(model=model_name, gpu_memory_utilization=gpu_memory_utilization,
                       enforce_eager=True, max_model_len=max_model_len)
     if enable_lora:
+        # max_lora_rank must be >= build_train_policy's lora_r, else vLLM rejects the hot-swapped adapter
         llm_kwargs.update(enable_lora=True, max_lora_rank=max_lora_rank, max_loras=1)
     engine = LLM(**llm_kwargs)
 
@@ -96,9 +97,10 @@ def save_lora_adapter(hf, adapter_dir, step):
 
 
 def _base_load_kwargs():
-    """HF `from_pretrained` dtype kwarg. Use `torch_dtype`, NOT `dtype`: the [llm] extra floor is
-    transformers>=4.30, and `dtype` was only accepted from ~4.56 — `torch_dtype` works across the
-    whole declared range. Kept as the single source of the kwarg name so a revert can't slip in."""
+    """The HF `from_pretrained` dtype kwarg — extracted so the transformers-compat choice is
+    unit-testable without GPU deps (see test_base_load_kwargs_uses_transformers_compatible_dtype).
+    Use `torch_dtype`, NOT `dtype`: `dtype` was only accepted from transformers ~4.56, while
+    `torch_dtype` works across the whole declared [llm] floor (>=4.30)."""
     return {"torch_dtype": torch.bfloat16}
 
 
@@ -107,9 +109,10 @@ def build_train_policy(model_name, tokenizer, method="qlora", lora_r=16, lora_al
     """LoRA/QLoRA HF model wrapped as a torchrl TransformersWrapper(generate=False).
 
     `input_mode="tokens"` (operate on the rollout's recorded tokens, avoiding the
-    re-render token-count mismatch) — the validated recipe. QLoRA quantizes the same
-    full-precision `model_name` to 4-bit on the fly (the vLLM rollout engine loads it bf16).
-    Both LoRA and QLoRA enable gradient checkpointing (needed at 8B depth to fit the backward).
+    re-render token-count mismatch) — the validated recipe. QLoRA loads `model_name` in
+    bitsandbytes 4-bit: a full-precision checkpoint is quantized on the fly, while a
+    pre-quantized bnb checkpoint (the default) uses its own embedded config. Both LoRA and
+    QLoRA enable gradient checkpointing (needed at 8B depth to fit the backward).
     """
     from transformers import AutoModelForCausalLM
     from peft import get_peft_model, prepare_model_for_kbit_training

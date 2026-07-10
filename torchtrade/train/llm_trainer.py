@@ -125,8 +125,8 @@ class LLMTrainer:
         os.environ.setdefault("VLLM_ALLOW_INSECURE_SERIALIZATION", "1")
         device = "cuda"
 
-        # reward oracle (never draws random bars during scoring — score()/obs_at seek)
         os.makedirs(self.output_dir, exist_ok=True)
+        # reward oracle (never draws random bars during scoring — score()/obs_at seek)
         score_env = OneStepTradingEnv(df=self.df, config=self.config,
                                       feature_preprocessing_fn=self.feature_preprocessing_fn)
         num_actions = score_env.action_spec.n
@@ -155,7 +155,6 @@ class LLMTrainer:
         hf, train_policy = build_train_policy(self.model, tokenizer, method=self.method, device=device)
 
         loss_fn = resolve_loss(self.loss, train_policy, self.loss_kwargs)
-        loss_fn.set_keys(sample_log_prob=("log_probs", "full"))
         # Buffer holds exactly one group (K completions of one bar), matching torchrl's canonical
         # grpo-sync recipe: sample(K) then returns the just-collected group with no cross-round
         # mixing — a larger buffer + SamplerWithoutReplacement would blend up to several prior
