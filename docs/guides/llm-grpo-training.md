@@ -15,9 +15,10 @@ adapter = LLMTrainer(
     df=df, config=config,
     feature_preprocessing_fn=my_features,  # what features to COMPUTE (features_* columns)
     feature_keys=["features_return", "close"],  # which of them the LLM SEES in the prompt
-    model="Qwen/Qwen2.5-0.5B-Instruct",
+    model="unsloth/Qwen3-8B-Base-bnb-4bit",  # default; one 4-bit ckpt for rollouts + QLoRA
     method="qlora",          # "full" | "lora" | "qlora"
-    num_generations=8,       # K completions per bar (the GRPO group)
+    num_generations=2,       # K completions per bar (the GRPO group); higher K = more memory
+    constrain_actions=True,  # guided decoding -> every completion is a parseable action
     reward_fn=None,          # default: OneStepTradingEnv score; override to customize
     system_prompt=None,      # default: the actor's system prompt; override to customize
     user_prompt_fn=None,     # default: the actor's user prompt; the "pre-prompt" override
@@ -106,18 +107,40 @@ So training uses the one-step form (via the deterministic reward oracle
 algorithm that needs a trajectory (PPO/PG with a value head) would use `SequentialTradingEnv`
 instead — that is a separate future recipe, not a `loss` swap.
 
+## Guided decoding (why a bigger model + constrained output)
+
+GRPO only learns from **within-group reward variance**. If the model's completions don't emit a
+valid `<answer>N</answer>`, the parser falls back to action 0 (hold) → every group is all-hold →
+zero reward variance → no gradient. Small models comply poorly with the format (Qwen2.5-0.5B ~2% of
+the time), so `constrain_actions=True` (the default) applies vLLM **guided decoding**: a regex forces
+every completion to a valid action index → 100% parseable → the model's genuine action variety
+becomes real learning signal. The default model is a capable `unsloth/Qwen3-8B-Base-bnb-4bit`; set
+`constrain_actions=False` only if you use a strong instruction-tuned model and want free-form
+reasoning tokens.
+
 ## The stack (hybrid torchrl-native)
 
-- Rollouts: torchrl `vLLMWrapper` over a plain `vllm.LLM` (K generations per bar).
+- Rollouts: torchrl `vLLMWrapper` over a plain `vllm.LLM` (K generations per bar), guided-decoded.
 - Advantage: torchrl `MCAdvantage` (group-relative over the K-group).
 - Loss: torchrl `GRPOLoss` over a LoRA/QLoRA `TransformersWrapper`.
-- Weight sync: after each step the merged LoRA weights are pushed into the vLLM engine via
-  `collective_rpc` (run with `VLLM_ALLOW_INSECURE_SERIALIZATION=1`).
+- Weight sync (LoRA/QLoRA): the vLLM engine loads the frozen 4-bit base **once**; each step the
+  trainer saves just the LoRA adapter (~tens of MB) and hot-swaps it via a fresh `LoRARequest`. The
+  base never changes, so this replaces re-pushing the whole ~16 GB base every step — far less memory
+  and a ~300× smaller per-step sync. (`method="full"` falls back to a merged-weight `collective_rpc`
+  sync; run with `VLLM_ALLOW_INSECURE_SERIALIZATION=1`.)
 
 > On DGX Spark (GB10/sm_121) this hybrid path is used because torchrl's `AsyncVLLM` + NCCL sync
 > does not import against the vLLM build that runs on that GPU. It still uses torchrl's
 > `vLLMWrapper` / `TransformersWrapper` / `GRPOLoss` / `MCAdvantage` — only the engine and the
 > sync mechanism differ.
+
+## Memory
+
+The GRPO loss materializes a `[K × seq_len × vocab]` logits tensor for the backward pass, and with
+Qwen's ~152k vocab that dominates memory (independent of model size). If you OOM: lower
+`num_generations` (K), shorten the prompt (fewer/smaller feature columns, smaller window), and keep
+`gpu_memory_utilization` modest (the 4-bit base needs little). QLoRA runs gradient checkpointing
+automatically.
 
 ## Requirements
 

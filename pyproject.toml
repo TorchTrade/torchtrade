@@ -27,7 +27,8 @@ dependencies = [
     # RL stack pinned in lockstep (torchrl + tensordict MUST move together — a
     # skew is what silently broke CI before this pin). torchrl 0.13 removed the
     # `SyncDataCollector` alias (use `Collector`); torch floor (2.1.0) is met by 2.9.0.
-    "torchrl>=0.13,<0.14",
+    # 0.13.2 floor: the LLMTrainer's vLLMWrapper needs it to import against vLLM >= 0.13.
+    "torchrl>=0.13.2,<0.14",
     "tensordict>=0.13,<0.14",
     "wandb",
     "tqdm",
