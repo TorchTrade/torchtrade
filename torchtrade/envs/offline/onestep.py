@@ -583,59 +583,50 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         # Open new position with SLTP brackets
         return self._open_position_with_sltp(side, execution_price, sl_pct, tp_pct)
 
-    def _force_next_start_index(self, bar_index: int) -> None:
-        """Force the sampler's NEXT reset() call to land exactly on `bar_index`.
-
-        `_reset()` (in `torchtrade/envs/core/offline_base.py`) always calls
-        `self.sampler.reset(random_start=True)` for `OneStepTradingEnv` (random_start
-        is forced True), which draws a random start index via
-        `self.sampler.np_rng.integers(...)` and then immediately consumes it in
-        `get_sequential_observation()`, which reads the observation at that index
-        and THEN increments `_sequential_idx` by one. As a result, `self._reset_idx`
-        (captured after that first observation fetch) equals `start_idx + 1`, i.e. one
-        past the bar that was actually sampled.
-
-        To make a forced reset land on the exact same bar as an organic reset whose
-        `_reset_idx` equals `bar_index`, the RNG draw consumed by `sampler.reset()`
-        must be `bar_index - 1`. `numpy.random.Generator` is a C-extension type whose
-        instances don't allow monkeypatching a single bound method, so instead this
-        swaps out the `self.sampler.np_rng` reference itself for a one-shot proxy
-        whose `integers(...)` call restores the original generator and returns
-        `bar_index - 1`. The rest of the reset path (`_end_idx` computation,
-        observation fetch, etc.) runs completely unmodified, so the resulting state
-        is byte-for-byte identical to what an organic reset landing on that bar
-        would have produced.
-        """
-        original_np_rng = self.sampler.np_rng
-        sampler = self.sampler
-
-        class _OneShotStartIndexRNG:
-            def integers(self, *args, **kwargs):
-                sampler.np_rng = original_np_rng
-                return bar_index - 1
-
-        self.sampler.np_rng = _OneShotStartIndexRNG()
-
     def score(self, bar_index: int, action: int) -> float:
         """Deterministically score a discrete action at a specific bar.
 
         Reuses the normal reset+step reward path (no new reward logic), but forces
-        the sampled bar to `bar_index` instead of the random_start draw. Used by the
-        GRPO trainer as the reward oracle so all K completions of a bar are scored at
-        the same bar. Additive: does not change reset()/step() behavior — the forced
-        RNG override only affects the ONE reset() call triggered here, and the
+        the sampled bar to `bar_index` via `self.sampler.seek(...)` instead of
+        letting `_reset()` draw a random start index. Used by the GRPO trainer as
+        the reward oracle so all K completions of a bar are scored at the same bar.
+        Additive: does not change reset()/step() behavior — the seek only affects
+        the ONE reset() call triggered here (`sampler.seek()` is one-shot), and the
         sampler resumes normal random sampling on any subsequent reset().
+
+        `bar_index` convention (IDENTICAL across `score()` and any future
+        `obs_at(bar_index)`): `_reset()` (in `torchtrade/envs/core/offline_base.py`)
+        always calls `self.sampler.reset(random_start=True)` for `OneStepTradingEnv`
+        (random_start is forced True), which draws a start index via
+        `self.sampler.np_rng.integers(...)` and then immediately consumes it in
+        `get_sequential_observation()`, which reads the observation at that index and
+        THEN increments `_sequential_idx` by one. As a result, `self._reset_idx`
+        (captured after that first observation fetch) equals `start_idx + 1`, i.e.
+        one past the bar that was actually sampled. `bar_index` is defined in these
+        same post-increment `_reset_idx` terms, so `score()` seeks the sampler to
+        `bar_index - 1` to land the forced reset on the same bar an organic reset
+        with `_reset_idx == bar_index` would have.
+
+        Valid range: because an organic start-index draw is always `>= 0`,
+        `bar_index` must be `>= 1` (`bar_index == 0` is never organically reachable
+        and raises `ValueError`, as does any `bar_index` beyond the sampler's data).
+        `self.sampler.seek()` performs this bounds check.
 
         Args:
             bar_index: The bar to score at, i.e. the value `self._reset_idx` would
                 take if a normal `reset()` had organically landed on this bar.
+                Must be `>= 1`.
             action: Discrete action index to apply at that bar.
 
         Returns:
             The scalar reward `reset()` (landing on `bar_index`) + `step(action)`
             would produce.
+
+        Raises:
+            ValueError: If `bar_index` is outside the range an organic reset()
+                could ever produce (see `MarketDataObservationSampler.seek`).
         """
-        self._force_next_start_index(bar_index)
+        self.sampler.seek(bar_index - 1)
         td = self.reset()
         td["action"] = torch.tensor(int(action))
         out = self.step(td)

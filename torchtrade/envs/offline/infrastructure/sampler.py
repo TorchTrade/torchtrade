@@ -207,6 +207,10 @@ class MarketDataObservationSampler:
 
         self._sequential_idx = 0
         self._end_idx = len(self.exec_times)
+        # One-shot deterministic seek target for the NEXT reset(random_start=True)
+        # call; set via seek(), consumed+cleared by reset(). None means "no seek
+        # pending" -> reset() draws a random start index as usual.
+        self._forced_start_idx: Optional[int] = None
         # PERF: Store exec_times as numpy array for fast indexing (avoid pandas overhead)
         self._exec_times_arr = self.exec_times.to_numpy()
 
@@ -410,19 +414,67 @@ class MarketDataObservationSampler:
         """
         return {key: len(df.columns) for key, df in self.resampled_dfs.items()}
 
+    def _max_organic_start_idx(self) -> int:
+        """Upper bound (inclusive) of the start index reset(random_start=True) can
+        draw on its own, given the current max_traj_length setting. Shared by
+        reset() (to draw within range) and seek() (to validate a forced index is
+        something an organic draw could have produced)."""
+        total_len = len(self._exec_times_arr)
+        if self.max_traj_length is None:
+            return max(0, total_len - 1)
+        return max(0, total_len - self.max_traj_length)
+
+    def seek(self, index: int) -> None:
+        """Force the NEXT reset(random_start=True) call to start exactly at
+        `index`, instead of drawing a random start index via np_rng.
+
+        One-shot: consumed (and cleared) by the very next reset(random_start=True)
+        call; normal random sampling resumes on any subsequent reset(). Does not
+        read or mutate np_rng state at all, so RNG draw order/count for callers
+        that never call seek() is completely unaffected. Purely additive -
+        reset(random_start=False) is unaffected entirely, and reset() for any
+        caller that never calls seek() runs the exact same branches it always did.
+
+        Args:
+            index: The start index reset() should use, in the same terms as the
+                `start_idx` an organic random draw would produce (i.e. this is a
+                SAMPLER-side, pre-increment index -- NOT
+                `OfflineTradingEnvBase._reset_idx`, which is captured one step
+                later, post-increment, by get_sequential_observation()).
+
+        Raises:
+            ValueError: If `index` is outside the range an organic
+                reset(random_start=True) draw could ever produce for the current
+                max_traj_length setting.
+        """
+        max_valid = self._max_organic_start_idx()
+        if not (0 <= index <= max_valid):
+            raise ValueError(
+                f"seek(index={index}) out of range: valid organic start index "
+                f"range is [0, {max_valid}] for this sampler "
+                f"(total_len={len(self._exec_times_arr)}, "
+                f"max_traj_length={self.max_traj_length})."
+            )
+        self._forced_start_idx = index
+
     def reset(self, random_start: bool = False) -> int:
         """Reset using index-based tracking."""
         total_len = len(self._exec_times_arr)
 
         if random_start:
-            if self.max_traj_length is None:
+            if self._forced_start_idx is not None:
+                start_idx = self._forced_start_idx
+                self._forced_start_idx = None
+            elif self.max_traj_length is None:
                 start_idx = int(self.np_rng.integers(0, max(1, total_len)))
-                self._sequential_idx = start_idx
+            else:
+                max_start_index = self._max_organic_start_idx()
+                start_idx = int(self.np_rng.integers(0, max_start_index + 1))
+
+            self._sequential_idx = start_idx
+            if self.max_traj_length is None:
                 self._end_idx = total_len
             else:
-                max_start_index = max(0, total_len - self.max_traj_length)
-                start_idx = int(self.np_rng.integers(0, max_start_index + 1))
-                self._sequential_idx = start_idx
                 self._end_idx = min(start_idx + self.max_traj_length, total_len)
         else:
             self._sequential_idx = 0
