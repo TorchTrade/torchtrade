@@ -6,7 +6,7 @@ NCCL sync is broken against the vLLM that runs on GB10/sm_121):
   - train policy: torchrl TransformersWrapper(generate=False) over a LoRA/QLoRA HF model,
   - weight sync (LoRA/QLoRA): the vLLM engine loads the frozen 4-bit base ONCE; each step we
     save just the LoRA adapter and hot-swap it via a fresh `LoRARequest` (the base never
-    changes, so re-pushing it is waste). "full" method falls back to a merged-weight sync.
+    changes, so re-pushing it is waste). "full" method falls back to a full state-dict sync.
 """
 from __future__ import annotations
 
@@ -122,10 +122,10 @@ def build_train_policy(model_name, tokenizer, method="qlora", lora_r=16, lora_al
         hf = hf.to(device)
     if cfg["peft_config"] is not None:
         hf = get_peft_model(hf, cfg["peft_config"])
-    # GRPOLoss requires eval mode: otherwise LoRA dropout makes the re-computed cur_log_prob
-    # non-deterministic and corrupts the importance ratio (backward/grad-checkpointing are
-    # unaffected — .training is orthogonal to autograd).
-    hf.eval()
+    # GRPOLoss needs a deterministic re-computed cur_log_prob (dropout would corrupt the
+    # importance ratio). We get that via lora_dropout=0.0 (build_peft_config), NOT a global
+    # hf.eval() — HF's GradientCheckpointingLayer gates recompute on self.training, so eval()
+    # would silently disable gradient checkpointing and OOM the 8B QLoRA backward.
     policy = TransformersWrapper(
         hf, tokenizer=tokenizer, input_mode="tokens", generate=False,
         return_log_probs=True, pad_output=False, device=device,
@@ -133,7 +133,7 @@ def build_train_policy(model_name, tokenizer, method="qlora", lora_r=16, lora_al
     return hf, policy
 
 
-def sync_weights_to_vllm(engine, hf, path="/tmp/_grpo_merged.pt"):
+def sync_weights_to_vllm(engine, hf, path="/tmp/_grpo_full.pt"):
     """Push the full trained model into the vLLM rollout engine — the `method="full"` sync.
 
     (LoRA/QLoRA use `save_lora_adapter` hot-swap instead; `full` has no adapter, so `hf` is a

@@ -2,14 +2,14 @@
 
 Easy facade over the (validated-on-DGX-Spark) hybrid torchrl GRPO recipe: rollouts via
 torchrl vLLMWrapper over a plain vLLM engine, group-relative advantage via MCAdvantage,
-token loss via torchrl GRPOLoss over a LoRA/QLoRA TransformersWrapper, and merged-weight
-sync back to the vLLM engine each step. The trading env's OneStepTradingEnv is the reward
+token loss via torchrl GRPOLoss over a LoRA/QLoRA TransformersWrapper, and per-step LoRA
+adapter hot-swap into the vLLM engine. The trading env's OneStepTradingEnv is the reward
 oracle (why OneStep for training / Sequential for eval: GRPO needs K samples of the SAME
 bar -> a contextual bandit; see the training guide).
 
-    LLMTrainer(df, config, model="Qwen/Qwen2.5-0.5B-Instruct", method="qlora",
+    LLMTrainer(df, config, model="unsloth/Qwen3-8B-Base-bnb-4bit", method="qlora",
                reward_fn=None, system_prompt=None, user_prompt_fn=None,
-               loss="grpo", num_generations=8).train()
+               loss="grpo", num_generations=2).train()
 """
 from __future__ import annotations
 
@@ -190,7 +190,7 @@ class LLMTrainer:
                 infer._lora_request = save_lora_adapter(hf, os.path.join(self.output_dir, "adapters"), step)
                 synced = f"adapter@{infer._lora_request.lora_int_id}"
             else:
-                synced = sync_weights_to_vllm(engine, hf, path=os.path.join(self.output_dir, "_merged.pt"))
+                synced = sync_weights_to_vllm(engine, hf, path=os.path.join(self.output_dir, "_full.pt"))
             mean_r = sum(rewards) / len(rewards)
             print(f"[LLMTrainer] step {step}: mean_reward={mean_r:.4f} loss={float(loss_val):.4f} synced={synced}",
                   flush=True)

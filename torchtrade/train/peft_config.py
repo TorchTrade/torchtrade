@@ -4,10 +4,14 @@ _DEFAULT_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj",
                     "gate_proj", "up_proj", "down_proj"]
 
 
-def build_peft_config(method, lora_r=16, lora_alpha=32, lora_dropout=0.05,
+def build_peft_config(method, lora_r=16, lora_alpha=32, lora_dropout=0.0,
                       target_modules=None, peft_config=None):
     """method in {"full","lora","qlora"} -> {"peft_config": LoraConfig|None,
-    "load_in_4bit": bool}. `peft_config` passthrough overrides the built LoraConfig."""
+    "load_in_4bit": bool}. `peft_config` passthrough overrides the built LoraConfig.
+
+    lora_dropout defaults to 0.0: GRPO re-computes cur_log_prob through the train policy, so a
+    stochastic (dropout) forward would corrupt the importance ratio — deterministic beats
+    regularized here (the standard PPO/GRPO LLM-finetuning convention)."""
     if method not in ("full", "lora", "qlora"):
         raise ValueError(f"method must be 'full'|'lora'|'qlora', got {method!r}")
     if method == "full":

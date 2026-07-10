@@ -31,11 +31,14 @@ def test_action_descriptions_covers_every_side():
     assert d[3] == "Action 3 -> close current position"
 
 
-def test_build_action_regex_constrains_to_valid_indices():
+@pytest.mark.parametrize("n,good,bad", [
+    (3, "<answer>2</answer>", "<answer>3</answer>"),
+    (11, "<answer>10</answer>", "<answer>11</answer>"),  # multi-digit: guards against a [0-9] refactor
+], ids=["single-digit", "multi-digit"])
+def test_build_action_regex_constrains_to_valid_indices(n, good, bad):
     import re
-    rx = LLMTrainer._build_action_regex(3)
-    assert rx == r"<answer>(0|1|2)</answer>"
-    assert re.fullmatch(rx, "<answer>2</answer>") and not re.fullmatch(rx, "<answer>3</answer>")
+    rx = LLMTrainer._build_action_regex(n)
+    assert re.fullmatch(rx, good) and not re.fullmatch(rx, bad)
 
 
 class _Turn:
