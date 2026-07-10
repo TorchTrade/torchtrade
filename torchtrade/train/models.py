@@ -94,8 +94,11 @@ def _merged_state_dict(hf):
             weight = merged.get(module_path, v)
             name = module_path.replace("base_model.model.", "") + ".weight"
         elif ".base_layer." in k:
-            continue  # bitsandbytes 4-bit quant-state buffers (absmax/quant_map/...) — the
-                      # dequantized base is already folded into the merged weight above
+            # bitsandbytes 4-bit quant-state buffers (absmax/quant_map/...): dropped because the
+            # dequantized base is already folded into the merged weight above. Also drops a
+            # base_layer.bias if present — correct only because build_peft_config uses bias="none"
+            # (frozen bias stays as vLLM loaded it); revisit if a custom bias config is exposed.
+            continue
         else:
             weight, name = v, k.replace("base_model.model.", "")
         state[name] = weight.detach().to(torch.bfloat16).cpu()

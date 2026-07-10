@@ -72,3 +72,29 @@ def test_reward_parser_step_scores_each_group_item():
     out = parser._step(td, next_td)
     assert out["reward"].shape == (2, 1, 1)
     assert out["reward"].flatten().tolist() == [7.0, 8.0]  # score(5,2)=7, score(7,1)=8
+
+
+def test_render_group_prompts_builds_contiguous_k_blocks(sample_ohlcv_df):
+    """_render_group_prompts must emit `max_steps` bars, each repeated K times as a CONTIGUOUS
+    block (make_trading_env's shuffle=False dataloader relies on this so one rollout == one
+    bar's GRPO group). Guards the group-structure invariant off the GPU."""
+    from torchtrade.envs.offline import OneStepTradingEnv, OneStepTradingEnvConfig
+    from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+    from tests.conftest import simple_feature_fn
+
+    cfg = OneStepTradingEnvConfig(
+        initial_cash=1000, execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        time_frames=[TimeFrame(1, TimeFrameUnit.Minute)], window_sizes=[10],
+        seed=42, random_start=False, action_levels=[-1, 0, 1])
+    trainer = LLMTrainer(df=sample_ohlcv_df, config=cfg, feature_preprocessing_fn=simple_feature_fn,
+                         feature_keys=["close", "volume"], num_generations=3, max_steps=4)
+    env = OneStepTradingEnv(df=sample_ohlcv_df, config=cfg, feature_preprocessing_fn=simple_feature_fn)
+    pb = trainer._build_prompt_actor(env)
+
+    sysp, prompts, bars = trainer._render_group_prompts(env, pb)
+    assert isinstance(sysp, str) and len(prompts) == 4 * 3 and len(bars) == 4 * 3
+    for i in range(0, 12, 3):                    # each K-block is one bar
+        assert bars[i] == bars[i + 1] == bars[i + 2]
+        assert prompts[i] == prompts[i + 1] == prompts[i + 2]
+    assert len({bars[i] for i in range(0, 12, 3)}) == 4   # 4 distinct bars
+    assert all(b >= 1 for b in bars)             # valid bar_index range
