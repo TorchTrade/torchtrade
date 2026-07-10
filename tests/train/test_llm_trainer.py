@@ -16,6 +16,28 @@ def test_rejects_unknown_method():
         LLMTrainer(df=None, config=None, method="bogus")
 
 
+class _FakeSLTPEnv:
+    _action_tuple = [(None, None, None), ("long", -0.02, 0.03),
+                     ("short", -0.02, 0.03), ("close", None, None)]
+
+
+def test_action_descriptions_covers_every_side():
+    """Regression: ('close', None, None) (include_close_action=True) must not crash on the
+    {None:+.1%} format; hold/long/short/close all get a sensible description."""
+    d = LLMTrainer._action_descriptions(_FakeSLTPEnv())
+    assert d[0] == "Action 0 -> hold / no position"
+    assert d[1] == "Action 1 -> open long: stop-loss -2.0%, take-profit +3.0%"
+    assert d[2].startswith("Action 2 -> open short")
+    assert d[3] == "Action 3 -> close current position"
+
+
+def test_build_action_regex_constrains_to_valid_indices():
+    import re
+    rx = LLMTrainer._build_action_regex(3)
+    assert rx == r"<answer>(0|1|2)</answer>"
+    assert re.fullmatch(rx, "<answer>2</answer>") and not re.fullmatch(rx, "<answer>3</answer>")
+
+
 class _Turn:
     def __init__(self, content):
         self.content = content

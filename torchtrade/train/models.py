@@ -122,6 +122,10 @@ def build_train_policy(model_name, tokenizer, method="qlora", lora_r=16, lora_al
         hf = hf.to(device)
     if cfg["peft_config"] is not None:
         hf = get_peft_model(hf, cfg["peft_config"])
+    # GRPOLoss requires eval mode: otherwise LoRA dropout makes the re-computed cur_log_prob
+    # non-deterministic and corrupts the importance ratio (backward/grad-checkpointing are
+    # unaffected — .training is orthogonal to autograd).
+    hf.eval()
     policy = TransformersWrapper(
         hf, tokenizer=tokenizer, input_mode="tokens", generate=False,
         return_log_probs=True, pad_output=False, device=device,
@@ -129,61 +133,17 @@ def build_train_policy(model_name, tokenizer, method="qlora", lora_r=16, lora_al
     return hf, policy
 
 
-def _merged_state_dict(hf):
-    """Merged (base + LoRA-delta) weights in vLLM/HF naming, WITHOUT mutating `hf`.
-
-    Avoids peft's `merge_adapter()`/`unmerge_adapter()`, which for a 4-bit (QLoRA) base
-    dequantize->add->REQUANTIZE the frozen base in place every call — a documented-lossy
-    round-trip that, called each training step, drifts the base weights over training.
-    Instead we dequantize a *copy* of each LoRA layer's base and add its delta on the copy.
-    """
-    from peft import PeftModel
-
-    if not isinstance(hf, PeftModel):  # method="full": plain HF model, nothing to merge
-        return {k: v.detach().to(torch.bfloat16).cpu() for k, v in hf.state_dict().items()}
-
-    from peft.tuners.lora import LoraLayer
-
-    merged = {}  # module path -> (base + delta), non-mutating
-    for name, module in hf.named_modules():
-        if isinstance(module, LoraLayer) and module.active_adapters:
-            base = module.base_layer.weight
-            quant_state = getattr(base, "quant_state", None)
-            if quant_state is not None:
-                import bitsandbytes.functional as bnb_f
-                base = bnb_f.dequantize_4bit(base.data, quant_state)
-            delta = module.get_delta_weight(module.active_adapters[0])
-            merged[name] = base.to(delta.dtype) + delta
-
-    state = {}
-    for k, v in hf.state_dict().items():
-        if "lora_" in k:
-            continue
-        if k.endswith(".base_layer.weight"):
-            module_path = k[: -len(".base_layer.weight")]
-            weight = merged.get(module_path, v)
-            name = module_path.replace("base_model.model.", "") + ".weight"
-        elif ".base_layer." in k:
-            # bitsandbytes 4-bit quant-state buffers (absmax/quant_map/...): dropped because the
-            # dequantized base is already folded into the merged weight above. Also drops a
-            # base_layer.bias if present — correct only because build_peft_config uses bias="none"
-            # (frozen bias stays as vLLM loaded it); revisit if a custom bias config is exposed.
-            continue
-        else:
-            weight, name = v, k.replace("base_model.model.", "")
-        state[name] = weight.detach().to(torch.bfloat16).cpu()
-    return state
-
-
 def sync_weights_to_vllm(engine, hf, path="/tmp/_grpo_merged.pt"):
-    """Push the trained weights into the vLLM rollout engine (the validated sync).
+    """Push the full trained model into the vLLM rollout engine — the `method="full"` sync.
 
-    Build the merged base+LoRA state_dict (non-mutating, see `_merged_state_dict`), write it
-    to disk, then `collective_rpc` a loader that reads the REAL tensors from disk on the
-    worker (only the path crosses the RPC boundary — passing tensors through RPC mangles
-    them). Requires env `VLLM_ALLOW_INSECURE_SERIALIZATION=1`. Returns the # weights loaded.
+    (LoRA/QLoRA use `save_lora_adapter` hot-swap instead; `full` has no adapter, so `hf` is a
+    plain HF model and its whole state_dict is pushed.) Write it to disk, then `collective_rpc`
+    a loader that reads the REAL tensors from disk on the worker (only the path crosses the RPC
+    boundary — passing tensors through RPC mangles them). Requires env
+    `VLLM_ALLOW_INSECURE_SERIALIZATION=1`. Returns the # weights loaded.
     """
-    torch.save(_merged_state_dict(hf), path)
+    state = {k: v.detach().to(torch.bfloat16).cpu() for k, v in hf.state_dict().items()}
+    torch.save(state, path)
 
     def _load(worker, p):
         import torch as _torch

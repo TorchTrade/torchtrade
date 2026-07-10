@@ -37,8 +37,7 @@ class TradingRewardParser(Transform):
 
     def _step(self, tensordict, next_tensordict):
         history = tensordict.get(("history", "full"))
-        bars = tensordict.get("bar_index")
-        bars = bars.tolist()
+        bars = tensordict.get("bar_index").tolist()
         rewards = [self.reward(self._response_text(h), int(b)) for h, b in zip(list(history), bars)]
         next_tensordict.set("reward", torch.tensor(rewards).reshape(next_tensordict.batch_size + (1, 1)))
         return next_tensordict

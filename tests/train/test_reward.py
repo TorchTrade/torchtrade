@@ -12,9 +12,12 @@ def test_parses_answer_and_scores():
     assert r("<think>x</think><answer>2</answer>", bar_index=5) == pytest.approx(25.0)
 
 
-def test_malformed_completion_defaults_action_zero_no_crash():
+@pytest.mark.parametrize("completion", ["no tag here", "<answer>9</answer>"], ids=["no-tag", "out-of-range"])
+def test_unparseable_completion_defaults_action_zero_no_crash(completion):
+    """No tag AND a well-formed-but-out-of-range index (reachable with constrain_actions=False)
+    both fall back to action 0."""
     r = TradingReward(env=_FakeEnv(), num_actions=3)
-    assert r("no tag here", bar_index=7) == pytest.approx(7.0)   # action 0 -> 0*10+7
+    assert r(completion, bar_index=7) == pytest.approx(7.0)   # action 0 -> 0*10+7
 
 
 def test_custom_reward_fn_overrides_scoring():

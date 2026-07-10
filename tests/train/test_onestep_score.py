@@ -81,22 +81,17 @@ def test_score_bar_index_one_matches_first_bar(sample_ohlcv_df, action):
     assert result == pytest.approx(expected)
 
 
-def test_score_bar_index_zero_raises_value_error(sample_ohlcv_df):
-    """bar_index=0 is never organically reachable (see test above) -- it maps to
-    sampler.seek(-1), which must raise ValueError instead of the pre-fix behavior
-    of silently wrapping around to `_exec_times_arr[-1]` (the LAST bar of data)."""
+@pytest.mark.parametrize("bad_bar", [
+    0,                    # maps to sampler.seek(-1): pre-fix silently wrapped to the LAST bar
+    "high_oob",           # beyond the data: pre-fix silently sought OOB
+], ids=["zero", "high_oob"])
+def test_score_invalid_bar_index_raises_value_error(sample_ohlcv_df, bad_bar):
+    """An out-of-range bar_index must raise, not silently wrap/seek OOB. bar_index=0 is never
+    organically reachable (see test above); >total_len is past the data."""
     env = _make_onestep_env(sample_ohlcv_df)
+    bar_index = len(env.sampler._exec_times_arr) + 1 if bad_bar == "high_oob" else bad_bar
     with pytest.raises(ValueError):
-        env.score(0, action=0)
-    env.close()
-
-
-def test_score_bar_index_out_of_range_high_raises_value_error(sample_ohlcv_df):
-    """bar_index beyond the sampler's data must raise, not silently seek OOB."""
-    env = _make_onestep_env(sample_ohlcv_df)
-    total_len = len(env.sampler._exec_times_arr)
-    with pytest.raises(ValueError):
-        env.score(total_len + 1, action=0)
+        env.score(bar_index, action=0)
     env.close()
 
 
@@ -108,6 +103,22 @@ def test_score_bar_index_max_valid_succeeds(sample_ohlcv_df):
     result = env.score(total_len, action=0)
     env.close()
     assert isinstance(result, float)
+
+
+def test_seek_is_one_shot_then_resumes_random(sample_ohlcv_df):
+    """seek() forces the NEXT reset to a bar, then must clear so later organic resets draw
+    randomly again. If the clear regressed, every rollout step would reuse one bar → GRPO groups
+    collapse to zero within-group variance and the loss silently stops learning (no crash)."""
+    env = _make_onestep_env(sample_ohlcv_df)
+    env.sampler.seek(4)
+    env.reset()
+    assert env._reset_idx == 5                       # forced start_idx=4 -> _reset_idx=5
+    seen = set()
+    for _ in range(30):
+        env.reset()
+        seen.add(env._reset_idx)
+    env.close()
+    assert len(seen) > 1                             # organic random resumed, not stuck on the forced bar
 
 
 def test_obs_at_matches_reset_obs(sample_ohlcv_df):

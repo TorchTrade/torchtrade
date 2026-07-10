@@ -77,9 +77,17 @@ class LLMTrainer:
         for i, (side, sl, tp) in enumerate(tuples):
             if side is None:
                 descs.append(f"Action {i} -> hold / no position")
+            elif sl is None or tp is None:  # e.g. ("close", None, None) when include_close_action=True
+                descs.append(f"Action {i} -> {side} current position")
             else:
                 descs.append(f"Action {i} -> open {side}: stop-loss {sl:+.1%}, take-profit {tp:+.1%}")
         return descs
+
+    @staticmethod
+    def _build_action_regex(num_actions):
+        """Guided-decoding regex constraining a completion to a valid `<answer>N</answer>`,
+        N in [0, num_actions). A wrong alternation → invalid constraint → the all-hold collapse."""
+        return r"<answer>(" + "|".join(str(i) for i in range(num_actions)) + r")</answer>"
 
     def _build_prompt_actor(self, env):
         num_actions = env.action_spec.n
@@ -136,9 +144,7 @@ class LLMTrainer:
         # Guided decoding: constrain every completion to a valid <answer>N</answer> so it always
         # parses to a real action (base/small models emit the format unreliably otherwise), which
         # is what feeds GRPO within-group reward variance.
-        action_regex = None
-        if self.constrain_actions:
-            action_regex = r"<answer>(" + "|".join(str(i) for i in range(num_actions)) + r")</answer>"
+        action_regex = self._build_action_regex(num_actions) if self.constrain_actions else None
         # LoRA/QLoRA: vLLM loads the frozen base once with LoRA support, and each step we
         # hot-swap only the trained adapter (cheap); "full" re-syncs the whole model.
         is_peft = self.method in ("lora", "qlora")
@@ -150,7 +156,11 @@ class LLMTrainer:
 
         loss_fn = resolve_loss(self.loss, train_policy, self.loss_kwargs)
         loss_fn.set_keys(sample_log_prob=("log_probs", "full"))
-        rb = ReplayBuffer(storage=LazyStackStorage(self.K * 4),
+        # Buffer holds exactly one group (K completions of one bar), matching torchrl's canonical
+        # grpo-sync recipe: sample(K) then returns the just-collected group with no cross-round
+        # mixing — a larger buffer + SamplerWithoutReplacement would blend up to several prior
+        # (staler) groups into each minibatch.
+        rb = ReplayBuffer(storage=LazyStackStorage(self.K),
                           sampler=SamplerWithoutReplacement(),
                           transform=MCAdvantage(grpo_size=self.K))
         opt = torch.optim.Adam([p for p in hf.parameters() if p.requires_grad], lr=self.lr)
@@ -165,9 +175,9 @@ class LLMTrainer:
         for step in range(self.max_steps):
             data = env.rollout(1, infer)
             rewards = data.get(("next", "reward")).flatten().tolist()
-            # MCAdvantage computes the group-relative advantage at extend() time (grouped by
-            # the shared prompt), so it is baked in before sampling; rb.sample(K) is just a
-            # minibatch draw (K here == group size only by convenience).
+            # MCAdvantage computes the group-relative advantage at extend() time (grouped by the
+            # shared prompt), so it is baked in before sampling; with a K-sized buffer, sample(K)
+            # returns exactly this step's group.
             rb.extend(data.reshape(-1))
             batch = rb.sample(self.K).to(device)
             loss = loss_fn(batch)
