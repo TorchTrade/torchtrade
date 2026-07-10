@@ -1050,10 +1050,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#extending-the-tool-use-seam" class="md-nav__link">
+  <a href="#tool-use" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Extending: the tool-use seam
+        Tool use
       
     </span>
   </a>
@@ -1348,10 +1348,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#extending-the-tool-use-seam" class="md-nav__link">
+  <a href="#tool-use" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Extending: the tool-use seam
+        Tool use
       
     </span>
   </a>
@@ -1660,19 +1660,28 @@ That logic lives in one reusable pure function:</p>
 <p>It returns the integer <code>N</code> when <code>0 &lt;= N &lt; num_actions</code>, and falls back to action
 <code>0</code> (logging a warning) when the tag is missing or out of range — a trading agent
 must always emit a valid action.</p>
-<h3 id="extending-the-tool-use-seam">Extending: the tool-use seam<a class="headerlink" href="#extending-the-tool-use-seam" title="Permanent link">&para;</a></h3>
-<p><code>BaseLLMActor.forward()</code> calls a <code>_resolve_tools(system_prompt, user_prompts,
-responses)</code> hook between generation and action extraction. The default is a no-op
-(returns <code>responses</code> unchanged), so standard single-shot actors are unaffected.
-To add tool use, override it:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ToolAugmentedActor</span><span class="p">(</span><span class="n">LocalLLMActor</span><span class="p">):</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_resolve_tools</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">system_prompt</span><span class="p">,</span> <span class="n">user_prompts</span><span class="p">,</span> <span class="n">responses</span><span class="p">):</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>        <span class="c1"># detect &lt;tool&gt;...&lt;/tool&gt; in each response, execute the tool, append the</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>        <span class="c1"># result to the conversation, and re-generate the ones that called a tool</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_tool_loop</span><span class="p">(</span><span class="n">system_prompt</span><span class="p">,</span> <span class="n">user_prompts</span><span class="p">,</span> <span class="n">responses</span><span class="p">)</span>
+<h3 id="tool-use">Tool use<a class="headerlink" href="#tool-use" title="Permanent link">&para;</a></h3>
+<p>Configure <code>tools=[...]</code> to let the actor call tools before deciding. Tools run
+only when configured (live path); without them the actor is single-shot as before.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.actor</span><span class="w"> </span><span class="kn">import</span> <span class="n">LocalLLMActor</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.actor.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">GoogleNewsTool</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">actor</span> <span class="o">=</span> <span class="n">LocalLLMActor</span><span class="p">(</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;Qwen/Qwen2.5-0.5B-Instruct&quot;</span><span class="p">,</span> <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;vllm&quot;</span><span class="p">,</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">market_data_keys</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">market_data_keys</span><span class="p">,</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">account_state_labels</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">account_state</span><span class="p">,</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="n">action_levels</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">action_levels</span><span class="p">,</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="p">,</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>    <span class="n">tools</span><span class="o">=</span><span class="p">[</span><span class="n">GoogleNewsTool</span><span class="p">(</span><span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="p">)],</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>    <span class="n">max_tool_iters</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="p">)</span>
 </span></code></pre></div>
-<p>The multi-turn tool-execution loop itself (parsing <code>&lt;tool&gt;</code> calls, dispatching to
-broker/data APIs, re-prompting) ships with the upcoming tool-use feature.</p>
+<p>The model calls a tool with <code>&lt;tool name="google_news"&gt;{"query": "Bitcoin"}&lt;/tool&gt;</code>
+(torchrl <code>XMLBlockParser</code> convention) and receives a <code>&lt;tool_results&gt;...&lt;/tool_results&gt;</code>
+block, then continues until it emits <code>&lt;answer&gt;N&lt;/answer&gt;</code>. Only conversations that
+call a tool are re-generated, so batched multi-symbol inference stays efficient.
+Tool use requires <code>backend="vllm"</code> (the transformers backend can't halt at
+<code>&lt;/tool&gt;</code>) and the <code>[llm]</code> extra (adds <code>feedparser</code>).</p>
 <hr />
 <h2 id="see-also">See Also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
