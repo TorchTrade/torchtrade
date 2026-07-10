@@ -40,9 +40,8 @@ class LLMTrainer:
                  max_steps=50, max_tokens=256, gpu_memory_utilization=0.3,
                  output_dir="./llm_grpo_out", use_wandb=False, wandb_project="torchtrade-grpo"):
         validate_num_generations(num_generations)
-        # build_peft_config validates `method` early (raises on unknown method)
-        from torchtrade.train.peft_config import build_peft_config
-        build_peft_config(method)
+        if method not in ("full", "lora", "qlora"):
+            raise ValueError(f"method must be 'full'|'lora'|'qlora', got {method!r}")
 
         self.df, self.config, self.model = df, config, model
         self.method, self.reward_fn = method, reward_fn

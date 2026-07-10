@@ -12,7 +12,6 @@ from tensordict import TensorDict
 from torch.utils.data import DataLoader
 from torchrl.data import Composite, Unbounded
 from torchrl.envs import StepCounter, Transform
-from torchrl.envs.llm import ChatEnv
 
 from torchtrade.train.reward import TradingReward
 
@@ -33,7 +32,7 @@ class TradingRewardParser(Transform):
     def _response_text(history_item) -> str:
         try:
             return history_item[-1].content  # last turn = assistant response
-        except Exception:
+        except (AttributeError, IndexError, TypeError):
             return str(history_item)
 
     def _step(self, tensordict, next_tensordict):
@@ -55,6 +54,8 @@ def make_trading_env(score_env, tokenizer, prompts, bar_indices, system_prompt, 
     mode) -> StepCounter(1) -> TradingRewardParser. `group_size` prompts are consumed per batch
     to form the GRPO group (K completions of the same bar when `prompts` repeats a bar K times).
     """
+    from torchrl.envs.llm import ChatEnv  # lazy: pulls the torchrl LLM/vLLM stack
+
     rows = [{"query": q, "bar_index": int(b)} for q, b in zip(prompts, bar_indices)]
 
     def collate(batch):

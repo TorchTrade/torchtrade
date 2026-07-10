@@ -38,3 +38,37 @@ def test_reward_parser_threads_custom_reward_fn():
     parser = TradingRewardParser(score_env=object(), num_actions=3, reward_fn=rf)
     assert parser.reward("<answer>2</answer>", bar_index=5) == 42.0
     assert seen == {"action": 2, "bar_index": 5}
+
+
+class _FakeTD:
+    """Minimal tensordict stand-in: avoids TensorDict's non-tensor stacking mangling the
+    mock History turns, so _step's own zip/score/reshape logic is what's under test."""
+    def __init__(self, data, batch_size):
+        self._d, self.batch_size = data, batch_size
+    def get(self, key):
+        return self._d[key]
+    def set(self, key, value):
+        self._d[key] = value
+        return self
+    def __getitem__(self, key):
+        return self._d[key]
+
+
+def test_reward_parser_step_scores_each_group_item():
+    """_step reads ("history","full") + bar_index, scores each completion, and writes one
+    reward per group item with shape batch+(1,1). Guards the zip/reshape glue (GPU-only path
+    otherwise)."""
+    import torch
+
+    class _FakeScoreEnv:
+        def score(self, bar_index, action):
+            return float(action + bar_index)
+
+    parser = TradingRewardParser(_FakeScoreEnv(), num_actions=3)
+    td = _FakeTD({("history", "full"): [[_Turn("<answer>2</answer>")], [_Turn("<answer>1</answer>")]],
+                  "bar_index": torch.tensor([5, 7])}, torch.Size([2]))
+    next_td = _FakeTD({}, torch.Size([2]))
+
+    out = parser._step(td, next_td)
+    assert out["reward"].shape == (2, 1, 1)
+    assert out["reward"].flatten().tolist() == [7.0, 8.0]  # score(5,2)=7, score(7,1)=8

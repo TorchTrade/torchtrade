@@ -93,6 +93,9 @@ def _merged_state_dict(hf):
             module_path = k[: -len(".base_layer.weight")]
             weight = merged.get(module_path, v)
             name = module_path.replace("base_model.model.", "") + ".weight"
+        elif ".base_layer." in k:
+            continue  # bitsandbytes 4-bit quant-state buffers (absmax/quant_map/...) — the
+                      # dequantized base is already folded into the merged weight above
         else:
             weight, name = v, k.replace("base_model.model.", "")
         state[name] = weight.detach().to(torch.bfloat16).cpu()
