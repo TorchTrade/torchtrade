@@ -632,6 +632,18 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         out = self.step(td)
         return float(out["next", "reward"].item())
 
+    def obs_at(self, bar_index: int) -> TensorDictBase:
+        """Deterministically fetch the observation tensordict at a specific bar.
+
+        Uses the same `bar_index` convention and one-shot `sampler.seek` mechanism as
+        `score()` (see its docstring), so `obs_at(b)` returns the observation of the
+        exact bar that `score(b, action)` scores. Additive/read-only: the seek only
+        affects this single `reset()`; the sampler resumes normal random sampling on
+        any subsequent reset(). Used by the GRPO trainer to render per-bar prompts.
+        """
+        self.sampler.seek(bar_index - 1)
+        return self.reset()
+
     def close(self):
         """Clean up resources."""
         pass

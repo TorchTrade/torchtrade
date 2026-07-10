@@ -108,3 +108,20 @@ def test_score_bar_index_max_valid_succeeds(sample_ohlcv_df):
     result = env.score(total_len, action=0)
     env.close()
     assert isinstance(result, float)
+
+
+@pytest.mark.parametrize("action", [0, 1, 2])
+def test_obs_at_matches_reset_obs(sample_ohlcv_df, action):
+    """obs_at(bar_index) returns the same market observation a reset landing on that bar
+    yields — the deterministic per-bar prompt source used by the GRPO trainer."""
+    env = _make_onestep_env(sample_ohlcv_df)
+    td = env.reset()
+    bar_index = env._reset_idx
+    env.close()
+
+    env2 = _make_onestep_env(sample_ohlcv_df)
+    obs = env2.obs_at(bar_index)
+    env2.close()
+
+    mkey = env.market_data_keys[0]
+    assert torch.allclose(td[mkey].float(), obs[mkey].float(), atol=1e-4)
