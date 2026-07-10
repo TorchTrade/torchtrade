@@ -45,3 +45,45 @@ def test_google_news_fetch_failure_returns_error_string(monkeypatch):
     monkeypatch.setattr(tool, "_fetch", boom)
     out = tool.run()                          # must NOT raise
     assert "error" in out.lower()
+
+
+def _fake_feedparser(monkeypatch):
+    """Inject a stub feedparser so _fetch's lazy import works without the real dep."""
+    import sys
+    import types
+    fake = types.ModuleType("feedparser")
+    fake.parse = lambda data: types.SimpleNamespace(entries=[])
+    monkeypatch.setitem(sys.modules, "feedparser", fake)
+
+
+def test_google_news_fetch_enforces_timeout(monkeypatch):
+    """_fetch must bound the request with self.timeout so a hung RSS connection
+    cannot block a live trading decision indefinitely."""
+    _fake_feedparser(monkeypatch)
+    captured = {}
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b"<rss></rss>"
+
+    def fake_urlopen(url, timeout=None):
+        captured["timeout"] = timeout
+        return _Resp()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    GoogleNewsTool(symbol="BTC/USD", timeout=3.0)._fetch("Bitcoin")
+    assert captured["timeout"] == 3.0
+
+
+def test_google_news_timeout_returns_error_string(monkeypatch):
+    """A network stall (urlopen raises after the timeout) degrades to an error
+    string via run()'s guard — never hangs or raises into forward()."""
+    _fake_feedparser(monkeypatch)
+
+    def stall(url, timeout=None):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr("urllib.request.urlopen", stall)
+    out = GoogleNewsTool(symbol="BTC/USD", timeout=0.01).run()
+    assert "error" in out.lower()

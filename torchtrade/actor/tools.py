@@ -38,12 +38,20 @@ class GoogleNewsTool(Tool):
     def _fetch(self, query: str) -> list[dict]:
         """Fetch + normalize Google News RSS entries. Thin network seam (mocked in tests)."""
         import feedparser  # lazy: torchtrade.actor.tools imports without feedparser
+        from urllib.request import urlopen
+
         url = (
             "https://news.google.com/rss/search?q="
             + quote_plus(query)
             + "&hl=en-US&gl=US&ceid=US:en"
         )
-        feed = feedparser.parse(url)
+        # Bound the network request: feedparser.parse(url) would fetch with no
+        # timeout, so a hung RSS connection could block a live trading decision
+        # indefinitely. Fetch the bytes ourselves with self.timeout — a stall then
+        # raises and run()'s guard degrades it to an error string.
+        with urlopen(url, timeout=self.timeout) as resp:
+            raw = resp.read()
+        feed = feedparser.parse(raw)
         entries = []
         for e in feed.entries:
             entries.append({
