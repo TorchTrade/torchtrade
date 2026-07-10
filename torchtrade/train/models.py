@@ -101,9 +101,8 @@ def build_train_policy(model_name, tokenizer, method="qlora", lora_r=16, lora_al
 
     `input_mode="tokens"` (operate on the rollout's recorded tokens, avoiding the
     re-render token-count mismatch) — the validated recipe. QLoRA quantizes the same
-    full-precision `model_name` to 4-bit on the fly (the vLLM rollout engine loads it bf16),
-    then runs kbit-training prep + gradient checkpointing (needed at 8B depth to fit the
-    backward).
+    full-precision `model_name` to 4-bit on the fly (the vLLM rollout engine loads it bf16).
+    Both LoRA and QLoRA enable gradient checkpointing (needed at 8B depth to fit the backward).
     """
     from transformers import AutoModelForCausalLM
     from peft import get_peft_model, prepare_model_for_kbit_training
@@ -120,6 +119,9 @@ def build_train_policy(model_name, tokenizer, method="qlora", lora_r=16, lora_al
         hf = prepare_model_for_kbit_training(hf, use_gradient_checkpointing=True)
     else:
         hf = hf.to(device)
+        if cfg["peft_config"] is not None:  # non-quantized LoRA: enable GC too (needed at 8B depth)
+            hf.gradient_checkpointing_enable()
+            hf.enable_input_require_grads()  # GC needs inputs to require grad (frozen embeddings)
     if cfg["peft_config"] is not None:
         hf = get_peft_model(hf, cfg["peft_config"])
     # GRPOLoss needs a deterministic re-computed cur_log_prob (dropout would corrupt the

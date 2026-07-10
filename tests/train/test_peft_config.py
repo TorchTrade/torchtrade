@@ -11,6 +11,7 @@ def test_method_maps_to_config(method, has_lora, in_4bit):
     if has_lora:
         assert cfg["peft_config"] is not None
         assert cfg["peft_config"].r == 8 and cfg["peft_config"].lora_alpha == 16
+        assert cfg["peft_config"].lora_dropout == 0.0  # deterministic forward for the GRPO ratio
     else:
         assert cfg["peft_config"] is None
 

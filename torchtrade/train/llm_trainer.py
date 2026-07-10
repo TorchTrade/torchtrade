@@ -181,7 +181,11 @@ class LLMTrainer:
             rb.extend(data.reshape(-1))
             batch = rb.sample(self.K).to(device)
             loss = loss_fn(batch)
-            loss_val = loss.get("loss_objective").mean() if "loss_objective" in loss.keys() \
+            # Sum ALL loss_* terms — GRPOLoss writes loss_objective, loss_entropy (entropy bonus),
+            # and any KL penalty as SEPARATE keys; cherry-picking loss_objective would silently
+            # drop the entropy/KL regularization from backward. Fall back to a plain-tensor loss.
+            loss_keys = [k for k in loss.keys() if isinstance(k, str) and k.startswith("loss_")]
+            loss_val = sum(loss.get(k).mean() for k in loss_keys) if loss_keys \
                 else loss.mean(reduce=True)
             opt.zero_grad()
             loss_val.backward()
