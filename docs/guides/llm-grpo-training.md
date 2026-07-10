@@ -8,11 +8,13 @@ provides the reward; you pass a dataset and pick what to train.
 from torchtrade.envs.offline import OneStepTradingEnvConfig
 from torchtrade.train import LLMTrainer
 
-config = OneStepTradingEnvConfig(symbol="BTC/USD", time_frames=["1Hour"], window_sizes=[48],
-                                 execute_on="1Hour", action_levels=[-1, 0, 1], random_start=False)
+config = OneStepTradingEnvConfig(symbol="BTC/USD", time_frames=["1Day"], window_sizes=[30],
+                                 execute_on="1Day", action_levels=[-1, 0, 1], random_start=False)
 
 adapter = LLMTrainer(
-    df=df, config=config, feature_preprocessing_fn=my_features,
+    df=df, config=config,
+    feature_preprocessing_fn=my_features,  # what features to COMPUTE (features_* columns)
+    feature_keys=["features_return", "close"],  # which of them the LLM SEES in the prompt
     model="Qwen/Qwen2.5-0.5B-Instruct",
     method="qlora",          # "full" | "lora" | "qlora"
     num_generations=8,       # K completions per bar (the GRPO group)
@@ -27,6 +29,20 @@ adapter = LLMTrainer(
 
 Everything customizable has a default: **reward, system prompt, user prompt, and loss** all
 follow the same "pass to override, omit for our default" pattern.
+
+## Features and timeframe
+
+**Features are yours to define** — exactly as with any other TorchTrade env. `feature_preprocessing_fn`
+receives the resampled OHLCV frame and returns `features_*` columns; `feature_keys` selects which
+columns are rendered into the LLM prompt. These are the *same* hooks `LocalLLMActor` uses at
+inference, so **your training prompt matches your inference prompt**. Omit both to fall back to the
+raw market-data keys.
+
+**Train on daily (or coarser) bars.** An LLM reasons over higher-level market structure; a decision
+over 1-minute or 1-hour noise gives it almost nothing to latch onto, and GRPO groups collapse to
+"all hold" (no within-group reward variance → no gradient). Set `time_frames`/`execute_on` to
+`"1Day"` (the sampler resamples your source data up) with a window of ~20–60 bars. The timeframe is
+entirely your `config` — the trainer passes it through untouched.
 
 ## Why `OneStepTradingEnv` for training and `SequentialTradingEnv` for eval
 
