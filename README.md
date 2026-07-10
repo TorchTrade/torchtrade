@@ -32,6 +32,7 @@ TorchTrade provides modular environments for both live trading with major exchan
 - 📊 **Feature Engineering** - Add technical indicators and custom features
 - 🔴 **Live Trading** - Direct Alpaca, Binance, Bitget, Bybit, OKX, and Polymarket integrations
 - 🧠 **LLM Integration** - Use GPT-4o-mini or local LLMs as trading agents
+- 🔧 **LLM Tool Use** - Let LLM agents call tools mid-reasoning (e.g. live Google News for sentiment) before choosing an action
 - 📐 **Rule-Based Actors** - Hard-coded strategies for imitation learning and baselines
 - 🔮 **Pretrained Encoder Transforms** - Foundation model embeddings for time series
 - 📦 **Ready-to-Use Datasets** - Pre-processed OHLCV data at [HuggingFace/Torch-Trade](https://huggingface.co/Torch-Trade)
