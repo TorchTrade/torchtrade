@@ -52,6 +52,7 @@ llm = [
     "transformers>=4.30.0",
     "accelerate>=0.20.0",
     "bitsandbytes>=0.41.0",
+    "feedparser>=6.0.0",
 ]
 chronos = [
     "chronos-forecasting",

@@ -33,6 +33,13 @@ class LocalLLMActor(BaseLLMActor):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        # transformers has no stop-string mechanism to halt at </tool>, so tools would
+        # degrade silently. Fail loud on a live (real-money) path instead.
+        if self.tools and backend == "transformers":
+            raise ValueError(
+                "Tool use requires backend='vllm'; the transformers backend does not "
+                "halt generation at </tool>."
+            )
         self.model_name = model
         self.backend = backend
         self.device = device
@@ -56,13 +63,14 @@ class LocalLLMActor(BaseLLMActor):
     def _initialize_vllm(self):
         from vllm import LLM, SamplingParams
         # include_stop_str_in_output=True is REQUIRED: vLLM defaults it to False,
-        # which strips the "</answer>" stop string from the returned text — but the
-        # action parser's regex requires the closing tag, so without this every live
-        # response fails to parse and silently defaults to action 0.
+        # which strips the matched stop string ("</tool>" / "</answer>") from the
+        # returned text — but the tool/action parsers' regexes require the closing
+        # tag, so without this every live response fails to parse and silently
+        # defaults to action 0.
         self.sampling_params = SamplingParams(
             temperature=self.temperature,
             max_tokens=self.max_tokens,
-            stop=["</answer>"],
+            stop=["</tool>", "</answer>"],
             include_stop_str_in_output=True,
         )
         kwargs = {

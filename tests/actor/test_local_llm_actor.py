@@ -134,10 +134,14 @@ def test_forward_clamps_out_of_range_action(actor, sample_td):
     assert result["action"].item() == 0
 
 
-def test_vllm_sampling_includes_stop_str_in_output():
-    """Regression: vLLM defaults include_stop_str_in_output=False, which strips the
-    '</answer>' stop string from output — but the parser regex requires the closing
-    tag, so without this flag every live response fails to parse and defaults to 0."""
+def test_vllm_stop_includes_tool_tag():
+    """The tool loop needs generation to halt at </tool> as well as </answer>.
+
+    Also pins include_stop_str_in_output=True: vLLM defaults it to False, which
+    strips the stop string from the returned text — but the action/tool parsers'
+    regexes require the closing tag, so without this flag every live response
+    fails to parse and silently defaults to action 0.
+    """
     captured = {}
 
     class CapturingSamplingParams:
@@ -148,14 +152,29 @@ def test_vllm_sampling_includes_stop_str_in_output():
 
     from torchtrade.actor import LocalLLMActor
     LocalLLMActor(
-        model="test-model",
-        backend="vllm",
+        model="test-model", backend="vllm",
         market_data_keys=MARKET_DATA_KEYS,
         account_state_labels=ACCOUNT_STATE_LABELS,
         action_levels=ACTION_LEVELS_FUTURES,
     )
-    assert captured["include_stop_str_in_output"] is True
+    assert "</tool>" in captured["stop"]
     assert "</answer>" in captured["stop"]
+    assert captured["include_stop_str_in_output"] is True
+
+
+def test_tools_with_transformers_backend_raises():
+    """Tool use requires vLLM's </tool> stop; the transformers backend can't halt
+    there, so configuring tools with it must fail loud rather than degrade silently."""
+    from torchtrade.actor import LocalLLMActor
+    from torchtrade.actor.tools import GoogleNewsTool
+    with pytest.raises(ValueError, match="Tool use requires backend='vllm'"):
+        LocalLLMActor(
+            model="test-model", backend="transformers",
+            market_data_keys=MARKET_DATA_KEYS,
+            account_state_labels=ACCOUNT_STATE_LABELS,
+            action_levels=ACTION_LEVELS_FUTURES,
+            tools=[GoogleNewsTool(symbol="BTC/USD")],
+        )
 
 
 def test_system_prompt_reflects_action_levels(actor):
@@ -434,3 +453,137 @@ def test_batched_forward_end_to_end_vllm(actor):
     assert result["action"].shape == torch.Size([3])
     assert result["action"].tolist() == [0, 1, 2]   # distinct -> proves per-element mapping
     assert len(result["thinking"]) == 3
+
+
+# ============================================================================
+# Tool config, system-prompt tools block, dispatch helpers (C1, Task 3)
+# ============================================================================
+
+
+from torchtrade.actor.tools import Tool
+
+
+class _EchoTool(Tool):
+    name = "echo"
+    description = "echo(text): returns the text"
+    def run(self, text="hi", **kw):
+        return f"echoed: {text}"
+
+
+class _BoomTool(Tool):
+    name = "boom"
+    description = "boom(): always fails"
+    def run(self, **kw):
+        raise RuntimeError("kaboom")
+
+
+@pytest.fixture
+def tool_actor():
+    from torchtrade.actor import LocalLLMActor
+    return LocalLLMActor(
+        model="test-model", backend="vllm",
+        market_data_keys=MARKET_DATA_KEYS,
+        account_state_labels=ACCOUNT_STATE_LABELS,
+        action_levels=ACTION_LEVELS_FUTURES,
+        symbol="BTC/USD",
+        tools=[_EchoTool(), _BoomTool()],
+        max_tool_iters=2,
+    )
+
+
+def test_tools_prompt_lists_tools_and_protocol(tool_actor):
+    prompt = tool_actor._resolve_system_prompt()
+    assert "echo(text)" in prompt                 # tool description present
+    assert '<tool name=' in prompt                # protocol shown
+    assert "<answer>" in prompt                   # base contract retained
+
+
+def test_run_tool_calls_success_and_errors(tool_actor):
+    out = tool_actor._run_tool_calls([
+        {"name": "echo", "args": {"text": "yo"}, "tag": None},
+        {"name": "nope", "args": {}, "tag": None},     # unknown tool
+        {"name": "boom", "args": {}, "tag": None},     # raises
+    ])
+    assert out.startswith("<tool_results>") and out.rstrip().endswith("</tool_results>")
+    assert "echoed: yo" in out
+    assert "Tool nope (call 2) failed" in out and "unknown tool" in out.lower()
+    assert "Tool boom (call 3) failed" in out and "kaboom" in out
+
+
+def test_no_tools_actor_prompt_unchanged(actor):
+    # actor fixture has no tools -> system prompt has no tool section
+    assert "<tool name=" not in actor._resolve_system_prompt()
+
+
+# ============================================================================
+# Multi-turn tool loop (C1, Task 4)
+# ============================================================================
+
+
+def test_tool_loop_call_then_answer(tool_actor, sample_td):
+    """A tool call is executed, its result injected, then the model answers."""
+    calls = [
+        ['<tool name="echo">{"text": "news"}</tool>'],   # round 1: tool call
+        ["<answer>2</answer>"],                            # round 2: final answer
+    ]
+    with patch.object(tool_actor, "generate_batch", side_effect=calls) as gen:
+        result = tool_actor.forward(sample_td)
+    assert result["action"].item() == 2
+    assert gen.call_count == 2                            # one extra generation for the tool round
+
+
+def test_tool_loop_batching_only_regenerates_pending(tool_actor):
+    """A1 preservation: only the tool-calling conversation is re-generated."""
+    td = TensorDict({
+        "market_data_1Hour_48": torch.randn(3, 48, 5),
+        "account_state": torch.zeros(3, 6),
+    }, batch_size=[3])
+    round1 = ['<answer>0</answer>', '<tool name="echo">{}</tool>', '<answer>1</answer>']
+    round2 = ['<answer>2</answer>']                       # only the 1 pending conv
+    seen = []
+    def fake_gen(system, prompts):
+        seen.append(list(prompts))
+        return round1 if len(seen) == 1 else round2
+    with patch.object(tool_actor, "generate_batch", side_effect=fake_gen):
+        result = tool_actor.forward(td)
+    assert len(seen) == 2
+    assert len(seen[1]) == 1                              # 2nd call regenerates ONLY the pending one
+    assert result["action"].tolist() == [0, 2, 1]
+
+
+def test_tool_loop_max_iters_defaults_to_zero(tool_actor, sample_td):
+    """Runaway tool caller hits the cap and safely defaults to action 0."""
+    with patch.object(tool_actor, "generate_batch",
+                      return_value=['<tool name="echo">{}</tool>']) as gen:
+        result = tool_actor.forward(sample_td)
+    assert result["action"].item() == 0                  # never emitted <answer>
+    assert gen.call_count == 1 + tool_actor.max_tool_iters
+
+
+def test_tool_loop_tool_failure_does_not_crash(tool_actor, sample_td):
+    calls = [['<tool name="boom">{}</tool>'], ["<answer>1</answer>"]]
+    with patch.object(tool_actor, "generate_batch", side_effect=calls):
+        result = tool_actor.forward(sample_td)            # must not raise
+    assert result["action"].item() == 1
+
+
+def test_tool_loop_accumulates_context_across_rounds(tool_actor, sample_td):
+    """Round N's prompt must carry ALL prior <tool_results>, not just the base
+    prompt — pins that _linearize threads the growing conversation (convo[i])."""
+    scripts = [
+        ['<tool name="echo">{"text": "first"}</tool>'],   # round 1: tool call
+        ['<tool name="echo">{"text": "second"}</tool>'],  # round 2: tool call
+        ["<answer>1</answer>"],                            # round 3: answer
+    ]
+    prompts_seen = []
+
+    def fake_gen(system, prompts):
+        prompts_seen.append(prompts[0])
+        return scripts[len(prompts_seen) - 1]
+
+    with patch.object(tool_actor, "generate_batch", side_effect=fake_gen):
+        result = tool_actor.forward(sample_td)
+    assert result["action"].item() == 1
+    # the final regeneration prompt must contain BOTH prior tool results
+    assert "echoed: first" in prompts_seen[-1]
+    assert "echoed: second" in prompts_seen[-1]
