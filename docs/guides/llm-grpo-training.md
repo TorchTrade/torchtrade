@@ -27,22 +27,69 @@ adapter = LLMTrainer(
 # -> load `adapter` into LocalLLMActor for eval / live inference.
 ```
 
-Everything customizable has a default: **reward, system prompt, user prompt, and loss** all
-follow the same "pass to override, omit for our default" pattern.
+The snippet above is the minimal call (see `examples/llm/train/grpo_finetune.py`). Everything
+else is optional and follows the same "pass to override, omit for our default" pattern.
 
-## Features and timeframe
+## Customizing
 
-**Features are yours to define** — exactly as with any other TorchTrade env. `feature_preprocessing_fn`
-receives the resampled OHLCV frame and returns `features_*` columns; `feature_keys` selects which
-columns are rendered into the LLM prompt. These are the *same* hooks `LocalLLMActor` uses at
-inference, so **your training prompt matches your inference prompt**. Omit both to fall back to the
-raw market-data keys.
+### Features — what the LLM sees
 
-**Train on daily (or coarser) bars.** An LLM reasons over higher-level market structure; a decision
-over 1-minute or 1-hour noise gives it almost nothing to latch onto, and GRPO groups collapse to
-"all hold" (no within-group reward variance → no gradient). Set `time_frames`/`execute_on` to
-`"1Day"` (the sampler resamples your source data up) with a window of ~20–60 bars. The timeframe is
-entirely your `config` — the trainer passes it through untouched.
+`feature_preprocessing_fn` receives the resampled OHLCV frame and returns `features_*` columns;
+`feature_keys` selects which columns are rendered into the prompt. These are the *same* hooks
+`LocalLLMActor` uses at inference, so **your training prompt matches your inference prompt**. Omit
+both to fall back to the raw market-data keys.
+
+```python
+def my_features(df):
+    df = df.copy().reset_index(drop=False)
+    df["features_return"] = df["close"].pct_change().fillna(0.0)
+    df["features_sma_ratio"] = (df["close"] / df["close"].rolling(10).mean()).fillna(1.0)
+    return df
+
+LLMTrainer(df=df, config=config,
+           feature_preprocessing_fn=my_features,           # what to COMPUTE
+           feature_keys=["features_return", "features_sma_ratio", "close"])  # what the LLM SEES
+```
+
+### Reward — how a decision is scored
+
+By default each decision is scored by `OneStepTradingEnv.score(bar_index, action)` (the realized
+return of rolling that action to its SL/TP/horizon). Pass `reward_fn(action, bar_index, env) -> float`
+to score it your way — e.g. penalize holding to encourage the model to take positions:
+
+```python
+def my_reward(action, bar_index, env):
+    r = env.score(bar_index, action)
+    return r - 0.001 if action == 0 else r    # small penalty for "hold"
+
+LLMTrainer(df=df, config=config, reward_fn=my_reward)
+```
+
+### Prompts — system prompt and pre-prompt
+
+```python
+LLMTrainer(df=df, config=config,
+           system_prompt="You are a disciplined BTC swing trader...",  # override the actor default
+           user_prompt_fn=my_user_prompt_fn)   # the "pre-prompt" builder (obs td -> str)
+```
+
+### Loss and training method
+
+```python
+LLMTrainer(df=df, config=config,
+           method="qlora",         # "full" | "lora" | "qlora"
+           loss="grpo",            # registry name, or a factory f(actor) -> LossModule
+           loss_kwargs={...},      # forwarded to the loss constructor
+           num_generations=8)      # GRPO group size (K completions per bar)
+```
+
+## Timeframe — train on daily (or coarser) bars
+
+An LLM reasons over higher-level market structure; a decision over 1-minute or 1-hour noise gives it
+almost nothing to latch onto, and GRPO groups collapse to "all hold" (no within-group reward
+variance → no gradient). Set `time_frames`/`execute_on` to `"1Day"` (the sampler resamples your
+source data up) with a window of ~20–60 bars. The timeframe is entirely your `config` — the trainer
+passes it through untouched.
 
 ## Why `OneStepTradingEnv` for training and `SequentialTradingEnv` for eval
 
