@@ -55,11 +55,32 @@ class LLMTrainer:
         self.output_dir = output_dir
         self.use_wandb, self.wandb_project = use_wandb, wandb_project
 
+    @staticmethod
+    def _action_descriptions(env):
+        """Human-readable description per action index, from the env's REAL action space.
+
+        OneStepTradingEnv is SLTP-based: action 0 = hold, 1..n-1 = open a position with a
+        (side, stop-loss, take-profit) bracket (env._action_tuple). `env.action_levels` is NOT
+        the action space for this env (it is forced to [0.0]) — describe the SLTP brackets so
+        the prompt matches what the model can actually choose."""
+        tuples = getattr(env, "_action_tuple", None)
+        if tuples is None:
+            return None  # non-SLTP env: let BaseLLMActor describe via action_levels
+        descs = []
+        for i, (side, sl, tp) in enumerate(tuples):
+            if side is None:
+                descs.append(f"Action {i} -> hold / no position")
+            else:
+                descs.append(f"Action {i} -> open {side}: stop-loss {sl:+.1%}, take-profit {tp:+.1%}")
+        return descs
+
     def _build_prompt_actor(self, env):
+        num_actions = env.action_spec.n
         return _PromptBuilder(
             market_data_keys=env.market_data_keys,
             account_state_labels=env.account_state,
-            action_levels=env.action_levels,
+            action_levels=list(range(num_actions)),  # index space; descriptions carry meaning
+            action_descriptions=self._action_descriptions(env),
             symbol=self.config.symbol,
             execute_on=self.config.execute_on,
             feature_keys=self.feature_keys,
@@ -93,7 +114,7 @@ class LLMTrainer:
         os.makedirs(self.output_dir, exist_ok=True)
         score_env = OneStepTradingEnv(df=self.df, config=self.config,
                                       feature_preprocessing_fn=self.feature_preprocessing_fn)
-        num_actions = len(score_env.action_levels)
+        num_actions = score_env.action_spec.n
         pb = self._build_prompt_actor(score_env)
 
         tokenizer = AutoTokenizer.from_pretrained(self.model)
