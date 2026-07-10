@@ -20,7 +20,12 @@ import torch
 from torchtrade.actor.base_llm_actor import BaseLLMActor
 from torchtrade.envs.offline import OneStepTradingEnv
 from torchtrade.train.losses import resolve_loss, validate_num_generations
-from torchtrade.train.models import build_inference_policy, build_train_policy, sync_weights_to_vllm
+from torchtrade.train.models import (
+    build_inference_policy,
+    build_train_policy,
+    save_lora_adapter,
+    sync_weights_to_vllm,
+)
 from torchtrade.train.trading_env import make_trading_env
 
 
@@ -33,11 +38,12 @@ class _PromptBuilder(BaseLLMActor):
 
 
 class LLMTrainer:
-    def __init__(self, df, config, model="Qwen/Qwen2.5-0.5B-Instruct", method="qlora",
+    def __init__(self, df, config, model="unsloth/Qwen3-8B-Base-bnb-4bit", method="qlora",
                  reward_fn=None, system_prompt=None, user_prompt_fn=None,
                  feature_preprocessing_fn=None, feature_keys=None,
-                 loss="grpo", loss_kwargs=None, num_generations=8, lr=1e-5,
-                 max_steps=50, max_tokens=256, gpu_memory_utilization=0.3,
+                 loss="grpo", loss_kwargs=None, num_generations=4, lr=1e-5,
+                 max_steps=50, max_tokens=256, gpu_memory_utilization=0.2,
+                 constrain_actions=True,
                  output_dir="./llm_grpo_out", use_wandb=False, wandb_project="torchtrade-grpo"):
         validate_num_generations(num_generations)
         if method not in ("full", "lora", "qlora"):
@@ -52,6 +58,7 @@ class LLMTrainer:
         self.K = num_generations
         self.lr, self.max_steps, self.max_tokens = lr, max_steps, max_tokens
         self.gpu_memory_utilization = gpu_memory_utilization
+        self.constrain_actions = constrain_actions
         self.output_dir = output_dir
         self.use_wandb, self.wandb_project = use_wandb, wandb_project
 
@@ -126,9 +133,19 @@ class LLMTrainer:
         env = make_trading_env(score_env, tokenizer, prompts, bar_indices, sysp, num_actions,
                                self.K, reward_fn=self.reward_fn)
 
+        # Guided decoding: constrain every completion to a valid <answer>N</answer> so it always
+        # parses to a real action (base/small models emit the format unreliably otherwise), which
+        # is what feeds GRPO within-group reward variance.
+        action_regex = None
+        if self.constrain_actions:
+            action_regex = r"<answer>(" + "|".join(str(i) for i in range(num_actions)) + r")</answer>"
+        # LoRA/QLoRA: vLLM loads the frozen base once with LoRA support, and each step we
+        # hot-swap only the trained adapter (cheap); "full" re-syncs the whole model.
+        is_peft = self.method in ("lora", "qlora")
         engine, infer = build_inference_policy(self.model, tokenizer,
                                                gpu_memory_utilization=self.gpu_memory_utilization,
-                                               max_tokens=self.max_tokens)
+                                               max_tokens=self.max_tokens, action_regex=action_regex,
+                                               enable_lora=is_peft)
         hf, train_policy = build_train_policy(self.model, tokenizer, method=self.method, device=device)
 
         loss_fn = resolve_loss(self.loss, train_policy, self.loss_kwargs)
@@ -159,9 +176,13 @@ class LLMTrainer:
             opt.zero_grad()
             loss_val.backward()
             opt.step()
-            n = sync_weights_to_vllm(engine, hf, path=os.path.join(self.output_dir, "_merged.pt"))
+            if is_peft:
+                infer._lora_request = save_lora_adapter(hf, os.path.join(self.output_dir, "adapters"), step)
+                synced = f"adapter@{infer._lora_request.lora_int_id}"
+            else:
+                synced = sync_weights_to_vllm(engine, hf, path=os.path.join(self.output_dir, "_merged.pt"))
             mean_r = sum(rewards) / len(rewards)
-            print(f"[LLMTrainer] step {step}: mean_reward={mean_r:.4f} loss={float(loss_val):.4f} synced={n}",
+            print(f"[LLMTrainer] step {step}: mean_reward={mean_r:.4f} loss={float(loss_val):.4f} synced={synced}",
                   flush=True)
             if logger is not None:
                 logger.log({"loss": float(loss_val), "mean_reward": mean_r, "step": step})
