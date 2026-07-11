@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from torchrl.data import Composite, Unbounded
 from torchrl.envs import StepCounter, Transform
 
-from torchtrade.train.reward import TradingReward
+from torchtrade.llm.train.reward import TradingReward
 
 
 class TradingRewardParser(Transform):

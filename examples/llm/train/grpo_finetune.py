@@ -10,7 +10,7 @@ import datasets
 import pandas as pd
 
 from torchtrade.envs.offline import OneStepTradingEnvConfig
-from torchtrade.train import LLMTrainer
+from torchtrade.llm.train import LLMTrainer
 
 
 def main():

@@ -1,5 +1,5 @@
 import pytest
-from torchtrade.train.losses import resolve_loss, validate_num_generations
+from torchtrade.llm.train.losses import resolve_loss, validate_num_generations
 
 
 class _StubLoss:
@@ -9,7 +9,7 @@ class _StubLoss:
 
 
 def test_registry_name_resolves_and_forwards_kwargs(monkeypatch):
-    import torchtrade.train.losses as m
+    import torchtrade.llm.train.losses as m
     monkeypatch.setitem(m._LOSS_REGISTRY, "stub", lambda: _StubLoss)
     loss = resolve_loss("stub", actor_network="ACTOR", loss_kwargs={"clip_epsilon": 0.2})
     assert isinstance(loss, _StubLoss)

@@ -14,7 +14,7 @@ import os
 
 import torch
 
-from torchtrade.train.peft_config import build_peft_config
+from torchtrade.llm.train.peft_config import build_peft_config
 
 
 def _structured_outputs_kwargs(regex):

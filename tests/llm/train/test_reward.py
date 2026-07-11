@@ -1,5 +1,5 @@
 import pytest
-from torchtrade.train.reward import TradingReward
+from torchtrade.llm.train.reward import TradingReward
 
 
 class _FakeEnv:

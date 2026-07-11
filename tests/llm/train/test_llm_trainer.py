@@ -2,8 +2,8 @@
 (The full training loop is GPU-only and is validated on the DGX Spark.)"""
 import pytest
 
-from torchtrade.train import LLMTrainer
-from torchtrade.train.trading_env import TradingRewardParser
+from torchtrade.llm.train import LLMTrainer
+from torchtrade.llm.train.trading_env import TradingRewardParser
 
 
 def test_rejects_num_generations_below_two():
@@ -14,7 +14,7 @@ def test_rejects_num_generations_below_two():
 def test_base_load_kwargs_uses_transformers_compatible_dtype():
     """Regression: transformers>=4.30 (the [llm] floor) accepts torch_dtype, not dtype (added
     ~4.56), so build_train_policy must pass torch_dtype to from_pretrained."""
-    from torchtrade.train.models import _base_load_kwargs
+    from torchtrade.llm.train.models import _base_load_kwargs
     kw = _base_load_kwargs()
     assert "torch_dtype" in kw and "dtype" not in kw
 

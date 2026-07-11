@@ -1,5 +1,5 @@
 import pytest
-from torchtrade.train.peft_config import build_peft_config
+from torchtrade.llm.train.peft_config import build_peft_config
 
 
 @pytest.mark.parametrize("method,has_lora,in_4bit", [

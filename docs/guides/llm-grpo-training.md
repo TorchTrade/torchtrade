@@ -6,7 +6,7 @@ provides the reward; you pass a dataset and pick what to train.
 
 ```python
 from torchtrade.envs.offline import OneStepTradingEnvConfig
-from torchtrade.train import LLMTrainer
+from torchtrade.llm.train import LLMTrainer
 
 config = OneStepTradingEnvConfig(symbol="BTC/USD", time_frames=["1Day"], window_sizes=[30],
                                  execute_on="1Day", action_levels=[-1, 0, 1], random_start=False)

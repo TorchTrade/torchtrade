@@ -19,14 +19,14 @@ import torch
 
 from torchtrade.actor.base_llm_actor import BaseLLMActor
 from torchtrade.envs.offline import OneStepTradingEnv
-from torchtrade.train.losses import resolve_loss, validate_num_generations
-from torchtrade.train.models import (
+from torchtrade.llm.train.losses import resolve_loss, validate_num_generations
+from torchtrade.llm.train.models import (
     build_inference_policy,
     build_train_policy,
     save_lora_adapter,
     sync_weights_to_vllm,
 )
-from torchtrade.train.trading_env import make_trading_env
+from torchtrade.llm.train.trading_env import make_trading_env
 
 
 class _PromptBuilder(BaseLLMActor):
