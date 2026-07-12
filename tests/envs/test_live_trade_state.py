@@ -63,6 +63,13 @@ class MockTrader:
     def get_mark_price(self):
         return self.mark_price_val
 
+    def get_lot_size(self):
+        return {"min_qty": 0.001, "qty_step": 0.001}
+
+    def _round_amount(self, amount):
+        # Floor to the 0.001 step (mirrors CCXT amount_to_precision truncation).
+        return int(amount / 0.001 + 1e-9) * 0.001
+
     def get_account_balance(self):
         return {
             "available_balance": self.balance,

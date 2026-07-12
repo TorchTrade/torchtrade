@@ -55,6 +55,8 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
         })
 
         trader.get_mark_price = MagicMock(return_value=50000.0)
+        trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001})
+        trader._round_amount = MagicMock(side_effect=lambda amount: amount)
 
         trader.get_status = MagicMock(return_value={
             "position_status": None,
@@ -467,6 +469,8 @@ class TestDuplicateActionPrevention:
             "total_margin_balance": 1000.0,
         })
         mock_trader.get_mark_price = MagicMock(return_value=50000.0)
+        mock_trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001})
+        mock_trader._round_amount = MagicMock(side_effect=lambda amount: amount)
         mock_trader.get_status = MagicMock(return_value={"position_status": None})
         mock_trader.trade = MagicMock(return_value=True)
 
@@ -637,6 +641,8 @@ class TestBitgetSLTPNotionalTradeMode:
             "total_margin_balance": 1000.0,
         })
         mock_trader.get_mark_price = MagicMock(return_value=50000.0)
+        mock_trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001})
+        mock_trader._round_amount = MagicMock(side_effect=lambda amount: amount)
         mock_trader.get_status = MagicMock(return_value={"position_status": None})
         mock_trader.trade = MagicMock(return_value=True)
 

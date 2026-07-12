@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 # Bitget error codes that indicate no position exists (expected, not real errors)
 BITGET_NO_POSITION_ERRORS = ["22002", "40773", "No position to close"]
 
+# Fallback used if the exchange lot-size cannot be read from CCXT market info
+_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001}
+
 
 class PositionMode(Enum):
     """
@@ -139,6 +142,7 @@ class BitgetFuturesOrderClass:
         self.margin_mode = margin_mode
         self.position_mode = position_mode
         self.last_order_id = None
+        self._lot_size_cache: Optional[Dict[str, float]] = None
 
         # Initialize CCXT client
         if client is not None:
@@ -174,6 +178,30 @@ class BitgetFuturesOrderClass:
         except Exception as e:
             logger.warning(f"Could not load markets for {self.symbol}: {e}")
 
+    def get_lot_size(self) -> Dict[str, float]:
+        """Return the symbol's ``{'min_qty', 'qty_step'}`` from CCXT market info (cached).
+
+        Bitget's CCXT precision mode is TICK_SIZE, so ``precision.amount`` is the
+        quantity step directly (e.g. 0.0001 for BTC/USDT:USDT). Falls back to
+        ``_DEFAULT_LOT_SIZE`` if the market info is unavailable.
+        """
+        if self._lot_size_cache is not None:
+            return self._lot_size_cache
+
+        try:
+            market = self.client.market(self.symbol)
+            min_qty = market.get("limits", {}).get("amount", {}).get("min")
+            qty_step = market.get("precision", {}).get("amount")
+            self._lot_size_cache = {
+                "min_qty": float(min_qty) if min_qty is not None else _DEFAULT_LOT_SIZE["min_qty"],
+                "qty_step": float(qty_step) if qty_step is not None else _DEFAULT_LOT_SIZE["qty_step"],
+            }
+        except Exception as e:
+            logger.warning(f"Failed to fetch lot size for {self.symbol}: {e}, using defaults")
+            self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+
+        return self._lot_size_cache
+
     def _round_price(self, price: float) -> float:
         """Round a price to the exchange's tick size precision using CCXT."""
         try:
@@ -181,6 +209,19 @@ class BitgetFuturesOrderClass:
         except Exception as e:
             logger.warning(f"price_to_precision failed for {self.symbol}, using unrounded price: {e}")
             return price
+
+    def _round_amount(self, amount: float) -> float:
+        """Floor a quantity to the exchange's lot-size step using CCXT.
+
+        CCXT ``amount_to_precision`` truncates (rounds down) for Bitget, so the
+        result never exceeds ``amount`` — the margin-safe direction. Preferred over
+        manual step arithmetic, which mishandles float error and sci-notation steps.
+        """
+        try:
+            return float(self.client.amount_to_precision(self.symbol, amount))
+        except Exception as e:
+            logger.warning(f"amount_to_precision failed for {self.symbol}, using unrounded amount: {e}")
+            return amount
 
     def _calculate_unrealized_pnl_pct(self, qty: float, entry_price: float, mark_price: float) -> float:
         """Calculate unrealized PnL percentage.
