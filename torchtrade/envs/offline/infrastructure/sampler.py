@@ -1,4 +1,4 @@
-from collections import deque, namedtuple
+from collections import namedtuple
 from typing import Dict, List, Optional, Tuple, Union, Callable, Sequence
 import logging
 import warnings
@@ -198,7 +198,6 @@ class MarketDataObservationSampler:
         if len(self.execute_base_features_df) == 0:
             raise ValueError("No execute_on base features available after min_start_time")
 
-        self.unseen_timestamps = deque(self.exec_times)
         if len(self.exec_times) == 0:
             raise ValueError("Window duration is too large for the given dataset, no execution times found")
 
@@ -260,18 +259,6 @@ class MarketDataObservationSampler:
                 "exec_times and execute_base_features_df timestamps are not aligned. "
                 "Sequential index access requires 1:1 row correspondence."
             )
-
-    def get_random_timestamp(self, without_replacement: bool = False) -> pd.Timestamp:
-        if without_replacement:
-            idx = self.np_rng.choice(len(self.unseen_timestamps), size=1, replace=False)
-            return self.unseen_timestamps.pop(int(idx))
-        else:
-            idx = self.np_rng.integers(0, len(self.exec_times))
-            return self.exec_times[idx]
-
-    def get_random_observation(self, without_replacement: bool = False) -> Tuple[Dict[str, torch.Tensor], pd.Timestamp, bool]:
-        timestamp = self.get_random_timestamp(without_replacement)
-        return self.get_observation(timestamp), timestamp, False
 
     def get_sequential_observation(self) -> Tuple[Dict[str, torch.Tensor], pd.Timestamp, bool]:
         """Get observation using index-based tracking."""
@@ -482,10 +469,6 @@ class MarketDataObservationSampler:
                 self._end_idx = total_len
             else:
                 self._end_idx = min(self.max_traj_length, total_len)
-
-        # PERF: Keep unseen_timestamps for backward compatibility but as lightweight view
-        # This is only used if someone calls get_sequential_observation() directly
-        self.unseen_timestamps = deque()  # Empty placeholder
 
         return self._end_idx - self._sequential_idx
 

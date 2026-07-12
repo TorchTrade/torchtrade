@@ -219,3 +219,10 @@ data_preprocessing.ipynb
 LLM-TorchRL-Feature-Integration.md
 docs/superpowers/
 
+# Local scratch (notebooks, ad-hoc scripts, tool caches)
+.serena/
+replay_buffer_*.pt/
+upload_pytorch_model.ipynb
+/test_real_data.py
+/test_unified_env.py
+

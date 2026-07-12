@@ -445,3 +445,50 @@ class TestBitgetFuturesOrderClassIntegration:
         # Test getting mark price
         price = executor.get_mark_price()
         assert price > 0
+
+
+class TestBitgetLotSize:
+    """get_lot_size must read real lot constraints from CCXT market info, not hardcode them.
+
+    Regression: env previously hardcoded min_qty/step=0.001, which is 10x the real
+    BTC/USDT:USDT step (0.0001) and would mis-size or wrongly reject orders.
+    """
+
+    @pytest.fixture
+    def order_executor(self, mock_ccxt_client):
+        from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
+        with patch('torchtrade.envs.live.bitget.order_executor.ccxt.bitget', return_value=mock_ccxt_client):
+            executor = BitgetFuturesOrderClass(
+                symbol="BTC/USDT:USDT", trade_mode="fractional",
+                api_key="k", api_secret="s", passphrase="p",
+            )
+            executor.client = mock_ccxt_client
+            return executor
+
+    def test_reads_market_info_and_caches(self, order_executor, mock_ccxt_client):
+        mock_ccxt_client.market.reset_mock()
+        lot = order_executor.get_lot_size()
+        assert lot == {"min_qty": 0.0001, "qty_step": 0.0001}
+        order_executor.get_lot_size()  # second call served from cache
+        mock_ccxt_client.market.assert_called_once()
+
+    def test_falls_back_to_default_on_error(self, order_executor, mock_ccxt_client):
+        mock_ccxt_client.market = MagicMock(side_effect=Exception("no market info"))
+        assert order_executor.get_lot_size() == {"min_qty": 0.001, "qty_step": 0.001}
+
+    @pytest.mark.parametrize("amount,expected", [
+        (0.00037, 0.0003),   # truncates down to the 0.0001 step (never rounds up -> margin-safe)
+        (0.0003, 0.0003),    # exact multiple preserved (the old int()/str() floor could lose a step)
+        (0.00125, 0.0012),   # truncates, not rounds-to-nearest
+    ])
+    def test_round_amount_floors_to_lot_step(self, order_executor, amount, expected):
+        """_round_amount delegates to CCXT amount_to_precision (truncation), replacing the
+        fragile string-parse floor that mishandled exact multiples and sci-notation steps."""
+        assert order_executor._round_amount(amount) == pytest.approx(expected)
+
+    def test_round_amount_floors_to_step_on_error(self, order_executor, mock_ccxt_client):
+        """If CCXT precision fails, floor to the cached lot step (never submit a raw
+        unaligned amount the exchange may reject)."""
+        mock_ccxt_client.amount_to_precision = MagicMock(side_effect=Exception("boom"))
+        # qty_step=0.0001 -> 0.00037 floors to 0.0003
+        assert order_executor._round_amount(0.00037) == pytest.approx(0.0003)

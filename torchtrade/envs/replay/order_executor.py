@@ -268,6 +268,12 @@ class ReplayOrderExecutor:
         """Get lot size constraints (permissive in replay)."""
         return {"min_qty": 0.000001, "qty_step": 0.000001}
 
+    def _round_amount(self, amount: float) -> float:
+        """Floor a quantity to the replay lot step (never rounds up — margin-safe,
+        matching the live truncation path)."""
+        step = self.get_lot_size()["qty_step"]
+        return (amount // step) * step
+
     def reset(self):
         """Reset executor to initial state."""
         self.position_qty = 0.0

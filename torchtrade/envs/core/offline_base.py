@@ -13,7 +13,6 @@ from torchrl.data import Categorical, Composite, Unbounded
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import HistoryTracker, PositionState
 from tensordict import TensorDict
-import torch
 
 
 class TorchTradeOfflineEnv(TorchTradeBaseEnv):
@@ -376,63 +375,6 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         obs_dict, self.current_timestamp, self.truncated = self.sampler.get_sequential_observation()
         base_features = self.sampler.get_base_features(self.current_timestamp)
         return obs_dict, base_features
-
-    def _build_standard_observation(
-        self,
-        obs_dict: dict,
-        account_state_values: list
-    ) -> TensorDictBase:
-        """Build observation TensorDict from market data and account state.
-
-        This is common logic used by most environments to assemble the final
-        observation from market data and account state.
-
-        Args:
-            obs_dict: Market data observation dictionary from sampler
-            account_state_values: List of account state values
-
-        Returns:
-            TensorDict with combined observation
-        """
-        account_state = torch.tensor(account_state_values, dtype=torch.float)
-        obs_data = {self.account_state_key: account_state}
-        obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
-        return TensorDict(obs_data, batch_size=())
-
-    def _validate_observation(self, obs: TensorDictBase) -> None:
-        """Validate observation for NaN/Inf values.
-
-        Checks all tensors in the observation for invalid values and raises
-        informative errors if found. This helps catch data corruption early
-        before it causes silent failures downstream.
-
-        Args:
-            obs: Observation TensorDict to validate
-
-        Raises:
-            ValueError: If any NaN or Inf values are found in the observation
-
-        Example:
-            >>> obs = self._get_observation()
-            >>> self._validate_observation(obs)  # Raises if invalid
-            >>> return obs
-        """
-        import torch
-
-        for key, value in obs.items():
-            if isinstance(value, torch.Tensor):
-                if torch.isnan(value).any():
-                    raise ValueError(
-                        f"Invalid observation: NaN values found in '{key}' at timestamp {self.current_timestamp}. "
-                        f"This indicates corrupted data or calculation errors. "
-                        f"Check your dataset and feature preprocessing function."
-                    )
-                if torch.isinf(value).any():
-                    raise ValueError(
-                        f"Invalid observation: Inf values found in '{key}' at timestamp {self.current_timestamp}. "
-                        f"This indicates corrupted data or calculation errors (possible division by zero). "
-                        f"Check your dataset and feature preprocessing function."
-                    )
 
     def _get_action_markers(self, action_types, action_history, position_history, is_futures):
         """Return list of (indices, marker, color, label, alpha) for action scatter plots."""

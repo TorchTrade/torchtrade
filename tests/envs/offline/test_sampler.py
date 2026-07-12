@@ -100,10 +100,10 @@ class TestSamplerInitialization:
 class TestSamplerReset:
     """Tests for sampler reset functionality."""
 
-    def test_reset_restores_unseen_timestamps(
+    def test_reset_restores_step_count(
         self, sample_ohlcv_df, default_timeframes, default_window_sizes, execute_timeframe
     ):
-        """Reset should restore all unseen timestamps."""
+        """Reset should restore the remaining-step count after observations are consumed."""
         sampler = MarketDataObservationSampler(
             df=sample_ohlcv_df,
             time_frames=default_timeframes,

@@ -340,27 +340,16 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         # Calculate delta (what we need to trade)
         delta_qty = target_qty - current_qty
 
-        # Tolerance check
-        # TODO: Query actual minimum quantity from Bitget exchange info instead of hardcoding
-        # Consider adding similar methods to Binance's _get_symbol_info(), _get_step_size(), _get_min_notional()
-        min_qty = 0.001  # Minimum tradeable quantity (hardcoded)
+        # Query real min-order-size from Bitget market info (not hardcoded)
+        min_qty = self.trader.get_lot_size()["min_qty"]
+
         if abs(delta_qty) < min_qty:
-            # Already at target
+            # Already at target (delta below the minimum tradeable size)
             return self._create_trade_info(executed=False)
 
-        # Determine side and amount
-        if delta_qty > 0:
-            # Need to buy
-            side = "buy"
-            amount = abs(delta_qty)
-        else:
-            # Need to sell
-            side = "sell"
-            amount = abs(delta_qty)
-
-        # Floor to step size to avoid exceeding available margin
-        step_size = min_qty  # TODO: Query actual step size from Bitget exchange info
-        amount = int(amount / step_size) * step_size
+        side = "buy" if delta_qty > 0 else "sell"
+        # Floor to the exchange lot step (CCXT truncates -> never exceeds margin)
+        amount = self.trader._round_amount(abs(delta_qty))
 
         if amount < min_qty:
             return self._create_trade_info(executed=False)

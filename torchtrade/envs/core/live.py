@@ -140,13 +140,6 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
             "day": "days",
             "seconds": "seconds",
             "D": "days",
-            # Lowercase variants
-            "min": "minutes",
-            "hour": "hours",
-            "day": "days",
-            "minute": "minutes",
-            # Binance uses seconds-based intervals
-            "seconds": "seconds",
         }
 
         if self.execute_on_unit not in unit_to_timedelta:
