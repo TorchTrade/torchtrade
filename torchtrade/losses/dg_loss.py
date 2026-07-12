@@ -96,7 +96,6 @@ class DGLoss(LossModule):
         samples_mc_entropy: int = 1,
         reduction: str | None = None,
         functional: bool = True,
-        device: torch.device | None = None,
     ):
         if actor_network is None:
             raise TypeError("Missing positional argument actor_network.")
