@@ -29,7 +29,7 @@ def main():
     # serves both the vLLM rollout engine and the QLoRA trainer; the adapter is hot-swapped
     # each step, ~50MB, not the 16GB base), method="qlora". We opt into constrain_actions=True
     # (guided decoding forces a parseable <answer>N</answer> every time — recommended) and a larger
-    # GRPO group; K is cheap thanks to the chunked log-probs (see the guide's Memory section).
+    # GRPO group; K is cheap thanks to the chunked log-probs.
     adapter = LLMTrainer(df=df, config=config, num_generations=8, max_steps=100,
                          constrain_actions=True).train()
     print(f"Trained adapter saved to {adapter} — load it into LocalLLMActor for eval/live.")
