@@ -267,3 +267,125 @@ class SimpleCNNEncoder(nn.Module):
 
         return x
 
+
+class SimpleTransformerEncoder(nn.Module):
+    """
+    Simple Transformer encoder for sequential data.
+
+    Uses standard PyTorch TransformerEncoder for processing temporal patterns.
+    Compatible with BiNMTABLModel interface from trading-nets.
+
+    Args:
+        input_shape: (sequence_length, num_features)
+        output_shape: (out_seq_length, out_features) - if None, matches input
+        hidden_feature_size: Hidden dimension size
+        num_heads: Number of attention heads
+        num_layers: Number of transformer layers
+        activation: Activation function name
+        dropout: Dropout rate
+        final_activation: Final activation function name
+    """
+
+    def __init__(
+        self,
+        input_shape: Tuple[int, int],
+        output_shape: Optional[Tuple[int, int]] = None,
+        hidden_feature_size: int = 64,
+        num_heads: int = 4,
+        num_layers: int = 2,
+        activation: str = "relu",
+        dropout: float = 0.1,
+        final_activation: Optional[str] = "relu",
+        **kwargs  # Accept extra args for compatibility
+    ):
+        super().__init__()
+
+        seq_len, num_features = input_shape
+
+        # Default output shape matches input
+        if output_shape is None:
+            output_shape = input_shape
+        self.output_shape = output_shape
+        out_seq_len, out_features = output_shape
+
+        # Input projection
+        self.input_proj = nn.Linear(num_features, hidden_feature_size)
+
+        # Transformer encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_feature_size,
+            nhead=num_heads,
+            dim_feedforward=hidden_feature_size * 4,
+            dropout=dropout,
+            activation=activation,
+            batch_first=True,
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        # Output projection
+        self.output_proj = nn.Linear(hidden_feature_size, out_features)
+
+        # Pooling/projection to match output sequence length
+        if seq_len != out_seq_len:
+            self.pool = nn.AdaptiveAvgPool1d(out_seq_len)
+        else:
+            self.pool = nn.Identity()
+
+        self.final_activation = self._get_activation(final_activation) if final_activation else None
+        self.input_shape = input_shape
+
+    def _get_activation(self, name: str) -> nn.Module:
+        """Get activation function by name."""
+        activations = {
+            "relu": nn.ReLU(),
+            "gelu": nn.GELU(),
+            "tanh": nn.Tanh(),
+            "sigmoid": nn.Sigmoid(),
+            "elu": nn.ELU(),
+        }
+        return activations.get(name.lower(), nn.ReLU())
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass.
+
+        Args:
+            x: Input tensor of shape (batch, seq_len, features) or (*batch_dims, seq_len, features)
+
+        Returns:
+            Output tensor of shape (batch, out_seq_len, out_features) or (*batch_dims, out_seq_len, out_features)
+        """
+        # Handle extra batch dimensions (e.g., from parallel envs)
+        original_shape = x.shape
+        if x.ndim > 3:
+            # Flatten all batch dimensions except last two (seq_len, features)
+            x = x.reshape(-1, *x.shape[-2:])
+
+        # Project input to hidden size
+        x = self.input_proj(x)
+
+        # Apply transformer
+        x = self.transformer(x)
+
+        # Project to output features
+        x = self.output_proj(x)
+
+        # Pool to output sequence length if needed
+        if not isinstance(self.pool, nn.Identity):
+            # Transpose for adaptive pooling
+            x = x.transpose(1, 2)
+            x = self.pool(x)
+            x = x.transpose(1, 2)
+
+        if self.final_activation:
+            x = self.final_activation(x)
+
+        # Restore original batch dimensions if needed
+        if len(original_shape) > 3:
+            x = x.reshape(*original_shape[:-2], *x.shape[-2:])
+
+        # Squeeze sequence dimension if output is single timestep
+        if self.output_shape[0] == 1:
+            x = x.squeeze(-2)
+
+        return x

@@ -486,7 +486,9 @@ class TestBitgetLotSize:
         fragile string-parse floor that mishandled exact multiples and sci-notation steps."""
         assert order_executor._round_amount(amount) == pytest.approx(expected)
 
-    def test_round_amount_falls_back_to_unrounded_on_error(self, order_executor, mock_ccxt_client):
-        """If CCXT precision fails, the raw amount is returned rather than crashing the order."""
+    def test_round_amount_floors_to_step_on_error(self, order_executor, mock_ccxt_client):
+        """If CCXT precision fails, floor to the cached lot step (never submit a raw
+        unaligned amount the exchange may reject)."""
         mock_ccxt_client.amount_to_precision = MagicMock(side_effect=Exception("boom"))
-        assert order_executor._round_amount(0.00037) == 0.00037
+        # qty_step=0.0001 -> 0.00037 floors to 0.0003
+        assert order_executor._round_amount(0.00037) == pytest.approx(0.0003)

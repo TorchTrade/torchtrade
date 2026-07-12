@@ -220,8 +220,11 @@ class BitgetFuturesOrderClass:
         try:
             return float(self.client.amount_to_precision(self.symbol, amount))
         except Exception as e:
-            logger.warning(f"amount_to_precision failed for {self.symbol}, using unrounded amount: {e}")
-            return amount
+            # Fail safe by flooring to the cached lot step rather than submitting an
+            # unaligned raw amount the exchange may reject.
+            step = self.get_lot_size()["qty_step"]
+            logger.warning(f"amount_to_precision failed for {self.symbol}, flooring to lot step {step}: {e}")
+            return (amount // step) * step
 
     def _calculate_unrealized_pnl_pct(self, qty: float, entry_price: float, mark_price: float) -> float:
         """Calculate unrealized PnL percentage.
