@@ -1202,17 +1202,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#memory-why-num_generations-k-is-a-free-knob" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Memory — why num_generations (K) is a free knob
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#logging-observability" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1278,8 +1267,8 @@ provides the reward; you pass a dataset and pick what to train.</p>
 </span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n">feature_keys</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;features_return&quot;</span><span class="p">,</span> <span class="s2">&quot;close&quot;</span><span class="p">],</span>  <span class="c1"># which of them the LLM SEES in the prompt</span>
 </span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;unsloth/Qwen3-8B-Base-bnb-4bit&quot;</span><span class="p">,</span>  <span class="c1"># default; one 4-bit ckpt for rollouts + QLoRA</span>
 </span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">method</span><span class="o">=</span><span class="s2">&quot;qlora&quot;</span><span class="p">,</span>          <span class="c1"># &quot;full&quot; | &quot;lora&quot; | &quot;qlora&quot;</span>
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">num_generations</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>       <span class="c1"># K completions per bar (the GRPO group); K is cheap now (see Memory)</span>
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">logprob_chunk_size</span><span class="o">=</span><span class="mi">1024</span><span class="p">,</span> <span class="c1"># chunk size for the memory-bounded log-prob/entropy (see Memory)</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">num_generations</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>       <span class="c1"># K completions per bar (the GRPO group); higher K = stronger signal</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">logprob_chunk_size</span><span class="o">=</span><span class="mi">1024</span><span class="p">,</span> <span class="c1"># chunk size for the memory-bounded log-prob/entropy computation</span>
 </span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="n">constrain_actions</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>  <span class="c1"># guided decoding -&gt; every completion is a parseable action (recommended)</span>
 </span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    <span class="n">reward_fn</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>          <span class="c1"># default: OneStepTradingEnv score; override to customize</span>
 </span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="n">system_prompt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>      <span class="c1"># default: the actor&#39;s system prompt; override to customize</span>
@@ -1310,7 +1299,7 @@ both to fall back to the raw market-data keys.</p>
 <h3 id="reward-how-a-decision-is-scored">Reward — how a decision is scored<a class="headerlink" href="#reward-how-a-decision-is-scored" title="Permanent link">&para;</a></h3>
 <p>By default each decision is scored by <code>OneStepTradingEnv.score(bar_index, action)</code> (the realized
 return of rolling that action to its SL/TP/horizon). Pass <code>reward_fn(action, bar_index, env) -&gt; float</code>
-to score it your way — e.g. penalize holding to encourage the model to take positions:</p>
+to score it your way, e.g. penalize holding to encourage the model to take positions:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">my_reward</span><span class="p">(</span><span class="n">action</span><span class="p">,</span> <span class="n">bar_index</span><span class="p">,</span> <span class="n">env</span><span class="p">):</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">r</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">bar_index</span><span class="p">,</span> <span class="n">action</span><span class="p">)</span>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="k">return</span> <span class="n">r</span> <span class="o">-</span> <span class="mf">0.001</span> <span class="k">if</span> <span class="n">action</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">else</span> <span class="n">r</span>    <span class="c1"># small penalty for &quot;hold&quot;</span>
@@ -1333,20 +1322,20 @@ to score it your way — e.g. penalize holding to encourage the model to take po
 <p>An LLM reasons over higher-level market structure; a decision over 1-minute or 1-hour noise gives it
 almost nothing to latch onto, and GRPO groups collapse to "all hold" (no within-group reward
 variance → no gradient). Set <code>time_frames</code>/<code>execute_on</code> to <code>"1Day"</code> (the sampler resamples your
-source data up) with a window of ~20–60 bars. The timeframe is entirely your <code>config</code> — the trainer
+source data up) with a window of ~20–60 bars. The timeframe is entirely your <code>config</code>; the trainer
 passes it through untouched.</p>
 <h2 id="why-onesteptradingenv-for-training-and-sequentialtradingenv-for-eval">Why <code>OneStepTradingEnv</code> for training and <code>SequentialTradingEnv</code> for eval<a class="headerlink" href="#why-onesteptradingenv-for-training-and-sequentialtradingenv-for-eval" title="Permanent link">&para;</a></h2>
 <p>GRPO's advantage is <strong>group-relative</strong>: for one state it samples K completions, gets K rewards,
 and uses <code>advantage_i = (r_i − mean) / std</code>. That requires <strong>K independent samples of the <em>same</em>
-state</strong>, each scored by one scalar — a contextual bandit. <code>OneStepTradingEnv</code> is exactly that
+state</strong>, each scored by one scalar: a contextual bandit. <code>OneStepTradingEnv</code> is exactly that
 (reset → a bar, <code>step(action)</code> → one scalar reward that rolls the position to its SL/TP/horizon).
 <code>SequentialTradingEnv</code> would break the group: after the first action the K rollouts diverge into
 different states, so there is no shared state to group on.</p>
 <p>So training uses the one-step form (via the deterministic reward oracle
 <code>OneStepTradingEnv.score(bar_index, action)</code>), and <strong>evaluation</strong> backtests the trained actor on
-<code>SequentialTradingEnv</code> — the honest measure of real sequential trading performance. A different
+<code>SequentialTradingEnv</code>, the honest measure of real sequential trading performance. A different
 algorithm that needs a trajectory (PPO/PG with a value head) would use <code>SequentialTradingEnv</code>
-instead — that is a separate future recipe, not a <code>loss</code> swap.</p>
+instead. That is a separate future recipe, not a <code>loss</code> swap.</p>
 <h2 id="guided-decoding-constrained-thinkanswer-output">Guided decoding (constrained <code>&lt;think&gt;</code>/<code>&lt;answer&gt;</code> output)<a class="headerlink" href="#guided-decoding-constrained-thinkanswer-output" title="Permanent link">&para;</a></h2>
 <p>GRPO only learns from <strong>within-group reward variance</strong>. If the model's completions don't emit a
 valid <code>&lt;answer&gt;N&lt;/answer&gt;</code>, the parser falls back to action 0 (hold) → every group is all-hold →
@@ -1361,54 +1350,35 @@ past <code>max_tokens</code> with no answer, or add text after <code>&lt;/answer
 produce <code>&lt;</code> to be <code>&lt;/think&gt;</code>, and <code>{40,600}</code> makes a minimum of real reasoning while forcing the close
 (then the answer) before the token cap. Keep <code>max_tokens</code> at roughly 2× the think token budget so the
 forced answer always fits. Reasoning can't contain a literal <code>&lt;</code> (the decoder rejects the lookahead
-that would allow it) — the model uses <code>&gt;</code> / "above" / "below" naturally. Set <code>constrain_actions=False</code>
+that would allow it), so the model uses <code>&gt;</code> / "above" / "below" naturally. Set <code>constrain_actions=False</code>
 only with a strong instruction-tuned model where you want fully free-form reasoning and accept the
 occasional unparseable completion (which scores as hold).</p>
 <h2 id="the-stack-hybrid-torchrl-native">The stack (hybrid torchrl-native)<a class="headerlink" href="#the-stack-hybrid-torchrl-native" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Rollouts: torchrl <code>vLLMWrapper</code> over a plain <code>vllm.LLM</code> (K generations per bar), guided-decoded.</li>
 <li>Advantage: torchrl <code>MCAdvantage</code> (group-relative over the K-group).</li>
-<li>Loss: stock torchrl <code>GRPOLoss</code> over a LoRA/QLoRA <code>ChunkedTransformersWrapper</code> (the chunked
-  log-prob/entropy from the Memory section, plugged into the wrapper's dist hook so the loss is
+<li>Loss: stock torchrl <code>GRPOLoss</code> over a LoRA/QLoRA <code>ChunkedTransformersWrapper</code> (computes the
+  log-prob/entropy from hidden states, plugged into the wrapper's dist hook so the loss is
   unmodified). <code>masking_strategy="rlhf"</code> scores only the <strong>answer/assistant tokens</strong> the model
   generated, not the prompt.</li>
 <li>Weight sync (LoRA/QLoRA): the vLLM engine loads the frozen 4-bit base <strong>once</strong>; each step the
   trainer saves just the LoRA adapter (~tens of MB) and hot-swaps it via a fresh <code>LoRARequest</code>. The
-  base never changes, so this replaces re-pushing the whole ~16 GB base every step — far less memory
+  base never changes, so this replaces re-pushing the whole ~16 GB base every step: far less memory
   and a ~300× smaller per-step sync. (<code>method="full"</code> falls back to a merged-weight <code>collective_rpc</code>
   sync; run with <code>VLLM_ALLOW_INSECURE_SERIALIZATION=1</code>.)</li>
 </ul>
 <blockquote>
 <p>On DGX Spark (GB10/sm_121) this hybrid path is used because torchrl's <code>AsyncVLLM</code> + NCCL sync
 does not import against the vLLM build that runs on that GPU. It still uses torchrl's
-<code>vLLMWrapper</code> / <code>TransformersWrapper</code> / <code>GRPOLoss</code> / <code>MCAdvantage</code> — only the engine and the
+<code>vLLMWrapper</code> / <code>TransformersWrapper</code> / <code>GRPOLoss</code> / <code>MCAdvantage</code>; only the engine and the
 sync mechanism differ.</p>
 </blockquote>
-<h2 id="memory-why-num_generations-k-is-a-free-knob">Memory — why <code>num_generations</code> (K) is a free knob<a class="headerlink" href="#memory-why-num_generations-k-is-a-free-knob" title="Permanent link">&para;</a></h2>
-<p>Stock GRPO builds a full <code>[K × seq_len × vocab]</code> logits tensor to get per-token log-probs, and with
-a large vocabulary (e.g. Qwen3.5's 248k) that term explodes as K grows — training used to OOM by
-K≈4. <code>LLMTrainer</code> avoids it with two things, so peak memory grows only gently with K:</p>
-<ul>
-<li><strong>Chunked log-probs (<code>ChunkedTransformersWrapper</code>).</strong> Instead of materializing all logits, it
-  computes the log-prob and entropy from the model's hidden states, chunked over the sequence, so
-  peak vocab memory is <code>O(logprob_chunk_size × vocab)</code> — independent of K and sequence length. It's
-  a lazy distribution plugged into the wrapper's own dist hook, so stock <code>GRPOLoss</code> is used
-  unchanged. Tune <code>logprob_chunk_size</code> (default 1024): smaller = less memory, slightly slower.</li>
-<li><strong>Gradient checkpointing that is actually active.</strong> The trainer enables checkpointing on the
-  <em>final</em> PEFT model and calls <code>train()</code> so every layer's checkpoint gate is live (enabling it before
-  the PEFT wrap, or leaving the model with children in eval, silently makes it inert — the flags lie).</li>
-</ul>
-<p>Measured on a single GB10 (Qwen3.5-4B QLoRA, seq 512): K=2 → 9.4 GB, K=8 → 22 GB, K=16 → 38 GB,
-K=24 → 55 GB — ~2 GB/K, versus ~12 GB/K with the naive path. So raise K for a stronger group signal
-rather than fighting OOMs. If you still need to trim: lower <code>logprob_chunk_size</code>, shorten the prompt
-(fewer/smaller feature columns, smaller window), lower <code>max_tokens</code>, and keep <code>gpu_memory_utilization</code>
-modest (the 4-bit base needs little).</p>
 <h2 id="logging-observability">Logging &amp; observability<a class="headerlink" href="#logging-observability" title="Permanent link">&para;</a></h2>
 <p>With <code>use_wandb=True</code> (default) each step logs <code>reward</code>, <code>advantage</code> (mean |group-relative
-advantage| — ~0 when the group agrees, positive when it disagrees), <code>loss</code>, <code>step_time_s</code>,
+advantage|: ~0 when the group agrees, positive when it disagrees), <code>loss</code>, <code>step_time_s</code>,
 <code>rollout_time_s</code>, <code>tokens_per_s</code> (generation throughput), and <code>gen_tokens</code>. Every
 <code>log_completions_every</code> steps (default 5) it also appends <code>n_completions_log</code> (default 2) sample
-completions to a growing wandb <strong>table</strong> — <code>step</code> / <code>completion</code> / parsed <code>action</code> / <code>reward</code> — so
+completions to a growing wandb <strong>table</strong> (<code>step</code> / <code>completion</code> / parsed <code>action</code> / <code>reward</code>), so
 you can watch the actual <code>&lt;think&gt;…&lt;/think&gt;&lt;answer&gt;N&lt;/answer&gt;</code> text evolve as training progresses (the
 best intuition for whether the model is learning the format and taking sensible actions). Everything
 is also printed to stdout, and logging never blocks training (a missing wandb login degrades to
