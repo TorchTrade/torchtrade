@@ -43,12 +43,6 @@ class GroupRelativePGLoss(LossModule):
         default values
 
         Attributes:
-            advantage (NestedKey): The input tensordict key where the advantage is expected.
-                Will be used for the underlying value estimator. Defaults to ``"advantage"``.
-            value_target (NestedKey): The input tensordict key where the target state value is expected.
-                Will be used for the underlying value estimator Defaults to ``"value_target"``.
-            value (NestedKey): The input tensordict key where the state value is expected.
-                Will be used for the underlying value estimator. Defaults to ``"state_value"``.
             sample_log_prob (NestedKey or list of nested keys): The input tensordict key where the
                sample log probability is expected.
                Defaults to ``"sample_log_prob"`` when :func:`~tensordict.nn.composite_lp_aggregate` returns `True`,
@@ -65,7 +59,6 @@ class GroupRelativePGLoss(LossModule):
                 Defaults to ``"terminated"``.
         """
 
-        advantage: NestedKey = "advantage"
         sample_log_prob: NestedKey | list[NestedKey] | None = None
         action: NestedKey | list[NestedKey] = "action"
         reward: NestedKey | list[NestedKey] = "reward"
@@ -93,12 +86,9 @@ class GroupRelativePGLoss(LossModule):
         epsilon_high: float = 0.2,
         samples_mc_entropy: int = 1,
         entropy_coeff: float | Mapping[NestedKey, float] | None = None,
-        log_explained_variance: bool = True,
         actor: ProbabilisticTensorDictSequential = None,
         reduction: str | None = None,
         functional: bool = True,
-        device: torch.device | None = None,
-        **kwargs,
     ):
         if actor is not None:
             actor_network = actor
@@ -121,32 +111,11 @@ class GroupRelativePGLoss(LossModule):
             self.actor_network = actor_network
             self.actor_network_params = None
 
-        self.log_explained_variance = log_explained_variance
         self.samples_mc_entropy = samples_mc_entropy
         self.entropy_bonus = entropy_bonus
         self.reduction = reduction
         self.epsilon_low = epsilon_low
         self.epsilon_high = epsilon_high
-
-        if device is None:
-            try:
-                device = next(self.parameters()).device
-            except (AttributeError, StopIteration):
-                device = getattr(
-                    torch, "get_default_device", lambda: torch.device("cpu")
-                )()
-
-        # Handle deprecated entropy_coef argument
-        if "entropy_coef" in kwargs:
-            if entropy_coeff is not None:  # Check if entropy_coeff was explicitly set
-                raise ValueError(
-                    "Cannot specify both 'entropy_coef' and 'entropy_coeff'"
-                )
-            warnings.warn(
-                "'entropy_coef' is deprecated and will be removed in torchrl v0.11. Please use 'entropy_coeff' instead.",
-                DeprecationWarning,
-            )
-            entropy_coeff = kwargs.pop("entropy_coef")
 
         # Set default value if None
         if entropy_coeff is None:
@@ -290,9 +259,9 @@ class GroupRelativePGLoss(LossModule):
         else:
             raise NotImplementedError(
                 "Only probabilistic modules from tensordict.nn are currently supported. "
-                "If you need to implement a custom logic to retrieve the log-probs (to compute "
-                "the PPO objective) or the distribution (for the PPO entropy), please augment "
-                f"the {type(self).__class__} by implementing your own logic in _get_cur_log_prob."
+                "If you need custom logic to retrieve the log-probs (for the policy-gradient "
+                "objective) or the distribution (for the entropy bonus), please augment "
+                f"{type(self).__name__} by implementing your own logic in _get_cur_log_prob."
             )
         return log_prob, dist, is_composite
 

@@ -237,21 +237,6 @@ class TestGroupRelativePGLoss:
         loss = GroupRelativePGLoss(actor_network=actor_network, entropy_coeff=coeff_map)
         assert loss._entropy_coeff_map == coeff_map
 
-    def test_deprecated_entropy_coef_warning(self, actor_network):
-        """Test that deprecated entropy_coef parameter raises warning."""
-        with pytest.warns(DeprecationWarning, match="entropy_coef.*deprecated"):
-            loss = GroupRelativePGLoss(actor_network=actor_network, entropy_coef=0.05)
-            assert loss.entropy_coeff.item() == pytest.approx(0.05)
-
-    def test_entropy_coef_and_coeff_conflict(self, actor_network):
-        """Test that using both entropy_coef and entropy_coeff raises error."""
-        with pytest.raises(ValueError, match="Cannot specify both"):
-            GroupRelativePGLoss(
-                actor_network=actor_network,
-                entropy_coeff=0.01,
-                entropy_coef=0.02,
-            )
-
     def test_functional_mode(self, actor_network):
         """Test that functional mode works correctly."""
         loss = GroupRelativePGLoss(actor_network=actor_network, functional=True)
@@ -333,14 +318,6 @@ class TestGroupRelativePGLoss:
         output = loss(sample_data)
         assert "entropy" in output.keys()
         assert torch.isfinite(output["entropy"])
-
-    def test_loss_log_explained_variance(self, actor_network):
-        """Test log_explained_variance parameter."""
-        loss = GroupRelativePGLoss(actor_network=actor_network, log_explained_variance=True)
-        assert loss.log_explained_variance is True
-
-        loss = GroupRelativePGLoss(actor_network=actor_network, log_explained_variance=False)
-        assert loss.log_explained_variance is False
 
     def test_loss_with_cuda_if_available(self, actor_network, sample_data):
         """Test loss computation on CUDA if available."""

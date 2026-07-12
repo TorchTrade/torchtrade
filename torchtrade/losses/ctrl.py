@@ -54,7 +54,7 @@ class CTRLLoss(LossModule):
         >>> import torch
         >>> from tensordict import TensorDict
         >>> from tensordict.nn import TensorDictModule
-        >>> from torchrl.objectives.ctrl import CTRLLoss
+        >>> from torchtrade.losses import CTRLLoss
         >>> # Create a simple encoder
         >>> encoder = TensorDictModule(
         ...     nn.Sequential(nn.Linear(64, 256), nn.ReLU(), nn.Linear(256, 128)),
@@ -428,7 +428,7 @@ class CTRLPPOLoss(LossModule):
 
     Examples:
         >>> from torchrl.objectives import ClipPPOLoss
-        >>> from torchrl.objectives.ctrl import CTRLLoss, CTRLPPOLoss
+        >>> from torchtrade.losses import CTRLLoss, CTRLPPOLoss
         >>> # Create PPO and CTRL losses
         >>> ppo_loss = ClipPPOLoss(actor, critic)
         >>> ctrl_loss = CTRLLoss(encoder, embedding_dim=128)
