@@ -102,6 +102,23 @@ class TestSequentialEnvInitialization:
             config = SequentialTradingEnvConfig(leverage=0.5)
             SequentialTradingEnv(sample_ohlcv_df, config)
 
+    @pytest.mark.parametrize("field,value", [
+        ("bankrupt_threshold", 1.0),          # >=1 terminates immediately: rejected
+        ("bankrupt_threshold", 5.0),          # was silently accepted before the fix
+        ("bankrupt_threshold", -0.1),
+        ("maintenance_margin_rate", 1.0),
+        ("maintenance_margin_rate", -0.1),
+    ])
+    def test_termination_threshold_out_of_range_raises(self, field, value):
+        """bankrupt_threshold / maintenance_margin_rate must be in [0, 1) (was unvalidated)."""
+        with pytest.raises(ValueError, match=field):
+            SequentialTradingEnvConfig(**{field: value})
+
+    @pytest.mark.parametrize("field", ["bankrupt_threshold", "maintenance_margin_rate"])
+    def test_termination_threshold_zero_disables(self, field):
+        """0.0 is a valid 'disabled' value and must not raise (parity with vectorized)."""
+        SequentialTradingEnvConfig(**{field: 0.0})
+
     @pytest.mark.parametrize("action_levels,leverage,should_warn", [
         ([-1, 0, 1], 1, True),   # Negative actions + spot = warn
         ([-1, 0, 1], 2, False),  # Negative actions + futures = no warn

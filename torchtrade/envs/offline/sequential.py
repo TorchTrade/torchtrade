@@ -86,6 +86,19 @@ class SequentialTradingEnvConfig:
                 f"Leverage must be between 1 and 125, got {self.leverage}"
             )
 
+        # Termination thresholds, range mirrors the vectorized config.
+        # bankrupt_threshold=0.0 removes the positive termination floor (spot positions
+        # never hit it; leveraged positions can still terminate on portfolio_value <= 0).
+        # maintenance_margin_rate=0.0 = no maintenance-margin buffer. >=1 is nonsensical.
+        if not (0 <= self.bankrupt_threshold < 1):
+            raise ValueError(
+                f"bankrupt_threshold must be in [0, 1), got {self.bankrupt_threshold}"
+            )
+        if not (0 <= self.maintenance_margin_rate < 1):
+            raise ValueError(
+                f"maintenance_margin_rate must be in [0, 1), got {self.maintenance_margin_rate}"
+            )
+
         # Validate action levels
         validate_action_levels(self.action_levels)
 

@@ -263,11 +263,21 @@ class TestVecEnvEdgeCases:
         ({"transaction_fee": 1.5}, "Transaction fee"),
         ({"slippage": -0.1}, "Slippage"),
         ({"slippage": 1.5}, "Slippage"),
-    ], ids=["fee-negative", "fee-over-1", "slip-negative", "slip-over-1"])
+        ({"bankrupt_threshold": 1.0}, "bankrupt_threshold"),
+        ({"bankrupt_threshold": -0.1}, "bankrupt_threshold"),
+        ({"maintenance_margin_rate": 1.0}, "maintenance_margin_rate"),
+    ], ids=["fee-negative", "fee-over-1", "slip-negative", "slip-over-1",
+            "bankrupt-1", "bankrupt-negative", "mmr-1"])
     def test_invalid_config_raises(self, kwargs, match):
-        """Should raise ValueError for out-of-range fee or slippage."""
+        """Should raise ValueError for out-of-range fee/slippage/threshold."""
         with pytest.raises(ValueError, match=match):
             VectorizedSequentialTradingEnvConfig(**kwargs)
+
+    @pytest.mark.parametrize("field", ["bankrupt_threshold", "maintenance_margin_rate"])
+    def test_termination_threshold_zero_accepted(self, field):
+        """0.0 must be accepted (disabled-floor), matching the scalar config parity
+        this PR reconciled (the vectorized config previously rejected 0.0)."""
+        VectorizedSequentialTradingEnvConfig(**{field: 0.0})
 
     @pytest.mark.parametrize("leverage,expected_first", [
         (1, 0.0),    # Spot: negative clamped to 0
