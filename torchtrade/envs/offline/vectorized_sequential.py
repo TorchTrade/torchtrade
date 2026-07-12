@@ -87,13 +87,15 @@ class VectorizedSequentialTradingEnvConfig:
             raise ValueError(
                 f"Leverage must be between 1 and 125, got {self.leverage}"
             )
-        if not (0 < self.bankrupt_threshold < 1):
+        # [0, 1) mirrors the scalar config: 0.0 removes the positive termination floor
+        # (env math floor = bankrupt_threshold * initial_pv). >=1 is nonsensical.
+        if not (0 <= self.bankrupt_threshold < 1):
             raise ValueError(
-                f"Bankrupt threshold must be between 0 and 1, got {self.bankrupt_threshold}"
+                f"bankrupt_threshold must be in [0, 1), got {self.bankrupt_threshold}"
             )
-        if not (0 < self.maintenance_margin_rate < 1):
+        if not (0 <= self.maintenance_margin_rate < 1):
             raise ValueError(
-                f"Maintenance margin rate must be between 0 and 1, got {self.maintenance_margin_rate}"
+                f"maintenance_margin_rate must be in [0, 1), got {self.maintenance_margin_rate}"
             )
 
 
