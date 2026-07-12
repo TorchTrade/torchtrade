@@ -1343,16 +1343,27 @@ zero reward variance → no gradient. Models comply with the format unreliably (
 the time), so set <code>constrain_actions=True</code> (recommended; the parameter defaults to <code>False</code>) to apply
 vLLM <strong>guided decoding</strong>: a regex forces every completion to <code>&lt;think&gt;…&lt;/think&gt;&lt;answer&gt;N&lt;/answer&gt;</code>
 with an in-range index → parseable → the model's genuine action variety becomes real learning signal.</p>
-<p>The regex is <code>&lt;think&gt;[^&lt;]{40,600}&lt;/think&gt;\s*&lt;answer&gt;(0|…)&lt;/answer&gt;</code>. The bounded, <code>&lt;</code>-free think body
-is deliberate: a permissive <code>[\s\S]*?</code> body is <strong>not actually enforced</strong> by the decoding FSM (it can
-absorb the closing tags as free text), which lets the model emit an empty <code>&lt;think&gt;&lt;/think&gt;</code>, ramble
-past <code>max_tokens</code> with no answer, or add text after <code>&lt;/answer&gt;</code>. Forbidding <code>&lt;</code> forces the only way to
-produce <code>&lt;</code> to be <code>&lt;/think&gt;</code>, and <code>{40,600}</code> makes a minimum of real reasoning while forcing the close
-(then the answer) before the token cap. Keep <code>max_tokens</code> at roughly 2× the think token budget so the
-forced answer always fits. Reasoning can't contain a literal <code>&lt;</code> (the decoder rejects the lookahead
-that would allow it), so the model uses <code>&gt;</code> / "above" / "below" naturally. Set <code>constrain_actions=False</code>
-only with a strong instruction-tuned model where you want fully free-form reasoning and accept the
-occasional unparseable completion (which scores as hold).</p>
+<p>The regex is <code>&lt;think&gt;[^&lt;]{40,600}&lt;/think&gt;\s{0,2}&lt;answer&gt;(0|…)&lt;/answer&gt;</code>. Two bounds are load-bearing:</p>
+<ul>
+<li><strong>The <code>&lt;</code>-free think body <code>[^&lt;]{40,600}</code>.</strong> A permissive <code>[\s\S]*?</code> body is <strong>not actually enforced</strong>
+  by the decoding FSM (it can absorb the closing tags as free text), which lets the model emit an empty
+  <code>&lt;think&gt;&lt;/think&gt;</code>, ramble past <code>max_tokens</code> with no answer, or add text after <code>&lt;/answer&gt;</code>. Forbidding
+  <code>&lt;</code> forces the only way to produce <code>&lt;</code> to be <code>&lt;/think&gt;</code>, and <code>{40,600}</code> requires a minimum of real
+  reasoning while forcing the close (then the answer). Reasoning can't contain a literal <code>&lt;</code> (the decoder
+  rejects the lookahead that would allow it), so the model uses <code>&gt;</code> / "above" / "below" naturally.</li>
+<li><strong>The bounded inter-tag gap <code>\s{0,2}</code>, not <code>\s*</code>.</strong> This one is subtle and only bites <em>thinking</em>
+  models (Qwen3.5, Qwen3-*-Thinking). An unbounded <code>\s*</code> is an escape hatch: once the char bound forces
+  the model to close <code>&lt;think&gt;</code> while it still "wants" to reason, it dumps whitespace into the gap until
+  the token cap and never emits <code>&lt;answer&gt;</code>. Measured on Qwen3-4B-Thinking, <code>\s*</code> gave <strong>16–35% no-answer
+  flat across every (think-bound × max_tokens) cell</strong> — raising <code>max_tokens</code> did <em>not</em> help, it just fed
+  the dump — while <code>\s{0,2}</code> took it to <strong>0%</strong>. (A plain-English base model like Qwen3-8B-Base reasons in
+  ~130 tokens and never triggers this, so it was already ~0% either way.)</li>
+</ul>
+<p><code>max_tokens</code> is therefore not a reliability knob for the answer format — the regex bounds are. Keep
+<code>max_tokens</code> comfortably above the think token budget (the 1024 default is ample for a 600-char body),
+and prefer a higher value only if <em>you</em> want longer reasoning, not to "fix" missing answers. Set
+<code>constrain_actions=False</code> only with a strong instruction-tuned model where you want fully free-form
+reasoning and accept the occasional unparseable completion (which scores as hold).</p>
 <h2 id="the-stack-hybrid-torchrl-native">The stack (hybrid torchrl-native)<a class="headerlink" href="#the-stack-hybrid-torchrl-native" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Rollouts: torchrl <code>vLLMWrapper</code> over a plain <code>vllm.LLM</code> (K generations per bar), guided-decoded.</li>
