@@ -84,7 +84,7 @@ class BaseObservationClassTests(ABC):
             window_sizes=[10, 20, 30],
         )
 
-        timeframes = getattr(observer, 'timeframes', getattr(observer, 'time_frames'))
+        timeframes = getattr(observer, 'timeframes', getattr(observer, 'time_frames', None))
         assert len(timeframes) == 3
         assert len(observer.window_sizes) == 3
 

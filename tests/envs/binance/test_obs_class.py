@@ -1,73 +1,71 @@
-"""Tests for BinanceObservationClass."""
+"""Tests for BinanceObservationClass.
+
+Common observation-class behavior is inherited from BaseObservationClassTests.
+Only Binance-specific tests (symbol normalization, exchange-specific kline columns,
+default feature names) and stricter assertions live here.
+"""
 
 import pytest
 import numpy as np
 from unittest.mock import MagicMock
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from tests.envs.base_exchange_tests import BaseObservationClassTests
 
 
-class TestBinanceObservationClass:
-    """Tests for BinanceObservationClass."""
+def _make_binance_client():
+    """Mock Binance client returning `limit` 12-column klines (chronological)."""
+    client = MagicMock()
+
+    def mock_get_klines(symbol, interval, limit=500):
+        base_time = 1700000000000
+        return [
+            [base_time + i * 60000, "50000.0", "50100.0", "49900.0", "50050.0", "100.0",
+             base_time + i * 60000 + 59999, "5000000.0", "100", "50.0", "2500000.0", "0"]
+            for i in range(limit)
+        ]
+
+    client.get_klines = MagicMock(side_effect=mock_get_klines)
+    return client
+
+
+class TestBinanceObservationClass(BaseObservationClassTests):
+    """Binance observation class — common tests inherited from the base."""
+
+    def create_observer(self, symbol, timeframes, window_sizes, **kwargs):
+        from torchtrade.envs.live.binance.observation import BinanceObservationClass
+        client = kwargs.pop("client", None) or _make_binance_client()
+        return BinanceObservationClass(
+            symbol=symbol, time_frames=timeframes, window_sizes=window_sizes,
+            client=client, **kwargs,
+        )
+
+    def get_expected_symbol_format(self, symbol):
+        return symbol.replace("/", "")
 
     @pytest.fixture
     def mock_client(self):
-        """Create a mock Binance client."""
-        client = MagicMock()
-
-        # Mock klines data (12 columns)
-        def mock_get_klines(symbol, interval, limit=500):
-            klines = []
-            base_time = 1700000000000  # Base timestamp in ms
-            for i in range(limit):
-                klines.append([
-                    base_time + i * 60000,  # open_time
-                    "50000.0",  # open
-                    "50100.0",  # high
-                    "49900.0",  # low
-                    "50050.0",  # close
-                    "100.0",    # volume
-                    base_time + i * 60000 + 59999,  # close_time
-                    "5000000.0",  # quote_volume
-                    "100",      # trades (string, matching real Binance API)
-                    "50.0",     # taker_buy_base
-                    "2500000.0",  # taker_buy_quote
-                    "0",        # ignore
-                ])
-            return klines
-
-        client.get_klines = MagicMock(side_effect=mock_get_klines)
-        return client
+        return _make_binance_client()
 
     @pytest.fixture
     def observer_single(self, mock_client):
-        """Create observer with single timeframe."""
         from torchtrade.envs.live.binance.observation import BinanceObservationClass
-
         return BinanceObservationClass(
-            symbol="BTCUSDT",
-            time_frames=TimeFrame(15, TimeFrameUnit.Minute),
-            window_sizes=10,
-            client=mock_client,
-        )
+            symbol="BTCUSDT", time_frames=TimeFrame(15, TimeFrameUnit.Minute),
+            window_sizes=10, client=mock_client)
 
     @pytest.fixture
     def observer_multi(self, mock_client):
-        """Create observer with multiple timeframes."""
         from torchtrade.envs.live.binance.observation import BinanceObservationClass
-
         return BinanceObservationClass(
             symbol="BTCUSDT",
-            time_frames=[
-                TimeFrame(1, TimeFrameUnit.Minute),
-                TimeFrame(5, TimeFrameUnit.Minute),
-                TimeFrame(1, TimeFrameUnit.Hour),
-            ],
-            window_sizes=[10, 20, 15],
-            client=mock_client,
-        )
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute),
+                         TimeFrame(1, TimeFrameUnit.Hour)],
+            window_sizes=[10, 20, 15], client=mock_client)
+
+    # --- Binance-specific / stricter tests ---
 
     def test_single_interval_initialization(self, observer_single):
-        """Test initialization with single timeframe."""
+        """Symbol + timeframe unit preserved (base checks neither)."""
         assert observer_single.symbol == "BTCUSDT"
         assert len(observer_single.time_frames) == 1
         assert observer_single.time_frames[0].value == 15
@@ -75,102 +73,40 @@ class TestBinanceObservationClass:
         assert observer_single.window_sizes == [10]
 
     def test_multi_interval_initialization(self, observer_multi):
-        """Test initialization with multiple timeframes."""
         assert observer_multi.symbol == "BTCUSDT"
         assert len(observer_multi.time_frames) == 3
-        assert observer_multi.time_frames[0].value == 1
-        assert observer_multi.time_frames[1].value == 5
-        assert observer_multi.time_frames[2].value == 1
         assert observer_multi.window_sizes == [10, 20, 15]
 
     def test_symbol_normalization(self, mock_client):
-        """Test that symbol with slash is normalized."""
+        """Slash is stripped from the symbol."""
         from torchtrade.envs.live.binance.observation import BinanceObservationClass
-
         observer = BinanceObservationClass(
-            symbol="BTC/USDT",
-            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
-            window_sizes=10,
-            client=mock_client,
-        )
+            symbol="BTC/USDT", time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=10, client=mock_client)
         assert observer.symbol == "BTCUSDT"
 
-    def test_mismatched_lengths_raises_error(self, mock_client):
-        """Test that mismatched time_frames and window_sizes raises error."""
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
-
-        with pytest.raises(ValueError, match="same length"):
-            BinanceObservationClass(
-                symbol="BTCUSDT",
-                time_frames=[
-                    TimeFrame(1, TimeFrameUnit.Minute),
-                    TimeFrame(5, TimeFrameUnit.Minute),
-                ],
-                window_sizes=[10],  # Mismatched length
-                client=mock_client,
-            )
-
-    def test_get_keys_single(self, observer_single):
-        """Test get_keys with single timeframe."""
-        keys = observer_single.get_keys()
-        assert keys == ["15Minute_10"]
-
     def test_get_keys_multi(self, observer_multi):
-        """Test get_keys with multiple timeframes."""
-        keys = observer_multi.get_keys()
-        assert keys == ["1Minute_10", "5Minute_20", "1Hour_15"]
+        assert observer_multi.get_keys() == ["1Minute_10", "5Minute_20", "1Hour_15"]
 
-    def test_get_observations_single(self, observer_single):
-        """Test get_observations with single interval."""
-        observations = observer_single.get_observations()
+    def test_get_observations_single_dtype(self, observer_single):
+        """Single-timeframe observation is exactly (10, 4) float32 (stricter than base)."""
+        obs = observer_single.get_observations()
+        assert obs["15Minute_10"].shape == (10, 4)
+        assert obs["15Minute_10"].dtype == np.float32
 
-        assert "15Minute_10" in observations
-        assert observations["15Minute_10"].shape == (10, 4)  # window_size x num_features
-        assert observations["15Minute_10"].dtype == np.float32
-
-    def test_get_observations_multi(self, observer_multi):
-        """Test get_observations with multiple intervals."""
-        observations = observer_multi.get_observations()
-
-        assert "1Minute_10" in observations
-        assert "5Minute_20" in observations
-        assert "1Hour_15" in observations
-
-        assert observations["1Minute_10"].shape == (10, 4)
-        assert observations["5Minute_20"].shape == (20, 4)
-        assert observations["1Hour_15"].shape == (15, 4)
+    def test_get_observations_multi_exact_shapes(self, observer_multi):
+        obs = observer_multi.get_observations()
+        assert obs["1Minute_10"].shape == (10, 4)
+        assert obs["5Minute_20"].shape == (20, 4)
+        assert obs["1Hour_15"].shape == (15, 4)
 
     def test_get_observations_with_base_ohlc(self, observer_single):
-        """Test get_observations with base OHLC data."""
-        observations = observer_single.get_observations(return_base_ohlc=True)
-
-        assert "15Minute_10" in observations
-        assert "base_features" in observations
-        assert "base_timestamps" in observations
-
-        assert observations["base_features"].shape == (10, 4)
-
-    def test_custom_preprocessing(self, mock_client):
-        """Test custom preprocessing function."""
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
-
-        def custom_preprocessing(df):
-            df = df.copy()
-            df["feature_custom1"] = df["close"].pct_change().fillna(0)
-            df["feature_custom2"] = df["volume"].pct_change().fillna(0)
-            df.dropna(inplace=True)
-            return df
-
-        observer = BinanceObservationClass(
-            symbol="BTCUSDT",
-            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
-            window_sizes=10,
-            client=mock_client,
-            feature_preprocessing_fn=custom_preprocessing,
-        )
-
-        observations = observer.get_observations()
-        assert observations["1Minute_10"].shape == (10, 2)  # 2 custom features
+        """base_features + base_timestamps present with exact shape (adds base_timestamps)."""
+        obs = observer_single.get_observations(return_base_ohlc=True)
+        assert "15Minute_10" in obs
+        assert "base_features" in obs
+        assert "base_timestamps" in obs
+        assert obs["base_features"].shape == (10, 4)
 
     def test_custom_preprocessing_with_kline_extra_fields(self, mock_client):
         """Custom preprocessing can derive features from Binance-specific kline fields."""
@@ -186,36 +122,18 @@ class TestBinanceObservationClass:
             return df
 
         observer = BinanceObservationClass(
-            symbol="BTCUSDT",
-            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
-            window_sizes=10,
-            client=mock_client,
-            feature_preprocessing_fn=kline_preprocessing,
-        )
+            symbol="BTCUSDT", time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=10, client=mock_client, feature_preprocessing_fn=kline_preprocessing)
 
-        # get_features() uses dummy data — verifies dummy DataFrame has extra columns
         features = observer.get_features()
         for f in ["feature_taker_ratio", "feature_quote_vol", "feature_avg_trade_size"]:
             assert f in features["observation_features"]
-
-        # get_observations() uses mock kline data — verifies type casting is correct
-        observations = observer.get_observations()
-        assert observations["1Minute_10"].shape == (10, 4)
-
-    def test_get_features(self, observer_single):
-        """Test get_features returns feature information."""
-        features = observer_single.get_features()
-
-        assert "observation_features" in features
-        assert "original_features" in features
-        assert len(features["observation_features"]) > 0
+        assert observer.get_observations()["1Minute_10"].shape == (10, 4)
 
     def test_default_preprocessing_output(self, observer_single):
-        """Test that default preprocessing produces expected features."""
+        """Default preprocessing produces the expected named features."""
         features = observer_single.get_features()
-
-        expected_features = ["feature_close", "feature_open", "feature_high", "feature_low"]
-        for feat in expected_features:
+        for feat in ["feature_close", "feature_open", "feature_high", "feature_low"]:
             assert feat in features["observation_features"]
 
 
@@ -226,16 +144,10 @@ class TestBinanceObservationClassIntegration:
     def test_live_data_fetch(self):
         """Test fetching live data from Binance."""
         from torchtrade.envs.live.binance.observation import BinanceObservationClass
-
         observer = BinanceObservationClass(
             symbol="BTCUSDT",
-            time_frames=[
-                TimeFrame(1, TimeFrameUnit.Minute),
-                TimeFrame(5, TimeFrameUnit.Minute),
-            ],
-            window_sizes=[10, 10],
-        )
-
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute)],
+            window_sizes=[10, 10])
         observations = observer.get_observations()
         assert "1Minute_10" in observations
         assert "5Minute_10" in observations
