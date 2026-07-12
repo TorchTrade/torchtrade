@@ -23,7 +23,7 @@ adapter = LLMTrainer(
     reward_fn=None,          # default: OneStepTradingEnv score; override to customize
     system_prompt=None,      # default: the actor's system prompt; override to customize
     user_prompt_fn=None,     # default: the actor's user prompt; the "pre-prompt" override
-    loss="grpo",             # registry name or a factory f(actor) -> LossModule
+    loss="grpo",             # "grpo", or a factory f(actor) -> LossModule
     use_wandb=True,          # logs reward/advantage/loss/tokens_per_s + a sample-completions table
 ).train()
 # -> load `adapter` into LocalLLMActor for eval / live inference.
@@ -80,7 +80,7 @@ LLMTrainer(df=df, config=config,
 ```python
 LLMTrainer(df=df, config=config,
            method="qlora",         # "full" | "lora" | "qlora"
-           loss="grpo",            # registry name, or a factory f(actor) -> LossModule
+           loss="grpo",            # "grpo", or a factory f(actor) -> LossModule
            loss_kwargs={...},      # forwarded to the loss constructor
            num_generations=8)      # GRPO group size (K completions per bar)
 ```
