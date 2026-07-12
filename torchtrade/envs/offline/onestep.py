@@ -20,7 +20,7 @@ import warnings
 
 import pandas as pd
 import torch
-from tensordict import TensorDict, TensorDictBase
+from tensordict import TensorDictBase
 
 from torchtrade.envs.offline.sequential_sltp import (
     SequentialTradingEnvSLTP,
@@ -186,61 +186,14 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
             self._cached_base_features = base_features
             self.rollout_returns = []
         else:
-            # Position exists - rollout until SL/TP trigger or truncation
-            # _rollout() updates _cached_base_features internally
-            trade_info, obs_dict = self._rollout()
+            # Position exists - rollout until SL/TP trigger or truncation.
+            # _rollout() refreshes self._cached_base_features internally.
+            _, obs_dict = self._rollout()
+            base_features = self._cached_base_features
 
-        # Use cached base features (avoids redundant get_base_features calls)
-        current_price = self._cached_base_features["close"]
-
-        # Calculate position value
-        self.position.position_value = abs(self.position.position_size * current_price)
-
-        # Calculate unrealized PnL
-        if self.position.position_size != 0:
-            self.unrealized_pnl = self._calculate_unrealized_pnl(
-                self.position.entry_price, current_price, self.position.position_size
-            )
-            self.unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(
-                self.position.entry_price, current_price, self.position.position_size
-            )
-        else:
-            self.unrealized_pnl = 0.0
-            self.unrealized_pnl_pct = 0.0
-
-        # Calculate portfolio value and exposure
-        portfolio_value = self._get_portfolio_value(current_price)
-        exposure_pct = self.position.position_value / portfolio_value if portfolio_value > 0 else 0.0
-
-        # Calculate position direction (-1, 0, +1)
-        position_direction = float(
-            1 if self.position.position_size > 0
-            else -1 if self.position.position_size < 0
-            else 0
-        )
-
-        # Calculate distance to liquidation
-        distance_to_liquidation = self._calculate_distance_to_liquidation(
-            current_price, self.liquidation_price, self.position.position_size
-        )
-
-        # Universal 6-element account state
-        # [exposure_pct, position_direction, unrealized_pnl_pct,
-        #  holding_time, leverage, distance_to_liquidation]
-        account_state = torch.tensor([
-            exposure_pct,                          # Element 0: exposure_pct
-            position_direction,                    # Element 1: position_direction (-1, 0, +1)
-            self.unrealized_pnl_pct,              # Element 2: unrealized_pnl_pct
-            float(self.position.hold_counter),     # Element 3: holding_time
-            float(self.leverage),                  # Element 4: leverage
-            distance_to_liquidation,               # Element 5: distance_to_liquidation
-        ], dtype=torch.float)
-
-        # Combine account state and market data
-        obs_data = {self.account_state_key: account_state}
-        obs_data.update(dict(zip(self.market_data_keys, obs_dict.values())))
-
-        return TensorDict(obs_data, batch_size=())
+        # Account-state assembly is shared with SequentialTradingEnv (same 6-element
+        # build); only the market-data branch above is one-step-specific.
+        return self._build_observation_from_data(obs_dict, base_features)
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step (always returns done=True for one-step).
