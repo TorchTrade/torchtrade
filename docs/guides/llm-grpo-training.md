@@ -117,16 +117,27 @@ the time), so set `constrain_actions=True` (recommended; the parameter defaults 
 vLLM **guided decoding**: a regex forces every completion to `<think>…</think><answer>N</answer>`
 with an in-range index → parseable → the model's genuine action variety becomes real learning signal.
 
-The regex is `<think>[^<]{40,600}</think>\s*<answer>(0|…)</answer>`. The bounded, `<`-free think body
-is deliberate: a permissive `[\s\S]*?` body is **not actually enforced** by the decoding FSM (it can
-absorb the closing tags as free text), which lets the model emit an empty `<think></think>`, ramble
-past `max_tokens` with no answer, or add text after `</answer>`. Forbidding `<` forces the only way to
-produce `<` to be `</think>`, and `{40,600}` makes a minimum of real reasoning while forcing the close
-(then the answer) before the token cap. Keep `max_tokens` at roughly 2× the think token budget so the
-forced answer always fits. Reasoning can't contain a literal `<` (the decoder rejects the lookahead
-that would allow it), so the model uses `>` / "above" / "below" naturally. Set `constrain_actions=False`
-only with a strong instruction-tuned model where you want fully free-form reasoning and accept the
-occasional unparseable completion (which scores as hold).
+The regex is `<think>[^<]{40,600}</think>\s{0,2}<answer>(0|…)</answer>`. Two bounds are load-bearing:
+
+- **The `<`-free think body `[^<]{40,600}`.** A permissive `[\s\S]*?` body is **not actually enforced**
+  by the decoding FSM (it can absorb the closing tags as free text), which lets the model emit an empty
+  `<think></think>`, ramble past `max_tokens` with no answer, or add text after `</answer>`. Forbidding
+  `<` forces the only way to produce `<` to be `</think>`, and `{40,600}` requires a minimum of real
+  reasoning while forcing the close (then the answer). Reasoning can't contain a literal `<` (the decoder
+  rejects the lookahead that would allow it), so the model uses `>` / "above" / "below" naturally.
+- **The bounded inter-tag gap `\s{0,2}`, not `\s*`.** This one is subtle and only bites *thinking*
+  models (Qwen3.5, Qwen3-\*-Thinking). An unbounded `\s*` is an escape hatch: once the char bound forces
+  the model to close `<think>` while it still "wants" to reason, it dumps whitespace into the gap until
+  the token cap and never emits `<answer>`. Measured on Qwen3-4B-Thinking, `\s*` gave **16–35% no-answer
+  flat across every (think-bound × max_tokens) cell** — raising `max_tokens` did *not* help, it just fed
+  the dump — while `\s{0,2}` took it to **0%**. (A plain-English base model like Qwen3-8B-Base reasons in
+  ~130 tokens and never triggers this, so it was already ~0% either way.)
+
+`max_tokens` is therefore not a reliability knob for the answer format — the regex bounds are. Keep
+`max_tokens` comfortably above the think token budget (the 1024 default is ample for a 600-char body),
+and prefer a higher value only if *you* want longer reasoning, not to "fix" missing answers. Set
+`constrain_actions=False` only with a strong instruction-tuned model where you want fully free-form
+reasoning and accept the occasional unparseable completion (which scores as hold).
 
 ## The stack (hybrid torchrl-native)
 

@@ -60,15 +60,19 @@ def test_build_action_regex_index_range(n, good_idx, bad_idx):
 
 def test_build_action_regex_structure_is_enforceable():
     """The regex must be guided-decoding-enforceable: reasoning REQUIRED and non-empty, nothing after
-    </answer>, and the {40,600} think bounds are load-bearing. Regression for the old [\\s\\S]*? regex
-    that let the model emit empty think, ramble with no answer, or add text after the answer."""
+    </answer>, the {40,600} think bounds are load-bearing, and the inter-tag gap is BOUNDED. Regression
+    for the old [\\s\\S]*? regex (empty think / no answer / trailing text) AND the unbounded \\s* gap
+    that let thinking models dump whitespace to the token cap instead of answering (16-35% no-answer)."""
     rx = LLMTrainer._build_action_regex(3)
-    assert re.fullmatch(rx, f"<think>{_THINK}</think>\n<answer>2</answer>")   # \\s* between tags
     assert not re.fullmatch(rx, "<answer>2</answer>")            # missing <think>: reasoning enforced
     assert not re.fullmatch(rx, f"<think>{_THINK}</think>")      # missing answer
     assert not re.fullmatch(rx, "<think></think><answer>1</answer>")     # empty think rejected
     assert not re.fullmatch(rx, _fmt(_THINK) + " extra")                 # no trailing text
     assert not re.fullmatch(rx, _fmt(f"has a < bracket {_THINK}"))       # '<' banned in think body
+    # inter-tag gap is bounded to \\s{0,2}: 0-2 whitespace OK, 3+ rejected (kills the whitespace-dump
+    # escape hatch). Pinning the upper bound fails a regression back to \\s* / \\s+.
+    for gap, ok in [("", True), ("\n", True), ("\n\n", True), ("\n\n\n", False), ("   ", False)]:
+        assert bool(re.fullmatch(rx, f"<think>{_THINK}</think>{gap}<answer>2</answer>")) is ok, repr(gap)
     # pin BOTH think-length bounds so a widening to {40,} or {1,600} fails here:
     for length, ok in [(39, False), (40, True), (600, True), (601, False)]:
         assert bool(re.fullmatch(rx, _fmt("a" * length))) is ok, length
