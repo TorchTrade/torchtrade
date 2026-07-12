@@ -54,20 +54,22 @@ def _make_vllm_wrapper_cls():
     return _TorchTradeVLLMWrapper
 
 
-def build_inference_policy(model_name, tokenizer, gpu_memory_utilization=0.3,
-                           max_model_len=2048, max_tokens=256, action_regex=None,
-                           enable_lora=False, max_lora_rank=16):
+def build_inference_policy(model_name, tokenizer, gpu_memory_utilization=0.5,
+                           max_model_len=4096, max_tokens=256, action_regex=None,
+                           enable_lora=False, max_lora_rank=16, enforce_eager=False):
     """torchrl vLLMWrapper over a plain vllm.LLM (rollout engine).
 
     `enable_lora` loads the base with vLLM LoRA support so the trainer can hot-swap adapters
     each step (`LoRARequest`); the base may be a bnb-4bit checkpoint (vLLM auto-detects the
     quantization). `action_regex` (e.g. `<answer>(0|..|9)</answer>`) constrains generation so
-    every completion is a parseable action index (guided decoding).
+    every completion is a parseable action index (guided decoding). Defaults favor throughput:
+    CUDA graphs on (`enforce_eager=False`), a real KV cache (`gpu_memory_utilization=0.5`), and
+    `max_model_len` big enough for prompt + a long reasoning generation.
     """
     from vllm import LLM
 
     llm_kwargs = dict(model=model_name, gpu_memory_utilization=gpu_memory_utilization,
-                      enforce_eager=True, max_model_len=max_model_len)
+                      enforce_eager=enforce_eager, max_model_len=max_model_len)
     if enable_lora:
         # max_lora_rank must be >= build_train_policy's lora_r, else vLLM rejects the hot-swapped adapter
         llm_kwargs.update(enable_lora=True, max_lora_rank=max_lora_rank, max_loras=1)
@@ -104,19 +106,49 @@ def _base_load_kwargs():
     return {"torch_dtype": torch.bfloat16}
 
 
+def _warn_if_stochastic(hf):
+    """GRPO recomputes cur_log_prob and needs it DETERMINISTIC (dropout would corrupt the importance
+    ratio — GRPOLoss's own docstring flags train/eval mismatch as a top cause of failure). The model
+    trains in train() mode ("full") or with train() forced on for gradient checkpointing (lora/qlora),
+    so any active dropout is a problem. Qwen2/Qwen3 default all dropout to 0, but warn loudly if a
+    different base doesn't — it is otherwise completely silent. Scans both the top-level config and a
+    nested `text_config` (multimodal checkpoints keep the LM's dropout there)."""
+    import warnings
+    cfg = getattr(hf, "config", None)
+    if cfg is None:
+        return
+    configs = [cfg]
+    text_config = getattr(cfg, "text_config", None)  # multimodal: LM dropout lives here
+    if text_config is not None:
+        configs.append(text_config)
+    nonzero = {k: v for c in configs for k, v in vars(c).items()
+               if ("dropout" in k or "pdrop" in k) and isinstance(v, (int, float)) and v > 0}
+    if nonzero:
+        warnings.warn(
+            f"Model has nonzero dropout {nonzero}. GRPO training runs the model in train() mode "
+            "(required to keep gradient checkpointing active), so this dropout is ACTIVE and makes "
+            "the recomputed log-probs stochastic — corrupting GRPOLoss's importance ratio. Set these "
+            "to 0 in the model config for correct GRPO training.", stacklevel=2)
+
+
 def build_train_policy(model_name, tokenizer, method="qlora", lora_r=16, lora_alpha=32,
-                       peft_config=None, device="cuda"):
-    """LoRA/QLoRA HF model wrapped as a torchrl TransformersWrapper(generate=False).
+                       peft_config=None, device="cuda", logprob_chunk_size=1024):
+    """LoRA/QLoRA HF model wrapped as a ChunkedTransformersWrapper(generate=False).
 
     `input_mode="tokens"` (operate on the rollout's recorded tokens, avoiding the
     re-render token-count mismatch) — the validated recipe. QLoRA loads `model_name` in
     bitsandbytes 4-bit: a full-precision checkpoint is quantized on the fly, while a
     pre-quantized bnb checkpoint (the default) uses its own embedded config. Both LoRA and
     QLoRA enable gradient checkpointing (needed at 8B depth to fit the backward).
+
+    The wrapper is `ChunkedTransformersWrapper`: its dist hooks compute log-prob/entropy from
+    hidden states chunked over the sequence (`logprob_chunk_size`), so stock GRPOLoss trains with
+    peak memory independent of `num_generations` even on Qwen3.5's 248k vocab.
     """
     from transformers import AutoModelForCausalLM
     from peft import get_peft_model, prepare_model_for_kbit_training
-    from torchrl.modules.llm import TransformersWrapper
+
+    from torchtrade.llm.train.chunked_policy import ChunkedTransformersWrapper
 
     cfg = build_peft_config(method, lora_r=lora_r, lora_alpha=lora_alpha, peft_config=peft_config)
     load_kwargs = _base_load_kwargs()
@@ -124,23 +156,42 @@ def build_train_policy(model_name, tokenizer, method="qlora", lora_r=16, lora_al
         from transformers import BitsAndBytesConfig
         load_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16)
-    hf = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
+    try:
+        hf = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
+    except (AttributeError, ValueError, KeyError):
+        # multimodal checkpoint (e.g. Qwen3.5 is *ForConditionalGeneration with a nested
+        # text_config, so AutoModelForCausalLM chokes on the missing top-level vocab_size). Load
+        # the full model — LoRA still targets ONLY the language_model's q/k/v/o/gate/up/down_proj
+        # (the vision tower uses different projection names), and a text-only forward drives the LM.
+        from transformers import AutoModelForImageTextToText
+        hf = AutoModelForImageTextToText.from_pretrained(model_name, **load_kwargs)
     if cfg["load_in_4bit"]:
-        hf = prepare_model_for_kbit_training(hf, use_gradient_checkpointing=True)
+        hf = prepare_model_for_kbit_training(
+            hf, use_gradient_checkpointing=True,
+            gradient_checkpointing_kwargs={"use_reentrant": False})
     else:
         hf = hf.to(device)
-        if cfg["peft_config"] is not None:  # non-quantized LoRA: enable GC too (needed at 8B depth)
-            hf.gradient_checkpointing_enable()
-            hf.enable_input_require_grads()  # GC needs inputs to require grad (frozen embeddings)
+    # Applies to EVERY method: "full" trains in the default train() mode, lora/qlora force train()
+    # below for gradient checkpointing — either way active dropout would corrupt the GRPO ratio.
+    _warn_if_stochastic(hf)
     if cfg["peft_config"] is not None:
         hf = get_peft_model(hf, cfg["peft_config"])
-    # GRPOLoss needs a deterministic re-computed cur_log_prob (dropout would corrupt the
-    # importance ratio). We get that via lora_dropout=0.0 (build_peft_config), NOT a global
-    # hf.eval() — HF's GradientCheckpointingLayer gates recompute on self.training, so eval()
-    # would silently disable gradient checkpointing and OOM the 8B QLoRA backward.
-    policy = TransformersWrapper(
+        hf.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        hf.enable_input_require_grads()
+    # CRITICAL: hf.train() is what actually ACTIVATES gradient checkpointing. HF's
+    # GradientCheckpointingLayer gates recompute on the LAYER's self.training, and PEFT wrapping /
+    # prepare_model_for_kbit_training leave the top module reporting training=True while some
+    # children sit in eval — so GC stays INERT despite is_gradient_checkpointing=True. A fresh
+    # hf.train() recursively flips every layer, cutting a Qwen3.5-4B K=2/seq=512 backward from
+    # 27.5GB -> 9.5GB (measured). Safe because lora_dropout=0.0 (build_peft_config) and these
+    # models default to 0 attention/hidden dropout, so cur_log_prob stays deterministic (dropout
+    # would corrupt GRPOLoss's importance ratio). Do NOT hf.eval() — that de-activates GC and OOMs.
+    if cfg["peft_config"] is not None:
+        hf.train()
+    policy = ChunkedTransformersWrapper(
         hf, tokenizer=tokenizer, input_mode="tokens", generate=False,
         return_log_probs=True, pad_output=False, device=device,
+        logprob_chunk_size=logprob_chunk_size,
     )
     return hf, policy
 

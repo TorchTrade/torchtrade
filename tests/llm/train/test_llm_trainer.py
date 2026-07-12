@@ -1,9 +1,13 @@
 """Non-GPU tests for the LLMTrainer facade construction + the reward-parser helper.
 (The full training loop is GPU-only and is validated on the DGX Spark.)"""
+import re
+
 import pytest
 
 from torchtrade.llm.train import LLMTrainer
 from torchtrade.llm.train.trading_env import TradingRewardParser
+
+_THINK = "the daily trend is up, price is above the SMA and momentum looks constructive"  # >=40 chars
 
 
 def test_rejects_num_generations_below_two():
@@ -39,14 +43,35 @@ def test_action_descriptions_covers_every_side():
     assert d[3] == "Action 3 -> close current position"
 
 
-@pytest.mark.parametrize("n,good,bad", [
-    (3, "<answer>2</answer>", "<answer>3</answer>"),
-    (11, "<answer>10</answer>", "<answer>11</answer>"),  # multi-digit: guards against a [0-9] refactor
+def _fmt(think, ans=1):
+    return f"<think>{think}</think><answer>{ans}</answer>"
+
+
+@pytest.mark.parametrize("n,good_idx,bad_idx", [
+    (3, 2, 3),      # single-digit: 2 in range, 3 out
+    (11, 10, 11),   # multi-digit: 10 in range, 11 out — guards against a naive [0-9] rewrite
 ], ids=["single-digit", "multi-digit"])
-def test_build_action_regex_constrains_to_valid_indices(n, good, bad):
-    import re
+def test_build_action_regex_index_range(n, good_idx, bad_idx):
+    """The <answer> index must be a valid action index (0..n-1), including multi-digit ones."""
     rx = LLMTrainer._build_action_regex(n)
-    assert re.fullmatch(rx, good) and not re.fullmatch(rx, bad)
+    assert re.fullmatch(rx, _fmt(_THINK, good_idx))
+    assert not re.fullmatch(rx, _fmt(_THINK, bad_idx))
+
+
+def test_build_action_regex_structure_is_enforceable():
+    """The regex must be guided-decoding-enforceable: reasoning REQUIRED and non-empty, nothing after
+    </answer>, and the {40,600} think bounds are load-bearing. Regression for the old [\\s\\S]*? regex
+    that let the model emit empty think, ramble with no answer, or add text after the answer."""
+    rx = LLMTrainer._build_action_regex(3)
+    assert re.fullmatch(rx, f"<think>{_THINK}</think>\n<answer>2</answer>")   # \\s* between tags
+    assert not re.fullmatch(rx, "<answer>2</answer>")            # missing <think>: reasoning enforced
+    assert not re.fullmatch(rx, f"<think>{_THINK}</think>")      # missing answer
+    assert not re.fullmatch(rx, "<think></think><answer>1</answer>")     # empty think rejected
+    assert not re.fullmatch(rx, _fmt(_THINK) + " extra")                 # no trailing text
+    assert not re.fullmatch(rx, _fmt(f"has a < bracket {_THINK}"))       # '<' banned in think body
+    # pin BOTH think-length bounds so a widening to {40,} or {1,600} fails here:
+    for length, ok in [(39, False), (40, True), (600, True), (601, False)]:
+        assert bool(re.fullmatch(rx, _fmt("a" * length))) is ok, length
 
 
 class _Turn:
