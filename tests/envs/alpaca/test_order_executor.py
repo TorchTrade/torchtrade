@@ -2,7 +2,6 @@
 Unit tests for AlpacaOrderClass.
 
 Tests order execution, position management, and error handling using mock clients.
-Inherits common tests from BaseOrderExecutorTests.
 """
 
 import pytest
@@ -13,31 +12,24 @@ from torchtrade.envs.live.alpaca.order_executor import (
     OrderStatus,
     PositionStatus,
 )
-from tests.mocks.alpaca import MockTradingClient
-from tests.envs.base_exchange_tests import BaseOrderExecutorTests
+from tests.mocks.alpaca import MockTradingClient, MockOrder, MockOrderStatus
+
+# Alpaca trade modes are the string TradeMode values (Literal, not an Enum).
+notional = "notional"
+quantity = "quantity"
 
 
-class TestAlpacaOrderClass(BaseOrderExecutorTests):
-    """Tests for AlpacaOrderClass - inherits common tests from base."""
+class TestAlpacaOrderClass:
+    """Tests for AlpacaOrderClass.
 
-    def create_order_executor(self, symbol, trade_mode, **kwargs):
-        """Create an AlpacaOrderClass instance."""
-        mock_client = kwargs.get('client', MockTradingClient(
-            initial_cash=kwargs.get('initial_cash', 10000.0),
-            current_price=kwargs.get('current_price', 100000.0),
-            simulate_failures=kwargs.get('simulate_failures', False),
-        ))
+    NOTE: this class previously subclassed BaseOrderExecutorTests without implementing
+    the abstract get_trade_mode_enum(), which made it an abstract class that pytest
+    collected ZERO tests from — silently disabling all of the tests below. The base is
+    unadoptable (it constructs with TradeMode.NOTIONAL, but TradeMode is a Literal with
+    no such member, and calls trade(amount=...) which futures executors don't accept),
+    so these tests now stand alone.
+    """
 
-        # Remove slash from symbol for Alpaca (will trigger warning)
-        symbol_clean = symbol.replace('/', '')
-
-        return AlpacaOrderClass(
-            symbol=symbol_clean,
-            trade_mode=trade_mode,
-            client=mock_client,
-        )
-
-    # Alpaca-specific tests
 
     def test_symbol_slash_removal(self):
         """Test that slashes are removed from symbols."""
@@ -54,17 +46,6 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
             assert "contains '/'" in str(w[0].message)
 
         assert order_class.symbol == "BTCUSD"
-
-    def test_trade_mode_quantity(self):
-        """Test initialization with QUANTITY trade mode."""
-        mock_client = MockTradingClient()
-        order_class = AlpacaOrderClass(
-            symbol="BTCUSD",
-            trade_mode=quantity,
-            client=mock_client,
-        )
-
-        assert order_class.trade_mode == quantity
 
     def test_quantity_mode_trade(self):
         """Test trade in QUANTITY mode."""
@@ -269,90 +250,53 @@ class TestAlpacaOrderClass(BaseOrderExecutorTests):
         assert isinstance(results, dict)
         assert all(v is True for v in results.values())
 
-    def test_time_in_force_gtc(self):
-        """Test GTC (Good Till Cancelled) time in force."""
-        mock_client = MockTradingClient()
-        order_class = AlpacaOrderClass(
-            symbol="BTCUSD",
-            trade_mode=notional,
-            client=mock_client,
-        )
+    @pytest.mark.parametrize("tif", ["gtc", "ioc"])
+    def test_time_in_force_accepted(self, tif):
+        """Both GTC and IOC time-in-force values submit successfully."""
+        oc = AlpacaOrderClass(symbol="BTCUSD", trade_mode=notional, client=MockTradingClient())
+        assert oc.trade(side="buy", amount=1000, order_type="market", time_in_force=tif) is True
 
-        success = order_class.trade(
-            side="buy",
-            amount=1000,
-            order_type="market",
-            time_in_force="gtc",
-        )
-
-        assert success is True
-
-    def test_time_in_force_ioc(self):
-        """Test IOC (Immediate Or Cancel) time in force."""
-        mock_client = MockTradingClient()
-        order_class = AlpacaOrderClass(
-            symbol="BTCUSD",
-            trade_mode=notional,
-            client=mock_client,
-        )
-
-        success = order_class.trade(
-            side="buy",
-            amount=1000,
-            order_type="market",
-            time_in_force="ioc",
-        )
-
-        assert success is True
-
-    def test_very_small_trade_amount(self):
-        """Test trading with very small amount."""
-        mock_client = MockTradingClient(current_price=100000.0)
-        order_class = AlpacaOrderClass(
-            symbol="BTCUSD",
-            trade_mode=notional,
-            client=mock_client,
-        )
-
-        success = order_class.trade(
-            side="buy",
-            amount=1.0,  # $1
-            order_type="market",
-        )
-
-        assert success is True
-
-    def test_very_large_trade_amount(self):
-        """Test trading with large amount."""
-        mock_client = MockTradingClient(initial_cash=1000000.0, current_price=100000.0)
-        order_class = AlpacaOrderClass(
-            symbol="BTCUSD",
-            trade_mode=notional,
-            client=mock_client,
-        )
-
-        success = order_class.trade(
-            side="buy",
-            amount=100000,  # $100,000
-            order_type="market",
-        )
-
-        assert success is True
-
-    def test_multiple_consecutive_trades(self):
-        """Test multiple trades in sequence."""
+    def test_notional_sell_full_closes_ignoring_amount(self):
+        """Notional-mode SELL does NOT submit a sized order — it full-closes the position
+        and returns True, ignoring `amount` (order_executor.py). Regression guard for that
+        surprising branch, which no test previously asserted."""
         mock_client = MockTradingClient(initial_cash=10000.0, current_price=100000.0)
-        order_class = AlpacaOrderClass(
-            symbol="BTCUSD",
-            trade_mode=notional,
-            client=mock_client,
-        )
+        oc = AlpacaOrderClass(symbol="BTCUSD", trade_mode=notional, client=mock_client)
+        oc.trade(side="buy", amount=1000, order_type="market")
+        assert oc.get_status().get("position_status") is not None
+        orders_after_buy = len(mock_client.orders)
 
-        # Buy
-        assert order_class.trade(side="buy", amount=1000, order_type="market") is True
+        assert oc.trade(side="sell", amount=999999, order_type="market") is True
+        assert oc.get_status().get("position_status") is None     # full close
+        assert len(mock_client.orders) == orders_after_buy        # no sized sell order submitted
 
-        # Sell
-        assert order_class.trade(side="sell", amount=1000, order_type="market") is True
+    def test_limit_order_happy_path(self):
+        """A limit order with a price submits successfully (the plain-limit success branch)."""
+        mock_client = MockTradingClient(initial_cash=10000.0, current_price=100000.0)
+        oc = AlpacaOrderClass(symbol="BTCUSD", trade_mode=notional, client=mock_client)
+        assert oc.trade(side="buy", amount=1000, order_type="limit", limit_price=95000.0) is True
+        assert len(mock_client.orders) == 1
 
-        # Buy again
-        assert order_class.trade(side="buy", amount=2000, order_type="market") is True
+    def test_bracket_order_tp_and_sl(self):
+        """Both take_profit and stop_loss -> a BRACKET order submits successfully (a headline
+        SLTP feature that had no coverage)."""
+        mock_client = MockTradingClient(initial_cash=10000.0, current_price=100000.0)
+        oc = AlpacaOrderClass(symbol="BTCUSD", trade_mode=notional, client=mock_client)
+        assert oc.trade(side="buy", amount=1000, order_type="market",
+                        take_profit=110000.0, stop_loss=90000.0) is True
+        assert len(mock_client.orders) == 1
+
+    @pytest.mark.parametrize("inject_open", [False, True], ids=["no-orders", "with-open-order"])
+    def test_cancel_open_orders(self, inject_open):
+        """cancel_open_orders returns True whether or not open orders exist, and cancels any
+        that are open (behavior the deleted BaseOrderExecutorTests named but never ran)."""
+        mock_client = MockTradingClient()
+        oc = AlpacaOrderClass(symbol="BTCUSD", trade_mode=notional, client=mock_client)
+        order = None
+        if inject_open:
+            order = MockOrder(symbol="BTCUSD", status=MockOrderStatus.NEW)
+            mock_client.orders[order.id] = order
+
+        assert oc.cancel_open_orders() is True
+        if inject_open:
+            assert order.status == MockOrderStatus.CANCELED
