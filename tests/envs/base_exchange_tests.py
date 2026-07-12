@@ -65,10 +65,10 @@ class BaseObservationClassTests(ABC):
             window_sizes=20,
         )
 
-        assert len(observer.timeframes) == 1 or len(observer.time_frames) == 1
-        timeframes = getattr(observer, 'timeframes', getattr(observer, 'time_frames'))
+        timeframes = getattr(observer, 'timeframes', getattr(observer, 'time_frames', None))
         window_sizes = observer.window_sizes
 
+        assert len(timeframes) == 1
         assert timeframes[0].value == 15
         assert window_sizes[0] == 20
 
