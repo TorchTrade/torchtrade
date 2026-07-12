@@ -145,11 +145,7 @@ class TestBybitFuturesTorchTradingEnv:
         (500.0, False),  # above threshold -> keep trading
     ], ids=["below-threshold", "at-threshold", "above-threshold"])
     def test_bankruptcy_termination(self, env, portfolio_value, expected_done):
-        """Terminates when portfolio falls below bankrupt_threshold * initial_portfolio_value.
-
-        Only the DISABLED path was covered here; this pins the enabled safety behavior
-        (previously tested on binance only).
-        """
+        """Terminates when portfolio falls below bankrupt_threshold * initial_portfolio_value."""
         env.initial_portfolio_value = 1000.0
         env.config.bankrupt_threshold = 0.1
         assert env._check_termination(portfolio_value) is expected_done

@@ -208,11 +208,7 @@ class TestBitgetFuturesTorchTradingEnv:
         (500.0, False),  # above threshold -> keep trading
     ], ids=["below-threshold", "at-threshold", "above-threshold"])
     def test_bankruptcy_termination(self, env, portfolio_value, expected_done):
-        """Terminates when portfolio falls below bankrupt_threshold * initial_portfolio_value.
-
-        Only the DISABLED path was covered here; this pins the enabled safety behavior
-        (previously tested on binance only).
-        """
+        """Terminates when portfolio falls below bankrupt_threshold * initial_portfolio_value."""
         env.initial_portfolio_value = 1000.0
         env.config.bankrupt_threshold = 0.1
         assert env._check_termination(portfolio_value) is expected_done
@@ -251,13 +247,8 @@ class TestBitgetFuturesTorchTradingEnv:
     def test_close_position_action(self, env, mock_trader):
         """Commanding flat (level 0.0) must close a position the env did NOT open.
 
-        Regression for a silent no-op: _reset synced current_position from the exchange
-        but left current_action_level at its stale 0.0 default, so
-        _execute_trade_if_needed's `desired_action == current_action_level` short-circuit
-        fired and the position was never closed.
-
-        NOTE: this test previously asserted nothing (its body ended in comments) and could
-        never fail, which is why the bug went unnoticed.
+        Regression: a stale current_action_level let the duplicate-action guard
+        short-circuit the close, silently leaving the position open.
         """
         from torchtrade.envs.live.bitget.order_executor import PositionStatus
 
@@ -278,19 +269,16 @@ class TestBitgetFuturesTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            # Discard the close_position() the constructor makes (close_position_on_init),
-            # otherwise assert_called() would pass without _step doing anything.
+            # The constructor closes any position (close_position_on_init); drop that call
+            # so assert_called_once() counts only what _step does.
             mock_trader.close_position.reset_mock()
 
             # Fractional action levels: [0=-1.0, 1=-0.5, 2=0.0, 3=0.5, 4=1.0]
             # Action index 2 -> level 0.0 -> close the open position.
             action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())
-            env._step(action_td)  # Use _step to test internal logic
+            env._step(action_td)
 
         mock_trader.close_position.assert_called_once()
-
-        # The open long must actually be closed (this test previously asserted nothing).
-        mock_trader.close_position.assert_called()
 
     def test_long_from_short(self, env, mock_trader):
         """Test going long from short position executes correct trade."""

@@ -201,26 +201,16 @@ class TestBinanceFuturesTorchTradingEnv:
             mock_trader.trade.assert_called()
 
 
-    def test_done_on_bankruptcy(self, env, mock_trader):
-        """Test termination on bankruptcy."""
+    @pytest.mark.parametrize("portfolio_value,expected_done", [
+        (50.0, True),    # below 10% of the 1000 initial -> bankrupt
+        (100.0, False),  # exactly at threshold -> NOT bankrupt (check is a strict <)
+        (500.0, False),  # above threshold -> keep trading
+    ], ids=["below-threshold", "at-threshold", "above-threshold"])
+    def test_bankruptcy_termination(self, env, portfolio_value, expected_done):
+        """Terminates when portfolio falls below bankrupt_threshold * initial_portfolio_value."""
         env.initial_portfolio_value = 1000.0
         env.config.bankrupt_threshold = 0.1
-
-        # Set balance to below threshold
-        mock_trader.get_account_balance = MagicMock(return_value={
-            "total_margin_balance": 50.0,  # Below 10% of 1000
-        })
-
-        done = env._check_termination(50.0)
-        assert done is True
-
-    def test_no_termination_above_threshold(self, env, mock_trader):
-        """Test no termination when above bankruptcy threshold."""
-        env.initial_portfolio_value = 1000.0
-        env.config.bankrupt_threshold = 0.1
-
-        done = env._check_termination(500.0)
-        assert done is False
+        assert env._check_termination(portfolio_value) is expected_done
 
     def test_close_method(self, env, mock_trader):
         """Test environment close method."""
