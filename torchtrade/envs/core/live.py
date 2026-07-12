@@ -164,6 +164,23 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         if sleep_seconds > 0:
             time.sleep(sleep_seconds)
 
+    def _sync_action_level_after_reset(self) -> None:
+        """Reconcile current_action_level with the position observed during reset.
+
+        _execute_trade_if_needed short-circuits when
+        ``desired_action == self.position.current_action_level``. But current_action_level
+        is only ever assigned after a trade THIS env made, so a position the env did not
+        open -- pre-existing on the exchange, or carried across a reset with
+        close_position_on_reset=False -- leaves it at the stale 0.0 default. Commanding
+        flat (0.0) would then match and silently no-op: the position is never closed.
+
+        The action level that produced such a position is unknowable, so mark it NaN.
+        NaN never compares equal to anything, so the next command always executes.
+        """
+        self.position.current_action_level = (
+            0.0 if self.position.current_position == 0 else float("nan")
+        )
+
     @abstractmethod
     def _get_portfolio_value(self, *args, **kwargs) -> float:
         """
