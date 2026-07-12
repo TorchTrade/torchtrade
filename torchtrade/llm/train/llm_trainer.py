@@ -104,10 +104,18 @@ class LLMTrainer:
         in the body so the only way to produce `<` is to start `</think>`; `{40,600}` makes min-40
         kill empty think and max-600 force `</think>` (then the answer) well before a typical
         max_tokens cap. Reasoning can't contain a literal `<` (xgrammar rejects the lookahead that
-        would allow it) — the model uses `>`/"above"/"below" fine. Keep max_tokens >= ~2x the think
-        token budget so the forced answer always fits."""
+        would allow it) — the model uses `>`/"above"/"below" fine.
+
+        The inter-tag gap is `\s{0,2}`, NOT `\s*`. An unbounded `\s*` is an escape hatch: a
+        reasoning-hungry model (any *thinking* model — Qwen3.5, Qwen3-*-Thinking), once the char
+        bound forces it to close `<think>` while it still "wants" to reason, dumps whitespace into
+        the gap until the token cap and never emits `<answer>`. Measured on Qwen3-4B-Thinking: `\s*`
+        gave 16-35% no-answer FLAT across every (think-bound x max_tokens) cell (raising max_tokens
+        did NOT help — it just fed the dump); `\s{0,2}` took it to 0% (the base Qwen3-8B, an English
+        reasoner, was already 0% either way). 0-2 whitespace covers the natural `</think>\n<answer>`
+        without leaving room to escape."""
         indices = "|".join(str(i) for i in range(num_actions))
-        return r"<think>[^<]{40,600}</think>\s*<answer>(" + indices + r")</answer>"
+        return r"<think>[^<]{40,600}</think>\s{0,2}<answer>(" + indices + r")</answer>"
 
     def _build_prompt_actor(self, env):
         num_actions = env.action_spec.n
