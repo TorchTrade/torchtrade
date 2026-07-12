@@ -1,91 +1,97 @@
-"""Tests for OKXObservationClass."""
+"""Tests for OKXObservationClass.
+
+Common observation-class behavior (init, keys, shapes, float32, no-NaN, features,
+window sizes) is inherited from BaseObservationClassTests. Only OKX-specific tests
+(symbol normalization, REST envelope validation, chronological parsing, utils) live
+here.
+"""
 
 import pytest
 import numpy as np
 from unittest.mock import MagicMock
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from tests.envs.base_exchange_tests import BaseObservationClassTests
 
 
-class TestOKXObservationClass:
-    """Tests for OKXObservationClass."""
+def _make_okx_market_client():
+    """Build a mock OKX MarketData client (mirrors the conftest fixture).
 
-    @pytest.fixture
-    def observer_single(self, mock_okx_market_client):
-        """Create observer with single timeframe."""
+    Generates exactly ``limit`` candles in reverse-chronological order (as OKX
+    returns them), so window sizes up to the base tests' 100 are satisfied.
+    """
+    client = MagicMock()
+
+    def mock_get_candlesticks(instId, bar, limit="200"):
+        n = int(limit)
+        base_time = 1700000000000
+        candles = [
+            [str(base_time + i * 60000), "50000.0", "50100.0", "49900.0",
+             "50050.0", "100.0", "5005000.0", "5005000.0", "1"]
+            for i in range(n - 1, -1, -1)  # reverse order
+        ]
+        return {"code": "0", "msg": "", "data": candles}
+
+    client.get_candlesticks = MagicMock(side_effect=mock_get_candlesticks)
+    return client
+
+
+class TestOKXObservationClass(BaseObservationClassTests):
+    """OKX observation class — common tests inherited from the base."""
+
+    def create_observer(self, symbol, timeframes, window_sizes, **kwargs):
         from torchtrade.envs.live.okx.observation import OKXObservationClass
-
+        client = kwargs.pop("client", None) or _make_okx_market_client()
         return OKXObservationClass(
-            symbol="BTC-USDT-SWAP",
-            time_frames=TimeFrame(15, TimeFrameUnit.Minute),
-            window_sizes=10,
-            client=mock_okx_market_client,
+            symbol=symbol,
+            time_frames=timeframes,
+            window_sizes=window_sizes,
+            client=client,
+            **kwargs,
         )
 
-    @pytest.fixture
-    def observer_multi(self, mock_okx_market_client):
-        """Create observer with multiple timeframes."""
+    def get_expected_symbol_format(self, symbol):
+        from torchtrade.envs.live.okx.utils import normalize_symbol
+        return normalize_symbol(symbol)
+
+    # --- OKX-specific tests (no base equivalent) ---
+
+    def test_invalid_interval_raises_error(self):
+        """Unsupported timeframe raises ValueError."""
         from torchtrade.envs.live.okx.observation import OKXObservationClass
-
-        return OKXObservationClass(
-            symbol="BTC-USDT-SWAP",
-            time_frames=[
-                TimeFrame(1, TimeFrameUnit.Minute),
-                TimeFrame(5, TimeFrameUnit.Minute),
-                TimeFrame(1, TimeFrameUnit.Hour),
-            ],
-            window_sizes=[10, 20, 15],
-            client=mock_okx_market_client,
-        )
-
-    def test_invalid_interval_raises_error(self, mock_okx_market_client):
-        """Test that invalid timeframe raises ValueError."""
-        from torchtrade.envs.live.okx.observation import OKXObservationClass
-
         with pytest.raises(ValueError, match="Unsupported timeframe"):
             OKXObservationClass(
                 symbol="BTC-USDT-SWAP",
                 time_frames=TimeFrame(2, TimeFrameUnit.Minute),
                 window_sizes=10,
-                client=mock_okx_market_client,
+                client=_make_okx_market_client(),
             )
 
-    def test_mismatched_lengths_raises_error(self, mock_okx_market_client):
-        """Test that mismatched time_frames and window_sizes raises error."""
-        from torchtrade.envs.live.okx.observation import OKXObservationClass
-
-        with pytest.raises(ValueError, match="same length"):
-            OKXObservationClass(
-                symbol="BTC-USDT-SWAP",
-                time_frames=[
-                    TimeFrame(1, TimeFrameUnit.Minute),
-                    TimeFrame(5, TimeFrameUnit.Minute),
-                ],
-                window_sizes=[10],
-                client=mock_okx_market_client,
-            )
-
-    def test_get_observations_single(self, observer_single):
-        """Test get_observations with single timeframe returns correct shape."""
-        observations = observer_single.get_observations()
-        assert "15Minute_10" in observations
+    def test_get_observations_single_exact_shape(self):
+        """OKX single-timeframe observation is exactly (10, 4) (stricter than base >=4)."""
+        observer = self.create_observer(
+            symbol="BTC-USDT-SWAP",
+            timeframes=TimeFrame(15, TimeFrameUnit.Minute),
+            window_sizes=10,
+        )
+        observations = observer.get_observations()
         assert observations["15Minute_10"].shape == (10, 4)
 
-    def test_get_observations_multi(self, observer_multi):
-        """Test get_observations with multiple timeframes returns correct shapes."""
-        observations = observer_multi.get_observations()
+    def test_get_observations_multi_exact_shapes(self):
+        """OKX multi-timeframe observations have exact per-timeframe shapes."""
+        observer = self.create_observer(
+            symbol="BTC-USDT-SWAP",
+            timeframes=[TimeFrame(1, TimeFrameUnit.Minute),
+                        TimeFrame(5, TimeFrameUnit.Minute),
+                        TimeFrame(1, TimeFrameUnit.Hour)],
+            window_sizes=[10, 20, 15],
+        )
+        observations = observer.get_observations()
         assert observations["1Minute_10"].shape == (10, 4)
         assert observations["5Minute_20"].shape == (20, 4)
         assert observations["1Hour_15"].shape == (15, 4)
 
-    def test_get_observations_with_base_ohlc(self, observer_single):
-        """Test get_observations with return_base_ohlc=True."""
-        observations = observer_single.get_observations(return_base_ohlc=True)
-        assert "15Minute_10" in observations
-        assert "base_features" in observations
-        assert observations["base_features"].shape[1] == 4
-
-    def test_custom_preprocessing(self, mock_okx_market_client):
-        """Test custom preprocessing function changes feature count."""
+    def test_custom_preprocessing_five_features(self):
+        """Custom preprocessing that adds OHLC-derived + a custom feature -> 5 cols."""
         from torchtrade.envs.live.okx.observation import OKXObservationClass
 
         def custom_preprocess(df):
@@ -105,59 +111,48 @@ class TestOKXObservationClass:
             time_frames=TimeFrame(1, TimeFrameUnit.Minute),
             window_sizes=10,
             feature_preprocessing_fn=custom_preprocess,
-            client=mock_okx_market_client,
+            client=_make_okx_market_client(),
         )
-
         observations = observer.get_observations()
         assert observations["1Minute_10"].shape[1] == 5  # 4 default + 1 custom
 
-    def test_empty_candles_raises_error(self, mock_okx_market_client):
-        """Test that empty candles raises RuntimeError."""
+    def test_empty_candles_raises_error(self):
+        """Empty candle data raises RuntimeError."""
         from torchtrade.envs.live.okx.observation import OKXObservationClass
-
-        mock_okx_market_client.get_candlesticks = MagicMock(return_value={
-            "code": "0", "msg": "", "data": [],
-        })
-
+        client = _make_okx_market_client()
+        client.get_candlesticks = MagicMock(return_value={"code": "0", "msg": "", "data": []})
         observer = OKXObservationClass(
             symbol="BTC-USDT-SWAP",
             time_frames=TimeFrame(1, TimeFrameUnit.Minute),
             window_sizes=10,
-            client=mock_okx_market_client,
+            client=client,
         )
-
         with pytest.raises(RuntimeError, match="No candle data"):
             observer.get_observations()
 
-    def test_fetch_klines_validates_code(self, mock_okx_market_client):
+    def test_fetch_klines_validates_code(self):
         """_fetch_klines must raise RuntimeError on non-zero code."""
         from torchtrade.envs.live.okx.observation import OKXObservationClass
-
-        mock_okx_market_client.get_candlesticks = MagicMock(return_value={
-            "code": "51001", "msg": "Invalid parameter", "data": [],
-        })
-
+        client = _make_okx_market_client()
+        client.get_candlesticks = MagicMock(return_value={"code": "51001", "msg": "Invalid parameter", "data": []})
         observer = OKXObservationClass(
             symbol="BTC-USDT-SWAP",
             time_frames=TimeFrame(1, TimeFrameUnit.Minute),
             window_sizes=10,
-            client=mock_okx_market_client,
+            client=client,
         )
-
         with pytest.raises(RuntimeError, match="code=51001"):
             observer._fetch_klines("BTC-USDT-SWAP", "1m", 200)
 
-    def test_parse_klines_sorts_chronologically(self, mock_okx_market_client):
+    def test_parse_klines_sorts_chronologically(self):
         """Reverse-ordered klines from OKX must be sorted oldest-first."""
         from torchtrade.envs.live.okx.observation import OKXObservationClass
-
         observer = OKXObservationClass(
             symbol="BTC-USDT-SWAP",
             time_frames=TimeFrame(1, TimeFrameUnit.Minute),
             window_sizes=5,
-            client=mock_okx_market_client,
+            client=_make_okx_market_client(),
         )
-
         raw_klines = [
             [str(1700000000000 + i * 60000), "50000", "50100", "49900", "50050", "100", "5000000", "5000000", "1"]
             for i in [4, 3, 2, 1, 0]
