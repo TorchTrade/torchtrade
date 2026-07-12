@@ -13,7 +13,27 @@ from torch.utils.data import DataLoader
 from torchrl.data import Composite, Unbounded
 from torchrl.envs import StepCounter, Transform
 
-from torchtrade.llm.train.reward import TradingReward
+from torchtrade.actor.parsers import extract_action
+
+
+class TradingReward:
+    """Callable reward: completion text -> discrete action -> scalar reward.
+
+    Default scoring is `env.score(bar_index, action)` (the OneStepTradingEnv reward oracle); a custom
+    `reward_fn(action, bar_index, env) -> float` overrides it. A malformed/out-of-range completion
+    falls back to action 0 (hold) via `extract_action`, so scoring never crashes.
+    """
+
+    def __init__(self, env, num_actions, reward_fn=None):
+        self.env = env
+        self.num_actions = num_actions
+        self.reward_fn = reward_fn
+
+    def __call__(self, completion: str, bar_index: int) -> float:
+        action = extract_action(completion, num_actions=self.num_actions)
+        if self.reward_fn is None:
+            return float(self.env.score(bar_index, action))
+        return float(self.reward_fn(action=action, bar_index=bar_index, env=self.env))
 
 
 class TradingRewardParser(Transform):

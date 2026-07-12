@@ -8,10 +8,10 @@ class _StubLoss:
         self.kw = kw
 
 
-def test_registry_name_resolves_and_forwards_kwargs(monkeypatch):
-    import torchtrade.llm.train.losses as m
-    monkeypatch.setitem(m._LOSS_REGISTRY, "stub", lambda: _StubLoss)
-    loss = resolve_loss("stub", actor_network="ACTOR", loss_kwargs={"clip_epsilon": 0.2})
+def test_grpo_name_resolves_and_forwards_kwargs(monkeypatch):
+    import torchrl.objectives.llm as m
+    monkeypatch.setattr(m, "GRPOLoss", _StubLoss)  # resolve_loss imports GRPOLoss lazily at call time
+    loss = resolve_loss("grpo", actor_network="ACTOR", loss_kwargs={"clip_epsilon": 0.2})
     assert isinstance(loss, _StubLoss)
     assert loss.actor == "ACTOR" and loss.kw == {"clip_epsilon": 0.2}
 

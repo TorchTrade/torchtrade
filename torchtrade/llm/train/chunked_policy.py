@@ -18,9 +18,46 @@ from __future__ import annotations
 import torch
 from torchrl.modules.llm import TransformersWrapper
 
-from torchtrade.llm.train.chunked_logprob import chunked_token_entropy, chunked_token_log_probs
-
 _IGNORE_INDEX = -100  # GRPOLoss pads the action tokens with this; must never reach gather()
+
+
+# --- memory-bounded kernels -------------------------------------------------------------------
+# Compute per-token log-prob / entropy from hidden states + the lm_head WITHOUT ever materializing
+# the full [B, T, vocab] logits. Chunking over B*T caps peak logit memory at O(chunk*vocab),
+# independent of K and seq — the Cut-Cross-Entropy / Liger idea, and what makes K a free knob.
+
+def chunked_token_log_probs(hidden_states, lm_head_weight, target_ids, chunk_size=1024,
+                            lm_head_bias=None):
+    """log P(target_ids[b,t] | hidden_states[b,t]) for every position, chunked over B*T.
+
+    hidden_states [B,T,H] must already be shifted so position t predicts target_ids[b,t];
+    lm_head_weight is [V,H]. Returns [B,T] float32.
+    """
+    B, T, H = hidden_states.shape
+    flat_h = hidden_states.reshape(B * T, H)
+    flat_tgt = target_ids.reshape(B * T)
+    out = torch.empty(B * T, dtype=torch.float32, device=hidden_states.device)
+    for i in range(0, B * T, chunk_size):
+        logits = torch.nn.functional.linear(flat_h[i:i + chunk_size], lm_head_weight,
+                                            lm_head_bias).float()  # [c, V]
+        logsumexp = torch.logsumexp(logits, dim=-1)
+        chosen = logits.gather(-1, flat_tgt[i:i + chunk_size, None]).squeeze(-1)
+        out[i:i + chunk_size] = chosen - logsumexp
+    return out.reshape(B, T)
+
+
+def chunked_token_entropy(hidden_states, lm_head_weight, chunk_size=1024, lm_head_bias=None):
+    """Per-position categorical entropy from hidden states, chunked over B*T (no full logits).
+    Sibling of `chunked_token_log_probs`; used for the GRPO entropy bonus."""
+    B, T, H = hidden_states.shape
+    flat_h = hidden_states.reshape(B * T, H)
+    out = torch.empty(B * T, dtype=torch.float32, device=hidden_states.device)
+    for i in range(0, B * T, chunk_size):
+        logits = torch.nn.functional.linear(flat_h[i:i + chunk_size], lm_head_weight,
+                                            lm_head_bias).float()  # [c, V]
+        logp = logits - torch.logsumexp(logits, dim=-1, keepdim=True)
+        out[i:i + chunk_size] = -(logp.exp() * logp).sum(-1)
+    return out.reshape(B, T)
 
 
 class ChunkedMaskedCategorical:
