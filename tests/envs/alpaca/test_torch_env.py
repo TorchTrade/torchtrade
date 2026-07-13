@@ -180,10 +180,8 @@ class TestAlpacaTorchTradingEnvReset:
     def test_reset_clears_the_holding_time_of_the_previous_episode(self, env):
         """Reset must zero hold_counter, or episode 2 inherits episode 1's age.
 
-        Asserting it on a FRESH env proves nothing -- PositionState already defaults it to 0,
-        so the assertion passes whether or not _reset zeroes anything. It has to be aged
-        first. Without this, an agent opens the next episode seeing a position it has "held"
-        for bars it never traded.
+        Asserting it on a fresh env proves nothing (PositionState defaults it to 0), so the
+        counter is aged first. Also pins that an OPEN position looks open.
         """
         env._wait_for_next_timestamp = lambda: None
         env.reset()
@@ -199,15 +197,10 @@ class TestAlpacaTorchTradingEnvReset:
         assert td["account_state"][3].item() == 0.0
 
     def test_reset_reads_dust_as_flat(self, env):
-        """A dust residual on reset is flat -- internally AND in what the agent sees.
+        """A dust residual (1e-12) left behind a close must read as FLAT, not as a position.
 
-        A close can leave a float residue (1e-12) behind, with a STALE entry price and market
-        value still attached. Read as an open position, those stale fields become the agent's
-        exposure and unrealized PnL for a position that does not exist.
-
-        The stale values are the whole point: an earlier version of this test zeroed them, so
-        every element it checked was already 0 whatever the code did, and the fix it was
-        guarding could be deleted with the suite still green.
+        The fixture is hostile in every field on purpose: a zeroed one made every element
+        read 0 whatever the code did.
         """
         env.trader.position_qty = 1e-12
         env.trader.position_value = 41.82        # stale market value left on the residual
@@ -303,13 +296,8 @@ class TestAlpacaTorchTradingEnvStep:
     def test_reenters_after_external_position_close(self, env):
         """A position closed on the exchange must not leave the guard refusing to re-enter.
 
-        Regression: current_position/current_action_level are written only by the env's OWN
-        trades, so a liquidation (or a manual close in the exchange UI) left them stale. The
-        duplicate-action guard then silently no-op'd an agent that re-requested the level it
-        used to hold -- and kept refusing for the REST of the episode.
-
-        Both halves matter. The guard must still suppress a redundant trade while the position
-        is genuinely held, or a fix that simply resynced on every step would pass this too.
+        Both halves matter: the guard must still suppress a genuinely redundant re-command,
+        or a fix that resynced on every step would pass too.
         """
         buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
 
@@ -365,13 +353,8 @@ class TestAlpacaTorchTradingEnvStep:
     def test_closing_a_position_does_not_age_the_next_one(self, env):
         """A closed position's age must not carry into the next one.
 
-        hold 5 bars -> close -> open again. Without the reset on close, the brand-new position
-        is reported to the policy as 6 bars old. The close can be the agent's own flat command
-        OR the external liquidation this branch resyncs -- the counter is the same either way.
-
-        This is the alpaca/binance counterpart of the bitget/bybit/okx dust-between-positions
-        test: those manage hold_counter in _get_observation, these two in _step, so the line
-        that needs pinning lives somewhere else.
+        The alpaca/binance counterpart of dust_between_positions: these two manage
+        hold_counter in _step, not in the observation branch.
         """
         buy = TensorDict({"action": torch.tensor(2)}, batch_size=())    # levels [0.0, 0.5, 1.0]
         flat = TensorDict({"action": torch.tensor(0)}, batch_size=())
@@ -390,12 +373,8 @@ class TestAlpacaTorchTradingEnvStep:
     def test_open_position_looks_open(self, env):
         """An OPEN position must look open in the vector the policy consumes.
 
-        Every other account_state assertion on this branch checks that a FLAT account reads
-        flat -- because that was the bug. The inverse was unpinned: corrupting exposure,
-        direction or unrealized PnL while genuinely open shipped with the whole suite green.
-        That is the same class of bug, pointing the other way.
-
-        Values measured off the mock, not computed.
+        Every other assertion here checks that a FLAT account reads flat -- the inverse was
+        unpinned, and shipped green.
         """
         env.reset()
         env._step(TensorDict({"action": torch.tensor(2)}, batch_size=()))   # buy at 100000

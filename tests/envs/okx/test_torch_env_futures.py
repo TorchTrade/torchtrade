@@ -126,15 +126,10 @@ class TestOKXFuturesTorchTradingEnv:
             assert next_td["next"]["done"].item() is expected_done
 
     def test_reset_reads_dust_as_flat(self, env, mock_env_trader):
-        """A dust residual on reset is flat -- internally AND in what the agent sees.
+        """A dust residual (1e-12) left behind a close must read as FLAT, not as a position.
 
-        An exchange can leave a float residue (1e-12) behind a full close. Read as an open
-        position it poisons the vector the policy consumes: a direction and a holding_time and
-        a distance-to-liquidation for a position that does not exist, at zero exposure. The
-        policy never saw that combination in training.
-
-        Behavioural on purpose: the structural guard that every _reset uses the shared rule
-        can be dodged by moving the derivation into a helper. This cannot.
+        The fixture is hostile in every field on purpose: a zeroed one made every element
+        read 0 whatever the code did.
         """
         from torchtrade.envs.live.okx.order_executor import PositionStatus
 
@@ -163,10 +158,6 @@ class TestOKXFuturesTorchTradingEnv:
 
     def test_dust_between_positions_does_not_age_the_next_one(self, env, mock_env_trader):
         """A residual left between two positions must not carry the old age into the new one.
-
-        Real position held N bars -> closed, leaving dust -> a NEW position opens. If the dust
-        bar does not reset the counter, the fresh position is reported as N+2 bars old. This
-        is what the `hold_counter = 0` in the dust branch is for; nothing else pins it.
         """
         from torchtrade.envs.live.okx.order_executor import PositionStatus
 
@@ -201,9 +192,8 @@ class TestOKXFuturesTorchTradingEnv:
     def test_reset_clears_the_holding_time_of_the_previous_episode(self, env, mock_env_trader):
         """Reset must zero hold_counter, or episode 2 inherits episode 1's age.
 
-        Asserting it on a FRESH env proves nothing -- PositionState already defaults it to 0.
-        The counter has to be aged first. Without this, an agent opens the next episode seeing
-        a position it has "held" for bars it never traded.
+        Asserting it on a fresh env proves nothing (PositionState defaults it to 0), so the
+        counter is aged first. Also pins that an OPEN position looks open.
         """
         from torchtrade.envs.live.okx.order_executor import PositionStatus
 
