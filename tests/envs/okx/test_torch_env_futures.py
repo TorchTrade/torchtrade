@@ -180,14 +180,17 @@ class TestOKXFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             mock_env_trader.get_status = MagicMock(return_value=status(0.01))
             env.reset()
+            long_idx = len(env.action_levels) - 1     # index 1 is a half SHORT in these fixtures
+            long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
+
             for _ in range(5):                       # age a real position
-                env.step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+                env.step(long)
 
             mock_env_trader.get_status = MagicMock(return_value=status(1e-12))   # closed -> dust
-            env.step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+            env.step(long)
 
             mock_env_trader.get_status = MagicMock(return_value=status(0.01))    # a NEW position
-            td = env.step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+            td = env.step(long)
 
         holding_time = td["next"]["account_state"][3].item()
         assert holding_time == 1.0, (
