@@ -236,7 +236,6 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Element 0: exposure_pct (position_value / portfolio_value)
         exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
 
-
         # Element 2: unrealized_pnl_pct (from Binance API)
 
         # Element 3: holding_time
