@@ -177,10 +177,26 @@ class TestAlpacaTorchTradingEnvReset:
 
         assert td[env.account_state_key].dtype == torch.float32
 
-    def test_reset_resets_position_counter(self, env):
-        """Test that reset resets position hold counter."""
+    def test_reset_clears_the_holding_time_of_the_previous_episode(self, env):
+        """Reset must zero hold_counter, or episode 2 inherits episode 1's age.
+
+        Asserting it on a FRESH env proves nothing -- PositionState already defaults it to 0,
+        so the assertion passes whether or not _reset zeroes anything. It has to be aged
+        first. Without this, an agent opens the next episode seeing a position it has "held"
+        for bars it never traded.
+        """
+        env._wait_for_next_timestamp = lambda: None
         env.reset()
+
+        buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
+        for _ in range(5):
+            env._step(buy)
+        assert env.position.hold_counter > 0        # genuinely aged
+
+        td = env.reset()                            # position still open on the exchange
+
         assert env.position.hold_counter == 0
+        assert td["account_state"][3].item() == 0.0
 
     def test_reset_reads_dust_as_flat(self, env):
         """A dust residual on reset is flat -- internally AND in what the agent sees.

@@ -421,6 +421,36 @@ class TestBitgetFuturesTorchTradingEnv:
             f"between the two did not reset the counter"
         )
 
+    def test_reset_clears_the_holding_time_of_the_previous_episode(self, env, mock_trader):
+        """Reset must zero hold_counter, or episode 2 inherits episode 1's age.
+
+        Asserting it on a FRESH env proves nothing -- PositionState already defaults it to 0.
+        The counter has to be aged first. Without this, an agent opens the next episode seeing
+        a position it has "held" for bars it never traded.
+        """
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
+
+        mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
+            qty=0.01, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
+            unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+            margin_mode="isolated", liquidation_price=45000.0,
+        )})
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            for _ in range(5):
+                env.step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+            assert env.position.hold_counter > 0     # genuinely aged
+
+            aged = env.position.hold_counter
+            td = env.reset()                         # position still open on the exchange
+
+        # 1, not 0: _reset zeroes the counter and then takes an observation, which legitimately
+        # counts the still-open position as bar ONE of the new episode. The bug is it reading
+        # `aged + 1` -- the previous episode's age carried across the reset.
+        assert env.position.hold_counter == 1, f"reset carried {aged} bars into the new episode"
+        assert td["account_state"][3].item() == 1.0
+
 
 class TestBitgetFractionalPositionResizing:
     """Tests for fractional position resizing (regression for #155)."""
