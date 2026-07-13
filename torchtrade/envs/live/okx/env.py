@@ -271,4 +271,3 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         return self._execute_fractional_action(
             desired_action, current_qty=current_qty, current_price=current_price,
         )
-

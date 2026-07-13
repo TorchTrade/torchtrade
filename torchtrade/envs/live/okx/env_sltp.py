@@ -334,4 +334,3 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
             return trade_info
 
         return trade_info
-

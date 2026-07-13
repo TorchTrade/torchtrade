@@ -280,4 +280,3 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
     def _execute_trade_if_needed(self, desired_action: float) -> Dict:
         """Execute trade based on desired action value."""
         return self._execute_fractional_action(desired_action)
-

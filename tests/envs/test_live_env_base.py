@@ -24,7 +24,6 @@ def _subclasses(cls):
 # __subclasses__() is a live registry, so do NOT define a TorchTradeLiveEnv subclass in any
 # test module -- it would land in here, import-order dependent.
 LIVE_ENVS = sorted(_subclasses(TorchTradeLiveEnv), key=lambda c: c.__name__)
-assert len(LIVE_ENVS) >= 10, f"live env discovery shrank to {len(LIVE_ENVS)} -- guard is degraded"
 
 
 @pytest.mark.parametrize("done_on_bankruptcy,portfolio_value,expected", [
@@ -36,8 +35,10 @@ assert len(LIVE_ENVS) >= 10, f"live env discovery shrank to {len(LIVE_ENVS)} -- 
 def test_check_termination(done_on_bankruptcy, portfolio_value, expected):
     """Terminates iff done_on_bankruptcy and portfolio < bankrupt_threshold * initial.
 
-    The stand-in carries only the two fields the method may read, so a renamed config field
-    raises AttributeError here instead of passing silently.
+    Called unbound on a stand-in rather than a real env: instantiating an EnvBase subclass
+    via __new__ to skip its __init__ flakes (nn.Module.__init__ never runs, so no _modules).
+    The stand-in carries only the three attributes the method reads, so a renamed config
+    field raises AttributeError here instead of passing silently.
     """
     env = SimpleNamespace(
         config=SimpleNamespace(
@@ -47,6 +48,18 @@ def test_check_termination(done_on_bankruptcy, portfolio_value, expected):
         initial_portfolio_value=1000.0,
     )
     assert TorchTradeLiveEnv._check_termination(env, portfolio_value) is expected
+
+
+def test_discovery_covers_every_live_exchange():
+    """The override guard below is only as good as this discovery.
+
+    If an exchange ever stops being imported by torchtrade.envs it drops out of LIVE_ENVS
+    silently, and the guard would still pass green while covering less. Fail here instead.
+    Adding exchange #6 is meant to fail this -- it forces you to confirm the newcomer
+    inherits the shared bankruptcy check rather than re-forking it.
+    """
+    exchanges = {cls.__module__.split(".")[-2] for cls in LIVE_ENVS}
+    assert exchanges == {"alpaca", "binance", "bitget", "bybit", "okx"}
 
 
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)

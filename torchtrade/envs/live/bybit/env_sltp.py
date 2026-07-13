@@ -329,4 +329,3 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
             return trade_info
 
         return trade_info
-
