@@ -176,3 +176,31 @@ def test_position_sync_resolves_to_a_shared_implementation(env_cls):
         f"{env_cls.__name__} does not resolve _sync_position_from_exchange to "
         f"{expected.__name__}'s -- check base-class order and any local override."
     )
+
+
+@pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
+def test_every_reset_uses_the_shared_direction_rule(env_cls):
+    """_reset must derive the position with the SAME dust rule as _step.
+
+    The five resets each hand-rolled an exact-zero check until now: at qty=1e-12 reset
+    reported a phantom position in account_state that the agent does not hold, while _step
+    read it as flat. One rule, or they disagree.
+
+    Applies to whichever class actually DERIVES the position; the SLTP envs' _reset only
+    delegates to super() and then resets brackets, so it is not one of them.
+    """
+    reset = env_cls.__dict__.get("_reset")
+    if reset is None:
+        pytest.skip(f"{env_cls.__name__} inherits _reset")
+
+    source = inspect.getsource(reset).lstrip()
+    if "current_position" not in source:
+        pytest.skip(f"{env_cls.__name__}._reset delegates the position derivation")
+
+    tree = ast.parse(source)
+    called = {n.func.id for n in ast.walk(tree)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    assert "position_direction_from_status" in called, (
+        f"{env_cls.__name__}._reset hand-rolls its position direction instead of using the "
+        f"shared rule -- a dust residual would read as a phantom position."
+    )
