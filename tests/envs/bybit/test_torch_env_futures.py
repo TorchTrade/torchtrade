@@ -143,30 +143,19 @@ class TestBybitFuturesTorchTradingEnv:
         (True, True),    # portfolio collapses below the threshold -> episode terminates
         (False, False),  # same collapse, check disabled -> keep trading
     ], ids=["enabled-terminates", "disabled-keeps-trading"])
-    def test_bankruptcy_termination(
-        self, env_config, mock_observer, mock_trader, done_on_bankruptcy, expected_done
-    ):
+    def test_bankruptcy_termination(self, env, mock_trader, done_on_bankruptcy, expected_done):
         """A collapsed portfolio ends the episode through _step iff done_on_bankruptcy.
 
-        The threshold arithmetic is covered once in tests/envs/test_live_env_base.py; what
-        is exchange-specific is that BybitFuturesTorchTradingEnv._step feeds `done` from it.
-
-        Keep BOTH cases: [disabled-keeps-trading] is the only test in this file that pins
-        `done` to False, so it is the sole guard against a _step that always terminates.
+        Threshold arithmetic is covered in tests/envs/test_live_env_base.py; the disabled
+        case is this file's only guard against a _step that hardcodes done=True.
         """
-        from torchtrade.envs.live.bybit.env import BybitFuturesTorchTradingEnv
-
-        env_config.done_on_bankruptcy = done_on_bankruptcy
-
-        with patch("time.sleep"), \
-             patch.object(BybitFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = BybitFuturesTorchTradingEnv(
-                config=env_config, observer=mock_observer, trader=mock_trader,
-            )
+        env.config.done_on_bankruptcy = done_on_bankruptcy
 
         mock_trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 10.0, "available_balance": 10.0,
-            "total_unrealized_profit": 0.0, "total_margin_balance": 10.0,
+            "total_wallet_balance": 50.0,  # below 10% of the 1000 captured at __init__
+            "available_balance": 50.0,
+            "total_unrealized_profit": 0.0,
+            "total_margin_balance": 50.0,
         })
 
         with patch.object(env, "_wait_for_next_timestamp"):

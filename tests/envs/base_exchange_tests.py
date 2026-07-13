@@ -1,21 +1,13 @@
-"""
-Base test classes for exchange-specific tests.
+"""Shared observation-class tests.
 
-Provides reusable test patterns for testing observation classes, order executors,
-environments, and SL/TP functionality across different exchanges (Alpaca, Binance, Bitget).
+Each exchange (alpaca, binance, bitget, bybit, okx) subclasses BaseObservationClassTests in
+its own test_obs_class.py and implements create_observer / get_expected_symbol_format.
 """
 
 import pytest
 import numpy as np
-import torch
 from abc import ABC, abstractmethod
-from tensordict import TensorDict
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-
-
-# ============================================================================
-# Base Observation Class Tests
-# ============================================================================
 
 
 class BaseObservationClassTests(ABC):
@@ -275,13 +267,3 @@ class BaseObservationClassTests(ABC):
         key = observer.get_keys()[0]
 
         assert observations[key].shape[0] == 100
-
-
-# ============================================================================
-# Base Environment Tests
-# ============================================================================
-
-
-# ============================================================================
-# Base SL/TP Tests
-# ============================================================================

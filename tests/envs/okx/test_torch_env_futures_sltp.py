@@ -121,17 +121,13 @@ class TestOKXFuturesSLTPTorchTradingEnv:
     def test_bankruptcy_termination(self, env, mock_env_trader, done_on_bankruptcy, expected_done):
         """A collapsed portfolio ends the episode through _step iff done_on_bankruptcy.
 
-        The threshold arithmetic is covered once in tests/envs/test_live_env_base.py; what
-        is SLTP-specific is that this env's _step feeds `done` from it.
-
-        Keep BOTH cases: [disabled-keeps-trading] is the only test in this file that pins
-        `done` to False, so it is the sole guard against a _step that always terminates --
-        which every SLTP env shipped unguarded before this test.
+        Threshold arithmetic is covered in tests/envs/test_live_env_base.py; the disabled
+        case is this file's only guard against a _step that hardcodes done=True.
         """
         env.config.done_on_bankruptcy = done_on_bankruptcy
 
         mock_env_trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 50.0,  # below 10% of the 1000 initial
+            "total_wallet_balance": 50.0,  # below 10% of the 1000 captured at __init__
             "available_balance": 50.0,
             "total_unrealized_profit": 0.0,
             "total_margin_balance": 50.0,

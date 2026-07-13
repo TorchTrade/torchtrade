@@ -305,12 +305,8 @@ class TestAlpacaSLTPTradingEnvTermination:
     def test_bankruptcy_termination(self, done_on_bankruptcy, expected_done):
         """A collapsed portfolio ends the episode through _step iff done_on_bankruptcy.
 
-        The threshold arithmetic is covered once in tests/envs/test_live_env_base.py; what
-        is SLTP-specific is that this env's _step feeds `done` from it.
-
-        Keep BOTH cases: [disabled-keeps-trading] is the only test in this file that pins
-        `done` to False, so it is the sole guard against a _step that always terminates --
-        which every SLTP env shipped unguarded before this test.
+        Threshold arithmetic is covered in tests/envs/test_live_env_base.py; the disabled
+        case is this file's only guard against a _step that hardcodes done=True.
         """
         config = AlpacaSLTPTradingEnvConfig(
             symbol="BTC/USD",

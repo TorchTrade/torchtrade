@@ -21,7 +21,10 @@ def _subclasses(cls):
 
 
 # Discovered, not hand-listed: a hand-listed exchange #6 would silently escape the guard.
-LIVE_ENVS = sorted(set(_subclasses(TorchTradeLiveEnv)), key=lambda c: c.__name__)
+# __subclasses__() is a live registry, so do NOT define a TorchTradeLiveEnv subclass in any
+# test module -- it would land in here, import-order dependent.
+LIVE_ENVS = sorted(_subclasses(TorchTradeLiveEnv), key=lambda c: c.__name__)
+assert len(LIVE_ENVS) >= 10, f"live env discovery shrank to {len(LIVE_ENVS)} -- guard is degraded"
 
 
 @pytest.mark.parametrize("done_on_bankruptcy,portfolio_value,expected", [
@@ -33,13 +36,8 @@ LIVE_ENVS = sorted(set(_subclasses(TorchTradeLiveEnv)), key=lambda c: c.__name__
 def test_check_termination(done_on_bankruptcy, portfolio_value, expected):
     """Terminates iff done_on_bankruptcy and portfolio < bankrupt_threshold * initial.
 
-    Called unbound on a stand-in `self`: the method reads two attributes and does
-    arithmetic, so there is nothing here an EnvBase instance would add. (Building one via
-    __new__ to skip EnvBase.__init__ was tried and flakes -- nn.Module.__init__ never runs,
-    so the object has no _modules.)
-
-    The stand-in carries only the two fields the method may read, which makes a renamed
-    config field an AttributeError here rather than a silent pass.
+    The stand-in carries only the two fields the method may read, so a renamed config field
+    raises AttributeError here instead of passing silently.
     """
     env = SimpleNamespace(
         config=SimpleNamespace(
@@ -53,12 +51,10 @@ def test_check_termination(done_on_bankruptcy, portfolio_value, expected):
 
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
 def test_no_live_env_overrides_check_termination(env_cls):
-    """Every live env inherits the shared bankruptcy check.
+    """No live env class overrides the shared bankruptcy check.
 
-    This is what makes testing _check_termination once (above) sufficient, and for the five
-    SLTP envs it is their only bankruptcy coverage outside their own _step tests. Duplicated
-    logic in this codebase has drifted into real bugs before (three divergent SLTP action
-    maps), so a re-forked copy of money-moving termination logic fails here immediately.
+    This is what makes testing _check_termination once (above) sufficient rather than a
+    coverage loss: a re-forked copy of money-moving termination logic fails here.
     """
     assert env_cls._check_termination is TorchTradeLiveEnv._check_termination, (
         f"{env_cls.__name__} overrides _check_termination. Either drop the override, or "
