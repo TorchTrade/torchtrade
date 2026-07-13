@@ -312,13 +312,23 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
             assert trade_info["executed"] is False
 
 
-    def test_done_on_bankruptcy(self, env, mock_trader):
-        """Test termination on bankruptcy."""
-        env.initial_portfolio_value = 1000.0
-        env.config.bankrupt_threshold = 0.1
+    def test_bankruptcy_termination(self, env, mock_trader):
+        """A collapsed portfolio ends the episode through _step.
 
-        done = env._check_termination(50.0)  # Below 10% of 1000
-        assert done is True
+        The threshold arithmetic is covered once in tests/envs/test_live_env_base.py; what
+        is SLTP-specific is that this env's _step actually feeds `done` from it.
+        """
+        mock_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 50.0,  # below 10% of the 1000 initial
+            "available_balance": 50.0,
+            "total_unrealized_profit": 0.0,
+            "total_margin_balance": 50.0,
+        })
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            next_td = env.step(TensorDict({"action": torch.tensor(0)}, batch_size=()))
+            assert next_td["next"]["done"].item() is True
 
     def test_close_method(self, env, mock_trader):
         """Test environment close method."""

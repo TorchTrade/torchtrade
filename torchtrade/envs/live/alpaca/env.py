@@ -333,14 +333,6 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         """Calculate the dollar amount to trade (not used in fractional mode)."""
         raise NotImplementedError("_calculate_trade_amount is not used in fractional mode")
 
-    def _check_termination(self, portfolio_value: float) -> bool:
-        """Check if episode should terminate."""
-        if not self.config.done_on_bankruptcy:
-            return False
-
-        bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
-        return portfolio_value < bankruptcy_threshold
-
     def _create_info_dict(self, portfolio_value: float, trade_info: Dict, action_value: float) -> Dict:
         """Create info dictionary for debugging."""
         portfolio_return = ((portfolio_value - self.initial_portfolio_value) / 

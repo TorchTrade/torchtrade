@@ -41,7 +41,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
     - Action space definition (different for standard vs SLTP)
     - _execute_trade_if_needed(): Trade execution logic
     - _calculate_trade_amount(): Trade sizing logic
-    - _check_termination(): Episode termination logic
     """
 
     # Standard account state for Alpaca environments (6 elements)
@@ -325,23 +324,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         """
         raise NotImplementedError(
             "Subclasses must implement _calculate_trade_amount()"
-        )
-
-    @abstractmethod
-    def _check_termination(self, portfolio_value: float) -> bool:
-        """
-        Check if episode should terminate.
-
-        Must be implemented by subclasses as termination conditions may differ.
-
-        Args:
-            portfolio_value: Current portfolio value
-
-        Returns:
-            True if episode should terminate, False otherwise
-        """
-        raise NotImplementedError(
-            "Subclasses must implement _check_termination()"
         )
 
     def get_market_data_keys(self) -> List[str]:

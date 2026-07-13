@@ -179,6 +179,18 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
             0.0 if self.position.current_position == 0 else float("nan")
         )
 
+    def _check_termination(self, portfolio_value: float) -> bool:
+        """Terminate when the portfolio falls below bankrupt_threshold * its initial value.
+
+        Shared by every live env. Override only if an exchange needs different termination
+        conditions.
+        """
+        if not self.config.done_on_bankruptcy:
+            return False
+
+        bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
+        return portfolio_value < bankruptcy_threshold
+
     @abstractmethod
     def _get_portfolio_value(self, *args, **kwargs) -> float:
         """
