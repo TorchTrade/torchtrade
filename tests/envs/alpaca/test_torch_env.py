@@ -4,6 +4,8 @@ Unit tests for AlpacaTorchTradingEnv (TorchRL-style environment).
 Tests environment initialization, reset, step, and trading mechanics using mock clients.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 import torch
 from tensordict import TensorDict
@@ -254,6 +256,44 @@ class TestAlpacaTorchTradingEnvStep:
         env._step(td_sell)
 
         assert env.position.current_position == 0
+
+    def test_reenters_after_external_position_close(self, env):
+        """A position closed on the exchange must not leave the guard refusing to re-enter.
+
+        Regression: current_position/current_action_level are written only by the env's OWN
+        trades, so a liquidation (or a manual close in the exchange UI) left them stale. The
+        duplicate-action guard then silently no-op'd an agent that re-requested the level it
+        used to hold -- and kept refusing for the REST of the episode.
+
+        Both halves matter. The guard must still suppress a redundant trade while the position
+        is genuinely held, or a fix that simply resynced on every step would pass this too.
+        """
+        buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
+
+        env.reset()
+        env._step(buy)
+        assert env.trader.position_qty > 0        # opened
+
+        # Still holding it: re-commanding the same level is redundant, guard must suppress.
+        env.trader.trade = MagicMock(wraps=env.trader.trade)
+        env._step(buy)
+        env.trader.trade.assert_not_called()
+
+        # The position is closed out from under us -- on spot that means a manual close in
+        # the Alpaca UI. The proceeds return to cash, exactly as the mock's own sell path
+        # does; without that the env would rightly refuse to size a trade against a zero
+        # portfolio, and this test would pass for the wrong reason.
+        env.trader.cash += env.trader.position_qty * env.trader.current_price
+        env.trader.position_qty = 0.0
+        env.trader.position_value = 0.0
+        env.trader.avg_entry_price = 0.0
+
+        env._step(buy)                            # agent still wants to be long
+
+        assert env.trader.position_qty > 0, (
+            "env did not re-enter after an external close -- the duplicate-action guard is "
+            "still trusting the stale pre-close action level"
+        )
 
     def test_step_hold_action(self, env):
         """Test hold action (action=0 -> 0.0, close/neutral)."""

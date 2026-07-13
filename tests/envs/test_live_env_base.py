@@ -6,12 +6,14 @@ with a guard that asserts exactly that. If an exchange ever re-adds its own over
 guard fails and tells you to test that exchange separately.
 """
 
+import math
 from types import SimpleNamespace
 
 import pytest
 
 import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
+from torchtrade.envs.core.state import PositionState
 
 
 def _subclasses(cls):
@@ -50,6 +52,41 @@ def test_check_termination(done_on_bankruptcy, portfolio_value, expected):
     assert TorchTradeLiveEnv._check_termination(env, portfolio_value) is expected
 
 
+@pytest.mark.parametrize("cached_position,cached_level,observed_qty,expect_position,expect_level", [
+    # The env's own trade already wrote both fields: a matching position must NOT be touched,
+    # or the guard could never suppress a genuinely redundant trade.
+    (1, 1.0, 0.5, 1, 1.0),
+    (-1, -1.0, -0.5, -1, -1.0),
+    (0, 0.0, 0.0, 0, 0.0),
+    # Position moved behind the env's back -> the level that produced it is unknowable.
+    (1, 1.0, 0.0, 0, 0.0),          # liquidated / closed externally -> flat, level flat
+    (0, 0.0, 0.5, 1, math.nan),     # opened externally -> NaN, so ANY next command executes
+    (1, 1.0, -0.5, -1, math.nan),   # flipped externally
+], ids=["long-unchanged", "short-unchanged", "flat-unchanged",
+        "liquidated", "opened-externally", "flipped-externally"])
+def test_sync_position_after_step(
+    cached_position, cached_level, observed_qty, expect_position, expect_level
+):
+    """Exchange truth overwrites the cached position, and an external change NaNs the level.
+
+    The level is the input to _execute_trade_if_needed's duplicate-action guard. If a
+    liquidation leaves it stale, the agent re-requesting the level it already holds is
+    silently refused -- for the rest of the episode.
+    """
+    env = SimpleNamespace(position=PositionState())
+    env.position.current_position = cached_position
+    env.position.current_action_level = cached_level
+
+    status = None if observed_qty == 0 else SimpleNamespace(qty=observed_qty)
+    TorchTradeLiveEnv._sync_position_after_step(env, status)
+
+    assert env.position.current_position == expect_position
+    if math.isnan(expect_level):
+        assert math.isnan(env.position.current_action_level)
+    else:
+        assert env.position.current_action_level == expect_level
+
+
 def test_discovery_covers_every_live_exchange():
     """The override guard below is only as good as this discovery.
 
@@ -62,15 +99,17 @@ def test_discovery_covers_every_live_exchange():
     assert exchanges == {"alpaca", "binance", "bitget", "bybit", "okx"}
 
 
+@pytest.mark.parametrize("method", [
+    "_check_termination", "_sync_position_after_step", "_sync_action_level_after_reset",
+])
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
-def test_no_live_env_overrides_check_termination(env_cls):
-    """No live env class overrides the shared bankruptcy check.
+def test_no_live_env_overrides_shared_method(env_cls, method):
+    """No live env class overrides a shared money-moving method.
 
-    This is what makes testing _check_termination once (above) sufficient rather than a
-    coverage loss: a re-forked copy of money-moving termination logic fails here.
+    This is what makes testing each of them once (above) sufficient rather than a coverage
+    loss: a re-forked copy fails here.
     """
-    assert env_cls._check_termination is TorchTradeLiveEnv._check_termination, (
-        f"{env_cls.__name__} overrides _check_termination. Either drop the override, or "
-        f"give that exchange its own termination tests -- the single shared test above no "
-        f"longer covers it."
+    assert getattr(env_cls, method) is getattr(TorchTradeLiveEnv, method), (
+        f"{env_cls.__name__} overrides {method}. Either drop the override, or give that "
+        f"exchange its own tests -- the single shared test above no longer covers it."
     )

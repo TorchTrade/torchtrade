@@ -115,6 +115,10 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
             current_price = self.trader.get_mark_price()
             position_size = 0.0
 
+        # Exchange truth wins: a liquidation or manual close between steps must not leave the
+        # duplicate-action guard trusting a position we no longer hold.
+        self._sync_position_after_step(position_status)
+
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()

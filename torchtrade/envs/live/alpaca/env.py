@@ -116,6 +116,10 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         position_status = status.get("position_status", None)
         current_price = self._get_current_price(position_status)
 
+        # Exchange truth wins: a liquidation or manual close between steps must not leave the
+        # duplicate-action guard trusting a position we no longer hold.
+        self._sync_position_after_step(position_status)
+
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
 

@@ -311,6 +311,45 @@ class TestBitgetFuturesTorchTradingEnv:
         assert all(isinstance(tf, TimeFrame) for tf in config.time_frames)
         assert config.window_sizes == [10]
 
+    def test_reenters_after_external_position_close(self, env, mock_trader):
+        """A position closed on the exchange must not leave the guard refusing to re-enter.
+
+        Regression: current_position/current_action_level are written only by the env's OWN
+        trades, so a liquidation (or a manual close in the exchange UI) left them stale. The
+        duplicate-action guard then silently no-op'd an agent that re-requested the level it
+        used to hold -- and kept refusing for the REST of the episode.
+
+        Both halves matter. The guard must still suppress a redundant trade while the
+        position is genuinely held, or a fix that just resyncs on every step would pass.
+        """
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            long_idx = len(env.action_levels) - 1
+
+            # 1. Agent opens a long.
+            env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
+            mock_trader.trade.assert_called()
+
+            # 2. Exchange confirms the position. Re-commanding the SAME level is redundant.
+            mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
+                qty=0.01, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
+                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+                margin_mode="isolated", liquidation_price=45000.0,
+            )})
+            mock_trader.trade.reset_mock()
+            env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
+            mock_trader.trade.assert_not_called()   # guard still works
+
+            # 3. The exchange liquidates it out from under us.
+            mock_trader.get_status = MagicMock(return_value={"position_status": None})
+            mock_trader.trade.reset_mock()
+            env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
+
+            # The agent still wants to be long -> the env must actually re-enter.
+            mock_trader.trade.assert_called()
+
 
 class TestBitgetFractionalPositionResizing:
     """Tests for fractional position resizing (regression for #155)."""

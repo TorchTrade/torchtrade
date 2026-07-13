@@ -180,6 +180,31 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
             0.0 if self.position.current_position == 0 else float("nan")
         )
 
+    def _sync_position_after_step(self, position_status) -> None:
+        """Reconcile the cached position with exchange truth, before the duplicate-action guard.
+
+        current_position/current_action_level are written only after a trade THIS env made, so
+        anything that moves the position behind the env's back -- a liquidation, a manual close
+        in the exchange UI -- leaves them stale for the REST of the episode. The
+        ``desired_action == current_action_level`` guard would then short-circuit a legitimate
+        command: after a liquidation, an agent re-requesting the level it already holds is
+        silently refused, and stays refused until it happens to pick a different level.
+
+        Only a mismatch means the change was not ours; on a match, leave the cached level alone
+        (that is what lets the guard suppress genuinely redundant trades). The level behind a
+        position we did not open is unknowable, so NaN it -- NaN never compares equal, so the
+        next command always executes.
+
+        Reuses the position_status _step already fetched: no extra API call.
+        """
+        qty = 0.0 if position_status is None else float(position_status.qty)
+        observed = 0 if qty == 0 else (1 if qty > 0 else -1)
+
+        if observed != self.position.current_position:
+            self.position.current_action_level = 0.0 if observed == 0 else float("nan")
+
+        self.position.current_position = observed
+
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""
         if not self.config.done_on_bankruptcy:
