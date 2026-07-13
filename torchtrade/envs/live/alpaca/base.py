@@ -11,7 +11,7 @@ from torchrl.data import Composite
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import HistoryTracker, PositionState
+from torchtrade.envs.core.state import HistoryTracker, position_direction_from_status, PositionState
 
 
 class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -281,10 +281,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status")
         self.position.hold_counter = 0
 
-        if position_status is None:
-            self.position.current_position = 0.0
-        else:
-            self.position.current_position = 1 if position_status.qty > 0 else 0
+        self.position.current_position = position_direction_from_status(position_status)
 
         self._sync_action_level_after_reset()
 

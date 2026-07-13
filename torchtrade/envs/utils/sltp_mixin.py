@@ -2,7 +2,7 @@
 
 import logging
 
-from torchtrade.envs.core.state import position_direction
+from torchtrade.envs.core.state import position_direction_from_status
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class SLTPMixin:
             or external closure), False otherwise.
         """
         prev_position = self.position.current_position
-        self.position.current_position = position_direction(position_status)
+        self.position.current_position = position_direction_from_status(position_status)
 
         # Detect position closure (had position, now don't)
         position_closed = (prev_position != 0 and self.position.current_position == 0)

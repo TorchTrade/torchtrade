@@ -10,19 +10,15 @@ from typing import Dict, List, Union
 POSITION_DUST_EPS = 1e-9
 
 
-def position_direction(position_status, eps: float = POSITION_DUST_EPS) -> int:
+def position_direction_from_status(position_status) -> int:
     """The direction the exchange actually holds: -1 short, 0 flat, +1 long.
 
-    The single normalization used by every position sync, live and SLTP alike. It exists
-    because two copies of it drifted apart once: one applied the dust tolerance, the other
-    compared to exactly zero.
-
-    Args:
-        position_status: Position status from trader.get_status(), or None if flat.
-        eps: Quantities with |qty| <= eps are dust and read as flat.
+    The single normalization used by every position sync -- live _reset, live _step, and
+    SLTP alike. It exists because two copies of it drifted apart once: one applied the dust
+    tolerance, the other compared to exactly zero, and the difference froze a live guard.
     """
     qty = 0.0 if position_status is None else float(position_status.qty)
-    if abs(qty) <= eps:
+    if abs(qty) <= POSITION_DUST_EPS:
         return 0
     return 1 if qty > 0 else -1
 

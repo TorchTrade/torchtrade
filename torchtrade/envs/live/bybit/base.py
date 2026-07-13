@@ -12,7 +12,7 @@ from torchrl.data.tensor_specs import Composite
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
 from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import HistoryTracker
+from torchtrade.envs.core.state import HistoryTracker, position_direction_from_status
 
 logger = logging.getLogger(__name__)
 
@@ -265,14 +265,7 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status")
         self.position.hold_counter = 0
 
-        if position_status is None:
-            self.position.current_position = 0
-        elif position_status.qty > 0:
-            self.position.current_position = 1
-        elif position_status.qty < 0:
-            self.position.current_position = -1
-        else:
-            self.position.current_position = 0
+        self.position.current_position = position_direction_from_status(position_status)
 
         # No-op today (bybit's _execute_trade_if_needed recomputes qty live and never reads
         # current_action_level), but keeps the field consistent so adding a duplicate-action

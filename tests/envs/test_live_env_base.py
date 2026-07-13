@@ -6,6 +6,7 @@ with a guard that asserts exactly that. If an exchange ever re-adds its own over
 guard fails and tells you to test that exchange separately.
 """
 
+import ast
 import inspect
 import math
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ import pytest
 
 import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
+from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 from torchtrade.envs.core.state import PositionState
 
 
@@ -109,6 +111,9 @@ def test_discovery_covers_every_live_exchange():
     """
     exchanges = {cls.__module__.split(".")[-2] for cls in LIVE_ENVS}
     assert exchanges == {"alpaca", "binance", "bitget", "bybit", "okx"}
+    # NON_SLTP_ENVS drives the call-site guard below, and an empty parametrize SKIPS rather
+    # than fails -- a module rename would silently retire that guard.
+    assert len(NON_SLTP_ENVS) == 5
 
 
 @pytest.mark.parametrize("method", [
@@ -128,16 +133,46 @@ def test_no_live_env_overrides_shared_method(env_cls, method):
 
 
 @pytest.mark.parametrize("env_cls", NON_SLTP_ENVS, ids=lambda c: c.__name__)
-def test_non_sltp_step_syncs_position_from_exchange(env_cls):
-    """Every non-SLTP _step reconciles with the exchange before it trades.
+def test_non_sltp_step_syncs_before_it_trades(env_cls):
+    """Every non-SLTP _step reconciles with the exchange BEFORE the duplicate-action guard.
 
     This is the only thing guarding the call in bybit/okx: they have no duplicate-action
     guard, so deleting the call there changes nothing observable and no behavioural test
-    would notice -- yet it is exactly the call whose absence froze the guard in the three
-    envs that DO have one.
+    would notice -- yet it is the call whose absence froze the guard in the three that do.
+
+    Ordering is asserted, not just presence: a sync placed after _execute_trade_if_needed
+    would be useless, and the guard would still read the stale cache. AST, not source text,
+    so a comment mentioning the method cannot satisfy it.
     """
-    source = inspect.getsource(env_cls.__dict__["_step"])
-    assert "_sync_position_from_exchange" in source, (
-        f"{env_cls.__name__}._step does not reconcile the cached position with the exchange "
-        f"before trading -- a liquidation would leave it stale for the rest of the episode."
+    tree = ast.parse(inspect.getsource(env_cls.__dict__["_step"]).lstrip())
+    calls = [n.func.attr for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+
+    assert "_sync_position_from_exchange" in calls, (
+        f"{env_cls.__name__}._step never reconciles the cached position with the exchange -- "
+        f"a liquidation would leave it stale for the rest of the episode."
+    )
+    assert calls.index("_sync_position_from_exchange") < calls.index("_execute_trade_if_needed"), (
+        f"{env_cls.__name__}._step syncs AFTER it trades: the duplicate-action guard still "
+        f"reads the stale position."
+    )
+
+
+@pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
+def test_position_sync_resolves_to_a_shared_implementation(env_cls):
+    """Each env gets the position sync its _step actually expects.
+
+    The base and the mixin share this name but NOT their contract: the base returns None and
+    NaNs current_action_level; the mixin returns the `position_closed` bool that every SLTP
+    _step reads. Declaring an SLTP env as (Base, SLTPMixin) instead of (SLTPMixin, Base) would
+    silently hand it the base version -- position_closed becomes None, falsy, and SL/TP
+    brackets are never cleared. Nothing raises. So base-class ORDER is load-bearing; pin it.
+
+    This also restores what the rename cost: without it, an exchange can re-fork its own
+    _sync_position_from_exchange (dropping the dust rule, say) with the whole suite green.
+    """
+    expected = SLTPMixin if issubclass(env_cls, SLTPMixin) else TorchTradeLiveEnv
+    assert env_cls._sync_position_from_exchange is expected._sync_position_from_exchange, (
+        f"{env_cls.__name__} does not resolve _sync_position_from_exchange to "
+        f"{expected.__name__}'s -- check base-class order and any local override."
     )

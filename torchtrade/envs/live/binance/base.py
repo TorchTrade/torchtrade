@@ -12,7 +12,7 @@ from torchtrade.envs.utils.timeframe import timeframe_to_seconds
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import HistoryTracker, PositionState
+from torchtrade.envs.core.state import HistoryTracker, position_direction_from_status, PositionState
 
 
 class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -312,14 +312,7 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status")
         self.position.hold_counter = 0
 
-        if position_status is None:
-            self.position.current_position = 0
-        elif position_status.qty > 0:
-            self.position.current_position = 1  # Long position
-        elif position_status.qty < 0:
-            self.position.current_position = -1  # Short position
-        else:
-            self.position.current_position = 0  # No position
+        self.position.current_position = position_direction_from_status(position_status)
 
         self._sync_action_level_after_reset()
 

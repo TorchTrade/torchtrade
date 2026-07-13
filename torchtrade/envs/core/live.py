@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from tensordict import TensorDictBase
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
-from torchtrade.envs.core.state import PositionState, position_direction
+from torchtrade.envs.core.state import PositionState, position_direction_from_status
 
 
 class TorchTradeLiveEnv(TorchTradeBaseEnv):
@@ -203,7 +203,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         Only the direction is reconciled, not the size: a PARTIAL external close leaves the
         direction intact and is still invisible to the guard. Pre-existing, not fixed here.
         """
-        observed = position_direction(position_status)
+        observed = position_direction_from_status(position_status)
 
         if observed != self.position.current_position:
             self.position.current_action_level = 0.0 if observed == 0 else float("nan")
