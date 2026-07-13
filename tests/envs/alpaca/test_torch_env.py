@@ -387,6 +387,30 @@ class TestAlpacaTorchTradingEnvStep:
         td = env._step(buy)                            # a BRAND NEW position
         assert td["account_state"][3].item() == 1.0, "a new position reported as older than 1 bar"
 
+    def test_open_position_looks_open(self, env):
+        """An OPEN position must look open in the vector the policy consumes.
+
+        Every other account_state assertion on this branch checks that a FLAT account reads
+        flat -- because that was the bug. The inverse was unpinned: corrupting exposure,
+        direction or unrealized PnL while genuinely open shipped with the whole suite green.
+        That is the same class of bug, pointing the other way.
+
+        Values measured off the mock, not computed.
+        """
+        env.reset()
+        env._step(TensorDict({"action": torch.tensor(2)}, batch_size=()))   # buy at 100000
+        assert env.trader.position_qty > 0
+
+        env.trader.current_price = 110000.0        # +10% -- entry stays at 100000
+        td = env._step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
+
+        exposure, direction, pnl, _ht, leverage, dist = td["account_state"].tolist()
+        assert direction == 1.0
+        assert exposure > 0.0                      # a held position has exposure
+        assert pnl == pytest.approx(0.1)           # (110000 - 100000) / 100000
+        assert leverage == 1.0                     # spot
+        assert dist == 1.0                         # spot: no liquidation
+
 
 class TestAlpacaTorchTradingEnvReward:
     """Tests for reward calculation."""

@@ -433,8 +433,8 @@ class TestBitgetFuturesTorchTradingEnv:
         from torchtrade.envs.live.bitget.order_executor import PositionStatus
 
         mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
-            qty=0.01, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
-            unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+            qty=0.01, notional_value=500.0, entry_price=47500.0, unrealized_pnl=26.3,
+            unrealized_pnl_pct=0.0526, mark_price=50000.0, leverage=20,  # NOT the config's 5
             margin_mode="isolated", liquidation_price=45000.0,
         )})
 
@@ -452,7 +452,19 @@ class TestBitgetFuturesTorchTradingEnv:
         # counts the still-open position as bar ONE of the new episode. The bug is it reading
         # `aged + 1` -- the previous episode's age carried across the reset.
         assert env.position.hold_counter == 1, f"reset carried {aged} bars into the new episode"
-        assert td["account_state"][3].item() == 1.0
+
+        # An OPEN position must look OPEN. Every other account_state assertion on this branch
+        # checks that a FLAT account reads flat; the inverse was unpinned here, so corrupting
+        # any of these while genuinely open shipped with the suite green. The position's
+        # leverage (20) deliberately differs from the config's (5) -- with both at 5 the
+        # assertion could not tell the open branch from the flat one.
+        exposure, direction, pnl, holding_time, leverage, dist_to_liq = td["account_state"].tolist()
+        assert direction == 1.0
+        assert exposure == 0.5                        # 500 notional / 1000 balance
+        assert pnl == pytest.approx(0.0526)
+        assert leverage == 20.0                       # the POSITION's, not the config's 5
+        assert dist_to_liq == pytest.approx(0.1)      # (50000 - 45000) / 50000
+        assert holding_time == 1.0
 
 
 class TestBitgetFractionalPositionResizing:

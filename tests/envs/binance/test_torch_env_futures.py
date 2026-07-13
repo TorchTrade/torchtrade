@@ -316,8 +316,8 @@ class TestBinanceFuturesTorchTradingEnv:
         from torchtrade.envs.live.binance.order_executor import PositionStatus
 
         mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
-            qty=0.01, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
-            unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=20,   # NOT the config's 5
+            qty=0.01, notional_value=500.0, entry_price=47500.0, unrealized_pnl=26.3,
+            unrealized_pnl_pct=0.0526, mark_price=50000.0, leverage=20,  # NOT the config's 5
             margin_type="isolated", liquidation_price=45000.0,
         )})
 
@@ -341,8 +341,9 @@ class TestBinanceFuturesTorchTradingEnv:
         # position_direction to 0 (so the flat branch is always taken) left the whole suite
         # green while handing the policy a healthy long as flat, unlevered and far from
         # liquidation. Values measured, not computed.
-        exposure, direction, _pnl, holding_time, leverage, dist_to_liq = td["account_state"].tolist()
+        exposure, direction, pnl, holding_time, leverage, dist_to_liq = td["account_state"].tolist()
         assert direction == 1.0
+        assert pnl == pytest.approx(0.0526)          # was unpacked and never asserted
         assert exposure == 0.5                       # 500 notional / 1000 balance
         # 20, the POSITION's leverage -- not the config's 5. They are deliberately different:
         # with both set to 5 this assertion could not tell "reports the open position's
