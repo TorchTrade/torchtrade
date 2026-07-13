@@ -192,8 +192,8 @@ class TestBybitFuturesTorchTradingEnv:
         from torchtrade.envs.live.bybit.order_executor import PositionStatus
 
         mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
-            qty=1e-12, notional_value=0.0, entry_price=50000.0, unrealized_pnl=0.0,
-            unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+            qty=1e-12, notional_value=500.0, entry_price=47500.0, unrealized_pnl=26.3,
+            unrealized_pnl_pct=0.0526, mark_price=50000.0, leverage=20,
             margin_mode="isolated", liquidation_price=48000.0,
         )})
 
@@ -202,14 +202,39 @@ class TestBybitFuturesTorchTradingEnv:
 
         assert env.position.current_position == 0
 
-        # Every element the dust used to poison. liquidation_price is STALE (48000) on
-        # purpose: passing 0.0 short-circuits the distance_to_liquidation branch and makes
-        # element [5] look correct whatever the code does.
-        exposure, direction, _pnl, holding_time, _lev, dist_to_liq = td["account_state"].tolist()
-        assert exposure == 0.0
+        # EVERY field on the residual is hostile on purpose. Earlier versions of this test
+        # passed 0.0 for notional / pnl / liquidation_price -- the exact values that make the
+        # position branch produce a flat-looking vector whatever the code does, so the bug it
+        # was guarding could be deleted with the suite green.
+        exposure, direction, pnl, holding_time, leverage, dist_to_liq = td["account_state"].tolist()
+        assert exposure == 0.0        # 500 notional attached to a position that is not there
         assert direction == 0.0
-        assert holding_time == 0.0     # flat, so it cannot have been "held" for a bar
-        assert dist_to_liq == 1.0      # no position -> no liquidation to be near
+        assert pnl == 0.0             # a position that does not exist cannot be up 5.26%
+        assert holding_time == 0.0    # nor can it have been held for a bar
+        assert leverage == 5.0        # the CONFIG leverage, not the 20 on the residual
+        assert dist_to_liq == 1.0     # no position -> no liquidation to be near
+
+    def test_persistent_dust_never_accrues_holding_time(self, env, mock_trader):
+        """Dust that lingers must not make holding_time grow bar after bar.
+
+        The reset tests pin holding_time at 0 on the first bar, where hold_counter is 0
+        anyway. This pins the thing that actually bit: a residual that stays on the book, so
+        the counter would tick every step -- the agent seeing "flat, but held for 17 bars".
+        """
+        from torchtrade.envs.live.bybit.order_executor import PositionStatus
+
+        mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
+            qty=1e-12, notional_value=500.0, entry_price=47500.0, unrealized_pnl=26.3,
+            unrealized_pnl_pct=0.0526, mark_price=50000.0, leverage=20,
+            margin_mode="isolated", liquidation_price=48000.0,
+        )})
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            for bar in range(5):
+                td = env.step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+                holding_time = td["next"]["account_state"][3].item()
+                assert holding_time == 0.0, f"dust accrued holding_time={holding_time} by bar {bar}"
 
 
 class TestBybitActionIndexClamping:

@@ -35,7 +35,10 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
     Element definitions:
         - exposure_pct: position_value / portfolio_value (0.0 to 1.0 for spot)
-        - position_direction: sign(position_size) (0 or +1 for spot, no shorts)
+        - position_direction: sign(position_size). Spot cannot short, so this is 0 or +1
+          in practice -- but it is NOT clamped: a negative qty from the broker is
+          reported as -1 rather than laundered into 'flat', so the observation always
+          agrees with the position state the env tracks internally.
         - unrealized_pnl_pct: (current_price - entry_price) / entry_price * direction
         - holding_time: steps since position opened
         - leverage: Always 1.0 for spot (no leverage)
@@ -225,7 +228,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Element 0: exposure_pct (position_value / portfolio_value)
         exposure_pct = position_value / portfolio_value if portfolio_value > 0 else 0.0
 
-        # Element 1: position_direction (0 or +1 for spot, no shorts)
 
         # Element 2: unrealized_pnl_pct (inherited from Alpaca)
         # Element 3: holding_time
