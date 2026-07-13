@@ -186,8 +186,8 @@ class TestAlpacaTorchTradingEnvReset:
         """A dust residual on reset is flat -- internally AND in what the agent sees.
 
         A close can leave a float residue (1e-12). Read as an open position it puts a phantom
-        direction in account_state with zero exposure -- an observation the policy never saw
-        in training -- and freezes the trade guard.
+        direction in account_state at zero exposure -- a combination the policy never saw in
+        training.
 
         Behavioural on purpose: the structural guard that every _reset uses the shared rule
         can be dodged by moving the derivation into a helper. This cannot.

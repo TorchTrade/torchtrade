@@ -187,7 +187,10 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
         total_balance = balance.get("total_wallet_balance", 0)
         position_status = status.get("position_status", None)
 
-        if position_status is None:
+        # Dust is not a position. Gating on `is None` let a float residual left behind a
+        # close take the position branch, putting a phantom holding_time / leverage /
+        # distance_to_liquidation into the vector the policy consumes.
+        if position_direction_from_status(position_status) == 0:
             self.position.hold_counter = 0
             position_size = 0.0
             position_value = 0.0

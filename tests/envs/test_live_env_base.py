@@ -179,8 +179,9 @@ def test_exactly_five_resets_derive_the_position():
     """One position-deriving _reset per exchange, and the guard below sees all five.
 
     That guard skips a _reset that only delegates. Move a derivation into a helper and the
-    class starts skipping too -- the guard would then cover less while staying green. This is
-    how a reviewer smuggled the old exact-zero rule back into okx with the suite passing.
+    class starts skipping too -- the guard would then cover less while staying green. A review
+    demonstrated exactly that: the old exact-zero rule went back into okx behind a helper and
+    the suite stayed green, with only the skip count moving.
     """
     deriving = [
         c for c in LIVE_ENVS

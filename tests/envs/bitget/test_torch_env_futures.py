@@ -355,8 +355,9 @@ class TestBitgetFuturesTorchTradingEnv:
         """A dust residual on reset is flat -- internally AND in what the agent sees.
 
         An exchange can leave a float residue (1e-12) behind a full close. Read as an open
-        position it puts a phantom direction in account_state with zero exposure -- an
-        observation the policy never saw in training -- and freezes the trade guard.
+        position it poisons the vector the policy consumes: a direction and a holding_time and
+        a distance-to-liquidation for a position that does not exist, at zero exposure. The
+        policy never saw that combination in training.
 
         Behavioural on purpose: the structural guard that every _reset uses the shared rule
         can be dodged by moving the derivation into a helper. This cannot.
@@ -366,14 +367,22 @@ class TestBitgetFuturesTorchTradingEnv:
         mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
             qty=1e-12, notional_value=0.0, entry_price=50000.0, unrealized_pnl=0.0,
             unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
-            margin_mode="isolated", liquidation_price=0.0,
+            margin_mode="isolated", liquidation_price=48000.0,
         )})
 
         with patch.object(env, "_wait_for_next_timestamp"):
             td = env.reset()
 
         assert env.position.current_position == 0
-        assert td["account_state"][1].item() == 0.0   # the direction the AGENT sees
+
+        # Every element the dust used to poison. liquidation_price is STALE (48000) on
+        # purpose: passing 0.0 short-circuits the distance_to_liquidation branch and makes
+        # element [5] look correct whatever the code does.
+        exposure, direction, _pnl, holding_time, _lev, dist_to_liq = td["account_state"].tolist()
+        assert exposure == 0.0
+        assert direction == 0.0
+        assert holding_time == 0.0     # flat, so it cannot have been "held" for a bar
+        assert dist_to_liq == 1.0      # no position -> no liquidation to be near
 
 
 class TestBitgetFractionalPositionResizing:

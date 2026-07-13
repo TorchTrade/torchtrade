@@ -198,7 +198,10 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status", None)
 
         # Calculate portfolio value
-        if position_status is None:
+        # Dust is not a position. Gating on `is None` let a float residual left behind a
+        # close take the position branch, putting a phantom holding_time / leverage /
+        # distance_to_liquidation into the vector the policy consumes.
+        if position_direction_from_status(position_status) == 0:
             position_size = 0.0
             position_value = 0.0
             entry_price = 0.0
@@ -224,8 +227,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         exposure_pct = position_value / portfolio_value if portfolio_value > 0 else 0.0
 
         # Element 1: position_direction (0 or +1 for spot, no shorts)
-        # Spot is long-only: max() keeps the domain at {0, +1}.
-        position_direction = float(max(0, position_direction_from_qty(position_size)))
+        position_direction = float(position_direction_from_qty(position_size))
 
         # Element 2: unrealized_pnl_pct (inherited from Alpaca)
         # Element 3: holding_time
