@@ -104,11 +104,16 @@ class MockTradingClient:
         self.positions: Dict[str, MockPosition] = {}
         self.orders: Dict[str, MockOrder] = {}
         self.order_history: List[MockOrder] = []
+        # The submitted request objects, kept so tests can assert on fields the MockOrder
+        # drops (order_class, take_profit, stop_loss, limit_price, time_in_force).
+        self.requests: List[Any] = []
 
     def submit_order(self, request: Any) -> MockOrder:
         """Submit a mock order."""
         if self.simulate_failures:
             raise Exception("Simulated API failure")
+
+        self.requests.append(request)
 
         symbol = getattr(request, 'symbol', 'BTCUSD')
         side = getattr(request, 'side', None)
