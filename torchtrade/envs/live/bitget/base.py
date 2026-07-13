@@ -12,7 +12,11 @@ from torchtrade.envs.utils.timeframe import TimeFrame
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import HistoryTracker, PositionState
+from torchtrade.envs.core.state import (
+    HistoryTracker,
+    PositionState,
+    position_direction_from_status,
+)
 
 
 class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -223,7 +227,10 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         position_status = status.get("position_status", None)
 
-        if position_status is None:
+        # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
+        # close take the position branch and read stale fields off it.
+        position_direction = float(position_direction_from_status(position_status))
+        if position_direction == 0:
             self.position.hold_counter = 0
             position_size = 0.0
             position_value = 0.0
@@ -247,13 +254,6 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Calculate new 6-element account state
         # Element 0: exposure_pct (position_value / portfolio_value)
         exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
-
-        # Element 1: position_direction (-1, 0, +1)
-        position_direction = float(
-            1 if position_size > 0
-            else -1 if position_size < 0
-            else 0
-        )
 
         # Element 2: unrealized_pnl_pct (from Bitget API)
 
@@ -331,14 +331,7 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status")
         self.position.hold_counter = 0
 
-        if position_status is None:
-            self.position.current_position = 0  # No position
-        elif position_status.qty > 0:
-            self.position.current_position = 1  # Long position
-        elif position_status.qty < 0:
-            self.position.current_position = -1  # Short position
-        else:
-            self.position.current_position = 0  # No position
+        self.position.current_position = position_direction_from_status(position_status)
 
         self._sync_action_level_after_reset()
 

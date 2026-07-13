@@ -116,6 +116,8 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         position_status = status.get("position_status", None)
         current_price = self._get_current_price(position_status)
 
+        self._sync_position_from_exchange(position_status)
+
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
 

@@ -11,7 +11,11 @@ from torchrl.data import Composite
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import HistoryTracker, PositionState
+from torchtrade.envs.core.state import (
+    HistoryTracker,
+    PositionState,
+    position_direction_from_status,
+)
 
 
 class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -31,7 +35,10 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
     Element definitions:
         - exposure_pct: position_value / portfolio_value (0.0 to 1.0 for spot)
-        - position_direction: sign(position_size) (0 or +1 for spot, no shorts)
+        - position_direction: sign(position_size). Spot cannot short, so this is 0 or +1
+          in practice -- but it is NOT clamped: a negative qty from the broker is
+          reported as -1 rather than laundered into 'flat', so the observation always
+          agrees with the position state the env tracks internally.
         - unrealized_pnl_pct: (current_price - entry_price) / entry_price * direction
         - holding_time: steps since position opened
         - leverage: Always 1.0 for spot (no leverage)
@@ -193,8 +200,10 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status", None)
 
         # Calculate portfolio value
-        if position_status is None:
-            position_size = 0.0
+        # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
+        # close take the position branch and read stale fields off it.
+        position_direction = float(position_direction_from_status(position_status))
+        if position_direction == 0:
             position_value = 0.0
             entry_price = 0.0
             unrealized_pnlpc = 0.0
@@ -206,7 +215,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             except Exception:
                 current_price = 0.0
         else:
-            position_size = position_status.qty
             position_value = position_status.market_value
             entry_price = position_status.avg_entry_price
             current_price = position_status.current_price
@@ -217,9 +225,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Calculate new 6-element account state
         # Element 0: exposure_pct (position_value / portfolio_value)
         exposure_pct = position_value / portfolio_value if portfolio_value > 0 else 0.0
-
-        # Element 1: position_direction (0 or +1 for spot, no shorts)
-        position_direction = 1.0 if position_size > 0 else 0.0
 
         # Element 2: unrealized_pnl_pct (inherited from Alpaca)
         # Element 3: holding_time
@@ -281,10 +286,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status")
         self.position.hold_counter = 0
 
-        if position_status is None:
-            self.position.current_position = 0.0
-        else:
-            self.position.current_position = 1 if position_status.qty > 0 else 0
+        self.position.current_position = position_direction_from_status(position_status)
 
         self._sync_action_level_after_reset()
 

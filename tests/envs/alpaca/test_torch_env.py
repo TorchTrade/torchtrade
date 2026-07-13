@@ -4,6 +4,8 @@ Unit tests for AlpacaTorchTradingEnv (TorchRL-style environment).
 Tests environment initialization, reset, step, and trading mechanics using mock clients.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 import torch
 from tensordict import TensorDict
@@ -175,10 +177,46 @@ class TestAlpacaTorchTradingEnvReset:
 
         assert td[env.account_state_key].dtype == torch.float32
 
-    def test_reset_resets_position_counter(self, env):
-        """Test that reset resets position hold counter."""
+    def test_reset_clears_the_holding_time_of_the_previous_episode(self, env):
+        """Reset must zero hold_counter, or episode 2 inherits episode 1's age.
+
+        Asserting it on a fresh env proves nothing (PositionState defaults it to 0), so the
+        counter is aged first. Also pins that an OPEN position looks open.
+        """
+        env._wait_for_next_timestamp = lambda: None
         env.reset()
+
+        buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
+        for _ in range(5):
+            env._step(buy)
+        assert env.position.hold_counter > 0        # genuinely aged
+
+        td = env.reset()                            # position still open on the exchange
+
         assert env.position.hold_counter == 0
+        assert td["account_state"][3].item() == 0.0
+
+    def test_reset_reads_dust_as_flat(self, env):
+        """A dust residual (1e-12) left behind a close must read as FLAT, not as a position.
+
+        The fixture is hostile in every field on purpose: a zeroed one made every element
+        read 0 whatever the code did.
+        """
+        env.trader.position_qty = 1e-12
+        env.trader.position_value = 41.82        # stale market value left on the residual
+        env.trader.avg_entry_price = 45000.0     # stale entry -> a fake +122% unrealized PnL
+
+        td = env.reset()
+
+        assert env.position.current_position == 0
+
+        exposure, direction, unrealized_pnl, holding_time, _lev, _dist = td["account_state"].tolist()
+        assert exposure == 0.0        # no position -> no exposure, whatever value is attached
+        assert direction == 0.0
+        assert unrealized_pnl == 0.0  # a position that does not exist cannot be up 122%
+        # NOT asserting holding_time here: alpaca manages hold_counter in _step, so at reset it
+        # is 0 in BOTH branches whatever the dust rule does -- the assertion would be dead.
+        # test_closing_a_position_does_not_age_the_next_one covers it where it can actually fail.
 
 
 class TestAlpacaTorchTradingEnvStep:
@@ -255,6 +293,43 @@ class TestAlpacaTorchTradingEnvStep:
 
         assert env.position.current_position == 0
 
+    def test_reenters_after_external_position_close(self, env):
+        """A position closed on the exchange must not leave the guard refusing to re-enter.
+
+        Both halves matter: the guard must still suppress a genuinely redundant re-command,
+        or a fix that resynced on every step would pass too.
+        """
+        buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
+
+        env.reset()
+        env._step(buy)
+        assert env.trader.position_qty > 0        # opened
+
+        # Still holding it: re-commanding the same level is redundant, guard must suppress.
+        # assert_not_called() alone is NOT enough here -- alpaca's _execute_fractional_action
+        # independently bails when the delta is under its $1 min_trade_value, so it would hold
+        # even with the guard broken. Assert the guard's actual input: the level survived.
+        env.trader.trade = MagicMock(wraps=env.trader.trade)
+        env._step(buy)
+        env.trader.trade.assert_not_called()
+        assert env.position.current_action_level == 1.0
+
+        # The position is closed out from under us -- on spot that means a manual close in
+        # the Alpaca UI. The proceeds return to cash, exactly as the mock's own sell path
+        # does; without that the env would rightly refuse to size a trade against a zero
+        # portfolio, and this test would pass for the wrong reason.
+        env.trader.cash += env.trader.position_qty * env.trader.current_price
+        env.trader.position_qty = 0.0
+        env.trader.position_value = 0.0
+        env.trader.avg_entry_price = 0.0
+
+        env._step(buy)                            # agent still wants to be long
+
+        assert env.trader.position_qty > 0, (
+            "env did not re-enter after an external close -- the duplicate-action guard is "
+            "still trusting the stale pre-close action level"
+        )
+
     def test_step_hold_action(self, env):
         """Test hold action (action=0 -> 0.0, close/neutral)."""
         env.reset()
@@ -274,6 +349,75 @@ class TestAlpacaTorchTradingEnvStep:
         # Account state: [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpc, holding_time]
         account_state = td_out[env.account_state_key]
         assert account_state[1] > 0  # position_size > 0
+
+    def test_closing_a_position_does_not_age_the_next_one(self, env):
+        """A closed position's age must not carry into the next one.
+
+        The alpaca/binance counterpart of dust_between_positions: these two manage
+        hold_counter in _step, not in the observation branch.
+        """
+        buy = TensorDict({"action": torch.tensor(2)}, batch_size=())    # levels [0.0, 0.5, 1.0]
+        flat = TensorDict({"action": torch.tensor(0)}, batch_size=())
+
+        env.reset()
+        for _ in range(5):
+            env._step(buy)
+        assert env.position.hold_counter == 5          # genuinely aged
+
+        env._step(flat)                                # closed -- the age must go with it
+        assert env.position.hold_counter == 0
+
+        td = env._step(buy)                            # a BRAND NEW position
+        assert td["account_state"][3].item() == 1.0, "a new position reported as older than 1 bar"
+
+    def test_open_position_looks_open(self, env):
+        """An OPEN position must look open in the vector the policy consumes.
+
+        Every other assertion here checks that a FLAT account reads flat -- the inverse was
+        unpinned, and shipped green.
+        """
+        env.reset()
+        env._step(TensorDict({"action": torch.tensor(2)}, batch_size=()))   # buy at 100000
+        assert env.trader.position_qty > 0
+
+        env.trader.current_price = 110000.0        # +10% -- entry stays at 100000
+        td = env._step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
+
+        exposure, direction, pnl, _ht, leverage, dist = td["account_state"].tolist()
+        assert direction == 1.0
+        assert exposure > 0.0                      # a held position has exposure
+        assert pnl == pytest.approx(0.1)           # (110000 - 100000) / 100000
+        assert leverage == 1.0                     # spot
+        assert dist == 1.0                         # spot: no liquidation
+
+    def test_reentry_after_external_close_starts_a_fresh_holding_time(self, env):
+        """A re-entry made in the SAME step as an external close must not inherit its age.
+
+        The sync detects the close and lets the guard re-enter -- but if it does not discard
+        hold_counter, the trade that re-enters in that same _step increments the DEAD
+        position's counter, and the policy is handed a brand-new position as N+1 bars old.
+
+        The other re-entry tests only assert that trade() was called, so they cannot see this.
+        """
+        buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
+
+        env.reset()
+        for _ in range(5):
+            env._step(buy)
+        assert env.position.hold_counter == 5
+
+        # liquidated between steps; proceeds return to cash
+        env.trader.cash += env.trader.position_qty * env.trader.current_price
+        env.trader.position_qty = 0.0
+        env.trader.position_value = 0.0
+        env.trader.avg_entry_price = 0.0
+
+        td = env._step(buy)                     # same-step re-entry at the same level
+
+        assert env.trader.position_qty > 0      # it really did re-enter
+        assert td["account_state"][3].item() == 1.0, (
+            "a position opened after a liquidation inherited the dead position's age"
+        )
 
 
 class TestAlpacaTorchTradingEnvReward:

@@ -177,6 +177,145 @@ class TestBybitFuturesTorchTradingEnv:
         assert isinstance(config.window_sizes, list)
         assert all(isinstance(tf, TimeFrame) for tf in config.time_frames)
 
+    def test_reset_reads_dust_as_flat(self, env, mock_trader):
+        """A dust residual (1e-12) left behind a close must read as FLAT, not as a position.
+
+        The fixture is hostile in every field on purpose: a zeroed one made every element
+        read 0 whatever the code did.
+        """
+        from torchtrade.envs.live.bybit.order_executor import PositionStatus
+
+        mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
+            qty=1e-12, notional_value=500.0, entry_price=47500.0, unrealized_pnl=26.3,
+            unrealized_pnl_pct=0.0526, mark_price=50000.0, leverage=20,
+            margin_mode="isolated", liquidation_price=48000.0,
+        )})
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            td = env.reset()
+
+        assert env.position.current_position == 0
+
+        # EVERY field on the residual is hostile on purpose. Earlier versions of this test
+        # passed 0.0 for notional / pnl / liquidation_price -- the exact values that make the
+        # position branch produce a flat-looking vector whatever the code does, so the bug it
+        # was guarding could be deleted with the suite green.
+        exposure, direction, pnl, holding_time, leverage, dist_to_liq = td["account_state"].tolist()
+        assert exposure == 0.0        # 500 notional attached to a position that is not there
+        assert direction == 0.0
+        assert pnl == 0.0             # a position that does not exist cannot be up 5.26%
+        assert holding_time == 0.0    # nor can it have been held for a bar
+        assert leverage == 5.0        # the CONFIG leverage, not the 20 on the residual
+        assert dist_to_liq == 1.0     # no position -> no liquidation to be near
+
+    def test_dust_between_positions_does_not_age_the_next_one(self, env, mock_trader):
+        """A residual left between two positions must not carry the old age into the new one.
+        """
+        from torchtrade.envs.live.bybit.order_executor import PositionStatus
+
+        def status(qty):
+            return {"position_status": PositionStatus(
+                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
+                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+                margin_mode="isolated", liquidation_price=45000.0,
+            )}
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            mock_trader.get_status = MagicMock(return_value=status(0.01))
+            env.reset()
+            long_idx = len(env.action_levels) - 1     # index 1 is a half SHORT in these fixtures
+            long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
+
+            for _ in range(5):                       # age a real position
+                env.step(long)
+
+            mock_trader.get_status = MagicMock(return_value=status(1e-12))   # closed -> dust
+            env.step(long)
+
+            mock_trader.get_status = MagicMock(return_value=status(0.01))    # a NEW position
+            td = env.step(long)
+
+        holding_time = td["next"]["account_state"][3].item()
+        assert holding_time == 1.0, (
+            f"a brand-new position is reported as {holding_time} bars old -- the dust bar "
+            f"between the two did not reset the counter"
+        )
+
+    def test_reset_clears_the_holding_time_of_the_previous_episode(self, env, mock_trader):
+        """Reset must zero hold_counter, or episode 2 inherits episode 1's age.
+
+        Asserting it on a fresh env proves nothing (PositionState defaults it to 0), so the
+        counter is aged first. Also pins that an OPEN position looks open.
+        """
+        from torchtrade.envs.live.bybit.order_executor import PositionStatus
+
+        mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
+            qty=0.01, notional_value=500.0, entry_price=47500.0, unrealized_pnl=26.3,
+            unrealized_pnl_pct=0.0526, mark_price=50000.0, leverage=20,  # NOT the config's 5
+            margin_mode="isolated", liquidation_price=45000.0,
+        )})
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            long_idx = len(env.action_levels) - 1     # index 1 is a half SHORT in these fixtures
+            for _ in range(5):
+                env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
+            assert env.position.hold_counter > 0      # genuinely aged
+
+            aged = env.position.hold_counter
+            td = env.reset()                         # position still open on the exchange
+
+        # 1, not 0: _reset zeroes the counter and then takes an observation, which legitimately
+        # counts the still-open position as bar ONE of the new episode. The bug is it reading
+        # `aged + 1` -- the previous episode's age carried across the reset.
+        assert env.position.hold_counter == 1, f"reset carried {aged} bars into the new episode"
+
+        # An OPEN position must look OPEN. Every other account_state assertion on this branch
+        # checks that a FLAT account reads flat; the inverse was unpinned here, so corrupting
+        # any of these while genuinely open shipped with the suite green. The position's
+        # leverage (20) deliberately differs from the config's (5) -- with both at 5 the
+        # assertion could not tell the open branch from the flat one.
+        exposure, direction, pnl, holding_time, leverage, dist_to_liq = td["account_state"].tolist()
+        assert direction == 1.0
+        assert exposure == 0.5                        # 500 notional / 1000 balance
+        assert pnl == pytest.approx(0.0526)
+        assert leverage == 20.0                       # the POSITION's, not the config's 5
+        assert dist_to_liq == pytest.approx(0.1)      # (50000 - 45000) / 50000
+        assert holding_time == 1.0
+
+    def test_reentry_after_external_close_starts_a_fresh_holding_time(self, env, mock_trader):
+        """A re-entry made in the SAME step as an external close must not inherit its age.
+
+        The sync detects the close and lets the guard re-enter -- but if it does not discard
+        hold_counter, the policy is handed a brand-new position as N+1 bars old.
+        """
+        from torchtrade.envs.live.bybit.order_executor import PositionStatus
+
+        def status(qty):
+            return {"position_status": PositionStatus(
+                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
+                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+                margin_mode="isolated", liquidation_price=45000.0,
+            )} if qty else {"position_status": None}
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            long_idx = len(env.action_levels) - 1
+            long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
+
+            mock_trader.get_status = MagicMock(return_value=status(0.01))
+            env.reset()
+            for _ in range(5):
+                env.step(long)
+            aged = env.position.hold_counter
+            assert aged > 1
+
+            mock_trader.get_status = MagicMock(return_value=status(None))   # liquidated
+            td = env.step(long)                                          # same-step re-entry
+
+        assert td["next"]["account_state"][3].item() <= 1.0, (
+            f"a position opened after a liquidation inherited the dead position's age ({aged})"
+        )
+
 
 class TestBybitActionIndexClamping:
     """Tests for action index out-of-range clamping."""

@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from tensordict import TensorDictBase
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
-from torchtrade.envs.core.state import PositionState
+from torchtrade.envs.core.state import PositionState, position_direction_from_status
 
 
 class TorchTradeLiveEnv(TorchTradeBaseEnv):
@@ -175,10 +175,46 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
 
         The level that produced such a position is unknowable: NaN never compares equal,
         so the next command always executes.
+
+        NOT subsumed by _sync_position_from_exchange, though it looks like it should be:
+        _reset writes current_position from the exchange FIRST, so by the first _step the
+        cache and the exchange already agree -- and a sync that only acts on a MISMATCH sees
+        none, and leaves the stale level alone. Reset answers "is this position mine?"; step
+        answers "is it still there?". Only reset can know the position predates the episode.
         """
         self.position.current_action_level = (
             0.0 if self.position.current_position == 0 else float("nan")
         )
+
+    def _sync_position_from_exchange(self, position_status) -> None:
+        """Overwrite the cached position with what the exchange actually holds.
+
+        Call at the top of _step(), BEFORE the duplicate-action guard.
+
+        current_position/current_action_level are written only by trades THIS env made, so a
+        liquidation or a manual close leaves them stale, and _execute_trade_if_needed's
+        ``desired_action == current_action_level`` guard then refuses the agent's re-entry for
+        the rest of the episode.
+
+        On a match the level is left alone -- that is what still lets the guard suppress a
+        genuinely redundant trade. The level behind a position we did not open is unknowable,
+        so it becomes NaN, which never compares equal.
+
+        A mismatch also discards hold_counter. The position we were counting is gone (or was
+        never ours), and this is the only code that knows that -- so if the agent re-enters in
+        THIS same step, the new position must start from zero rather than inherit the dead
+        one's age.
+
+        Only the direction is reconciled, not the size: a PARTIAL external close leaves the
+        direction intact and is still invisible to the guard. Pre-existing, not fixed here.
+        """
+        observed = position_direction_from_status(position_status)
+
+        if observed != self.position.current_position:
+            self.position.current_action_level = 0.0 if observed == 0 else float("nan")
+            self.position.hold_counter = 0
+
+        self.position.current_position = observed
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""

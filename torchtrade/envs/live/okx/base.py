@@ -12,7 +12,10 @@ from torchrl.data.tensor_specs import Composite
 from torchtrade.envs.live.okx.observation import OKXObservationClass
 from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import HistoryTracker
+from torchtrade.envs.core.state import (
+    HistoryTracker,
+    position_direction_from_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +196,10 @@ class OKXBaseTorchTradingEnv(TorchTradeLiveEnv):
         total_balance = balance.get("total_wallet_balance", 0)
         position_status = status.get("position_status", None)
 
-        if position_status is None:
+        # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
+        # close take the position branch and read stale fields off it.
+        position_direction = float(position_direction_from_status(position_status))
+        if position_direction == 0:
             self.position.hold_counter = 0
             position_size = 0.0
             position_value = 0.0
@@ -214,13 +220,6 @@ class OKXBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         # Build 6-element account state
         exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
-
-        if position_size > 0:
-            position_direction = 1.0
-        elif position_size < 0:
-            position_direction = -1.0
-        else:
-            position_direction = 0.0
 
         if position_size == 0 or current_price == 0 or liquidation_price <= 0:
             distance_to_liquidation = 1.0
@@ -275,14 +274,7 @@ class OKXBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status")
         self.position.hold_counter = 0
 
-        if position_status is None:
-            self.position.current_position = 0
-        elif position_status.qty > 0:
-            self.position.current_position = 1
-        elif position_status.qty < 0:
-            self.position.current_position = -1
-        else:
-            self.position.current_position = 0
+        self.position.current_position = position_direction_from_status(position_status)
 
         # No-op today (okx's _execute_trade_if_needed recomputes qty live and never reads
         # current_action_level), but keeps the field consistent so adding a duplicate-action

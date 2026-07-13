@@ -159,6 +159,8 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
             current_price = self.trader.get_mark_price()
             position_size = 0.0
 
+        self._sync_position_from_exchange(position_status)
+
         # Get desired action level
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
