@@ -409,6 +409,40 @@ class TestBitgetFuturesTorchTradingEnv:
                 holding_time = td["next"]["account_state"][3].item()
                 assert holding_time == 0.0, f"dust accrued holding_time={holding_time} by bar {bar}"
 
+    def test_dust_between_positions_does_not_age_the_next_one(self, env, mock_trader):
+        """A residual left between two positions must not carry the old age into the new one.
+
+        Real position held N bars -> closed, leaving dust -> a NEW position opens. If the dust
+        bar does not reset the counter, the fresh position is reported as N+2 bars old. This
+        is what the `hold_counter = 0` in the dust branch is for; nothing else pins it.
+        """
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
+
+        def status(qty):
+            return {"position_status": PositionStatus(
+                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
+                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+                margin_mode="isolated", liquidation_price=45000.0,
+            )}
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            mock_trader.get_status = MagicMock(return_value=status(0.01))
+            env.reset()
+            for _ in range(5):                       # age a real position
+                env.step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+
+            mock_trader.get_status = MagicMock(return_value=status(1e-12))   # closed -> dust
+            env.step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+
+            mock_trader.get_status = MagicMock(return_value=status(0.01))    # a NEW position
+            td = env.step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+
+        holding_time = td["next"]["account_state"][3].item()
+        assert holding_time == 1.0, (
+            f"a brand-new position is reported as {holding_time} bars old -- the dust bar "
+            f"between the two did not reset the counter"
+        )
+
 
 class TestBitgetFractionalPositionResizing:
     """Tests for fractional position resizing (regression for #155)."""
