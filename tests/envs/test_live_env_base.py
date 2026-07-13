@@ -63,7 +63,6 @@ def test_check_termination(done_on_bankruptcy, portfolio_value, expected):
     # or the guard could never suppress a genuinely redundant trade.
     (1, 1.0, SimpleNamespace(qty=0.5), 1, 1.0),
     (-1, -1.0, SimpleNamespace(qty=-0.5), -1, -1.0),
-    (0, 0.0, None, 0, 0.0),
     # Position moved behind the env's back -> the level that produced it is unknowable.
     (1, 1.0, None, 0, 0.0),                          # liquidated -> flat, level flat
     (0, 0.0, SimpleNamespace(qty=0.5), 1, math.nan),  # opened externally -> ANY next command runs
@@ -73,9 +72,11 @@ def test_check_termination(done_on_bankruptcy, portfolio_value, expected):
     # position is what re-froze the guard -- the dust rule is the whole point of the shared
     # position_direction_from_status() rule.
     (1, 1.0, SimpleNamespace(qty=1e-12), 0, 0.0),     # dust after liquidation -> flat
-], ids=["long-unchanged", "short-unchanged", "flat-unchanged",
+    # qty exactly at the epsilon: the docstring says "at or below" is flat. Pin the boundary.
+    (1, 1.0, SimpleNamespace(qty=1e-9), 0, 0.0),
+], ids=["long-unchanged", "short-unchanged",
         "liquidated", "opened-externally", "flipped-long-to-short", "flipped-short-to-long",
-        "dust-after-liquidation"])
+        "dust-after-liquidation", "at-the-dust-epsilon"])
 def test_sync_position_from_exchange(
     cached_position, cached_level, status, expect_position, expect_level
 ):
@@ -220,3 +221,27 @@ def test_every_reset_uses_the_shared_direction_rule(env_cls):
         f"{env_cls.__name__}._reset hand-rolls its position direction instead of using the "
         f"shared rule -- a dust residual would read as a phantom position."
     )
+
+
+@pytest.mark.parametrize("current_position,expected_level", [
+    (0, 0.0),          # flat -> a flat command is genuinely redundant, let the guard suppress it
+    (1, math.nan),     # a position we did NOT open -> the level behind it is unknowable
+    (-1, math.nan),
+], ids=["flat", "pre-existing-long", "pre-existing-short"])
+def test_sync_action_level_after_reset(current_position, expected_level):
+    """A position that predates the episode must not leave the guard able to refuse a close.
+
+    This pins the #243 fix directly. It had exactly ONE guard -- an incidental assertion in
+    bitget's test_close_position_action -- so an unrelated edit to that test would have
+    silently retired the only cover for a money-moving fix.
+    """
+    env = SimpleNamespace(position=PositionState())
+    env.position.current_position = current_position
+    env.position.current_action_level = 0.0          # the stale default the bug relied on
+
+    TorchTradeLiveEnv._sync_action_level_after_reset(env)
+
+    if math.isnan(expected_level):
+        assert math.isnan(env.position.current_action_level)
+    else:
+        assert env.position.current_action_level == expected_level

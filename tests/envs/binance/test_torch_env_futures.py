@@ -335,7 +335,18 @@ class TestBinanceFuturesTorchTradingEnv:
         # _get_observation, so the reset observation does not count a bar. The bug either way
         # is the previous episode's age surviving the reset.
         assert env.position.hold_counter == 0, f"reset carried {aged} bars into the new episode"
-        assert td["account_state"][3].item() == 0.0
+
+        # An OPEN position must look OPEN. Every other account_state assertion on this branch
+        # checks that a FLAT account reads flat -- the inverse was unpinned, and forcing
+        # position_direction to 0 (so the flat branch is always taken) left the whole suite
+        # green while handing the policy a healthy long as flat, unlevered and far from
+        # liquidation. Values measured, not computed.
+        exposure, direction, _pnl, holding_time, leverage, dist_to_liq = td["account_state"].tolist()
+        assert direction == 1.0
+        assert exposure == 0.5                       # 500 notional / 1000 balance
+        assert leverage == 5.0
+        assert dist_to_liq == pytest.approx(0.1)     # (50000 - 45000) / 50000
+        assert holding_time == 0.0
 
     def test_closing_a_position_does_not_age_the_next_one(self, env, mock_trader):
         """A closed position's age must not carry into the next one.
