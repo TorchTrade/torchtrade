@@ -5,16 +5,17 @@ from typing import Dict, List, Union
 
 
 # Quantities at or below this are dust, not a position. Exchanges can leave a float residual
-# (e.g. 1e-12) behind a full close, and misreading that as an open position is what freezes
-# the live envs' duplicate-action guard -- so every position sync must apply the same rule.
+# (e.g. 1e-12) behind a full close; misreading it as an open position freezes the live envs'
+# duplicate-action guard and puts a position the agent does not hold into its observation.
 POSITION_DUST_EPS = 1e-9
 
 
 def position_direction_from_qty(qty: float) -> int:
     """The direction a quantity represents: -1 short, 0 flat, +1 long.
 
-    THE rule: the position syncs, the resets, and the account_state the agent sees all go
-    through here.
+    The single rule for the LIVE envs: their position syncs, their resets, and the
+    account_state they show the agent all go through here. The offline envs still derive
+    direction their own way -- out of scope here, but they are not covered by this.
     """
     if abs(qty) <= POSITION_DUST_EPS:
         return 0

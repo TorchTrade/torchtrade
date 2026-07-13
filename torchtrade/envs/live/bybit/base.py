@@ -14,7 +14,6 @@ from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.core.state import (
     HistoryTracker,
-    position_direction_from_qty,
     position_direction_from_status,
 )
 
@@ -187,10 +186,10 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
         total_balance = balance.get("total_wallet_balance", 0)
         position_status = status.get("position_status", None)
 
-        # Dust is not a position. Gating on `is None` let a float residual left behind a
-        # close take the position branch, putting a phantom holding_time / leverage /
-        # distance_to_liquidation into the vector the policy consumes.
-        if position_direction_from_status(position_status) == 0:
+        # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
+        # close take the position branch and read stale fields off it.
+        position_direction = float(position_direction_from_status(position_status))
+        if position_direction == 0:
             self.position.hold_counter = 0
             position_size = 0.0
             position_value = 0.0
@@ -212,7 +211,6 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Build 6-element account state
         exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
 
-        position_direction = float(position_direction_from_qty(position_size))
 
         if position_size == 0 or current_price == 0 or liquidation_price <= 0:
             distance_to_liquidation = 1.0

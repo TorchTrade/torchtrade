@@ -14,7 +14,6 @@ from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.core.state import (
     HistoryTracker,
     PositionState,
-    position_direction_from_qty,
     position_direction_from_status,
 )
 
@@ -198,10 +197,10 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status", None)
 
         # Calculate portfolio value
-        # Dust is not a position. Gating on `is None` let a float residual left behind a
-        # close take the position branch, putting a phantom holding_time / leverage /
-        # distance_to_liquidation into the vector the policy consumes.
-        if position_direction_from_status(position_status) == 0:
+        # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
+        # close take the position branch and read stale fields off it.
+        position_direction = float(position_direction_from_status(position_status))
+        if position_direction == 0:
             position_size = 0.0
             position_value = 0.0
             entry_price = 0.0
@@ -227,7 +226,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         exposure_pct = position_value / portfolio_value if portfolio_value > 0 else 0.0
 
         # Element 1: position_direction (0 or +1 for spot, no shorts)
-        position_direction = float(position_direction_from_qty(position_size))
 
         # Element 2: unrealized_pnl_pct (inherited from Alpaca)
         # Element 3: holding_time

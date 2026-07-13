@@ -185,20 +185,27 @@ class TestAlpacaTorchTradingEnvReset:
     def test_reset_reads_dust_as_flat(self, env):
         """A dust residual on reset is flat -- internally AND in what the agent sees.
 
-        A close can leave a float residue (1e-12). Read as an open position it puts a phantom
-        direction in account_state at zero exposure -- a combination the policy never saw in
-        training.
+        A close can leave a float residue (1e-12) behind, with a STALE entry price and market
+        value still attached. Read as an open position, those stale fields become the agent's
+        exposure and unrealized PnL for a position that does not exist.
 
-        Behavioural on purpose: the structural guard that every _reset uses the shared rule
-        can be dodged by moving the derivation into a helper. This cannot.
+        The stale values are the whole point: an earlier version of this test zeroed them, so
+        every element it checked was already 0 whatever the code did, and the fix it was
+        guarding could be deleted with the suite still green.
         """
         env.trader.position_qty = 1e-12
-        env.trader.position_value = 0.0
+        env.trader.position_value = 41.82        # stale market value left on the residual
+        env.trader.avg_entry_price = 45000.0     # stale entry -> a fake +22% unrealized PnL
 
         td = env.reset()
 
         assert env.position.current_position == 0
-        assert td["account_state"][1].item() == 0.0   # the direction the AGENT sees
+
+        exposure, direction, unrealized_pnl, holding_time, _lev, _dist = td["account_state"].tolist()
+        assert exposure == 0.0        # no position -> no exposure, whatever value is attached
+        assert direction == 0.0
+        assert unrealized_pnl == 0.0  # a position that does not exist cannot be up 22%
+        assert holding_time == 0.0
 
 
 class TestAlpacaTorchTradingEnvStep:
