@@ -69,6 +69,19 @@ class MockAccount:
 
 
 @dataclass
+class MockAsset:
+    """Mock Alpaca Asset. Defaults are BTC/USD's real values.
+
+    min_order_size/min_trade_increment are crypto-only on the real API and come back None
+    for equities -- which is the signal to fall back to the `fractionable` rule.
+    """
+    fractionable: bool = True
+    min_order_size: Optional[float] = 0.0001
+    min_trade_increment: Optional[float] = 0.0001
+    price_increment: Optional[float] = 1.0
+
+
+@dataclass
 class MockClock:
     """Mock Alpaca clock object."""
     is_open: bool = True
@@ -103,6 +116,7 @@ class MockTradingClient:
         self.simulate_failures = simulate_failures
         self.positions: Dict[str, MockPosition] = {}
         self.orders: Dict[str, MockOrder] = {}
+        self.asset = MockAsset()
         self.order_history: List[MockOrder] = []
         # The submitted request objects, kept so tests can assert on fields the MockOrder
         # drops (order_class, take_profit, stop_loss, limit_price, time_in_force).
@@ -240,6 +254,10 @@ class MockTradingClient:
             buying_power=self.cash,
             portfolio_value=self.cash + total_position_value,
         )
+
+    def get_asset(self, symbol_or_asset_id: str) -> MockAsset:
+        """Asset quantity rules. Defaults to BTC/USD's real crypto values."""
+        return self.asset
 
     def get_clock(self) -> MockClock:
         """Get market clock."""

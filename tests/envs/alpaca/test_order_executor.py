@@ -13,7 +13,7 @@ from torchtrade.envs.live.alpaca.order_executor import (
     OrderStatus,
     PositionStatus,
 )
-from tests.mocks.alpaca import MockTradingClient, MockOrder, MockOrderStatus
+from tests.mocks.alpaca import MockTradingClient, MockOrder, MockOrderStatus, MockAsset
 
 
 # Standalone by design: the shared exchange test base assumes an enum TradeMode and a
@@ -49,16 +49,75 @@ class TestAlpacaOrderClass:
         assert req.qty == 0.5
         assert req.notional is None
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="BUG: quantity mode does round(amount, 1), so any qty < 0.05 becomes 0.0 — "
-               "an order for 0.01 BTC submits qty=0.0. Needs the real Alpaca qty precision "
-               "(crypto allows far more than 1 dp). Remove this xfail when fixed.",
-    )
     def test_quantity_mode_does_not_zero_small_quantities(self, client):
-        """A small crypto quantity must survive to the request (0.01 BTC, not 0.0)."""
+        """A small crypto quantity must survive to the request (0.01 BTC, not 0.0).
+
+        Regression: quantity mode did round(amount, 1), so anything under 0.05 became 0.0 --
+        an order for 0.01 BTC submitted qty=0.0. BTC's real increment is 0.0001.
+        """
         order_class = AlpacaOrderClass(symbol="BTCUSD", trade_mode="quantity", client=client)
-        order_class.trade(side="buy", amount=0.01, order_type="market")
+        assert order_class.trade(side="buy", amount=0.01, order_type="market") is True
+        assert client.requests[-1].qty == 0.01
+
+    @pytest.mark.parametrize("amount,expected_qty", [
+        (0.01, 0.01),          # survives -- round(_, 1) used to zero this
+        (0.000123456, 0.0001),  # floored ONTO the 0.0001 grid, never up
+        (1.23456789, 1.2345),   # ditto, larger
+    ], ids=["small-crypto-qty", "floors-to-increment", "floors-larger"])
+    def test_quantity_floors_onto_the_asset_increment(self, client, amount, expected_qty):
+        """Quantities land on Alpaca's grid for the asset, and always by flooring.
+
+        Flooring, not rounding: rounding up can exceed the size (and the buying power) the
+        caller asked for.
+        """
+        oc = AlpacaOrderClass(symbol="BTCUSD", trade_mode="quantity", client=client)
+        assert oc.trade(side="buy", amount=amount, order_type="market") is True
+        assert client.requests[-1].qty == pytest.approx(expected_qty)
+
+    def test_quantity_below_min_order_size_is_refused(self, client):
+        """Sub-minimum quantities are refused, not submitted as a zero-qty order.
+
+        The old code floored them to 0.0 and submitted anyway.
+        """
+        oc = AlpacaOrderClass(symbol="BTCUSD", trade_mode="quantity", client=client)
+        assert oc.trade(side="buy", amount=0.00001, order_type="market") is False
+        assert client.requests == []
+
+    def test_quantity_mode_sell_all_sentinel_closes_position(self, client):
+        """env.py signals "sell everything" with amount=-1.
+
+        Notional mode intercepts sells and full-closes; quantity mode had no such intercept,
+        so the sentinel would have been submitted as a literal qty=-1.
+        """
+        oc = AlpacaOrderClass(symbol="BTCUSD", trade_mode="quantity", client=client)
+        oc.trade(side="buy", amount=0.01, order_type="market")
+        assert oc.get_status()["position_status"] is not None
+
+        assert oc.trade(side="sell", amount=-1, order_type="market") is True
+        assert oc.get_status()["position_status"] is None
+        assert all(getattr(r, "qty", 0) >= 0 for r in client.requests)  # never a negative qty
+
+    def test_non_fractionable_equity_floors_to_whole_shares(self, client):
+        """A non-fractionable stock takes whole shares only."""
+        client.asset = MockAsset(
+            fractionable=False, min_order_size=None, min_trade_increment=None,
+        )
+        oc = AlpacaOrderClass(symbol="AAPL", trade_mode="quantity", client=client)
+        assert oc.trade(side="buy", amount=3.7, order_type="market") is True
+        assert client.requests[-1].qty == 3.0
+
+    def test_asset_lookup_failure_falls_back_without_zeroing(self, client):
+        """If get_asset is unreachable we fall back to 9dp -- the documented API maximum.
+
+        The fallback can only floor away digits Alpaca would have rejected anyway; it cannot
+        reproduce the old silent qty=0.0.
+        """
+        def boom(_):
+            raise RuntimeError("assets endpoint down")
+        client.get_asset = boom
+
+        oc = AlpacaOrderClass(symbol="BTCUSD", trade_mode="quantity", client=client)
+        assert oc.trade(side="buy", amount=0.01, order_type="market") is True
         assert client.requests[-1].qty == 0.01
 
     # --- order types ---

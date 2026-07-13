@@ -1,6 +1,7 @@
 import logging
 import os
 from dataclasses import dataclass
+from decimal import ROUND_DOWN, Decimal
 from typing import Dict, List, Optional, Union
 
 from alpaca.trading.client import TradingClient
@@ -90,6 +91,52 @@ class AlpacaOrderClass:
         self.trade_mode = trade_mode
         self.client = client if client is not None else TradingClient(api_key, secret_key=api_secret, paper=paper)
         self.last_order_id = None
+        self._asset_precision = None
+
+    # Alpaca accepts up to 9 dp on qty for crypto and for fractionable equities. Used only
+    # when the asset lookup gives us nothing better: it is the loosest legal bound, so it can
+    # only floor away digits Alpaca would have rejected anyway.
+    MAX_QTY_DECIMALS = 9
+
+    def get_asset_precision(self) -> dict:
+        """Quantity rules for this symbol, straight from Alpaca. Cached.
+
+        min_trade_increment/min_order_size are crypto-only and come back None for equities,
+        which is the signal to fall back to the fractionable rule. min_order_size is not a
+        constant Alpaca publishes once -- for USD pairs it tracks ~10/price -- so it has to be
+        asked for, not hardcoded.
+        """
+        if self._asset_precision is None:
+            try:
+                asset = self.client.get_asset(self.symbol)
+                self._asset_precision = {
+                    "increment": getattr(asset, "min_trade_increment", None),
+                    "min_qty": getattr(asset, "min_order_size", None),
+                    "fractionable": getattr(asset, "fractionable", True),
+                }
+            except Exception as e:
+                logger.warning(
+                    f"get_asset({self.symbol}) failed: {e}; falling back to {self.MAX_QTY_DECIMALS}dp"
+                )
+                self._asset_precision = {"increment": None, "min_qty": None, "fractionable": True}
+        return self._asset_precision
+
+    def _round_qty(self, amount: float) -> float:
+        """Floor a quantity onto Alpaca's grid for this asset.
+
+        Floor, never round: rounding up can exceed the size the caller asked for (and the
+        buying power behind it). Decimal, because the increments (0.0001) are not exactly
+        representable in binary float.
+        """
+        p = self.get_asset_precision()
+        qty = Decimal(str(amount))
+
+        if p["increment"]:
+            step = Decimal(str(p["increment"]))
+            return float((qty / step).to_integral_value(rounding=ROUND_DOWN) * step)
+        if not p["fractionable"]:
+            return float(qty.to_integral_value(rounding=ROUND_DOWN))
+        return float(qty.quantize(Decimal(1).scaleb(-self.MAX_QTY_DECIMALS), rounding=ROUND_DOWN))
 
     def trade(
         self,
@@ -145,12 +192,26 @@ class AlpacaOrderClass:
             # Add amount based on trade mode
             if self.trade_mode == "notional":
                 if side.lower() == "buy":
-                    order_params["notional"] = round(amount, 2)  # Alpaca requires 2 decimal places
+                    order_params["notional"] = round(amount, 2)
                 else:
                     self.close_position() # For now we close the full position
                     return True
             else:
-                order_params["qty"] = round(amount, 1)
+                # env.py signals "sell everything" with amount=-1. Notional mode intercepts
+                # sells above; quantity mode has no such intercept, so without this the
+                # sentinel would be submitted as a literal qty=-1.
+                if side.lower() == "sell" and amount < 0:
+                    return self.close_position()
+
+                qty = self._round_qty(amount)
+                min_qty = self.get_asset_precision()["min_qty"]
+                if qty <= 0 or (min_qty and qty < float(min_qty)):
+                    logger.warning(
+                        f"Refusing to submit {self.symbol} qty={amount} -> {qty}: below the "
+                        f"minimum order size ({min_qty}). Not submitting a zero/rejectable order."
+                    )
+                    return False
+                order_params["qty"] = qty
 
 
 
