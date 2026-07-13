@@ -317,7 +317,7 @@ class TestBinanceFuturesTorchTradingEnv:
 
         mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
             qty=0.01, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
-            unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+            unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=20,   # NOT the config's 5
             margin_type="isolated", liquidation_price=45000.0,
         )})
 
@@ -344,7 +344,10 @@ class TestBinanceFuturesTorchTradingEnv:
         exposure, direction, _pnl, holding_time, leverage, dist_to_liq = td["account_state"].tolist()
         assert direction == 1.0
         assert exposure == 0.5                       # 500 notional / 1000 balance
-        assert leverage == 5.0
+        # 20, the POSITION's leverage -- not the config's 5. They are deliberately different:
+        # with both set to 5 this assertion could not tell "reports the open position's
+        # leverage" from a regression to "always reports the config's".
+        assert leverage == 20.0
         assert dist_to_liq == pytest.approx(0.1)     # (50000 - 45000) / 50000
         assert holding_time == 0.0
 
