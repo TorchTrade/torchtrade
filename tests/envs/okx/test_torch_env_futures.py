@@ -125,7 +125,6 @@ class TestOKXFuturesTorchTradingEnv:
             next_td = env.step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
             assert next_td["next"]["done"].item() is expected_done
 
-
     def test_reset_reads_dust_as_flat(self, env, mock_env_trader):
         """A dust residual on reset is flat -- internally AND in what the agent sees.
 
@@ -213,9 +212,10 @@ class TestOKXFuturesTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
+            long_idx = len(env.action_levels) - 1     # index 1 is a half SHORT in these fixtures
             for _ in range(5):
-                env.step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
-            assert env.position.hold_counter > 0     # genuinely aged
+                env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
+            assert env.position.hold_counter > 0      # genuinely aged
 
             aged = env.position.hold_counter
             td = env.reset()                         # position still open on the exchange

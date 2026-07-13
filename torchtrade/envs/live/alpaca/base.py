@@ -204,7 +204,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # close take the position branch and read stale fields off it.
         position_direction = float(position_direction_from_status(position_status))
         if position_direction == 0:
-            position_size = 0.0
             position_value = 0.0
             entry_price = 0.0
             unrealized_pnlpc = 0.0
@@ -216,7 +215,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             except Exception:
                 current_price = 0.0
         else:
-            position_size = position_status.qty
             position_value = position_status.market_value
             entry_price = position_status.avg_entry_price
             current_price = position_status.current_price

@@ -304,6 +304,7 @@ class TestBinanceFuturesTorchTradingEnv:
         assert holding_time == 0.0    # nor can it have been held for a bar
         assert leverage == 5.0        # the CONFIG leverage, not the 20 on the residual
         assert dist_to_liq == 1.0     # no position -> no liquidation to be near
+
     def test_reset_clears_the_holding_time_of_the_previous_episode(self, env, mock_trader):
         """Reset must zero hold_counter, or episode 2 inherits episode 1's age.
 
