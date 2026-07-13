@@ -221,7 +221,9 @@ class TestAlpacaTorchTradingEnvReset:
         assert exposure == 0.0        # no position -> no exposure, whatever value is attached
         assert direction == 0.0
         assert unrealized_pnl == 0.0  # a position that does not exist cannot be up 122%
-        assert holding_time == 0.0
+        # NOT asserting holding_time here: alpaca manages hold_counter in _step, so at reset it
+        # is 0 in BOTH branches whatever the dust rule does -- the assertion would be dead.
+        # test_closing_a_position_does_not_age_the_next_one covers it where it can actually fail.
 
 
 class TestAlpacaTorchTradingEnvStep:
@@ -359,6 +361,31 @@ class TestAlpacaTorchTradingEnvStep:
         # Account state: [cash, position_size, position_value, entry_price, current_price, unrealized_pnlpc, holding_time]
         account_state = td_out[env.account_state_key]
         assert account_state[1] > 0  # position_size > 0
+
+    def test_closing_a_position_does_not_age_the_next_one(self, env):
+        """A closed position's age must not carry into the next one.
+
+        hold 5 bars -> close -> open again. Without the reset on close, the brand-new position
+        is reported to the policy as 6 bars old. The close can be the agent's own flat command
+        OR the external liquidation this branch resyncs -- the counter is the same either way.
+
+        This is the alpaca/binance counterpart of the bitget/bybit/okx dust-between-positions
+        test: those manage hold_counter in _get_observation, these two in _step, so the line
+        that needs pinning lives somewhere else.
+        """
+        buy = TensorDict({"action": torch.tensor(2)}, batch_size=())    # levels [0.0, 0.5, 1.0]
+        flat = TensorDict({"action": torch.tensor(0)}, batch_size=())
+
+        env.reset()
+        for _ in range(5):
+            env._step(buy)
+        assert env.position.hold_counter == 5          # genuinely aged
+
+        env._step(flat)                                # closed -- the age must go with it
+        assert env.position.hold_counter == 0
+
+        td = env._step(buy)                            # a BRAND NEW position
+        assert td["account_state"][3].item() == 1.0, "a new position reported as older than 1 bar"
 
 
 class TestAlpacaTorchTradingEnvReward:

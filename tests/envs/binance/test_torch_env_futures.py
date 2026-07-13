@@ -297,11 +297,12 @@ class TestBinanceFuturesTorchTradingEnv:
         # passed 0.0 for notional / pnl / liquidation_price -- the exact values that make the
         # position branch produce a flat-looking vector whatever the code does, so the bug it
         # was guarding could be deleted with the suite green.
-        exposure, direction, pnl, holding_time, leverage, dist_to_liq = td["account_state"].tolist()
+        exposure, direction, pnl, _holding_time, leverage, dist_to_liq = td["account_state"].tolist()
         assert exposure == 0.0        # 500 notional attached to a position that is not there
         assert direction == 0.0
         assert pnl == 0.0             # a position that does not exist cannot be up 5.26%
-        assert holding_time == 0.0    # nor can it have been held for a bar
+        # NOT asserting holding_time: binance manages hold_counter in _step, so at reset it is 0
+        # in BOTH branches whatever the dust rule does -- the assertion would be dead.
         assert leverage == 5.0        # the CONFIG leverage, not the 20 on the residual
         assert dist_to_liq == 1.0     # no position -> no liquidation to be near
 
@@ -335,6 +336,36 @@ class TestBinanceFuturesTorchTradingEnv:
         # is the previous episode's age surviving the reset.
         assert env.position.hold_counter == 0, f"reset carried {aged} bars into the new episode"
         assert td["account_state"][3].item() == 0.0
+
+    def test_closing_a_position_does_not_age_the_next_one(self, env, mock_trader):
+        """A closed position's age must not carry into the next one.
+
+        hold 5 bars -> close -> open again. Without the reset on close, the brand-new position
+        is reported to the policy as 6 bars old. The close can be the agent's own flat command
+        OR the external liquidation this branch resyncs -- the counter is the same either way.
+
+        This is the alpaca/binance counterpart of the bitget/bybit/okx dust-between-positions
+        test: those manage hold_counter in _get_observation, these two in _step, so the line
+        that needs pinning lives somewhere else.
+        """
+        long = TensorDict({"action": torch.tensor(2)}, batch_size=())   # levels [-1, 0, 1]
+        flat = TensorDict({"action": torch.tensor(1)}, batch_size=())
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            for _ in range(5):
+                env._step(long)
+            assert env.position.hold_counter == 5      # genuinely aged
+
+            env._step(flat)                            # closed -- the age must go with it
+            assert env.position.hold_counter == 0
+
+            env._step(long)                            # a BRAND NEW position
+
+        # Asserting the counter, not account_state[3]: this fixture's trader reports no
+        # position_status, so the observation takes the flat branch and would read 0.0 either
+        # way. The counter is the value the missing reset actually corrupts.
+        assert env.position.hold_counter == 1, "a new position starts older than 1 bar"
 
 
 class TestBinanceFuturesTradingEnvConfig:
