@@ -202,6 +202,17 @@ class TestBitgetFuturesTorchTradingEnv:
             assert isinstance(truncated, torch.Tensor)
             assert done.shape == (1,)
 
+    @pytest.mark.parametrize("portfolio_value,expected_done", [
+        (50.0, True),    # below 10% of the 1000 initial -> bankrupt
+        (100.0, False),  # exactly at threshold -> NOT bankrupt (check is a strict <)
+        (500.0, False),  # above threshold -> keep trading
+    ], ids=["below-threshold", "at-threshold", "above-threshold"])
+    def test_bankruptcy_termination(self, env, portfolio_value, expected_done):
+        """Terminates when portfolio falls below bankrupt_threshold * initial_portfolio_value."""
+        env.initial_portfolio_value = 1000.0
+        env.config.bankrupt_threshold = 0.1
+        assert env._check_termination(portfolio_value) is expected_done
+
     def test_no_bankruptcy_when_disabled(self, env_config, mock_observer, mock_trader):
         """Test that bankruptcy check can be disabled."""
         from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv
@@ -234,10 +245,14 @@ class TestBitgetFuturesTorchTradingEnv:
             assert done.item() is False  # Should not terminate
 
     def test_close_position_action(self, env, mock_trader):
-        """Test that action 1 (hold/close) closes existing position."""
+        """Commanding flat (level 0.0) must close a position the env did NOT open.
+
+        Regression: a stale current_action_level let the duplicate-action guard
+        short-circuit the close, silently leaving the position open.
+        """
         from torchtrade.envs.live.bitget.order_executor import PositionStatus
 
-        # Mock existing long position
+        # A long position already open on the exchange (not opened by this env)
         mock_trader.get_status = MagicMock(return_value={
             "position_status": PositionStatus(
                 qty=0.001,
@@ -254,13 +269,16 @@ class TestBitgetFuturesTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-
-            # Action index 2 maps to level 0.0, which should close position
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())
-            env._step(action_td)  # Use _step to test internal logic
+            # The constructor closes any position (close_position_on_init); drop that call
+            # so assert_called_once() counts only what _step does.
+            mock_trader.close_position.reset_mock()
 
             # Fractional action levels: [0=-1.0, 1=-0.5, 2=0.0, 3=0.5, 4=1.0]
-            # Action 0.0 means close position, so if qty != 0, it should close
+            # Action index 2 -> level 0.0 -> close the open position.
+            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())
+            env._step(action_td)
+
+        mock_trader.close_position.assert_called_once()
 
     def test_long_from_short(self, env, mock_trader):
         """Test going long from short position executes correct trade."""

@@ -139,6 +139,17 @@ class TestBybitFuturesTorchTradingEnv:
             assert next_td["next"]["terminated"].shape == (1,)
             assert next_td["next"]["truncated"].shape == (1,)
 
+    @pytest.mark.parametrize("portfolio_value,expected_done", [
+        (50.0, True),    # below 10% of the 1000 initial -> bankrupt
+        (100.0, False),  # exactly at threshold -> NOT bankrupt (check is a strict <)
+        (500.0, False),  # above threshold -> keep trading
+    ], ids=["below-threshold", "at-threshold", "above-threshold"])
+    def test_bankruptcy_termination(self, env, portfolio_value, expected_done):
+        """Terminates when portfolio falls below bankrupt_threshold * initial_portfolio_value."""
+        env.initial_portfolio_value = 1000.0
+        env.config.bankrupt_threshold = 0.1
+        assert env._check_termination(portfolio_value) is expected_done
+
     def test_no_bankruptcy_when_disabled(self, env_config, mock_observer, mock_trader):
         """Test that bankruptcy check can be disabled."""
         from torchtrade.envs.live.bybit.env import BybitFuturesTorchTradingEnv

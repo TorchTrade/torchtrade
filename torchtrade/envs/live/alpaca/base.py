@@ -287,6 +287,8 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         else:
             self.position.current_position = 1 if position_status.qty > 0 else 0
 
+        self._sync_action_level_after_reset()
+
         # Get initial observation
         return self._get_observation()
 

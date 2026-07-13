@@ -322,6 +322,8 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         else:
             self.position.current_position = 0  # No position
 
+        self._sync_action_level_after_reset()
+
         # Get initial observation
         return self._get_observation()
 

@@ -285,6 +285,11 @@ class OKXBaseTorchTradingEnv(TorchTradeLiveEnv):
         else:
             self.position.current_position = 0
 
+        # No-op today (okx's _execute_trade_if_needed recomputes qty live and never reads
+        # current_action_level), but keeps the field consistent so adding a duplicate-action
+        # guard here can't reintroduce the silent no-op that bit bitget/binance/alpaca.
+        self._sync_action_level_after_reset()
+
         return self._get_observation()
 
     @abstractmethod
