@@ -305,7 +305,6 @@ class TestBinanceFuturesTorchTradingEnv:
         assert leverage == 5.0        # the CONFIG leverage, not the 20 on the residual
         assert dist_to_liq == 1.0     # no position -> no liquidation to be near
 
-
 class TestBinanceFuturesTradingEnvConfig:
     """Tests for BinanceFuturesTradingEnvConfig."""
 

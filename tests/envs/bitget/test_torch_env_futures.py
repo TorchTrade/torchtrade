@@ -387,6 +387,28 @@ class TestBitgetFuturesTorchTradingEnv:
         assert leverage == 5.0        # the CONFIG leverage, not the 20 on the residual
         assert dist_to_liq == 1.0     # no position -> no liquidation to be near
 
+    def test_persistent_dust_never_accrues_holding_time(self, env, mock_trader):
+        """Dust that lingers must not make holding_time grow bar after bar.
+
+        The reset test pins holding_time at 0 on the first bar, where hold_counter is 0
+        anyway. This pins the thing that actually bit: a residual that STAYS on the book, so
+        the counter would tick every step -- the agent seeing "flat, but held for 17 bars".
+        """
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
+
+        mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
+            qty=1e-12, notional_value=500.0, entry_price=47500.0, unrealized_pnl=26.3,
+            unrealized_pnl_pct=0.0526, mark_price=50000.0, leverage=20,
+            margin_mode="isolated", liquidation_price=48000.0,
+        )})
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            for bar in range(5):
+                td = env.step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+                holding_time = td["next"]["account_state"][3].item()
+                assert holding_time == 0.0, f"dust accrued holding_time={holding_time} by bar {bar}"
+
 
 class TestBitgetFractionalPositionResizing:
     """Tests for fractional position resizing (regression for #155)."""

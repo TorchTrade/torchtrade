@@ -71,7 +71,7 @@ def test_check_termination(done_on_bankruptcy, portfolio_value, expected):
     (-1, -1.0, SimpleNamespace(qty=0.5), 1, math.nan),  # flipped short -> long
     # A close can leave a float residual instead of an exact zero. Reading that as an open
     # position is what re-froze the guard -- the dust rule is the whole point of the shared
-    # position_direction_from_qty() rule.
+    # position_direction_from_status() rule.
     (1, 1.0, SimpleNamespace(qty=1e-12), 0, 0.0),     # dust after liquidation -> flat
 ], ids=["long-unchanged", "short-unchanged", "flat-unchanged",
         "liquidated", "opened-externally", "flipped-long-to-short", "flipped-short-to-long",

@@ -10,23 +10,17 @@ from typing import Dict, List, Union
 POSITION_DUST_EPS = 1e-9
 
 
-def position_direction_from_qty(qty: float) -> int:
-    """The direction a quantity represents: -1 short, 0 flat, +1 long.
+def position_direction_from_status(position_status) -> int:
+    """The direction the exchange holds: -1 short, 0 flat, +1 long. None means flat.
 
     The single rule for the LIVE envs: their position syncs, their resets, and the
     account_state they show the agent all go through here. The offline envs still derive
-    direction their own way -- out of scope here, but they are not covered by this.
+    direction their own way -- out of scope here, and not covered by this.
     """
+    qty = 0.0 if position_status is None else float(position_status.qty)
     if abs(qty) <= POSITION_DUST_EPS:
         return 0
     return 1 if qty > 0 else -1
-
-
-def position_direction_from_status(position_status) -> int:
-    """Same rule, applied to a trader.get_status() position_status (None means flat)."""
-    return position_direction_from_qty(
-        0.0 if position_status is None else float(position_status.qty)
-    )
 
 
 def binarize_action_type(action_type: str) -> int:

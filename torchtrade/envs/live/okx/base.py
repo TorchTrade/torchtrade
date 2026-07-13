@@ -221,7 +221,6 @@ class OKXBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Build 6-element account state
         exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
 
-
         if position_size == 0 or current_price == 0 or liquidation_price <= 0:
             distance_to_liquidation = 1.0
         else:

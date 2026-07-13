@@ -228,7 +228,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Element 0: exposure_pct (position_value / portfolio_value)
         exposure_pct = position_value / portfolio_value if portfolio_value > 0 else 0.0
 
-
         # Element 2: unrealized_pnl_pct (inherited from Alpaca)
         # Element 3: holding_time
         # Element 4: leverage (always 1.0 for spot)

@@ -195,7 +195,7 @@ class TestAlpacaTorchTradingEnvReset:
         """
         env.trader.position_qty = 1e-12
         env.trader.position_value = 41.82        # stale market value left on the residual
-        env.trader.avg_entry_price = 45000.0     # stale entry -> a fake +22% unrealized PnL
+        env.trader.avg_entry_price = 45000.0     # stale entry -> a fake +122% unrealized PnL
 
         td = env.reset()
 
@@ -204,7 +204,7 @@ class TestAlpacaTorchTradingEnvReset:
         exposure, direction, unrealized_pnl, holding_time, _lev, _dist = td["account_state"].tolist()
         assert exposure == 0.0        # no position -> no exposure, whatever value is attached
         assert direction == 0.0
-        assert unrealized_pnl == 0.0  # a position that does not exist cannot be up 22%
+        assert unrealized_pnl == 0.0  # a position that does not exist cannot be up 122%
         assert holding_time == 0.0
 
 
