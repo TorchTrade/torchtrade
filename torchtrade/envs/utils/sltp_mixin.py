@@ -39,6 +39,11 @@ class SLTPMixin:
         prev_position = self.position.current_position
         self.position.current_position = position_direction_from_status(position_status)
 
+        # The position we were counting is gone, or was never ours. Its age must not be
+        # inherited by whatever is there now -- including a re-entry made in THIS same step.
+        if self.position.current_position != prev_position:
+            self.position.hold_counter = 0
+
         # Detect position closure (had position, now don't)
         position_closed = (prev_position != 0 and self.position.current_position == 0)
         if position_closed:

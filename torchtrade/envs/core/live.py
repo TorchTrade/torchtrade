@@ -200,6 +200,11 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         genuinely redundant trade. The level behind a position we did not open is unknowable,
         so it becomes NaN, which never compares equal.
 
+        A mismatch also discards hold_counter. The position we were counting is gone (or was
+        never ours), and this is the only code that knows that -- so if the agent re-enters in
+        THIS same step, the new position must start from zero rather than inherit the dead
+        one's age.
+
         Only the direction is reconciled, not the size: a PARTIAL external close leaves the
         direction intact and is still invisible to the guard. Pre-existing, not fixed here.
         """
@@ -207,6 +212,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
 
         if observed != self.position.current_position:
             self.position.current_action_level = 0.0 if observed == 0 else float("nan")
+            self.position.hold_counter = 0
 
         self.position.current_position = observed
 

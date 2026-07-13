@@ -451,6 +451,39 @@ class TestBitgetFuturesTorchTradingEnv:
         assert dist_to_liq == pytest.approx(0.1)      # (50000 - 45000) / 50000
         assert holding_time == 1.0
 
+    def test_reentry_after_external_close_starts_a_fresh_holding_time(self, env, mock_trader):
+        """A re-entry made in the SAME step as an external close must not inherit its age.
+
+        The sync detects the close and lets the guard re-enter -- but if it does not discard
+        hold_counter, the policy is handed a brand-new position as N+1 bars old.
+        """
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
+
+        def status(qty):
+            return {"position_status": PositionStatus(
+                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
+                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+                margin_mode="isolated", liquidation_price=45000.0,
+            )} if qty else {"position_status": None}
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            long_idx = len(env.action_levels) - 1
+            long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
+
+            mock_trader.get_status = MagicMock(return_value=status(0.01))
+            env.reset()
+            for _ in range(5):
+                env.step(long)
+            aged = env.position.hold_counter
+            assert aged > 1
+
+            mock_trader.get_status = MagicMock(return_value=status(None))   # liquidated
+            td = env.step(long)                                          # same-step re-entry
+
+        assert td["next"]["account_state"][3].item() <= 1.0, (
+            f"a position opened after a liquidation inherited the dead position's age ({aged})"
+        )
+
 
 class TestBitgetFractionalPositionResizing:
     """Tests for fractional position resizing (regression for #155)."""

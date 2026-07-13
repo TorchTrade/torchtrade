@@ -390,6 +390,35 @@ class TestAlpacaTorchTradingEnvStep:
         assert leverage == 1.0                     # spot
         assert dist == 1.0                         # spot: no liquidation
 
+    def test_reentry_after_external_close_starts_a_fresh_holding_time(self, env):
+        """A re-entry made in the SAME step as an external close must not inherit its age.
+
+        The sync detects the close and lets the guard re-enter -- but if it does not discard
+        hold_counter, the trade that re-enters in that same _step increments the DEAD
+        position's counter, and the policy is handed a brand-new position as N+1 bars old.
+
+        The other re-entry tests only assert that trade() was called, so they cannot see this.
+        """
+        buy = TensorDict({"action": torch.tensor(2)}, batch_size=())
+
+        env.reset()
+        for _ in range(5):
+            env._step(buy)
+        assert env.position.hold_counter == 5
+
+        # liquidated between steps; proceeds return to cash
+        env.trader.cash += env.trader.position_qty * env.trader.current_price
+        env.trader.position_qty = 0.0
+        env.trader.position_value = 0.0
+        env.trader.avg_entry_price = 0.0
+
+        td = env._step(buy)                     # same-step re-entry at the same level
+
+        assert env.trader.position_qty > 0      # it really did re-enter
+        assert td["account_state"][3].item() == 1.0, (
+            "a position opened after a liquidation inherited the dead position's age"
+        )
+
 
 class TestAlpacaTorchTradingEnvReward:
     """Tests for reward calculation."""

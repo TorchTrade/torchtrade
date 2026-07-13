@@ -344,27 +344,69 @@ class TestBinanceFuturesTorchTradingEnv:
     def test_closing_a_position_does_not_age_the_next_one(self, env, mock_trader):
         """A closed position's age must not carry into the next one.
 
-        The alpaca/binance counterpart of dust_between_positions: these two manage
-        hold_counter in _step, not in the observation branch.
+        The exchange must report what the env holds -- the bare fixture says "no position"
+        while the env believes it is long, and the sync (correctly) resets the counter on that
+        disagreement every step, so it could never age.
         """
-        long = TensorDict({"action": torch.tensor(2)}, batch_size=())   # levels [-1, 0, 1]
-        flat = TensorDict({"action": torch.tensor(1)}, batch_size=())
+        from torchtrade.envs.live.binance.order_executor import PositionStatus
+
+        def status(qty):
+            return {"position_status": PositionStatus(
+                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
+                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+                margin_type="isolated", liquidation_price=45000.0,
+            )} if qty else {"position_status": None}
 
         with patch.object(env, "_wait_for_next_timestamp"):
+            long = TensorDict({"action": torch.tensor(2)}, batch_size=())   # levels [-1, 0, 1]
+            flat = TensorDict({"action": torch.tensor(1)}, batch_size=())
+
+            mock_trader.get_status = MagicMock(return_value=status(0.01))
             env.reset()
             for _ in range(5):
                 env._step(long)
-            assert env.position.hold_counter == 5      # genuinely aged
+            assert env.position.hold_counter == 5           # genuinely aged
 
-            env._step(flat)                            # closed -- the age must go with it
-            assert env.position.hold_counter == 0
+            mock_trader.get_status = MagicMock(return_value=status(None))   # closed
+            env._step(flat)
+            assert env.position.hold_counter == 0           # the age goes with it
 
-            env._step(long)                            # a BRAND NEW position
+            mock_trader.get_status = MagicMock(return_value=status(0.01))   # a BRAND NEW one
+            env._step(long)
 
-        # Asserting the counter, not account_state[3]: this fixture's trader reports no
-        # position_status, so the observation takes the flat branch and would read 0.0 either
-        # way. The counter is the value the missing reset actually corrupts.
         assert env.position.hold_counter == 1, "a new position starts older than 1 bar"
+    def test_reentry_after_external_close_starts_a_fresh_holding_time(self, env, mock_trader):
+        """A re-entry made in the SAME step as an external close must not inherit its age.
+
+        The sync detects the close and lets the guard re-enter -- but if it does not discard
+        hold_counter, the policy is handed a brand-new position as N+1 bars old.
+        """
+        from torchtrade.envs.live.binance.order_executor import PositionStatus
+
+        def status(qty):
+            return {"position_status": PositionStatus(
+                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
+                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+                margin_type="isolated", liquidation_price=45000.0,
+            )} if qty else {"position_status": None}
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            long_idx = len(env.action_levels) - 1
+            long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
+
+            mock_trader.get_status = MagicMock(return_value=status(0.01))
+            env.reset()
+            for _ in range(5):
+                env.step(long)
+            aged = env.position.hold_counter
+            assert aged > 1
+
+            mock_trader.get_status = MagicMock(return_value=status(None))   # liquidated
+            td = env.step(long)                                          # same-step re-entry
+
+        assert td["next"]["account_state"][3].item() <= 1.0, (
+            f"a position opened after a liquidation inherited the dead position's age ({aged})"
+        )
 
 
 class TestBinanceFuturesTradingEnvConfig:
