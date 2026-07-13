@@ -12,7 +12,12 @@ from torchtrade.envs.utils.timeframe import TimeFrame
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import HistoryTracker, position_direction_from_status, PositionState
+from torchtrade.envs.core.state import (
+    HistoryTracker,
+    PositionState,
+    position_direction_from_qty,
+    position_direction_from_status,
+)
 
 
 class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -249,11 +254,7 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
 
         # Element 1: position_direction (-1, 0, +1)
-        position_direction = float(
-            1 if position_size > 0
-            else -1 if position_size < 0
-            else 0
-        )
+        position_direction = float(position_direction_from_qty(position_size))
 
         # Element 2: unrealized_pnl_pct (from Bitget API)
 

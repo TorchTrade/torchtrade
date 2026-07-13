@@ -182,6 +182,24 @@ class TestAlpacaTorchTradingEnvReset:
         env.reset()
         assert env.position.hold_counter == 0
 
+    def test_reset_reads_dust_as_flat(self, env):
+        """A dust residual on reset is flat -- internally AND in what the agent sees.
+
+        A close can leave a float residue (1e-12). Read as an open position it puts a phantom
+        direction in account_state with zero exposure -- an observation the policy never saw
+        in training -- and freezes the trade guard.
+
+        Behavioural on purpose: the structural guard that every _reset uses the shared rule
+        can be dodged by moving the derivation into a helper. This cannot.
+        """
+        env.trader.position_qty = 1e-12
+        env.trader.position_value = 0.0
+
+        td = env.reset()
+
+        assert env.position.current_position == 0
+        assert td["account_state"][1].item() == 0.0   # the direction the AGENT sees
+
 
 class TestAlpacaTorchTradingEnvStep:
     """Tests for environment step."""

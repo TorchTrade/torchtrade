@@ -270,11 +270,14 @@ class TestBinanceFuturesTorchTradingEnv:
             mock_trader.trade.assert_called()
 
     def test_reset_reads_dust_as_flat(self, env, mock_trader):
-        """A dust residual on reset must not become a phantom position.
+        """A dust residual on reset is flat -- internally AND in what the agent sees.
 
-        An exchange can leave a float residue (1e-12) behind a full close. Reading it as an
-        open position puts a position in account_state that the agent does not hold -- and
-        _step, which applies the dust rule, would disagree with _reset about the same state.
+        An exchange can leave a float residue (1e-12) behind a full close. Read as an open
+        position it puts a phantom direction in account_state with zero exposure -- an
+        observation the policy never saw in training -- and freezes the trade guard.
+
+        Behavioural on purpose: the structural guard that every _reset uses the shared rule
+        can be dodged by moving the derivation into a helper. This cannot.
         """
         from torchtrade.envs.live.binance.order_executor import PositionStatus
 
@@ -285,14 +288,10 @@ class TestBinanceFuturesTorchTradingEnv:
         )})
 
         with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
+            td = env.reset()
 
         assert env.position.current_position == 0
-
-
-class TestBinanceFuturesTradingEnvConfig:
-    """Tests for BinanceFuturesTradingEnvConfig."""
-
+        assert td["account_state"][1].item() == 0.0   # the direction the AGENT sees
 
     def test_custom_config(self):
         """Test custom configuration."""

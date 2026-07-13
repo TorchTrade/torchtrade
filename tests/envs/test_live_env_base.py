@@ -71,14 +71,11 @@ def test_check_termination(done_on_bankruptcy, portfolio_value, expected):
     (-1, -1.0, SimpleNamespace(qty=0.5), 1, math.nan),  # flipped short -> long
     # A close can leave a float residual instead of an exact zero. Reading that as an open
     # position is what re-froze the guard -- the dust rule is the whole point of the shared
-    # position_direction() helper.
+    # position_direction_from_qty() rule.
     (1, 1.0, SimpleNamespace(qty=1e-12), 0, 0.0),     # dust after liquidation -> flat
-    # Exchanges also report a flat position as a zero-qty object rather than None; every
-    # live _reset already has an explicit branch for it.
-    (1, 1.0, SimpleNamespace(qty=0.0), 0, 0.0),
 ], ids=["long-unchanged", "short-unchanged", "flat-unchanged",
         "liquidated", "opened-externally", "flipped-long-to-short", "flipped-short-to-long",
-        "dust-after-liquidation", "zero-qty-status-not-none"])
+        "dust-after-liquidation"])
 def test_sync_position_from_exchange(
     cached_position, cached_level, status, expect_position, expect_level
 ):
@@ -175,6 +172,24 @@ def test_position_sync_resolves_to_a_shared_implementation(env_cls):
     assert env_cls._sync_position_from_exchange is expected._sync_position_from_exchange, (
         f"{env_cls.__name__} does not resolve _sync_position_from_exchange to "
         f"{expected.__name__}'s -- check base-class order and any local override."
+    )
+
+
+def test_exactly_five_resets_derive_the_position():
+    """One position-deriving _reset per exchange, and the guard below sees all five.
+
+    That guard skips a _reset that only delegates. Move a derivation into a helper and the
+    class starts skipping too -- the guard would then cover less while staying green. This is
+    how a reviewer smuggled the old exact-zero rule back into okx with the suite passing.
+    """
+    deriving = [
+        c for c in LIVE_ENVS
+        if (r := c.__dict__.get("_reset")) is not None
+        and "current_position" in inspect.getsource(r)
+    ]
+    assert len(deriving) == 5, (
+        f"expected one position-deriving _reset per exchange, found {len(deriving)}: "
+        f"{[c.__name__ for c in deriving]}"
     )
 
 

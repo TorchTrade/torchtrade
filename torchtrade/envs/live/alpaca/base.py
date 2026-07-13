@@ -11,7 +11,12 @@ from torchrl.data import Composite
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import HistoryTracker, position_direction_from_status, PositionState
+from torchtrade.envs.core.state import (
+    HistoryTracker,
+    PositionState,
+    position_direction_from_qty,
+    position_direction_from_status,
+)
 
 
 class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -219,7 +224,8 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         exposure_pct = position_value / portfolio_value if portfolio_value > 0 else 0.0
 
         # Element 1: position_direction (0 or +1 for spot, no shorts)
-        position_direction = 1.0 if position_size > 0 else 0.0
+        # Spot is long-only: max() keeps the domain at {0, +1}.
+        position_direction = float(max(0, position_direction_from_qty(position_size)))
 
         # Element 2: unrealized_pnl_pct (inherited from Alpaca)
         # Element 3: holding_time

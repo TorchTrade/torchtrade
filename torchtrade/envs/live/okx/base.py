@@ -12,7 +12,11 @@ from torchrl.data.tensor_specs import Composite
 from torchtrade.envs.live.okx.observation import OKXObservationClass
 from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import HistoryTracker, position_direction_from_status
+from torchtrade.envs.core.state import (
+    HistoryTracker,
+    position_direction_from_qty,
+    position_direction_from_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -215,12 +219,7 @@ class OKXBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Build 6-element account state
         exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
 
-        if position_size > 0:
-            position_direction = 1.0
-        elif position_size < 0:
-            position_direction = -1.0
-        else:
-            position_direction = 0.0
+        position_direction = float(position_direction_from_qty(position_size))
 
         if position_size == 0 or current_price == 0 or liquidation_price <= 0:
             distance_to_liquidation = 1.0

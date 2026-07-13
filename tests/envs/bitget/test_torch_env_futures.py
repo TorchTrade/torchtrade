@@ -351,6 +351,31 @@ class TestBitgetFuturesTorchTradingEnv:
             mock_trader.trade.assert_called()
 
 
+    def test_reset_reads_dust_as_flat(self, env, mock_trader):
+        """A dust residual on reset is flat -- internally AND in what the agent sees.
+
+        An exchange can leave a float residue (1e-12) behind a full close. Read as an open
+        position it puts a phantom direction in account_state with zero exposure -- an
+        observation the policy never saw in training -- and freezes the trade guard.
+
+        Behavioural on purpose: the structural guard that every _reset uses the shared rule
+        can be dodged by moving the derivation into a helper. This cannot.
+        """
+        from torchtrade.envs.live.bitget.order_executor import PositionStatus
+
+        mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
+            qty=1e-12, notional_value=0.0, entry_price=50000.0, unrealized_pnl=0.0,
+            unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+            margin_mode="isolated", liquidation_price=0.0,
+        )})
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            td = env.reset()
+
+        assert env.position.current_position == 0
+        assert td["account_state"][1].item() == 0.0   # the direction the AGENT sees
+
+
 class TestBitgetFractionalPositionResizing:
     """Tests for fractional position resizing (regression for #155)."""
 
