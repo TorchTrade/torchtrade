@@ -271,11 +271,3 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         return self._execute_fractional_action(
             desired_action, current_qty=current_qty, current_price=current_price,
         )
-
-    def _check_termination(self, portfolio_value: float) -> bool:
-        """Check if episode should terminate."""
-        if not self.config.done_on_bankruptcy:
-            return False
-
-        bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
-        return portfolio_value < bankruptcy_threshold

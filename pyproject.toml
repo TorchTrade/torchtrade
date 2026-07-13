@@ -65,6 +65,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+# An empty parametrize list otherwise collects zero tests and reports a silent pass --
+# the failure mode that let a dead test file sit in this repo undetected.
+empty_parameter_set_mark = "fail_at_collect"
 
 [project.urls]
 "Homepage" = "https://github.com/TorchTrade/torchtrade"

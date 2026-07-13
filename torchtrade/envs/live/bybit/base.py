@@ -34,7 +34,6 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
     Subclasses must implement:
     - Action space definition
     - _execute_trade_if_needed(): Trade execution logic
-    - _check_termination(): Episode termination logic
     """
 
     ACCOUNT_STATE = [
@@ -285,11 +284,6 @@ class BybitBaseTorchTradingEnv(TorchTradeLiveEnv):
     @abstractmethod
     def _execute_trade_if_needed(self, action) -> dict:
         """Execute trade if position change is needed."""
-        raise NotImplementedError
-
-    @abstractmethod
-    def _check_termination(self, portfolio_value: float) -> bool:
-        """Check if episode should terminate."""
         raise NotImplementedError
 
     def get_market_data_keys(self) -> List[str]:

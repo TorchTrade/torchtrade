@@ -139,39 +139,29 @@ class TestBybitFuturesTorchTradingEnv:
             assert next_td["next"]["terminated"].shape == (1,)
             assert next_td["next"]["truncated"].shape == (1,)
 
-    @pytest.mark.parametrize("portfolio_value,expected_done", [
-        (50.0, True),    # below 10% of the 1000 initial -> bankrupt
-        (100.0, False),  # exactly at threshold -> NOT bankrupt (check is a strict <)
-        (500.0, False),  # above threshold -> keep trading
-    ], ids=["below-threshold", "at-threshold", "above-threshold"])
-    def test_bankruptcy_termination(self, env, portfolio_value, expected_done):
-        """Terminates when portfolio falls below bankrupt_threshold * initial_portfolio_value."""
-        env.initial_portfolio_value = 1000.0
-        env.config.bankrupt_threshold = 0.1
-        assert env._check_termination(portfolio_value) is expected_done
+    @pytest.mark.parametrize("done_on_bankruptcy,expected_done", [
+        (True, True),    # portfolio collapses below the threshold -> episode terminates
+        (False, False),  # same collapse, check disabled -> keep trading
+    ], ids=["enabled-terminates", "disabled-keeps-trading"])
+    def test_bankruptcy_termination(self, env, mock_trader, done_on_bankruptcy, expected_done):
+        """A collapsed portfolio ends the episode through _step iff done_on_bankruptcy.
 
-    def test_no_bankruptcy_when_disabled(self, env_config, mock_observer, mock_trader):
-        """Test that bankruptcy check can be disabled."""
-        from torchtrade.envs.live.bybit.env import BybitFuturesTorchTradingEnv
-
-        env_config.done_on_bankruptcy = False
-
-        with patch("time.sleep"), \
-             patch.object(BybitFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = BybitFuturesTorchTradingEnv(
-                config=env_config, observer=mock_observer, trader=mock_trader,
-            )
+        Threshold arithmetic is covered in tests/envs/test_live_env_base.py; the disabled
+        case is this file's only guard against a _step that hardcodes done=True.
+        """
+        env.config.done_on_bankruptcy = done_on_bankruptcy
 
         mock_trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 10.0, "available_balance": 10.0,
-            "total_unrealized_profit": 0.0, "total_margin_balance": 10.0,
+            "total_wallet_balance": 50.0,  # below 10% of the 1000 captured at __init__
+            "available_balance": 50.0,
+            "total_unrealized_profit": 0.0,
+            "total_margin_balance": 50.0,
         })
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())
-            next_td = env.step(action_td)
-            assert next_td["next"]["done"].item() is False
+            next_td = env.step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
+            assert next_td["next"]["done"].item() is expected_done
 
     def test_config_post_init(self):
         """Test config post_init normalization."""

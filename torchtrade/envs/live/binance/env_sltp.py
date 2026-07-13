@@ -391,14 +391,6 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
 
         return trade_info
 
-    def _check_termination(self, portfolio_value: float) -> bool:
-        """Check if episode should terminate."""
-        if not self.config.done_on_bankruptcy:
-            return False
-
-        bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
-        return portfolio_value < bankruptcy_threshold
-
 
 if __name__ == "__main__":
     import os

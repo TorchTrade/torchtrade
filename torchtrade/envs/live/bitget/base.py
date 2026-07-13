@@ -41,7 +41,6 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
     Subclasses must implement:
     - Action space definition (different per environment)
     - _execute_trade_if_needed(): Trade execution logic
-    - _check_termination(): Episode termination logic
     """
 
     # Standard account state for Bitget futures environments (6 elements)
@@ -361,23 +360,6 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         """
         raise NotImplementedError(
             "Subclasses must implement _execute_trade_if_needed()"
-        )
-
-    @abstractmethod
-    def _check_termination(self, portfolio_value: float) -> bool:
-        """
-        Check if episode should terminate.
-
-        Must be implemented by subclasses as termination conditions may differ.
-
-        Args:
-            portfolio_value: Current portfolio value
-
-        Returns:
-            True if episode should terminate, False otherwise
-        """
-        raise NotImplementedError(
-            "Subclasses must implement _check_termination()"
         )
 
     def get_market_data_keys(self) -> List[str]:

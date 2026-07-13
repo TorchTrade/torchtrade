@@ -20,6 +20,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
     - Common waiting logic (_wait_for_next_timestamp)
     - Market data observation spec construction pattern
     - Reset scaffolding
+    - Bankruptcy termination check (_check_termination)
 
     Subclasses must implement:
     - _init_trading_clients(): Provider-specific client initialization
@@ -178,6 +179,14 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         self.position.current_action_level = (
             0.0 if self.position.current_position == 0 else float("nan")
         )
+
+    def _check_termination(self, portfolio_value: float) -> bool:
+        """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""
+        if not self.config.done_on_bankruptcy:
+            return False
+
+        bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
+        return portfolio_value < bankruptcy_threshold
 
     @abstractmethod
     def _get_portfolio_value(self, *args, **kwargs) -> float:

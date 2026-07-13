@@ -280,11 +280,3 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
     def _execute_trade_if_needed(self, desired_action: float) -> Dict:
         """Execute trade based on desired action value."""
         return self._execute_fractional_action(desired_action)
-
-    def _check_termination(self, portfolio_value: float) -> bool:
-        """Check if episode should terminate."""
-        if not self.config.done_on_bankruptcy:
-            return False
-
-        bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
-        return portfolio_value < bankruptcy_threshold
