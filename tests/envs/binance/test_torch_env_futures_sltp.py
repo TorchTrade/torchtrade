@@ -312,12 +312,22 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
             assert trade_info["executed"] is False
 
 
-    def test_bankruptcy_termination(self, env, mock_trader):
-        """A collapsed portfolio ends the episode through _step.
+    @pytest.mark.parametrize("done_on_bankruptcy,expected_done", [
+        (True, True),    # portfolio collapses below the threshold -> episode terminates
+        (False, False),  # same collapse, check disabled -> keep trading
+    ], ids=["enabled-terminates", "disabled-keeps-trading"])
+    def test_bankruptcy_termination(self, env, mock_trader, done_on_bankruptcy, expected_done):
+        """A collapsed portfolio ends the episode through _step iff done_on_bankruptcy.
 
         The threshold arithmetic is covered once in tests/envs/test_live_env_base.py; what
-        is SLTP-specific is that this env's _step actually feeds `done` from it.
+        is SLTP-specific is that this env's _step feeds `done` from it.
+
+        Keep BOTH cases: [disabled-keeps-trading] is the only test in this file that pins
+        `done` to False, so it is the sole guard against a _step that always terminates --
+        which every SLTP env shipped unguarded before this test.
         """
+        env.config.done_on_bankruptcy = done_on_bankruptcy
+
         mock_trader.get_account_balance = MagicMock(return_value={
             "total_wallet_balance": 50.0,  # below 10% of the 1000 initial
             "available_balance": 50.0,
@@ -328,7 +338,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
             next_td = env.step(TensorDict({"action": torch.tensor(0)}, batch_size=()))
-            assert next_td["next"]["done"].item() is True
+            assert next_td["next"]["done"].item() is expected_done
 
     def test_close_method(self, env, mock_trader):
         """Test environment close method."""

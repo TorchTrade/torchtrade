@@ -393,6 +393,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
 
         return trade_info
 
+
 if __name__ == "__main__":
     import os
 

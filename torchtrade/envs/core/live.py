@@ -20,6 +20,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
     - Common waiting logic (_wait_for_next_timestamp)
     - Market data observation spec construction pattern
     - Reset scaffolding
+    - Bankruptcy termination check (_check_termination)
 
     Subclasses must implement:
     - _init_trading_clients(): Provider-specific client initialization
@@ -180,11 +181,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         )
 
     def _check_termination(self, portfolio_value: float) -> bool:
-        """Terminate when the portfolio falls below bankrupt_threshold * its initial value.
-
-        Shared by every live env. Override only if an exchange needs different termination
-        conditions.
-        """
+        """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""
         if not self.config.done_on_bankruptcy:
             return False
 

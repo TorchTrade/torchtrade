@@ -211,12 +211,11 @@ class TestBitgetFuturesTorchTradingEnv:
     ):
         """A collapsed portfolio ends the episode through _step iff done_on_bankruptcy.
 
-        The threshold arithmetic itself is covered once in tests/envs/test_live_env_base.py
-        (the check is shared by every live env); what is exchange-specific -- and what this
-        covers -- is that BitgetFuturesTorchTradingEnv._step actually feeds `done` from it.
+        The threshold arithmetic is covered once in tests/envs/test_live_env_base.py; what
+        is exchange-specific is that BitgetFuturesTorchTradingEnv._step feeds `done` from it.
 
-        Both cases on purpose: the disabled case alone still passes with _check_termination
-        gutted to `return False`, so it only means something next to the enabled one.
+        Keep BOTH cases: [disabled-keeps-trading] is the only test in this file that pins
+        `done` to False, so it is the sole guard against a _step that always terminates.
         """
         from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv
 

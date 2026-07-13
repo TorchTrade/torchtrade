@@ -391,6 +391,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
 
         return trade_info
 
+
 if __name__ == "__main__":
     import os
     from dotenv import load_dotenv

@@ -521,6 +521,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
 
         return self._execute_fractional_action(desired_action)
 
+
 if __name__ == "__main__":
     import os
     from dotenv import load_dotenv

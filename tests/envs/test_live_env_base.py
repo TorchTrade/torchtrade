@@ -1,7 +1,7 @@
 """Contract tests for behaviour shared by every live env via TorchTradeLiveEnv.
 
 These replace the per-exchange copies of the same assertions. Testing a shared method
-once is only sound if every env actually inherits it -- so each unit test here is paired
+once is only sound if every env actually inherits it -- so the unit test here is paired
 with a guard that asserts exactly that. If an exchange ever re-adds its own override, the
 guard fails and tells you to test that exchange separately.
 """
@@ -10,55 +10,18 @@ from types import SimpleNamespace
 
 import pytest
 
+import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv
-from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv
-from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv
-from torchtrade.envs.live.binance.env_sltp import BinanceFuturesSLTPTorchTradingEnv
-from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv
-from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTorchTradingEnv
-from torchtrade.envs.live.bybit.env import BybitFuturesTorchTradingEnv
-from torchtrade.envs.live.bybit.env_sltp import BybitFuturesSLTPTorchTradingEnv
-from torchtrade.envs.live.okx.env import OKXFuturesTorchTradingEnv
-from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTorchTradingEnv
-
-LIVE_ENVS = [
-    AlpacaTorchTradingEnv, AlpacaSLTPTorchTradingEnv,
-    BinanceFuturesTorchTradingEnv, BinanceFuturesSLTPTorchTradingEnv,
-    BitgetFuturesTorchTradingEnv, BitgetFuturesSLTPTorchTradingEnv,
-    BybitFuturesTorchTradingEnv, BybitFuturesSLTPTorchTradingEnv,
-    OKXFuturesTorchTradingEnv, OKXFuturesSLTPTorchTradingEnv,
-]
 
 
-class _ConcreteLiveEnv(TorchTradeLiveEnv):
-    """Smallest possible live env: satisfies the abstract methods, overrides nothing else."""
-
-    def _init_trading_clients(self, api_key, api_secret, observer, trader):
-        raise NotImplementedError
-
-    def _get_portfolio_value(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def _reset(self, tensordict, **kwargs):
-        raise NotImplementedError
-
-    def _step(self, tensordict):
-        raise NotImplementedError
+def _subclasses(cls):
+    for sub in cls.__subclasses__():
+        yield sub
+        yield from _subclasses(sub)
 
 
-def _live_env(done_on_bankruptcy=True, bankrupt_threshold=0.1, initial_portfolio_value=1000.0):
-    """A live env carrying only what _check_termination reads.
-
-    __new__ skips EnvBase's spec machinery, which the method under test never touches.
-    """
-    env = _ConcreteLiveEnv.__new__(_ConcreteLiveEnv)
-    env.config = SimpleNamespace(
-        done_on_bankruptcy=done_on_bankruptcy,
-        bankrupt_threshold=bankrupt_threshold,
-    )
-    env.initial_portfolio_value = initial_portfolio_value
-    return env
+# Discovered, not hand-listed: a hand-listed exchange #6 would silently escape the guard.
+LIVE_ENVS = sorted(set(_subclasses(TorchTradeLiveEnv)), key=lambda c: c.__name__)
 
 
 @pytest.mark.parametrize("done_on_bankruptcy,portfolio_value,expected", [
@@ -68,17 +31,37 @@ def _live_env(done_on_bankruptcy=True, bankrupt_threshold=0.1, initial_portfolio
     (False, 0.0, False),   # wiped out, but the check is off -> never terminates
 ], ids=["below-threshold", "at-threshold", "above-threshold", "disabled"])
 def test_check_termination(done_on_bankruptcy, portfolio_value, expected):
-    """Terminates iff done_on_bankruptcy and portfolio < bankrupt_threshold * initial."""
-    env = _live_env(done_on_bankruptcy=done_on_bankruptcy)
-    assert env._check_termination(portfolio_value) is expected
+    """Terminates iff done_on_bankruptcy and portfolio < bankrupt_threshold * initial.
+
+    Called unbound on a stand-in `self`: the method reads two attributes and does
+    arithmetic, so there is nothing here an EnvBase instance would add. (Building one via
+    __new__ to skip EnvBase.__init__ was tried and flakes -- nn.Module.__init__ never runs,
+    so the object has no _modules.)
+
+    The stand-in carries only the two fields the method may read, which makes a renamed
+    config field an AttributeError here rather than a silent pass.
+    """
+    env = SimpleNamespace(
+        config=SimpleNamespace(
+            done_on_bankruptcy=done_on_bankruptcy,
+            bankrupt_threshold=0.1,
+        ),
+        initial_portfolio_value=1000.0,
+    )
+    assert TorchTradeLiveEnv._check_termination(env, portfolio_value) is expected
 
 
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
 def test_no_live_env_overrides_check_termination(env_cls):
     """Every live env inherits the shared bankruptcy check.
 
-    This is what makes testing _check_termination once (above) sufficient. It also guards
-    the hoist: the five exchanges used to carry byte-identical copies, and a copy that
-    drifts is a silent divergence in money-moving termination logic.
+    This is what makes testing _check_termination once (above) sufficient, and for the five
+    SLTP envs it is their only bankruptcy coverage outside their own _step tests. Duplicated
+    logic in this codebase has drifted into real bugs before (three divergent SLTP action
+    maps), so a re-forked copy of money-moving termination logic fails here immediately.
     """
-    assert env_cls._check_termination is TorchTradeLiveEnv._check_termination
+    assert env_cls._check_termination is TorchTradeLiveEnv._check_termination, (
+        f"{env_cls.__name__} overrides _check_termination. Either drop the override, or "
+        f"give that exchange its own termination tests -- the single shared test above no "
+        f"longer covers it."
+    )

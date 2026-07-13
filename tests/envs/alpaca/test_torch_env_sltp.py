@@ -298,31 +298,37 @@ class TestAlpacaSLTPTradingEnvStep:
 class TestAlpacaSLTPTradingEnvTermination:
     """Tests for episode termination."""
 
-    def test_bankruptcy_termination(self):
-        """Test that bankruptcy triggers termination."""
+    @pytest.mark.parametrize("done_on_bankruptcy,expected_done", [
+        (True, True),    # portfolio collapses below the threshold -> episode terminates
+        (False, False),  # same collapse, check disabled -> keep trading
+    ], ids=["enabled-terminates", "disabled-keeps-trading"])
+    def test_bankruptcy_termination(self, done_on_bankruptcy, expected_done):
+        """A collapsed portfolio ends the episode through _step iff done_on_bankruptcy.
+
+        The threshold arithmetic is covered once in tests/envs/test_live_env_base.py; what
+        is SLTP-specific is that this env's _step feeds `done` from it.
+
+        Keep BOTH cases: [disabled-keeps-trading] is the only test in this file that pins
+        `done` to False, so it is the sole guard against a _step that always terminates --
+        which every SLTP env shipped unguarded before this test.
+        """
         config = AlpacaSLTPTradingEnvConfig(
             symbol="BTC/USD",
             window_sizes=[10],
-            done_on_bankruptcy=True,
+            done_on_bankruptcy=done_on_bankruptcy,
             bankrupt_threshold=0.1,
         )
-        mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader(initial_cash=500.0)
-
         env = AlpacaSLTPTorchTradingEnv(
             config=config,
-            observer=mock_observer,
-            trader=mock_trader,
+            observer=MockObserver(window_sizes=[10]),
+            trader=MockSLTPTrader(initial_cash=500.0),
         )
-        env.initial_portfolio_value = 10000.0
+        env.initial_portfolio_value = 10000.0  # the 500 cash is below 10% of this
         env._wait_for_next_timestamp = lambda: None
 
         env.reset()
-        td_in = TensorDict({"action": torch.tensor(0)}, batch_size=())
-        td_out = env._step(td_in)
-
-        # Portfolio value (500) is below 10% of initial (1000)
-        assert td_out["done"].item() is True
+        next_td = env.step(TensorDict({"action": torch.tensor(0)}, batch_size=()))
+        assert next_td["next"]["done"].item() is expected_done
 
 
 class TestAlpacaSLTPTradingEnvClose:
