@@ -106,19 +106,45 @@ class TestAlpacaOrderClass:
         assert oc.trade(side="buy", amount=3.7, order_type="market") is True
         assert client.requests[-1].qty == 3.0
 
-    def test_asset_lookup_failure_falls_back_without_zeroing(self, client):
-        """If get_asset is unreachable we fall back to 9dp -- the documented API maximum.
+    def test_asset_lookup_failure_fails_closed(self, client):
+        """If the asset's rules cannot be read, refuse the order -- do not guess a precision.
 
-        The fallback can only floor away digits Alpaca would have rejected anyway; it cannot
-        reproduce the old silent qty=0.0.
+        Falling back to 9dp is wrong for an asset whose real increment is 0.01 or 1: the order
+        just gets rejected by the exchange, and a cached fallback would poison every order after
+        it.
         """
         def boom(_):
             raise RuntimeError("assets endpoint down")
         client.get_asset = boom
 
         oc = AlpacaOrderClass(symbol="BTCUSD", trade_mode="quantity", client=client)
-        assert oc.trade(side="buy", amount=0.01, order_type="market") is True
-        assert client.requests[-1].qty == 0.01
+        assert oc.trade(side="buy", amount=0.01, order_type="market") is False
+        assert client.requests == []
+
+    def test_quantity_lands_on_the_min_plus_n_steps_lattice(self, client):
+        """Valid crypto quantities are min + N*step, NOT N*step.
+
+        With a minimum that is not a whole multiple of the step, flooring from zero lands above
+        the minimum yet off the lattice -- and Alpaca rejects it.
+        """
+        client.asset = MockAsset(min_order_size=0.000166, min_trade_increment=0.0001)
+        oc = AlpacaOrderClass(symbol="BTCUSD", trade_mode="quantity", client=client)
+
+        assert oc.trade(side="buy", amount=0.00027, order_type="market") is True
+        # floor-from-zero would give 0.0002 (above the min, but not on the lattice)
+        assert client.requests[-1].qty == pytest.approx(0.000266)   # 0.000166 + 1 * 0.0001
+
+    def test_min_order_size_is_not_cached_across_price_moves(self, client):
+        """min_order_size is dynamic (it tracks ~10/price). Caching it goes stale.
+
+        A quantity that was valid at one price must be refused once the minimum rises past it.
+        """
+        client.asset = MockAsset(min_order_size=0.0001, min_trade_increment=0.0001)
+        oc = AlpacaOrderClass(symbol="BTCUSD", trade_mode="quantity", client=client)
+        assert oc.trade(side="buy", amount=0.0002, order_type="market") is True
+
+        client.asset = MockAsset(min_order_size=0.001, min_trade_increment=0.0001)  # price fell
+        assert oc.trade(side="buy", amount=0.0002, order_type="market") is False
 
     # --- order types ---
 

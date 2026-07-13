@@ -91,52 +91,56 @@ class AlpacaOrderClass:
         self.trade_mode = trade_mode
         self.client = client if client is not None else TradingClient(api_key, secret_key=api_secret, paper=paper)
         self.last_order_id = None
-        self._asset_precision = None
 
-    # Alpaca accepts up to 9 dp on qty for crypto and for fractionable equities. Used only
-    # when the asset lookup gives us nothing better: it is the loosest legal bound, so it can
-    # only floor away digits Alpaca would have rejected anyway.
-    MAX_QTY_DECIMALS = 9
+    # Alpaca's documented maximum quantity precision for a FRACTIONABLE equity. It is not a
+    # fallback for an unknown asset -- 9dp on an asset whose real increment is 0.01 or 1 just
+    # gets rejected by the exchange.
+    MAX_EQUITY_QTY_DECIMALS = 9
 
-    def get_asset_precision(self) -> dict:
-        """Quantity rules for this symbol, straight from Alpaca. Cached.
+    def _round_qty(self, amount: float) -> Optional[float]:
+        """Floor `amount` onto Alpaca's quantity lattice for this asset.
 
-        min_trade_increment/min_order_size are crypto-only and come back None for equities,
-        which is the signal to fall back to the fractionable rule. min_order_size is not a
-        constant Alpaca publishes once -- for USD pairs it tracks ~10/price -- so it has to be
-        asked for, not hardcoded.
+        Returns None when the order must NOT be sent: the asset's rules are unavailable (we do
+        not guess a precision on a live order), or the amount is below the minimum order size.
+
+        NOT cached. min_order_size is dynamic for crypto -- for USD pairs it tracks ~10/price --
+        so a value cached at construction goes stale on the next price move and starts either
+        refusing valid orders or passing now-sub-minimum ones. One REST call per order is a
+        fair price; orders are not high-frequency here.
+
+        Floor, never round: rounding up can exceed the size, and the buying power, the caller
+        asked for. Decimal, because 0.0001 is not exactly representable in binary float.
         """
-        if self._asset_precision is None:
-            try:
-                asset = self.client.get_asset(self.symbol)
-                self._asset_precision = {
-                    "increment": getattr(asset, "min_trade_increment", None),
-                    "min_qty": getattr(asset, "min_order_size", None),
-                    "fractionable": getattr(asset, "fractionable", True),
-                }
-            except Exception as e:
-                logger.warning(
-                    f"get_asset({self.symbol}) failed: {e}; falling back to {self.MAX_QTY_DECIMALS}dp"
-                )
-                self._asset_precision = {"increment": None, "min_qty": None, "fractionable": True}
-        return self._asset_precision
+        try:
+            asset = self.client.get_asset(self.symbol)
+        except Exception as e:
+            logger.error(
+                f"get_asset({self.symbol}) failed: {e}. Refusing to size the order rather than "
+                f"guess a precision."
+            )
+            return None
 
-    def _round_qty(self, amount: float) -> float:
-        """Floor a quantity onto Alpaca's grid for this asset.
-
-        Floor, never round: rounding up can exceed the size the caller asked for (and the
-        buying power behind it). Decimal, because the increments (0.0001) are not exactly
-        representable in binary float.
-        """
-        p = self.get_asset_precision()
         qty = Decimal(str(amount))
+        min_qty = getattr(asset, "min_order_size", None)
+        step = getattr(asset, "min_trade_increment", None)
 
-        if p["increment"]:
-            step = Decimal(str(p["increment"]))
-            return float((qty / step).to_integral_value(rounding=ROUND_DOWN) * step)
-        if not p["fractionable"]:
-            return float(qty.to_integral_value(rounding=ROUND_DOWN))
-        return float(qty.quantize(Decimal(1).scaleb(-self.MAX_QTY_DECIMALS), rounding=ROUND_DOWN))
+        if min_qty and step:
+            # Crypto: valid quantities are min + N*step, NOT N*step. Flooring from zero can
+            # land above the minimum yet off the lattice (min 0.000166, step 0.0001,
+            # amount 0.00027 -> 0.0002: above the minimum, and rejected).
+            min_d, step_d = Decimal(str(min_qty)), Decimal(str(step))
+            if qty < min_d:
+                return None
+            steps = ((qty - min_d) / step_d).to_integral_value(rounding=ROUND_DOWN)
+            return float(min_d + steps * step_d)
+
+        if not getattr(asset, "fractionable", True):
+            whole = qty.to_integral_value(rounding=ROUND_DOWN)
+            return float(whole) if whole > 0 else None
+
+        # Fractionable equity: no increment is published, and 9dp is the documented maximum.
+        return float(qty.quantize(Decimal(1).scaleb(-self.MAX_EQUITY_QTY_DECIMALS),
+                                  rounding=ROUND_DOWN))
 
     def trade(
         self,
@@ -204,11 +208,10 @@ class AlpacaOrderClass:
                     return self.close_position()
 
                 qty = self._round_qty(amount)
-                min_qty = self.get_asset_precision()["min_qty"]
-                if qty <= 0 or (min_qty and qty < float(min_qty)):
+                if not qty:
                     logger.warning(
-                        f"Refusing to submit {self.symbol} qty={amount} -> {qty}: below the "
-                        f"minimum order size ({min_qty}). Not submitting a zero/rejectable order."
+                        f"Refusing to submit {self.symbol} qty={amount}: below the asset's "
+                        f"minimum, or its rules could not be read."
                     )
                     return False
                 order_params["qty"] = qty
