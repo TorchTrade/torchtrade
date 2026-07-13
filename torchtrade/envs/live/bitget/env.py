@@ -159,9 +159,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
             current_price = self.trader.get_mark_price()
             position_size = 0.0
 
-        # Exchange truth wins: a liquidation or manual close between steps must not leave the
-        # duplicate-action guard trusting a position we no longer hold.
-        self._sync_position_after_step(position_status)
+        self._sync_position_from_exchange(position_status)
 
         # Get desired action level
         action_idx = tensordict.get("action", 0)

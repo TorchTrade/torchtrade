@@ -4,6 +4,29 @@ from dataclasses import asdict, dataclass, field, fields
 from typing import Dict, List, Union
 
 
+# Quantities at or below this are dust, not a position. Exchanges can leave a float residual
+# (e.g. 1e-12) behind a full close, and misreading that as an open position is what freezes
+# the live envs' duplicate-action guard -- so every position sync must apply the same rule.
+POSITION_DUST_EPS = 1e-9
+
+
+def position_direction(position_status, eps: float = POSITION_DUST_EPS) -> int:
+    """The direction the exchange actually holds: -1 short, 0 flat, +1 long.
+
+    The single normalization used by every position sync, live and SLTP alike. It exists
+    because two copies of it drifted apart once: one applied the dust tolerance, the other
+    compared to exactly zero.
+
+    Args:
+        position_status: Position status from trader.get_status(), or None if flat.
+        eps: Quantities with |qty| <= eps are dust and read as flat.
+    """
+    qty = 0.0 if position_status is None else float(position_status.qty)
+    if abs(qty) <= eps:
+        return 0
+    return 1 if qty > 0 else -1
+
+
 def binarize_action_type(action_type: str) -> int:
     """Convert action type string to binarized action value.
 

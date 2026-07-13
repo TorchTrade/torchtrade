@@ -2,6 +2,8 @@
 
 import logging
 
+from torchtrade.envs.core.state import position_direction
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,10 +19,6 @@ class SLTPMixin:
         - self.active_stop_loss: float (current SL price)
         - self.active_take_profit: float (current TP price)
     """
-
-    # Quantities below this threshold are treated as dust (no real position).
-    # Prevents float residuals (e.g. 1e-12) from being read as open positions.
-    POSITION_DUST_EPS = 1e-9
 
     def _sync_position_from_exchange(self, position_status) -> bool:
         """Sync internal position state from exchange and detect SL/TP closures.
@@ -39,15 +37,7 @@ class SLTPMixin:
             or external closure), False otherwise.
         """
         prev_position = self.position.current_position
-
-        qty = 0.0 if position_status is None else float(position_status.qty)
-
-        if abs(qty) <= self.POSITION_DUST_EPS:
-            self.position.current_position = 0
-        elif qty > 0:
-            self.position.current_position = 1
-        else:
-            self.position.current_position = -1
+        self.position.current_position = position_direction(position_status)
 
         # Detect position closure (had position, now don't)
         position_closed = (prev_position != 0 and self.position.current_position == 0)

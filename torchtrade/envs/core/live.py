@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from tensordict import TensorDictBase
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
-from torchtrade.envs.core.state import PositionState
+from torchtrade.envs.core.state import PositionState, position_direction
 
 
 class TorchTradeLiveEnv(TorchTradeBaseEnv):
@@ -175,30 +175,35 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
 
         The level that produced such a position is unknowable: NaN never compares equal,
         so the next command always executes.
+
+        NOT subsumed by _sync_position_from_exchange, though it looks like it should be:
+        _reset writes current_position from the exchange FIRST, so by the first _step the
+        cache and the exchange already agree -- and a sync that only acts on a MISMATCH sees
+        none, and leaves the stale level alone. Reset answers "is this position mine?"; step
+        answers "is it still there?". Only reset can know the position predates the episode.
         """
         self.position.current_action_level = (
             0.0 if self.position.current_position == 0 else float("nan")
         )
 
-    def _sync_position_after_step(self, position_status) -> None:
-        """Reconcile the cached position with exchange truth, before the duplicate-action guard.
+    def _sync_position_from_exchange(self, position_status) -> None:
+        """Overwrite the cached position with what the exchange actually holds.
 
-        current_position/current_action_level are written only after a trade THIS env made, so
-        anything that moves the position behind the env's back -- a liquidation, a manual close
-        in the exchange UI -- leaves them stale for the REST of the episode. The
-        ``desired_action == current_action_level`` guard would then short-circuit a legitimate
-        command: after a liquidation, an agent re-requesting the level it already holds is
-        silently refused, and stays refused until it happens to pick a different level.
+        Call at the top of _step(), BEFORE the duplicate-action guard.
 
-        Only a mismatch means the change was not ours; on a match, leave the cached level alone
-        (that is what lets the guard suppress genuinely redundant trades). The level behind a
-        position we did not open is unknowable, so NaN it -- NaN never compares equal, so the
-        next command always executes.
+        current_position/current_action_level are written only by trades THIS env made, so a
+        liquidation or a manual close leaves them stale, and _execute_trade_if_needed's
+        ``desired_action == current_action_level`` guard then refuses the agent's re-entry for
+        the rest of the episode.
 
-        Reuses the position_status _step already fetched: no extra API call.
+        On a match the level is left alone -- that is what still lets the guard suppress a
+        genuinely redundant trade. The level behind a position we did not open is unknowable,
+        so it becomes NaN, which never compares equal.
+
+        Only the direction is reconciled, not the size: a PARTIAL external close leaves the
+        direction intact and is still invisible to the guard. Pre-existing, not fixed here.
         """
-        qty = 0.0 if position_status is None else float(position_status.qty)
-        observed = 0 if qty == 0 else (1 if qty > 0 else -1)
+        observed = position_direction(position_status)
 
         if observed != self.position.current_position:
             self.position.current_action_level = 0.0 if observed == 0 else float("nan")

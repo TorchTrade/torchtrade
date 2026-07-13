@@ -114,9 +114,10 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
             current_price = self.trader.get_mark_price()
             position_size = 0.0
 
-        # Exchange truth wins: a liquidation or manual close between steps must not leave the
-        # duplicate-action guard trusting a position we no longer hold.
-        self._sync_position_after_step(position_status)
+        # No-op today (this env's _execute_trade_if_needed recomputes qty live and never reads
+        # current_action_level), but keeps the field consistent so adding a duplicate-action
+        # guard here can't reintroduce the silent no-op that bit alpaca/binance/bitget.
+        self._sync_position_from_exchange(position_status)
 
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):

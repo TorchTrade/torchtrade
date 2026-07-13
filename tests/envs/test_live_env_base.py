@@ -6,6 +6,7 @@ with a guard that asserts exactly that. If an exchange ever re-adds its own over
 guard fails and tells you to test that exchange separately.
 """
 
+import inspect
 import math
 from types import SimpleNamespace
 
@@ -26,6 +27,9 @@ def _subclasses(cls):
 # __subclasses__() is a live registry, so do NOT define a TorchTradeLiveEnv subclass in any
 # test module -- it would land in here, import-order dependent.
 LIVE_ENVS = sorted(_subclasses(TorchTradeLiveEnv), key=lambda c: c.__name__)
+
+# The plain envs (env.py). The SLTP ones get their sync from SLTPMixin instead.
+NON_SLTP_ENVS = [c for c in LIVE_ENVS if c.__module__.endswith(".env")]
 
 
 @pytest.mark.parametrize("done_on_bankruptcy,portfolio_value,expected", [
@@ -52,20 +56,29 @@ def test_check_termination(done_on_bankruptcy, portfolio_value, expected):
     assert TorchTradeLiveEnv._check_termination(env, portfolio_value) is expected
 
 
-@pytest.mark.parametrize("cached_position,cached_level,observed_qty,expect_position,expect_level", [
+@pytest.mark.parametrize("cached_position,cached_level,status,expect_position,expect_level", [
     # The env's own trade already wrote both fields: a matching position must NOT be touched,
     # or the guard could never suppress a genuinely redundant trade.
-    (1, 1.0, 0.5, 1, 1.0),
-    (-1, -1.0, -0.5, -1, -1.0),
-    (0, 0.0, 0.0, 0, 0.0),
+    (1, 1.0, SimpleNamespace(qty=0.5), 1, 1.0),
+    (-1, -1.0, SimpleNamespace(qty=-0.5), -1, -1.0),
+    (0, 0.0, None, 0, 0.0),
     # Position moved behind the env's back -> the level that produced it is unknowable.
-    (1, 1.0, 0.0, 0, 0.0),          # liquidated / closed externally -> flat, level flat
-    (0, 0.0, 0.5, 1, math.nan),     # opened externally -> NaN, so ANY next command executes
-    (1, 1.0, -0.5, -1, math.nan),   # flipped externally
+    (1, 1.0, None, 0, 0.0),                          # liquidated -> flat, level flat
+    (0, 0.0, SimpleNamespace(qty=0.5), 1, math.nan),  # opened externally -> ANY next command runs
+    (1, 1.0, SimpleNamespace(qty=-0.5), -1, math.nan),  # flipped long -> short
+    (-1, -1.0, SimpleNamespace(qty=0.5), 1, math.nan),  # flipped short -> long
+    # A close can leave a float residual instead of an exact zero. Reading that as an open
+    # position is what re-froze the guard -- the dust rule is the whole point of the shared
+    # position_direction() helper.
+    (1, 1.0, SimpleNamespace(qty=1e-12), 0, 0.0),     # dust after liquidation -> flat
+    # Exchanges also report a flat position as a zero-qty object rather than None; every
+    # live _reset already has an explicit branch for it.
+    (1, 1.0, SimpleNamespace(qty=0.0), 0, 0.0),
 ], ids=["long-unchanged", "short-unchanged", "flat-unchanged",
-        "liquidated", "opened-externally", "flipped-externally"])
-def test_sync_position_after_step(
-    cached_position, cached_level, observed_qty, expect_position, expect_level
+        "liquidated", "opened-externally", "flipped-long-to-short", "flipped-short-to-long",
+        "dust-after-liquidation", "zero-qty-status-not-none"])
+def test_sync_position_from_exchange(
+    cached_position, cached_level, status, expect_position, expect_level
 ):
     """Exchange truth overwrites the cached position, and an external change NaNs the level.
 
@@ -77,8 +90,7 @@ def test_sync_position_after_step(
     env.position.current_position = cached_position
     env.position.current_action_level = cached_level
 
-    status = None if observed_qty == 0 else SimpleNamespace(qty=observed_qty)
-    TorchTradeLiveEnv._sync_position_after_step(env, status)
+    TorchTradeLiveEnv._sync_position_from_exchange(env, status)
 
     assert env.position.current_position == expect_position
     if math.isnan(expect_level):
@@ -100,7 +112,7 @@ def test_discovery_covers_every_live_exchange():
 
 
 @pytest.mark.parametrize("method", [
-    "_check_termination", "_sync_position_after_step", "_sync_action_level_after_reset",
+    "_check_termination", "_sync_action_level_after_reset",
 ])
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
 def test_no_live_env_overrides_shared_method(env_cls, method):
@@ -112,4 +124,20 @@ def test_no_live_env_overrides_shared_method(env_cls, method):
     assert getattr(env_cls, method) is getattr(TorchTradeLiveEnv, method), (
         f"{env_cls.__name__} overrides {method}. Either drop the override, or give that "
         f"exchange its own tests -- the single shared test above no longer covers it."
+    )
+
+
+@pytest.mark.parametrize("env_cls", NON_SLTP_ENVS, ids=lambda c: c.__name__)
+def test_non_sltp_step_syncs_position_from_exchange(env_cls):
+    """Every non-SLTP _step reconciles with the exchange before it trades.
+
+    This is the only thing guarding the call in bybit/okx: they have no duplicate-action
+    guard, so deleting the call there changes nothing observable and no behavioural test
+    would notice -- yet it is exactly the call whose absence froze the guard in the three
+    envs that DO have one.
+    """
+    source = inspect.getsource(env_cls.__dict__["_step"])
+    assert "_sync_position_from_exchange" in source, (
+        f"{env_cls.__name__}._step does not reconcile the cached position with the exchange "
+        f"before trading -- a liquidation would leave it stale for the rest of the episode."
     )

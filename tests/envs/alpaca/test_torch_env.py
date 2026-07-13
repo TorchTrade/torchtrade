@@ -275,9 +275,13 @@ class TestAlpacaTorchTradingEnvStep:
         assert env.trader.position_qty > 0        # opened
 
         # Still holding it: re-commanding the same level is redundant, guard must suppress.
+        # assert_not_called() alone is NOT enough here -- alpaca's _execute_fractional_action
+        # independently bails when the delta is under its $1 min_trade_value, so it would hold
+        # even with the guard broken. Assert the guard's actual input: the level survived.
         env.trader.trade = MagicMock(wraps=env.trader.trade)
         env._step(buy)
         env.trader.trade.assert_not_called()
+        assert env.position.current_action_level == 1.0
 
         # The position is closed out from under us -- on spot that means a manual close in
         # the Alpaca UI. The proceeds return to cash, exactly as the mock's own sell path
