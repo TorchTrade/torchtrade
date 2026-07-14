@@ -336,6 +336,46 @@ class TestGroupRelativePGLoss:
         loss = GroupRelativePGLoss(actor_network=actor_network)
         loss.reset()  # Should not raise any errors
 
+    def test_set_keys_does_not_raise(self, actor_network):
+        """LossModule.set_keys() requires _forward_value_estimator_keys; without it, it raised.
+
+        Every external call to the public set_keys() API blew up with
+        AttributeError: 'GroupRelativePGLoss' object has no attribute
+        '_forward_value_estimator_keys'.
+        """
+        loss = GroupRelativePGLoss(actor_network=actor_network)
+
+        loss.set_keys(action="custom_action", sample_log_prob="custom_log_prob")
+
+        assert loss.tensor_keys.action == "custom_action"
+        assert loss.tensor_keys.sample_log_prob == "custom_log_prob"
+
+    def test_set_keys_invalidates_the_cached_in_keys(self, actor_network):
+        """A renamed key must appear in in_keys, and the old one must be gone.
+
+        This is the half that an empty `_forward_value_estimator_keys` would silently break:
+        set_keys() would stop raising, tensor_keys would update, but the CACHED in_keys would
+        still name the old key -- so a training loop doing tensordict.select(*loss.in_keys)
+        would quietly drop the renamed one.
+        """
+        loss = GroupRelativePGLoss(actor_network=actor_network)
+        _ = loss.in_keys                      # populate the cache with the default keys
+
+        loss.set_keys(action="custom_action")
+
+        in_keys = [str(k) for k in loss.in_keys]
+        assert "custom_action" in in_keys
+        assert "action" not in in_keys, "the cached in_keys still name the old key"
+
+    def test_constructor_sets_the_actor_keys(self, actor_network):
+        """__init__ configures the keys from the actor. It used to do so inside a try/except
+        AttributeError that swallowed a real error -- so a genuine regression here would have
+        been silent."""
+        loss = GroupRelativePGLoss(actor_network=actor_network)
+
+        assert loss.tensor_keys.action == actor_network.dist_sample_keys[0]
+        assert loss.tensor_keys.sample_log_prob == actor_network.log_prob_keys[0]
+
 
 class TestGroupRelativePGLossGroupingInvariant:
     """Regression test for the group-relative-advantage invariant.

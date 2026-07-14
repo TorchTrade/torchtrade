@@ -139,15 +139,23 @@ class GroupRelativePGLoss(LossModule):
             raise TypeError("entropy_coeff must be a float or a Mapping[str, float]")
 
 
-        try:
-            log_prob_keys = self.actor_network.log_prob_keys
-            action_keys = self.actor_network.dist_sample_keys
-            if len(log_prob_keys) > 1:
-                self.set_keys(sample_log_prob=log_prob_keys, action=action_keys)
-            else:
-                self.set_keys(sample_log_prob=log_prob_keys[0], action=action_keys[0])
-        except AttributeError:
-            pass
+        log_prob_keys = self.actor_network.log_prob_keys
+        action_keys = self.actor_network.dist_sample_keys
+        if len(log_prob_keys) > 1:
+            self.set_keys(sample_log_prob=log_prob_keys, action=action_keys)
+        else:
+            self.set_keys(sample_log_prob=log_prob_keys[0], action=action_keys[0])
+
+    def _forward_value_estimator_keys(self, **kwargs) -> None:
+        """Required by LossModule.set_keys(); without it, set_keys() raises AttributeError.
+
+        GRPO has no value estimator -- the advantage is group-relative, computed from the
+        rewards themselves, not from a critic. So there are no estimator keys to forward. The
+        one thing that DOES have to happen is invalidating the cached in_keys: a renamed key
+        must show up in `loss.in_keys`, or a training loop doing
+        `tensordict.select(*loss.in_keys)` would silently drop it.
+        """
+        self._set_in_keys()
 
     @property
     def functional(self):
