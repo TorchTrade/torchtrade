@@ -142,6 +142,19 @@ class DGLoss(LossModule):
     def functional(self):
         return self._functional
 
+    def _forward_value_estimator_keys(self, **kwargs) -> None:
+        """Required by LossModule.set_keys(); without it, set_keys() raises AttributeError.
+
+        DGLoss has no value estimator -- the advantage is ``reward - baseline`` with the
+        baseline computed from the rewards themselves ("mean") or absent ("none"), never from a
+        critic. So there are no estimator keys to forward. What DOES have to happen is
+        invalidating the cached in_keys: a renamed key must show up in ``loss.in_keys``, or a
+        training loop doing ``tensordict.select(*loss.in_keys)`` silently drops it.
+
+        Same fix as GroupRelativePGLoss (#247); DGLoss was missed at the time.
+        """
+        self._set_in_keys()
+
     def _set_in_keys(self):
         keys = []
         _maybe_add_or_extend_key(keys, self.actor_network.in_keys)
