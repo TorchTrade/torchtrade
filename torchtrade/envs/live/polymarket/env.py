@@ -133,11 +133,20 @@ class PolymarketBetEnvConfig:
         if self.initial_cash <= 0:
             raise ValueError(f"initial_cash must be > 0, got {self.initial_cash}")
 
-        # bet_fraction > 1 stakes more than the account holds, drives cash negative, and then
-        # only the `stake <= 0` guard inside _compute_payoff stands between that and INVERTED
-        # P&L (a loss paying out). Same boundary rule; 0 is allowed (a no-bet agent).
+        # bet_fraction > 1 would stake more than the account holds and drive cash negative,
+        # which flips the sign of a loss (a losing bet paying out). Refusing it here is what
+        # GUARANTEES cash >= 0 -- which is in turn why _compute_payoff needs no `stake <= 0`
+        # guard. 0 is allowed (a no-bet agent).
         if not 0.0 <= self.bet_fraction <= 1.0:
             raise ValueError(f"bet_fraction must be in [0, 1], got {self.bet_fraction}")
+
+        # Unvalidated, this is the same silent-default trap as initial_cash, one field over:
+        # > 1 makes the account bankrupt on step 1, before a single bet resolves; < 0 makes
+        # `current < threshold * initial` unsatisfiable and SILENTLY DISABLES the safety stop.
+        if not 0.0 <= self.bankrupt_threshold <= 1.0:
+            raise ValueError(
+                f"bankrupt_threshold must be in [0, 1], got {self.bankrupt_threshold}"
+            )
 
         # frozen=True above is load-bearing, not style: __post_init__ runs ONCE, at
         # construction, so on a mutable dataclass `config.dry_run = False` afterwards sails
@@ -445,8 +454,6 @@ class PolymarketBetEnv(EnvBase):
         Not the realized payoff: ``fill`` is the quoted outcome price, so this assumes a fill at
         the quote with no spread crossing and no fees. Optimistic vs. a real FOK market order.
         """
-        if stake <= 0:
-            return 0.0
         if action == outcome:
             if fill_price <= 0:
                 return 0.0

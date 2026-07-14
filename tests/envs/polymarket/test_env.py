@@ -217,6 +217,48 @@ class TestReset:
 # --- Step ------------------------------------------------------------------- #
 
 class TestStep:
+    def test_step_returns_the_NEXT_market_state_not_the_resolved_one(self):
+        """_step's observation must come from the market the agent will BET ON next.
+
+        The reset path was pinned; this one was not, and `_market_state(next_market)` ->
+        `_market_state(market)` (the stale, already-resolved market) passed the whole suite.
+        Live that is severe: the policy conditions on the OLD market's quotes while the next
+        bet's fill_price is read from the NEW one -- the agent bets at prices it never saw.
+        The two markets here differ in every slot so no swap or staleness can hide.
+        (CLAUDE.md invariant #3, one method over from where it was just fixed.)
+        """
+        resolved = _make_market(yes_price=0.42, spread=0.02, volume_24h=1500.0, liquidity=12000.0)
+        upcoming = _make_market(yes_price=0.77, spread=0.05, volume_24h=999.0, liquidity=4321.0)
+        env, _, _ = _make_env(outcomes=[1], markets=[resolved, upcoming])
+        env.reset()
+        td = env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+        assert torch.equal(
+            td["market_state"],
+            torch.tensor([0.77, 0.05, 999.0, 4321.0], dtype=torch.float32),
+        )
+
+    def test_step_waits_for_endDate_before_polling(self):
+        """The wait must happen BEFORE the poll, and be handed the right market.
+
+        Nothing observed this: _make_env stubs _wait_for_resolution with a bare lambda, so
+        deleting the call, or polling first, both passed. Live, polling a market that has not
+        ended means the midpoint never snaps to 0.99/0.01, the resolution budget burns out, and
+        EVERY bet books reward=0 -- silent in tests, poison in the training data.
+        Also pins that _poll_for_resolution gets the MARKET, not market.condition_id (which
+        would AttributeError on the first live step).
+        """
+        market = _make_market()
+        env, _, _ = _make_env(outcomes=[1], markets=[market, _make_market()], mock_fetch=False)
+        env.reset()
+        rec = MagicMock()
+        env._wait_for_resolution = rec.wait
+        env._poll_for_resolution = lambda *a, **k: (rec.poll(*a, **k), 1)[1]
+        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+
+        assert [c[0] for c in rec.mock_calls] == ["wait", "poll"]   # order, not just presence
+        rec.wait.assert_called_once_with(market.end_date)
+        rec.poll.assert_called_once_with(market)
+
     def test_paper_env_never_touches_the_trader_during_a_step(self):
         """The paper env must not call the trader AT ALL during a step -- not just `.buy`.
 
@@ -434,8 +476,8 @@ class TestFetchResolvedOutcome:
         [
             ("1.0", "0.0", 1),       # Up snapped fully
             ("0.0", "1.0", 0),       # Down snapped fully
-            ("0.995", "0.005", 1),   # boundary: just at threshold (Up)
-            ("0.005", "0.995", 0),   # boundary: just at threshold (Down)
+            ("0.99", "0.01", 1),     # EXACTLY at threshold (Up): >= must not become >
+            ("0.01", "0.99", 0),     # EXACTLY at threshold (Down): <= must not become <
             ("0.989", "0.011", None),  # below the 0.99 threshold
             ("0.99", "0.05", None),    # Up at threshold but Down still too high
             ("0.5", "0.5", None),      # mid-market
@@ -517,7 +559,10 @@ class TestPollForResolution:
         assert env._fetch_resolved_outcome.call_count == 1
 
     def test_retries_until_resolved(self):
-        env = self._real_poll_env(resolution_poll_interval_seconds=15.0)
+        # 7.0, NOT the 15.0 default: pinning the default cannot distinguish a config read
+        # from a hardcoded constant. (The sibling backoff test at test_retry_sleep_... does
+        # this correctly; I missed it here and pinned 15.0, which killed nothing.)
+        env = self._real_poll_env(resolution_poll_interval_seconds=7.0)
         # First two calls: still mid-market. Third: Up wins.
         env._fetch_resolved_outcome = MagicMock(side_effect=[None, None, 1])
         with patch("torchtrade.envs.live.polymarket.env.time.sleep") as mock_sleep:
@@ -526,7 +571,7 @@ class TestPollForResolution:
         # Pin the poll interval BY VALUE, not just "it slept". Nothing pinned this, so
         # hardcoding time.sleep(1.0) passed the whole suite -- turning a 15s poll into a 1s
         # one, i.e. ~600 CLOB requests per resolution instead of ~40.
-        assert mock_sleep.call_args_list == [call(15.0), call(15.0)]
+        assert mock_sleep.call_args_list == [call(7.0), call(7.0)]
 
     def test_returns_none_when_max_wait_exhausted(self):
         env = self._real_poll_env(
@@ -613,6 +658,19 @@ class TestConfigValidation:
         config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
         with pytest.raises(dataclasses.FrozenInstanceError):
             config.dry_run = False
+
+    @pytest.mark.parametrize("bad", [-1.0, 1.5], ids=["negative-disables-the-stop", "over-100%"])
+    def test_bankrupt_threshold_validated_at_the_boundary(self, bad):
+        """The same silent-default trap as initial_cash, one field over.
+
+        > 1: threshold * initial exceeds the starting cash, so the account is bankrupt on step
+        1, before a single bet resolves.
+        < 0: `current < threshold * initial` is unsatisfiable for any non-negative cash, which
+        SILENTLY DISABLES the safety stop -- the exact failure this repo keeps getting bitten
+        by, and the reason _is_bankrupt's old `initial > 0` guard was removed rather than kept.
+        """
+        with pytest.raises(ValueError, match="bankrupt_threshold"):
+            PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", bankrupt_threshold=bad)
 
     @pytest.mark.parametrize("bad", [-0.1, 1.5], ids=["negative", "over-100%"])
     def test_bet_fraction_validated_at_the_boundary(self, bad):
