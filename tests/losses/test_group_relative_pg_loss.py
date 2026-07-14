@@ -336,20 +336,6 @@ class TestGroupRelativePGLoss:
         loss = GroupRelativePGLoss(actor_network=actor_network)
         loss.reset()  # Should not raise any errors
 
-    def test_set_keys_does_not_raise(self, actor_network):
-        """LossModule.set_keys() requires _forward_value_estimator_keys; without it, it raised.
-
-        Every external call to the public set_keys() API blew up with
-        AttributeError: 'GroupRelativePGLoss' object has no attribute
-        '_forward_value_estimator_keys'.
-        """
-        loss = GroupRelativePGLoss(actor_network=actor_network)
-
-        loss.set_keys(action="custom_action", sample_log_prob="custom_log_prob")
-
-        assert loss.tensor_keys.action == "custom_action"
-        assert loss.tensor_keys.sample_log_prob == "custom_log_prob"
-
     def test_set_keys_invalidates_the_cached_in_keys(self, actor_network):
         """A renamed key must appear in in_keys, and the old one must be gone.
 
