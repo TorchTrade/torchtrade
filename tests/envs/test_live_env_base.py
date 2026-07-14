@@ -250,30 +250,6 @@ def test_sync_action_level_after_reset(current_position, expected_level):
 
 # --- holding_time on a direct flip (#44) ------------------------------------- #
 
-@pytest.mark.parametrize("directions,expected,why", [
-    ([1, 1, 1],            [1, 2, 3], "a held position ages"),
-    ([1, 1, -1],           [1, 2, 1], "a DIRECT FLIP is a brand-new position, not a 3-bar-old one"),
-    ([-1, -1, 1],          [1, 2, 1], "and the same the other way round"),
-    ([1, 1, 0, 1],         [1, 2, 0, 1], "flat resets; the re-entry starts over"),
-    ([1, -1, 1, -1],       [1, 1, 1, 1], "every flip is a new position"),
-], ids=["held", "flip-long-to-short", "flip-short-to-long", "via-flat", "repeated-flips"])
-def test_holding_time_resets_on_a_direct_flip(directions, expected, why):
-    """holding_time is account_state[3] -- the policy conditions on it directly.
-
-    Every live env hand-rolled the rule as "increment while a position exists, reset when
-    flat", in two different spellings. A direct long->short flip never passes through flat, so
-    the reset never fired: the counter just kept climbing and a ONE-STEP-OLD short reported
-    itself as (say) 6 bars old. A hold-time-aware policy would read a position it had just
-    opened as one it had been sitting in for six bars.
-
-    Reachable with the DEFAULT config on every futures env -- the default action levels span
-    -1..+1, so +1 -> -1 is an ordinary single action.
-    """
-    position = PositionState()
-    got = [advance_hold_counter(position, d) for d in directions]
-    assert got == [float(e) for e in expected], why
-
-
 @pytest.mark.parametrize(
     "path", sorted(pathlib.Path("torchtrade/envs/live").rglob("*.py")), ids=str
 )

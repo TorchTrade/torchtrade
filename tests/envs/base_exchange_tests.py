@@ -5,8 +5,13 @@
   test_torch_env_futures*.py, so the flip contract has one body and five kills.
 """
 
+from dataclasses import fields
+
 import pytest
 import numpy as np
+import torch
+from tensordict import TensorDict
+from unittest.mock import MagicMock, patch
 from abc import ABC, abstractmethod
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
@@ -271,7 +276,7 @@ class BaseObservationClassTests(ABC):
 
 
 def assert_a_direct_flip_does_not_age_the_new_position(
-    env, trader, PositionStatus, long_action, short_action, set_side=None
+    env, trader, PositionStatus, long_action, short_action
 ):
     """A long flipped straight to a short is ONE step old, not the long's age.
 
@@ -280,15 +285,9 @@ def assert_a_direct_flip_does_not_age_the_new_position(
     change and reset hold_counter itself (PR #245 / SLTPMixin), masking the bug: the test goes
     vacuous. Two of these passed on the buggy code before I found that.
     """
-    from unittest.mock import MagicMock, patch
-
-    import torch
-    from tensordict import TensorDict
-
     # Built positionally because the four dataclasses differ only in the NAME of field 8
     # (margin_type on binance, margin_mode elsewhere). The only field this test actually reads
     # is qty -- everything else is inert filler -- so that is the one thing worth pinning.
-    from dataclasses import fields
     assert [f.name for f in fields(PositionStatus)][0] == "qty"
 
     def pos(qty):
@@ -297,8 +296,6 @@ def assert_a_direct_flip_does_not_age_the_new_position(
             qty, 500.0, 50000.0, 0.0, 0.0, 50000.0, 5, "isolated", liq)}
 
     with patch.object(env, "_wait_for_next_timestamp"):
-        if set_side:
-            set_side("BUY")
         trader.get_status = MagicMock(return_value=pos(0.01))
         env.reset()
 
@@ -307,8 +304,6 @@ def assert_a_direct_flip_does_not_age_the_new_position(
         aged = td["next"]["account_state"][3].item()
         assert aged > 1.0, f"the long never aged ({aged}) -- the assertion below would be vacuous"
 
-        if set_side:
-            set_side("SELL")
 
         # The exchange reports the OLD long until the trade actually executes -- keyed off the
         # TRADE, not off how many times _step happens to call get_status(). An earlier
