@@ -113,6 +113,14 @@ class TestDryRunWithoutClient:
             PolymarketOrderExecutor(private_key="0x", dry_run=False)
 
 
+class TestSafeDefault:
+    def test_executor_defaults_to_paper(self):
+        """The default must be the SAFE mode. It used to default to dry_run=False, so any
+        caller that forgot the kwarg -- including the env -- got a live client. Nothing pinned
+        this, so flipping the default back was an invisible regression."""
+        assert PolymarketOrderExecutor(private_key="x")._dry_run is True
+
+
 class TestDryRunSkipsRealOrder:
     def test_buy_in_dry_run_returns_dry_run_marker(self, patched_module):
         exe = PolymarketOrderExecutor(private_key="0x", dry_run=True)

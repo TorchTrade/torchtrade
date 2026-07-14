@@ -1,11 +1,13 @@
 """Order executor for Polymarket CLOB trading via py-clob-client.
 
-Minimal surface, only the operations :class:`PolymarketBetEnv` needs:
+DORMANT. :class:`PolymarketBetEnv` is paper-only and calls nothing here but
+:meth:`cancel_all` (a no-op in dry-run) -- :meth:`buy` is called by no shipped code path.
+The module is kept as the starting point for the CLOB V2 port, not because it works.
 
-- :meth:`buy`, submits a fill-or-kill market order for a single side.
+- :meth:`buy`, submits a fill-or-kill market order for a single side. Unused.
 - :meth:`cancel_all`, called from :meth:`PolymarketBetEnv.close`.
 
-``dry_run=True`` skips the CLOB client entirely, so paper-trading the env
+``dry_run=True`` (the default) skips the CLOB client entirely, so paper-trading the env
 works without ``py-clob-client`` installed.
 
 .. warning::
@@ -40,13 +42,13 @@ except ImportError:
 class PolymarketOrderExecutor:
     """Buys YES/NO outcome shares on Polymarket via py-clob-client.
 
-    Constructed automatically by :class:`PolymarketBetEnv`; you typically don't
-    instantiate this directly.
+    Constructed automatically by :class:`PolymarketBetEnv`, which only ever builds it in
+    dry-run and never calls :meth:`buy` -- see the module docstring.
     """
 
     def __init__(
         self,
-        private_key: str,
+        private_key: str = "",
         chain_id: int = 137,
         signature_type: int = 0,
         funder: Optional[str] = None,

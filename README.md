@@ -30,7 +30,7 @@ TorchTrade provides modular environments for both live trading with major exchan
 - 🎯 **Multi-Timeframe Observations** - Train on 1m, 5m, 15m, 1h bars simultaneously
 - 🤖 **Multiple RL Algorithms** - PPO, DQN, IQL, GRPO, DSAC, CTRL implementations
 - 📊 **Feature Engineering** - Add technical indicators and custom features
-- 🔴 **Live Trading** - Direct Alpaca, Binance, Bitget, Bybit, OKX, and Polymarket integrations
+- 🔴 **Live Trading** - Direct Alpaca, Binance, Bitget, Bybit, and OKX integrations (Polymarket is paper-only)
 - 🧠 **LLM Integration** - Use GPT-4o-mini or local LLMs as trading agents
 - 🔧 **LLM Tool Use** - Let LLM agents call tools mid-reasoning (e.g. live Google News for sentiment) before choosing an action
 - 🎓 **LLM GRPO Fine-tuning** - Train/finetune a local LLM actor on your data with GRPO ([guide](docs/guides/llm-grpo-training.md))
@@ -181,7 +181,8 @@ Start live trading with these supported platforms:
 
 **[Polymarket](https://polymarket.com/)** - Decentralized prediction market on Polygon
 - **Supported by:** `PolymarketBetEnv`
-- **Features:** Rolling one-shot bets on short-cadence binary markets (BTC/ETH/SOL up-or-down at 5m / 15m / 1h / 4h / daily cadences), Gamma API market scanner, dry-run paper trading without `py-clob-client` installed
+- **Features:** Rolling one-shot bets on short-cadence binary markets (BTC/ETH/SOL up-or-down at 5m / 15m / 1h / 4h / daily cadences), Gamma API market scanner
+- **⚠️ Paper trading only:** `dry_run=False` raises. `py-clob-client` is archived/non-functional (Polymarket moved to CLOB V2), and the env holds bets to resolution while Polymarket only releases collateral on an on-chain redeem no client exposes — so a live bot would drain to zero *while winning*. Reviving live needs the V2 port **and** a redemption workflow.
 - **Get Started:** [Browse markets at Polymarket](https://polymarket.com/)
 
 ### 📈 Stock & Crypto API

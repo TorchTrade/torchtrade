@@ -9,8 +9,9 @@ bet: did the asset go up or down over the bar? The env rolls through the
 series, bet → wait for resolution → collect payoff → next market, without
 holding any position across steps.
 
-All examples default to `dry_run=True`, so you can run them without a funded
-Polygon wallet or `py-clob-client` installed.
+**Paper trading only.** `dry_run=False` raises `NotImplementedError` — see
+[Running for real](#running-for-real). No funded Polygon wallet, private key, or
+`py-clob-client` install is needed (or useful).
 
 ## End-to-end walkthrough
 
@@ -116,9 +117,11 @@ env = PolymarketBetEnv(config)
 >    explicitly **redeemed** on-chain, which no Polymarket client exposes. A live bot that
 >    never redeems would watch its balance drain to zero *while winning*.
 >
-> Reviving live trading needs the CLOB V2 port **and** a redemption workflow. Everything
-> else about the env is real: real market data, real resolution, real payoffs — booked
-> against a simulated balance.
+> Reviving live trading needs the CLOB V2 port **and** a redemption workflow.
+>
+> The market data and the resolution are real. The **payoff is modelled**, not real: it fills
+> at the quoted outcome price with no spread crossing and no fees, so it is optimistic
+> versus the fill-or-kill order a live bot would actually pay.
 
 
 Swapping to ETH 15-minute is a one-line change:
@@ -147,11 +150,11 @@ Cumulative P&L is captured directly in the per-step rewards.
 Each `step()` does five things:
 
 ```
-1. Submit the bet on the current market (skipped in dry_run)
+1. Book the bet on the current market (paper only — no order is submitted)
 2. Sleep until the market's endDate + grace
 3. Poll the CLOB midpoint for each outcome token; resolved when YES mid >= 0.99
    and NO mid <= 0.01 (Up won) or vice versa (Down won)
-4. Compute realized payoff:  win → stake * (1 - fill) / fill, loss → -stake
+4. Compute the modelled payoff:  win → stake * (1 - fill) / fill, loss → -stake
 5. Pick the next active market matching market_slug_prefix and return its market_state
 ```
 

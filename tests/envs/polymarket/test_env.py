@@ -76,7 +76,6 @@ def _make_env(
         scanner.next_active_market.side_effect = list(markets)
 
     trader = MagicMock()
-    trader.buy.return_value = {"success": True}
 
     env = PolymarketBetEnv(config, scanner=scanner, trader=trader)
     env._wait_for_resolution = lambda *a, **k: None
@@ -98,6 +97,24 @@ class TestSpecs:
     def test_check_env_specs_passes(self):
         env, _, _ = _make_env()
         check_env_specs(env)
+
+    def test_market_state_is_exactly_yes_spread_volume_liquidity(self):
+        """The policy's ENTIRE input. Pin the ORDER and the SOURCE FIELD of all four slots.
+
+        Four mutually distinct values, so no swap can hide: spread<->liquidity,
+        volume<->liquidity, and yes_price->no_price each survived the whole suite before this
+        test existed. A permutation is invisible to check_env_specs -- Bounded(0, inf) accepts
+        any order -- and feeding the policy `no_price` inverts the market it thinks it sees.
+        (CLAUDE.md invariant #3: an observation mutation once passed 1977 tests.)
+        """
+        market = _make_market(yes_price=0.42, no_price=0.58, spread=0.02,
+                              volume_24h=1500.0, liquidity=12000.0)
+        env, _, _ = _make_env(markets=[market])
+        td = env.reset()
+        assert torch.equal(
+            td["market_state"],
+            torch.tensor([0.42, 0.02, 1500.0, 12000.0], dtype=torch.float32),
+        )
 
     def test_observation_has_only_market_state(self):
         env, _, _ = _make_env()
@@ -122,10 +139,10 @@ class TestSpecs:
         # whole message be replaced with "pip install py-clob-client, then set dry_run=False"
         # -- the exact dead-end advice this PR exists to delete -- with the suite still green.
         # Both reasons must survive: the dead client AND the redemption blocker.
-        with pytest.raises(NotImplementedError, match="archived"):
+        with pytest.raises(NotImplementedError) as exc:
             PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", dry_run=False)
-        with pytest.raises(NotImplementedError, match="redeem"):
-            PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", dry_run=False)
+        assert "archived" in str(exc.value)   # blocker 1: the client is dead
+        assert "redeem" in str(exc.value)     # blocker 2: the one a port cannot skip
 
     def test_config_is_frozen_so_the_guard_cannot_be_mutated_away(self):
         """__post_init__ runs ONCE. On a mutable dataclass this is the bypass:
@@ -139,6 +156,18 @@ class TestSpecs:
         config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
         with pytest.raises(dataclasses.FrozenInstanceError):
             config.dry_run = False
+
+    def test_paper_env_never_touches_the_trader_during_a_step(self):
+        """The paper env must not call the trader AT ALL during a step -- not just `.buy`.
+
+        Asserting `buy.assert_not_called()` pinned only that one attribute name; a _step that
+        called `trader.submit_market_order(...)` would have passed. mock_calls == [] pins the
+        whole surface, which is the actual contract: nothing is submitted, ever.
+        """
+        env, _, trader = _make_env()
+        env.reset()
+        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+        assert trader.mock_calls == []
 
     @pytest.mark.parametrize("bad", [-0.1, 1.5], ids=["negative", "over-100%"])
     def test_bet_fraction_validated_at_the_boundary(self, bad):
@@ -173,14 +202,31 @@ class TestSpecs:
             PolymarketOrderExecutor,
         )
         assert isinstance(env.trader, PolymarketOrderExecutor)
-        # THE load-bearing assertion. Without it, dropping `dry_run=config.dry_run` from the
-        # executor call leaves a PAPER-configured env holding a LIVE trader that builds a real
-        # authenticated CLOB client from the private key -- and the suite stays green (it only
-        # failed here by accident, because py-clob-client happens not to be installed).
+        # Pins that the env actually wires the executor to PAPER rather than trusting the
+        # executor's default. Belt-and-braces: the executor now defaults to dry_run=True too,
+        # so BOTH must regress before a live client can be built -- this assertion is what
+        # makes that take two mistakes instead of one.
         assert env.trader._dry_run is True
 
 
 # --- Pure helpers ----------------------------------------------------------- #
+
+class TestClose:
+    def test_close_works_through_a_transform(self):
+        """Regression: `def close(self)` did not accept EnvBase's keyword-only
+        `raise_if_closed`, which TransformedEnv forwards -- so closing a wrapped env raised
+        TypeError. RewardSum is the wrapper this env's own spec comment points users at."""
+        from torchrl.envs import TransformedEnv
+        from torchrl.envs.transforms import RewardSum
+
+        env, _, trader = _make_env()
+        TransformedEnv(env, RewardSum()).close()   # must not raise
+        trader.cancel_all.assert_called_once()
+        # NOT asserting is_closed: EnvBase.close() only sets is_closed=True, and this env's
+        # is_closed is ALREADY True from construction -- so the assertion would pass whether or
+        # not close() delegates upward. A dead assertion is worse than no assertion. The
+        # super() call in close() is correct delegation, but it is currently unobservable.
+
 
 class TestComputePayoff:
     @pytest.mark.parametrize(
@@ -191,8 +237,12 @@ class TestComputePayoff:
             (1, 0.4, 0, -100.0),
             (0, 0.4, 1, -100.0),
             (1, 0.5, 1, 100.0),
+            # A market quoting 0.0 must not ZeroDivisionError mid-episode. The chosen silent
+            # default -- a WIN at fill 0 books 0.0, not an infinite payout -- is pinned here
+            # because deleting the guard otherwise passes the whole suite.
+            (1, 0.0, 1, 0.0),
         ],
-        ids=["up-wins", "down-wins", "up-loses", "down-loses", "even-money"],
+        ids=["up-wins", "down-wins", "up-loses", "down-loses", "even-money", "zero-fill-price"],
     )
     def test_payoff(self, action, fill, outcome, expected):
         assert PolymarketBetEnv._compute_payoff(action, fill, outcome, 100.0) == pytest.approx(expected)
@@ -249,12 +299,6 @@ class TestStep:
         env.reset()
         td = env._step(TensorDict({"action": torch.tensor(action)}, batch_size=()))
         assert td["reward"].item() == pytest.approx(expected_payoff)
-
-    def test_dry_run_skips_trader_buy(self):
-        env, _, trader = _make_env(config_overrides={"dry_run": True})
-        env.reset()
-        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
-        trader.buy.assert_not_called()
 
     def test_cash_updates_after_win_and_loss(self):
         env, _, _ = _make_env(
@@ -574,7 +618,9 @@ class TestWaitForResolution:
             env._wait_for_resolution(future)
             mock_sleep.assert_called_once()
             slept_for = mock_sleep.call_args.args[0]
-            assert slept_for > 100  # 120s + 30s grace ≈ 150s
+            # By VALUE, not "> 100": a 120s horizon plus the configured 30s grace. The loose
+            # bound let `target = end_dt` (grace dropped entirely) pass, since 120 > 100.
+            assert slept_for == pytest.approx(150, abs=2)
 
 
 class TestCloseLifecycle:

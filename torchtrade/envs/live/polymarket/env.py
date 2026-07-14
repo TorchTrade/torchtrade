@@ -51,18 +51,13 @@ logger = logging.getLogger(__name__)
 # Gamma's outcomePrices.
 CLOB_API_BASE = "https://clob.polymarket.com"
 
-# For whoever does the CLOB V2 port -- the part LIVE_UNSUPPORTED does not say.
-#
-# The redemption blocker is the deep one, and porting to the V2 SDK does NOT fix it. This env
-# never sells: it buys and holds every position through resolution. Polymarket resolution does
-# not move collateral, so a winning share is worth $1 but stays an ERC-1155 token until an
-# explicit redeemPositions call -- which must go through their Relayer, because the proxy/Safe
-# wallet owns the position, not the EOA.
-#
-# The corollary is the whole reason this env is refused rather than repaired: you CANNOT fix
-# the simulated `cash` by reading the real wallet. While winnings sit unredeemed the collateral
-# balance is not the account's worth, so wiring it in would make a WINNING agent watch its
-# balance drain and declare itself bankrupt -- strictly worse than the simulation it replaced.
+# Two implementation details for the CLOB V2 port, on top of what LIVE_UNSUPPORTED tells users:
+#   - The redeem must go through Polymarket's Relayer: the proxy/Safe wallet owns the ERC-1155
+#     position, not the EOA, so redeemPositions sent from the EOA redeems nothing.
+#   - Corollary, and the reason this env is refused rather than repaired: you CANNOT fix the
+#     simulated `cash` by reading the real wallet. While winnings sit unredeemed the collateral
+#     balance is not the account's worth, so a wallet-backed balance would make a WINNING agent
+#     drain to zero and declare itself bankrupt -- worse than the simulation it replaced.
 LIVE_UNSUPPORTED = (
     "Live Polymarket trading is not supported. `dry_run=False` is refused rather than "
     "silently mis-trading:\n"
@@ -119,6 +114,15 @@ class PolymarketBetEnvConfig:
     # 10 min is a safe ceiling.
     resolution_max_wait_seconds: float = 600.0
 
+    # When the scanner returns no upcoming market, retry at the env level after
+    # this sleep. The scanner's internal retry budget (~48s) covers brief blips;
+    # this layer covers minutes-long Gamma outages where the underlying series
+    # is still running. For continuous short-cadence series (e.g. 5-min crypto),
+    # "no next market" is almost always "API unreachable" rather than "series
+    # ended", so a few sleep+retry rounds before terminating saves the run.
+    next_market_max_attempts: int = 3
+    next_market_retry_sleep_seconds: float = 30.0
+
     def __post_init__(self):
         # Validated at the boundary, not guarded inside the rule. _is_bankrupt() used to carry
         # an `initial > 0` guard, which silently turned a nonsense config into "never bankrupt"
@@ -136,20 +140,12 @@ class PolymarketBetEnvConfig:
         # frozen=True above is load-bearing, not style: __post_init__ runs ONCE, at
         # construction, so on a mutable dataclass `config.dry_run = False` afterwards sails
         # straight past this check and the guard becomes a speed bump rather than a boundary.
-        # (Safe for TorchRL: pickle/deepcopy restore via __dict__ without re-running
-        # __post_init__, so ParallelEnv workers and env.clone() cannot spuriously raise, while
-        # dataclasses.replace() DOES re-validate.)
+        # (Safe for TorchRL: pickle/deepcopy restore via __dict__ WITHOUT re-running
+        # __post_init__, so ParallelEnv/SerialEnv workers -- which re-pickle the env factory,
+        # verified under both fork and spawn -- cannot spuriously raise on an already-valid
+        # config. dataclasses.replace() DOES re-validate, which is what we want.)
         if not self.dry_run:
             raise NotImplementedError(LIVE_UNSUPPORTED)
-
-    # When the scanner returns no upcoming market, retry at the env level after
-    # this sleep. The scanner's internal retry budget (~48s) covers brief blips;
-    # this layer covers minutes-long Gamma outages where the underlying series
-    # is still running. For continuous short-cadence series (e.g. 5-min crypto),
-    # "no next market" is almost always "API unreachable" rather than "series
-    # ended", so a few sleep+retry rounds before terminating saves the run.
-    next_market_max_attempts: int = 3
-    next_market_retry_sleep_seconds: float = 30.0
 
 
 class PolymarketBetEnv(EnvBase):
@@ -163,7 +159,7 @@ class PolymarketBetEnv(EnvBase):
     3. No order is submitted (paper-only; see ``LIVE_UNSUPPORTED``).
     4. The env sleeps until the market's endDate plus a small grace period.
     5. The resolved outcome is polled from the Polymarket CLOB
-       (``/midpoint`` per outcome token); the realized payoff is computed
+       (``/midpoint`` per outcome token); the modelled payoff is computed
        and returned as the step's reward.
     6. The scanner picks the next active market matching ``market_slug_prefix``
        and its market_state becomes the next observation.
@@ -187,7 +183,6 @@ class PolymarketBetEnv(EnvBase):
     def __init__(
         self,
         config: PolymarketBetEnvConfig,
-        private_key: str = "",
         scanner: Optional[MarketScanner] = None,
         trader=None,
         device: Optional[torch.device] = None,
@@ -209,9 +204,10 @@ class PolymarketBetEnv(EnvBase):
             from torchtrade.envs.live.polymarket.order_executor import (
                 PolymarketOrderExecutor,
             )
-            self.trader = PolymarketOrderExecutor(
-                private_key=private_key, dry_run=config.dry_run
-            )
+            # No private key: paper-only, so nothing is ever signed or submitted. The port
+            # re-adds one here. dry_run is passed explicitly (not left to the executor's
+            # default) so the two cannot silently disagree -- a test pins it.
+            self.trader = PolymarketOrderExecutor(dry_run=config.dry_run)
 
         # Specs, Binary for bool flags (per TorchRL spec semantics) and
         # reward inside a Composite so RewardSum-style transforms work.
@@ -275,13 +271,8 @@ class PolymarketBetEnv(EnvBase):
         fill_price = market.yes_price if action_idx == 1 else market.no_price
         stake = self.cash * self.config.bet_fraction
 
-        # No order is submitted -- this env is paper-only (LIVE_UNSUPPORTED). The CLOB V2 port
-        # re-enters HERE: submit before _wait_for_resolution, redeem the winnings after it.
-        # The order-submission branch that used to sit here, and the four tests that pinned its
-        # safety contract (a failed order must book zero, not phantom, P&L), were removed
-        # together -- recover both with `git show 1a83d54^ -- torchtrade/ tests/`. They are not
-        # a head start: the V1 call shape (buy() -> {"success": bool}) does not survive the
-        # port, and reading the real wallet is NOT sufficient without the redeem.
+        # Paper-only: no order is submitted (LIVE_UNSUPPORTED). The CLOB V2 port re-enters
+        # here -- submit before _wait_for_resolution, redeem the winnings after it.
         self._wait_for_resolution(market.end_date)
         outcome = self._poll_for_resolution(market)
 
@@ -450,7 +441,11 @@ class PolymarketBetEnv(EnvBase):
     def _compute_payoff(
         action: int, fill_price: float, outcome: int, stake: float
     ) -> float:
-        """Realized USDC payoff. Win pays ``stake * (1 - fill) / fill``; loss returns ``-stake``."""
+        """MODELLED USDC payoff. Win pays ``stake * (1 - fill) / fill``; loss returns ``-stake``.
+
+        Not the realized payoff: ``fill`` is the quoted outcome price, so this assumes a fill at
+        the quote with no spread crossing and no fees. Optimistic vs. a real FOK market order.
+        """
         if stake <= 0:
             return 0.0
         if action == outcome:
@@ -472,5 +467,9 @@ class PolymarketBetEnv(EnvBase):
             enabled=self.config.done_on_bankruptcy,
         )
 
-    def close(self):
+    def close(self, *, raise_if_closed: bool = True):
+        # Signature must match EnvBase.close(*, raise_if_closed=True): TransformedEnv forwards
+        # that kwarg, so a bare `def close(self)` made TransformedEnv(env, RewardSum()).close()
+        # raise TypeError -- on the very composition this env's spec comment advertises.
         self.trader.cancel_all()
+        super().close(raise_if_closed=raise_if_closed)
