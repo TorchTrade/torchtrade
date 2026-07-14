@@ -150,6 +150,32 @@ class TestSpecs:
 
 # --- Pure helpers ----------------------------------------------------------- #
 
+class TestConstructorCompat:
+    """The private_key removal must not break callers SILENTLY."""
+
+    def test_private_key_is_refused_with_an_explanation_not_a_bare_TypeError(self):
+        """Old callers passed private_key=... (the repo's own example did). Rather than let
+        Python emit a bare "unexpected keyword argument", say what happened and why.
+
+        It is REFUSED, not ignored: silently swallowing a real private key would tell the
+        caller their key is configured when the env can never sign anything.
+        """
+        cfg = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
+        with pytest.raises(TypeError, match="paper-only"):
+            PolymarketBetEnv(cfg, private_key="0xdeadbeef", scanner=MagicMock())
+
+    def test_positional_misuse_is_loud_not_silent(self):
+        """private_key used to be the SECOND POSITIONAL parameter. Removing it would have
+        silently rebound `PolymarketBetEnv(config, "0xkey")` to `scanner`, which then blows up
+        much later with an AttributeError on a str -- a silent break, which is precisely the
+        bug class this whole env is being fixed for. Keyword-only args make it a TypeError at
+        the call site instead.
+        """
+        cfg = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
+        with pytest.raises(TypeError):
+            PolymarketBetEnv(cfg, "0xdeadbeef")   # noqa: the point is that this must raise
+
+
 class TestClose:
     def test_close_works_through_a_transform(self):
         """Regression: `def close(self)` did not accept EnvBase's keyword-only

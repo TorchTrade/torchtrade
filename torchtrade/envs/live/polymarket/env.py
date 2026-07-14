@@ -197,10 +197,27 @@ class PolymarketBetEnv(EnvBase):
     def __init__(
         self,
         config: PolymarketBetEnvConfig,
+        *,
         scanner: Optional[MarketScanner] = None,
         trader=None,
         device: Optional[torch.device] = None,
+        private_key: Optional[str] = None,
     ):
+        # private_key used to be the SECOND POSITIONAL parameter. Dropping it silently rebound
+        # `PolymarketBetEnv(config, "0xkey")` to `scanner`, which then fails much later with a
+        # confusing AttributeError on a str -- a silent break, the exact class of bug this env
+        # is being fixed for. Hence: everything after `config` is keyword-only (so the
+        # positional form is a loud TypeError), and private_key is still ACCEPTED so it can be
+        # rejected with an explanation rather than a bare "unexpected keyword argument".
+        # It is refused, not ignored: silently swallowing a real private key would tell the
+        # caller their key is configured when the env can never sign anything.
+        if private_key is not None:
+            raise TypeError(
+                "PolymarketBetEnv no longer takes private_key: the env is paper-only "
+                "(dry_run=False is refused), so nothing is ever signed or submitted and a key "
+                "would do nothing. Remove the argument. See LIVE_UNSUPPORTED in this module."
+            )
+
         super().__init__(device=device or torch.device("cpu"), batch_size=())
 
         if not config.market_slug_prefix:

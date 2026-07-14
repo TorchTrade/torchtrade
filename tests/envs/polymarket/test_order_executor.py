@@ -1,181 +1,70 @@
-"""Tests for the slim Polymarket order executor (buy + cancel_all).
+"""Tests for the paper-only Polymarket order executor.
 
-NOTE: the live path exercised below is DORMANT -- PolymarketBetEnv is paper-only and calls
-nothing here but cancel_all() (a no-op in dry-run). These tests pin the V1 call shape for
-the CLOB V2 port; they do not cover any shipped code path. See LIVE_UNSUPPORTED in env.py.
+The V1 live path (ClobClient construction, MarketOrderArgs/OrderType.FOK order posting) and
+the ~10 tests that pinned its call shape were deleted together: ``dry_run=False`` is now
+REFUSED by the constructor, so none of it was reachable. What remains is the contract that
+actually matters -- this class cannot submit an order, and cannot be talked into trying.
 """
-
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from torchtrade.envs.live.polymarket.order_executor import PolymarketOrderExecutor
 
 
-def _make_order_args(token_id, amount, side):
-    obj = MagicMock()
-    obj.token_id = token_id
-    obj.amount = amount
-    obj.side = side
-    return obj
+class TestLiveIsRefused:
+    """Makes the paper-only contract true for the PUBLIC API, not just for the env.
 
-
-@pytest.fixture
-def patched_module():
-    """Patch the optional py-clob-client imports for the whole test."""
-    mock_order_type = MagicMock()
-    mock_order_type.FOK = "FOK"
-    patches = [
-        patch(
-            "torchtrade.envs.live.polymarket.order_executor.ClobClient",
-            new=MagicMock(),
-        ),
-        patch(
-            "torchtrade.envs.live.polymarket.order_executor.MarketOrderArgs",
-            side_effect=_make_order_args,
-        ),
-        patch(
-            "torchtrade.envs.live.polymarket.order_executor.OrderType",
-            new=mock_order_type,
-        ),
-    ]
-    for p in patches:
-        p.start()
-    yield
-    for p in patches:
-        p.stop()
-
-
-@pytest.fixture
-def executor(patched_module):
-    # dry_run=False is now explicit: the executor DEFAULTS to paper, so the live path has
-    # to be asked for by name.
-    exe = PolymarketOrderExecutor(private_key="0xtest", chain_id=137, dry_run=False)
-    exe.client = MagicMock()
-    exe.client.post_order.return_value = {"success": True, "orderID": "ord-1"}
-    return exe
-
-
-class TestBuy:
-    def test_returns_success_dict(self, executor):
-        result = executor.buy(token_id="tok_yes_1", amount_usdc=100.0)
-        assert result["success"] is True
-
-    def test_returns_failure_dict_on_post_order_exception(self, executor):
-        executor.client.post_order = MagicMock(side_effect=Exception("api down"))
-        result = executor.buy(token_id="tok", amount_usdc=1.0)
-        assert result == {"success": False, "error": "api down"}
-
-    def test_pins_buy_side_and_fok_order_type(self, executor):
-        """A BUY↔SELL or FOK↔GTC swap must fail this test, not silently pass."""
-        from torchtrade.envs.live.polymarket import order_executor as oe
-
-        executor.buy(token_id="tok_yes", amount_usdc=42.0)
-        # MarketOrderArgs called with side=BUY (the constant from the package)
-        args_call = oe.MarketOrderArgs.call_args
-        assert args_call.kwargs["side"] == oe.BUY
-        assert args_call.kwargs["token_id"] == "tok_yes"
-        assert args_call.kwargs["amount"] == 42.0
-        # post_order called with OrderType.FOK (fill-or-kill)
-        post_call = executor.client.post_order.call_args
-        assert post_call.args[1] == oe.OrderType.FOK
-
-
-class TestCancelAll:
-    def test_returns_true_on_success(self, executor):
-        assert executor.cancel_all() is True
-
-    def test_returns_false_on_api_failure(self, executor):
-        executor.client.cancel_all = MagicMock(side_effect=Exception("503"))
-        assert executor.cancel_all() is False
-
-
-class TestDryRunWithoutClient:
-    """``dry_run=True`` works without py-clob-client installed."""
-
-    def test_constructs_with_no_clob_dependency(self, monkeypatch):
-        monkeypatch.setattr(
-            "torchtrade.envs.live.polymarket.order_executor.ClobClient", None
-        )
-        exe = PolymarketOrderExecutor(private_key="0x", dry_run=True)
-        assert exe.client is None
-
-    def test_methods_return_safe_defaults_without_client(self, monkeypatch):
-        monkeypatch.setattr(
-            "torchtrade.envs.live.polymarket.order_executor.ClobClient", None
-        )
-        exe = PolymarketOrderExecutor(private_key="0x", dry_run=True)
-        assert exe.buy("tok", 1.0)["success"] is True
-        assert exe.cancel_all() is True
-
-    def test_live_mode_error_does_not_advise_installing_the_dead_package(self, monkeypatch):
-        """The old message said "pip install py-clob-client" -- advice that now sends people
-        to an archived, non-functional package. Pin the honest message instead."""
-        monkeypatch.setattr(
-            "torchtrade.envs.live.polymarket.order_executor.ClobClient", None
-        )
-        with pytest.raises(ImportError, match="archived and no longer functional"):
-            PolymarketOrderExecutor(private_key="0x", dry_run=False)
-
-
-class TestSafeDefault:
-    def test_executor_defaults_to_paper(self):
-        """The default must be the SAFE mode. It used to default to dry_run=False, so any
-        caller that forgot the kwarg -- including the env -- got a live client. Nothing pinned
-        this, so flipping the default back was an invisible regression."""
-        assert PolymarketOrderExecutor(private_key="x")._dry_run is True
-
-
-class TestDryRunSkipsRealOrder:
-    def test_buy_in_dry_run_returns_dry_run_marker(self, patched_module):
-        exe = PolymarketOrderExecutor(private_key="0x", dry_run=True)
-        exe.client = MagicMock()  # would error if hit
-        result = exe.buy(token_id="tok", amount_usdc=10.0)
-        assert result == {"success": True, "dry_run": True}
-        exe.client.create_market_order.assert_not_called()
-        exe.client.post_order.assert_not_called()
-
-
-class TestDryRunSkipsClientConstructionEvenWhenAvailable:
-    """dry_run=True must not touch the network even when py-clob-client IS installed.
-
-    The previous behavior constructed a real ``ClobClient`` and called
-    ``set_api_creds(create_or_derive_api_creds())`` (a network roundtrip + valid
-    private key requirement) whenever the package was available, regardless of
-    ``dry_run``. Paper trading should be fully offline.
+    PolymarketOrderExecutor is exported from ``torchtrade.envs.live``. With the config
+    boundary on PolymarketBetEnv as the only gate, a caller using the exported class directly
+    could still build a live CLOB client from a real private key and post an order -- against
+    an archived V1 API, with no redemption workflow. The env believing itself paper-only did
+    nothing to stop that.
     """
 
-    def test_dry_run_does_not_construct_clob_client(self):
-        mock_clob_class = MagicMock()
-        with patch(
-            "torchtrade.envs.live.polymarket.order_executor.ClobClient",
-            new=mock_clob_class,
-        ):
-            exe = PolymarketOrderExecutor(private_key="0xtest", dry_run=True)
-        assert exe.client is None
-        mock_clob_class.assert_not_called()
+    def test_live_mode_raises(self):
+        with pytest.raises(NotImplementedError) as exc:
+            PolymarketOrderExecutor(private_key="0xtest", dry_run=False)
+        # Pin the SUBSTANCE, not a contentless phrase: both blockers must survive, or the
+        # message could be reduced to "not supported yet" and still pass.
+        assert "archived" in str(exc.value)
+        assert "redeem" in str(exc.value)
 
-    def test_dry_run_does_not_derive_api_creds(self):
-        """Critical: the API-creds derivation hits the wallet RPC."""
-        mock_clob_instance = MagicMock()
-        mock_clob_class = MagicMock(return_value=mock_clob_instance)
-        with patch(
-            "torchtrade.envs.live.polymarket.order_executor.ClobClient",
-            new=mock_clob_class,
-        ):
-            PolymarketOrderExecutor(private_key="0xtest", dry_run=True)
-        mock_clob_instance.create_or_derive_api_creds.assert_not_called()
-        mock_clob_instance.set_api_creds.assert_not_called()
+    def test_live_mode_raises_even_with_a_funded_looking_config(self):
+        """A full live config -- key, chain, proxy signature type, funder -- must not sneak
+        past. The refusal is on dry_run, not on whether the caller looks prepared."""
+        with pytest.raises(NotImplementedError):
+            PolymarketOrderExecutor(
+                private_key="0xdeadbeef",
+                chain_id=137,
+                signature_type=2,
+                funder="0xproxy",
+                dry_run=False,
+            )
 
-    def test_dry_run_buy_returns_marker_when_package_available(self):
-        """End-to-end dry-run contract: even with py-clob-client installed,
-        ``buy()`` must return the dry-run marker without touching the network."""
-        mock_clob_class = MagicMock()
-        with patch(
-            "torchtrade.envs.live.polymarket.order_executor.ClobClient",
-            new=mock_clob_class,
-        ):
-            exe = PolymarketOrderExecutor(private_key="0xtest", dry_run=True)
-        result = exe.buy(token_id="tok", amount_usdc=10.0)
-        assert result == {"success": True, "dry_run": True}
-        mock_clob_class.assert_not_called()
+
+class TestPaperExecution:
+    def test_defaults_to_paper(self):
+        """The DEFAULT must be the safe mode. It used to default to dry_run=False, so any
+        caller who forgot the kwarg -- including the env -- got a live client."""
+        assert PolymarketOrderExecutor(private_key="x")._dry_run is True
+
+    def test_no_clob_client_is_ever_constructed(self):
+        """Constructing a ClobClient would derive API creds -- a network roundtrip against the
+        wallet. That shipped as a real bug once; it is now structurally impossible."""
+        assert PolymarketOrderExecutor(private_key="0xtest").client is None
+
+    def test_buy_submits_nothing(self):
+        assert PolymarketOrderExecutor().buy(token_id="tok", amount_usdc=10.0) == {
+            "success": True,
+            "dry_run": True,
+        }
+
+    def test_cancel_all_is_a_noop(self):
+        assert PolymarketOrderExecutor().cancel_all() is True
+
+    def test_does_not_depend_on_py_clob_client_at_all(self):
+        """Paper trading must not need the archived package. The module no longer imports it,
+        so this is structural now rather than a runtime dry_run branch."""
+        import torchtrade.envs.live.polymarket.order_executor as oe
+
+        assert not hasattr(oe, "ClobClient")
