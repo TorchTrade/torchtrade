@@ -659,12 +659,16 @@ class TestConfigValidation:
         with pytest.raises(dataclasses.FrozenInstanceError):
             config.dry_run = False
 
-    @pytest.mark.parametrize("bad", [-1.0, 1.5], ids=["negative-disables-the-stop", "over-100%"])
+    @pytest.mark.parametrize(
+        "bad", [-1.0, 1.0, 1.5],
+        ids=["negative-disables-the-stop", "exactly-1.0", "over-100%"],
+    )
     def test_bankrupt_threshold_validated_at_the_boundary(self, bad):
         """The same silent-default trap as initial_cash, one field over.
 
-        > 1: threshold * initial exceeds the starting cash, so step 1 terminates unless the
-        opening bet alone lifts cash back above the line.
+        >= 1: the account starts at or below its own bankruptcy line. The domain is half-open
+        [0, 1) to match SequentialTradingEnvConfig, which already settled this field's domain
+        -- a live env inventing a different one is exactly the drift we keep paying for.
         < 0: `current < threshold * initial` is unsatisfiable for any non-negative cash, which
         SILENTLY DISABLES the safety stop -- the exact failure this repo keeps getting bitten
         by, and the reason _is_bankrupt's old `initial > 0` guard was removed rather than kept.

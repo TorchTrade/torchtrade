@@ -145,9 +145,13 @@ class PolymarketBetEnvConfig:
         # > 1 puts the account under the bankruptcy line at reset, so step 1 terminates unless
         # the opening bet alone lifts cash above threshold*initial_cash; < 0 makes
         # `current < threshold * initial` unsatisfiable and SILENTLY DISABLES the safety stop.
-        if not 0.0 <= self.bankrupt_threshold <= 1.0:
+        # [0, 1), half-open, matching SequentialTradingEnvConfig and
+        # VectorizedSequentialTradingEnvConfig -- this codebase already settled this exact
+        # field's domain ("bankrupt_threshold >= 1 is nonsensical"), and a live env inventing a
+        # different one is the drift the "apply to ALL environments" rule exists to stop.
+        if not 0.0 <= self.bankrupt_threshold < 1.0:
             raise ValueError(
-                f"bankrupt_threshold must be in [0, 1], got {self.bankrupt_threshold}"
+                f"bankrupt_threshold must be in [0, 1), got {self.bankrupt_threshold}"
             )
 
         # frozen=True above is load-bearing, not style: __post_init__ runs ONCE, at
