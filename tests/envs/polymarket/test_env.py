@@ -1,5 +1,6 @@
 """Tests for PolymarketBetEnv."""
 
+import dataclasses
 import itertools
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, call, patch
@@ -117,8 +118,34 @@ class TestSpecs:
         regression that quietly downgraded live to paper (or dropped the check) would let a
         user believe real money was at work.
         """
-        with pytest.raises(NotImplementedError, match="not supported"):
+        # Match the SUBSTANCE, not a contentless phrase. Pinning only "not supported" let the
+        # whole message be replaced with "pip install py-clob-client, then set dry_run=False"
+        # -- the exact dead-end advice this PR exists to delete -- with the suite still green.
+        # Both reasons must survive: the dead client AND the redemption blocker.
+        with pytest.raises(NotImplementedError, match="archived"):
             PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", dry_run=False)
+        with pytest.raises(NotImplementedError, match="redeem"):
+            PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", dry_run=False)
+
+    def test_config_is_frozen_so_the_guard_cannot_be_mutated_away(self):
+        """__post_init__ runs ONCE. On a mutable dataclass this is the bypass:
+
+            config = PolymarketBetEnvConfig(...)   # dry_run=True, passes
+            config.dry_run = False                 # guard never re-runs
+            env = PolymarketBetEnv(config)         # wires a LIVE trader
+
+        frozen=True is what turns the check from a speed bump into a boundary.
+        """
+        config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            config.dry_run = False
+
+    @pytest.mark.parametrize("bad", [-0.1, 1.5], ids=["negative", "over-100%"])
+    def test_bet_fraction_validated_at_the_boundary(self, bad):
+        """bet_fraction > 1 stakes more than the account holds -> cash goes negative -> a LOSS
+        pays out (inverted P&L). Refuse the config rather than guard downstream."""
+        with pytest.raises(ValueError, match="bet_fraction"):
+            PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", bet_fraction=bad)
 
     def test_default_config_is_paper(self):
         """The DEFAULT must be the safe mode.
@@ -146,6 +173,11 @@ class TestSpecs:
             PolymarketOrderExecutor,
         )
         assert isinstance(env.trader, PolymarketOrderExecutor)
+        # THE load-bearing assertion. Without it, dropping `dry_run=config.dry_run` from the
+        # executor call leaves a PAPER-configured env holding a LIVE trader that builds a real
+        # authenticated CLOB client from the private key -- and the suite stays green (it only
+        # failed here by accident, because py-clob-client happens not to be installed).
+        assert env.trader._dry_run is True
 
 
 # --- Pure helpers ----------------------------------------------------------- #
@@ -238,8 +270,16 @@ class TestStep:
         env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))  # Up wins
         after_win = env.cash
         env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))  # Up loses
-        assert after_win > before
-        assert env.cash < after_win
+
+        # EXACT values, not just direction: stake COMPOUNDS off current cash, and a fixed stake
+        # (initial_cash * frac) satisfies "up then down" just as well, so directional asserts
+        # cannot tell the two apart. This is the rule that decides how much is at risk per bet.
+        # bet_fraction=0.1, fill=0.4 -> win pays stake*(1-f)/f = 1.5x stake.
+        #   stake1 = 1000 * 0.1 = 100      -> +150  -> 1150
+        #   stake2 = 1150 * 0.1 = 115      -> -115  -> 1035   (a fixed stake would give 1050)
+        assert before == pytest.approx(1000.0)
+        assert after_win == pytest.approx(1150.0)
+        assert env.cash == pytest.approx(1035.0)
 
     def test_max_steps_truncation(self):
         env, _, _ = _make_env(

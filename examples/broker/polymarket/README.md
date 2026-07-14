@@ -194,14 +194,26 @@ discrete index; an RL policy gets logits over two classes.
 
 ## Running for real
 
-To trade real funds:
+**You can't, and you shouldn't try.** `dry_run=False` raises `NotImplementedError`. The
+previous instructions here (set `POLYGON_PRIVATE_KEY`, `pip install py-clob-client`, flip
+`dry_run`) were all wrong, and following them would have lost money quietly. Two blockers:
 
-1. Set `POLYGON_PRIVATE_KEY` in `.env`, the wallet must hold USDC.e on Polygon.
-2. `pip install py-clob-client`.
-3. Set `dry_run=False` in `PolymarketBetEnvConfig`.
+1. **The client is dead.** `py-clob-client` was archived in May 2026 — *"no longer functional
+   and should not be used for new or existing integrations."* Polymarket's CLOB V2 uses new
+   contracts and replaced USDC.e collateral with pUSD. No order this env submits can reach
+   production.
+2. **There is no redemption.** This env buys and holds every bet through resolution, and
+   Polymarket does **not** release collateral when a market resolves — a winning share is
+   worth $1 but stays an ERC-1155 token until an explicit on-chain `redeemPositions` call,
+   which no Polymarket client exposes (it has to go through their Relayer, because the
+   proxy wallet owns the position, not your EOA). A bot that never redeems watches its
+   spendable balance **drain to zero while it is winning.**
 
-Always start with `dry_run=True` and verify the bet timing, payoff
-computation, and accounting before flipping the switch.
+Blocker 2 is why this can't be fixed by "just reading the real wallet": while winnings sit
+unredeemed, the collateral balance isn't the account's worth, so a wallet-backed balance
+would make a *winning* agent declare itself bankrupt.
+
+Reviving live trading needs the CLOB V2 port **and** a redemption workflow.
 
 ## See Also
 

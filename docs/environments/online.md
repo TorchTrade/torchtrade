@@ -385,8 +385,8 @@ env = OKXFuturesSLTPTorchTradingEnv(
 !!! note "Authentication"
     Polymarket uses a **Polygon private key**, not an API key/secret pair. The key is used to derive CLOB API credentials at runtime.
 
-!!! warning "USDC Required"
-    The wallet must hold USDC.e on Polygon to place real orders. Use `dry_run=True` to validate the pipeline without spending capital, `dry_run` works without `py-clob-client` installed.
+!!! danger "Paper trading only, live is refused"
+    `dry_run=False` raises `NotImplementedError`. Two blockers: (1) `py-clob-client` was **archived** in May 2026 ("no longer functional") — Polymarket's CLOB V2 uses new contracts and replaced USDC.e collateral with pUSD, so no order can reach production; (2) this env buys and holds every bet through resolution, and Polymarket does **not** release collateral on resolution — winning shares must be **redeemed** on-chain via their Relayer, which no client exposes. Without the redeem, a bot's spendable balance drains to zero *while it is winning*. That is also why the balance cannot simply be read from the wallet. Reviving live needs the CLOB V2 port **and** a redemption workflow.
 
 ### PolymarketBetEnv
 
@@ -402,19 +402,18 @@ config = PolymarketBetEnvConfig(
     bet_fraction=0.01,                    # stake 1 % of cash per bet
     max_steps=10,                         # 10 bets per episode
     initial_cash=1_000.0,                 # for dry-run accounting
-    dry_run=True,                         # paper trading (recommended!)
+    dry_run=True,                         # the only supported mode (the default)
 )
 
 env = PolymarketBetEnv(
     config=config,
-    private_key=os.getenv("POLYGON_PRIVATE_KEY", ""),
 )
 # observation_spec: {"market_state": (4,)}  → [yes_price, spread, vol_24h, liquidity]
 # action_spec:      Categorical(2)            → 0 = Down, 1 = Up
 ```
 
 Each `step()`:
-1. Submits the bet on the current market (skipped in `dry_run`).
+1. Books the bet on the current market (paper only — no order is submitted).
 2. Sleeps until the market's `endDate` plus a small grace period.
 3. Polls Polymarket's **CLOB** at `clob.polymarket.com/midpoint?token_id=…` for each outcome token; the market is resolved once the YES midpoint is `≥ 0.99` and the NO midpoint is `≤ 0.01` (Up won), or vice versa (Down won). The CLOB is used here rather than Gamma's `outcomePrices` because Gamma evicts short-cadence markets within minutes of `endDate` and its prices field is a stale snapshot, not a live mid.
 4. Computes realized payoff, a win pays `stake × (1 − fill) / fill`; a loss returns `−stake`.
@@ -767,8 +766,7 @@ OKX_API_KEY=your_okx_api_key
 OKX_API_SECRET=your_okx_api_secret
 OKX_PASSPHRASE=your_okx_passphrase
 
-# Polymarket (Polygon wallet, fund with USDC.e)
-POLYGON_PRIVATE_KEY=your_polygon_wallet_private_key
+# Polymarket: paper-only, no live orders -- no funded wallet or key is needed.
 ```
 
 !!! warning "Always Start with Paper/Testnet Trading"
@@ -783,9 +781,9 @@ POLYGON_PRIVATE_KEY=your_polygon_wallet_private_key
 | **Asset Types** | Stocks, Crypto | Crypto | Crypto | Crypto | Crypto | Prediction markets |
 | **Futures** | - | Yes | Yes | Yes | Yes | - |
 | **Max Leverage** | 1x | 125x | 125x | 100x | 125x | 1x |
-| **Paper Trading** | Yes | Yes (Testnet) | Yes (Testnet) | Yes (Testnet) | Yes (Demo) | Yes (dry_run) |
+| **Paper Trading** | Yes | Yes (Testnet) | Yes (Testnet) | Yes (Testnet) | Yes (Demo) | Yes (dry_run — the ONLY mode) |
 | **Commission** | Free | 0.02%/0.04% | 0.02%/0.06% | 0.02%/0.055% | 0.02%/0.05% | Variable (CLOB) |
-| **SDK** | Alpaca SDK | CCXT | CCXT | pybit (native) | python-okx (native) | py-clob-client |
+| **SDK** | Alpaca SDK | CCXT | CCXT | pybit (native) | python-okx (native) | py-clob-client (archived; live unsupported) |
 
 ---
 

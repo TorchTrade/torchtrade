@@ -1,4 +1,5 @@
-"""Polymarket prediction market live trading environment."""
+"""Polymarket prediction market environment (PAPER ONLY -- live trading is refused;
+see LIVE_UNSUPPORTED in env.py)."""
 
 from torchtrade.envs.live.polymarket.env import (
     PolymarketBetEnv,

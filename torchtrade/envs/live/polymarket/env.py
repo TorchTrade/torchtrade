@@ -2,7 +2,7 @@
 
 Pattern B (contextual-bandit shape): each step is an independent bet on a
 fresh, short-cadence binary market, bet on direction, wait for resolution,
-collect the realized payoff, then move to the next market in the series.
+collect the modelled payoff, then move to the next market in the series.
 
 PAPER TRADING ONLY. The env runs against live Polymarket market data but never submits an
 order: ``dry_run=False`` is refused at the config boundary. See ``LIVE_UNSUPPORTED`` below
@@ -51,26 +51,18 @@ logger = logging.getLogger(__name__)
 # Gamma's outcomePrices.
 CLOB_API_BASE = "https://clob.polymarket.com"
 
-# Live trading is refused at the config boundary. Two independent blockers, either one
-# fatal on its own:
+# For whoever does the CLOB V2 port -- the part LIVE_UNSUPPORTED does not say.
 #
-# 1. py-clob-client, which order_executor.py is written against, was archived on
-#    2026-05-25: "The client is no longer functional and should not be used for new or
-#    existing integrations." Polymarket's CLOB V2 (2026-04) moved to new Exchange
-#    contracts and replaced USDC.e collateral with pUSD. No order this env submits can
-#    reach production.
+# The redemption blocker is the deep one, and porting to the V2 SDK does NOT fix it. This env
+# never sells: it buys and holds every position through resolution. Polymarket resolution does
+# not move collateral, so a winning share is worth $1 but stays an ERC-1155 token until an
+# explicit redeemPositions call -- which must go through their Relayer, because the proxy/Safe
+# wallet owns the position, not the EOA.
 #
-# 2. Worse, and not fixed by porting to the V2 SDK: this env NEVER SELLS. It buys and
-#    holds every position through resolution (_step -> _wait_for_resolution). Polymarket
-#    resolution does not move collateral -- a winning share is worth $1 but stays an
-#    ERC-1155 token until it is explicitly REDEEMED, and no Polymarket client (V1, V2, or
-#    the unified py-sdk) exposes redeem; it needs a hand-built redeemPositions call through
-#    their Relayer. So a live bot that never redeems watches its queryable collateral drain
-#    monotonically to zero WHILE IT IS WINNING.
-#
-# (2) is why this env cannot simply "read the real wallet" to fix its simulated cash: the
-# real wallet balance is not the account's worth, and wiring it in would make a winning
-# agent declare itself bankrupt. Live support needs the V2 port AND a redemption workflow.
+# The corollary is the whole reason this env is refused rather than repaired: you CANNOT fix
+# the simulated `cash` by reading the real wallet. While winnings sit unredeemed the collateral
+# balance is not the account's worth, so wiring it in would make a WINNING agent watch its
+# balance drain and declare itself bankrupt -- strictly worse than the simulation it replaced.
 LIVE_UNSUPPORTED = (
     "Live Polymarket trading is not supported. `dry_run=False` is refused rather than "
     "silently mis-trading:\n"
@@ -85,7 +77,7 @@ LIVE_UNSUPPORTED = (
 )
 
 
-@dataclass
+@dataclass(frozen=True)
 class PolymarketBetEnvConfig:
     """Configuration for :class:`PolymarketBetEnv`.
 
@@ -131,11 +123,22 @@ class PolymarketBetEnvConfig:
         # Validated at the boundary, not guarded inside the rule. _is_bankrupt() used to carry
         # an `initial > 0` guard, which silently turned a nonsense config into "never bankrupt"
         # instead of saying so -- the silent-default pattern this repo keeps getting bitten by.
-        # Refuse the config instead. (Only initial_cash: bet_fraction=0 is a supported config
-        # here, with a test that relies on it.)
+        # Refuse the config instead.
         if self.initial_cash <= 0:
             raise ValueError(f"initial_cash must be > 0, got {self.initial_cash}")
 
+        # bet_fraction > 1 stakes more than the account holds, drives cash negative, and then
+        # only the `stake <= 0` guard inside _compute_payoff stands between that and INVERTED
+        # P&L (a loss paying out). Same boundary rule; 0 is allowed (a no-bet agent).
+        if not 0.0 <= self.bet_fraction <= 1.0:
+            raise ValueError(f"bet_fraction must be in [0, 1], got {self.bet_fraction}")
+
+        # frozen=True above is load-bearing, not style: __post_init__ runs ONCE, at
+        # construction, so on a mutable dataclass `config.dry_run = False` afterwards sails
+        # straight past this check and the guard becomes a speed bump rather than a boundary.
+        # (Safe for TorchRL: pickle/deepcopy restore via __dict__ without re-running
+        # __post_init__, so ParallelEnv workers and env.clone() cannot spuriously raise, while
+        # dataclasses.replace() DOES re-validate.)
         if not self.dry_run:
             raise NotImplementedError(LIVE_UNSUPPORTED)
 
@@ -157,7 +160,7 @@ class PolymarketBetEnv(EnvBase):
     1. The current market_state is observed
        (``[yes_price, spread, volume_24h, liquidity]``).
     2. The agent picks a side (0 = Down, 1 = Up).
-    3. The trader submits a market order (skipped in ``dry_run``).
+    3. No order is submitted (paper-only; see ``LIVE_UNSUPPORTED``).
     4. The env sleeps until the market's endDate plus a small grace period.
     5. The resolved outcome is polled from the Polymarket CLOB
        (``/midpoint`` per outcome token); the realized payoff is computed
@@ -166,8 +169,10 @@ class PolymarketBetEnv(EnvBase):
        and its market_state becomes the next observation.
 
     Paper trading only (``dry_run=True``, enforced by the config): step 3 never submits an
-    order. Every other step is real -- real market data in, real resolution polled from the
-    CLOB, real payoff booked against a simulated balance. See ``LIVE_UNSUPPORTED``.
+    order. The market data and the resolution are real, polled live from Gamma and the CLOB.
+    The PAYOFF IS MODELLED, not real: ``_compute_payoff`` fills at the quoted outcome price
+    with no spread crossing and no fees, so it is optimistic relative to the fill-or-kill
+    market order a live bot would actually pay. See ``LIVE_UNSUPPORTED``.
 
     Episode ends when the scanner finds no next market across
     ``next_market_max_attempts`` env-level retries (terminated), the simulated
@@ -269,27 +274,14 @@ class PolymarketBetEnv(EnvBase):
 
         fill_price = market.yes_price if action_idx == 1 else market.no_price
         stake = self.cash * self.config.bet_fraction
-        token_id = market.yes_token_id if action_idx == 1 else market.no_token_id
 
-        # UNREACHABLE today: the config refuses dry_run=False (see LIVE_UNSUPPORTED), so this
-        # branch never runs. Kept, not deleted, as the call site the CLOB V2 port revives by
-        # lifting that one guard -- and kept UNTESTED for the same reason: the contract this
-        # env makes right now is "live is refused" (tested), not "live buys like so".
-        # If you are here to do the port: reading the real wallet is NOT enough. You must also
-        # redeem resolved winnings, or `cash` decays to zero on a winning account.
-        if stake > 0 and not self.config.dry_run:
-            result = self.trader.buy(token_id=token_id, amount_usdc=stake)
-            if not result.get("success"):
-                # Order failed (FOK rejection, insufficient USDC, network glitch).
-                # Do NOT book a payoff against an order we never filled, set the
-                # effective stake to zero so _compute_payoff returns 0.0.
-                logger.warning(
-                    "Order failed for %s: %s, recording as no-bet",
-                    market.slug,
-                    result.get("error", "unknown"),
-                )
-                stake = 0.0
-
+        # No order is submitted -- this env is paper-only (LIVE_UNSUPPORTED). The CLOB V2 port
+        # re-enters HERE: submit before _wait_for_resolution, redeem the winnings after it.
+        # The order-submission branch that used to sit here, and the four tests that pinned its
+        # safety contract (a failed order must book zero, not phantom, P&L), were removed
+        # together -- recover both with `git show 1a83d54^ -- torchtrade/ tests/`. They are not
+        # a head start: the V1 call shape (buy() -> {"success": bool}) does not survive the
+        # port, and reading the real wallet is NOT sufficient without the redeem.
         self._wait_for_resolution(market.end_date)
         outcome = self._poll_for_resolution(market)
 

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 
 import torch
 
@@ -47,7 +46,8 @@ def main():
         initial_cash=args.initial_cash,
         dry_run=True,
     )
-    env = PolymarketBetEnv(config, private_key=os.getenv("POLYGON_PRIVATE_KEY", ""))
+    # No private key: paper-only, nothing is signed or submitted.
+    env = PolymarketBetEnv(config)
 
     td = env.reset()
     print(f"slug_prefix:        {config.market_slug_prefix}")

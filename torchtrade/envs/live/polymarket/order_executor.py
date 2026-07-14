@@ -50,7 +50,7 @@ class PolymarketOrderExecutor:
         chain_id: int = 137,
         signature_type: int = 0,
         funder: Optional[str] = None,
-        dry_run: bool = False,
+        dry_run: bool = True,
     ):
         self._dry_run = dry_run
         # Dry-run is fully offline: never construct the live CLOB client, never
@@ -60,14 +60,16 @@ class PolymarketOrderExecutor:
             self.client = None
             return
         if ClobClient is None:
-            # Deliberately NOT "pip install py-clob-client" -- that package is archived and
-            # non-functional against CLOB V2, so the old advice sent people to a dead end.
+            # An honest import diagnostic, NOT a refusal: this fires only when the package is
+            # ABSENT. The refusal that actually stops live trading is at the env boundary
+            # (PolymarketBetEnvConfig -> LIVE_UNSUPPORTED); do not restate it here. It
+            # deliberately does not say "pip install py-clob-client" -- that package is
+            # archived and non-functional, so the old advice sent people to a dead end.
             raise ImportError(
-                "Live Polymarket trading is unsupported: py-clob-client is archived and no "
-                "longer functional (Polymarket shipped CLOB V2 with pUSD collateral), and "
-                "this module has no on-chain redemption of resolved winnings -- without it a "
-                "winning account's collateral drains to zero. Pass dry_run=True to paper "
-                "trade. PolymarketBetEnv refuses dry_run=False for the same reasons."
+                "py-clob-client is not installed, and installing it will not help: it is "
+                "archived and no longer functional against Polymarket's CLOB V2. Live "
+                "Polymarket trading is unsupported -- see LIVE_UNSUPPORTED in "
+                "torchtrade/envs/live/polymarket/env.py. Pass dry_run=True to paper trade."
             )
 
         self.client = ClobClient(

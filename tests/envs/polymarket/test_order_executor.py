@@ -43,7 +43,9 @@ def patched_module():
 
 @pytest.fixture
 def executor(patched_module):
-    exe = PolymarketOrderExecutor(private_key="0xtest", chain_id=137)
+    # dry_run=False is now explicit: the executor DEFAULTS to paper, so the live path has
+    # to be asked for by name.
+    exe = PolymarketOrderExecutor(private_key="0xtest", chain_id=137, dry_run=False)
     exe.client = MagicMock()
     exe.client.post_order.return_value = {"success": True, "orderID": "ord-1"}
     return exe
