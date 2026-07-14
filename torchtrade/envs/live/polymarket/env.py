@@ -51,13 +51,13 @@ logger = logging.getLogger(__name__)
 # Gamma's outcomePrices.
 CLOB_API_BASE = "https://clob.polymarket.com"
 
-# Two implementation details for the CLOB V2 port, on top of what LIVE_UNSUPPORTED tells users:
-#   - The redeem must go through Polymarket's Relayer: the proxy/Safe wallet owns the ERC-1155
-#     position, not the EOA, so redeemPositions sent from the EOA redeems nothing.
-#   - Corollary, and the reason this env is refused rather than repaired: you CANNOT fix the
-#     simulated `cash` by reading the real wallet. While winnings sit unredeemed the collateral
-#     balance is not the account's worth, so a wallet-backed balance would make a WINNING agent
-#     drain to zero and declare itself bankrupt -- worse than the simulation it replaced.
+# For the CLOB V2 port, the one thing LIVE_UNSUPPORTED does not spell out: you cannot repair the
+# simulated `cash` by reading the real wallet. While winnings sit unredeemed the collateral
+# balance is not the account's worth, so a wallet-backed balance would make a WINNING agent drain
+# to zero and declare itself bankrupt -- worse than the simulation it replaces. Redemption comes
+# first; the balance read is meaningless without it.
+# (Which contract/route the redeem takes depends on the signature type -- an EOA (sig 0, the
+# default here) holds its own positions, a proxy/Safe (sig 1/2) does not. Work it out then.)
 LIVE_UNSUPPORTED = (
     "Live Polymarket trading is not supported. `dry_run=False` is refused rather than "
     "silently mis-trading:\n"
@@ -68,7 +68,9 @@ LIVE_UNSUPPORTED = (
     "which no Polymarket client exposes. Without that, a winning account's balance drains "
     "to zero.\n"
     "Use dry_run=True (paper trading against live market data). Reviving live mode needs "
-    "the CLOB V2 port plus a redemption workflow."
+    "the CLOB V2 port plus a redemption workflow.\n"
+    "Sources: https://github.com/Polymarket/py-clob-client (archive notice) and "
+    "https://docs.polymarket.com/trading/ctf/redeem (redemption is manual)."
 )
 
 
@@ -139,11 +141,8 @@ class PolymarketBetEnvConfig:
 
         # frozen=True above is load-bearing, not style: __post_init__ runs ONCE, at
         # construction, so on a mutable dataclass `config.dry_run = False` afterwards sails
-        # straight past this check and the guard becomes a speed bump rather than a boundary.
-        # (Safe for TorchRL: pickle/deepcopy restore via __dict__ WITHOUT re-running
-        # __post_init__, so ParallelEnv/SerialEnv workers -- which re-pickle the env factory,
-        # verified under both fork and spawn -- cannot spuriously raise on an already-valid
-        # config. dataclasses.replace() DOES re-validate, which is what we want.)
+        # straight past this check. Frozen does not make the bypass impossible
+        # (object.__setattr__ still works) -- it makes it deliberate rather than accidental.
         if not self.dry_run:
             raise NotImplementedError(LIVE_UNSUPPORTED)
 
@@ -468,8 +467,6 @@ class PolymarketBetEnv(EnvBase):
         )
 
     def close(self, *, raise_if_closed: bool = True):
-        # Signature must match EnvBase.close(*, raise_if_closed=True): TransformedEnv forwards
-        # that kwarg, so a bare `def close(self)` made TransformedEnv(env, RewardSum()).close()
-        # raise TypeError -- on the very composition this env's spec comment advertises.
+        # TransformedEnv forwards raise_if_closed; a bare `def close(self)` raised TypeError.
         self.trader.cancel_all()
         super().close(raise_if_closed=raise_if_closed)

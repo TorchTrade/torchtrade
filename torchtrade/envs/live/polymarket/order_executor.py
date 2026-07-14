@@ -11,14 +11,8 @@ The module is kept as the starting point for the CLOB V2 port, not because it wo
 works without ``py-clob-client`` installed.
 
 .. warning::
-   The live path here CANNOT reach production, and :class:`PolymarketBetEnv` refuses
-   ``dry_run=False`` for that reason (see ``LIVE_UNSUPPORTED`` in ``env.py``). The
-   ``py-clob-client`` package this module is written against was archived on 2026-05-25
-   ("no longer functional"); Polymarket's CLOB V2 uses new contracts and pUSD collateral.
-   Reviving live trading means porting this module to the V2 SDK **and** adding on-chain
-   redemption of resolved winnings -- which no Polymarket client exposes, and without
-   which a winning account's collateral drains to zero. This module is kept as the
-   starting point for that port, not because it works.
+   The live path here cannot reach production. See ``LIVE_UNSUPPORTED`` in ``env.py`` for why
+   and for sources -- do not restate it here.
 """
 
 from __future__ import annotations

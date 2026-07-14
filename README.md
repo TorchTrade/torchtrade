@@ -149,7 +149,8 @@ See **[Online Environments Documentation](https://torchtrade.github.io/torchtrad
 
 ## Trading Platforms
 
-Start live trading with these supported platforms:
+Live trading is supported on the platforms below. **Polymarket is the exception: it is
+paper-only** — see its entry.
 
 ### 🪙 Cryptocurrency Trading
 
@@ -182,7 +183,7 @@ Start live trading with these supported platforms:
 **[Polymarket](https://polymarket.com/)** - Decentralized prediction market on Polygon
 - **Supported by:** `PolymarketBetEnv`
 - **Features:** Rolling one-shot bets on short-cadence binary markets (BTC/ETH/SOL up-or-down at 5m / 15m / 1h / 4h / daily cadences), Gamma API market scanner
-- **⚠️ Paper trading only:** `dry_run=False` raises. `py-clob-client` is archived/non-functional (Polymarket moved to CLOB V2), and the env holds bets to resolution while Polymarket only releases collateral on an on-chain redeem no client exposes — so a live bot would drain to zero *while winning*. Reviving live needs the V2 port **and** a redemption workflow.
+- **⚠️ Paper trading only — not live:** `dry_run=False` raises. `py-clob-client` is archived/non-functional (Polymarket moved to CLOB V2), and the env holds bets to resolution while Polymarket only releases collateral on an on-chain redeem no client exposes — so a live bot would drain to zero *while winning*. Reviving live needs the V2 port **and** a redemption workflow.
 - **Get Started:** [Browse markets at Polymarket](https://polymarket.com/)
 
 ### 📈 Stock & Crypto API

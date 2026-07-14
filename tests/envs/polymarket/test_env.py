@@ -125,67 +125,6 @@ class TestSpecs:
         env, _, _ = _make_env()
         assert env.action_spec.n == 2
 
-    def test_live_mode_is_refused(self):
-        """dry_run=False must RAISE, not silently paper-trade.
-
-        The env can never execute live: py-clob-client is archived/non-functional, and the
-        env holds every bet to resolution while Polymarket only releases collateral on an
-        explicit on-chain redeem that no client exposes -- so a live bot's balance drains to
-        zero while it is winning. Refusing the config is the whole point of this guard; a
-        regression that quietly downgraded live to paper (or dropped the check) would let a
-        user believe real money was at work.
-        """
-        # Match the SUBSTANCE, not a contentless phrase. Pinning only "not supported" let the
-        # whole message be replaced with "pip install py-clob-client, then set dry_run=False"
-        # -- the exact dead-end advice this PR exists to delete -- with the suite still green.
-        # Both reasons must survive: the dead client AND the redemption blocker.
-        with pytest.raises(NotImplementedError) as exc:
-            PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", dry_run=False)
-        assert "archived" in str(exc.value)   # blocker 1: the client is dead
-        assert "redeem" in str(exc.value)     # blocker 2: the one a port cannot skip
-
-    def test_config_is_frozen_so_the_guard_cannot_be_mutated_away(self):
-        """__post_init__ runs ONCE. On a mutable dataclass this is the bypass:
-
-            config = PolymarketBetEnvConfig(...)   # dry_run=True, passes
-            config.dry_run = False                 # guard never re-runs
-            env = PolymarketBetEnv(config)         # wires a LIVE trader
-
-        frozen=True is what turns the check from a speed bump into a boundary.
-        """
-        config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            config.dry_run = False
-
-    def test_paper_env_never_touches_the_trader_during_a_step(self):
-        """The paper env must not call the trader AT ALL during a step -- not just `.buy`.
-
-        Asserting `buy.assert_not_called()` pinned only that one attribute name; a _step that
-        called `trader.submit_market_order(...)` would have passed. mock_calls == [] pins the
-        whole surface, which is the actual contract: nothing is submitted, ever.
-        """
-        env, _, trader = _make_env()
-        env.reset()
-        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
-        assert trader.mock_calls == []
-
-    @pytest.mark.parametrize("bad", [-0.1, 1.5], ids=["negative", "over-100%"])
-    def test_bet_fraction_validated_at_the_boundary(self, bad):
-        """bet_fraction > 1 stakes more than the account holds -> cash goes negative -> a LOSS
-        pays out (inverted P&L). Refuse the config rather than guard downstream."""
-        with pytest.raises(ValueError, match="bet_fraction"):
-            PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", bet_fraction=bad)
-
-    def test_default_config_is_paper(self):
-        """The DEFAULT must be the safe mode.
-
-        Not a tautology against the line above: this pins that a user who never mentions
-        dry_run gets a constructible paper env. The default used to be dry_run=False, which
-        (once the guard exists) means the default config would not even build.
-        """
-        config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
-        assert config.dry_run is True
-
     def test_missing_slug_prefix_raises(self):
         with pytest.raises(ValueError, match="market_slug_prefix"):
             PolymarketBetEnv(PolymarketBetEnvConfig())
@@ -278,6 +217,18 @@ class TestReset:
 # --- Step ------------------------------------------------------------------- #
 
 class TestStep:
+    def test_paper_env_never_touches_the_trader_during_a_step(self):
+        """The paper env must not call the trader AT ALL during a step -- not just `.buy`.
+
+        Asserting `buy.assert_not_called()` pinned only that one attribute name; a _step that
+        called `trader.submit_market_order(...)` would have passed. mock_calls == [] pins the
+        whole surface, which is the actual contract: nothing is submitted, ever.
+        """
+        env, _, trader = _make_env()
+        env.reset()
+        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+        assert trader.mock_calls == []
+
     @pytest.mark.parametrize(
         "action,outcome,fill_price,expected_payoff",
         [
@@ -566,12 +517,16 @@ class TestPollForResolution:
         assert env._fetch_resolved_outcome.call_count == 1
 
     def test_retries_until_resolved(self):
-        env = self._real_poll_env()
+        env = self._real_poll_env(resolution_poll_interval_seconds=15.0)
         # First two calls: still mid-market. Third: Up wins.
         env._fetch_resolved_outcome = MagicMock(side_effect=[None, None, 1])
-        with patch("torchtrade.envs.live.polymarket.env.time.sleep"):
+        with patch("torchtrade.envs.live.polymarket.env.time.sleep") as mock_sleep:
             assert env._poll_for_resolution("0xcond") == 1
         assert env._fetch_resolved_outcome.call_count == 3
+        # Pin the poll interval BY VALUE, not just "it slept". Nothing pinned this, so
+        # hardcoding time.sleep(1.0) passed the whole suite -- turning a 15s poll into a 1s
+        # one, i.e. ~600 CLOB requests per resolution instead of ~40.
+        assert mock_sleep.call_args_list == [call(15.0), call(15.0)]
 
     def test_returns_none_when_max_wait_exhausted(self):
         env = self._real_poll_env(
@@ -623,14 +578,62 @@ class TestWaitForResolution:
             assert slept_for == pytest.approx(150, abs=2)
 
 
-class TestCloseLifecycle:
-    def test_close_calls_trader_cancel_all(self):
-        env, _, trader = _make_env()
-        env.close()
-        trader.cancel_all.assert_called_once()
-
 class TestConfigValidation:
     """The config is the boundary. A nonsense value must be refused there, not absorbed."""
+
+    def test_live_mode_is_refused(self):
+        """dry_run=False must RAISE, not silently paper-trade.
+
+        The env can never execute live: py-clob-client is archived/non-functional, and the
+        env holds every bet to resolution while Polymarket only releases collateral on an
+        explicit on-chain redeem that no client exposes -- so a live bot's balance drains to
+        zero while it is winning. Refusing the config is the whole point of this guard; a
+        regression that quietly downgraded live to paper (or dropped the check) would let a
+        user believe real money was at work.
+        """
+        # Match the SUBSTANCE, not a contentless phrase. Pinning only "not supported" let the
+        # whole message be replaced with "pip install py-clob-client, then set dry_run=False"
+        # -- the exact dead-end advice this PR exists to delete -- with the suite still green.
+        # Both reasons must survive: the dead client AND the redemption blocker.
+        with pytest.raises(NotImplementedError) as exc:
+            PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", dry_run=False)
+        assert "archived" in str(exc.value)   # blocker 1: the client is dead
+        assert "redeem" in str(exc.value)     # blocker 2: the one a port cannot skip
+
+    def test_config_is_frozen_so_the_guard_cannot_be_mutated_away(self):
+        """__post_init__ runs ONCE. On a mutable dataclass this is the bypass:
+
+            config = PolymarketBetEnvConfig(...)   # dry_run=True, passes
+            config.dry_run = False                 # guard never re-runs
+            env = PolymarketBetEnv(config)         # wires a LIVE trader
+
+        frozen=True does not make the bypass impossible (object.__setattr__ still works);
+        it makes it deliberate rather than an ordinary attribute assignment.
+        """
+        config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            config.dry_run = False
+
+    @pytest.mark.parametrize("bad", [-0.1, 1.5], ids=["negative", "over-100%"])
+    def test_bet_fraction_validated_at_the_boundary(self, bad):
+        """bet_fraction > 1 stakes more than the account holds, driving cash negative.
+
+        Today only _compute_payoff's `stake <= 0` guard (plus same-step bankruptcy) stands
+        between that and inverted P&L -- a loss paying out. Refuse the config at the boundary
+        rather than depend on a downstream guard to absorb it.
+        """
+        with pytest.raises(ValueError, match="bet_fraction"):
+            PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", bet_fraction=bad)
+
+    def test_default_config_is_paper(self):
+        """The DEFAULT must be the safe mode.
+
+        Not a tautology against the line above: this pins that a user who never mentions
+        dry_run gets a constructible paper env. The default used to be dry_run=False, which
+        (once the guard exists) means the default config would not even build.
+        """
+        config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
+        assert config.dry_run is True
 
     @pytest.mark.parametrize("initial_cash", [-100.0, 0.0], ids=["negative", "zero"])
     def test_nonsense_starting_cash_is_refused(self, initial_cash):

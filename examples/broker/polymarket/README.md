@@ -197,9 +197,7 @@ discrete index; an RL policy gets logits over two classes.
 
 ## Running for real
 
-**You can't, and you shouldn't try.** `dry_run=False` raises `NotImplementedError`. The
-previous instructions here (set `POLYGON_PRIVATE_KEY`, `pip install py-clob-client`, flip
-`dry_run`) were all wrong, and following them would have lost money quietly. Two blockers:
+**Live trading is not supported.** `dry_run=False` raises `NotImplementedError`. Two blockers:
 
 1. **The client is dead.** `py-clob-client` was archived in May 2026 — *"no longer functional
    and should not be used for new or existing integrations."* Polymarket's CLOB V2 uses new
@@ -208,9 +206,8 @@ previous instructions here (set `POLYGON_PRIVATE_KEY`, `pip install py-clob-clie
 2. **There is no redemption.** This env buys and holds every bet through resolution, and
    Polymarket does **not** release collateral when a market resolves — a winning share is
    worth $1 but stays an ERC-1155 token until an explicit on-chain `redeemPositions` call,
-   which no Polymarket client exposes (it has to go through their Relayer, because the
-   proxy wallet owns the position, not your EOA). A bot that never redeems watches its
-   spendable balance **drain to zero while it is winning.**
+   which no Polymarket client exposes. A bot that never redeems watches its spendable
+   balance **drain to zero while it is winning.**
 
 Blocker 2 is why this can't be fixed by "just reading the real wallet": while winnings sit
 unredeemed, the collateral balance isn't the account's worth, so a wallet-backed balance

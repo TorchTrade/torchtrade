@@ -382,20 +382,13 @@ env = OKXFuturesSLTPTorchTradingEnv(
 !!! info "Starter environment, more to come"
     `PolymarketBetEnv` is intentionally a **starter env** matching the most common Polymarket use case for TorchTrade (rolling binary up/down bets). Polymarket also has multi-strike daily price markets, sports, politics, and longer-horizon markets that benefit from a different env shape. Additional Polymarket envs will be added based on user requests and as new market types appear, open an issue describing the pattern you need.
 
-!!! note "Authentication"
-    Polymarket uses a **Polygon private key**, not an API key/secret pair. The key is used to derive CLOB API credentials at runtime.
-
 !!! danger "Paper trading only, live is refused"
-    `dry_run=False` raises `NotImplementedError`. Two blockers: (1) `py-clob-client` was **archived** in May 2026 ("no longer functional") — Polymarket's CLOB V2 uses new contracts and replaced USDC.e collateral with pUSD, so no order can reach production; (2) this env buys and holds every bet through resolution, and Polymarket does **not** release collateral on resolution — winning shares must be **redeemed** on-chain via their Relayer, which no client exposes. Without the redeem, a bot's spendable balance drains to zero *while it is winning*. That is also why the balance cannot simply be read from the wallet. Reviving live needs the CLOB V2 port **and** a redemption workflow.
+    `dry_run=False` raises `NotImplementedError`. Two blockers: (1) `py-clob-client` was **archived** in May 2026 ("no longer functional") — Polymarket's CLOB V2 uses new contracts and replaced USDC.e collateral with pUSD, so no order can reach production; (2) this env buys and holds every bet through resolution, and Polymarket does **not** release collateral on resolution — winning shares must be **redeemed** on-chain, which no Polymarket client exposes. Without the redeem, a bot's spendable balance drains to zero *while it is winning*. That is also why the balance cannot simply be read from the wallet. Reviving live needs the CLOB V2 port **and** a redemption workflow.
 
 ### PolymarketBetEnv
 
 ```python
 from torchtrade.envs.live.polymarket import PolymarketBetEnv, PolymarketBetEnvConfig
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 config = PolymarketBetEnvConfig(
     market_slug_prefix="btc-updown-5m-",  # discover via scan_markets.py
