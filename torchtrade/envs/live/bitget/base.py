@@ -231,9 +231,6 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
         # close take the position branch and read stale fields off it.
         position_direction = float(position_direction_from_status(position_status))
-        # THE holding_time rule. Hand-rolling it as "reset when flat" missed the direct
-        # flip: long -> short never passes through flat, so the counter kept climbing and a
-        # brand-new short reported the dead long's age. See core/state.py.
         holding_time = advance_hold_counter(self.position, position_direction)
 
         if position_direction == 0:

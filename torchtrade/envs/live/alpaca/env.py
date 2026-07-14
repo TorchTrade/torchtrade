@@ -130,9 +130,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         self._wait_for_next_timestamp()
 
         # Update position hold counter
-        # The shared rule. Spot cannot flip (levels are long-only), so this is behaviourally
-        # identical here -- but one rule with no exceptions is how it STAYS identical.
-        advance_hold_counter(self.position, int(self.position.current_position))
+        advance_hold_counter(self.position, self.position.current_position)
 
         # Get updated state
         new_portfolio_value = self._get_portfolio_value()

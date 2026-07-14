@@ -242,59 +242,12 @@ class TestBybitFuturesTorchTradingEnv:
         )
 
     def test_a_direct_flip_does_not_age_the_new_position(self, env, mock_trader):
-        """END TO END, on the value the policy actually receives.
-
-        The unit test for advance_hold_counter proves the RULE; this proves the WIRING -- that
-        the env feeds it the right direction and emits the result as account_state[3]. The rule
-        could be perfect while the env passed it the cached direction instead of the observed
-        one, and the unit test would never notice.
-
-        A long held for 5 bars, then flipped straight to a short with NO flat bar in between.
-        The short is ONE step old. Before the fix the env reported it as 6 bars old, because
-        "reset when flat" never fired -- and holding_time is what a hold-aware policy reasons
-        about.
-        """
         from torchtrade.envs.live.bybit.order_executor import PositionStatus
-
-        def status(qty):
-            return {"position_status": PositionStatus(
-                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
-                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
-                margin_mode="isolated", liquidation_price=45000.0,
-            )}
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            mock_trader.get_status = MagicMock(return_value=status(0.01))     # LONG
-            env.reset()
-            long = TensorDict({"action": torch.tensor(len(env.action_levels) - 1)}, batch_size=())
-
-            for _ in range(5):
-                td = env.step(long)
-            # reset() emits an observation too, so that first bar counts: 1 + 5 = 6.
-            aged = td["next"]["account_state"][3].item()
-            assert aged == 6.0, f"the long should have aged, got {aged}"
-
-            # A REAL flip, modelled honestly: at _sync_position_from_exchange time the trade
-            # has NOT executed yet, so the exchange still shows the OLD long. Only afterwards,
-            # when _get_observation re-reads it, does it show the short.
-            #
-            # This distinction is the whole test. Mocking the short for the ENTIRE step makes
-            # the sync see exchange(short) != cache(long), treat it as an EXTERNAL change, and
-            # reset the counter itself -- PR #245's logic -- which masks this bug completely.
-            mock_trader.get_status = MagicMock(side_effect=[
-                status(0.01),    # sync: still long, the flip has not executed
-                status(-0.01),   # observation: now short
-                status(-0.01),   # (any further reads)
-                status(-0.01),
-            ])
-            short = TensorDict({"action": torch.tensor(0)}, batch_size=())
-            td = env.step(short)
-
-        holding_time = td["next"]["account_state"][3].item()
-        assert holding_time == 1.0, (
-            f"a one-step-old short is reported as {holding_time} bars old (the long's age was "
-            f"{aged}) -- the flip never passed through flat, so the counter was never reset"
+        from tests.envs.base_exchange_tests import (
+            assert_a_direct_flip_does_not_age_the_new_position as assert_flip,
         )
+        assert_flip(env, mock_trader, PositionStatus,
+                    long_action=len(env.action_levels) - 1, short_action=0)
 
     def test_reset_clears_the_holding_time_of_the_previous_episode(self, env, mock_trader):
         """Reset must zero hold_counter, or episode 2 inherits episode 1's age.

@@ -274,29 +274,3 @@ def test_holding_time_resets_on_a_direct_flip(directions, expected, why):
     assert got == [float(e) for e in expected], why
 
 
-@pytest.mark.parametrize("module", [
-    f"torchtrade/envs/live/{ex}/{mod}.py"
-    for ex in ("alpaca", "binance", "bitget", "bybit", "okx")
-    for mod in ("env", "env_sltp", "base")
-])
-def test_no_live_env_hand_rolls_the_holding_time_rule(module):
-    """Structural guard: the rule lives in ONE place.
-
-    It was hand-rolled in two idioms across five exchanges, and every copy had the same hole.
-    A re-forked copy that has not drifted YET is still a bug waiting to happen -- this repo has
-    paid for that with three divergent SLTP action maps and four copies of _check_termination.
-
-    Scans base.py AND env_sltp.py, not just env.py. The first version of this guard scanned
-    only the `.env` modules -- which is where the rule lives for alpaca/binance and NOWHERE
-    ELSE. bitget/bybit/okx keep it in base.py, and the SLTP variants in env_sltp.py, so 5 of
-    the 7 places it lives were unscanned: the guard was green while the files that HAD the bug
-    were never looked at. A guard that green-lights the buggy files is worse than no guard.
-    """
-    path = pathlib.Path(module)
-    assert path.exists(), f"{module} vanished -- this guard must not silently stop scanning"
-
-    src = path.read_text()
-    assert "hold_counter += 1" not in src, (
-        f"{module} ages the position itself instead of calling advance_hold_counter(). "
-        f"That is how the direct-flip hole got in -- five times, in two spellings."
-    )

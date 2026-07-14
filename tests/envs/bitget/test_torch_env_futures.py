@@ -377,44 +377,12 @@ class TestBitgetFuturesTorchTradingEnv:
         assert dist_to_liq == 1.0     # no position -> no liquidation to be near
 
     def test_a_direct_flip_does_not_age_the_new_position(self, env, mock_trader):
-        """END TO END on account_state[3]. The unit test proves the RULE; this proves the WIRING.
-
-        Reverting bitget to the old hand-rolled rule passed the ENTIRE suite before this test
-        existed -- the exchange could be fully un-fixed with zero failures.
-
-        The flip is modelled honestly: at _sync_position_from_exchange time the trade has NOT
-        executed, so the exchange still shows the OLD long. Mocking the short for the whole step
-        makes the sync see exchange(short) != cache(long), treat it as an EXTERNAL change and
-        reset the counter itself (PR #245) -- which masks this bug completely.
-        """
         from torchtrade.envs.live.bitget.order_executor import PositionStatus
-
-        def pos(qty):
-            return {"position_status": PositionStatus(
-                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
-                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
-                margin_mode="isolated", liquidation_price=45000.0,
-            )}
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            mock_trader.get_status = MagicMock(return_value=pos(0.01))      # LONG
-            env.reset()
-            long = TensorDict({"action": torch.tensor(len(env.action_levels) - 1)}, batch_size=())
-
-            for _ in range(5):
-                td = env.step(long)
-            aged = td["next"]["account_state"][3].item()
-            assert aged > 1.0, f"the long should have aged, got {aged}"
-
-            # still long at sync time; short by the time we observe. A real flip.
-            mock_trader.get_status = MagicMock(side_effect=[pos(0.01)] + [pos(-0.01)] * 4)
-            td = env.step(TensorDict({"action": torch.tensor(0)}, batch_size=()))
-
-        holding_time = td["next"]["account_state"][3].item()
-        assert holding_time == 1.0, (
-            f"a one-step-old short is reported as {holding_time} bars old (the long's age was "
-            f"{aged}) -- the flip never passed through flat, so the counter was never reset"
+        from tests.envs.base_exchange_tests import (
+            assert_a_direct_flip_does_not_age_the_new_position as assert_flip,
         )
+        assert_flip(env, mock_trader, PositionStatus,
+                    long_action=len(env.action_levels) - 1, short_action=0)
 
     def test_dust_between_positions_does_not_age_the_next_one(self, env, mock_trader):
         """A residual left between two positions must not carry the old age into the new one.

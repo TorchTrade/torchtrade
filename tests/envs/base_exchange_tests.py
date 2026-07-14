@@ -267,3 +267,49 @@ class BaseObservationClassTests(ABC):
         key = observer.get_keys()[0]
 
         assert observations[key].shape[0] == 100
+
+
+
+def assert_a_direct_flip_does_not_age_the_new_position(
+    env, trader, PositionStatus, long_action, short_action, set_side=None
+):
+    """A long flipped straight to a short is ONE step old, not the long's age.
+
+    THE TRAP: the exchange must still report the LONG when _step syncs -- the trade has not
+    executed yet. Reporting the short there makes _sync_position_from_exchange see an EXTERNAL
+    change and reset hold_counter itself (PR #245 / SLTPMixin), masking the bug: the test goes
+    vacuous. Two of these passed on the buggy code before I found that.
+    """
+    from unittest.mock import MagicMock, patch
+
+    import torch
+    from tensordict import TensorDict
+
+    # the four PositionStatus dataclasses are field-identical in order (only field 8 is named
+    # margin_type on binance, margin_mode elsewhere), so build them positionally
+    def pos(qty):
+        return {"position_status": PositionStatus(
+            qty, 500.0, 50000.0, 0.0, 0.0, 50000.0, 5, "isolated", 45000.0)}
+
+    with patch.object(env, "_wait_for_next_timestamp"):
+        if set_side:
+            set_side("BUY")
+        trader.get_status = MagicMock(return_value=pos(0.01))
+        env.reset()
+
+        for _ in range(5):
+            td = env.step(TensorDict({"action": torch.tensor(long_action)}, batch_size=()))
+        aged = td["next"]["account_state"][3].item()
+        assert aged > 1.0, f"the long never aged ({aged}) -- the assertion below would be vacuous"
+
+        if set_side:
+            set_side("SELL")
+        first = iter([pos(0.01)])          # sync reads the OLD long; every later read is short
+        trader.get_status = MagicMock(side_effect=lambda: next(first, pos(-0.01)))
+        td = env.step(TensorDict({"action": torch.tensor(short_action)}, batch_size=()))
+
+    holding_time = td["next"]["account_state"][3].item()
+    assert holding_time == 1.0, (
+        f"a one-step-old short reports {holding_time} bars (the long aged to {aged}): the flip "
+        f"never passed through flat, so the counter was never reset"
+    )

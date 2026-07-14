@@ -208,9 +208,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         self._wait_for_next_timestamp()
 
         # Update position hold counter
-        # THE holding_time rule -- "reset when flat" never fires on a direct long->short
-        # flip, so the brand-new position inherited the dead one's age. See core/state.py.
-        advance_hold_counter(self.position, int(self.position.current_position))
+        advance_hold_counter(self.position, self.position.current_position)
 
         # Get updated state
         new_portfolio_value = self._get_portfolio_value()
