@@ -107,6 +107,29 @@ class TestSpecs:
         env, _, _ = _make_env()
         assert env.action_spec.n == 2
 
+    def test_live_mode_is_refused(self):
+        """dry_run=False must RAISE, not silently paper-trade.
+
+        The env can never execute live: py-clob-client is archived/non-functional, and the
+        env holds every bet to resolution while Polymarket only releases collateral on an
+        explicit on-chain redeem that no client exposes -- so a live bot's balance drains to
+        zero while it is winning. Refusing the config is the whole point of this guard; a
+        regression that quietly downgraded live to paper (or dropped the check) would let a
+        user believe real money was at work.
+        """
+        with pytest.raises(NotImplementedError, match="not supported"):
+            PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", dry_run=False)
+
+    def test_default_config_is_paper(self):
+        """The DEFAULT must be the safe mode.
+
+        Not a tautology against the line above: this pins that a user who never mentions
+        dry_run gets a constructible paper env. The default used to be dry_run=False, which
+        (once the guard exists) means the default config would not even build.
+        """
+        config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
+        assert config.dry_run is True
+
     def test_missing_slug_prefix_raises(self):
         with pytest.raises(ValueError, match="market_slug_prefix"):
             PolymarketBetEnv(PolymarketBetEnvConfig())
@@ -200,75 +223,6 @@ class TestStep:
         env.reset()
         env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
         trader.buy.assert_not_called()
-
-    @pytest.mark.parametrize(
-        "action,expected_token_id",
-        [(1, "tok_yes"), (0, "tok_no")],
-        ids=["bet-up-targets-yes-token", "bet-down-targets-no-token"],
-    )
-    def test_live_mode_calls_trader_buy_with_correct_token(self, action, expected_token_id):
-        """A YES↔NO token swap on either action would silently pass without
-        parametrizing both directions — so this test exercises both."""
-        env, _, trader = _make_env(config_overrides={"dry_run": False})
-        env.reset()
-        env._step(TensorDict({"action": torch.tensor(action)}, batch_size=()))
-        trader.buy.assert_called_once()
-        kwargs = trader.buy.call_args.kwargs
-        assert kwargs["token_id"] == expected_token_id
-        assert kwargs["amount_usdc"] > 0
-
-    def test_zero_stake_in_live_mode_does_not_call_trader(self):
-        """bet_fraction=0 → stake=0 → no order even in live mode."""
-        env, _, trader = _make_env(
-            config_overrides={"dry_run": False, "bet_fraction": 0.0}
-        )
-        env.reset()
-        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
-        trader.buy.assert_not_called()
-
-    @pytest.mark.parametrize(
-        "underlying_outcome",
-        [1, 0],
-        ids=["would-have-won", "would-have-lost"],
-    )
-    def test_failed_order_in_live_mode_books_zero_payoff(self, underlying_outcome):
-        """Critical safety: a rejected/failed order must NOT produce phantom P&L.
-
-        Pins the FULL post-failure contract, not just reward, so a future
-        refactor that ``return``-s early on failure (skipping the next-market
-        fetch, step counter, or done flags) breaks the test instead of silently
-        breaking episode progression. Parametrized over both possible underlying
-        outcomes, a regression that booked ``-stake`` on failure (instead of 0)
-        would only show up in the would-have-lost case otherwise.
-        """
-        market = _make_market(yes_price=0.4, no_price=0.6)
-        env, scanner, trader = _make_env(
-            outcomes=[underlying_outcome],
-            markets=[market, _make_market(slug="btc-updown-5m-next")],
-            config_overrides={"dry_run": False},
-        )
-        trader.buy.return_value = {"success": False, "error": "insufficient USDC"}
-        env.reset()
-        cash_before = env.cash
-        scanner_calls_before = scanner.next_active_market.call_count
-        td = env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
-
-        # We tried to place the order
-        trader.buy.assert_called_once()
-
-        # No phantom P&L
-        assert td["reward"].item() == 0.0
-        assert env.cash == pytest.approx(cash_before)
-
-        # Episode progression continues normally, these assertions catch a
-        # naive `if failure: return early_td` shortcut.
-        assert env._step_count == 1
-        assert not td["terminated"].item()
-        assert not td["truncated"].item()
-        assert scanner.next_active_market.call_count > scanner_calls_before
-        # Next market's state is non-zero (real market_state, not the terminal
-        # zero-tensor used for "no next market" cases).
-        assert not torch.equal(td["market_state"], torch.zeros(4))
 
     def test_cash_updates_after_win_and_loss(self):
         env, _, _ = _make_env(

@@ -7,6 +7,16 @@ Minimal surface, only the operations :class:`PolymarketBetEnv` needs:
 
 ``dry_run=True`` skips the CLOB client entirely, so paper-trading the env
 works without ``py-clob-client`` installed.
+
+.. warning::
+   The live path here CANNOT reach production, and :class:`PolymarketBetEnv` refuses
+   ``dry_run=False`` for that reason (see ``LIVE_UNSUPPORTED`` in ``env.py``). The
+   ``py-clob-client`` package this module is written against was archived on 2026-05-25
+   ("no longer functional"); Polymarket's CLOB V2 uses new contracts and pUSD collateral.
+   Reviving live trading means porting this module to the V2 SDK **and** adding on-chain
+   redemption of resolved winnings -- which no Polymarket client exposes, and without
+   which a winning account's collateral drains to zero. This module is kept as the
+   starting point for that port, not because it works.
 """
 
 from __future__ import annotations
@@ -50,10 +60,14 @@ class PolymarketOrderExecutor:
             self.client = None
             return
         if ClobClient is None:
+            # Deliberately NOT "pip install py-clob-client" -- that package is archived and
+            # non-functional against CLOB V2, so the old advice sent people to a dead end.
             raise ImportError(
-                "py-clob-client is required for live Polymarket trading. "
-                "Install with: pip install py-clob-client. "
-                "(Pass dry_run=True to skip the CLOB client.)"
+                "Live Polymarket trading is unsupported: py-clob-client is archived and no "
+                "longer functional (Polymarket shipped CLOB V2 with pUSD collateral), and "
+                "this module has no on-chain redemption of resolved winnings -- without it a "
+                "winning account's collateral drains to zero. Pass dry_run=True to paper "
+                "trade. PolymarketBetEnv refuses dry_run=False for the same reasons."
             )
 
         self.client = ClobClient(

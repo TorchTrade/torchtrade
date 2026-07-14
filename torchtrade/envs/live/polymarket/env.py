@@ -4,10 +4,15 @@ Pattern B (contextual-bandit shape): each step is an independent bet on a
 fresh, short-cadence binary market, bet on direction, wait for resolution,
 collect the realized payoff, then move to the next market in the series.
 
+PAPER TRADING ONLY. The env runs against live Polymarket market data but never submits an
+order: ``dry_run=False`` is refused at the config boundary. See ``LIVE_UNSUPPORTED`` below
+for the two reasons (archived CLOB client; no redemption workflow, without which a winning
+account's on-chain balance drains to zero).
+
 Concrete example (5-minute Bitcoin up/down):
 
-    config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
-    env = PolymarketBetEnv(config, dry_run=True)
+    config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")  # dry_run=True
+    env = PolymarketBetEnv(config)
 
     td = env.reset()
     while True:
@@ -46,6 +51,39 @@ logger = logging.getLogger(__name__)
 # Gamma's outcomePrices.
 CLOB_API_BASE = "https://clob.polymarket.com"
 
+# Live trading is refused at the config boundary. Two independent blockers, either one
+# fatal on its own:
+#
+# 1. py-clob-client, which order_executor.py is written against, was archived on
+#    2026-05-25: "The client is no longer functional and should not be used for new or
+#    existing integrations." Polymarket's CLOB V2 (2026-04) moved to new Exchange
+#    contracts and replaced USDC.e collateral with pUSD. No order this env submits can
+#    reach production.
+#
+# 2. Worse, and not fixed by porting to the V2 SDK: this env NEVER SELLS. It buys and
+#    holds every position through resolution (_step -> _wait_for_resolution). Polymarket
+#    resolution does not move collateral -- a winning share is worth $1 but stays an
+#    ERC-1155 token until it is explicitly REDEEMED, and no Polymarket client (V1, V2, or
+#    the unified py-sdk) exposes redeem; it needs a hand-built redeemPositions call through
+#    their Relayer. So a live bot that never redeems watches its queryable collateral drain
+#    monotonically to zero WHILE IT IS WINNING.
+#
+# (2) is why this env cannot simply "read the real wallet" to fix its simulated cash: the
+# real wallet balance is not the account's worth, and wiring it in would make a winning
+# agent declare itself bankrupt. Live support needs the V2 port AND a redemption workflow.
+LIVE_UNSUPPORTED = (
+    "Live Polymarket trading is not supported. `dry_run=False` is refused rather than "
+    "silently mis-trading:\n"
+    "  - py-clob-client is archived and non-functional (Polymarket shipped CLOB V2, with "
+    "pUSD collateral replacing USDC.e); no order can reach production.\n"
+    "  - This env holds every bet through resolution, and Polymarket does not auto-credit "
+    "collateral on resolution. Winning shares must be redeemed on-chain via the Relayer, "
+    "which no Polymarket client exposes. Without that, a winning account's balance drains "
+    "to zero.\n"
+    "Use dry_run=True (paper trading against live market data). Reviving live mode needs "
+    "the CLOB V2 port plus a redemption workflow."
+)
+
 
 @dataclass
 class PolymarketBetEnvConfig:
@@ -57,16 +95,16 @@ class PolymarketBetEnvConfig:
             up/down markets).
         bet_fraction: Fraction of current cash to stake per bet (default 1%).
         max_steps: Maximum bets per episode.
-        initial_cash: Starting USDC balance. NOTE this is simulated bookkeeping in BOTH
-            dry_run and live mode -- nothing here reads the real USDC wallet, and _reset()
-            restores this constant every episode. So in live mode `cash` (and therefore the
-            bankruptcy check) can drift from the real balance. Tracked as a follow-up; it is
-            a bigger fix than this file.
+        initial_cash: Starting paper balance. This is SIMULATED bookkeeping, by design,
+            and that is correct: the env is paper-only (see ``dry_run``), so there is no
+            real wallet for it to disagree with. ``_reset()`` restores it each episode.
+            It is NOT a claim about any real USDC/pUSD balance.
         done_on_bankruptcy: If True, terminate the episode when cash drops below
             ``bankrupt_threshold * initial_cash``.
         bankrupt_threshold: Bankruptcy cutoff as a fraction of initial cash.
-        dry_run: If True, skip CLOB order submission but still wait for
-            resolution and compute the would-have-been payoff.
+        dry_run: Must be True. Paper-trades against live Polymarket market data: no order
+            is submitted, but the env still waits for real resolution and books the
+            would-have-been payoff. ``dry_run=False`` raises -- see LIVE_UNSUPPORTED.
         resolution_grace_seconds: Extra wait after the market's endDate before
             polling for the resolved outcome (Polymarket settles on-chain).
     """
@@ -77,7 +115,7 @@ class PolymarketBetEnvConfig:
     initial_cash: float = 1_000.0
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1
-    dry_run: bool = False
+    dry_run: bool = True
     # Initial wait after a market's endDate before the FIRST resolution poll.
     resolution_grace_seconds: float = 30.0
     # If the first poll finds the market still pre-settlement on the CLOB
@@ -97,6 +135,9 @@ class PolymarketBetEnvConfig:
         # here, with a test that relies on it.)
         if self.initial_cash <= 0:
             raise ValueError(f"initial_cash must be > 0, got {self.initial_cash}")
+
+        if not self.dry_run:
+            raise NotImplementedError(LIVE_UNSUPPORTED)
 
     # When the scanner returns no upcoming market, retry at the env level after
     # this sleep. The scanner's internal retry budget (~48s) covers brief blips;
@@ -124,12 +165,14 @@ class PolymarketBetEnv(EnvBase):
     6. The scanner picks the next active market matching ``market_slug_prefix``
        and its market_state becomes the next observation.
 
+    Paper trading only (``dry_run=True``, enforced by the config): step 3 never submits an
+    order. Every other step is real -- real market data in, real resolution polled from the
+    CLOB, real payoff booked against a simulated balance. See ``LIVE_UNSUPPORTED``.
+
     Episode ends when the scanner finds no next market across
     ``next_market_max_attempts`` env-level retries (terminated), the simulated
-    cash balance drops below the bankruptcy threshold (terminated) -- see
-    ``initial_cash`` on the config, it is NOT the real wallet -- or ``max_steps``
-    is hit
-    (truncated). The observation deliberately omits any ``account_state``, by
+    cash balance drops below the bankruptcy threshold (terminated), or ``max_steps``
+    is hit (truncated). The observation deliberately omits any ``account_state``, by
     the time the next decision is made, the previous bet has already resolved
     and there is no carried position to encode.
     """
@@ -228,6 +271,12 @@ class PolymarketBetEnv(EnvBase):
         stake = self.cash * self.config.bet_fraction
         token_id = market.yes_token_id if action_idx == 1 else market.no_token_id
 
+        # UNREACHABLE today: the config refuses dry_run=False (see LIVE_UNSUPPORTED), so this
+        # branch never runs. Kept, not deleted, as the call site the CLOB V2 port revives by
+        # lifting that one guard -- and kept UNTESTED for the same reason: the contract this
+        # env makes right now is "live is refused" (tested), not "live buys like so".
+        # If you are here to do the port: reading the real wallet is NOT enough. You must also
+        # redeem resolved winnings, or `cash` decays to zero on a winning account.
         if stake > 0 and not self.config.dry_run:
             result = self.trader.buy(token_id=token_id, amount_usdc=stake)
             if not result.get("success"):

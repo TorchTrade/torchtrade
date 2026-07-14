@@ -100,11 +100,26 @@ config = PolymarketBetEnvConfig(
     market_slug_prefix="btc-updown-5m-",   # the only required field
     bet_fraction=0.01,                     # stake 1 % of cash per bet
     max_steps=10,                          # 10 bets per episode
-    initial_cash=1_000.0,                  # for dry-run accounting
-    dry_run=True,                          # skip real CLOB orders
+    initial_cash=1_000.0,                  # simulated paper balance
+    dry_run=True,                          # the only supported mode (the default)
 )
-env = PolymarketBetEnv(config, private_key="")  # private_key only needed when dry_run=False
+env = PolymarketBetEnv(config)
 ```
+
+> **Paper trading only.** `dry_run=False` raises `NotImplementedError`. Two reasons, either
+> fatal on its own:
+> 1. `py-clob-client`, which the order executor is built on, was **archived** in May 2026
+>    ("no longer functional"). Polymarket's CLOB V2 uses new contracts and replaced USDC.e
+>    collateral with pUSD, so no order this env submits can reach production.
+> 2. This env **buys and holds every bet through resolution**, and Polymarket does *not*
+>    release collateral on resolution — a winning share stays an ERC-1155 token until it is
+>    explicitly **redeemed** on-chain, which no Polymarket client exposes. A live bot that
+>    never redeems would watch its balance drain to zero *while winning*.
+>
+> Reviving live trading needs the CLOB V2 port **and** a redemption workflow. Everything
+> else about the env is real: real market data, real resolution, real payoffs — booked
+> against a simulated balance.
+
 
 Swapping to ETH 15-minute is a one-line change:
 

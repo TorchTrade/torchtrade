@@ -101,11 +101,13 @@ class TestDryRunWithoutClient:
         assert exe.buy("tok", 1.0)["success"] is True
         assert exe.cancel_all() is True
 
-    def test_live_mode_still_requires_clob(self, monkeypatch):
+    def test_live_mode_error_does_not_advise_installing_the_dead_package(self, monkeypatch):
+        """The old message said "pip install py-clob-client" -- advice that now sends people
+        to an archived, non-functional package. Pin the honest message instead."""
         monkeypatch.setattr(
             "torchtrade.envs.live.polymarket.order_executor.ClobClient", None
         )
-        with pytest.raises(ImportError, match="py-clob-client is required"):
+        with pytest.raises(ImportError, match="archived and no longer functional"):
             PolymarketOrderExecutor(private_key="0x", dry_run=False)
 
 
