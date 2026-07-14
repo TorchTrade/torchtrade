@@ -173,3 +173,45 @@ class TestDGLoss:
 
         assert gate_rare_success > 0.5, f"rare success should be amplified, got gate={gate_rare_success}"
         assert gate_rare_failure < 0.5, f"rare failure should be suppressed, got gate={gate_rare_failure}"
+
+
+class TestDGLossSetKeys:
+    """set_keys() raised AttributeError unconditionally -- the #247 bug, in a class that was
+    missed at the time."""
+
+    @pytest.fixture
+    def actor_network(self):
+        from tensordict.nn import TensorDictModule
+        from torch import nn
+        return TensorDictModule(nn.Linear(4, 2), in_keys=["observation"], out_keys=["logits"])
+
+    def test_set_keys_does_not_raise(self, actor_network):
+        """LossModule.set_keys() calls self._forward_value_estimator_keys(), which DGLoss did
+        not define -- so ANY call raised:
+
+            AttributeError: ... the subclass needs to implement
+            `._forward_value_estimator_keys()` ...
+
+        Renaming a key is the supported way to use a non-default action key, so this was not an
+        exotic path -- it was broken for every caller.
+        """
+        loss = DGLoss(actor_network=actor_network)
+        loss.set_keys(action="custom_action")   # must not raise
+        assert loss.tensor_keys.action == "custom_action"
+
+    def test_set_keys_invalidates_the_cached_in_keys(self, actor_network):
+        """The half a no-op `_forward_value_estimator_keys` would silently break.
+
+        A stub that just `pass`-es makes set_keys() stop raising and tensor_keys update -- but
+        the CACHED in_keys still name the OLD key, so a training loop doing
+        `tensordict.select(*loss.in_keys)` quietly drops the renamed one and trains on nothing.
+        Without this assertion, `def _forward_value_estimator_keys(self, **kw): pass` passes.
+        """
+        loss = DGLoss(actor_network=actor_network)
+        _ = loss.in_keys                        # populate the cache with the default keys
+
+        loss.set_keys(action="custom_action")
+
+        in_keys = [str(k) for k in loss.in_keys]
+        assert "custom_action" in in_keys
+        assert "action" not in in_keys, "the cached in_keys still name the old key"
