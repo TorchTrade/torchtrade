@@ -2533,46 +2533,37 @@
 </span></code></pre></div>
 <hr />
 <h2 id="polymarket-environment">Polymarket Environment<a class="headerlink" href="#polymarket-environment" title="Permanent link">&para;</a></h2>
-<p><a href="https://polymarket.com/">Polymarket</a> is a decentralized prediction market on Polygon. TorchTrade currently exposes a single env, <code>PolymarketBetEnv</code>, tailored for short-cadence binary markets, Polymarket runs continuous <strong>5-minute, 15-minute, 1-hour, and 4-hour</strong> crypto "up/down" markets (BTC, ETH, SOL) plus daily markets. Each step is an independent bet: place direction, wait for resolution, collect realized payoff, advance to the next market in the series. There is no carried position, so the observation deliberately omits any <code>account_state</code>.</p>
+<p><a href="https://polymarket.com/">Polymarket</a> is a decentralized prediction market on Polygon. TorchTrade currently exposes a single env, <code>PolymarketBetEnv</code>, tailored for short-cadence binary markets, Polymarket runs continuous <strong>5-minute, 15-minute, 1-hour, and 4-hour</strong> crypto "up/down" markets (BTC, ETH, SOL) plus daily markets. Each step is an independent bet: place direction, wait for resolution, collect the modelled payoff, advance to the next market in the series. There is no carried position, so the observation deliberately omits any <code>account_state</code>.</p>
 <div class="admonition info">
 <p class="admonition-title">Starter environment, more to come</p>
 <p><code>PolymarketBetEnv</code> is intentionally a <strong>starter env</strong> matching the most common Polymarket use case for TorchTrade (rolling binary up/down bets). Polymarket also has multi-strike daily price markets, sports, politics, and longer-horizon markets that benefit from a different env shape. Additional Polymarket envs will be added based on user requests and as new market types appear, open an issue describing the pattern you need.</p>
 </div>
-<div class="admonition note">
-<p class="admonition-title">Authentication</p>
-<p>Polymarket uses a <strong>Polygon private key</strong>, not an API key/secret pair. The key is used to derive CLOB API credentials at runtime.</p>
-</div>
-<div class="admonition warning">
-<p class="admonition-title">USDC Required</p>
-<p>The wallet must hold USDC.e on Polygon to place real orders. Use <code>dry_run=True</code> to validate the pipeline without spending capital, <code>dry_run</code> works without <code>py-clob-client</code> installed.</p>
+<div class="admonition danger">
+<p class="admonition-title">Paper trading only, live is refused</p>
+<p><code>dry_run=False</code> raises <code>NotImplementedError</code>. Two blockers: (1) <code>py-clob-client</code> was <strong>archived</strong> in May 2026 ("no longer functional") — Polymarket's CLOB V2 uses new contracts and replaced USDC.e collateral with pUSD, so no order can reach production; (2) this env buys and holds every bet through resolution, and Polymarket does <strong>not</strong> release collateral on resolution — winning shares must be <strong>redeemed</strong> on-chain, which no Polymarket client exposes. Without the redeem, a bot's spendable balance drains to zero <em>while it is winning</em>. That is also why the balance cannot simply be read from the wallet. Reviving live needs the CLOB V2 port <strong>and</strong> a redemption workflow.</p>
 </div>
 <h3 id="polymarketbetenv">PolymarketBetEnv<a class="headerlink" href="#polymarketbetenv" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.live.polymarket</span><span class="w"> </span><span class="kn">import</span> <span class="n">PolymarketBetEnv</span><span class="p">,</span> <span class="n">PolymarketBetEnvConfig</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">dotenv</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_dotenv</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">load_dotenv</span><span class="p">()</span>
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
-</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="n">config</span> <span class="o">=</span> <span class="n">PolymarketBetEnvConfig</span><span class="p">(</span>
-</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="n">market_slug_prefix</span><span class="o">=</span><span class="s2">&quot;btc-updown-5m-&quot;</span><span class="p">,</span>  <span class="c1"># discover via scan_markets.py</span>
-</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="n">bet_fraction</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>                    <span class="c1"># stake 1 % of cash per bet</span>
-</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="n">max_steps</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>                         <span class="c1"># 10 bets per episode</span>
-</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>    <span class="n">initial_cash</span><span class="o">=</span><span class="mf">1_000.0</span><span class="p">,</span>                 <span class="c1"># for dry-run accounting</span>
-</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="n">dry_run</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>                         <span class="c1"># paper trading (recommended!)</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">PolymarketBetEnvConfig</span><span class="p">(</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">market_slug_prefix</span><span class="o">=</span><span class="s2">&quot;btc-updown-5m-&quot;</span><span class="p">,</span>  <span class="c1"># discover via scan_markets.py</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">bet_fraction</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>                    <span class="c1"># stake 1 % of cash per bet</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="n">max_steps</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>                         <span class="c1"># 10 bets per episode</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="n">initial_cash</span><span class="o">=</span><span class="mf">1_000.0</span><span class="p">,</span>                 <span class="c1"># for dry-run accounting</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="n">dry_run</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>                         <span class="c1"># the only supported mode (the default)</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="p">)</span>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="n">env</span> <span class="o">=</span> <span class="n">PolymarketBetEnv</span><span class="p">(</span>
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
 </span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="p">)</span>
-</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>
-</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="n">env</span> <span class="o">=</span> <span class="n">PolymarketBetEnv</span><span class="p">(</span>
-</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>    <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
-</span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>    <span class="n">private_key</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;POLYGON_PRIVATE_KEY&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
-</span><span id="__span-10-18"><a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="p">)</span>
-</span><span id="__span-10-19"><a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a><span class="c1"># observation_spec: {&quot;market_state&quot;: (4,)}  → [yes_price, spread, vol_24h, liquidity]</span>
-</span><span id="__span-10-20"><a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a><span class="c1"># action_spec:      Categorical(2)            → 0 = Down, 1 = Up</span>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="c1"># observation_spec: {&quot;market_state&quot;: (4,)}  → [yes_price, spread, vol_24h, liquidity]</span>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="c1"># action_spec:      Categorical(2)            → 0 = Down, 1 = Up</span>
 </span></code></pre></div>
 <p>Each <code>step()</code>:
-1. Submits the bet on the current market (skipped in <code>dry_run</code>).
+1. Books the bet on the current market (paper only — no order is submitted).
 2. Sleeps until the market's <code>endDate</code> plus a small grace period.
 3. Polls Polymarket's <strong>CLOB</strong> at <code>clob.polymarket.com/midpoint?token_id=…</code> for each outcome token; the market is resolved once the YES midpoint is <code>≥ 0.99</code> and the NO midpoint is <code>≤ 0.01</code> (Up won), or vice versa (Down won). The CLOB is used here rather than Gamma's <code>outcomePrices</code> because Gamma evicts short-cadence markets within minutes of <code>endDate</code> and its prices field is a stale snapshot, not a live mid.
-4. Computes realized payoff, a win pays <code>stake × (1 − fill) / fill</code>; a loss returns <code>−stake</code>.
+4. Computes the modelled payoff, a win pays <code>stake × (1 − fill) / fill</code>; a loss returns <code>−stake</code>.
 5. Picks the next active market matching <code>market_slug_prefix</code> and returns its <code>market_state</code>.</p>
 <h3 id="discovering-markets-and-slug-prefixes">Discovering markets and slug prefixes<a class="headerlink" href="#discovering-markets-and-slug-prefixes" title="Permanent link">&para;</a></h3>
 <p><code>MarketScanner</code> is the discovery tool. Use it once to identify the slug prefix that points at the series you want, then plug it into the env. Two query strategies depending on your filters:</p>
@@ -2960,8 +2951,7 @@
 </span><span id="__span-22-20"><a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a><span class="nv">OKX_API_SECRET</span><span class="o">=</span>your_okx_api_secret
 </span><span id="__span-22-21"><a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a><span class="nv">OKX_PASSPHRASE</span><span class="o">=</span>your_okx_passphrase
 </span><span id="__span-22-22"><a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a>
-</span><span id="__span-22-23"><a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a><span class="c1"># Polymarket (Polygon wallet, fund with USDC.e)</span>
-</span><span id="__span-22-24"><a id="__codelineno-22-24" name="__codelineno-22-24" href="#__codelineno-22-24"></a><span class="nv">POLYGON_PRIVATE_KEY</span><span class="o">=</span>your_polygon_wallet_private_key
+</span><span id="__span-22-23"><a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a><span class="c1"># Polymarket: paper-only, no live orders -- no funded wallet or key is needed.</span>
 </span></code></pre></div>
 <div class="admonition warning">
 <p class="admonition-title">Always Start with Paper/Testnet Trading</p>
@@ -3016,7 +3006,7 @@
 <td>Yes (Testnet)</td>
 <td>Yes (Testnet)</td>
 <td>Yes (Demo)</td>
-<td>Yes (dry_run)</td>
+<td>Yes (dry_run — the ONLY mode)</td>
 </tr>
 <tr>
 <td><strong>Commission</strong></td>
@@ -3034,7 +3024,7 @@
 <td>CCXT</td>
 <td>pybit (native)</td>
 <td>python-okx (native)</td>
-<td>py-clob-client</td>
+<td>py-clob-client (archived; live unsupported)</td>
 </tr>
 </tbody>
 </table>
