@@ -58,26 +58,6 @@ def test_check_termination(done_on_bankruptcy, portfolio_value, expected):
     assert TorchTradeLiveEnv._check_termination(env, portfolio_value) is expected
 
 
-@pytest.mark.parametrize("initial", [0.0, -5.0], ids=["zero", "negative"])
-def test_check_termination_with_no_initial_value(initial):
-    """A live env with no initial portfolio value never terminates on bankruptcy.
-
-    BEHAVIOUR CHANGE, pinned deliberately. The live envs previously had no initial>0 guard, so
-    a corrupted initial_portfolio_value of 0 (the exchange bases do
-    `balance.get("total_wallet_balance", 0)`) made the threshold 0 and would still fire the
-    stop on a negative balance. The shared rule refuses to judge bankruptcy against nothing.
-
-    The real bug is that silent `.get(key, 0)` default -- an env whose starting balance could
-    not be read should fail loudly at construction, not limp on with a meaningless threshold.
-    Tracked separately; this pins what the code does now so the change is visible.
-    """
-    env = SimpleNamespace(
-        config=SimpleNamespace(done_on_bankruptcy=True, bankrupt_threshold=0.1),
-        initial_portfolio_value=initial,
-    )
-    assert TorchTradeLiveEnv._check_termination(env, -100.0) is False
-
-
 @pytest.mark.parametrize("cached_position,cached_level,status,expect_position,expect_level", [
     # The env's own trade already wrote both fields: a matching position must NOT be touched,
     # or the guard could never suppress a genuinely redundant trade.

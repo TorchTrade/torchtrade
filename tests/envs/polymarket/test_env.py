@@ -319,7 +319,7 @@ class TestStep:
         # The two rows that pin the WIRING. The boundary and the arithmetic belong to the shared
         # rule and are pinned in tests/envs/test_termination.py -- asserting them again through
         # the env is the layering this test exists to avoid.
-        (199.99, True, True),   # sole killer of every wrong-config-field mutant
+        (199.99, True, True),   # sole killer of the bet_fraction mutant (both are fractions)
         (0.0, False, False),    # sole killer of a hardcoded gate
     ], ids=["just-below", "gate-off-while-broke"])
     def test_is_bankrupt_wiring(self, cash, enabled, expected):
@@ -333,8 +333,6 @@ class TestStep:
         against a threshold of 5, far past the boundary.
         """
         env, _, _ = _make_env(
-            outcomes=[0],
-            markets=[_make_market(), _make_market()],
             config_overrides={
                 "initial_cash": 1000.0,
                 "done_on_bankruptcy": enabled,

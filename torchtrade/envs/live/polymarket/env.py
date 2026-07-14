@@ -115,8 +115,10 @@ class PolymarketBetEnv(EnvBase):
        and its market_state becomes the next observation.
 
     Episode ends when the scanner finds no next market across
-    ``next_market_max_attempts`` env-level retries (terminated), the wallet
-    drops below the bankruptcy threshold (terminated), or ``max_steps`` is hit
+    ``next_market_max_attempts`` env-level retries (terminated), the simulated
+    cash balance drops below the bankruptcy threshold (terminated) -- see
+    ``initial_cash`` on the config, it is NOT the real wallet -- or ``max_steps``
+    is hit
     (truncated). The observation deliberately omits any ``account_state``, by
     the time the next decision is made, the previous bet has already resolved
     and there is no carried position to encode.
