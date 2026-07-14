@@ -588,3 +588,21 @@ class TestCloseLifecycle:
         env, _, trader = _make_env()
         env.close()
         trader.cancel_all.assert_called_once()
+
+class TestConfigValidation:
+    """The config is the boundary. A nonsense value must be refused there, not absorbed."""
+
+    @pytest.mark.parametrize("initial_cash", [-100.0, 0.0], ids=["negative", "zero"])
+    def test_nonsense_starting_cash_is_refused(self, initial_cash):
+        """Negative starting cash used to be silently absorbed into 'never bankrupt'.
+
+        The old _is_bankrupt() carried an `initial > 0` guard, so a config with
+        initial_cash=-100 constructed fine and simply never terminated. That is a nonsense
+        config producing a silently disabled safety stop -- the exact silent-default pattern
+        this repo keeps getting bitten by.
+        """
+        with pytest.raises(ValueError, match="initial_cash"):
+            PolymarketBetEnvConfig(initial_cash=initial_cash)
+
+    def test_a_sane_config_still_constructs(self):
+        assert PolymarketBetEnvConfig(initial_cash=1000.0).initial_cash == 1000.0

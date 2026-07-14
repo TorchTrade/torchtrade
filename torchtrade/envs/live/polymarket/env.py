@@ -88,6 +88,16 @@ class PolymarketBetEnvConfig:
     # typically snaps the CLOB midpoints within 1-5 minutes of endDate;
     # 10 min is a safe ceiling.
     resolution_max_wait_seconds: float = 600.0
+
+    def __post_init__(self):
+        # Validated at the boundary, not guarded inside the rule. _is_bankrupt() used to carry
+        # an `initial > 0` guard, which silently turned a nonsense config into "never bankrupt"
+        # instead of saying so -- the silent-default pattern this repo keeps getting bitten by.
+        # Refuse the config instead. (Only initial_cash: bet_fraction=0 is a supported config
+        # here, with a test that relies on it.)
+        if self.initial_cash <= 0:
+            raise ValueError(f"initial_cash must be > 0, got {self.initial_cash}")
+
     # When the scanner returns no upcoming market, retry at the env level after
     # this sleep. The scanner's internal retry budget (~48s) covers brief blips;
     # this layer covers minutes-long Gamma outages where the underlying series
