@@ -141,11 +141,11 @@ class TestSpecs:
             PolymarketOrderExecutor,
         )
         assert isinstance(env.trader, PolymarketOrderExecutor)
-        # Pins that the env actually wires the executor to PAPER rather than trusting the
-        # executor's default. Belt-and-braces: the executor now defaults to dry_run=True too,
-        # so BOTH must regress before a live client can be built -- this assertion is what
-        # makes that take two mistakes instead of one.
-        assert env.trader._dry_run is True
+        # NOT asserting env.trader._dry_run: it cannot fail. The config admits only
+        # dry_run=True, so passing config.dry_run, passing True, and omitting the kwarg (the
+        # executor's own default) are indistinguishable here -- a dead assertion dressed as a
+        # second lock. The executor's safe default is pinned for real in
+        # test_order_executor.py::test_executor_defaults_to_paper; that is the actual guard.
 
 
 # --- Pure helpers ----------------------------------------------------------- #
@@ -554,7 +554,7 @@ class TestPollForResolution:
         env = self._real_poll_env()
         env._fetch_resolved_outcome = MagicMock(return_value=1)
         with patch("torchtrade.envs.live.polymarket.env.time.sleep") as mock_sleep:
-            assert env._poll_for_resolution("0xcond") == 1
+            assert env._poll_for_resolution(_make_market()) == 1
         mock_sleep.assert_not_called()
         assert env._fetch_resolved_outcome.call_count == 1
 
@@ -566,7 +566,7 @@ class TestPollForResolution:
         # First two calls: still mid-market. Third: Up wins.
         env._fetch_resolved_outcome = MagicMock(side_effect=[None, None, 1])
         with patch("torchtrade.envs.live.polymarket.env.time.sleep") as mock_sleep:
-            assert env._poll_for_resolution("0xcond") == 1
+            assert env._poll_for_resolution(_make_market()) == 1
         assert env._fetch_resolved_outcome.call_count == 3
         # Pin the poll interval BY VALUE, not just "it slept". Nothing pinned this, so
         # hardcoding a constant passed the whole suite -- turning a 15s poll into a 1s one,
@@ -574,14 +574,32 @@ class TestPollForResolution:
         assert mock_sleep.call_args_list == [call(7.0), call(7.0)]
 
     def test_returns_none_when_max_wait_exhausted(self):
+        """The deadline must come from resolution_max_wait_seconds, and be OBSERVABLE.
+
+        A fake clock advancing exactly one poll-interval per tick makes the poll count a
+        deterministic function of the config: 50s budget / 10s interval = 5 polls. Asserting
+        the COUNT is what turns "the deadline was hardcoded to 600.0" from a 600-second HANG
+        (which no assertion catches -- only a CI timeout) into an ordinary test failure.
+        """
         env = self._real_poll_env(
-            resolution_max_wait_seconds=0.1,
-            resolution_poll_interval_seconds=0.01,
+            resolution_max_wait_seconds=50.0,
+            resolution_poll_interval_seconds=10.0,
         )
         env._fetch_resolved_outcome = MagicMock(return_value=None)
-        with patch("torchtrade.envs.live.polymarket.env.time.sleep"):
-            assert env._poll_for_resolution("0xcond") is None
-        assert env._fetch_resolved_outcome.call_count >= 1
+
+        # Clock advances ONLY when the loop sleeps -- a faithful simulation of elapsed time,
+        # and robust to how many times the loop happens to read the clock per iteration
+        # (it reads it twice today; a per-read counter would break on any refactor).
+        now = [0.0]
+        with patch("torchtrade.envs.live.polymarket.env.time.sleep",
+                   side_effect=lambda sec: now.__setitem__(0, now[0] + sec)), \
+             patch("torchtrade.envs.live.polymarket.env.time.monotonic",
+                   side_effect=lambda: now[0]):
+            assert env._poll_for_resolution(_make_market()) is None
+
+        # 50s budget / 10s interval => 5 sleeps, so 6 polls before the deadline bites.
+        # A hardcoded 600.0 budget would poll 61 times -- a wrong NUMBER, not a 600s hang.
+        assert env._fetch_resolved_outcome.call_count == 6
 
 
 class TestWaitForResolution:
@@ -607,7 +625,7 @@ class TestWaitForResolution:
             assert mock_sleep.called == expect_sleep
 
     def test_sleeps_when_future_endDate(self):
-        env, _, _ = _make_env()
+        env, _, _ = _make_env(config_overrides={"resolution_grace_seconds": 45.0})
         env._wait_for_resolution = (
             PolymarketBetEnv._wait_for_resolution.__get__(env, PolymarketBetEnv)
         )
@@ -618,9 +636,10 @@ class TestWaitForResolution:
             env._wait_for_resolution(future)
             mock_sleep.assert_called_once()
             slept_for = mock_sleep.call_args.args[0]
-            # By VALUE, not "> 100": a 120s horizon plus the configured 30s grace. The loose
-            # bound let `target = end_dt` (grace dropped entirely) pass, since 120 > 100.
-            assert slept_for == pytest.approx(150, abs=2)
+            # 45s grace, NOT the 30.0 default: pinning a knob at its default cannot tell a
+            # config read from a hardcoded constant. (Same trap as the poll interval; I shipped
+            # this bug class twice before catching it here.) 120s horizon + 45s grace = 165.
+            assert slept_for == pytest.approx(165, abs=2)
 
 
 class TestConfigValidation:
@@ -658,6 +677,17 @@ class TestConfigValidation:
         config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
         with pytest.raises(dataclasses.FrozenInstanceError):
             config.dry_run = False
+
+    def test_zero_is_legal_for_both_fractions(self):
+        """0.0 is DOCUMENTED as supported for both (a no-bet agent; bankruptcy disabled).
+
+        The lower bounds were never constructed, so `0 <= x` -> `0 < x` silently forbade a
+        config the docstrings promise. Pin that both zeros still build.
+        """
+        cfg = PolymarketBetEnvConfig(
+            market_slug_prefix="btc-updown-5m-", bet_fraction=0.0, bankrupt_threshold=0.0
+        )
+        assert cfg.bet_fraction == 0.0 and cfg.bankrupt_threshold == 0.0
 
     @pytest.mark.parametrize(
         "bad", [-1.0, 1.0, 1.5],
