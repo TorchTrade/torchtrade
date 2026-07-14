@@ -315,6 +315,38 @@ class TestStep:
         td = env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
         assert td["terminated"].item()
 
+    @pytest.mark.parametrize("cash,enabled,expected", [
+        # The two rows that pin the WIRING. The boundary and the arithmetic belong to the shared
+        # rule and are pinned in tests/envs/test_termination.py -- asserting them again through
+        # the env is the layering this test exists to avoid.
+        (199.99, True, True),   # sole killer of the bet_fraction mutant (both are fractions)
+        (0.0, False, False),    # sole killer of a hardcoded gate
+    ], ids=["just-below", "gate-off-while-broke"])
+    def test_is_bankrupt_wiring(self, cash, enabled, expected):
+        """The env threads its OWN cash/config into the shared rule.
+
+        Deliberately goes through env._is_bankrupt(), not the shared helper: the helper's
+        arithmetic is pinned in tests/envs/test_termination.py, and asserting it again here
+        would pass even if this env swapped current/initial or hardcoded the gate.
+
+        The boundary and the gate were both unpinned before: the old test drives cash to 0
+        against a threshold of 5, far past the boundary.
+        """
+        env, _, _ = _make_env(
+            config_overrides={
+                "initial_cash": 1000.0,
+                "done_on_bankruptcy": enabled,
+                # 0.2, NOT the fixture's bet_fraction of 0.1 -- with both at 0.1 this test
+                # cannot tell the two config fields apart, and passing the wrong one kills
+                # nothing. -> a threshold of 200.0
+                "bankrupt_threshold": 0.2,
+            },
+        )
+        env.reset()
+        env.cash = cash
+
+        assert env._is_bankrupt() is expected
+
     def test_terminated_wins_when_bankruptcy_and_max_steps_coincide(self):
         """If both fire on the same step, terminated suppresses truncated."""
         market = _make_market(yes_price=0.5, no_price=0.5)
@@ -556,3 +588,21 @@ class TestCloseLifecycle:
         env, _, trader = _make_env()
         env.close()
         trader.cancel_all.assert_called_once()
+
+class TestConfigValidation:
+    """The config is the boundary. A nonsense value must be refused there, not absorbed."""
+
+    @pytest.mark.parametrize("initial_cash", [-100.0, 0.0], ids=["negative", "zero"])
+    def test_nonsense_starting_cash_is_refused(self, initial_cash):
+        """Negative starting cash used to be silently absorbed into 'never bankrupt'.
+
+        The old _is_bankrupt() carried an `initial > 0` guard, so a config with
+        initial_cash=-100 constructed fine and simply never terminated. That is a nonsense
+        config producing a silently disabled safety stop -- the exact silent-default pattern
+        this repo keeps getting bitten by.
+        """
+        with pytest.raises(ValueError, match="initial_cash"):
+            PolymarketBetEnvConfig(initial_cash=initial_cash)
+
+    def test_a_sane_config_still_constructs(self):
+        assert PolymarketBetEnvConfig(initial_cash=1000.0).initial_cash == 1000.0
