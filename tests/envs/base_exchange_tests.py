@@ -1,7 +1,8 @@
-"""Shared observation-class tests.
+"""Shared test bodies for the per-exchange live-env test files.
 
-Each exchange (alpaca, binance, bitget, bybit, okx) subclasses BaseObservationClassTests in
-its own test_obs_class.py and implements create_observer / get_expected_symbol_format.
+- BaseObservationClassTests: subclassed by each exchange's test_obs_class.py.
+- assert_a_direct_flip_does_not_age_the_new_position: called by each exchange's
+  test_torch_env_futures*.py, so the flip contract has one body and five kills.
 """
 
 import pytest
@@ -269,7 +270,6 @@ class BaseObservationClassTests(ABC):
         assert observations[key].shape[0] == 100
 
 
-
 def assert_a_direct_flip_does_not_age_the_new_position(
     env, trader, PositionStatus, long_action, short_action, set_side=None
 ):
@@ -285,11 +285,16 @@ def assert_a_direct_flip_does_not_age_the_new_position(
     import torch
     from tensordict import TensorDict
 
-    # the four PositionStatus dataclasses are field-identical in order (only field 8 is named
-    # margin_type on binance, margin_mode elsewhere), so build them positionally
+    # Built positionally because the four dataclasses differ only in the NAME of field 8
+    # (margin_type on binance, margin_mode elsewhere). The only field this test actually reads
+    # is qty -- everything else is inert filler -- so that is the one thing worth pinning.
+    from dataclasses import fields
+    assert [f.name for f in fields(PositionStatus)][0] == "qty"
+
     def pos(qty):
+        liq = 45000.0 if qty > 0 else 55000.0     # shorts liquidate ABOVE the mark
         return {"position_status": PositionStatus(
-            qty, 500.0, 50000.0, 0.0, 0.0, 50000.0, 5, "isolated", 45000.0)}
+            qty, 500.0, 50000.0, 0.0, 0.0, 50000.0, 5, "isolated", liq)}
 
     with patch.object(env, "_wait_for_next_timestamp"):
         if set_side:
@@ -304,8 +309,18 @@ def assert_a_direct_flip_does_not_age_the_new_position(
 
         if set_side:
             set_side("SELL")
-        first = iter([pos(0.01)])          # sync reads the OLD long; every later read is short
-        trader.get_status = MagicMock(side_effect=lambda: next(first, pos(-0.01)))
+
+        # The exchange reports the OLD long until the trade actually executes -- keyed off the
+        # TRADE, not off how many times _step happens to call get_status(). An earlier
+        # get_status() added to _step (a price prefetch, a retry) would consume a
+        # call-ordering-based mock's single "long", the sync would then see the short, reset
+        # hold_counter ITSELF, and all five tests would go green on buggy code.
+        traded = []
+        inner_trade = trader.trade
+        trader.trade = MagicMock(
+            side_effect=lambda *a, **k: (traded.append(1), inner_trade(*a, **k))[1]
+        )
+        trader.get_status = MagicMock(side_effect=lambda: pos(-0.01) if traded else pos(0.01))
         td = env.step(TensorDict({"action": torch.tensor(short_action)}, batch_size=()))
 
     holding_time = td["next"]["account_state"][3].item()

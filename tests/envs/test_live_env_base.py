@@ -274,3 +274,38 @@ def test_holding_time_resets_on_a_direct_flip(directions, expected, why):
     assert got == [float(e) for e in expected], why
 
 
+@pytest.mark.parametrize(
+    "path", sorted(pathlib.Path("torchtrade/envs/live").rglob("*.py")), ids=str
+)
+def test_only_the_shared_rule_ages_a_position(path):
+    """Nothing may age a position except advance_hold_counter().
+
+    This bug shipped FIVE times -- once per exchange, in two spellings -- because no guard
+    existed. But the first version of this guard was theatre: a substring search for
+    "hold_counter += 1" over a hand-listed set of paths, so it missed both
+    `hold_counter = hold_counter + 1` AND any exchange added later.
+
+    This one walks the AST and auto-discovers the files, so neither escape works. Plain
+    `hold_counter = 0` resets are still allowed -- they are how a flat position and a new
+    episode are expressed; what is banned is anything DERIVING a new age.
+    """
+    tree = ast.parse(path.read_text())
+
+    offenders = []
+    for node in ast.walk(tree):
+        target, value = None, None
+        if isinstance(node, ast.AugAssign):                  # hold_counter += 1
+            target, value = node.target, node.value
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value      # hold_counter = <anything>
+        if not (isinstance(target, ast.Attribute) and target.attr == "hold_counter"):
+            continue
+        # a literal reset to 0 is the one legal write
+        if isinstance(node, ast.Assign) and isinstance(value, ast.Constant) and value.value == 0:
+            continue
+        offenders.append(f"line {node.lineno}: {ast.unparse(node)}")
+
+    assert not offenders, (
+        f"{path} ages the position itself instead of calling advance_hold_counter():\n  "
+        + "\n  ".join(offenders)
+    )

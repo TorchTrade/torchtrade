@@ -341,7 +341,6 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
         env.close()
         mock_trader.cancel_open_orders.assert_called()
 
-
     def test_a_direct_flip_does_not_age_the_new_position(self, env, mock_trader):
         """env_sltp sets current_position from the trade SIDE, so LONG -> SHORT bracket flips
         without ever passing through flat."""

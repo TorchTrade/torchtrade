@@ -174,7 +174,8 @@ def advance_hold_counter(position: PositionState, direction: float) -> float:
         long  -> SHORT  a NEW position     -> 1     <-- a DIRECT flip, no flat bar between
         short -> flat   no position        -> 0
 
-    Every live env hand-rolled this as "increment while a position exists, reset when flat". A
+    The five live envs that track holding_time each hand-rolled this as "increment while a
+    position exists, reset when flat". A
     direct flip never passes through flat, so the reset never fired and a one-step-old short
     reported the dead long's age as account_state[3] -- which the policy conditions on.
     """
