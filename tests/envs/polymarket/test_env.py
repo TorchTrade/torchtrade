@@ -316,8 +316,8 @@ class TestStep:
         assert td["terminated"].item()
 
     @pytest.mark.parametrize("cash,enabled,expected", [
-        (100.0, True, False),   # exactly at the threshold -> NOT bankrupt (the check is a strict <)
-        (99.99, True, True),    # a hair below -> bankrupt
+        (200.0, True, False),   # exactly at the threshold -> NOT bankrupt (the check is a strict <)
+        (199.99, True, True),   # a hair below -> bankrupt
         (0.0, False, False),    # wiped out, but the gate is off -> keep betting
         (0.0, True, True),      # wiped out, gate on
     ], ids=["at-threshold", "just-below", "gate-off-while-broke", "gate-on-while-broke"])
@@ -337,7 +337,10 @@ class TestStep:
             config_overrides={
                 "initial_cash": 1000.0,
                 "done_on_bankruptcy": enabled,
-                "bankrupt_threshold": 0.1,   # -> a threshold of 100.0
+                # 0.2, NOT the fixture's bet_fraction of 0.1 -- with both at 0.1 this test
+                # cannot tell the two config fields apart, and passing the wrong one kills
+                # nothing. -> a threshold of 200.0
+                "bankrupt_threshold": 0.2,
             },
         )
         env.reset()
