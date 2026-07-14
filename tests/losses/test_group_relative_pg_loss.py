@@ -336,6 +336,51 @@ class TestGroupRelativePGLoss:
         loss = GroupRelativePGLoss(actor_network=actor_network)
         loss.reset()  # Should not raise any errors
 
+    def test_set_keys_invalidates_the_cached_in_keys(self, actor_network):
+        """A renamed key must appear in in_keys, and the old one must be gone.
+
+        This is the half that an empty `_forward_value_estimator_keys` would silently break:
+        set_keys() would stop raising, tensor_keys would update, but the CACHED in_keys would
+        still name the old key -- so a training loop doing tensordict.select(*loss.in_keys)
+        would quietly drop the renamed one.
+        """
+        loss = GroupRelativePGLoss(actor_network=actor_network)
+        _ = loss.in_keys                      # populate the cache with the default keys
+
+        loss.set_keys(action="custom_action", sample_log_prob="custom_log_prob")
+
+        in_keys = [str(k) for k in loss.in_keys]
+        assert "custom_action" in in_keys
+        assert "action" not in in_keys, "the cached in_keys still name the old key"
+        # sample_log_prob too, not just action: dropping it from _set_in_keys passed every
+        # test in this file, and the log-prob is what GRPO's importance ratio is built on --
+        # the precise failure this test exists to prevent.
+        assert "custom_log_prob" in in_keys
+
+    def test_constructor_takes_the_keys_from_the_actor(self):
+        """__init__ configures the loss's keys from the actor's, not from the defaults.
+
+        The actor deliberately uses NON-default key names. Comparing against
+        `actor.dist_sample_keys[0]` would be a tautology -- that is "action", which is also
+        what _AcceptedKeys.action defaults to, so the assertion would hold even if __init__
+        never configured anything (and it did hold: deleting the whole set_keys block from the
+        constructor left every test in this file green).
+        """
+        policy_net = TensorDictModule(
+            nn.Sequential(nn.Linear(self.OBS_DIM, 64), nn.ReLU(), nn.Linear(64, self.ACTION_DIM)),
+            in_keys=["observation"], out_keys=["logits"],
+        )
+        actor = ProbabilisticTensorDictModule(
+            in_keys=["logits"], out_keys=["my_action"],
+            distribution_class=Categorical, return_log_prob=True,
+        )
+        loss = GroupRelativePGLoss(
+            actor_network=ProbabilisticTensorDictSequential(policy_net, actor)
+        )
+
+        assert loss.tensor_keys.action == "my_action"          # not the "action" default
+        assert loss.tensor_keys.sample_log_prob == "my_action_log_prob"
+
 
 class TestGroupRelativePGLossGroupingInvariant:
     """Regression test for the group-relative-advantage invariant.
