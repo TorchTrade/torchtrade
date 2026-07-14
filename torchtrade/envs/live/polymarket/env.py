@@ -41,6 +41,7 @@ from torchtrade.envs.live.polymarket.market_scanner import (
     MarketScannerConfig,
     PolymarketMarket,
 )
+from torchtrade.envs.live.polymarket.order_executor import PolymarketOrderExecutor
 
 from torchtrade.envs.utils.termination import is_bankrupt
 
@@ -232,12 +233,10 @@ class PolymarketBetEnv(EnvBase):
         if trader is not None:
             self.trader = trader
         else:
-            from torchtrade.envs.live.polymarket.order_executor import (
-                PolymarketOrderExecutor,
-            )
-            # No private key: paper-only, so nothing is ever signed or submitted. The port
-            # re-adds one here. dry_run is passed explicitly (not left to the executor's
-            # default) so the two cannot silently disagree -- a test pins it.
+            # dry_run passed explicitly rather than left to the executor's default, so the two
+            # cannot silently disagree. The executor refuses dry_run=False on its own account,
+            # which is what makes a forced config mutation (object.__setattr__ defeats
+            # frozen=True) still fail to wire a live trader.
             self.trader = PolymarketOrderExecutor(dry_run=config.dry_run)
 
         # Specs, Binary for bool flags (per TorchRL spec semantics) and

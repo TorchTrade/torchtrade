@@ -1,19 +1,23 @@
 """Paper-trading order executor for Polymarket.
 
-PAPER ONLY. ``dry_run=False`` is REFUSED here, not just at the env's config boundary: this
-class is publicly exported (``torchtrade.envs.live``), so a caller reaching for the exported
-API could otherwise construct a live CLOB client and post a real order while
-:class:`PolymarketBetEnv` believed itself paper-only. The guard has to sit on the class that
-can actually move money, not only on the env that happens to build it.
+PAPER ONLY, and it refuses to pretend otherwise:
 
-See ``LIVE_UNSUPPORTED`` in ``env.py`` for why live is unsupported, and for sources -- do not
-restate it here.
+- ``dry_run=False`` raises. The refusal lives HERE, not only on the env's config, because this
+  class is publicly exported (``torchtrade.envs.live``) -- a caller reaching for the exported
+  API could otherwise construct a live CLOB client and post a real order while
+  :class:`PolymarketBetEnv` believed itself paper-only. The guard belongs on the class that
+  can move money, not only on the env that happens to build it.
+- ``private_key`` raises too. Accepting and ignoring a real key would tell the caller their
+  key is configured when nothing here can ever sign anything. Refused, not swallowed.
+
+The refusal message summarizes both blockers (archived client, no redeem); the sources for
+them live in ``LIVE_UNSUPPORTED`` in ``env.py``.
 
 The V1 py-clob-client machinery this module used to carry (``ClobClient`` construction,
-``MarketOrderArgs``/``OrderType.FOK`` order posting) was deleted rather than left behind the
-guard: it is unreachable once live is refused, and it would not have survived the CLOB V2 port
-anyway (different package, different types, pUSD collateral, plus a redemption workflow that
-does not exist yet). Recover it from git history if the port ever wants a reference.
+``MarketOrderArgs``/``OrderType.FOK`` order posting) was deleted rather than parked behind the
+guard: unreachable once live is refused, and it would not have survived the CLOB V2 port
+anyway (different package, different types, pUSD collateral, plus a redeem that does not exist
+yet). Recover it from git history if the port wants a reference.
 """
 
 from __future__ import annotations
@@ -32,26 +36,27 @@ LIVE_EXECUTOR_UNSUPPORTED = (
 
 
 class PolymarketOrderExecutor:
-    """Simulates Polymarket order submission. Never touches the network.
+    """Simulates Polymarket order submission. Never touches the network, never signs.
 
-    Built automatically by :class:`PolymarketBetEnv` (which is paper-only and calls nothing
-    here but :meth:`cancel_all`). This is where the CLOB V2 port begins.
+    Built automatically by :class:`PolymarketBetEnv`, which calls only :meth:`cancel_all`.
+    This is where the CLOB V2 port begins.
     """
 
-    def __init__(
-        self,
-        private_key: str = "",
-        chain_id: int = 137,
-        signature_type: int = 0,
-        funder: Optional[str] = None,
-        dry_run: bool = True,
-    ):
+    def __init__(self, *, private_key: Optional[str] = None, dry_run: bool = True):
+        # Keyword-only, and the live-config params (chain_id / signature_type / funder) are
+        # gone: they fed the deleted CLOB client and no caller in the tree ever passed them.
+        # Any leftover call site now gets a loud TypeError naming the argument.
         if not dry_run:
             raise NotImplementedError(LIVE_EXECUTOR_UNSUPPORTED)
-        self._dry_run = True
-        # Fully offline: no client, no API-cred derivation (which would hit the wallet RPC),
-        # no dependency on py-clob-client being installed, no need for a funded key.
-        self.client = None
+
+        # `is not None`, NOT truthiness: the old example passed
+        # os.getenv("POLYGON_PRIVATE_KEY", ""), and `if private_key:` would wave that through.
+        if private_key is not None:
+            raise TypeError(
+                "PolymarketOrderExecutor no longer takes private_key: it is paper-only and "
+                "can never sign or submit anything, so a key would do nothing. Accepting it "
+                "silently would tell you it was configured. Remove the argument."
+            )
 
     def buy(self, token_id: str, amount_usdc: float) -> dict:
         """Simulate buying ``amount_usdc`` of ``token_id``. Submits nothing."""
@@ -59,5 +64,5 @@ class PolymarketOrderExecutor:
         return {"success": True, "dry_run": True}
 
     def cancel_all(self) -> bool:
-        """No-op: there are no live orders to cancel."""
+        """No-op: a paper env has no live orders to cancel."""
         return True

@@ -130,7 +130,7 @@ class TestSpecs:
             PolymarketBetEnv(PolymarketBetEnvConfig())
 
     def test_default_trader_constructed_when_not_injected(self):
-        """Lazy import path: ``PolymarketOrderExecutor`` is built when no trader is passed."""
+        """``PolymarketOrderExecutor`` is built when no trader is injected."""
         config = PolymarketBetEnvConfig(
             market_slug_prefix="btc-updown-5m-", dry_run=True
         )
@@ -145,7 +145,7 @@ class TestSpecs:
         # dry_run=True, so passing config.dry_run, passing True, and omitting the kwarg (the
         # executor's own default) are indistinguishable here -- a dead assertion dressed as a
         # second lock. The executor's safe default is pinned for real in
-        # test_order_executor.py::test_executor_defaults_to_paper; that is the actual guard.
+        # test_order_executor.py (TestPaperExecution); that is the actual guard.
 
 
 # --- Pure helpers ----------------------------------------------------------- #
@@ -172,8 +172,8 @@ class TestConstructorCompat:
         the call site instead.
         """
         cfg = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
-        with pytest.raises(TypeError):
-            PolymarketBetEnv(cfg, "0xdeadbeef")   # noqa: the point is that this must raise
+        with pytest.raises(TypeError, match="positional"):
+            PolymarketBetEnv(cfg, "0xdeadbeef")
 
 
 class TestClose:
@@ -504,12 +504,21 @@ class TestFetchResolvedOutcome:
             ("0.0", "1.0", 0),       # Down snapped fully
             ("0.99", "0.01", 1),     # EXACTLY at threshold (Up): >= must not become >
             ("0.01", "0.99", 0),     # EXACTLY at threshold (Down): <= must not become <
+            # PARTIALLY snapped: the winning side is still moving while the losing side has
+            # already collapsed. The two midpoints are two INDEPENDENT HTTP reads and need not
+            # sum to 1 mid-settlement, so this state is real -- it is the state the poll loop
+            # exists to wait through. Nothing pinned the 0.99 CONSTANT (only the >= operator),
+            # so degrading it to 0.90 -- or even 0.10 -- passed the entire suite while making
+            # _fetch_resolved_outcome declare a WINNER on an unresolved market, which _step
+            # then books a payoff for. These two rows are what kill that.
+            ("0.90", "0.005", None),  # Up only partly snapped, Down already collapsed
+            ("0.005", "0.90", None),  # Down only partly snapped, Up already collapsed
             ("0.989", "0.011", None),  # below the 0.99 threshold
             ("0.99", "0.05", None),    # Up at threshold but Down still too high
             ("0.5", "0.5", None),      # mid-market
         ],
-        ids=["up", "down", "tight-up", "tight-down", "below-up",
-             "asymmetric-pending", "midmarket"],
+        ids=["up", "down", "at-threshold-up", "at-threshold-down", "below-up",
+             "asymmetric-pending", "midmarket", "partial-up", "partial-down"],
     )
     def test_outcome_parsing(self, yes_mid, no_mid, expected):
         env, _, _ = _make_env(mock_fetch=False)
@@ -691,18 +700,31 @@ class TestConfigValidation:
         assert "redeem" in str(exc.value)     # blocker 2: the one a port cannot skip
 
     def test_config_is_frozen_so_the_guard_cannot_be_mutated_away(self):
-        """__post_init__ runs ONCE. On a mutable dataclass this is the bypass:
+        """__post_init__ runs ONCE. On a mutable dataclass this was the bypass:
 
             config = PolymarketBetEnvConfig(...)   # dry_run=True, passes
             config.dry_run = False                 # guard never re-runs
-            env = PolymarketBetEnv(config)         # wires a LIVE trader
+            env = PolymarketBetEnv(config)         # ...used to wire a LIVE trader
 
-        frozen=True does not make the bypass impossible (object.__setattr__ still works);
-        it makes it deliberate rather than an ordinary attribute assignment.
+        frozen=True does not make it impossible (object.__setattr__ still works); it makes it
+        deliberate rather than an ordinary attribute assignment. It is no longer the last line
+        of defence either: the executor now refuses dry_run=False itself, so even a forced
+        mutation raises there -- pinned by test_forced_mutation_is_still_caught_downstream.
         """
         config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
         with pytest.raises(dataclasses.FrozenInstanceError):
             config.dry_run = False
+
+    def test_forced_mutation_is_still_caught_downstream(self):
+        """Defence in depth: even object.__setattr__ (which defeats frozen=True) cannot get a
+        live trader wired, because the executor refuses dry_run=False on its own account.
+
+        Two independent guards must both regress before a live client can be built.
+        """
+        config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
+        object.__setattr__(config, "dry_run", False)
+        with pytest.raises(NotImplementedError, match="archived"):
+            PolymarketBetEnv(config, scanner=MagicMock())
 
     def test_zero_is_legal_for_both_fractions(self):
         """0.0 is DOCUMENTED as supported for both (a no-bet agent; bankruptcy disabled).
