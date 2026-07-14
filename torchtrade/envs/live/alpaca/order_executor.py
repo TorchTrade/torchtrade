@@ -1,6 +1,7 @@
 import logging
 import os
 from dataclasses import dataclass
+from decimal import ROUND_DOWN, Decimal
 from typing import Dict, List, Optional, Union
 
 from alpaca.trading.client import TradingClient
@@ -91,6 +92,56 @@ class AlpacaOrderClass:
         self.client = client if client is not None else TradingClient(api_key, secret_key=api_secret, paper=paper)
         self.last_order_id = None
 
+    # Alpaca's documented maximum quantity precision for a FRACTIONABLE equity. It is not a
+    # fallback for an unknown asset -- 9dp on an asset whose real increment is 0.01 or 1 just
+    # gets rejected by the exchange.
+    MAX_EQUITY_QTY_DECIMALS = 9
+
+    def _round_qty(self, amount: float) -> Optional[float]:
+        """Floor `amount` onto Alpaca's quantity lattice for this asset.
+
+        Returns None when the order must NOT be sent: the asset's rules are unavailable (we do
+        not guess a precision on a live order), or the amount is below the minimum order size.
+
+        NOT cached. min_order_size is dynamic for crypto -- for USD pairs it tracks ~10/price --
+        so a value cached at construction goes stale on the next price move and starts either
+        refusing valid orders or passing now-sub-minimum ones. One REST call per order is a
+        fair price; orders are not high-frequency here.
+
+        Floor, never round: rounding up can exceed the size, and the buying power, the caller
+        asked for. Decimal, because 0.0001 is not exactly representable in binary float.
+        """
+        try:
+            asset = self.client.get_asset(self.symbol)
+        except Exception as e:
+            logger.error(
+                f"get_asset({self.symbol}) failed: {e}. Refusing to size the order rather than "
+                f"guess a precision."
+            )
+            return None
+
+        qty = Decimal(str(amount))
+        min_qty = getattr(asset, "min_order_size", None)
+        step = getattr(asset, "min_trade_increment", None)
+
+        if min_qty and step:
+            # Crypto: valid quantities are min + N*step, NOT N*step. Flooring from zero can
+            # land above the minimum yet off the lattice (min 0.000166, step 0.0001,
+            # amount 0.00027 -> 0.0002: above the minimum, and rejected).
+            min_d, step_d = Decimal(str(min_qty)), Decimal(str(step))
+            if qty < min_d:
+                return None
+            steps = ((qty - min_d) / step_d).to_integral_value(rounding=ROUND_DOWN)
+            return float(min_d + steps * step_d)
+
+        if not getattr(asset, "fractionable", True):
+            whole = qty.to_integral_value(rounding=ROUND_DOWN)
+            return float(whole) if whole > 0 else None
+
+        # Fractionable equity: no increment is published, and 9dp is the documented maximum.
+        return float(qty.quantize(Decimal(1).scaleb(-self.MAX_EQUITY_QTY_DECIMALS),
+                                  rounding=ROUND_DOWN))
+
     def trade(
         self,
         side: str,
@@ -145,12 +196,25 @@ class AlpacaOrderClass:
             # Add amount based on trade mode
             if self.trade_mode == "notional":
                 if side.lower() == "buy":
-                    order_params["notional"] = round(amount, 2)  # Alpaca requires 2 decimal places
+                    order_params["notional"] = round(amount, 2)
                 else:
                     self.close_position() # For now we close the full position
                     return True
             else:
-                order_params["qty"] = round(amount, 1)
+                # env.py signals "sell everything" with amount=-1. Notional mode intercepts
+                # sells above; quantity mode has no such intercept, so without this the
+                # sentinel would be submitted as a literal qty=-1.
+                if side.lower() == "sell" and amount < 0:
+                    return self.close_position()
+
+                qty = self._round_qty(amount)
+                if not qty:
+                    logger.warning(
+                        f"Refusing to submit {self.symbol} qty={amount}: below the asset's "
+                        f"minimum, or its rules could not be read."
+                    )
+                    return False
+                order_params["qty"] = qty
 
 
 
