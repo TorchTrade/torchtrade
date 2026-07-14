@@ -316,11 +316,12 @@ class TestStep:
         assert td["terminated"].item()
 
     @pytest.mark.parametrize("cash,enabled,expected", [
-        (200.0, True, False),   # exactly at the threshold -> NOT bankrupt (the check is a strict <)
-        (199.99, True, True),   # a hair below -> bankrupt
-        (0.0, False, False),    # wiped out, but the gate is off -> keep betting
-        (0.0, True, True),      # wiped out, gate on
-    ], ids=["at-threshold", "just-below", "gate-off-while-broke", "gate-on-while-broke"])
+        # The two rows that pin the WIRING. The boundary and the arithmetic belong to the shared
+        # rule and are pinned in tests/envs/test_termination.py -- asserting them again through
+        # the env is the layering this test exists to avoid.
+        (199.99, True, True),   # sole killer of every wrong-config-field mutant
+        (0.0, False, False),    # sole killer of a hardcoded gate
+    ], ids=["just-below", "gate-off-while-broke"])
     def test_is_bankrupt_wiring(self, cash, enabled, expected):
         """The env threads its OWN cash/config into the shared rule.
 
