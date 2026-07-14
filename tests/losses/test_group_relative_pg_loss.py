@@ -347,11 +347,15 @@ class TestGroupRelativePGLoss:
         loss = GroupRelativePGLoss(actor_network=actor_network)
         _ = loss.in_keys                      # populate the cache with the default keys
 
-        loss.set_keys(action="custom_action")
+        loss.set_keys(action="custom_action", sample_log_prob="custom_log_prob")
 
         in_keys = [str(k) for k in loss.in_keys]
         assert "custom_action" in in_keys
         assert "action" not in in_keys, "the cached in_keys still name the old key"
+        # sample_log_prob too, not just action: dropping it from _set_in_keys passed every
+        # test in this file, and the log-prob is what GRPO's importance ratio is built on --
+        # the precise failure this test exists to prevent.
+        assert "custom_log_prob" in in_keys
 
     def test_constructor_takes_the_keys_from_the_actor(self):
         """__init__ configures the loss's keys from the actor's, not from the defaults.
