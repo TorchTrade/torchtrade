@@ -367,14 +367,29 @@ class TestGroupRelativePGLoss:
         assert "custom_action" in in_keys
         assert "action" not in in_keys, "the cached in_keys still name the old key"
 
-    def test_constructor_sets_the_actor_keys(self, actor_network):
-        """__init__ configures the keys from the actor. It used to do so inside a try/except
-        AttributeError that swallowed a real error -- so a genuine regression here would have
-        been silent."""
-        loss = GroupRelativePGLoss(actor_network=actor_network)
+    def test_constructor_takes_the_keys_from_the_actor(self):
+        """__init__ configures the loss's keys from the actor's, not from the defaults.
 
-        assert loss.tensor_keys.action == actor_network.dist_sample_keys[0]
-        assert loss.tensor_keys.sample_log_prob == actor_network.log_prob_keys[0]
+        The actor deliberately uses NON-default key names. Comparing against
+        `actor.dist_sample_keys[0]` would be a tautology -- that is "action", which is also
+        what _AcceptedKeys.action defaults to, so the assertion would hold even if __init__
+        never configured anything (and it did hold: deleting the whole set_keys block from the
+        constructor left every test in this file green).
+        """
+        policy_net = TensorDictModule(
+            nn.Sequential(nn.Linear(self.OBS_DIM, 64), nn.ReLU(), nn.Linear(64, self.ACTION_DIM)),
+            in_keys=["observation"], out_keys=["logits"],
+        )
+        actor = ProbabilisticTensorDictModule(
+            in_keys=["logits"], out_keys=["my_action"],
+            distribution_class=Categorical, return_log_prob=True,
+        )
+        loss = GroupRelativePGLoss(
+            actor_network=ProbabilisticTensorDictSequential(policy_net, actor)
+        )
+
+        assert loss.tensor_keys.action == "my_action"          # not the "action" default
+        assert loss.tensor_keys.sample_log_prob == "my_action_log_prob"
 
 
 class TestGroupRelativePGLossGroupingInvariant:
