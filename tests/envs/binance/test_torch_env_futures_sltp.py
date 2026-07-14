@@ -342,6 +342,57 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
         mock_trader.cancel_open_orders.assert_called()
 
 
+    def test_a_direct_flip_does_not_age_the_new_position(self, env, mock_trader):
+        """The SLTP flip path, which the non-SLTP fix left completely uncovered.
+
+        env_sltp.py sets current_position = 1 on BUY and -1 on SELL directly, so a LONG bracket
+        followed by a SHORT bracket is a DIRECT FLIP that never passes through flat -- exactly
+        the bug. Reverting env_sltp.py to the old hand-rolled rule passed the ENTIRE suite
+        before this test existed.
+
+        The flip is modelled honestly: the trade's SIDE is what drives current_position here, so
+        the sync cannot mask it the way it does in the non-SLTP path.
+        """
+        from torchtrade.envs.live.binance.order_executor import PositionStatus
+
+        def pos(qty):
+            return {"position_status": PositionStatus(
+                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
+                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+                margin_type="isolated", liquidation_price=45000.0,
+            )}
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            mock_trader.trade = MagicMock(return_value={"side": "BUY", "executed": True,
+                                                        "success": True, "closed_position": False})
+            mock_trader.get_status = MagicMock(return_value=pos(0.001))
+            env.reset()
+
+            long_bracket = TensorDict({"action": torch.tensor(1)}, batch_size=())
+            for _ in range(4):
+                td = env.step(long_bracket)
+            aged = td["next"]["account_state"][3].item()
+            assert aged > 1.0, f"the long should have aged, got {aged}"
+
+            # A SHORT bracket while long. env_sltp writes current_position = -1 from the trade
+            # SIDE, so the flip happens in the env, not on the exchange.
+            #
+            # The exchange must still report the LONG at _sync_position_from_exchange time --
+            # the trade has not executed yet. Reporting the short there makes SLTPMixin's sync
+            # see a direction change, reset hold_counter ITSELF, and mask the bug completely.
+            # (I shipped exactly that vacuous test once already on the non-SLTP path.)
+            mock_trader.trade = MagicMock(return_value={"side": "SELL", "executed": True,
+                                                        "success": True, "closed_position": False})
+            mock_trader.get_status = MagicMock(side_effect=[pos(0.001)] + [pos(-0.001)] * 5)
+            td = env.step(TensorDict({"action": torch.tensor(5)}, batch_size=()))
+
+        holding_time = td["next"]["account_state"][3].item()
+        assert holding_time == 1.0, (
+            f"a one-step-old short bracket is reported as {holding_time} bars old (the long's "
+            f"age was {aged}) -- the flip never passed through flat"
+        )
+
+
 class TestBinanceFuturesSLTPTradingEnvConfig:
     """Tests for BinanceFuturesSLTPTradingEnvConfig."""
 
