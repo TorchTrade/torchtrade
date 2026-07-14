@@ -315,26 +315,35 @@ class TestStep:
         td = env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
         assert td["terminated"].item()
 
-    def test_at_the_bankruptcy_threshold_is_not_bankrupt(self, monkeypatch):
-        """Exactly at the threshold is NOT bankrupt -- the check is a strict <.
+    @pytest.mark.parametrize("cash,enabled,expected", [
+        (100.0, True, False),   # exactly at the threshold -> NOT bankrupt (the check is a strict <)
+        (99.99, True, True),    # a hair below -> bankrupt
+        (0.0, False, False),    # wiped out, but the gate is off -> keep betting
+        (0.0, True, True),      # wiped out, gate on
+    ], ids=["at-threshold", "just-below", "gate-off-while-broke", "gate-on-while-broke"])
+    def test_is_bankrupt_wiring(self, cash, enabled, expected):
+        """The env threads its OWN cash/config into the shared rule.
 
-        The existing test drives cash to 0 against a threshold of 5, far past the boundary, so
-        a `<` -> `<=` flip passes it unnoticed.
+        Deliberately goes through env._is_bankrupt(), not the shared helper: the helper's
+        arithmetic is pinned in tests/envs/test_termination.py, and asserting it again here
+        would pass even if this env swapped current/initial or hardcoded the gate.
+
+        The boundary and the gate were both unpinned before: the old test drives cash to 0
+        against a threshold of 5, far past the boundary.
         """
-        from torchtrade.envs.utils.termination import is_bankrupt
+        env, _, _ = _make_env(
+            outcomes=[0],
+            markets=[_make_market(), _make_market()],
+            config_overrides={
+                "initial_cash": 1000.0,
+                "done_on_bankruptcy": enabled,
+                "bankrupt_threshold": 0.1,   # -> a threshold of 100.0
+            },
+        )
+        env.reset()
+        env.cash = cash
 
-        assert is_bankrupt(current=100.0, initial=1000.0, threshold=0.1, enabled=True) is False
-        assert is_bankrupt(current=99.99, initial=1000.0, threshold=0.1, enabled=True) is True
-
-    def test_bankruptcy_gate_off_keeps_trading(self):
-        """done_on_bankruptcy=False keeps going even when genuinely wiped out.
-
-        Nothing pinned this: deleting the gate from the rule passed the whole polymarket suite.
-        """
-        from torchtrade.envs.utils.termination import is_bankrupt
-
-        assert is_bankrupt(current=0.0, initial=1000.0, threshold=0.1, enabled=False) is False
-        assert is_bankrupt(current=0.0, initial=1000.0, threshold=0.1, enabled=True) is True
+        assert env._is_bankrupt() is expected
 
     def test_terminated_wins_when_bankruptcy_and_max_steps_coincide(self):
         """If both fire on the same step, terminated suppresses truncated."""
