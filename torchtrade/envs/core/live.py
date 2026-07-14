@@ -9,6 +9,7 @@ from tensordict import TensorDictBase
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import PositionState, position_direction_from_status
+from torchtrade.envs.utils.termination import is_bankrupt
 
 
 class TorchTradeLiveEnv(TorchTradeBaseEnv):
@@ -218,11 +219,12 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""
-        if not self.config.done_on_bankruptcy:
-            return False
-
-        bankruptcy_threshold = self.config.bankrupt_threshold * self.initial_portfolio_value
-        return portfolio_value < bankruptcy_threshold
+        return is_bankrupt(
+            current=portfolio_value,
+            initial=self.initial_portfolio_value,
+            threshold=self.config.bankrupt_threshold,
+            enabled=self.config.done_on_bankruptcy,
+        )
 
     @abstractmethod
     def _get_portfolio_value(self, *args, **kwargs) -> float:

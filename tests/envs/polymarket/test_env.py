@@ -315,6 +315,27 @@ class TestStep:
         td = env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
         assert td["terminated"].item()
 
+    def test_at_the_bankruptcy_threshold_is_not_bankrupt(self, monkeypatch):
+        """Exactly at the threshold is NOT bankrupt -- the check is a strict <.
+
+        The existing test drives cash to 0 against a threshold of 5, far past the boundary, so
+        a `<` -> `<=` flip passes it unnoticed.
+        """
+        from torchtrade.envs.utils.termination import is_bankrupt
+
+        assert is_bankrupt(current=100.0, initial=1000.0, threshold=0.1, enabled=True) is False
+        assert is_bankrupt(current=99.99, initial=1000.0, threshold=0.1, enabled=True) is True
+
+    def test_bankruptcy_gate_off_keeps_trading(self):
+        """done_on_bankruptcy=False keeps going even when genuinely wiped out.
+
+        Nothing pinned this: deleting the gate from the rule passed the whole polymarket suite.
+        """
+        from torchtrade.envs.utils.termination import is_bankrupt
+
+        assert is_bankrupt(current=0.0, initial=1000.0, threshold=0.1, enabled=False) is False
+        assert is_bankrupt(current=0.0, initial=1000.0, threshold=0.1, enabled=True) is True
+
     def test_terminated_wins_when_bankruptcy_and_max_steps_coincide(self):
         """If both fire on the same step, terminated suppresses truncated."""
         market = _make_market(yes_price=0.5, no_price=0.5)

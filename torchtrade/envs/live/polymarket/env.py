@@ -37,6 +37,8 @@ from torchtrade.envs.live.polymarket.market_scanner import (
     PolymarketMarket,
 )
 
+from torchtrade.envs.utils.termination import is_bankrupt
+
 logger = logging.getLogger(__name__)
 
 # Polymarket's public CLOB endpoint. Used for resolution detection — see
@@ -55,8 +57,11 @@ class PolymarketBetEnvConfig:
             up/down markets).
         bet_fraction: Fraction of current cash to stake per bet (default 1%).
         max_steps: Maximum bets per episode.
-        initial_cash: Starting USDC balance used for dry-run accounting; live
-            mode reads the real wallet via the trader.
+        initial_cash: Starting USDC balance. NOTE this is simulated bookkeeping in BOTH
+            dry_run and live mode -- nothing here reads the real USDC wallet, and _reset()
+            restores this constant every episode. So in live mode `cash` (and therefore the
+            bankruptcy check) can drift from the real balance. Tracked as a follow-up; it is
+            a bigger fix than this file.
         done_on_bankruptcy: If True, terminate the episode when cash drops below
             ``bankrupt_threshold * initial_cash``.
         bankrupt_threshold: Bankruptcy cutoff as a fraction of initial cash.
@@ -402,11 +407,16 @@ class PolymarketBetEnv(EnvBase):
         return -stake
 
     def _is_bankrupt(self) -> bool:
-        initial = self.config.initial_cash
-        return (
-            self.config.done_on_bankruptcy
-            and initial > 0
-            and self.cash < self.config.bankrupt_threshold * initial
+        """Same rule as the exchange envs, on this env's own terms.
+
+        `cash`, not a portfolio value: a resolved bet has already been paid into cash by the
+        time this runs, and there is no carried position to mark.
+        """
+        return is_bankrupt(
+            current=self.cash,
+            initial=self.config.initial_cash,
+            threshold=self.config.bankrupt_threshold,
+            enabled=self.config.done_on_bankruptcy,
         )
 
     def close(self):
