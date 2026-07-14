@@ -569,8 +569,8 @@ class TestPollForResolution:
             assert env._poll_for_resolution("0xcond") == 1
         assert env._fetch_resolved_outcome.call_count == 3
         # Pin the poll interval BY VALUE, not just "it slept". Nothing pinned this, so
-        # hardcoding time.sleep(1.0) passed the whole suite -- turning a 15s poll into a 1s
-        # one, i.e. ~600 CLOB requests per resolution instead of ~40.
+        # hardcoding a constant passed the whole suite -- turning a 15s poll into a 1s one,
+        # i.e. ~600 polls per resolution instead of ~40 (and each poll is 2 CLOB requests).
         assert mock_sleep.call_args_list == [call(7.0), call(7.0)]
 
     def test_returns_none_when_max_wait_exhausted(self):
@@ -663,8 +663,8 @@ class TestConfigValidation:
     def test_bankrupt_threshold_validated_at_the_boundary(self, bad):
         """The same silent-default trap as initial_cash, one field over.
 
-        > 1: threshold * initial exceeds the starting cash, so the account is bankrupt on step
-        1, before a single bet resolves.
+        > 1: threshold * initial exceeds the starting cash, so step 1 terminates unless the
+        opening bet alone lifts cash back above the line.
         < 0: `current < threshold * initial` is unsatisfiable for any non-negative cash, which
         SILENTLY DISABLES the safety stop -- the exact failure this repo keeps getting bitten
         by, and the reason _is_bankrupt's old `initial > 0` guard was removed rather than kept.
@@ -674,11 +674,12 @@ class TestConfigValidation:
 
     @pytest.mark.parametrize("bad", [-0.1, 1.5], ids=["negative", "over-100%"])
     def test_bet_fraction_validated_at_the_boundary(self, bad):
-        """bet_fraction > 1 stakes more than the account holds, driving cash negative.
+        """bet_fraction > 1 stakes more than the account holds, driving cash negative -- which
+        flips the sign of a loss, so a losing bet would PAY OUT.
 
-        Today only _compute_payoff's `stake <= 0` guard (plus same-step bankruptcy) stands
-        between that and inverted P&L -- a loss paying out. Refuse the config at the boundary
-        rather than depend on a downstream guard to absorb it.
+        Refusing it here is what guarantees cash >= 0, and that guarantee is in turn why
+        _compute_payoff carries no `stake <= 0` guard (it was deleted as unreachable). The
+        boundary check REPLACES the downstream guard; it does not merely back it up.
         """
         with pytest.raises(ValueError, match="bet_fraction"):
             PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", bet_fraction=bad)

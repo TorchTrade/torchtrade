@@ -64,7 +64,8 @@ LIVE_UNSUPPORTED = (
     "  - py-clob-client is archived and non-functional (Polymarket shipped CLOB V2, with "
     "pUSD collateral replacing USDC.e); no order can reach production.\n"
     "  - This env holds every bet through resolution, and Polymarket does not auto-credit "
-    "collateral on resolution. Winning shares must be redeemed on-chain via the Relayer, "
+    "collateral on resolution. Winning shares must be redeemed on-chain via an explicit "
+    "redeemPositions call, "
     "which no Polymarket client exposes. Without that, a winning account's balance drains "
     "to zero.\n"
     "Use dry_run=True (paper trading against live market data). Reviving live mode needs "
@@ -141,7 +142,8 @@ class PolymarketBetEnvConfig:
             raise ValueError(f"bet_fraction must be in [0, 1], got {self.bet_fraction}")
 
         # Unvalidated, this is the same silent-default trap as initial_cash, one field over:
-        # > 1 makes the account bankrupt on step 1, before a single bet resolves; < 0 makes
+        # > 1 puts the account under the bankruptcy line at reset, so step 1 terminates unless
+        # the opening bet alone lifts cash above threshold*initial_cash; < 0 makes
         # `current < threshold * initial` unsatisfiable and SILENTLY DISABLES the safety stop.
         if not 0.0 <= self.bankrupt_threshold <= 1.0:
             raise ValueError(

@@ -1,4 +1,9 @@
-"""Tests for the slim Polymarket order executor (buy + cancel_all)."""
+"""Tests for the slim Polymarket order executor (buy + cancel_all).
+
+NOTE: the live path exercised below is DORMANT -- PolymarketBetEnv is paper-only and calls
+nothing here but cancel_all() (a no-op in dry-run). These tests pin the V1 call shape for
+the CLOB V2 port; they do not cover any shipped code path. See LIVE_UNSUPPORTED in env.py.
+"""
 
 from unittest.mock import MagicMock, patch
 
