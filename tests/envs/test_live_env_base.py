@@ -16,7 +16,7 @@ import pytest
 import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
-from torchtrade.envs.core.state import PositionState
+from torchtrade.envs.core.state import PositionState, advance_hold_counter
 
 
 def _subclasses(cls):
@@ -245,3 +245,46 @@ def test_sync_action_level_after_reset(current_position, expected_level):
         assert math.isnan(env.position.current_action_level)
     else:
         assert env.position.current_action_level == expected_level
+
+
+# --- holding_time on a direct flip (#44) ------------------------------------- #
+
+@pytest.mark.parametrize("directions,expected,why", [
+    ([1, 1, 1],            [1, 2, 3], "a held position ages"),
+    ([1, 1, -1],           [1, 2, 1], "a DIRECT FLIP is a brand-new position, not a 3-bar-old one"),
+    ([-1, -1, 1],          [1, 2, 1], "and the same the other way round"),
+    ([1, 1, 0, 1],         [1, 2, 0, 1], "flat resets; the re-entry starts over"),
+    ([1, -1, 1, -1],       [1, 1, 1, 1], "every flip is a new position"),
+], ids=["held", "flip-long-to-short", "flip-short-to-long", "via-flat", "repeated-flips"])
+def test_holding_time_resets_on_a_direct_flip(directions, expected, why):
+    """holding_time is account_state[3] -- the policy conditions on it directly.
+
+    Every live env hand-rolled the rule as "increment while a position exists, reset when
+    flat", in two different spellings. A direct long->short flip never passes through flat, so
+    the reset never fired: the counter just kept climbing and a ONE-STEP-OLD short reported
+    itself as (say) 6 bars old. A hold-time-aware policy would read a position it had just
+    opened as one it had been sitting in for six bars.
+
+    Reachable with the DEFAULT config on every futures env -- the default action levels span
+    -1..+1, so +1 -> -1 is an ordinary single action.
+    """
+    position = PositionState()
+    got = [advance_hold_counter(position, d) for d in directions]
+    assert got == [float(e) for e in expected], why
+
+
+@pytest.mark.parametrize("env_cls", NON_SLTP_ENVS, ids=lambda c: c.__name__)
+def test_no_live_env_hand_rolls_the_holding_time_rule(env_cls):
+    """Structural guard: the rule lives in ONE place.
+
+    It was hand-rolled in two idioms across four exchanges, and all of them had the same hole.
+    A re-forked copy that has not drifted YET is still a bug waiting to happen -- this repo has
+    paid for that with three divergent SLTP action maps and four copies of _check_termination.
+    """
+    import inspect
+    src = inspect.getsource(inspect.getmodule(env_cls))
+    # the reset in _reset() is fine; what is banned is re-deriving the AGE of a position
+    assert "hold_counter += 1" not in src, (
+        f"{env_cls.__name__} increments hold_counter itself instead of calling "
+        f"advance_hold_counter() -- which is how the direct-flip hole got in, four times."
+    )

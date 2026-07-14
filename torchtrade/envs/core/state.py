@@ -71,6 +71,10 @@ class PositionState:
     entry_price: float = 0.0
     unrealized_pnlpc: float = 0.0
     hold_counter: int = 0
+    # The direction the hold_counter is currently counting. Without it, a DIRECT
+    # FLIP (long -> short in one step, never passing through flat) leaves the
+    # counter running, and the brand-new position reports the old one's age.
+    hold_direction: int = 0
     current_action_level: float = 0.0
 
     def reset(self):
@@ -161,3 +165,35 @@ class HistoryTracker:
             Number of steps in the history
         """
         return len(self.base_prices)
+
+
+def advance_hold_counter(position: PositionState, direction: int) -> float:
+    """Age the CURRENT position by one step, and return it as holding_time.
+
+    THE rule for holding_time. Every live env hand-rolled it as "increment while a position
+    exists, reset when flat", in two different spellings -- and all of them missed the third
+    case:
+
+        flat -> long    : a new position     -> 1
+        long -> long    : the same position  -> 2, 3, 4, ...
+        long -> SHORT   : a NEW position     -> 1        <-- every env reported the old age
+        short -> flat   : no position        -> 0
+
+    A direct flip never passes through flat, so "reset when flat" never fires: the counter just
+    kept climbing, and a one-step-old short reported itself as (say) 6 bars old. holding_time is
+    account_state[3] -- the policy conditions on it directly, and a hold-time-aware policy would
+    read a position it just opened as one it had been sitting in for six bars.
+
+    Reachable with the DEFAULT config on every futures env: the default action levels span
+    -1..+1, so +1 -> -1 in one step is an ordinary action. Spot (Alpaca) cannot flip and is
+    unaffected.
+    """
+    if direction == 0:
+        position.hold_counter = 0
+    elif direction != position.hold_direction:
+        position.hold_counter = 1      # brand-new position: 1 step old, exactly like a fresh open
+    else:
+        position.hold_counter += 1
+
+    position.hold_direction = direction
+    return float(position.hold_counter)

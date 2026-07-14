@@ -13,6 +13,7 @@ from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.core.state import (
+    advance_hold_counter,
     HistoryTracker,
     PositionState,
     position_direction_from_status,
@@ -230,8 +231,12 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
         # close take the position branch and read stale fields off it.
         position_direction = float(position_direction_from_status(position_status))
+        # THE holding_time rule. Hand-rolling it as "reset when flat" missed the direct
+        # flip: long -> short never passes through flat, so the counter kept climbing and a
+        # brand-new short reported the dead long's age. See core/state.py.
+        holding_time = advance_hold_counter(self.position, position_direction)
+
         if position_direction == 0:
-            self.position.hold_counter = 0
             position_size = 0.0
             position_value = 0.0
             entry_price = 0.0
@@ -239,9 +244,7 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
             unrealized_pnl_pct = 0.0
             leverage = float(self.config.leverage)
             liquidation_price = 0.0
-            holding_time = 0.0
         else:
-            self.position.hold_counter += 1
             position_size = position_status.qty  # Positive=long, Negative=short
             position_value = abs(position_status.notional_value)
             entry_price = position_status.entry_price
@@ -249,7 +252,6 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
             unrealized_pnl_pct = position_status.unrealized_pnl_pct
             leverage = float(position_status.leverage)
             liquidation_price = position_status.liquidation_price
-            holding_time = float(self.position.hold_counter)
 
         # Calculate new 6-element account state
         # Element 0: exposure_pct (position_value / portfolio_value)
@@ -330,6 +332,9 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         status = self.trader.get_status()
         position_status = status.get("position_status")
         self.position.hold_counter = 0
+        # ...and the direction it was counting, or the first step of the next episode
+        # compares against a dead episode's position.
+        self.position.hold_direction = 0
 
         self.position.current_position = position_direction_from_status(position_status)
 
