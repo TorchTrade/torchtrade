@@ -13,6 +13,7 @@ from torchtrade.envs.live.okx.observation import OKXObservationClass
 from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.core.state import (
+    advance_hold_counter,
     HistoryTracker,
     position_direction_from_status,
 )
@@ -199,24 +200,22 @@ class OKXBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
         # close take the position branch and read stale fields off it.
         position_direction = float(position_direction_from_status(position_status))
+        holding_time = advance_hold_counter(self.position, position_direction)
+
         if position_direction == 0:
-            self.position.hold_counter = 0
             position_size = 0.0
             position_value = 0.0
             current_price = self.trader.get_mark_price()
             unrealized_pnl_pct = 0.0
             leverage = float(self.config.leverage)
             liquidation_price = 0.0
-            holding_time = 0.0
         else:
-            self.position.hold_counter += 1
             position_size = position_status.qty
             position_value = abs(position_status.notional_value)
             current_price = position_status.mark_price
             unrealized_pnl_pct = position_status.unrealized_pnl_pct
             leverage = float(position_status.leverage)
             liquidation_price = position_status.liquidation_price
-            holding_time = float(self.position.hold_counter)
 
         # Build 6-element account state
         exposure_pct = position_value / total_balance if total_balance > 0 else 0.0

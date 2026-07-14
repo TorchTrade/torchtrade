@@ -64,6 +64,8 @@ class PositionState:
         entry_price: Price at which the position was entered
         unrealized_pnlpc: Unrealized profit/loss as percentage of entry price
         hold_counter: Number of steps the position has been held
+        hold_direction: The direction hold_counter is counting, so a direct flip
+            (long -> short, never passing through flat) can be told apart from a hold
     """
     current_position: float = 0.0
     position_size: float = 0.0
@@ -71,6 +73,7 @@ class PositionState:
     entry_price: float = 0.0
     unrealized_pnlpc: float = 0.0
     hold_counter: int = 0
+    hold_direction: float = 0.0
     current_action_level: float = 0.0
 
     def reset(self):
@@ -161,3 +164,27 @@ class HistoryTracker:
             Number of steps in the history
         """
         return len(self.base_prices)
+
+
+def advance_hold_counter(position: PositionState, direction: float) -> float:
+    """Age the CURRENT position by one step and return it as holding_time.
+
+        flat  -> long   a new position     -> 1
+        long  -> long   the same position  -> 2, 3, 4, ...
+        long  -> SHORT  a NEW position     -> 1     <-- a DIRECT flip, no flat bar between
+        short -> flat   no position        -> 0
+
+    The five live envs that track holding_time each hand-rolled this as "increment while a
+    position exists, reset when flat". A
+    direct flip never passes through flat, so the reset never fired and a one-step-old short
+    reported the dead long's age as account_state[3] -- which the policy conditions on.
+    """
+    if direction == 0:
+        position.hold_counter = 0
+    elif direction != position.hold_direction:
+        position.hold_counter = 1
+    else:
+        position.hold_counter += 1
+
+    position.hold_direction = direction
+    return float(position.hold_counter)

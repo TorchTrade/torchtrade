@@ -1,11 +1,17 @@
-"""Shared observation-class tests.
+"""Shared test bodies for the per-exchange live-env test files.
 
-Each exchange (alpaca, binance, bitget, bybit, okx) subclasses BaseObservationClassTests in
-its own test_obs_class.py and implements create_observer / get_expected_symbol_format.
+- BaseObservationClassTests: subclassed by each exchange's test_obs_class.py.
+- assert_a_direct_flip_does_not_age_the_new_position: called by each exchange's
+  test_torch_env_futures*.py, so the flip contract has one body and five kills.
 """
+
+from dataclasses import fields
 
 import pytest
 import numpy as np
+import torch
+from tensordict import TensorDict
+from unittest.mock import MagicMock, patch
 from abc import ABC, abstractmethod
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
@@ -267,3 +273,53 @@ class BaseObservationClassTests(ABC):
         key = observer.get_keys()[0]
 
         assert observations[key].shape[0] == 100
+
+
+def assert_a_direct_flip_does_not_age_the_new_position(
+    env, trader, PositionStatus, long_action, short_action
+):
+    """A long flipped straight to a short is ONE step old, not the long's age.
+
+    THE TRAP: the exchange must still report the LONG when _step syncs -- the trade has not
+    executed yet. Reporting the short there makes _sync_position_from_exchange see an EXTERNAL
+    change and reset hold_counter itself (PR #245 / SLTPMixin), masking the bug: the test goes
+    vacuous. Two of these passed on the buggy code before I found that.
+    """
+    # Built positionally because the four dataclasses differ only in the NAME of field 8
+    # (margin_type on binance, margin_mode elsewhere). The only field this test actually reads
+    # is qty -- everything else is inert filler -- so that is the one thing worth pinning.
+    assert [f.name for f in fields(PositionStatus)][0] == "qty"
+
+    def pos(qty):
+        liq = 45000.0 if qty > 0 else 55000.0     # shorts liquidate ABOVE the mark
+        return {"position_status": PositionStatus(
+            qty, 500.0, 50000.0, 0.0, 0.0, 50000.0, 5, "isolated", liq)}
+
+    with patch.object(env, "_wait_for_next_timestamp"):
+        trader.get_status = MagicMock(return_value=pos(0.01))
+        env.reset()
+
+        for _ in range(5):
+            td = env.step(TensorDict({"action": torch.tensor(long_action)}, batch_size=()))
+        aged = td["next"]["account_state"][3].item()
+        assert aged > 1.0, f"the long never aged ({aged}) -- the assertion below would be vacuous"
+
+
+        # The exchange reports the OLD long until the trade actually executes -- keyed off the
+        # TRADE, not off how many times _step happens to call get_status(). An earlier
+        # get_status() added to _step (a price prefetch, a retry) would consume a
+        # call-ordering-based mock's single "long", the sync would then see the short, reset
+        # hold_counter ITSELF, and all five tests would go green on buggy code.
+        traded = []
+        inner_trade = trader.trade
+        trader.trade = MagicMock(
+            side_effect=lambda *a, **k: (traded.append(1), inner_trade(*a, **k))[1]
+        )
+        trader.get_status = MagicMock(side_effect=lambda: pos(-0.01) if traded else pos(0.01))
+        td = env.step(TensorDict({"action": torch.tensor(short_action)}, batch_size=()))
+
+    holding_time = td["next"]["account_state"][3].item()
+    assert holding_time == 1.0, (
+        f"a one-step-old short reports {holding_time} bars (the long aged to {aged}): the flip "
+        f"never passed through flat, so the counter was never reset"
+    )

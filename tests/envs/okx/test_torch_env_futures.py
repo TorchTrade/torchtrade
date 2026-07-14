@@ -156,6 +156,14 @@ class TestOKXFuturesTorchTradingEnv:
         assert leverage == 5.0        # the CONFIG leverage, not the 20 on the residual
         assert dist_to_liq == 1.0     # no position -> no liquidation to be near
 
+    def test_a_direct_flip_does_not_age_the_new_position(self, env, mock_env_trader):
+        from torchtrade.envs.live.okx.order_executor import PositionStatus
+        from tests.envs.base_exchange_tests import (
+            assert_a_direct_flip_does_not_age_the_new_position as assert_flip,
+        )
+        assert_flip(env, mock_env_trader, PositionStatus,
+                    long_action=len(env.action_levels) - 1, short_action=0)
+
     def test_dust_between_positions_does_not_age_the_next_one(self, env, mock_env_trader):
         """A residual left between two positions must not carry the old age into the new one.
         """

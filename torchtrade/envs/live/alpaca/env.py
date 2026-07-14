@@ -5,6 +5,7 @@ import logging
 import torch
 
 logger = logging.getLogger(__name__)
+from torchtrade.envs.core.state import advance_hold_counter
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.live.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
@@ -129,10 +130,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         self._wait_for_next_timestamp()
 
         # Update position hold counter
-        if self.position.current_position != 0:
-            self.position.hold_counter += 1
-        else:
-            self.position.hold_counter = 0
+        advance_hold_counter(self.position, self.position.current_position)
 
         # Get updated state
         new_portfolio_value = self._get_portfolio_value()
