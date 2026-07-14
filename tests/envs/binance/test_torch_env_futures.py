@@ -296,6 +296,49 @@ class TestBinanceFuturesTorchTradingEnv:
         assert leverage == 5.0        # the CONFIG leverage, not the 20 on the residual
         assert dist_to_liq == 1.0     # no position -> no liquidation to be near
 
+    def test_a_direct_flip_does_not_age_the_new_position(self, env, mock_trader):
+        """END TO END on account_state[3], for BINANCE's wiring specifically.
+
+        Binance advances the counter from the env's CACHED direction (after the trade updates
+        it), while bybit/bitget/okx advance it from the direction OBSERVED on the exchange.
+        Two different wirings, so the shared rule being right does not prove binance feeds it
+        the right thing -- only this does.
+
+        The flip is modelled honestly: at _sync_position_from_exchange time the trade has not
+        executed, so the exchange still shows the OLD long. Mocking the short for the whole step
+        would make the sync treat it as an EXTERNAL change and reset the counter itself (PR
+        #245), masking the bug entirely.
+        """
+        from torchtrade.envs.live.binance.order_executor import PositionStatus
+
+        def pos(qty):
+            return {"position_status": PositionStatus(
+                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
+                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+                margin_type="isolated", liquidation_price=45000.0,
+            )}
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            mock_trader.get_status = MagicMock(return_value=pos(0.01))     # LONG
+            env.reset()
+            long_idx = len(env.action_levels) - 1
+            long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
+
+            for _ in range(5):
+                td = env.step(long)
+            aged = td["next"]["account_state"][3].item()
+            assert aged > 1.0, f"the long should have aged, got {aged}"
+
+            # the flip: still long at sync time, short by the time we observe
+            mock_trader.get_status = MagicMock(side_effect=[pos(0.01)] + [pos(-0.01)] * 4)
+            td = env.step(TensorDict({"action": torch.tensor(0)}, batch_size=()))
+
+        holding_time = td["next"]["account_state"][3].item()
+        assert holding_time == 1.0, (
+            f"a one-step-old short is reported as {holding_time} bars old (the long's age was "
+            f"{aged}) -- the flip never passed through flat, so the counter was never reset"
+        )
+
     def test_reset_clears_the_holding_time_of_the_previous_episode(self, env, mock_trader):
         """Reset must zero hold_counter, or episode 2 inherits episode 1's age.
 
