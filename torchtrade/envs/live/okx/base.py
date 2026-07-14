@@ -275,9 +275,6 @@ class OKXBaseTorchTradingEnv(TorchTradeLiveEnv):
         status = self.trader.get_status()
         position_status = status.get("position_status")
         self.position.hold_counter = 0
-        # ...and the direction it was counting, or the first step of the next episode
-        # compares against a dead episode's position.
-        self.position.hold_direction = 0
 
         self.position.current_position = position_direction_from_status(position_status)
 

@@ -64,6 +64,8 @@ class PositionState:
         entry_price: Price at which the position was entered
         unrealized_pnlpc: Unrealized profit/loss as percentage of entry price
         hold_counter: Number of steps the position has been held
+        hold_direction: The direction hold_counter is counting, so a direct flip
+            (long -> short, never passing through flat) can be told apart from a hold
     """
     current_position: float = 0.0
     position_size: float = 0.0
@@ -74,7 +76,7 @@ class PositionState:
     # The direction the hold_counter is currently counting. Without it, a DIRECT
     # FLIP (long -> short in one step, never passing through flat) leaves the
     # counter running, and the brand-new position reports the old one's age.
-    hold_direction: int = 0
+    hold_direction: float = 0.0
     current_action_level: float = 0.0
 
     def reset(self):
@@ -167,7 +169,7 @@ class HistoryTracker:
         return len(self.base_prices)
 
 
-def advance_hold_counter(position: PositionState, direction: int) -> float:
+def advance_hold_counter(position: PositionState, direction: float) -> float:
     """Age the CURRENT position by one step, and return it as holding_time.
 
     THE rule for holding_time. Every live env hand-rolled it as "increment while a position
@@ -185,8 +187,11 @@ def advance_hold_counter(position: PositionState, direction: int) -> float:
     read a position it just opened as one it had been sitting in for six bars.
 
     Reachable with the DEFAULT config on every futures env: the default action levels span
-    -1..+1, so +1 -> -1 in one step is an ordinary action. Spot (Alpaca) cannot flip and is
-    unaffected.
+    -1..+1, so +1 -> -1 in one step is an ordinary action, not an exotic path.
+
+    Alpaca is unaffected because it never RECORDS a short direction (its _step only ever
+    writes 0 or +1) -- not because the config forbids one: action_levels is an unvalidated
+    field, so 'the levels are long-only' is a default, not a constraint.
     """
     if direction == 0:
         position.hold_counter = 0
