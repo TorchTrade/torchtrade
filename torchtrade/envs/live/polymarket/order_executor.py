@@ -1,12 +1,23 @@
-"""Order executor for Polymarket CLOB trading via py-clob-client.
+"""Paper-trading order executor for Polymarket.
 
-Minimal surface, only the operations :class:`PolymarketBetEnv` needs:
+PAPER ONLY, and it refuses to pretend otherwise:
 
-- :meth:`buy`, submits a fill-or-kill market order for a single side.
-- :meth:`cancel_all`, called from :meth:`PolymarketBetEnv.close`.
+- ``dry_run=False`` raises. The refusal lives HERE, not only on the env's config, because this
+  class is publicly exported (``torchtrade.envs.live``) -- a caller reaching for the exported
+  API could otherwise construct a live CLOB client and post a real order while
+  :class:`PolymarketBetEnv` believed itself paper-only. The guard belongs on the class that
+  can move money, not only on the env that happens to build it.
+- ``private_key`` raises too. Accepting and ignoring a real key would tell the caller their
+  key is configured when nothing here can ever sign anything. Refused, not swallowed.
 
-``dry_run=True`` skips the CLOB client entirely, so paper-trading the env
-works without ``py-clob-client`` installed.
+The refusal message summarizes both blockers (archived client, no redeem); the sources for
+them live in ``LIVE_UNSUPPORTED`` in ``env.py``.
+
+The V1 py-clob-client machinery this module used to carry (``ClobClient`` construction,
+``MarketOrderArgs``/``OrderType.FOK`` order posting) was deleted rather than parked behind the
+guard: unreachable once live is refused, and it would not have survived the CLOB V2 port
+anyway (different package, different types, pUSD collateral, plus a redeem that does not exist
+yet). Recover it from git history if the port wants a reference.
 """
 
 from __future__ import annotations
@@ -16,78 +27,42 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-try:
-    from py_clob_client.client import ClobClient
-    from py_clob_client.clob_types import MarketOrderArgs, OrderType
-    from py_clob_client.order_builder.constants import BUY
-except ImportError:
-    ClobClient = None
-    MarketOrderArgs = None
-    OrderType = None
-    BUY = "BUY"
+LIVE_EXECUTOR_UNSUPPORTED = (
+    "PolymarketOrderExecutor is paper-only: dry_run=False is refused. py-clob-client is "
+    "archived and no longer functional against Polymarket's CLOB V2, and resolved winnings "
+    "are never redeemed -- without a redeem, a winning account's collateral drains to zero. "
+    "See LIVE_UNSUPPORTED in torchtrade/envs/live/polymarket/env.py."
+)
 
 
 class PolymarketOrderExecutor:
-    """Buys YES/NO outcome shares on Polymarket via py-clob-client.
+    """Simulates Polymarket order submission. Never touches the network, never signs.
 
-    Constructed automatically by :class:`PolymarketBetEnv`; you typically don't
-    instantiate this directly.
+    Built automatically by :class:`PolymarketBetEnv`, which calls only :meth:`cancel_all`.
+    This is where the CLOB V2 port begins.
     """
 
-    def __init__(
-        self,
-        private_key: str,
-        chain_id: int = 137,
-        signature_type: int = 0,
-        funder: Optional[str] = None,
-        dry_run: bool = False,
-    ):
-        self._dry_run = dry_run
-        # Dry-run is fully offline: never construct the live CLOB client, never
-        # derive API creds. This keeps paper-trading independent of py-clob-client
-        # availability AND of having a valid funded private key.
-        if dry_run:
-            self.client = None
-            return
-        if ClobClient is None:
-            raise ImportError(
-                "py-clob-client is required for live Polymarket trading. "
-                "Install with: pip install py-clob-client. "
-                "(Pass dry_run=True to skip the CLOB client.)"
-            )
+    def __init__(self, *, private_key: Optional[str] = None, dry_run: bool = True):
+        # Keyword-only, and the live-config params (chain_id / signature_type / funder) are
+        # gone: they fed the deleted CLOB client and no caller in the tree ever passed them.
+        # Any leftover call site now gets a loud TypeError naming the argument.
+        if not dry_run:
+            raise NotImplementedError(LIVE_EXECUTOR_UNSUPPORTED)
 
-        self.client = ClobClient(
-            host="https://clob.polymarket.com",
-            key=private_key,
-            chain_id=chain_id,
-            signature_type=signature_type,
-            funder=funder,
-        )
-        self.client.set_api_creds(self.client.create_or_derive_api_creds())
+        # `is not None`, NOT truthiness: the old example passed
+        # os.getenv("POLYGON_PRIVATE_KEY", ""), and `if private_key:` would wave that through.
+        if private_key is not None:
+            raise TypeError(
+                "PolymarketOrderExecutor no longer takes private_key: it is paper-only and "
+                "can never sign or submit anything, so a key would do nothing. Accepting it "
+                "silently would tell you it was configured. Remove the argument."
+            )
 
     def buy(self, token_id: str, amount_usdc: float) -> dict:
-        """Buy ``amount_usdc`` worth of shares for ``token_id`` (FOK market order)."""
-        if self._dry_run:
-            logger.info("DRY RUN: BUY %.4f of %s", amount_usdc, token_id)
-            return {"success": True, "dry_run": True}
-        try:
-            order_args = MarketOrderArgs(
-                token_id=token_id, amount=amount_usdc, side=BUY
-            )
-            signed_order = self.client.create_market_order(order_args)
-            result = self.client.post_order(signed_order, OrderType.FOK)
-            return {"success": True, "order": result}
-        except Exception as e:
-            logger.error("BUY failed for token %s: %s", token_id, e)
-            return {"success": False, "error": str(e)}
+        """Simulate buying ``amount_usdc`` of ``token_id``. Submits nothing."""
+        logger.info("DRY RUN: BUY %.4f of %s", amount_usdc, token_id)
+        return {"success": True, "dry_run": True}
 
     def cancel_all(self) -> bool:
-        """Cancel all open orders. No-op in dry-run; returns False on API failure."""
-        if self._dry_run:
-            return True
-        try:
-            self.client.cancel_all()
-            return True
-        except Exception:
-            logger.exception("Cancel all failed")
-            return False
+        """No-op: a paper env has no live orders to cancel."""
+        return True

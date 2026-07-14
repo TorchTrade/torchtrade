@@ -1,5 +1,6 @@
 """Tests for PolymarketBetEnv."""
 
+import dataclasses
 import itertools
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, call, patch
@@ -75,7 +76,6 @@ def _make_env(
         scanner.next_active_market.side_effect = list(markets)
 
     trader = MagicMock()
-    trader.buy.return_value = {"success": True}
 
     env = PolymarketBetEnv(config, scanner=scanner, trader=trader)
     env._wait_for_resolution = lambda *a, **k: None
@@ -98,6 +98,24 @@ class TestSpecs:
         env, _, _ = _make_env()
         check_env_specs(env)
 
+    def test_market_state_is_exactly_yes_spread_volume_liquidity(self):
+        """The policy's ENTIRE input. Pin the ORDER and the SOURCE FIELD of all four slots.
+
+        Four mutually distinct values, so no swap can hide: spread<->liquidity,
+        volume<->liquidity, and yes_price->no_price each survived the whole suite before this
+        test existed. A permutation is invisible to check_env_specs -- Bounded(0, inf) accepts
+        any order -- and feeding the policy `no_price` inverts the market it thinks it sees.
+        (CLAUDE.md invariant #3: an observation mutation once passed 1977 tests.)
+        """
+        market = _make_market(yes_price=0.42, no_price=0.58, spread=0.02,
+                              volume_24h=1500.0, liquidity=12000.0)
+        env, _, _ = _make_env(markets=[market])
+        td = env.reset()
+        assert torch.equal(
+            td["market_state"],
+            torch.tensor([0.42, 0.02, 1500.0, 12000.0], dtype=torch.float32),
+        )
+
     def test_observation_has_only_market_state(self):
         env, _, _ = _make_env()
         assert list(env.observation_spec.keys()) == ["market_state"]
@@ -112,7 +130,7 @@ class TestSpecs:
             PolymarketBetEnv(PolymarketBetEnvConfig())
 
     def test_default_trader_constructed_when_not_injected(self):
-        """Lazy import path: ``PolymarketOrderExecutor`` is built when no trader is passed."""
+        """``PolymarketOrderExecutor`` is built when no trader is injected."""
         config = PolymarketBetEnvConfig(
             market_slug_prefix="btc-updown-5m-", dry_run=True
         )
@@ -123,9 +141,57 @@ class TestSpecs:
             PolymarketOrderExecutor,
         )
         assert isinstance(env.trader, PolymarketOrderExecutor)
+        # NOT asserting env.trader._dry_run: it cannot fail. The config admits only
+        # dry_run=True, so passing config.dry_run, passing True, and omitting the kwarg (the
+        # executor's own default) are indistinguishable here -- a dead assertion dressed as a
+        # second lock. The executor's safe default is pinned for real in
+        # test_order_executor.py (TestPaperExecution); that is the actual guard.
 
 
 # --- Pure helpers ----------------------------------------------------------- #
+
+class TestConstructorCompat:
+    """The private_key removal must not break callers SILENTLY."""
+
+    def test_private_key_is_refused_with_an_explanation_not_a_bare_TypeError(self):
+        """Old callers passed private_key=... (the repo's own example did). Rather than let
+        Python emit a bare "unexpected keyword argument", say what happened and why.
+
+        It is REFUSED, not ignored: silently swallowing a real private key would tell the
+        caller their key is configured when the env can never sign anything.
+        """
+        cfg = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
+        with pytest.raises(TypeError, match="paper-only"):
+            PolymarketBetEnv(cfg, private_key="0xdeadbeef", scanner=MagicMock())
+
+    def test_positional_misuse_is_loud_not_silent(self):
+        """private_key used to be the SECOND POSITIONAL parameter. Removing it would have
+        silently rebound `PolymarketBetEnv(config, "0xkey")` to `scanner`, which then blows up
+        much later with an AttributeError on a str -- a silent break, which is precisely the
+        bug class this whole env is being fixed for. Keyword-only args make it a TypeError at
+        the call site instead.
+        """
+        cfg = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
+        with pytest.raises(TypeError, match="positional"):
+            PolymarketBetEnv(cfg, "0xdeadbeef")
+
+
+class TestClose:
+    def test_close_works_through_a_transform(self):
+        """Regression: `def close(self)` did not accept EnvBase's keyword-only
+        `raise_if_closed`, which TransformedEnv forwards -- so closing a wrapped env raised
+        TypeError. RewardSum is the wrapper this env's own spec comment points users at."""
+        from torchrl.envs import TransformedEnv
+        from torchrl.envs.transforms import RewardSum
+
+        env, _, trader = _make_env()
+        TransformedEnv(env, RewardSum()).close()   # must not raise
+        trader.cancel_all.assert_called_once()
+        # NOT asserting is_closed: EnvBase.close() only sets is_closed=True, and this env's
+        # is_closed is ALREADY True from construction -- so the assertion would pass whether or
+        # not close() delegates upward. A dead assertion is worse than no assertion. The
+        # super() call in close() is correct delegation, but it is currently unobservable.
+
 
 class TestComputePayoff:
     @pytest.mark.parametrize(
@@ -136,8 +202,12 @@ class TestComputePayoff:
             (1, 0.4, 0, -100.0),
             (0, 0.4, 1, -100.0),
             (1, 0.5, 1, 100.0),
+            # A market quoting 0.0 must not ZeroDivisionError mid-episode. The chosen silent
+            # default -- a WIN at fill 0 books 0.0, not an infinite payout -- is pinned here
+            # because deleting the guard otherwise passes the whole suite.
+            (1, 0.0, 1, 0.0),
         ],
-        ids=["up-wins", "down-wins", "up-loses", "down-loses", "even-money"],
+        ids=["up-wins", "down-wins", "up-loses", "down-loses", "even-money", "zero-fill-price"],
     )
     def test_payoff(self, action, fill, outcome, expected):
         assert PolymarketBetEnv._compute_payoff(action, fill, outcome, 100.0) == pytest.approx(expected)
@@ -173,6 +243,60 @@ class TestReset:
 # --- Step ------------------------------------------------------------------- #
 
 class TestStep:
+    def test_step_returns_the_NEXT_market_state_not_the_resolved_one(self):
+        """_step's observation must come from the market the agent will BET ON next.
+
+        The reset path was pinned; this one was not, and `_market_state(next_market)` ->
+        `_market_state(market)` (the stale, already-resolved market) passed the whole suite.
+        Live that is severe: the policy conditions on the OLD market's quotes while the next
+        bet's fill_price is read from the NEW one -- the agent bets at prices it never saw.
+        The two markets here differ in every slot so no swap or staleness can hide.
+        (CLAUDE.md invariant #3, one method over from where it was just fixed.)
+        """
+        resolved = _make_market(yes_price=0.42, spread=0.02, volume_24h=1500.0, liquidity=12000.0)
+        upcoming = _make_market(yes_price=0.77, spread=0.05, volume_24h=999.0, liquidity=4321.0)
+        env, _, _ = _make_env(outcomes=[1], markets=[resolved, upcoming])
+        env.reset()
+        td = env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+        assert torch.equal(
+            td["market_state"],
+            torch.tensor([0.77, 0.05, 999.0, 4321.0], dtype=torch.float32),
+        )
+
+    def test_step_waits_for_endDate_before_polling(self):
+        """The wait must happen BEFORE the poll, and be handed the right market.
+
+        Nothing observed this: _make_env stubs _wait_for_resolution with a bare lambda, so
+        deleting the call, or polling first, both passed. Live, polling a market that has not
+        ended means the midpoint never snaps to 0.99/0.01, the resolution budget burns out, and
+        EVERY bet books reward=0 -- silent in tests, poison in the training data.
+        Also pins that _poll_for_resolution gets the MARKET, not market.condition_id (which
+        would AttributeError on the first live step).
+        """
+        market = _make_market()
+        env, _, _ = _make_env(outcomes=[1], markets=[market, _make_market()], mock_fetch=False)
+        env.reset()
+        rec = MagicMock()
+        env._wait_for_resolution = rec.wait
+        env._poll_for_resolution = lambda *a, **k: (rec.poll(*a, **k), 1)[1]
+        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+
+        assert [c[0] for c in rec.mock_calls] == ["wait", "poll"]   # order, not just presence
+        rec.wait.assert_called_once_with(market.end_date)
+        rec.poll.assert_called_once_with(market)
+
+    def test_paper_env_never_touches_the_trader_during_a_step(self):
+        """The paper env must not call the trader AT ALL during a step -- not just `.buy`.
+
+        Asserting `buy.assert_not_called()` pinned only that one attribute name; a _step that
+        called `trader.submit_market_order(...)` would have passed. mock_calls == [] pins the
+        whole surface, which is the actual contract: nothing is submitted, ever.
+        """
+        env, _, trader = _make_env()
+        env.reset()
+        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+        assert trader.mock_calls == []
+
     @pytest.mark.parametrize(
         "action,outcome,fill_price,expected_payoff",
         [
@@ -195,81 +319,6 @@ class TestStep:
         td = env._step(TensorDict({"action": torch.tensor(action)}, batch_size=()))
         assert td["reward"].item() == pytest.approx(expected_payoff)
 
-    def test_dry_run_skips_trader_buy(self):
-        env, _, trader = _make_env(config_overrides={"dry_run": True})
-        env.reset()
-        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
-        trader.buy.assert_not_called()
-
-    @pytest.mark.parametrize(
-        "action,expected_token_id",
-        [(1, "tok_yes"), (0, "tok_no")],
-        ids=["bet-up-targets-yes-token", "bet-down-targets-no-token"],
-    )
-    def test_live_mode_calls_trader_buy_with_correct_token(self, action, expected_token_id):
-        """A YES↔NO token swap on either action would silently pass without
-        parametrizing both directions — so this test exercises both."""
-        env, _, trader = _make_env(config_overrides={"dry_run": False})
-        env.reset()
-        env._step(TensorDict({"action": torch.tensor(action)}, batch_size=()))
-        trader.buy.assert_called_once()
-        kwargs = trader.buy.call_args.kwargs
-        assert kwargs["token_id"] == expected_token_id
-        assert kwargs["amount_usdc"] > 0
-
-    def test_zero_stake_in_live_mode_does_not_call_trader(self):
-        """bet_fraction=0 → stake=0 → no order even in live mode."""
-        env, _, trader = _make_env(
-            config_overrides={"dry_run": False, "bet_fraction": 0.0}
-        )
-        env.reset()
-        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
-        trader.buy.assert_not_called()
-
-    @pytest.mark.parametrize(
-        "underlying_outcome",
-        [1, 0],
-        ids=["would-have-won", "would-have-lost"],
-    )
-    def test_failed_order_in_live_mode_books_zero_payoff(self, underlying_outcome):
-        """Critical safety: a rejected/failed order must NOT produce phantom P&L.
-
-        Pins the FULL post-failure contract, not just reward, so a future
-        refactor that ``return``-s early on failure (skipping the next-market
-        fetch, step counter, or done flags) breaks the test instead of silently
-        breaking episode progression. Parametrized over both possible underlying
-        outcomes, a regression that booked ``-stake`` on failure (instead of 0)
-        would only show up in the would-have-lost case otherwise.
-        """
-        market = _make_market(yes_price=0.4, no_price=0.6)
-        env, scanner, trader = _make_env(
-            outcomes=[underlying_outcome],
-            markets=[market, _make_market(slug="btc-updown-5m-next")],
-            config_overrides={"dry_run": False},
-        )
-        trader.buy.return_value = {"success": False, "error": "insufficient USDC"}
-        env.reset()
-        cash_before = env.cash
-        scanner_calls_before = scanner.next_active_market.call_count
-        td = env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
-
-        # We tried to place the order
-        trader.buy.assert_called_once()
-
-        # No phantom P&L
-        assert td["reward"].item() == 0.0
-        assert env.cash == pytest.approx(cash_before)
-
-        # Episode progression continues normally, these assertions catch a
-        # naive `if failure: return early_td` shortcut.
-        assert env._step_count == 1
-        assert not td["terminated"].item()
-        assert not td["truncated"].item()
-        assert scanner.next_active_market.call_count > scanner_calls_before
-        # Next market's state is non-zero (real market_state, not the terminal
-        # zero-tensor used for "no next market" cases).
-        assert not torch.equal(td["market_state"], torch.zeros(4))
-
     def test_cash_updates_after_win_and_loss(self):
         env, _, _ = _make_env(
             outcomes=[1, 0],
@@ -284,8 +333,16 @@ class TestStep:
         env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))  # Up wins
         after_win = env.cash
         env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))  # Up loses
-        assert after_win > before
-        assert env.cash < after_win
+
+        # EXACT values, not just direction: stake COMPOUNDS off current cash, and a fixed stake
+        # (initial_cash * frac) satisfies "up then down" just as well, so directional asserts
+        # cannot tell the two apart. This is the rule that decides how much is at risk per bet.
+        # bet_fraction=0.1, fill=0.4 -> win pays stake*(1-f)/f = 1.5x stake.
+        #   stake1 = 1000 * 0.1 = 100      -> +150  -> 1150
+        #   stake2 = 1150 * 0.1 = 115      -> -115  -> 1035   (a fixed stake would give 1050)
+        assert before == pytest.approx(1000.0)
+        assert after_win == pytest.approx(1150.0)
+        assert env.cash == pytest.approx(1035.0)
 
     def test_max_steps_truncation(self):
         env, _, _ = _make_env(
@@ -445,14 +502,23 @@ class TestFetchResolvedOutcome:
         [
             ("1.0", "0.0", 1),       # Up snapped fully
             ("0.0", "1.0", 0),       # Down snapped fully
-            ("0.995", "0.005", 1),   # boundary: just at threshold (Up)
-            ("0.005", "0.995", 0),   # boundary: just at threshold (Down)
+            ("0.99", "0.01", 1),     # EXACTLY at threshold (Up): >= must not become >
+            ("0.01", "0.99", 0),     # EXACTLY at threshold (Down): <= must not become <
+            # PARTIALLY snapped: the winning side is still moving while the losing side has
+            # already collapsed. The two midpoints are two INDEPENDENT HTTP reads and need not
+            # sum to 1 mid-settlement, so this state is real -- it is the state the poll loop
+            # exists to wait through. Nothing pinned the 0.99 CONSTANT (only the >= operator),
+            # so degrading it to 0.90 -- or even 0.10 -- passed the entire suite while making
+            # _fetch_resolved_outcome declare a WINNER on an unresolved market, which _step
+            # then books a payoff for. These two rows are what kill that.
+            ("0.90", "0.005", None),  # Up only partly snapped, Down already collapsed
+            ("0.005", "0.90", None),  # Down only partly snapped, Up already collapsed
             ("0.989", "0.011", None),  # below the 0.99 threshold
             ("0.99", "0.05", None),    # Up at threshold but Down still too high
             ("0.5", "0.5", None),      # mid-market
         ],
-        ids=["up", "down", "tight-up", "tight-down", "below-up",
-             "asymmetric-pending", "midmarket"],
+        ids=["up", "down", "at-threshold-up", "at-threshold-down", "below-up",
+             "asymmetric-pending", "midmarket", "partial-up", "partial-down"],
     )
     def test_outcome_parsing(self, yes_mid, no_mid, expected):
         env, _, _ = _make_env(mock_fetch=False)
@@ -523,27 +589,52 @@ class TestPollForResolution:
         env = self._real_poll_env()
         env._fetch_resolved_outcome = MagicMock(return_value=1)
         with patch("torchtrade.envs.live.polymarket.env.time.sleep") as mock_sleep:
-            assert env._poll_for_resolution("0xcond") == 1
+            assert env._poll_for_resolution(_make_market()) == 1
         mock_sleep.assert_not_called()
         assert env._fetch_resolved_outcome.call_count == 1
 
     def test_retries_until_resolved(self):
-        env = self._real_poll_env()
+        # 7.0, NOT the 15.0 default: pinning the default cannot distinguish a config read
+        # from a hardcoded constant. (The sibling backoff test at test_retry_sleep_... does
+        # this correctly; I missed it here and pinned 15.0, which killed nothing.)
+        env = self._real_poll_env(resolution_poll_interval_seconds=7.0)
         # First two calls: still mid-market. Third: Up wins.
         env._fetch_resolved_outcome = MagicMock(side_effect=[None, None, 1])
-        with patch("torchtrade.envs.live.polymarket.env.time.sleep"):
-            assert env._poll_for_resolution("0xcond") == 1
+        with patch("torchtrade.envs.live.polymarket.env.time.sleep") as mock_sleep:
+            assert env._poll_for_resolution(_make_market()) == 1
         assert env._fetch_resolved_outcome.call_count == 3
+        # Pin the poll interval BY VALUE, not just "it slept". Nothing pinned this, so
+        # hardcoding a constant passed the whole suite -- turning a 15s poll into a 1s one,
+        # i.e. ~600 polls per resolution instead of ~40 (and each poll is 2 CLOB requests).
+        assert mock_sleep.call_args_list == [call(7.0), call(7.0)]
 
     def test_returns_none_when_max_wait_exhausted(self):
+        """The deadline must come from resolution_max_wait_seconds, and be OBSERVABLE.
+
+        A fake clock advancing exactly one poll-interval per tick makes the poll count a
+        deterministic function of the config: 50s budget / 10s interval = 5 polls. Asserting
+        the COUNT is what turns "the deadline was hardcoded to 600.0" from a 600-second HANG
+        (which no assertion catches -- only a CI timeout) into an ordinary test failure.
+        """
         env = self._real_poll_env(
-            resolution_max_wait_seconds=0.1,
-            resolution_poll_interval_seconds=0.01,
+            resolution_max_wait_seconds=50.0,
+            resolution_poll_interval_seconds=10.0,
         )
         env._fetch_resolved_outcome = MagicMock(return_value=None)
-        with patch("torchtrade.envs.live.polymarket.env.time.sleep"):
-            assert env._poll_for_resolution("0xcond") is None
-        assert env._fetch_resolved_outcome.call_count >= 1
+
+        # Clock advances ONLY when the loop sleeps -- a faithful simulation of elapsed time,
+        # and robust to how many times the loop happens to read the clock per iteration
+        # (it reads it twice today; a per-read counter would break on any refactor).
+        now = [0.0]
+        with patch("torchtrade.envs.live.polymarket.env.time.sleep",
+                   side_effect=lambda sec: now.__setitem__(0, now[0] + sec)), \
+             patch("torchtrade.envs.live.polymarket.env.time.monotonic",
+                   side_effect=lambda: now[0]):
+            assert env._poll_for_resolution(_make_market()) is None
+
+        # 50s budget / 10s interval => 5 sleeps, so 6 polls before the deadline bites.
+        # A hardcoded 600.0 budget would poll 61 times -- a wrong NUMBER, not a 600s hang.
+        assert env._fetch_resolved_outcome.call_count == 6
 
 
 class TestWaitForResolution:
@@ -569,7 +660,7 @@ class TestWaitForResolution:
             assert mock_sleep.called == expect_sleep
 
     def test_sleeps_when_future_endDate(self):
-        env, _, _ = _make_env()
+        env, _, _ = _make_env(config_overrides={"resolution_grace_seconds": 45.0})
         env._wait_for_resolution = (
             PolymarketBetEnv._wait_for_resolution.__get__(env, PolymarketBetEnv)
         )
@@ -580,17 +671,110 @@ class TestWaitForResolution:
             env._wait_for_resolution(future)
             mock_sleep.assert_called_once()
             slept_for = mock_sleep.call_args.args[0]
-            assert slept_for > 100  # 120s + 30s grace ≈ 150s
+            # 45s grace, NOT the 30.0 default: pinning a knob at its default cannot tell a
+            # config read from a hardcoded constant. (Same trap as the poll interval; I shipped
+            # this bug class twice before catching it here.) 120s horizon + 45s grace = 165.
+            assert slept_for == pytest.approx(165, abs=2)
 
-
-class TestCloseLifecycle:
-    def test_close_calls_trader_cancel_all(self):
-        env, _, trader = _make_env()
-        env.close()
-        trader.cancel_all.assert_called_once()
 
 class TestConfigValidation:
     """The config is the boundary. A nonsense value must be refused there, not absorbed."""
+
+    def test_live_mode_is_refused(self):
+        """dry_run=False must RAISE, not silently paper-trade.
+
+        The env can never execute live: py-clob-client is archived/non-functional, and the
+        env holds every bet to resolution while Polymarket only releases collateral on an
+        explicit on-chain redeem that no client exposes -- so a live bot's balance drains to
+        zero while it is winning. Refusing the config is the whole point of this guard; a
+        regression that quietly downgraded live to paper (or dropped the check) would let a
+        user believe real money was at work.
+        """
+        # Match the SUBSTANCE, not a contentless phrase. Pinning only "not supported" let the
+        # whole message be replaced with "pip install py-clob-client, then set dry_run=False"
+        # -- the exact dead-end advice this PR exists to delete -- with the suite still green.
+        # Both reasons must survive: the dead client AND the redemption blocker.
+        with pytest.raises(NotImplementedError) as exc:
+            PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", dry_run=False)
+        assert "archived" in str(exc.value)   # blocker 1: the client is dead
+        assert "redeem" in str(exc.value)     # blocker 2: the one a port cannot skip
+
+    def test_config_is_frozen_so_the_guard_cannot_be_mutated_away(self):
+        """__post_init__ runs ONCE. On a mutable dataclass this was the bypass:
+
+            config = PolymarketBetEnvConfig(...)   # dry_run=True, passes
+            config.dry_run = False                 # guard never re-runs
+            env = PolymarketBetEnv(config)         # ...used to wire a LIVE trader
+
+        frozen=True does not make it impossible (object.__setattr__ still works); it makes it
+        deliberate rather than an ordinary attribute assignment. It is no longer the last line
+        of defence either: the executor now refuses dry_run=False itself, so even a forced
+        mutation raises there -- pinned by test_forced_mutation_is_still_caught_downstream.
+        """
+        config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            config.dry_run = False
+
+    def test_forced_mutation_is_still_caught_downstream(self):
+        """Defence in depth: even object.__setattr__ (which defeats frozen=True) cannot get a
+        live trader wired, because the executor refuses dry_run=False on its own account.
+
+        Two independent guards must both regress before a live client can be built.
+        """
+        config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
+        object.__setattr__(config, "dry_run", False)
+        with pytest.raises(NotImplementedError, match="archived"):
+            PolymarketBetEnv(config, scanner=MagicMock())
+
+    def test_zero_is_legal_for_both_fractions(self):
+        """0.0 is DOCUMENTED as supported for both (a no-bet agent; bankruptcy disabled).
+
+        The lower bounds were never constructed, so `0 <= x` -> `0 < x` silently forbade a
+        config the docstrings promise. Pin that both zeros still build.
+        """
+        cfg = PolymarketBetEnvConfig(
+            market_slug_prefix="btc-updown-5m-", bet_fraction=0.0, bankrupt_threshold=0.0
+        )
+        assert cfg.bet_fraction == 0.0 and cfg.bankrupt_threshold == 0.0
+
+    @pytest.mark.parametrize(
+        "bad", [-1.0, 1.0, 1.5],
+        ids=["negative-disables-the-stop", "exactly-1.0", "over-100%"],
+    )
+    def test_bankrupt_threshold_validated_at_the_boundary(self, bad):
+        """The same silent-default trap as initial_cash, one field over.
+
+        >= 1: the account starts at or below its own bankruptcy line. The domain is half-open
+        [0, 1) to match SequentialTradingEnvConfig, which already settled this field's domain
+        -- a live env inventing a different one is exactly the drift we keep paying for.
+        < 0: `current < threshold * initial` is unsatisfiable for any non-negative cash, which
+        SILENTLY DISABLES the safety stop -- the exact failure this repo keeps getting bitten
+        by, and the reason _is_bankrupt's old `initial > 0` guard was removed rather than kept.
+        """
+        with pytest.raises(ValueError, match="bankrupt_threshold"):
+            PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", bankrupt_threshold=bad)
+
+    @pytest.mark.parametrize("bad", [-0.1, 1.5], ids=["negative", "over-100%"])
+    def test_bet_fraction_validated_at_the_boundary(self, bad):
+        """bet_fraction > 1 stakes more than the account holds, driving cash negative -- which
+        flips the sign of a loss, so a losing bet would PAY OUT.
+
+        Refusing it here is what guarantees cash >= 0, and that guarantee is in turn why
+        _compute_payoff carries no `stake <= 0` guard (it was deleted as unreachable). The
+        boundary check REPLACES the downstream guard; it does not merely back it up.
+        """
+        with pytest.raises(ValueError, match="bet_fraction"):
+            PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", bet_fraction=bad)
+
+    def test_default_config_is_paper(self):
+        """The DEFAULT must be the safe mode.
+
+        Not a tautology against the line above: this pins that a user who never mentions
+        dry_run gets a constructible paper env. The default used to be dry_run=False, which
+        (once the guard exists) means the default config would not even build.
+        """
+        config = PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-")
+        assert config.dry_run is True
 
     @pytest.mark.parametrize("initial_cash", [-100.0, 0.0], ids=["negative", "zero"])
     def test_nonsense_starting_cash_is_refused(self, initial_cash):

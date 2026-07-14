@@ -1,9 +1,12 @@
 """Dry-run a few rolling Polymarket bets on a short-cadence series.
 
 Picks the next active market matching ``market_slug_prefix`` (e.g.
-``btc-updown-5m-``), bets a random direction, *waits for resolution*, collects
-the realized payoff, and rolls to the next market. ``dry_run=True`` skips real
-CLOB orders so no funded wallet is required.
+``btc-updown-5m-``), bets a random direction, *waits for resolution*, books the
+modelled payoff, and rolls to the next market.
+
+Paper only -- the env never submits an order, and ``dry_run=False`` raises. No funded
+wallet or private key is needed (or useful). The market data and the resolution are real;
+the payoff is modelled at the quoted price, without spread crossing or fees.
 
 Run with:
     python examples/broker/polymarket/run_dry_run.py
@@ -17,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 
 import torch
 
@@ -47,7 +49,8 @@ def main():
         initial_cash=args.initial_cash,
         dry_run=True,
     )
-    env = PolymarketBetEnv(config, private_key=os.getenv("POLYGON_PRIVATE_KEY", ""))
+    # No private key: paper-only, nothing is signed or submitted.
+    env = PolymarketBetEnv(config)
 
     td = env.reset()
     print(f"slug_prefix:        {config.market_slug_prefix}")

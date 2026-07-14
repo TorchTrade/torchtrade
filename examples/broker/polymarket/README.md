@@ -9,8 +9,9 @@ bet: did the asset go up or down over the bar? The env rolls through the
 series, bet → wait for resolution → collect payoff → next market, without
 holding any position across steps.
 
-All examples default to `dry_run=True`, so you can run them without a funded
-Polygon wallet or `py-clob-client` installed.
+**Paper trading only.** `dry_run=False` raises `NotImplementedError` — see
+[Running for real](#running-for-real). No funded Polygon wallet, private key, or
+`py-clob-client` install is needed (or useful).
 
 ## End-to-end walkthrough
 
@@ -100,11 +101,19 @@ config = PolymarketBetEnvConfig(
     market_slug_prefix="btc-updown-5m-",   # the only required field
     bet_fraction=0.01,                     # stake 1 % of cash per bet
     max_steps=10,                          # 10 bets per episode
-    initial_cash=1_000.0,                  # for dry-run accounting
-    dry_run=True,                          # skip real CLOB orders
+    initial_cash=1_000.0,                  # simulated paper balance
+    dry_run=True,                          # the only supported mode (the default)
 )
-env = PolymarketBetEnv(config, private_key="")  # private_key only needed when dry_run=False
+env = PolymarketBetEnv(config)
 ```
+
+> **Paper trading only.** `dry_run=False` raises `NotImplementedError` — the archived CLOB
+> client and the missing redemption workflow are spelled out under
+> [Running for real](#running-for-real).
+>
+> The market data and the resolution are real. The **payoff is modelled**, not real: it fills
+> at the quoted outcome price with no spread crossing and no fees, so it is optimistic
+> versus the fill-or-kill order a live bot would actually pay.
 
 Swapping to ETH 15-minute is a one-line change:
 
@@ -132,11 +141,11 @@ Cumulative P&L is captured directly in the per-step rewards.
 Each `step()` does five things:
 
 ```
-1. Submit the bet on the current market (skipped in dry_run)
+1. Book the bet on the current market (paper only — no order is submitted)
 2. Sleep until the market's endDate + grace
 3. Poll the CLOB midpoint for each outcome token; resolved when YES mid >= 0.99
    and NO mid <= 0.01 (Up won) or vice versa (Down won)
-4. Compute realized payoff:  win → stake * (1 - fill) / fill, loss → -stake
+4. Compute the modelled payoff:  win → stake * (1 - fill) / fill, loss → -stake
 5. Pick the next active market matching market_slug_prefix and return its market_state
 ```
 
@@ -179,14 +188,23 @@ discrete index; an RL policy gets logits over two classes.
 
 ## Running for real
 
-To trade real funds:
+**Live trading is not supported.** `dry_run=False` raises `NotImplementedError`. Two blockers:
 
-1. Set `POLYGON_PRIVATE_KEY` in `.env`, the wallet must hold USDC.e on Polygon.
-2. `pip install py-clob-client`.
-3. Set `dry_run=False` in `PolymarketBetEnvConfig`.
+1. **The client is dead.** `py-clob-client` was archived in May 2026 — *"no longer functional
+   and should not be used for new or existing integrations."* Polymarket's CLOB V2 uses new
+   contracts and replaced USDC.e collateral with pUSD. No order this env submits can reach
+   production.
+2. **There is no redemption.** This env buys and holds every bet through resolution, and
+   Polymarket does **not** release collateral when a market resolves — a winning share is
+   worth $1 but stays an ERC-1155 token until an explicit on-chain `redeemPositions` call,
+   which no Polymarket client exposes. A bot that never redeems watches its spendable
+   balance **drain to zero while it is winning.**
 
-Always start with `dry_run=True` and verify the bet timing, payoff
-computation, and accounting before flipping the switch.
+Blocker 2 is why this can't be fixed by "just reading the real wallet": while winnings sit
+unredeemed, the collateral balance isn't the account's worth, so a wallet-backed balance
+would make a *winning* agent declare itself bankrupt.
+
+Reviving live trading needs the CLOB V2 port **and** a redemption workflow.
 
 ## See Also
 
