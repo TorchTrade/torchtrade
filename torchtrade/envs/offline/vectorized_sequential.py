@@ -684,7 +684,9 @@ class VectorizedSequentialTradingEnv(EnvBase):
                 self._balances.clamp_(min=0.0)
                 self._position_sizes[final_open] = new_sizes[final_open]
                 self._entry_prices[final_open] = execution_prices[final_open]
-                self._hold_counters[final_open] = 0
+                # The bar a position OPENS on is holding_time=1, not 0 (matches the
+                # scalar SequentialTradingEnv / advance_hold_counter canonical rule).
+                self._hold_counters[final_open] = 1
 
     def close(self):
         """Clean up resources."""

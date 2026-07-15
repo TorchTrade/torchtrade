@@ -328,9 +328,9 @@ class TestBinanceFuturesTorchTradingEnv:
             aged = env.position.hold_counter
             td = env.reset()                         # position still open on the exchange
 
-        # 0 here, unlike bitget/bybit/okx: binance increments hold_counter in _step, not in
-        # _get_observation, so the reset observation does not count a bar. The bug either way
-        # is the previous episode's age surviving the reset.
+        # 0: _get_observation() only READS hold_counter now (advance_hold_counter runs exactly
+        # once per _step(), never from _reset(), which passes advance_hold=False), so a reset --
+        # even one that finds a position still open on the exchange -- never itself counts a bar.
         assert env.position.hold_counter == 0, f"reset carried {aged} bars into the new episode"
 
         # An OPEN position must look OPEN. Every other account_state assertion on this branch

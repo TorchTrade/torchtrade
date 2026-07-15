@@ -42,6 +42,18 @@ class TestBybitFuturesSLTPTorchTradingEnv:
                     trader=mock_env_trader,
                 )
 
+    def test_a_direct_flip_does_not_age_the_new_position(self, env, mock_env_trader):
+        """A long flipped straight to a short (never through flat) is one step old (#49).
+
+        Covers this SLTP env's _step -> _get_observation(advance_hold=True) aging path, which
+        is otherwise untested here (the shared base._get_observation is exercised by the
+        non-SLTP futures file, but this env_sltp._step is not)."""
+        from torchtrade.envs.live.bybit.order_executor import PositionStatus
+        from tests.envs.base_exchange_tests import (
+            assert_a_direct_flip_does_not_age_the_new_position as assert_flip,
+        )
+        assert_flip(env, mock_env_trader, PositionStatus, long_action=1, short_action=5)
+
     def test_action_map_structure(self, env):
         """Test action map: 1 HOLD + 4 LONG (2x2) + 4 SHORT (2x2) = 9 actions."""
         assert len(env.action_map) == 9

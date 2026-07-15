@@ -744,7 +744,9 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self.position.position_size = position_size
         self.position.position_value = abs(notional_value)
         self.position.entry_price = execution_price
-        self.position.hold_counter = 0
+        # The bar a position OPENS on is holding_time=1, not 0 (see advance_hold_counter
+        # docstring in core/state.py for the canonical rule this must match).
+        self.position.hold_counter = 1
 
         # Set position direction
         if not self.allows_short:

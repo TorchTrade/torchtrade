@@ -257,6 +257,18 @@ class TestAlpacaSLTPTradingEnvStep:
 
         assert env.position.current_position == 0
 
+    def test_holding_time_ages_from_one(self, env):
+        """holding_time reads 1 on the opening bar, then increments (#49).
+
+        alpaca is spot (no flip), so this open->hold->hold covers this SLTP env's
+        _step -> _get_observation(advance_hold=True) aging path directly."""
+        env.reset()
+        seq = []
+        for a in (1, 0, 0):  # open bracket, hold, hold
+            td = env._step(TensorDict({"action": torch.tensor(a)}, batch_size=()))
+            seq.append(td["account_state"][3].item())
+        assert seq == [1.0, 2.0, 3.0]
+
     def test_step_buy_with_sltp(self, env):
         """Test buy action with SL/TP (action > 0)."""
         env.reset()
