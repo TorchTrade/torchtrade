@@ -353,8 +353,8 @@ class TestAlpacaTorchTradingEnvStep:
     def test_closing_a_position_does_not_age_the_next_one(self, env):
         """A closed position's age must not carry into the next one.
 
-        The alpaca/binance counterpart of dust_between_positions: these two manage
-        hold_counter in _step, not in the observation branch.
+        The alpaca/binance counterpart of dust_between_positions: all five live envs now age
+        hold_counter inside _get_observation() (once per _step, via advance_hold_counter).
         """
         buy = TensorDict({"action": torch.tensor(2)}, batch_size=())    # levels [0.0, 0.5, 1.0]
         flat = TensorDict({"action": torch.tensor(0)}, batch_size=())

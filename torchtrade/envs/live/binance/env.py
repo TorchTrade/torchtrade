@@ -8,7 +8,6 @@ logger = logging.getLogger(__name__)
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.core.state import advance_hold_counter
 from torchtrade.envs.utils.timeframe import TimeFrame
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
@@ -182,9 +181,6 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
 
         # Wait for next time step
         self._wait_for_next_timestamp()
-
-        # Update position hold counter
-        advance_hold_counter(self.position, self.position.current_position)
 
         # Get updated state
         new_portfolio_value = self._get_portfolio_value()

@@ -14,6 +14,7 @@ from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.core.state import (
     HistoryTracker,
     PositionState,
+    advance_hold_counter,
     position_direction_from_status,
 )
 
@@ -179,8 +180,16 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             self.observation_spec.set(market_data_key, market_data_spec)
             self.market_data_keys.append(market_data_key)
 
-    def _get_observation(self) -> TensorDictBase:
-        """Get the current observation state."""
+    def _get_observation(self, advance_hold: bool = True) -> TensorDictBase:
+        """Get the current observation state.
+
+        Args:
+            advance_hold: If True (the default, used by `_step()`), ages `hold_counter`
+                by one bar using the direction observed in THIS method's single
+                `get_status()` call -- holding_time and position_direction in the
+                emitted account_state are always derived from the same snapshot.
+                `_reset()` passes False so a reset can never itself count a bar.
+        """
         # Get market data
         obs_dict = self.observer.get_observations(
             return_base_ohlc=True if self.config.include_base_features else False
@@ -193,7 +202,8 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Get market data for each timeframe
         market_data = [obs_dict[features_name] for features_name in self.observer.get_keys()]
 
-        # Get account state from trader
+        # Get account state from trader (single fetch: holding_time and
+        # position_direction below MUST come from this same snapshot)
         status = self.trader.get_status()
         account = self.trader.client.get_account()
         cash = float(account.cash)
@@ -203,11 +213,14 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
         # close take the position branch and read stale fields off it.
         position_direction = float(position_direction_from_status(position_status))
+        if advance_hold:
+            advance_hold_counter(self.position, position_direction)
+        holding_time = float(self.position.hold_counter)
+
         if position_direction == 0:
             position_value = 0.0
             entry_price = 0.0
             unrealized_pnlpc = 0.0
-            holding_time = 0.0
             portfolio_value = cash
             # Get current market price even when no position
             try:
@@ -219,7 +232,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             entry_price = position_status.avg_entry_price
             current_price = position_status.current_price
             unrealized_pnlpc = position_status.unrealized_plpc
-            holding_time = float(self.position.hold_counter)
             portfolio_value = cash + position_value
 
         # Calculate new 6-element account state
@@ -290,8 +302,9 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         self._sync_action_level_after_reset()
 
-        # Get initial observation
-        return self._get_observation()
+        # Get initial observation. advance_hold=False: hold_counter was just zeroed
+        # above; a reset must never itself count a bar (see advance_hold docstring).
+        return self._get_observation(advance_hold=False)
 
     @abstractmethod
     def _execute_trade_if_needed(self, action) -> dict:

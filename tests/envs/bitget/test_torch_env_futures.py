@@ -441,10 +441,12 @@ class TestBitgetFuturesTorchTradingEnv:
             aged = env.position.hold_counter
             td = env.reset()                         # position still open on the exchange
 
-        # 1, not 0: _reset zeroes the counter and then takes an observation, which legitimately
-        # counts the still-open position as bar ONE of the new episode. The bug is it reading
-        # `aged + 1` -- the previous episode's age carried across the reset.
-        assert env.position.hold_counter == 1, f"reset carried {aged} bars into the new episode"
+        # 0: _get_observation() only READS hold_counter now (advance_hold_counter is called
+        # exactly once per _step(), never from _reset()), so a reset -- even one that finds a
+        # position still open on the exchange -- never itself counts a bar. The bug this test
+        # used to pin was `_get_observation()` also advancing the counter when reset called it,
+        # which read `aged + 1` (or, coincidentally with hold_counter zeroed first, always 1).
+        assert env.position.hold_counter == 0, f"reset carried {aged} bars into the new episode"
 
         # An OPEN position must look OPEN. Every other account_state assertion on this branch
         # checks that a FLAT account reads flat; the inverse was unpinned here, so corrupting
@@ -457,7 +459,7 @@ class TestBitgetFuturesTorchTradingEnv:
         assert pnl == pytest.approx(0.0526)
         assert leverage == 20.0                       # the POSITION's, not the config's 5
         assert dist_to_liq == pytest.approx(0.1)      # (50000 - 45000) / 50000
-        assert holding_time == 1.0
+        assert holding_time == 0.0
 
     def test_reentry_after_external_close_starts_a_fresh_holding_time(self, env, mock_trader):
         """A re-entry made in the SAME step as an external close must not inherit its age.

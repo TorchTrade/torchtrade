@@ -166,8 +166,8 @@ class HistoryTracker:
         return len(self.base_prices)
 
 
-def advance_hold_counter(position: PositionState, direction: float) -> float:
-    """Age the CURRENT position by one step and return it as holding_time.
+def advance_hold_counter(position: PositionState, direction: float) -> None:
+    """Age the CURRENT position by one step, writing the new age to position.hold_counter.
 
         flat  -> long   a new position     -> 1
         long  -> long   the same position  -> 2, 3, 4, ...
@@ -187,4 +187,3 @@ def advance_hold_counter(position: PositionState, direction: float) -> float:
         position.hold_counter += 1
 
     position.hold_direction = direction
-    return float(position.hold_counter)

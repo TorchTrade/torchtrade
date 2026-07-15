@@ -250,9 +250,17 @@ def test_sync_action_level_after_reset(current_position, expected_level):
 
 # --- holding_time on a direct flip (#44) ------------------------------------- #
 
-@pytest.mark.parametrize(
-    "path", sorted(pathlib.Path("torchtrade/envs/live").rglob("*.py")), ids=str
-)
+# Every file that writes position.hold_counter must obey the two guards below. That is the
+# live envs, plus the shared live base (core/live.py) and the SLTP mixin (utils/sltp_mixin.py)
+# whose _sync_position_from_exchange methods legitimately reset it to 0 -- if those two drifted
+# to hand-rolled aging, the live-only rglob would never see it. (#49)
+_HOLD_COUNTER_FILES = sorted(pathlib.Path("torchtrade/envs/live").rglob("*.py")) + [
+    pathlib.Path("torchtrade/envs/core/live.py"),
+    pathlib.Path("torchtrade/envs/utils/sltp_mixin.py"),
+]
+
+
+@pytest.mark.parametrize("path", _HOLD_COUNTER_FILES, ids=str)
 def test_only_the_shared_rule_ages_a_position(path):
     """Nothing may age a position except advance_hold_counter().
 
@@ -283,5 +291,38 @@ def test_only_the_shared_rule_ages_a_position(path):
 
     assert not offenders, (
         f"{path} ages the position itself instead of calling advance_hold_counter():\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+@pytest.mark.parametrize("path", _HOLD_COUNTER_FILES, ids=str)
+def test_hold_counter_is_only_advanced_inside_get_observation(path):
+    """advance_hold_counter() may be called ONLY from _get_observation() (#49).
+
+    The guard above bans hand-rolled aging; this bans MISUSING the sanctioned function. #49
+    was a SECOND call site: alpaca/binance aged the counter in _step() off the stale cached
+    direction -- a different get_status() snapshot than the one _get_observation() shows the
+    policy, so holding_time and position_direction could disagree in the same account_state.
+    Pinning the ONE call to _get_observation() keeps them on a single snapshot and lets
+    _reset() gate aging with advance_hold=False. A behavioural test is not a reliable backstop
+    here -- the aging code is shared per exchange by env.py and env_sltp.py, so a regression in
+    just one _step() escapes the other's tests.
+    """
+    tree = ast.parse(path.read_text())
+
+    def _callee(node):
+        f = node.func
+        return f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+
+    offenders = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) or fn.name == "_get_observation":
+            continue
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Call) and _callee(node) == "advance_hold_counter":
+                offenders.append(f"line {node.lineno} (in {fn.name}): {ast.unparse(node)}")
+
+    assert not offenders, (
+        f"{path} calls advance_hold_counter() outside _get_observation():\n  "
         + "\n  ".join(offenders)
     )

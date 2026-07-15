@@ -15,6 +15,7 @@ from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.core.state import (
     HistoryTracker,
     PositionState,
+    advance_hold_counter,
     position_direction_from_status,
 )
 
@@ -187,8 +188,16 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
             self.observation_spec.set(market_data_key, market_data_spec)
             self.market_data_keys.append(market_data_key)
 
-    def _get_observation(self) -> TensorDictBase:
-        """Get the current observation state."""
+    def _get_observation(self, advance_hold: bool = True) -> TensorDictBase:
+        """Get the current observation state.
+
+        Args:
+            advance_hold: If True (the default, used by `_step()`), ages `hold_counter`
+                by one bar using the direction observed in THIS method's single
+                `get_status()` call -- holding_time and position_direction in the
+                emitted account_state are always derived from the same snapshot.
+                `_reset()` passes False so a reset can never itself count a bar.
+        """
         # Get market data
         obs_dict = self.observer.get_observations(
             return_base_ohlc=self.config.include_base_features
@@ -201,7 +210,8 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Get market data for each interval
         market_data = [obs_dict[features_name] for features_name in self.observer.get_keys()]
 
-        # Get account state from trader
+        # Get account state from trader (single fetch: holding_time and
+        # position_direction below MUST come from this same snapshot)
         status = self.trader.get_status()
         balance = self.trader.get_account_balance()
 
@@ -213,6 +223,10 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
         # close take the position branch and read stale fields off it.
         position_direction = float(position_direction_from_status(position_status))
+        if advance_hold:
+            advance_hold_counter(self.position, position_direction)
+        holding_time = float(self.position.hold_counter)
+
         if position_direction == 0:
             position_size = 0.0
             position_value = 0.0
@@ -221,7 +235,6 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
             unrealized_pnl_pct = 0.0
             leverage = float(self.config.leverage)
             liquidation_price = 0.0
-            holding_time = 0.0
         else:
             position_size = position_status.qty  # Positive=long, Negative=short
             position_value = abs(position_status.notional_value)
@@ -230,7 +243,6 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
             unrealized_pnl_pct = position_status.unrealized_pnl_pct
             leverage = float(position_status.leverage)
             liquidation_price = position_status.liquidation_price
-            holding_time = float(self.position.hold_counter)
 
         # Calculate new 6-element account state
         # Element 0: exposure_pct (position_value / portfolio_value)
@@ -316,8 +328,9 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         self._sync_action_level_after_reset()
 
-        # Get initial observation
-        return self._get_observation()
+        # Get initial observation. advance_hold=False: hold_counter was just zeroed
+        # above; a reset must never itself count a bar (see advance_hold docstring).
+        return self._get_observation(advance_hold=False)
 
     @abstractmethod
     def _execute_trade_if_needed(self, action) -> dict:
