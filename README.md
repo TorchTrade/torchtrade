@@ -160,23 +160,23 @@ paper-only** — see its entry.
 - **Commission:** Maker 0.02% / Taker 0.04% (with BNB discount)
 - **Get Started:** [Sign up for Binance](https://accounts.binance.com/register?ref=25015935)
 
-**[Bitget](https://www.bitget.com/)** - Fast-growing cryptocurrency exchange
+**[Bitget](https://share.bitget.com/u/VGN302X2)** - Fast-growing cryptocurrency exchange
 - **Supported by:** `BitgetFuturesTorchTradingEnv`, `BitgetFuturesSLTPTorchTradingEnv`
 - **Features:** Futures trading with up to 125x leverage, testnet for safe testing
 - **Commission:** Maker 0.02% / Taker 0.06%
-- **Get Started:** [Sign up for Bitget](https://www.bitget.com/)
+- **Get Started:** [Sign up for Bitget](https://share.bitget.com/u/VGN302X2)
 
-**[Bybit](https://www.bybit.com/)** - Top cryptocurrency derivatives exchange
+**[Bybit](https://www.bybit.eu/invite?ref=MX42GRV)** - Top cryptocurrency derivatives exchange
 - **Supported by:** `BybitFuturesTorchTradingEnv`, `BybitFuturesSLTPTorchTradingEnv`
 - **Features:** Futures trading with up to 100x leverage, native bracket orders (SL/TP), testnet for safe testing
 - **Commission:** Maker 0.02% / Taker 0.055%
-- **Get Started:** [Sign up for Bybit](https://www.bybit.com/)
+- **Get Started:** [Sign up for Bybit](https://www.bybit.eu/invite?ref=MX42GRV)
 
-**[OKX](https://www.okx.com/)** - Leading global cryptocurrency exchange
+**[OKX](https://my.okx.com/en-eu/join/52629853)** - Leading global cryptocurrency exchange
 - **Supported by:** `OKXFuturesTorchTradingEnv`, `OKXFuturesSLTPTorchTradingEnv`
 - **Features:** Futures trading with up to 125x leverage, bracket orders via attachAlgoOrds, demo trading
 - **Commission:** Maker 0.02% / Taker 0.05%
-- **Get Started:** [Sign up for OKX](https://www.okx.com/)
+- **Get Started:** [Sign up for OKX](https://my.okx.com/en-eu/join/52629853)
 
 ### 🔮 Prediction Markets
 
