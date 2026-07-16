@@ -272,9 +272,10 @@ class BitgetBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Element 4: leverage
 
         # Element 5: distance_to_liquidation
-        if position_size == 0:
-            distance_to_liquidation = 1.0
-        elif current_price == 0:
+        # liquidation_price <= 0 means "no liquidation price": the exchange omitted the field
+        # (-> .get(..., 0)) or reports "0" for cross-margin. A short must then read 1.0, not
+        # (0 - price)/price = 0.0, which would falsely tell the policy it is AT liquidation.
+        if position_size == 0 or current_price == 0 or liquidation_price <= 0:
             distance_to_liquidation = 1.0
         else:
             if position_size > 0:
