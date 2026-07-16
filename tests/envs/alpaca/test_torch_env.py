@@ -78,6 +78,7 @@ class TestAlpacaTorchTradingEnvInitialization:
         # Check market data keys
         market_keys = [k for k in env.observation_spec.keys() if "market_data" in k]
         assert len(market_keys) == 1
+        assert "base_features" not in env.observation_spec.keys()  # off by default (mirror of #61)
 
     def test_reward_spec(self):
         """Test that reward spec is correctly defined."""
@@ -162,6 +163,9 @@ class TestAlpacaTorchTradingEnvReset:
         td = env.reset()
 
         assert isinstance(td, TensorDict)
+        # include_base_features is off by default -> the key is neither declared nor emitted
+        # (the emission side of the off-by-default symmetry the spec test pins the other half of)
+        assert "base_features" not in td.keys()
 
     def test_reset_contains_market_data(self, env):
         """Test that reset returns market data."""
@@ -667,8 +671,11 @@ class TestAlpacaTorchTradingEnvPositionTracking:
 class TestAlpacaTorchTradingEnvBaseFeatures:
     """Tests for base features inclusion."""
 
-    def test_include_base_features(self):
-        """Test that base features are included when configured."""
+    def test_base_features_declared_in_observation_spec(self):
+        """include_base_features=True must DECLARE base_features in observation_spec (not just
+        emit it) AND emit the full (window, 4) window -- not the last-bar (4,) slice. Either
+        mismatch means spec and observation disagree and a collector pre-allocating from the
+        spec drops or misshapes it (#61, #69)."""
         config = AlpacaTradingEnvConfig(
             symbol="BTC/USD",
             window_sizes=[10],
@@ -686,7 +693,9 @@ class TestAlpacaTorchTradingEnvBaseFeatures:
 
         td = env.reset()
 
+        assert "base_features" in env.observation_spec.keys()
         assert "base_features" in td.keys()
+        assert env.observation_spec["base_features"].shape == td["base_features"].shape == (10, 4)
 
 
 class TestAlpacaTorchTradingEnvClose:

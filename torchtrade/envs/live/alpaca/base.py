@@ -180,6 +180,8 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             self.observation_spec.set(market_data_key, market_data_spec)
             self.market_data_keys.append(market_data_key)
 
+        self._declare_base_features_spec(window_sizes[0])
+
     def _get_observation(self, advance_hold: bool = True) -> TensorDictBase:
         """Get the current observation state.
 
@@ -192,12 +194,12 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         """
         # Get market data
         obs_dict = self.observer.get_observations(
-            return_base_ohlc=True if self.config.include_base_features else False
+            return_base_ohlc=self.config.include_base_features
         )
 
         # Extract base features if requested
         if self.config.include_base_features:
-            base_features = obs_dict["base_features"][-1]
+            base_features = obs_dict.get("base_features")
 
         # Get market data for each timeframe
         market_data = [obs_dict[features_name] for features_name in self.observer.get_keys()]
@@ -260,7 +262,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             out_td.set(market_data_name, torch.from_numpy(data))
 
         # Add base features if requested
-        if self.config.include_base_features:
+        if self.config.include_base_features and base_features is not None:
             out_td.set("base_features", torch.from_numpy(base_features))
 
         return out_td

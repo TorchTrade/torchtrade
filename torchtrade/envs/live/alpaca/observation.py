@@ -154,11 +154,14 @@ class AlpacaObservationClass:
                 base_df = df.reset_index()
                 base_df.dropna(inplace=True)
                 base_df.drop_duplicates(inplace=True)
+                # Window base_features to the first timeframe's window, matching the futures
+                # observer (futures_base_obs.py) -- the env declares a (window, 4) spec, so an
+                # unwindowed emission (the full lookback) would disagree with it (#69).
                 observations['base_features'] = self._get_numpy_obs(
-                    base_df, 
+                    base_df,
                     columns=['open', 'high', 'low', 'close']
-                )
-                observations['base_timestamps'] = base_df['timestamp'].values
+                )[-window_size:]
+                observations['base_timestamps'] = base_df['timestamp'].values[-window_size:]
             processed_df = self.feature_preprocessing_fn(df)
             # apply window size
             processed_df = processed_df.iloc[-window_size:]

@@ -65,7 +65,10 @@ class TestAlpacaObservationClass(BaseObservationClassTests):
         observations = obs.get_observations(return_base_ohlc=True)
         assert "base_features" in observations
         assert "base_timestamps" in observations
-        assert observations["base_features"].shape[1] == 4
+        # (window, 4), not the full 600-bar lookback: base_features must be windowed like
+        # market_data, or it disagrees with the env's declared (window, 4) spec (#69).
+        assert observations["base_features"].shape == (10, 4)
+        assert observations["base_timestamps"].shape == (10,)
 
     def test_get_features_default_names(self):
         """Default preprocessing yields the four named OHLC features."""

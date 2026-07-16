@@ -11,7 +11,6 @@ inherits `TorchTradeLiveEnv` directly.
 """
 import torch
 from tensordict import TensorDict, TensorDictBase
-from torchrl.data import Bounded
 
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.core.state import advance_hold_counter, position_direction_from_status
@@ -127,18 +126,3 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         """Calculate total portfolio value (includes unrealized PnL)."""
         balance = self.trader.get_account_balance()
         return balance.get("total_margin_balance", 0)
-
-    def _declare_base_features_spec(self, base_window: int) -> None:
-        """Declare the base_features spec (raw OHLC, first timeframe) -- shape (base_window, 4).
-
-        _get_observation (shared, above) emits base_features when include_base_features is set, so
-        every futures exchange's _build_observation_specs MUST call this or observation_spec
-        disagrees with the emitted observation: check_env_specs fails and a collector
-        pre-allocating from the spec silently drops the key. Shared here alongside the emitter so
-        the spec cannot drift per-exchange -- the exact drift that left 3 of 4 undeclared (#61).
-        """
-        if self.config.include_base_features:
-            self.observation_spec.set(
-                "base_features",
-                Bounded(low=-torch.inf, high=torch.inf, shape=(base_window, 4), dtype=torch.float),
-            )
