@@ -16,6 +16,7 @@ import pytest
 
 import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
+from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 from torchtrade.envs.core.state import PositionState, advance_hold_counter
 
@@ -33,6 +34,14 @@ LIVE_ENVS = sorted(_subclasses(TorchTradeLiveEnv), key=lambda c: c.__name__)
 
 # The plain envs (env.py). The SLTP ones get their sync from SLTPMixin instead.
 NON_SLTP_ENVS = [c for c in LIVE_ENVS if c.__module__.endswith(".env")]
+
+# The 4 futures exchanges (base + SLTP) share ONE _get_observation via TorchTradeFuturesLiveEnv;
+# the intermediate base itself is excluded (it IS the shared impl). alpaca (spot) is absent by
+# construction -- it does not subclass TorchTradeFuturesLiveEnv.
+FUTURES_ENVS = [
+    c for c in LIVE_ENVS
+    if issubclass(c, TorchTradeFuturesLiveEnv) and c is not TorchTradeFuturesLiveEnv
+]
 
 
 @pytest.mark.parametrize("done_on_bankruptcy,portfolio_value,expected", [
@@ -107,8 +116,14 @@ def test_discovery_covers_every_live_exchange():
     silently, and the guard would still pass green while covering less. Fail here instead.
     Adding exchange #6 is meant to fail this -- it forces you to confirm the newcomer
     inherits the shared bankruptcy check rather than re-forking it.
+
+    Abstract intermediate bases (e.g. TorchTradeFuturesLiveEnv) live under
+    torchtrade/envs/live/shared/ and are not themselves an exchange -- they never define
+    _reset or _init_trading_clients, so every other guard in this file already skips or
+    passes them via inheritance. Only this set-of-exchanges check needs to filter "shared"
+    out explicitly, or a real newcomer exchange could hide behind it.
     """
-    exchanges = {cls.__module__.split(".")[-2] for cls in LIVE_ENVS}
+    exchanges = {cls.__module__.split(".")[-2] for cls in LIVE_ENVS} - {"shared"}
     assert exchanges == {"alpaca", "binance", "bitget", "bybit", "okx"}
     # NON_SLTP_ENVS drives the call-site guard below, and an empty parametrize SKIPS rather
     # than fails -- a module rename would silently retire that guard.
@@ -128,6 +143,22 @@ def test_no_live_env_overrides_shared_method(env_cls, method):
     assert getattr(env_cls, method) is getattr(TorchTradeLiveEnv, method), (
         f"{env_cls.__name__} overrides {method}. Either drop the override, or give that "
         f"exchange its own tests -- the single shared test above no longer covers it."
+    )
+
+
+@pytest.mark.parametrize("method", ["_get_observation", "_get_portfolio_value"])
+@pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
+def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
+    """The 4 futures exchanges share ONE _get_observation/_get_portfolio_value.
+
+    The whole point of TorchTradeFuturesLiveEnv is that an account_state fix lands ONCE. If an
+    exchange re-adds its own copy, that guarantee is silently lost and every per-exchange
+    account_state test still passes -- so fail here instead. (alpaca is spot: it keeps its own
+    _get_observation and is correctly absent from FUTURES_ENVS.)
+    """
+    assert getattr(env_cls, method) is getattr(TorchTradeFuturesLiveEnv, method), (
+        f"{env_cls.__name__} re-forks {method} instead of sharing TorchTradeFuturesLiveEnv's. "
+        f"Drop the override, or the unification no longer covers it."
     )
 
 
