@@ -168,6 +168,8 @@ class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
             self.observation_spec.set(market_data_key, market_data_spec)
             self.market_data_keys.append(market_data_key)
 
+        self._declare_base_features_spec(window_sizes[0])
+
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
         if not self.trader.cancel_open_orders():

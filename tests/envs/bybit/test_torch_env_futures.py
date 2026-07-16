@@ -106,6 +106,23 @@ class TestBybitFuturesTorchTradingEnv:
 
         assert "base_features" in td.keys()
 
+    def test_base_features_declared_in_observation_spec(self, env_config, mock_observer, mock_trader):
+        """include_base_features=True must DECLARE base_features in observation_spec, not just
+        emit it -- else spec and observation disagree and a collector pre-allocating from the
+        spec silently drops it (#61)."""
+        import dataclasses
+        from torchtrade.envs.live.bybit.env import BybitFuturesTorchTradingEnv
+
+        config = dataclasses.replace(env_config, include_base_features=True)
+        with patch("time.sleep"), patch.object(BybitFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesTorchTradingEnv(config=config, observer=mock_observer, trader=mock_trader)
+            td = env.reset()
+
+        assert "base_features" in env.observation_spec.keys()   # the fix (was missing on bybit)
+        assert "base_features" in td.keys()                     # emitted -> spec & obs consistent
+        # shape must agree too: a collector pre-allocates buffers BY SHAPE from the spec
+        assert env.observation_spec["base_features"].shape == td["base_features"].shape
+
     def test_observation_spec(self, env):
         """Test observation spec contains expected keys with correct shapes."""
         obs_spec = env.observation_spec
@@ -113,6 +130,7 @@ class TestBybitFuturesTorchTradingEnv:
         assert "market_data_1Minute_10" in obs_spec.keys()
         assert "market_data_5Minute_10" in obs_spec.keys()
         assert obs_spec["account_state"].shape == (6,)
+        assert "base_features" not in obs_spec.keys()   # off by default (mirror of #61)
 
     def test_reset(self, env, mock_trader):
         """Test environment reset returns expected keys and shapes."""

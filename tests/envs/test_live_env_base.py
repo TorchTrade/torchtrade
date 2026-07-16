@@ -162,6 +162,36 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     )
 
 
+# Every futures exchange that defines its own _build_observation_specs -- auto-discovered from the
+# discovered FUTURES_ENVS (base + SLTP variants collapse to the 4 defining base classes), so a
+# future 5th futures exchange is covered without editing this list.
+_FUTURES_SPEC_CLASSES = sorted(
+    {c for c in FUTURES_ENVS if "_build_observation_specs" in vars(c)},
+    key=lambda c: c.__module__.split(".")[-2],
+)
+
+
+@pytest.mark.parametrize("env_cls", _FUTURES_SPEC_CLASSES, ids=lambda c: c.__module__.split(".")[-2])
+def test_every_futures_env_declares_base_features_via_the_shared_helper(env_cls):
+    """Every futures _build_observation_specs must call the shared _declare_base_features_spec.
+
+    #61 was a class-level defect: base_features is EMITTED by the shared _get_observation but was
+    DECLARED in observation_spec only by okx (3 of 4 forgot), so spec and observation disagreed
+    and a collector pre-allocating from the spec silently dropped it. The per-exchange behavioural
+    tests each guard only their own exchange; this catches a FUTURE exchange that forgets the call.
+    AST, not source text (like the guards above), so a comment mentioning the method can't satisfy it.
+    """
+    tree = ast.parse(inspect.getsource(env_cls.__dict__["_build_observation_specs"]).lstrip())
+    called = {
+        node.func.attr for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    assert "_declare_base_features_spec" in called, (
+        f"{env_cls.__name__}._build_observation_specs never calls _declare_base_features_spec -- "
+        f"base_features would be emitted but not declared in observation_spec (#61)."
+    )
+
+
 @pytest.mark.parametrize("env_cls", NON_SLTP_ENVS, ids=lambda c: c.__name__)
 def test_non_sltp_step_syncs_before_it_trades(env_cls):
     """Every non-SLTP _step reconciles with the exchange BEFORE the duplicate-action guard.
