@@ -467,7 +467,7 @@ observation = {
 #   - exposure_pct: position_value / portfolio_value (0-1+ with leverage)
 #   - position_direction: sign(position_size) (-1=short, 0=flat, +1=long)
 #   - unrealized_pnl_pct: (current_price - entry_price) / entry_price * direction
-#   - holding_time: steps since position opened
+#   - holding_time: bars the current position has been held (1 on the opening bar, 0 when flat)
 #   - leverage: 1.0 for spot, 1-125 for futures
 #   - distance_to_liquidation: normalized distance (1.0 for spot/no position)
 #
