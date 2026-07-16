@@ -108,6 +108,23 @@ class TestBitgetFuturesTorchTradingEnv:
         """Test action levels are correctly set."""
         assert env.action_levels == [-1.0, -0.5, 0.0, 0.5, 1.0]
 
+    def test_base_features_declared_in_observation_spec(self, env_config, mock_observer, mock_trader):
+        """include_base_features=True must DECLARE base_features in observation_spec, not just
+        emit it -- else spec and observation disagree and a collector pre-allocating from the
+        spec silently drops it (#61)."""
+        import dataclasses
+        from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv
+
+        config = dataclasses.replace(env_config, include_base_features=True)
+        with patch("time.sleep"), patch.object(BitgetFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BitgetFuturesTorchTradingEnv(config=config, observer=mock_observer, trader=mock_trader)
+            td = env.reset()
+
+        assert "base_features" in env.observation_spec.keys()   # the fix (was missing on bitget)
+        assert "base_features" in td.keys()                     # emitted -> spec & obs consistent
+        # shape must agree too: a collector pre-allocates buffers BY SHAPE from the spec
+        assert env.observation_spec["base_features"].shape == td["base_features"].shape
+
     def test_observation_spec(self, env):
         """Test observation spec contains expected keys."""
         obs_spec = env.observation_spec
@@ -115,6 +132,7 @@ class TestBitgetFuturesTorchTradingEnv:
         assert "account_state" in obs_spec.keys()
         assert "market_data_1m_10" in obs_spec.keys()
         assert "market_data_5m_10" in obs_spec.keys()
+        assert "base_features" not in obs_spec.keys()   # off by default (mirror of #61)
 
     def test_account_state_shape(self, env):
         """Test account state has correct shape (6 elements)."""

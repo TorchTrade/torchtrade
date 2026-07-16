@@ -170,13 +170,7 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
             self.observation_spec.set(market_data_key, market_data_spec)
             self.market_data_keys.append(market_data_key)
 
-        # Base features spec (raw OHLC from first timeframe)
-        if self.config.include_base_features:
-            base_ws = window_sizes[0]
-            self.observation_spec.set(
-                "base_features",
-                Bounded(low=-torch.inf, high=torch.inf, shape=(base_ws, 4), dtype=torch.float),
-            )
+        self._declare_base_features_spec(window_sizes[0])
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""

@@ -56,6 +56,23 @@ class TestOKXFuturesTorchTradingEnv:
         assert env.action_spec.n == 5
         assert env.action_levels == [-1.0, -0.5, 0.0, 0.5, 1.0]
 
+    def test_base_features_declared_in_observation_spec(self, env_config, mock_observer, mock_env_trader):
+        """include_base_features=True must DECLARE base_features in observation_spec, not just
+        emit it -- else spec and observation disagree and a collector pre-allocating from the
+        spec silently drops it (#61). okx already declared it -- this is its regression lock."""
+        import dataclasses
+        from torchtrade.envs.live.okx.env import OKXFuturesTorchTradingEnv
+
+        config = dataclasses.replace(env_config, include_base_features=True)
+        with patch("time.sleep"), patch.object(OKXFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = OKXFuturesTorchTradingEnv(config=config, observer=mock_observer, trader=mock_env_trader)
+            td = env.reset()
+
+        assert "base_features" in env.observation_spec.keys()
+        assert "base_features" in td.keys()                     # emitted -> spec & obs consistent
+        # shape must agree too: a collector pre-allocates buffers BY SHAPE from the spec
+        assert env.observation_spec["base_features"].shape == td["base_features"].shape
+
     def test_observation_spec(self, env):
         """Test observation spec contains expected keys with correct shapes."""
         obs_spec = env.observation_spec
@@ -63,6 +80,7 @@ class TestOKXFuturesTorchTradingEnv:
         assert "market_data_1Minute_10" in obs_spec.keys()
         assert "market_data_5Minute_10" in obs_spec.keys()
         assert obs_spec["account_state"].shape == (6,)
+        assert "base_features" not in obs_spec.keys()   # off by default (mirror of #61)
 
     def test_reset(self, env, mock_env_trader):
         """Test environment reset returns expected keys and shapes."""
