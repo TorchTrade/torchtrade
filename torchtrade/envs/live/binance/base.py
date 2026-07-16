@@ -4,23 +4,22 @@ from abc import abstractmethod
 from typing import Callable, List, Optional
 
 import torch
-from tensordict import TensorDict, TensorDictBase
+from tensordict import TensorDictBase
 from torchrl.data import Bounded
 from torchrl.data import Composite
 
 from torchtrade.envs.utils.timeframe import timeframe_to_seconds
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
-from torchtrade.envs.core.live import TorchTradeLiveEnv
+from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 from torchtrade.envs.core.state import (
     HistoryTracker,
     PositionState,
-    advance_hold_counter,
     position_direction_from_status,
 )
 
 
-class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
+class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     """
     Base class for Binance trading environments.
 
@@ -187,123 +186,6 @@ class BinanceBaseTorchTradingEnv(TorchTradeLiveEnv):
             )
             self.observation_spec.set(market_data_key, market_data_spec)
             self.market_data_keys.append(market_data_key)
-
-    def _get_observation(self, advance_hold: bool = True) -> TensorDictBase:
-        """Get the current observation state.
-
-        Args:
-            advance_hold: If True (the default, used by `_step()`), ages `hold_counter`
-                by one bar using the direction observed in THIS method's single
-                `get_status()` call -- holding_time and position_direction in the
-                emitted account_state are always derived from the same snapshot.
-                `_reset()` passes False so a reset can never itself count a bar.
-        """
-        # Get market data
-        obs_dict = self.observer.get_observations(
-            return_base_ohlc=self.config.include_base_features
-        )
-
-        # Extract base features if requested
-        if self.config.include_base_features:
-            base_features = obs_dict.get("base_features")
-
-        # Get market data for each interval
-        market_data = [obs_dict[features_name] for features_name in self.observer.get_keys()]
-
-        # Get account state from trader (single fetch: holding_time and
-        # position_direction below MUST come from this same snapshot)
-        status = self.trader.get_status()
-        balance = self.trader.get_account_balance()
-
-        cash = balance.get("available_balance", 0)
-        total_balance = balance.get("total_wallet_balance", 0)
-
-        position_status = status.get("position_status", None)
-
-        # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
-        # close take the position branch and read stale fields off it.
-        position_direction = float(position_direction_from_status(position_status))
-        if advance_hold:
-            advance_hold_counter(self.position, position_direction)
-        holding_time = float(self.position.hold_counter)
-
-        if position_direction == 0:
-            position_size = 0.0
-            position_value = 0.0
-            entry_price = 0.0
-            current_price = self.trader.get_mark_price()
-            unrealized_pnl_pct = 0.0
-            leverage = float(self.config.leverage)
-            liquidation_price = 0.0
-        else:
-            position_size = position_status.qty  # Positive=long, Negative=short
-            position_value = abs(position_status.notional_value)
-            entry_price = position_status.entry_price
-            current_price = position_status.mark_price
-            unrealized_pnl_pct = position_status.unrealized_pnl_pct
-            leverage = float(position_status.leverage)
-            liquidation_price = position_status.liquidation_price
-
-        # Calculate new 6-element account state
-        # Element 0: exposure_pct (position_value / portfolio_value)
-        exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
-
-        # Element 2: unrealized_pnl_pct (from Binance API)
-
-        # Element 3: holding_time
-
-        # Element 4: leverage
-
-        # Element 5: distance_to_liquidation
-        # liquidation_price <= 0 means "no liquidation price": the exchange omitted the field
-        # (-> .get(..., 0)) or reports "0" for cross-margin. A short must then read 1.0, not
-        # (0 - price)/price = 0.0, which would falsely tell the policy it is AT liquidation.
-        if position_size == 0 or current_price == 0 or liquidation_price <= 0:
-            distance_to_liquidation = 1.0
-        else:
-            if position_size > 0:
-                # Long position - liquidated if price drops below liquidation_price
-                distance_to_liquidation = (current_price - liquidation_price) / current_price
-            else:
-                # Short position - liquidated if price rises above liquidation_price
-                distance_to_liquidation = (liquidation_price - current_price) / current_price
-            # Clamp to [0, inf)
-            distance_to_liquidation = max(0.0, distance_to_liquidation)
-
-        # Build 6-element account state tensor
-        # [exposure_pct, position_direction, unrealized_pnl_pct,
-        #  holding_time, leverage, distance_to_liquidation]
-        account_state = torch.tensor(
-            [
-                exposure_pct,
-                position_direction,
-                unrealized_pnl_pct,
-                holding_time,
-                leverage,
-                distance_to_liquidation,
-            ],
-            dtype=torch.float,
-        )
-
-        # Build output TensorDict
-        out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
-        for market_data_name, data in zip(self.market_data_keys, market_data):
-            out_td.set(market_data_name, torch.from_numpy(data))
-
-        # Add base features if requested
-        if self.config.include_base_features and base_features is not None:
-            out_td.set("base_features", torch.from_numpy(base_features))
-
-        return out_td
-
-    def _get_portfolio_value(self) -> float:
-        """
-        Calculate total portfolio value for Binance futures.
-
-        Returns total_margin_balance (includes unrealized PnL).
-        """
-        balance = self.trader.get_account_balance()
-        return balance.get("total_margin_balance", 0)
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""

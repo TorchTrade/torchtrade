@@ -85,6 +85,27 @@ class TestBybitFuturesTorchTradingEnv:
         assert env.action_spec.n == 5  # [-1.0, -0.5, 0.0, 0.5, 1.0]
         assert env.action_levels == [-1.0, -0.5, 0.0, 0.5, 1.0]
 
+    def test_include_base_features_flows_through_shared_get_observation(self, mock_observer, mock_trader):
+        """The shared TorchTradeFuturesLiveEnv._get_observation passes base_features through.
+
+        The futures envs default include_base_features=False, so this branch of the now-shared
+        method was untested; one case here covers it for all four exchanges via inheritance.
+        """
+        from torchtrade.envs.live.bybit.env import (
+            BybitFuturesTorchTradingEnv,
+            BybitFuturesTradingEnvConfig,
+        )
+
+        config = BybitFuturesTradingEnvConfig(
+            symbol="BTCUSDT", demo=True, time_frames=["1m", "5m"], window_sizes=[10, 10],
+            execute_on="1m", leverage=5, include_base_features=True,
+        )
+        with patch("time.sleep"), patch.object(BybitFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BybitFuturesTorchTradingEnv(config=config, observer=mock_observer, trader=mock_trader)
+            td = env.reset()
+
+        assert "base_features" in td.keys()
+
     def test_observation_spec(self, env):
         """Test observation spec contains expected keys with correct shapes."""
         obs_spec = env.observation_spec
