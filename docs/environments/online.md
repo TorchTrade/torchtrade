@@ -15,9 +15,9 @@ Online environments connect to real trading APIs for paper trading or live execu
 
 - **[Alpaca](https://alpaca.markets/)** - Commission-free US stocks and crypto with paper trading
 - **[Binance](https://accounts.binance.com/register?ref=25015935)** - Cryptocurrency futures with high leverage and testnet
-- **[Bitget](https://www.bitget.com/)** - Cryptocurrency futures with competitive fees and testnet
-- **[Bybit](https://www.bybit.com/)** - Cryptocurrency derivatives with native bracket orders and testnet
-- **[OKX](https://www.okx.com/)** - Global cryptocurrency exchange with bracket orders via attachAlgoOrds and demo trading
+- **[Bitget](https://share.bitget.com/u/VGN302X2)** - Cryptocurrency futures with competitive fees and testnet
+- **[Bybit](https://www.bybit.eu/invite?ref=MX42GRV)** - Cryptocurrency derivatives with native bracket orders and testnet
+- **[OKX](https://my.okx.com/en-eu/join/52629853)** - Global cryptocurrency exchange with bracket orders via attachAlgoOrds and demo trading
 - **[Polymarket](https://polymarket.com/)** - Decentralized prediction markets on Polygon (CLOB), with dry-run paper trading
 
 ## Overview
@@ -154,7 +154,7 @@ env = BinanceFuturesSLTPTorchTradingEnv(config)
 
 ## Bitget Environments
 
-[Bitget](https://www.bitget.com/) provides cryptocurrency futures trading with competitive fees and testnet support. TorchTrade uses [CCXT](https://github.com/ccxt/ccxt) to interface with Bitget's V2 API.
+[Bitget](https://share.bitget.com/u/VGN302X2) provides cryptocurrency futures trading with competitive fees and testnet support. TorchTrade uses [CCXT](https://github.com/ccxt/ccxt) to interface with Bitget's V2 API.
 
 !!! note "CCXT Symbol Format"
     Bitget uses CCXT's perpetual swap format: `"BTC/USDT:USDT"` (not `"BTCUSDT"`).
@@ -230,7 +230,7 @@ env = BitgetFuturesSLTPTorchTradingEnv(
 
 ## Bybit Environments
 
-[Bybit](https://www.bybit.com/) provides cryptocurrency derivatives trading with native bracket order support (stop-loss/take-profit set directly on orders). TorchTrade uses [pybit](https://github.com/bybit-exchange/pybit), Bybit's official Python SDK, for direct v5 API access.
+[Bybit](https://www.bybit.eu/invite?ref=MX42GRV) provides cryptocurrency derivatives trading with native bracket order support (stop-loss/take-profit set directly on orders). TorchTrade uses [pybit](https://github.com/bybit-exchange/pybit), Bybit's official Python SDK, for direct v5 API access.
 
 !!! note "Symbol Format"
     Bybit uses simple concatenated symbols: `"BTCUSDT"` (not `"BTC/USDT:USDT"`).
@@ -301,7 +301,7 @@ env = BybitFuturesSLTPTorchTradingEnv(
 
 ## OKX Environments
 
-[OKX](https://www.okx.com/) provides global cryptocurrency trading with up to 125x leverage and demo trading support. TorchTrade uses [python-okx](https://pypi.org/project/python-okx/), OKX's official Python SDK. Bracket orders (SL/TP) are placed atomically via OKX's `attachAlgoOrds` parameter.
+[OKX](https://my.okx.com/en-eu/join/52629853) provides global cryptocurrency trading with up to 125x leverage and demo trading support. TorchTrade uses [python-okx](https://pypi.org/project/python-okx/), OKX's official Python SDK. Bracket orders (SL/TP) are placed atomically via OKX's `attachAlgoOrds` parameter.
 
 !!! note "Symbol Format"
     OKX uses dash-separated symbols with swap suffix: `"BTC-USDT-SWAP"`. The environment auto-normalizes common formats (`"BTCUSDT"`, `"BTC/USDT"`, `"BTC-USDT"`) to the correct OKX format.
