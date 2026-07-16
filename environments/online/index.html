@@ -2128,9 +2128,9 @@
 <ul>
 <li><strong><a href="https://alpaca.markets/">Alpaca</a></strong> - Commission-free US stocks and crypto with paper trading</li>
 <li><strong><a href="https://accounts.binance.com/register?ref=25015935">Binance</a></strong> - Cryptocurrency futures with high leverage and testnet</li>
-<li><strong><a href="https://www.bitget.com/">Bitget</a></strong> - Cryptocurrency futures with competitive fees and testnet</li>
-<li><strong><a href="https://www.bybit.com/">Bybit</a></strong> - Cryptocurrency derivatives with native bracket orders and testnet</li>
-<li><strong><a href="https://www.okx.com/">OKX</a></strong> - Global cryptocurrency exchange with bracket orders via attachAlgoOrds and demo trading</li>
+<li><strong><a href="https://share.bitget.com/u/VGN302X2">Bitget</a></strong> - Cryptocurrency futures with competitive fees and testnet</li>
+<li><strong><a href="https://www.bybit.eu/invite?ref=MX42GRV">Bybit</a></strong> - Cryptocurrency derivatives with native bracket orders and testnet</li>
+<li><strong><a href="https://my.okx.com/en-eu/join/52629853">OKX</a></strong> - Global cryptocurrency exchange with bracket orders via attachAlgoOrds and demo trading</li>
 <li><strong><a href="https://polymarket.com/">Polymarket</a></strong> - Decentralized prediction markets on Polygon (CLOB), with dry-run paper trading</li>
 </ul>
 <h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
@@ -2333,7 +2333,7 @@
 </span></code></pre></div>
 <hr />
 <h2 id="bitget-environments">Bitget Environments<a class="headerlink" href="#bitget-environments" title="Permanent link">&para;</a></h2>
-<p><a href="https://www.bitget.com/">Bitget</a> provides cryptocurrency futures trading with competitive fees and testnet support. TorchTrade uses <a href="https://github.com/ccxt/ccxt">CCXT</a> to interface with Bitget's V2 API.</p>
+<p><a href="https://share.bitget.com/u/VGN302X2">Bitget</a> provides cryptocurrency futures trading with competitive fees and testnet support. TorchTrade uses <a href="https://github.com/ccxt/ccxt">CCXT</a> to interface with Bitget's V2 API.</p>
 <div class="admonition note">
 <p class="admonition-title">CCXT Symbol Format</p>
 <p>Bitget uses CCXT's perpetual swap format: <code>"BTC/USDT:USDT"</code> (not <code>"BTCUSDT"</code>).</p>
@@ -2401,7 +2401,7 @@
 </span></code></pre></div>
 <hr />
 <h2 id="bybit-environments">Bybit Environments<a class="headerlink" href="#bybit-environments" title="Permanent link">&para;</a></h2>
-<p><a href="https://www.bybit.com/">Bybit</a> provides cryptocurrency derivatives trading with native bracket order support (stop-loss/take-profit set directly on orders). TorchTrade uses <a href="https://github.com/bybit-exchange/pybit">pybit</a>, Bybit's official Python SDK, for direct v5 API access.</p>
+<p><a href="https://www.bybit.eu/invite?ref=MX42GRV">Bybit</a> provides cryptocurrency derivatives trading with native bracket order support (stop-loss/take-profit set directly on orders). TorchTrade uses <a href="https://github.com/bybit-exchange/pybit">pybit</a>, Bybit's official Python SDK, for direct v5 API access.</p>
 <div class="admonition note">
 <p class="admonition-title">Symbol Format</p>
 <p>Bybit uses simple concatenated symbols: <code>"BTCUSDT"</code> (not <code>"BTC/USDT:USDT"</code>).</p>
@@ -2464,7 +2464,7 @@
 </span></code></pre></div>
 <hr />
 <h2 id="okx-environments">OKX Environments<a class="headerlink" href="#okx-environments" title="Permanent link">&para;</a></h2>
-<p><a href="https://www.okx.com/">OKX</a> provides global cryptocurrency trading with up to 125x leverage and demo trading support. TorchTrade uses <a href="https://pypi.org/project/python-okx/">python-okx</a>, OKX's official Python SDK. Bracket orders (SL/TP) are placed atomically via OKX's <code>attachAlgoOrds</code> parameter.</p>
+<p><a href="https://my.okx.com/en-eu/join/52629853">OKX</a> provides global cryptocurrency trading with up to 125x leverage and demo trading support. TorchTrade uses <a href="https://pypi.org/project/python-okx/">python-okx</a>, OKX's official Python SDK. Bracket orders (SL/TP) are placed atomically via OKX's <code>attachAlgoOrds</code> parameter.</p>
 <div class="admonition note">
 <p class="admonition-title">Symbol Format</p>
 <p>OKX uses dash-separated symbols with swap suffix: <code>"BTC-USDT-SWAP"</code>. The environment auto-normalizes common formats (<code>"BTCUSDT"</code>, <code>"BTC/USDT"</code>, <code>"BTC-USDT"</code>) to the correct OKX format.</p>
