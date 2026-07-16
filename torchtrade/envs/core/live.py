@@ -5,7 +5,9 @@ from abc import abstractmethod
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import torch
 from tensordict import TensorDictBase
+from torchrl.data import Bounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import PositionState, position_direction_from_status
@@ -216,6 +218,21 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
             self.position.hold_counter = 0
 
         self.position.current_position = observed
+
+    def _declare_base_features_spec(self, base_window: int) -> None:
+        """Declare the base_features spec (raw OHLC, first timeframe) -- shape (base_window, 4).
+
+        _get_observation emits base_features when include_base_features is set, so every live
+        env's _build_observation_specs MUST call this or observation_spec disagrees with the
+        emitted observation: check_env_specs fails and a collector pre-allocating from the spec
+        silently drops the key. Shared here alongside the emitter so the spec cannot drift
+        per-exchange -- the exact drift that left 3 of 4 futures exchanges undeclared (#61).
+        """
+        if self.config.include_base_features:
+            self.observation_spec.set(
+                "base_features",
+                Bounded(low=-torch.inf, high=torch.inf, shape=(base_window, 4), dtype=torch.float),
+            )
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""

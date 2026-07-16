@@ -162,22 +162,27 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     )
 
 
-# Every futures exchange that defines its own _build_observation_specs -- auto-discovered from the
-# discovered FUTURES_ENVS (base + SLTP variants collapse to the 4 defining base classes), so a
-# future 5th futures exchange is covered without editing this list.
-_FUTURES_SPEC_CLASSES = sorted(
-    {c for c in FUTURES_ENVS if "_build_observation_specs" in vars(c)},
+# Every live env that defines its own _build_observation_specs -- auto-discovered from LIVE_ENVS
+# (base + SLTP variants collapse to their defining base classes), so a future exchange, or a new
+# non-futures env, is covered without editing this list. This spans both the 4 futures exchanges
+# AND alpaca (spot) -- alpaca declares base_features via the same shared helper too.
+_BASE_FEATURES_SPEC_CLASSES = sorted(
+    {c for c in LIVE_ENVS if "_build_observation_specs" in vars(c)},
     key=lambda c: c.__module__.split(".")[-2],
 )
 
 
-@pytest.mark.parametrize("env_cls", _FUTURES_SPEC_CLASSES, ids=lambda c: c.__module__.split(".")[-2])
-def test_every_futures_env_declares_base_features_via_the_shared_helper(env_cls):
-    """Every futures _build_observation_specs must call the shared _declare_base_features_spec.
+@pytest.mark.parametrize(
+    "env_cls", _BASE_FEATURES_SPEC_CLASSES, ids=lambda c: c.__module__.split(".")[-2]
+)
+def test_every_live_env_declares_base_features_via_the_shared_helper(env_cls):
+    """Every live env's _build_observation_specs must call the shared _declare_base_features_spec.
 
     #61 was a class-level defect: base_features is EMITTED by the shared _get_observation but was
-    DECLARED in observation_spec only by okx (3 of 4 forgot), so spec and observation disagreed
-    and a collector pre-allocating from the spec silently dropped it. The per-exchange behavioural
+    DECLARED in observation_spec only by okx (3 of 4 futures exchanges forgot), so spec and
+    observation disagreed and a collector pre-allocating from the spec silently dropped it. The
+    helper now lives on TorchTradeLiveEnv (the common ancestor of both the futures base and
+    alpaca), so this guard spans every live env, not just futures. The per-exchange behavioural
     tests each guard only their own exchange; this catches a FUTURE exchange that forgets the call.
     AST, not source text (like the guards above), so a comment mentioning the method can't satisfy it.
     """
