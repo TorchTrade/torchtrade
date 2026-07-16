@@ -35,7 +35,7 @@ class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
      holding_time, leverage, distance_to_liquidation]
 
     Element definitions:
-        - exposure_pct: position_value / total_equity
+        - exposure_pct: position_value / total_margin_balance (equity incl. unrealized PnL)
         - position_direction: sign(position_size) (-1=short, 0=flat, +1=long)
         - unrealized_pnl_pct: percentage unrealized PnL from entry
         - holding_time: steps since position opened

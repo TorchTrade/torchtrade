@@ -58,7 +58,13 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         status = self.trader.get_status()
         balance = self.trader.get_account_balance()
 
-        total_balance = balance.get("total_wallet_balance", 0)
+        # exposure_pct denominator: use total_margin_balance (equity incl. unrealized PnL),
+        # NOT total_wallet_balance. The latter's meaning diverges across exchanges -- Binance's
+        # excludes uPnL while Bitget/Bybit/OKX map equity to the same key -- which made Binance's
+        # exposure_pct read differently for the same position. total_margin_balance is uniformly
+        # equity across all four, so exposure_pct is comparable cross-exchange (and matches the
+        # portfolio value _get_portfolio_value returns).
+        total_balance = balance.get("total_margin_balance", 0)
         position_status = status.get("position_status", None)
 
         # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a

@@ -375,6 +375,30 @@ class TestBinanceFuturesTorchTradingEnv:
         assert td["account_state"][1].item() == (1.0 if qty > 0 else -1.0)
         assert td["account_state"][5].item() == expected_dtl
 
+    def test_exposure_pct_uses_equity_not_wallet_balance(self, env, mock_trader):
+        """exposure_pct (account_state[0]) must divide by total_margin_balance (equity incl.
+        uPnL), not total_wallet_balance. Binance's total_wallet_balance excludes uPnL, so using
+        it read a different exposure than the other exchanges for the same position (#60)."""
+        from torchtrade.envs.live.binance.order_executor import PositionStatus
+
+        mock_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0,    # Binance: excludes unrealized PnL
+            "available_balance": 900.0,
+            "total_unrealized_profit": 100.0,
+            "total_margin_balance": 1100.0,    # equity = wallet + uPnL
+        })
+        mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
+            qty=0.011, notional_value=550.0, entry_price=50000.0, unrealized_pnl=100.0,
+            unrealized_pnl_pct=0.02, mark_price=50000.0, leverage=10,
+            margin_type="isolated", liquidation_price=45000.0,
+        )})
+        with patch.object(env, "_wait_for_next_timestamp"):
+            td = env.reset()
+
+        assert td["account_state"][1].item() == 1.0                 # a genuine open long
+        # equity: 550 / 1100 = 0.5. Wallet would give 550 / 1000 = 0.55 (excludes the +100 uPnL).
+        assert td["account_state"][0].item() == pytest.approx(0.5)
+
     def test_closing_a_position_does_not_age_the_next_one(self, env, mock_trader):
         """A closed position's age must not carry into the next one.
 
