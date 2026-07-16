@@ -349,6 +349,32 @@ class TestBinanceFuturesTorchTradingEnv:
         assert dist_to_liq == pytest.approx(0.1)     # (50000 - 45000) / 50000
         assert holding_time == 0.0
 
+    @pytest.mark.parametrize("qty,liq_price,expected_dtl", [
+        (0.001, 45000.0, pytest.approx(0.1018, rel=1e-2)),   # long normal: (50100-45000)/50100
+        (0.001, 0.0, 1.0),                                   # long zero-liq -> unknown -> 1.0
+        (-0.001, 55000.0, pytest.approx(0.0978, rel=1e-2)),  # short normal: (55000-50100)/50100
+        (-0.001, 0.0, 1.0),                                  # short zero-liq -> unknown -> 1.0 (the fix)
+    ], ids=["long-normal", "long-zero-liq", "short-normal", "short-zero-liq"])
+    def test_distance_to_liquidation(self, env, mock_trader, qty, liq_price, expected_dtl):
+        """distance_to_liquidation (account_state[5]) across long/short x normal/zero-liq.
+
+        A zero/absent liq price (cross-margin, or .get(..., 0)) must read 1.0 -- for a short the
+        unguarded (0 - price)/price = 0.0 would falsely signal AT liquidation. Matches bybit/okx.
+        """
+        from torchtrade.envs.live.binance.order_executor import PositionStatus
+
+        mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
+            qty=qty, notional_value=50.1, entry_price=50000.0, unrealized_pnl=0.1,
+            unrealized_pnl_pct=0.002, mark_price=50100.0, leverage=10,
+            margin_type="isolated", liquidation_price=liq_price,
+        )})
+        with patch.object(env, "_wait_for_next_timestamp"):
+            td = env.reset()
+
+        # direction proves a genuine OPEN position, so dtl==1.0 can't pass via the flat branch
+        assert td["account_state"][1].item() == (1.0 if qty > 0 else -1.0)
+        assert td["account_state"][5].item() == expected_dtl
+
     def test_closing_a_position_does_not_age_the_next_one(self, env, mock_trader):
         """A closed position's age must not carry into the next one.
 
