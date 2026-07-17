@@ -46,6 +46,25 @@ class TestOKXFuturesSLTPTorchTradingEnv:
         assert env.action_spec.n == 9
         assert env.action_map[0] == (None, None, None)  # HOLD
 
+    def test_initial_portfolio_value_uses_margin_balance(self, env_config, mock_env_observer, mock_env_trader):
+        """initial_portfolio_value (the bankruptcy baseline) must be equity
+        (total_margin_balance), not total_wallet_balance -- matching offline's
+        portfolio_value basis (#65)."""
+        from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTorchTradingEnv
+
+        mock_env_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0, "available_balance": 900.0,
+            "total_unrealized_profit": 100.0, "total_margin_balance": 1100.0,
+        })
+
+        with patch("time.sleep"), \
+             patch.object(OKXFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = OKXFuturesSLTPTorchTradingEnv(
+                config=env_config, observer=mock_env_observer, trader=mock_env_trader,
+            )
+
+        assert env.initial_portfolio_value == 1100.0
+
     def test_action_spec_long_only(self, env_config, mock_env_observer, mock_env_trader):
         """Test action spec when short positions disabled: 1 HOLD + 4 LONG = 5."""
         from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTorchTradingEnv
@@ -331,14 +350,16 @@ class TestOKXSLTPNotionalTradeMode:
 
         mock_env_trader.get_mark_price = MagicMock(return_value=50000.0)
         mock_env_trader.get_account_balance = MagicMock(return_value={
+            # wallet != margin: sizing must use total_margin_balance (equity, incl.
+            # unrealized PnL), matching offline's portfolio_value basis (#65).
             "total_wallet_balance": 1000.0, "available_balance": 900.0,
-            "total_unrealized_profit": 0.0, "total_margin_balance": 1000.0,
+            "total_unrealized_profit": 100.0, "total_margin_balance": 1100.0,
         })
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
             env._execute_trade_if_needed(("long", -0.02, 0.03))
-            # balance=1000 * fraction=0.1 * leverage=5 / price=50000 = 0.01
-            assert mock_env_trader.trade.call_args[1]["quantity"] == pytest.approx(0.01, rel=1e-4)
+            # margin_balance=1100 * fraction=0.1 * leverage=5 / price=50000 = 0.011
+            assert mock_env_trader.trade.call_args[1]["quantity"] == pytest.approx(0.011, rel=1e-4)
 
 
 class TestOKXSLTPLockPosition:
