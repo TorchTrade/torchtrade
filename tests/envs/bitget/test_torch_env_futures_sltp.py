@@ -118,6 +118,27 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
         assert env.active_stop_loss == 0.0
         assert env.active_take_profit == 0.0
 
+    def test_initial_portfolio_value_uses_margin_balance(self, env_config, mock_observer, mock_trader):
+        """initial_portfolio_value (the bankruptcy baseline) must be equity
+        (total_margin_balance), not total_wallet_balance -- matching offline's
+        portfolio_value basis (#65)."""
+        from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTorchTradingEnv
+
+        mock_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 1000.0,
+            "available_balance": 900.0,
+            "total_unrealized_profit": 100.0,
+            "total_margin_balance": 1100.0,
+        })
+
+        with patch("time.sleep"), \
+             patch.object(BitgetFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = BitgetFuturesSLTPTorchTradingEnv(
+                config=env_config, observer=mock_observer, trader=mock_trader,
+            )
+
+        assert env.initial_portfolio_value == 1100.0
+
     def test_action_map_structure(self, env):
         """Test action map has correct structure."""
         # With 2 SL levels and 2 TP levels:
@@ -793,10 +814,12 @@ class TestBitgetSLTPNotionalTradeMode:
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)
         mock_trader.get_account_balance = MagicMock(return_value={
+            # wallet != margin: sizing must use total_margin_balance (equity, incl.
+            # unrealized PnL), matching offline's portfolio_value basis (#65).
             "total_wallet_balance": 1000.0,
             "available_balance": 900.0,
-            "total_unrealized_profit": 0.0,
-            "total_margin_balance": 1000.0,
+            "total_unrealized_profit": 100.0,
+            "total_margin_balance": 1100.0,
         })
         mock_trader.get_status = MagicMock(return_value={"position_status": None})
         mock_trader.trade = MagicMock(return_value=True)
@@ -822,8 +845,8 @@ class TestBitgetSLTPNotionalTradeMode:
         env._execute_trade_if_needed(("long", -0.02, 0.03))
 
         call_kwargs = mock_trader.trade.call_args[1]
-        # balance=1000 * fraction=0.1 * leverage=5 / candle_close=50050 ≈ 0.00999
-        expected_qty = 1000.0 * 0.1 * 5 / 50050.0
+        # margin_balance=1100 * fraction=0.1 * leverage=5 / candle_close=50050 ≈ 0.01099
+        expected_qty = 1100.0 * 0.1 * 5 / 50050.0
         assert call_kwargs["quantity"] == pytest.approx(expected_qty, rel=1e-4)
 
 

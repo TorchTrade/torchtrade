@@ -259,7 +259,10 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
 
         # Resolve quantity based on trade_mode
         if self.config.trade_mode == "fractional":
-            balance = float(self.trader.get_account_balance()["total_wallet_balance"])
+            # Size on total_margin_balance (equity), matching offline sizing and the non-SLTP
+            # live path. Binance's total_wallet_balance excludes unrealized PnL and would under-size;
+            # bitget/bybit/okx map both keys to equity, so the switch is a no-op there.
+            balance = float(self.trader.get_account_balance()["total_margin_balance"])
             if current_price <= 0 or balance <= 0:
                 logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
                 trade_info["success"] = False
