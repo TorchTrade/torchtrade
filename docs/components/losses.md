@@ -138,14 +138,15 @@ $$
 ```python
 from torchtrade.llm.train import LLMTrainer
 
-LLMTrainer(df=df, config=config, loss="sao", num_generations=4,  # 4 = distinct bars/step
-           loss_kwargs={"epsilon_low": 0.3, "epsilon_high": 5.0}).train()
+# defaults are the paper's math/TIR values (ε_l=0.3, ε_h=5.0, entropy off);
+# override any via loss_kwargs, e.g. loss_kwargs={"epsilon_low": 0.8, "epsilon_high": 3.0} for the SWE-Bench setting.
+LLMTrainer(df=df, config=config, loss="sao", num_generations=4).train()  # 4 = distinct bars/step
 ```
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `epsilon_low` | 0.2 | Lower trust-region half-width $\varepsilon_l$ |
-| `epsilon_high` | 0.2 | Upper trust-region half-width $\varepsilon_h$ (widen for clip-higher) |
+| `epsilon_low` | 0.3 | Lower trust-region half-width $\varepsilon_l$ (paper's math/TIR value) |
+| `epsilon_high` | 5.0 | Upper trust-region half-width $\varepsilon_h$ — the asymmetric "clip-higher" is the point of DIS (paper: 5.0 math/TIR, 3.0 SWE-Bench) |
 | `entropy_bonus` | False | Add an entropy bonus (paper's objective has none) |
 | `masking_strategy` | `"rlhf"` | Score assistant/answer tokens only |
 

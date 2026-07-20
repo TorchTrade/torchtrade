@@ -66,7 +66,11 @@ def test_gradient_flows_through_in_band_ratio_only():
 
 
 def test_defaults_are_paper_faithful():
-    """entropy_bonus off and rlhf masking by default (vs GRPO's True / 'sft')."""
-    loss = _loss()
+    """The class defaults match the paper (arXiv:2607.07508 §4.1, math/TIR): no
+    entropy, rlhf masking, and the asymmetric clip-higher band ε_l=0.3, ε_h=5.0
+    (NOT a tight symmetric band — the wide upper bound is the point of DIS)."""
+    loss = SAOLoss(actor_network=None)  # NO epsilon args -> exercise the class defaults
     assert loss.entropy_bonus is False
     assert loss.masking_strategy == "rlhf"
+    assert float(loss.clip_epsilon_low) == pytest.approx(0.3)
+    assert float(loss.clip_epsilon_high) == pytest.approx(5.0)

@@ -44,7 +44,7 @@ class LLMTrainer:
                  reward_fn=None, system_prompt=None, user_prompt_fn=None,
                  feature_preprocessing_fn=None, feature_keys=None,
                  loss="grpo", loss_kwargs=None, num_generations=4, lr=1e-5,
-                 critic_lr=1e-3, critic_updates=2, critic_hidden=128,
+                 critic_lr=1e-3, critic_updates=2, critic_hidden=128, critic_warmup=0,
                  max_steps=50, max_tokens=1024, max_model_len=4096, gpu_memory_utilization=0.5,
                  constrain_actions=False, enforce_eager=False, logprob_chunk_size=1024,
                  output_dir="./llm_grpo_out", use_wandb=True, wandb_project="torchtrade-grpo",
@@ -57,6 +57,8 @@ class LLMTrainer:
             raise ValueError(f"method must be 'full'|'lora'|'qlora', got {method!r}")
         if critic_updates < 1:
             raise ValueError(f"critic_updates must be >= 1, got {critic_updates}")
+        if critic_warmup < 0:
+            raise ValueError(f"critic_warmup must be >= 0, got {critic_warmup}")
 
         self.df, self.config, self.model = df, config, model
         self.method, self.reward_fn = method, reward_fn
@@ -66,6 +68,7 @@ class LLMTrainer:
         self.loss, self.loss_kwargs = loss, loss_kwargs
         self.K = num_generations
         self.critic_lr, self.critic_updates, self.critic_hidden = critic_lr, critic_updates, critic_hidden
+        self.critic_warmup = critic_warmup
         self.lr, self.max_steps, self.max_tokens = lr, max_steps, max_tokens
         self.max_model_len = max_model_len
         self.gpu_memory_utilization = gpu_memory_utilization
@@ -298,6 +301,13 @@ class LLMTrainer:
                 # returns exactly this step's group.
                 rb.extend(flat)
                 batch = rb.sample(self.K).to(device)
+            if sao and step < self.critic_warmup:
+                # Critic warmup (paper §4.1's cold-start mitigation): keep training V(s) on real
+                # rollout rewards but hold the POLICY frozen, so the baseline is sane before it
+                # drives updates. Default off — the small MLP critic converges in ~1 step (smoke:
+                # critic_loss 0.46->0.02 by step 1), unlike the paper's cold LLM value head.
+                print(f"[LLMTrainer] step {step}: CRITIC WARMUP — policy frozen", flush=True)
+                continue
             # generation throughput: assistant mask marks the model-generated (completion) tokens
             # across all K completions; tokens/s = those tokens / the rollout wall-time.
             gen_tokens = int(batch.get(("masks", "all_assistant_mask"), as_padded_tensor=True,

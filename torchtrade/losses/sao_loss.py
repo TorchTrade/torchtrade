@@ -45,11 +45,14 @@ class SAOLoss(GRPOLoss):
     Args:
         actor_network: the LLM policy wrapper (e.g. ``ChunkedTransformersWrapper``).
         epsilon_low: lower trust-region half-width ε_l — tokens with
-            ``ratio ≤ 1 − ε_l`` are masked. Must be in [0, 1). Default 0.2.
+            ``ratio ≤ 1 − ε_l`` are masked. Must be in [0, 1). Default 0.3 (the
+            paper's math/TIR value).
         epsilon_high: upper trust-region half-width ε_h — tokens with
-            ``ratio ≥ 1 + ε_h`` are masked. Default 0.2. The paper uses aggressive
-            asymmetric "clip-higher" values (e.g. ε_l=0.3, ε_h=5.0); widen
-            ``epsilon_high`` to opt in.
+            ``ratio ≥ 1 + ε_h`` are masked. Default 5.0 (the paper's math/TIR
+            value). SAO's DIS is deliberately an **asymmetric "clip-higher"**
+            (ε_h ≫ ε_l): the wide upper bound keeps large positive-advantage
+            updates while the tight lower bound gates negative off-policy drift.
+            The paper also reports ε_l=0.8, ε_h=3.0 for SWE-Bench.
         entropy_bonus: default ``False`` (the paper's objective has no entropy
             term), overriding GRPO's ``True``.
         masking_strategy: default ``"rlhf"`` (score assistant/answer tokens only),
@@ -58,6 +61,20 @@ class SAOLoss(GRPOLoss):
 
     All other keyword arguments (``aggregation``, ``kl_to_ref_coeff``,
     ``reduction``, ``device`` …) pass straight through to ``GRPOLoss``.
+
+    Deviations from the paper (arXiv:2607.07508), all deliberate for the
+    single-shot trading setting — the LLM emits one ``<answer>`` per one-step
+    OneStepTradingEnv bar, so several of the paper's multi-turn/LLM-value-head
+    mechanisms do not apply:
+
+    - **Frozen-attention critic** and **value pretraining**: N/A — the SAO
+      trainer's critic is a small MLP on the numeric bar state, not an LLM value
+      head, so there are no attention layers to freeze. Cold start is cheap here
+      (empirically the MLP converges in ~1 step), so the paper's 10-step value
+      warmup defaults off; it is available as the trainer's ``critic_warmup`` knob.
+    - **Skip-observation token-level GAE (Eq 4-5)** and the length-adaptive
+      ``λ_policy``: N/A — a single action per episode means no cross-action GAE.
+    - The paper's **faster-value schedule (K=2)** IS applied, in the trainer.
     """
 
     output_type = SAOLossOutput
@@ -66,8 +83,8 @@ class SAOLoss(GRPOLoss):
         self,
         actor_network=None,
         *,
-        epsilon_low: float = 0.2,
-        epsilon_high: float = 0.2,
+        epsilon_low: float = 0.3,
+        epsilon_high: float = 5.0,
         entropy_bonus: bool = False,
         masking_strategy: str = "rlhf",
         **kwargs,

@@ -26,6 +26,11 @@ def test_rejects_critic_updates_below_one():
         LLMTrainer(df=None, config=None, loss="sao", num_generations=1, critic_updates=0)
 
 
+def test_rejects_negative_critic_warmup():
+    with pytest.raises(ValueError, match="critic_warmup"):
+        LLMTrainer(df=None, config=None, loss="sao", num_generations=1, critic_warmup=-1)
+
+
 def test_base_load_kwargs_uses_transformers_compatible_dtype():
     """Regression: transformers>=4.30 (the [llm] floor) accepts torch_dtype, not dtype (added
     ~4.56), so build_train_policy must pass torch_dtype to from_pretrained."""
