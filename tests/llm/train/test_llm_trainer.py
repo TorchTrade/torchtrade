@@ -15,6 +15,17 @@ def test_rejects_num_generations_below_two():
         LLMTrainer(df=None, config=None, num_generations=1)
 
 
+def test_sao_allows_num_generations_one():
+    """SAO is single-rollout — its baseline is the critic, so a group of 1 is legal. The
+    num_generations>=2 guard must NOT fire for loss='sao' (it must for grpo, above)."""
+    LLMTrainer(df=None, config=None, loss="sao", num_generations=1)  # must not raise
+
+
+def test_rejects_critic_updates_below_one():
+    with pytest.raises(ValueError, match="critic_updates"):
+        LLMTrainer(df=None, config=None, loss="sao", num_generations=1, critic_updates=0)
+
+
 def test_base_load_kwargs_uses_transformers_compatible_dtype():
     """Regression: transformers>=4.30 (the [llm] floor) accepts torch_dtype, not dtype (added
     ~4.56), so build_train_policy must pass torch_dtype to from_pretrained."""
@@ -160,3 +171,9 @@ def test_render_group_prompts_builds_contiguous_k_blocks(sample_ohlcv_df):
         assert prompts[i] == prompts[i + 1] == prompts[i + 2]
     assert len({bars[i] for i in range(0, 12, 3)}) == 4   # 4 distinct bars
     assert all(b >= 1 for b in bars)             # valid bar_index range
+
+    # SAO (distinct=True): max_steps*K DISTINCT bars, each rendered ONCE — not the K-repeat
+    # blocks. `len(set) > max_steps` is the tell it isn't the GRPO grouping (which gives exactly 4).
+    _, sao_prompts, sao_bars = trainer._render_group_prompts(env, pb, distinct=True)
+    assert len(sao_prompts) == 4 * 3 and len(sao_bars) == 4 * 3
+    assert len(set(sao_bars)) > 4

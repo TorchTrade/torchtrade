@@ -44,13 +44,19 @@ class LLMTrainer:
                  reward_fn=None, system_prompt=None, user_prompt_fn=None,
                  feature_preprocessing_fn=None, feature_keys=None,
                  loss="grpo", loss_kwargs=None, num_generations=4, lr=1e-5,
+                 critic_lr=1e-3, critic_updates=2, critic_hidden=128,
                  max_steps=50, max_tokens=1024, max_model_len=4096, gpu_memory_utilization=0.5,
                  constrain_actions=False, enforce_eager=False, logprob_chunk_size=1024,
                  output_dir="./llm_grpo_out", use_wandb=True, wandb_project="torchtrade-grpo",
                  log_completions_every=5, n_completions_log=2):
-        validate_num_generations(num_generations)
+        # SAO is single-rollout (a critic supplies the baseline), so it does NOT need a
+        # group of >= 2. Everything else (grpo + any group-relative factory) keeps the guard.
+        if loss != "sao":
+            validate_num_generations(num_generations)
         if method not in ("full", "lora", "qlora"):
             raise ValueError(f"method must be 'full'|'lora'|'qlora', got {method!r}")
+        if critic_updates < 1:
+            raise ValueError(f"critic_updates must be >= 1, got {critic_updates}")
 
         self.df, self.config, self.model = df, config, model
         self.method, self.reward_fn = method, reward_fn
@@ -59,6 +65,7 @@ class LLMTrainer:
         self.feature_keys = feature_keys
         self.loss, self.loss_kwargs = loss, loss_kwargs
         self.K = num_generations
+        self.critic_lr, self.critic_updates, self.critic_hidden = critic_lr, critic_updates, critic_hidden
         self.lr, self.max_steps, self.max_tokens = lr, max_steps, max_tokens
         self.max_model_len = max_model_len
         self.gpu_memory_utilization = gpu_memory_utilization
@@ -131,18 +138,25 @@ class LLMTrainer:
             user_prompt_fn=self.user_prompt_fn,
         )
 
-    def _render_group_prompts(self, score_env, pb):
-        """Pick `max_steps` bars, render each bar's prompt, and repeat it K times so each
-        consecutive K-block is one bar's GRPO group."""
+    def _render_group_prompts(self, score_env, pb, distinct=False):
+        """Render per-step prompt batches of size K.
+
+        GRPO (``distinct=False``): ``max_steps`` bars, each repeated K times, so each
+        consecutive K-block is one bar's GRPO group (K completions of the SAME bar).
+        SAO (``distinct=True``): ``max_steps * K`` DISTINCT bars, each rendered once, so each
+        consecutive K-block is K DIFFERENT single-rollout bars (no group — the critic is the
+        baseline, so there is nothing to gain from repeating a bar)."""
         prompts, bar_indices = [], []
         sysp = pb._resolve_system_prompt()
         max_bar = score_env.sampler._max_organic_start_idx() + 1
-        step_bars = torch.linspace(1, max_bar, self.max_steps).long().tolist()
+        n_bars = self.max_steps * self.K if distinct else self.max_steps
+        reps = 1 if distinct else self.K
+        step_bars = torch.linspace(1, max_bar, n_bars).long().tolist()
         for b in step_bars:
-            td = score_env.obs_at(int(b))
+            td = score_env.obs_at(b)
             user = pb._build_user_prompt(td)
-            prompts += [user] * self.K
-            bar_indices += [int(b)] * self.K
+            prompts += [user] * reps
+            bar_indices += [b] * reps
         return sysp, prompts, bar_indices
 
     def train(self):
@@ -165,7 +179,8 @@ class LLMTrainer:
             tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
         tokenizer.padding_side = "left"
 
-        sysp, prompts, bar_indices = self._render_group_prompts(score_env, pb)
+        sysp, prompts, bar_indices = self._render_group_prompts(score_env, pb,
+                                                                distinct=(self.loss == "sao"))
         env = make_trading_env(score_env, tokenizer, prompts, bar_indices, sysp, num_actions,
                                self.K, reward_fn=self.reward_fn)
 
@@ -189,17 +204,34 @@ class LLMTrainer:
         # tokens (the <think>.../<answer>N</answer> the model generated), not the prompt. Stock
         # GRPOLoss defaults to "sft"; override unless the user set it explicitly in loss_kwargs.
         loss_kwargs = dict(self.loss_kwargs or {})
-        if self.loss == "grpo":
+        if self.loss in ("grpo", "sao"):
+            # train-time recompute must score the same assistant/answer tokens the rollout mask
+            # used (rlhf), or log-probs won't line up with the sampled tokens.
             loss_kwargs.setdefault("masking_strategy", "rlhf")
         loss_fn = resolve_loss(self.loss, train_policy, loss_kwargs)
-        # Buffer holds exactly one group (K completions of one bar), matching torchrl's canonical
-        # grpo-sync recipe: sample(K) then returns the just-collected group with no cross-round
-        # mixing — a larger buffer + SamplerWithoutReplacement would blend up to several prior
-        # (staler) groups into each minibatch.
-        rb = ReplayBuffer(storage=LazyStackStorage(self.K),
-                          sampler=SamplerWithoutReplacement(),
-                          transform=MCAdvantage(grpo_size=self.K))
         opt = torch.optim.Adam([p for p in hf.parameters() if p.requires_grad], lr=self.lr)
+
+        sao = self.loss == "sao"
+        if sao:
+            # SAO baseline: a small critic V(bar) on the NUMERIC market state (NOT an LLM head),
+            # trained by MSE against the realized reward. Its own optimizer, never folded into
+            # `opt` (no shared params with the LoRA policy), updated `critic_updates` times per
+            # policy step — the paper's faster-value schedule.
+            from torchtrade.models.observation_critic import ObservationCritic
+            critic = ObservationCritic(score_env.market_data_keys,
+                                       account_state_key=score_env.account_state_key,
+                                       hidden_size=self.critic_hidden).to(device)
+            with torch.no_grad():  # materialize LazyLinear before building the optimizer
+                critic(score_env.obs_at(1).to(device))
+            critic_opt = torch.optim.Adam(critic.parameters(), lr=self.critic_lr)
+        else:
+            # Buffer holds exactly one group (K completions of one bar), matching torchrl's canonical
+            # grpo-sync recipe: sample(K) then returns the just-collected group with no cross-round
+            # mixing — a larger buffer + SamplerWithoutReplacement would blend up to several prior
+            # (staler) groups into each minibatch.
+            rb = ReplayBuffer(storage=LazyStackStorage(self.K),
+                              sampler=SamplerWithoutReplacement(),
+                              transform=MCAdvantage(grpo_size=self.K))
 
         logger = None
         if self.use_wandb:
@@ -236,11 +268,36 @@ class LLMTrainer:
                 for h, r in list(zip(histories, rewards))[:self.n_completions_log]:
                     text = str(TradingRewardParser._response_text(h))
                     completion_rows.append([step, text, extract_action(text, num_actions), r])
-            # MCAdvantage computes the group-relative advantage at extend() time (grouped by the
-            # shared prompt), so it is baked in before sampling; with a K-sized buffer, sample(K)
-            # returns exactly this step's group.
-            rb.extend(data.reshape(-1))
-            batch = rb.sample(self.K).to(device)
+            flat = data.reshape(-1)  # drop the (T=1) time dim -> K rows
+            if sao:
+                # SAO advantage = reward - V(bar). Fetch each bar's NUMERIC obs, train the critic
+                # (MSE vs the realized reward), then take a DETACHED V for the baseline. Shape the
+                # advantage [B,1,1] so it broadcasts across the answer tokens (matches GRPO's).
+                batch = flat.to(device)
+                bars = flat.get("bar_index").tolist()  # int64 tensor -> python ints
+                obs_batch = torch.stack([score_env.obs_at(b) for b in bars]).to(device)
+                reward_flat = batch.get(("next", "reward")).reshape(len(bars), 1)  # (B,1)
+                for _ in range(self.critic_updates):
+                    # smooth_l1 (Huber), not MSE: trading rewards are heavy-tailed (a -1.0
+                    # liquidation among ~1e-2 log-returns would dominate a plain MSE over the
+                    # small K-row batch and distort V for every row). The paper uses MSE, but its
+                    # rewards are bounded 0/1 accuracy — ours are not.
+                    critic_loss = torch.nn.functional.smooth_l1_loss(critic(obs_batch), reward_flat)
+                    critic_opt.zero_grad()
+                    critic_loss.backward()
+                    critic_opt.step()
+                with torch.no_grad():
+                    v_pred = critic(obs_batch)  # (B,1), detached baseline
+                batch.set("advantage", (reward_flat - v_pred).reshape(len(bars), 1, 1))
+                print(f"[LLMTrainer]   sao critic_loss={float(critic_loss):.5f} "
+                      f"V_mean={float(v_pred.mean()):.5f} R_mean={float(reward_flat.mean()):.5f}",
+                      flush=True)
+            else:
+                # MCAdvantage computes the group-relative advantage at extend() time (grouped by the
+                # shared prompt), so it is baked in before sampling; with a K-sized buffer, sample(K)
+                # returns exactly this step's group.
+                rb.extend(flat)
+                batch = rb.sample(self.K).to(device)
             # generation throughput: assistant mask marks the model-generated (completion) tokens
             # across all K completions; tokens/s = those tokens / the rollout wall-time.
             gen_tokens = int(batch.get(("masks", "all_assistant_mask"), as_padded_tensor=True,
@@ -268,8 +325,9 @@ class LLMTrainer:
             else:
                 synced = sync_weights_to_vllm(engine, hf, path=os.path.join(self.output_dir, "_full.pt"))
             mean_r = sum(rewards) / len(rewards)
-            # advantage = the group-relative signal MCAdvantage baked in; log its magnitude
-            # (mean |adv|) — ~0 on a degenerate all-agree group, positive when the group disagrees.
+            # advantage = the group-relative signal MCAdvantage baked in (GRPO) or R − V(s) from
+            # the critic (SAO); log its magnitude (mean |adv|) — ~0 when the baseline matches the
+            # reward, larger when the policy's action beat/missed the baseline.
             adv = batch.get("advantage", None)
             adv_mag = float(adv.float().abs().mean()) if adv is not None else float("nan")
             dt = time.time() - t0

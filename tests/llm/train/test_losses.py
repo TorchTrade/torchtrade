@@ -16,10 +16,26 @@ def test_grpo_name_resolves_and_forwards_kwargs(monkeypatch):
     assert loss.actor == "ACTOR" and loss.kw == {"clip_epsilon": 0.2}
 
 
+def test_sao_name_resolves_and_forwards_kwargs(monkeypatch):
+    import torchtrade.losses.sao_loss as m
+    monkeypatch.setattr(m, "SAOLoss", _StubLoss)  # resolve_loss imports SAOLoss lazily at call time
+    loss = resolve_loss("sao", actor_network="ACTOR",
+                        loss_kwargs={"epsilon_low": 0.3, "epsilon_high": 5.0})
+    assert isinstance(loss, _StubLoss)
+    assert loss.actor == "ACTOR" and loss.kw == {"epsilon_low": 0.3, "epsilon_high": 5.0}
+
+
 def test_callable_factory_is_used():
     sentinel = object()
     loss = resolve_loss(lambda actor: sentinel, actor_network="ACTOR")
     assert loss is sentinel
+
+
+def test_callable_factory_receives_kwargs():
+    """resolve_loss threads loss_kwargs into the factory (needed for SAOLoss-style factories)."""
+    loss = resolve_loss(lambda actor, **kw: _StubLoss(actor, **kw),
+                        actor_network="ACTOR", loss_kwargs={"epsilon_high": 5.0})
+    assert isinstance(loss, _StubLoss) and loss.kw == {"epsilon_high": 5.0}
 
 
 def test_unknown_name_raises():

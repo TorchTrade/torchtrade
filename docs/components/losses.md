@@ -8,6 +8,7 @@ TorchTrade provides specialized loss functions for training RL trading agents, b
 |---------------|------|----------|
 | [**DGLoss**](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/dg_loss.py) | Policy Gradient | Delight-gated updates — no importance sampling needed |
 | [**GroupRelativePGLoss**](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/group_relative_pg_loss.py) | Policy Gradient | One-step RL with SLTP environments |
+| [**SAOLoss**](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/sao_loss.py) | Policy Gradient (LLM) | Single-rollout LLM RL with a critic baseline — no K-sample group needed |
 | [**CTRLLoss**](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/ctrl.py) | Representation Learning | Self-supervised encoder training |
 | [**CTRLPPOLoss**](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/ctrl.py) | Combined | Joint policy + representation learning |
 
@@ -113,6 +114,45 @@ for batch in collector:
 ```
 
 **Paper**: [DeepSeekMath (arXiv:2402.03300)](https://arxiv.org/abs/2402.03300) — Section 2.2
+
+---
+
+## SAOLoss
+
+Single-Rollout Asynchronous Optimization for **LLM** trading actors. Where the LLM GRPO path builds its baseline from a **group of K completions of the same bar**, SAO trains on **one rollout per bar** and recovers the baseline from a learned **critic** $V(s)$ instead. This removes the K-fold *generation* cost of the group baseline — the dominant expense when the actor is an LLM — at the price of a small critic.
+
+`SAOLoss` is a thin subclass of TorchRL's LLM `GRPOLoss` that reuses the entire pipeline (assistant-token masking, per-token log-weights, aggregation, ESS) and overrides only the policy objective:
+
+$$
+\begin{aligned}
+r_t &= \exp\!\left(\log \pi_\theta(a_t|s) - \log \pi_{\text{rollout}}(a_t|s)\right) \\
+f(r_t) &= \begin{cases} r_t & \text{if } 1-\varepsilon_l < r_t < 1+\varepsilon_h \\ 0 & \text{otherwise} \end{cases} \\
+\mathcal{L} &= -\mathbb{E}_t\left[ f(r_t)\cdot \hat{A} \right], \qquad \hat{A} = R - V(s)
+\end{aligned}
+$$
+
+**Two swaps vs GRPO.** (1) **Clip → DIS mask (Eq. 3):** in-band, $f$ is the *identity* (the ratio is retained as an off-policy weight); out-of-band tokens are **masked to zero**, not clamped to the boundary — permitting the aggressive asymmetric "clip-higher" the paper relies on. (2) **Group baseline → critic advantage:** $\hat{A} = R - V(s)$, where $V(s)$ is supplied by the trainer per bar. There is no entropy or KL term by default, matching the paper's objective.
+
+**Run it via `LLMTrainer(loss="sao")`** — the trainer wires the single-rollout collection, the `ObservationCritic` on the numeric bar state (a valid action-independent baseline; the LLM is only the policy), and the critic's own optimizer on the paper's faster-value schedule (`critic_updates=2`):
+
+```python
+from torchtrade.llm.train import LLMTrainer
+
+LLMTrainer(df=df, config=config, loss="sao", num_generations=4,  # 4 = distinct bars/step
+           loss_kwargs={"epsilon_low": 0.3, "epsilon_high": 5.0}).train()
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `epsilon_low` | 0.2 | Lower trust-region half-width $\varepsilon_l$ |
+| `epsilon_high` | 0.2 | Upper trust-region half-width $\varepsilon_h$ (widen for clip-higher) |
+| `entropy_bonus` | False | Add an entropy bonus (paper's objective has none) |
+| `masking_strategy` | `"rlhf"` | Score assistant/answer tokens only |
+
+!!! note
+    `SAOLoss` pulls the LLM/vllm stack, so it is not exported from `torchtrade.losses`; import it from `torchtrade.losses.sao_loss` or use `LLMTrainer(loss="sao")`.
+
+**Paper**: [Single-Rollout Asynchronous Optimization (arXiv:2607.07508)](https://arxiv.org/abs/2607.07508)
 
 ---
 
