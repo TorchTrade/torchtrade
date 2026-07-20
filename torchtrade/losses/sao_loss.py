@@ -110,6 +110,12 @@ class SAOLoss(GRPOLoss):
         """
         low, high = self._clip_bounds  # (log(1 - ε_l), log(1 + ε_h))
         in_band = (log_weight > low) & (log_weight < high)  # per-token, Eq. 3 open interval
-        gain = log_weight.exp() * advantage * in_band.to(log_weight.dtype)
+        # Clamp the log-weight to the trust bounds BEFORE exp: an extreme out-of-band weight
+        # would overflow to inf, and inf * 0(mask) = nan would then poison the whole masked
+        # batch loss. In-band weights lie strictly inside [low, high] so clamping leaves them
+        # untouched; out-of-band weights are zeroed by the mask anyway, so clamping their
+        # (unused) value is harmless. Mirrors GRPOLoss's own clamp-before-exp.
+        ratio = log_weight.clamp(low, high).exp()
+        gain = ratio * advantage * in_band.to(log_weight.dtype)
         masked_fraction = (~in_band).to(log_weight.dtype).mean()
         return -gain, masked_fraction

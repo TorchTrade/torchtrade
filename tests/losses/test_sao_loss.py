@@ -40,6 +40,19 @@ def test_out_of_band_tokens_masked_to_zero():
     assert masked_fraction.item() == pytest.approx(1.0)
 
 
+def test_extreme_out_of_band_stays_finite():
+    """An extreme out-of-band log-weight (exp overflows fp32) must be masked to a finite
+    zero, NOT become inf*0=nan that poisons the whole batch loss. Regression for the
+    DIS-mask overflow (PR #261 review): exp() must be clamped before the mask multiply."""
+    loss = _loss()
+    log_weight = torch.tensor([[[0.0], [100.0]]])  # in-band, then exp(100)=inf without the clamp
+    advantage = torch.ones(1, 1, 1)
+    neg_gain, masked_fraction = loss._compute_policy_objective(log_weight, advantage)
+    assert torch.isfinite(neg_gain).all(), "masked out-of-band token produced a non-finite gain"
+    assert neg_gain[0, 1, 0].item() == 0.0          # the extreme token contributes exactly 0
+    assert masked_fraction.item() == pytest.approx(0.5)
+
+
 def test_asymmetric_band_keeps_high_ratio():
     """Clip-higher: with ε_high large, a high ratio stays in-band; ε_low small
     masks a modestly-low ratio. Catches a low/high operand swap."""
