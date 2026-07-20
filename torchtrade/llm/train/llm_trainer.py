@@ -50,9 +50,12 @@ class LLMTrainer:
                  output_dir="./llm_grpo_out", use_wandb=True, wandb_project="torchtrade-grpo",
                  log_completions_every=5, n_completions_log=2):
         # SAO is single-rollout (a critic supplies the baseline), so it does NOT need a
-        # group of >= 2. Everything else (grpo + any group-relative factory) keeps the guard.
+        # group of >= 2 — but it still needs >= 1 bar per step. Everything else (grpo + any
+        # group-relative factory) keeps the >= 2 guard.
         if loss != "sao":
             validate_num_generations(num_generations)
+        elif num_generations < 1:
+            raise ValueError(f"num_generations must be >= 1 for SAO, got {num_generations}")
         if method not in ("full", "lora", "qlora"):
             raise ValueError(f"method must be 'full'|'lora'|'qlora', got {method!r}")
         if critic_updates < 1:

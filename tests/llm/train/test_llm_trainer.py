@@ -21,6 +21,12 @@ def test_sao_allows_num_generations_one():
     LLMTrainer(df=None, config=None, loss="sao", num_generations=1)  # must not raise
 
 
+def test_sao_rejects_num_generations_zero():
+    """SAO waives the >=2 group check but still needs >=1 bar per step."""
+    with pytest.raises(ValueError, match="num_generations"):
+        LLMTrainer(df=None, config=None, loss="sao", num_generations=0)
+
+
 def test_rejects_critic_updates_below_one():
     with pytest.raises(ValueError, match="critic_updates"):
         LLMTrainer(df=None, config=None, loss="sao", num_generations=1, critic_updates=0)
