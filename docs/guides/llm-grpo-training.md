@@ -80,10 +80,17 @@ LLMTrainer(df=df, config=config,
 ```python
 LLMTrainer(df=df, config=config,
            method="qlora",         # "full" | "lora" | "qlora"
-           loss="grpo",            # "grpo", or a factory f(actor) -> LossModule
+           loss="grpo",            # "grpo" | "sao", or a factory f(actor) -> LossModule
            loss_kwargs={...},      # forwarded to the loss constructor
            num_generations=8)      # GRPO group size (K completions per bar)
 ```
+
+`loss="sao"` swaps the GRPO group baseline for **[SAO](https://arxiv.org/abs/2607.07508)**
+(single-rollout with a learned critic): it trains on **one** rollout per bar and recovers the
+baseline from an `ObservationCritic` instead of K completions, removing the K-fold generation cost
+— the dominant expense with an LLM actor. Same call, same dataset; the trainer wires the critic and
+its optimizer for you. See [Loss Functions → SAOLoss](../components/losses.md#saoloss) for the
+objective and the full parameter set.
 
 ## Timeframe — train on daily (or coarser) bars
 

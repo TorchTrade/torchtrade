@@ -10,9 +10,84 @@ from torchtrade.llm.train.trading_env import TradingRewardParser
 _THINK = "the daily trend is up, price is above the SMA and momentum looks constructive"  # >=40 chars
 
 
-def test_rejects_num_generations_below_two():
-    with pytest.raises(ValueError, match="num_generations"):
-        LLMTrainer(df=None, config=None, num_generations=1)
+@pytest.mark.parametrize("loss,num_generations,should_raise", [
+    ("grpo", 1, True),   # GRPO needs a group of >= 2: undefined group-relative baseline for 1
+    ("sao", 1, False),   # SAO's baseline is the critic, so a group of 1 is legal
+    ("sao", 0, True),    # SAO waives the >=2 group check but still needs >=1 bar per step
+], ids=["grpo-below-two-raises", "sao-one-ok", "sao-zero-raises"])
+def test_num_generations_guard(loss, num_generations, should_raise):
+    """num_generations validation differs by loss: GRPO's guard must fire for a group of 1
+    (group-relative advantage undefined); SAO's must NOT (the critic is the baseline instead
+    of a same-prompt group), but SAO still floors at >=1 bar per step."""
+    kwargs = dict(df=None, config=None, loss=loss, num_generations=num_generations)
+    if should_raise:
+        with pytest.raises(ValueError, match="num_generations"):
+            LLMTrainer(**kwargs)
+    else:
+        LLMTrainer(**kwargs)  # must not raise
+
+
+@pytest.mark.parametrize("bad_kwarg,value", [
+    ("critic_updates", 0),
+    ("critic_warmup", -1),
+], ids=["critic_updates", "critic_warmup"])
+def test_sao_config_validation(bad_kwarg, value):
+    with pytest.raises(ValueError, match=bad_kwarg):
+        LLMTrainer(df=None, config=None, loss="sao", num_generations=1, **{bad_kwarg: value})
+
+
+def test_sao_advantage_baseline_predates_critic_fit_and_stays_detached():
+    """Pins the Finding 1 fix in `_sao_advantage`: V(s) must be snapshotted from the
+    PRE-update critic, not the just-fitted one. With critic_updates high enough and a fast
+    optimizer, a critic that read V AFTER fitting reward_flat on these exact B rows would
+    nearly memorize the targets and collapse the advantage toward 0 — the ordering under
+    test is what prevents that. Also pins: advantage shape [B,1,1] for B != K (SAO's
+    distinct=True gives B = max_steps*K, unrelated to num_generations), full detachment (no
+    grad reaches the critic from a downstream use of the advantage), and that critic_opt.step
+    fires exactly `critic_updates` times."""
+    import torch
+    from tensordict import TensorDict
+
+    from torchtrade.models.observation_critic import ObservationCritic
+
+    B, K = 6, 4  # B != K on purpose
+    trainer = LLMTrainer(df=None, config=None, loss="sao", num_generations=K,
+                        critic_updates=20, critic_lr=0.5)
+
+    critic = ObservationCritic(["market_data_1Min"], hidden_size=16)
+    obs_batch = TensorDict(
+        {"market_data_1Min": torch.randn(B, 10, 4), "account_state": torch.randn(B, 6)},
+        batch_size=[B],
+    )
+    with torch.no_grad():
+        critic(obs_batch)  # materialize LazyLinear before building the optimizer
+    critic_opt = torch.optim.Adam(critic.parameters(), lr=trainer.critic_lr)
+
+    step_count = {"n": 0}
+    real_step = critic_opt.step
+
+    def counted_step(*args, **kwargs):
+        step_count["n"] += 1
+        return real_step(*args, **kwargs)
+
+    critic_opt.step = counted_step
+
+    reward_flat = torch.randn(B, 1)
+    with torch.no_grad():
+        v_before = critic(obs_batch).clone()  # the PRE-fit baseline the helper must snapshot
+    advantage, v_pred, critic_loss = trainer._sao_advantage(reward_flat, obs_batch, critic, critic_opt)
+
+    assert advantage.shape == (B, 1, 1)
+    assert step_count["n"] == trainer.critic_updates == 20
+    assert advantage.grad_fn is None  # detached leaf (no critic graph reaches the policy loss)
+
+    # THE load-bearing assertion for Finding 1: the returned baseline is the critic's value
+    # BEFORE this step's fit, not after. Under the buggy read-after-fit ordering the 20 Adam
+    # steps move the critic, so v_pred != v_before — this exact-equality check is what fails on
+    # the regression (a magnitude check does not: smooth_l1's clipped gradient leaves the
+    # post-fit residual far above any threshold).
+    assert torch.allclose(v_pred, v_before)
+    assert torch.allclose(advantage, (reward_flat - v_before).reshape(-1, 1, 1))
 
 
 def test_base_load_kwargs_uses_transformers_compatible_dtype():
@@ -160,3 +235,9 @@ def test_render_group_prompts_builds_contiguous_k_blocks(sample_ohlcv_df):
         assert prompts[i] == prompts[i + 1] == prompts[i + 2]
     assert len({bars[i] for i in range(0, 12, 3)}) == 4   # 4 distinct bars
     assert all(b >= 1 for b in bars)             # valid bar_index range
+
+    # SAO (distinct=True): max_steps*K DISTINCT bars, each rendered ONCE — not the K-repeat
+    # blocks. `len(set) > max_steps` is the tell it isn't the GRPO grouping (which gives exactly 4).
+    _, sao_prompts, sao_bars = trainer._render_group_prompts(env, pb, distinct=True)
+    assert len(sao_prompts) == 4 * 3 and len(sao_bars) == 4 * 3
+    assert len(set(sao_bars)) > 4
