@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -33,7 +33,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -960,6 +960,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#saoloss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SAOLoss
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ctrlloss" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1286,6 +1297,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#saoloss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SAOLoss
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ctrlloss" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1407,6 +1429,11 @@
 <td><a href="https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/group_relative_pg_loss.py"><strong>GroupRelativePGLoss</strong></a></td>
 <td>Policy Gradient</td>
 <td>One-step RL with SLTP environments</td>
+</tr>
+<tr>
+<td><a href="https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/sao_loss.py"><strong>SAOLoss</strong></a></td>
+<td>Policy Gradient (LLM)</td>
+<td>Single-rollout LLM RL with a critic baseline — no K-sample group needed</td>
 </tr>
 <tr>
 <td><a href="https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/losses/ctrl.py"><strong>CTRLLoss</strong></a></td>
@@ -1572,6 +1599,61 @@
 </span></code></pre></div>
 <p><strong>Paper</strong>: <a href="https://arxiv.org/abs/2402.03300">DeepSeekMath (arXiv:2402.03300)</a> — Section 2.2</p>
 <hr />
+<h2 id="saoloss">SAOLoss<a class="headerlink" href="#saoloss" title="Permanent link">&para;</a></h2>
+<p>Single-Rollout Asynchronous Optimization for <strong>LLM</strong> trading actors. Where the LLM GRPO path builds its baseline from a <strong>group of K completions of the same bar</strong>, SAO trains on <strong>one rollout per bar</strong> and recovers the baseline from a learned <strong>critic</strong> <span class="arithmatex">\(V(s)\)</span> instead. This removes the K-fold <em>generation</em> cost of the group baseline — the dominant expense when the actor is an LLM — at the price of a small critic.</p>
+<p><code>SAOLoss</code> is a thin subclass of TorchRL's LLM <code>GRPOLoss</code> that reuses the entire pipeline (assistant-token masking, per-token log-weights, aggregation, ESS) and overrides only the policy objective:</p>
+<div class="arithmatex">\[
+\begin{aligned}
+r_t &amp;= \exp\!\left(\log \pi_\theta(a_t|s) - \log \pi_{\text{rollout}}(a_t|s)\right) \\
+f(r_t) &amp;= \begin{cases} r_t &amp; \text{if } 1-\varepsilon_l &lt; r_t &lt; 1+\varepsilon_h \\ 0 &amp; \text{otherwise} \end{cases} \\
+\mathcal{L} &amp;= -\mathbb{E}_t\left[ f(r_t)\cdot \hat{A} \right], \qquad \hat{A} = R - V(s)
+\end{aligned}
+\]</div>
+<p><strong>Two swaps vs GRPO.</strong> (1) <strong>Clip → DIS mask (Eq. 3):</strong> in-band, <span class="arithmatex">\(f\)</span> is the <em>identity</em> (the ratio is retained as an off-policy weight); out-of-band tokens are <strong>masked to zero</strong>, not clamped to the boundary — permitting the aggressive asymmetric "clip-higher" the paper relies on. (2) <strong>Group baseline → critic advantage:</strong> <span class="arithmatex">\(\hat{A} = R - V(s)\)</span>, where <span class="arithmatex">\(V(s)\)</span> is supplied by the trainer per bar. There is no entropy or KL term by default, matching the paper's objective.</p>
+<p><strong>Run it via <code>LLMTrainer(loss="sao")</code></strong> — the trainer wires the single-rollout collection, the <code>ObservationCritic</code> on the numeric bar state (a valid action-independent baseline; the LLM is only the policy), and the critic's own optimizer on the paper's faster-value schedule (<code>critic_updates=2</code>):</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.llm.train</span><span class="w"> </span><span class="kn">import</span> <span class="n">LLMTrainer</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># defaults are the paper&#39;s math/TIR values (ε_l=0.3, ε_h=5.0, entropy off);</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># override any via loss_kwargs, e.g. loss_kwargs={&quot;epsilon_low&quot;: 0.8, &quot;epsilon_high&quot;: 3.0} for the SWE-Bench setting.</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">LLMTrainer</span><span class="p">(</span><span class="n">df</span><span class="o">=</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">loss</span><span class="o">=</span><span class="s2">&quot;sao&quot;</span><span class="p">,</span> <span class="n">num_generations</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span><span class="o">.</span><span class="n">train</span><span class="p">()</span>  <span class="c1"># 4 = distinct bars/step</span>
+</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>epsilon_low</code></td>
+<td>0.3</td>
+<td>Lower trust-region half-width <span class="arithmatex">\(\varepsilon_l\)</span> (paper's math/TIR value)</td>
+</tr>
+<tr>
+<td><code>epsilon_high</code></td>
+<td>5.0</td>
+<td>Upper trust-region half-width <span class="arithmatex">\(\varepsilon_h\)</span> — the asymmetric "clip-higher" is the point of DIS (paper: 5.0 math/TIR, 3.0 SWE-Bench)</td>
+</tr>
+<tr>
+<td><code>entropy_bonus</code></td>
+<td>False</td>
+<td>Add an entropy bonus (paper's objective has none)</td>
+</tr>
+<tr>
+<td><code>masking_strategy</code></td>
+<td><code>"rlhf"</code></td>
+<td>Score assistant/answer tokens only</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><code>SAOLoss</code> pulls the LLM/vllm stack, so it is not exported from <code>torchtrade.losses</code>; import it from <code>torchtrade.losses.sao_loss</code> or use <code>LLMTrainer(loss="sao")</code>.</p>
+</div>
+<p><strong>Paper</strong>: <a href="https://arxiv.org/abs/2607.07508">Single-Rollout Asynchronous Optimization (arXiv:2607.07508)</a></p>
+<hr />
 <h2 id="ctrlloss">CTRLLoss<a class="headerlink" href="#ctrlloss" title="Permanent link">&para;</a></h2>
 <p>Cross-Trajectory Representation Learning for self-supervised encoder training. Trains encoders to recognize behavioral similarity across trajectories without rewards, improving zero-shot generalization.</p>
 <table>
@@ -1615,37 +1697,37 @@
 </tr>
 </tbody>
 </table>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.losses</span><span class="w"> </span><span class="kn">import</span> <span class="n">CTRLLoss</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">ctrl_loss</span> <span class="o">=</span> <span class="n">CTRLLoss</span><span class="p">(</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">encoder_network</span><span class="o">=</span><span class="n">encoder</span><span class="p">,</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">embedding_dim</span><span class="o">=</span><span class="mi">128</span><span class="p">,</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">num_prototypes</span><span class="o">=</span><span class="mi">512</span><span class="p">,</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="p">)</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">collector</span><span class="p">:</span>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="n">loss_td</span> <span class="o">=</span> <span class="n">ctrl_loss</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="n">loss_td</span><span class="p">[</span><span class="s2">&quot;loss_ctrl&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
-</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.losses</span><span class="w"> </span><span class="kn">import</span> <span class="n">CTRLLoss</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">ctrl_loss</span> <span class="o">=</span> <span class="n">CTRLLoss</span><span class="p">(</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">encoder_network</span><span class="o">=</span><span class="n">encoder</span><span class="p">,</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">embedding_dim</span><span class="o">=</span><span class="mi">128</span><span class="p">,</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">num_prototypes</span><span class="o">=</span><span class="mi">512</span><span class="p">,</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="p">)</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">collector</span><span class="p">:</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="n">loss_td</span> <span class="o">=</span> <span class="n">ctrl_loss</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="n">loss_td</span><span class="p">[</span><span class="s2">&quot;loss_ctrl&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
 </span></code></pre></div>
 <p><strong>Paper</strong>: <a href="https://arxiv.org/abs/2106.02193">Cross-Trajectory Representation Learning (arXiv:2106.02193)</a></p>
 <hr />
 <h2 id="ctrlppoloss">CTRLPPOLoss<a class="headerlink" href="#ctrlppoloss" title="Permanent link">&para;</a></h2>
 <p>Combines ClipPPOLoss with CTRLLoss for joint policy and encoder training. The encoder learns useful representations while the policy learns to act.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.losses</span><span class="w"> </span><span class="kn">import</span> <span class="n">CTRLLoss</span><span class="p">,</span> <span class="n">CTRLPPOLoss</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchrl.objectives</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClipPPOLoss</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">combined_loss</span> <span class="o">=</span> <span class="n">CTRLPPOLoss</span><span class="p">(</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">ppo_loss</span><span class="o">=</span><span class="n">ClipPPOLoss</span><span class="p">(</span><span class="n">actor</span><span class="p">,</span> <span class="n">critic</span><span class="p">),</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">ctrl_loss</span><span class="o">=</span><span class="n">CTRLLoss</span><span class="p">(</span><span class="n">encoder</span><span class="p">,</span> <span class="n">embedding_dim</span><span class="o">=</span><span class="mi">128</span><span class="p">),</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">ctrl_coeff</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="p">)</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">collector</span><span class="p">:</span>
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="n">loss_td</span> <span class="o">=</span> <span class="n">combined_loss</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
-</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">total_loss</span> <span class="o">=</span> <span class="n">loss_td</span><span class="p">[</span><span class="s2">&quot;loss_objective&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">loss_td</span><span class="p">[</span><span class="s2">&quot;loss_critic&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">loss_td</span><span class="p">[</span><span class="s2">&quot;loss_ctrl&quot;</span><span class="p">]</span>
-</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    <span class="n">total_loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
-</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.losses</span><span class="w"> </span><span class="kn">import</span> <span class="n">CTRLLoss</span><span class="p">,</span> <span class="n">CTRLPPOLoss</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchrl.objectives</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClipPPOLoss</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">combined_loss</span> <span class="o">=</span> <span class="n">CTRLPPOLoss</span><span class="p">(</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">ppo_loss</span><span class="o">=</span><span class="n">ClipPPOLoss</span><span class="p">(</span><span class="n">actor</span><span class="p">,</span> <span class="n">critic</span><span class="p">),</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">ctrl_loss</span><span class="o">=</span><span class="n">CTRLLoss</span><span class="p">(</span><span class="n">encoder</span><span class="p">,</span> <span class="n">embedding_dim</span><span class="o">=</span><span class="mi">128</span><span class="p">),</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="n">ctrl_coeff</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="p">)</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">collector</span><span class="p">:</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>    <span class="n">loss_td</span> <span class="o">=</span> <span class="n">combined_loss</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>    <span class="n">total_loss</span> <span class="o">=</span> <span class="n">loss_td</span><span class="p">[</span><span class="s2">&quot;loss_objective&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">loss_td</span><span class="p">[</span><span class="s2">&quot;loss_critic&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">loss_td</span><span class="p">[</span><span class="s2">&quot;loss_ctrl&quot;</span><span class="p">]</span>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>    <span class="n">total_loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>    <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
 </span></code></pre></div>
 <hr />
 <h2 id="see-also">See Also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
@@ -1779,7 +1861,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tracking", "navigation.sections", "navigation.top", "navigation.expand", "navigation.path", "navigation.footer", "search.suggest", "search.highlight", "content.tabs.link", "content.code.annotation", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
         <script src="../../javascripts/mathjax.js"></script>
       
