@@ -78,6 +78,16 @@ def test_gradient_flows_through_in_band_ratio_only():
     assert log_weight.grad[0, 1, 0].item() == 0.0   # masked token: no gradient
 
 
+@pytest.mark.parametrize("epsilon_low", [1.0, 1.5])
+def test_epsilon_low_at_or_above_one_raises(epsilon_low):
+    """eps_low >= 1 would make 1 - eps_low <= 0 -> log1p(-eps_low) is -inf/nan, which would
+    mask EVERY token as out-of-band (or worse, silently corrupt the band). SAOLoss doesn't
+    re-derive this guard itself; it must inherit GRPOLoss's `eps_low < 1` validation
+    (grpo.py) so the contract propagates through the subclass rather than silently NaN-ing."""
+    with pytest.raises(ValueError, match="clip_epsilon"):
+        SAOLoss(actor_network=None, epsilon_low=epsilon_low, epsilon_high=5.0)
+
+
 def test_defaults_are_paper_faithful():
     """The class defaults match the paper (arXiv:2607.07508 §4.1, math/TIR): no
     entropy, rlhf masking, and the asymmetric clip-higher band ε_l=0.3, ε_h=5.0

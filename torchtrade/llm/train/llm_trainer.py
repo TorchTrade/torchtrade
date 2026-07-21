@@ -165,6 +165,25 @@ class LLMTrainer:
             bar_indices += [b] * reps
         return sysp, prompts, bar_indices
 
+    def _sao_advantage(self, reward_flat, obs_batch, critic, critic_opt):
+        """SAO advantage R - V(s). Baseline V is read from the PRE-update critic so this step's
+        fit can't shrink its own advantage toward zero (SAO has one rollout per bar); the critic
+        is then fit toward the realized reward for future steps. Returns (advantage[B,1,1]
+        detached, v_pred, critic_loss)."""
+        with torch.no_grad():
+            v_pred = critic(obs_batch)  # baseline BEFORE this step's fit
+        critic_loss = None
+        for _ in range(self.critic_updates):
+            # smooth_l1 (Huber), not MSE: trading rewards are heavy-tailed (a -1.0
+            # liquidation among ~1e-2 log-returns would dominate a plain MSE over the
+            # small K-row batch and distort V for every row). The paper uses MSE, but its
+            # rewards are bounded 0/1 accuracy — ours are not.
+            critic_loss = torch.nn.functional.smooth_l1_loss(critic(obs_batch), reward_flat)
+            critic_opt.zero_grad()
+            critic_loss.backward()
+            critic_opt.step()
+        return (reward_flat - v_pred).reshape(-1, 1, 1), v_pred, critic_loss
+
     def train(self):
         from transformers import AutoTokenizer
         from torchrl.data import LazyStackStorage, ReplayBuffer, SamplerWithoutReplacement
@@ -211,8 +230,6 @@ class LLMTrainer:
         # GRPOLoss defaults to "sft"; override unless the user set it explicitly in loss_kwargs.
         loss_kwargs = dict(self.loss_kwargs or {})
         if self.loss in ("grpo", "sao"):
-            # train-time recompute must score the same assistant/answer tokens the rollout mask
-            # used (rlhf), or log-probs won't line up with the sampled tokens.
             loss_kwargs.setdefault("masking_strategy", "rlhf")
         loss_fn = resolve_loss(self.loss, train_policy, loss_kwargs)
         opt = torch.optim.Adam([p for p in hf.parameters() if p.requires_grad], lr=self.lr)
@@ -220,9 +237,9 @@ class LLMTrainer:
         sao = self.loss == "sao"
         if sao:
             # SAO baseline: a small critic V(bar) on the NUMERIC market state (NOT an LLM head),
-            # trained by MSE against the realized reward. Its own optimizer, never folded into
-            # `opt` (no shared params with the LoRA policy), updated `critic_updates` times per
-            # policy step — the paper's faster-value schedule.
+            # trained (smooth_l1/Huber, see _sao_advantage) against the realized reward. Its own
+            # optimizer, never folded into `opt` (no shared params with the LoRA policy), updated
+            # `critic_updates` times per policy step — the paper's faster-value schedule.
             from torchtrade.models.observation_critic import ObservationCritic
             critic = ObservationCritic(score_env.market_data_keys,
                                        account_state_key=score_env.account_state_key,
@@ -276,25 +293,17 @@ class LLMTrainer:
                     completion_rows.append([step, text, extract_action(text, num_actions), r])
             flat = data.reshape(-1)  # drop the (T=1) time dim -> K rows
             if sao:
-                # SAO advantage = reward - V(bar). Fetch each bar's NUMERIC obs, train the critic
-                # (MSE vs the realized reward), then take a DETACHED V for the baseline. Shape the
-                # advantage [B,1,1] so it broadcasts across the answer tokens (matches GRPO's).
+                # SAO advantage = reward - V(bar), baseline snapshotted BEFORE this step's critic
+                # fit (see _sao_advantage). Shape [B,1,1] so it broadcasts across the answer
+                # tokens (matches GRPO's).
                 batch = flat.to(device)
                 bars = flat.get("bar_index").tolist()  # int64 tensor -> python ints
                 obs_batch = torch.stack([score_env.obs_at(b) for b in bars]).to(device)
                 reward_flat = batch.get(("next", "reward")).reshape(len(bars), 1)  # (B,1)
-                for _ in range(self.critic_updates):
-                    # smooth_l1 (Huber), not MSE: trading rewards are heavy-tailed (a -1.0
-                    # liquidation among ~1e-2 log-returns would dominate a plain MSE over the
-                    # small K-row batch and distort V for every row). The paper uses MSE, but its
-                    # rewards are bounded 0/1 accuracy — ours are not.
-                    critic_loss = torch.nn.functional.smooth_l1_loss(critic(obs_batch), reward_flat)
-                    critic_opt.zero_grad()
-                    critic_loss.backward()
-                    critic_opt.step()
-                with torch.no_grad():
-                    v_pred = critic(obs_batch)  # (B,1), detached baseline
-                batch.set("advantage", (reward_flat - v_pred).reshape(len(bars), 1, 1))
+                advantage, v_pred, critic_loss = self._sao_advantage(
+                    reward_flat, obs_batch, critic, critic_opt
+                )
+                batch.set("advantage", advantage)
                 print(f"[LLMTrainer]   sao critic_loss={float(critic_loss):.5f} "
                       f"V_mean={float(v_pred.mean()):.5f} R_mean={float(reward_flat.mean()):.5f}",
                       flush=True)

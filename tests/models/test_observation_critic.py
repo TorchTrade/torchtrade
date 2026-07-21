@@ -28,21 +28,16 @@ def env(sample_ohlcv_df):
     e.close()
 
 
-def test_value_of_a_real_single_observation(env):
-    """A single env observation -> scalar V(s) of shape (1,)."""
+@pytest.mark.parametrize("bars,expected_shape", [
+    (5, (1,)),                  # single real observation, batch_size []
+    ((3, 5, 7, 9), (4, 1)),     # stacked batch of B bars (how the trainer feeds it)
+], ids=["single", "stacked-batch"])
+def test_value_of_a_real_observation(env, bars, expected_shape):
+    """A real observation (single or stacked batch) -> finite V(s) of the expected shape."""
     critic = ObservationCritic(env.market_data_keys)
-    obs = env.obs_at(5)  # real reset td at bar 5, batch_size []
+    obs = env.obs_at(bars) if isinstance(bars, int) else torch.stack([env.obs_at(b) for b in bars])
     value = critic(obs)
-    assert value.shape == (1,)
-    assert torch.isfinite(value).all()
-
-
-def test_value_of_a_stacked_batch(env):
-    """A batch of B bars (how the trainer feeds it) -> V(s) of shape (B, 1)."""
-    critic = ObservationCritic(env.market_data_keys)
-    batch = torch.stack([env.obs_at(b) for b in (3, 5, 7, 9)])  # batch_size [4]
-    value = critic(batch)
-    assert value.shape == (4, 1)
+    assert value.shape == expected_shape
     assert torch.isfinite(value).all()
 
 
@@ -65,31 +60,35 @@ def test_critic_learns_a_constant_target(env):
 
 
 def test_ignores_extra_keys():
-    """Reads only market_data + account_state; other keys in the td are ignored."""
+    """An extra td key must NOT change V (reads only the declared market_data + account_state).
+    Asserts value-invariance, not just shape: LazyLinear absorbs any input width, so a mutation
+    that concatenated every td key would still yield shape (2,1) — only the value check catches it."""
     critic = ObservationCritic(["market_data_1Min"])
-    td = TensorDict(
-        {
-            "market_data_1Min": torch.randn(2, 10, 4),
-            "account_state": torch.randn(2, 6),
-            "reward": torch.randn(2, 1),  # extraneous, must be ignored
-        },
+    base = TensorDict(
+        {"market_data_1Min": torch.randn(2, 10, 4), "account_state": torch.randn(2, 6)},
         batch_size=[2],
     )
-    assert critic(td).shape == (2, 1)
+    with_extra = base.clone()
+    with_extra["reward"] = torch.randn(2, 1)  # extraneous key that must be ignored
+    with torch.no_grad():
+        critic(base)  # materialize LazyLinear on the declared-keys width first
+        assert torch.allclose(critic(base), critic(with_extra))
 
 
-def test_every_market_data_key_affects_the_value():
-    """Multi-timeframe (differing flattened widths): EVERY market_data key must influence V.
-    Guards the concat path against a dropped key — a regression that hardcoded keys[0] would
-    still pass shape checks (LazyLinear masks the narrower input), so only value-sensitivity
-    catches it."""
+@pytest.mark.parametrize("perturb_key", ["market_data_a", "market_data_b", "account_state"])
+def test_every_declared_input_affects_the_value(perturb_key):
+    """EVERY declared input — each market_data key AND account_state — must influence V. Guards
+    the concat path against a dropped input: a hardcoded keys[0] OR a dropped account_state still
+    passes shape checks (LazyLinear masks the narrower input), so only value-sensitivity per input
+    catches it. account_state carries position/exposure/pnl — the state a trading baseline most needs."""
     critic = ObservationCritic(["market_data_a", "market_data_b"])
     td = TensorDict(
         {"market_data_a": torch.randn(2, 10, 4), "market_data_b": torch.randn(2, 8, 3),  # widths 40 vs 24
          "account_state": torch.randn(2, 6)},
         batch_size=[2],
     )
-    v0 = critic(td)
-    perturbed = td.clone()
-    perturbed["market_data_b"] = torch.randn(2, 8, 3)  # change ONLY the second key
-    assert not torch.allclose(v0, critic(perturbed)), "V ignores market_data_b — a key was dropped"
+    with torch.no_grad():
+        v0 = critic(td)  # materializes LazyLinear
+        perturbed = td.clone()
+        perturbed[perturb_key] = torch.randn_like(td[perturb_key])  # change ONLY this input
+        assert not torch.allclose(v0, critic(perturbed)), f"V ignores {perturb_key} — an input was dropped"
