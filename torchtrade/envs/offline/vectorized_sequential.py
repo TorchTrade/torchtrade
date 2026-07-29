@@ -17,7 +17,7 @@ from typing import Callable, List, Optional, Tuple, Union
 import pandas as pd
 import torch
 from tensordict import TensorDict, TensorDictBase
-from torchrl.data import Bounded, Categorical, Composite
+from torchrl.data import Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
 
 from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservationSampler
@@ -200,12 +200,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
         observation_spec = Composite(shape=batch)
         observation_spec.set(
             "account_state",
-            Bounded(
-                low=-torch.inf,
-                high=torch.inf,
-                shape=batch + torch.Size([6]),
-                dtype=torch.float32,
-            ),
+            Unbounded(shape=batch + torch.Size([6]), dtype=torch.float32),
         )
         for i, tf in enumerate(self._time_frames):
             tf_key = tf.obs_key_freq()
@@ -213,9 +208,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
             md_key = self._market_data_keys[i]
             observation_spec.set(
                 md_key,
-                Bounded(
-                    low=-torch.inf,
-                    high=torch.inf,
+                Unbounded(
                     shape=batch + torch.Size([self._window_sizes[i], n_features]),
                     dtype=torch.float32,
                 ),
@@ -223,12 +216,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
         self.observation_spec = observation_spec
 
         # Reward spec
-        self.reward_spec = Bounded(
-            low=-torch.inf,
-            high=torch.inf,
-            shape=batch + torch.Size([1]),
-            dtype=torch.float32,
-        )
+        self.reward_spec = Unbounded(shape=batch + torch.Size([1]), dtype=torch.float32)
 
         # Done spec
         self.full_done_spec = Composite(

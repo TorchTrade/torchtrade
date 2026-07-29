@@ -20,7 +20,7 @@ from typing import Callable, List, Optional
 import numpy as np
 import torch
 from tensordict import TensorDictBase
-from torchrl.data import Bounded
+from torchrl.data import Unbounded
 from torchrl.envs.transforms import Transform
 
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
@@ -158,11 +158,6 @@ class BinanceOHLCVTransform(Transform):
         ):
             observation_spec.set(
                 self._key(tf, window),
-                Bounded(
-                    low=-float("inf"),
-                    high=float("inf"),
-                    shape=(window, self._n_features),
-                    dtype=torch.float32,
-                ),
+                Unbounded(shape=(window, self._n_features), dtype=torch.float32),
             )
         return observation_spec

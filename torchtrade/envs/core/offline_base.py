@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 from tensordict import TensorDictBase
-from torchrl.data import Bounded
+from torchrl.data import Unbounded
 from torchrl.data import Categorical, Composite, Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
@@ -138,12 +138,7 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         # Account state spec
         self.account_state_key = "account_state"
         self.account_state = account_state
-        account_state_spec = Bounded(
-            low=-torch.inf,
-            high=torch.inf,
-            shape=(len(account_state),),
-            dtype=torch.float
-        )
+        account_state_spec = Unbounded(shape=(len(account_state),), dtype=torch.float)
         self.observation_spec.set(self.account_state_key, account_state_spec)
 
         # Market data specs (one per timeframe)
@@ -169,11 +164,8 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             else:
                 tf_num_features = num_features
 
-            market_data_spec = Bounded(
-                low=-torch.inf,
-                high=torch.inf,
-                shape=(self.config.window_sizes[i], tf_num_features),
-                dtype=torch.float
+            market_data_spec = Unbounded(
+                shape=(self.config.window_sizes[i], tf_num_features), dtype=torch.float
             )
             self.observation_spec.set(market_data_key, market_data_spec)
             self.market_data_keys.append(market_data_key)

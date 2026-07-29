@@ -32,7 +32,7 @@ from typing import Optional
 import requests
 import torch
 from tensordict import TensorDict, TensorDictBase
-from torchrl.data import Binary, Bounded, Categorical
+from torchrl.data import Binary, Bounded, Categorical, Unbounded
 from torchrl.data.tensor_specs import Composite
 from torchrl.envs import EnvBase
 
@@ -249,9 +249,7 @@ class PolymarketBetEnv(EnvBase):
         )
         self.action_spec = Categorical(2)
         self.reward_spec = Composite(
-            reward=Bounded(
-                low=-float("inf"), high=float("inf"), shape=(1,), dtype=torch.float32
-            ),
+            reward=Unbounded(shape=(1,), dtype=torch.float32),
             shape=(),
         )
         # Declare only terminated/truncated; TorchRL derives `done` automatically
@@ -353,9 +351,7 @@ class PolymarketBetEnv(EnvBase):
     def _market_state(market: PolymarketMarket) -> torch.Tensor:
         """4-element market state: [yes_price, spread, volume_24h, liquidity]."""
         return torch.tensor(
-            [market.yes_price, market.spread, market.volume_24h, market.liquidity],
-            dtype=torch.float32,
-        )
+            [market.yes_price, market.spread, market.volume_24h, market.liquidity], dtype=torch.float32)
 
     def _fetch_next_market(self) -> Optional[PolymarketMarket]:
         """Get the next upcoming market, sleeping and retrying on ``None``.
