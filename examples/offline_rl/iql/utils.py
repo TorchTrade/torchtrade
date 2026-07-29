@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import functools
-import os
 
 import torch.nn
 import torch.optim
@@ -11,7 +10,6 @@ from torch.distributions import Categorical
 from torchrl.data import (
     Composite,
     LazyMemmapStorage,
-    TensorDictPrioritizedReplayBuffer,
     TensorDictReplayBuffer,
 )
 from torchrl.data.replay_buffers import SamplerWithoutReplacement
@@ -142,56 +140,13 @@ def make_environment(train_df, test_df, cfg, train_num_envs=1, eval_num_envs=1):
 # ---------------------------
 
 
-def make_replay_buffer(
-    batch_size,
-    prb=False,
-    buffer_size=1000000,
-    scratch_dir=None,
-    device="cpu",
-    prefetch=3,
-):
-    if prb:
-        replay_buffer = TensorDictPrioritizedReplayBuffer(
-            alpha=0.7,
-            beta=0.5,
-            pin_memory=False,
-            prefetch=prefetch,
-            storage=LazyMemmapStorage(
-                buffer_size,
-                scratch_dir=scratch_dir,
-                device=device,
-            ),
-            batch_size=batch_size,
-        )
-    else:
-        replay_buffer = TensorDictReplayBuffer(
-            pin_memory=False,
-            prefetch=prefetch,
-            storage=LazyMemmapStorage(
-                buffer_size,
-                scratch_dir=scratch_dir,
-                device=device,
-            ),
-            batch_size=batch_size,
-        )
-    return replay_buffer
-
-
-def _is_hf_repo_id(path):
-    """An 'org/name' repo id, as opposed to a filesystem path. Anything that exists on
-    disk or is written as a path wins, so a relative buffer path isn't sent to the Hub."""
-    return (
-        "/" in path
-        and not path.startswith((".", "/"))
-        and not os.path.exists(path)
-    )
-
-
 def make_offline_replay_buffer(rb_cfg, env):
     if rb_cfg.data_path == "synthetic":
         # Roll out the env so the keys match observation_spec; a hand-built td doesn't.
         td = env.rollout(rb_cfg.buffer_size, break_when_any_done=False).reshape(-1)
-    elif _is_hf_repo_id(rb_cfg.data_path):
+    elif "/" in rb_cfg.data_path and not rb_cfg.data_path.startswith((".", "/")):
+        # An org/name repo id. Write ./relative or /absolute for an on-disk buffer --
+        # hydra chdirs into its run dir, so probing the filesystem here is unreliable.
         from datasets import load_dataset
         from torchtrade.utils import dataset_to_td
         ds = load_dataset(rb_cfg.data_path, split="train")

@@ -22,7 +22,7 @@ logger:
   exp_name: iql
   group_name: null
   eval_iter: 200
-  eval_steps: 1000
+  eval_steps: 10000  # long enough to run the 14-day test split to done
   mode: online
   eval_envs: 5
   video: False

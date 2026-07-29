@@ -10,6 +10,7 @@ Similar to TorchRL's sota-tests approach.
 """
 
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -128,23 +129,15 @@ class TestOnlineExamplesWithMocks:
         env.close()
 
 
-# =============================================================================
-# Offline data plumbing (dataset_to_td + replay buffer)
-# =============================================================================
-
 def _check_hf_market_data_available():
-    """Check if HuggingFace market data dataset is accessible."""
-    import os
+    """Metadata only -- load_dataset here would pull ~1.4M rows at collection time."""
     import warnings
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     try:
-        # Metadata only -- load_dataset here would pull ~1.4M rows at collection time
-        # just to answer a yes/no.
         from huggingface_hub import HfApi
         HfApi().dataset_info(HF_MARKET_DATA_PATH, token=token)
         return True
     except Exception as e:
-        # Use warnings to make debug info visible in pytest output
         warnings.warn(
             f"HF market data '{HF_MARKET_DATA_PATH}' check failed "
             f"(token={'set' if token else 'NOT SET'}): {e}",
@@ -153,15 +146,18 @@ def _check_hf_market_data_available():
         return False
 
 
-_HF_MARKET_DATA_AVAILABLE = None
+_HF_MARKET_DATA_AVAILABLE = _check_hf_market_data_available()
+
+# The example smoke tests are the ONLY thing covering the fixes that make the offline
+# IQL example run at all, and they skip when the dataset is unreachable -- i.e. they
+# fail open, which is exactly how the dead dataset paths stayed green for so long.
+# Set TORCHTRADE_REQUIRE_HF=1 (do this in CI) to turn that skip into a real failure.
+_REQUIRE_HF = os.environ.get("TORCHTRADE_REQUIRE_HF") == "1"
 
 
-def hf_market_data_available():
-    """Cached check for HuggingFace market data availability."""
-    global _HF_MARKET_DATA_AVAILABLE
-    if _HF_MARKET_DATA_AVAILABLE is None:
-        _HF_MARKET_DATA_AVAILABLE = _check_hf_market_data_available()
-    return _HF_MARKET_DATA_AVAILABLE
+# =============================================================================
+# Offline data plumbing (dataset_to_td + replay buffer)
+# =============================================================================
 
 
 @pytest.fixture
@@ -253,6 +249,47 @@ def test_offline_buffer_hf_branch_synthesises_missing_terminated(
     sample = buffer.sample()
     assert sample["next", "terminated"].shape == (4, 1)
     assert torch.equal(sample["next", "terminated"], sample["next", "done"])
+
+
+@pytest.mark.parametrize("data_path,goes_to_hub", [
+    ("Some-Org/some-transitions", True),   # org/name repo id
+    ("./buf", False),                      # dot-relative on-disk buffer
+    ("buf", False),                        # bare filename
+], ids=["repo-id", "dot-relative", "bare-name"])
+def test_offline_buffer_routes_repo_ids_to_the_hub_and_paths_to_disk(
+    tmp_path, monkeypatch, hf_dataset, iql_offline_utils, data_path, goes_to_hub
+):
+    """A path written as a path must never be shipped to the Hub. Probing the filesystem
+    can't decide this -- hydra chdirs into its run dir before this runs -- so the routing
+    is syntactic, and each of its conditions needs holding down."""
+    import datasets
+    from tensordict import TensorDict
+
+    monkeypatch.chdir(tmp_path)
+    n = 8
+    TensorDict({
+        "observation": torch.randn(n, 3),
+        "action": torch.randint(0, 3, (n,)),
+        "next": TensorDict({
+            "observation": torch.randn(n, 3),
+            "reward": torch.randn(n),
+            "done": torch.zeros(n, dtype=torch.bool),
+        }, batch_size=[n]),
+    }, batch_size=[n]).save("buf")
+
+    reached_hub = False
+
+    def _fake_load_dataset(*a, **kw):
+        nonlocal reached_hub
+        reached_hub = True
+        return hf_dataset
+
+    monkeypatch.setattr(datasets, "load_dataset", _fake_load_dataset)
+
+    rb_cfg = SimpleNamespace(data_path=data_path, buffer_size=n, batch_size=4)
+    iql_offline_utils.make_offline_replay_buffer(rb_cfg, env=None)
+
+    assert reached_hub is goes_to_hub
 
 
 def test_run_command_uses_the_interpreter_running_the_tests():
@@ -401,7 +438,7 @@ def run_command(command: str, timeout: int = 300) -> int:
     # Use the interpreter running the tests; a stale `python` on PATH would smoke-test
     # the examples against a different torchrl than the one under test.
     if command.startswith("python "):
-        command = sys.executable + command[len("python"):]
+        command = shlex.quote(sys.executable) + command[len("python"):]
 
     process = subprocess.Popen(
         command,
@@ -424,12 +461,9 @@ def run_command(command: str, timeout: int = 300) -> int:
 
 
 @pytest.mark.skipif(
-    len(EXAMPLE_COMMANDS) == 0,
-    reason="No example commands configured yet"
-)
-@pytest.mark.skipif(
-    not hf_market_data_available(),
-    reason=f"HuggingFace market data '{HF_MARKET_DATA_PATH}' not accessible (may require auth)"
+    not _HF_MARKET_DATA_AVAILABLE and not _REQUIRE_HF,
+    reason=f"HuggingFace market data '{HF_MARKET_DATA_PATH}' not accessible "
+           f"(set TORCHTRADE_REQUIRE_HF=1 to fail instead of skip)"
 )
 @pytest.mark.parametrize("name,command", list(EXAMPLE_COMMANDS.items()))
 def test_example_commands(name: str, command: str):

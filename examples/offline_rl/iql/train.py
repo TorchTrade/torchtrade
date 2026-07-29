@@ -161,7 +161,6 @@ def main(cfg: DictConfig):  # noqa: F821
                     auto_cast_to_device=True,
                     break_when_any_done=True,
                 )
-                eval_rollout.squeeze()
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
                 fig = eval_env.base_env.render_history(return_fig=True)
@@ -186,6 +185,8 @@ def main(cfg: DictConfig):  # noqa: F821
     pbar.close()
     if not eval_env.is_closed:
         eval_env.close()
+    if not train_env.is_closed:
+        train_env.close()
 
 
     
