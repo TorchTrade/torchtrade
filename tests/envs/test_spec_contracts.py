@@ -1,16 +1,14 @@
 """Contract tests for observation/reward spec declarations.
 
-`Bounded(low=-inf, high=inf)` is not a harmless spelling of "unconstrained": TorchRL
-samples a Bounded spec as `uniform() * (high - low) + low`, so infinite bounds make
-every `.rand()` draw NaN and the spec rejects its own sample. Nothing in the normal
-test path catches it -- `check_env_specs()` builds its dummy batch from `spec.zero()`,
-never `.rand()` -- so it survived across every environment until an example that used
-the standard `spec.rand()` lazy-init idiom silently initialised its nets on NaN.
+TorchRL samples a Bounded spec as `uniform() * (high - low) + low`, so an infinite
+bound makes `.rand()` produce NaN (both bounds infinite) or inf (one bound infinite),
+and inf poisons the first forward pass just as thoroughly. `check_env_specs()` cannot
+catch either: it builds its dummy batch from `spec.zero()` and a real rollout, never
+`.rand()`. So every environment shipped a spec that could not be sampled, and the
+standard `spec.rand()` lazy-init idiom silently initialised networks on garbage.
 
-The structural guard is source-level on purpose. Two attempts to sweep this by hand
-missed sites: once because the sweep was driven by a file list, and once because a file
-spelled infinity `float("inf")` instead of `torch.inf`. A guard that parses every file
-in the package cannot be escaped by either.
+Use `Unbounded(shape=..., dtype=...)` for unbounded quantities, and finite numbers
+where a bound is real.
 """
 
 import ast
@@ -18,77 +16,137 @@ import pathlib
 
 import pytest
 import torch
+from tensordict import TensorDictBase
 
 import torchtrade
 
-PACKAGE_ROOT = pathlib.Path(torchtrade.__file__).parent
+# examples/ is scanned too: the bug was found there, in an example whose lazy init used
+# the spec.rand() idiom. Guarding only the package would leave its discovery site open.
+REPO_ROOT = pathlib.Path(torchtrade.__file__).parent.parent
+SCAN_ROOTS = [REPO_ROOT / "torchtrade", REPO_ROOT / "examples"]
 
 
-def _is_infinite(node):
-    """True for `torch.inf`, `np.inf`, `float("inf")` and their negations."""
+def _infinite(node, consts):
+    """True for `torch.inf`, `np.inf`, `float("inf")`, their negations, and names bound
+    to any of those at module level."""
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-        return _is_infinite(node.operand)
-    if isinstance(node, ast.Attribute) and node.attr == "inf":
-        return True
-    if (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "float"
-        and node.args
-        and isinstance(node.args[0], ast.Constant)
-        and str(node.args[0].value).lower().lstrip("-") in {"inf", "infinity"}
-    ):
-        return True
-    return isinstance(node, ast.Constant) and node.value in (float("inf"), float("-inf"))
+        return _infinite(node.operand, consts)
+    if isinstance(node, ast.Attribute):
+        return node.attr == "inf"
+    if isinstance(node, ast.Name):
+        return consts.get(node.id, False)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "float":
+        return bool(node.args) and isinstance(node.args[0], ast.Constant) and str(
+            node.args[0].value
+        ).lstrip("-").lower().startswith("inf")
+    return False
 
 
-def _infinite_bounded_calls():
-    """Every `Bounded(...)` in the package whose low AND high are both infinite."""
-    for path in sorted(PACKAGE_ROOT.rglob("*.py")):
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
-                continue
-            if node.func.id != "Bounded":
-                continue
-            kw = {k.arg: k.value for k in node.keywords}
-            if "low" in kw and "high" in kw and _is_infinite(kw["low"]) and _is_infinite(kw["high"]):
-                yield f"{path.relative_to(PACKAGE_ROOT.parent)}:{node.lineno}"
+def _bounded_names(tree):
+    """`Bounded`, plus any alias it was imported under."""
+    names = {"Bounded"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            names.update(a.asname or a.name for a in node.names if a.name == "Bounded")
+    return names
+
+
+def _infinitely_bounded_calls():
+    """Every `Bounded(...)` under the scan roots with an infinite low or high."""
+    for root in SCAN_ROOTS:
+        for path in sorted(root.rglob("*.py")):
+            tree = ast.parse(path.read_text(), filename=str(path))
+            names = _bounded_names(tree)
+            # Module-level `INF = torch.inf` style indirection.
+            consts = {
+                t.id: _infinite(n.value, {})
+                for n in ast.walk(tree)
+                if isinstance(n, ast.Assign)
+                for t in n.targets
+                if isinstance(t, ast.Name)
+            }
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                is_bounded = (
+                    (isinstance(func, ast.Name) and func.id in names)
+                    or (isinstance(func, ast.Attribute) and func.attr == "Bounded")
+                )
+                if not is_bounded:
+                    continue
+                kw = {k.arg: k.value for k in node.keywords}
+                # Bounded(low, high, ...) may pass either positionally.
+                low = kw.get("low", node.args[0] if len(node.args) > 0 else None)
+                high = kw.get("high", node.args[1] if len(node.args) > 1 else None)
+                if (low is not None and _infinite(low, consts)) or (
+                    high is not None and _infinite(high, consts)
+                ):
+                    yield f"{path.relative_to(REPO_ROOT)}:{node.lineno}"
 
 
 def test_no_spec_is_bounded_by_infinity():
-    """Use Unbounded instead: a doubly-infinite Bounded samples NaN from .rand().
-
-    Half-infinite bounds are deliberately allowed -- e.g. polymarket's market_state is
-    Bounded(low=0.0, high=inf), where the lower bound is a real constraint (prices and
-    sizes are non-negative) and .rand() yields inf rather than NaN.
-    """
-    offenders = list(_infinite_bounded_calls())
+    """An infinite bound on either side makes .rand() unsamplable (NaN, or inf that
+    becomes NaN downstream). Catches aliased, qualified and positional spellings, so
+    it cannot be sidestepped by writing the same thing a different way."""
+    offenders = list(_infinitely_bounded_calls())
     assert not offenders, (
-        "Bounded(low=-inf, high=inf) samples NaN; use Unbounded(shape=..., dtype=...):\n  "
-        + "\n  ".join(offenders)
+        "Bounded with an infinite bound cannot be sampled; use Unbounded(shape=..., "
+        "dtype=...) or a finite bound:\n  " + "\n  ".join(offenders)
     )
 
 
-def test_offline_env_specs_sample_finite_values(sample_ohlcv_df):
-    """The behaviour the structural guard exists to protect: a spec must be able to
-    produce a sample it would itself accept. check_env_specs() cannot catch this."""
-    from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
+def _offline_envs(df):
+    """One instance per offline env family. Built here rather than fixtured so a new
+    family shows up as an import error instead of silently going uncovered."""
+    from torchtrade.envs.offline import (
+        OneStepTradingEnv, SequentialTradingEnv, SequentialTradingEnvSLTP,
+        VectorizedSequentialTradingEnv,
+    )
 
-    env = SequentialTradingEnv(
-        sample_ohlcv_df,
-        SequentialTradingEnvConfig(
-            time_frames=["5Min", "15Min"], window_sizes=[10, 10],
-            execute_on="5Min", initial_cash=1000, action_levels=[0, 1],
+    common = dict(
+        time_frames=["5Min", "15Min"], window_sizes=[10, 10],
+        execute_on="5Min", initial_cash=1000,
+    )
+    from torchtrade.envs.offline import (
+        OneStepTradingEnvConfig, SequentialTradingEnvConfig,
+        SequentialTradingEnvSLTPConfig, VectorizedSequentialTradingEnvConfig,
+    )
+    return {
+        "sequential": SequentialTradingEnv(df, SequentialTradingEnvConfig(**common)),
+        "sequential_sltp": SequentialTradingEnvSLTP(df, SequentialTradingEnvSLTPConfig(**common)),
+        "onestep": OneStepTradingEnv(df, OneStepTradingEnvConfig(**common)),
+        "vectorized": VectorizedSequentialTradingEnv(
+            df, VectorizedSequentialTradingEnvConfig(**common, num_envs=2)
         ),
-    )
+    }
 
-    sample = env.observation_spec.rand()
-    for key in sample.keys():
-        value = sample[key]
-        if value.is_floating_point():
-            assert torch.isfinite(value).all(), f"{key} sampled non-finite values"
-    assert env.observation_spec.is_in(sample), "spec rejects its own sample"
 
-    reward = env.reward_spec.rand()
-    assert torch.isfinite(reward).all(), "reward_spec sampled non-finite values"
+@pytest.fixture
+def offline_envs(sample_ohlcv_df):
+    return _offline_envs(sample_ohlcv_df)
+
+
+@pytest.mark.parametrize(
+    "family", ["sequential", "sequential_sltp", "onestep", "vectorized"]
+)
+def test_env_specs_sample_finite_values(offline_envs, family):
+    """The behaviour the structural guard protects, checked per env family: a spec must
+    produce a sample it would itself accept. The guard proves no infinite Bounded is
+    written down; this proves the specs are actually samplable."""
+    env = offline_envs[family]
+
+    for name in ("observation_spec", "reward_spec", "action_spec", "full_done_spec"):
+        spec = getattr(env, name, None)
+        if spec is None:
+            continue
+        sample = spec.rand()
+        values = (
+            sample.values(include_nested=True, leaves_only=True)
+            if isinstance(sample, TensorDictBase)
+            else [sample]
+        )
+        for value in values:
+            if value.is_floating_point():
+                assert torch.isfinite(value).all(), f"{family}.{name} sampled non-finite"
+        assert spec.is_in(sample), f"{family}.{name} rejects its own sample"

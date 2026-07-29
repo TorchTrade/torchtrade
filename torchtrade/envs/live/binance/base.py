@@ -5,8 +5,7 @@ from typing import Callable, List, Optional
 
 import torch
 from tensordict import TensorDictBase
-from torchrl.data import Unbounded
-from torchrl.data import Composite
+from torchrl.data import Composite, Unbounded
 
 from torchtrade.envs.utils.timeframe import timeframe_to_seconds
 from torchtrade.envs.live.binance.observation import BinanceObservationClass

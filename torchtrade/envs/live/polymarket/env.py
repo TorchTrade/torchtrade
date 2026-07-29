@@ -242,9 +242,7 @@ class PolymarketBetEnv(EnvBase):
         # Specs, Binary for bool flags (per TorchRL spec semantics) and
         # reward inside a Composite so RewardSum-style transforms work.
         self.observation_spec = Composite(
-            market_state=Bounded(
-                low=0.0, high=float("inf"), shape=(4,), dtype=torch.float32
-            ),
+            market_state=Unbounded(shape=(4,), dtype=torch.float32),
             shape=(),
         )
         self.action_spec = Categorical(2)
@@ -351,7 +349,9 @@ class PolymarketBetEnv(EnvBase):
     def _market_state(market: PolymarketMarket) -> torch.Tensor:
         """4-element market state: [yes_price, spread, volume_24h, liquidity]."""
         return torch.tensor(
-            [market.yes_price, market.spread, market.volume_24h, market.liquidity], dtype=torch.float32)
+            [market.yes_price, market.spread, market.volume_24h, market.liquidity],
+            dtype=torch.float32,
+        )
 
     def _fetch_next_market(self) -> Optional[PolymarketMarket]:
         """Get the next upcoming market, sleeping and retrying on ``None``.

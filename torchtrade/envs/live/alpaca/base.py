@@ -5,8 +5,7 @@ from typing import Callable, List, Optional
 
 import torch
 from tensordict import TensorDict, TensorDictBase
-from torchrl.data import Unbounded
-from torchrl.data import Composite
+from torchrl.data import Composite, Unbounded
 
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass

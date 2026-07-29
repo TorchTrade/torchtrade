@@ -290,8 +290,8 @@ def make_discrete_iql_model(cfg, env, device):
 
     # init nets
 
-    # Real reset obs, not observation_spec.rand(): the specs are Bounded with infinite
-    # bounds, so sampling them yields NaN.
+    # A real observation rather than observation_spec.rand(): lazy init on actual data
+    # keeps the first forward pass representative of what training will see.
     example_td = env.reset().to(device)
     with torch.no_grad(), set_exploration_type(ExplorationType.RANDOM):
         for net in model:

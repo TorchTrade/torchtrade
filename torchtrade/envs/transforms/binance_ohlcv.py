@@ -36,7 +36,7 @@ class BinanceOHLCVTransform(Transform):
     :meth:`BinanceObservationClass.get_observations` and writes one tensor per
     ``(timeframe, window)`` pair into the next-step TensorDict, keyed
     ``{key_prefix}_{TimeFrame.obs_key_freq()}_{window}``. The
-    ``observation_spec`` is extended with matching ``Bounded`` entries so
+    ``observation_spec`` is extended with matching ``Unbounded`` entries so
     ``check_env_specs`` passes.
 
     Args:

@@ -197,11 +197,11 @@ Environments must define their observation space:
 
 ```python
 def _make_observation_space(self):
-    return spaces.Box(
-        low=-np.inf,
-        high=np.inf,
+    # Unbounded, not Bounded(low=-inf, high=inf): TorchRL samples a Bounded spec as
+    # uniform() * (high - low) + low, so infinite bounds make every .rand() draw NaN.
+    return Unbounded(
         shape=(self.window_size, self.n_features),
-        dtype=np.float32
+        dtype=torch.float32,
     )
 ```
 
