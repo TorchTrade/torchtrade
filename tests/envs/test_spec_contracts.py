@@ -125,6 +125,9 @@ def _assert_specs_sample_finite(env, label):
         assert spec.is_in(sample), f"{label}.{name} rejects its own sample"
 
 
+# One per family, though 3 of the 5 currently share TorchTradeOfflineEnv's builder, so a
+# defect there fails 3 cases. Kept per the all-environments rule: a family that later
+# overrides spec construction is then already covered.
 OFFLINE_ENVS = [
     (SequentialTradingEnv, SequentialTradingEnvConfig, {}),
     (SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig, {}),
@@ -183,7 +186,12 @@ LIVE_ENVS = _concrete_live_envs()
 def test_live_env_specs_sample_finite(env_cls):
     """Built via __new__ + the unbound spec builder rather than a full env: every
     exchange needs different broker mocks to construct, and the specs are all this
-    test is about."""
+    test is about.
+
+    The 10 cases resolve to 5 builders (no SLTP variant overrides one), so a defect
+    fails 2 cases. Deduplicating would need a hand-maintained MRO map, which is exactly
+    what the __subclasses__ discovery exists to avoid.
+    """
     env = env_cls.__new__(env_cls)
     env.observer = _StubObserver()
     # include_base_features=True so the shared _declare_base_features_spec runs: that spec
