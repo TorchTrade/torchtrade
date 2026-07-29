@@ -20,6 +20,7 @@ from tensordict import TensorDictBase
 
 import torchtrade
 import torchtrade.envs  # noqa: F401 -- registers every live env as a subclass
+from tests.envs.test_live_env_base import _subclasses
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.offline import (
     OneStepTradingEnv,
@@ -94,8 +95,11 @@ def test_no_spec_is_bounded_by_infinity():
     import, qualified `module.Bounded`, `torch.inf`/`np.inf`/`float("inf")`/`1e999`.
     It does NOT resolve indirection -- `partial(Bounded, ...)`, a Bounded subclass,
     a name assigned from Bounded, or `**kwargs` unpacking all escape it, and only
-    `.py` files under torchtrade/ and examples/ are scanned. It is a guard against
-    re-introducing the pattern, not an adversarial sandbox.
+    `.py` files under torchtrade/ and examples/ are scanned. Those are left alone
+    deliberately: each is caught by the behavioural tests below (verified), and an
+    earlier attempt to resolve name indirection here introduced both false positives
+    and false negatives. This guards against re-introducing the pattern; it is not an
+    adversarial sandbox.
     """
     offenders = list(_infinitely_bounded_calls())
     assert not offenders, (
@@ -167,14 +171,10 @@ class _StubObserver:
 
 
 def _concrete_live_envs():
-    """Discovered, not hand-listed, so exchange #6 cannot skip this by being forgotten."""
-    def walk(cls):
-        for sub in cls.__subclasses__():
-            yield sub
-            yield from walk(sub)
-
+    """Discovered, not hand-listed, so exchange #6 cannot skip this by being forgotten.
+    Abstract bases are dropped -- EnvBase.__new__ rejects them."""
     return sorted(
-        (c for c in set(walk(TorchTradeLiveEnv)) if not getattr(c, "__abstractmethods__", None)),
+        (c for c in set(_subclasses(TorchTradeLiveEnv)) if not getattr(c, "__abstractmethods__", None)),
         key=lambda c: c.__name__,
     )
 
