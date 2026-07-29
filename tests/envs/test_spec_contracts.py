@@ -34,8 +34,8 @@ from torchtrade.envs.offline import (
     VectorizedSequentialTradingEnvSLTPConfig,
 )
 
-# examples/ too: the .rand() lazy-init idiom lives there, and that is where this bug
-# was found.
+# examples/ is scanned too: that is where this bug was found, and example code is where
+# the spec.rand() lazy-init idiom tends to reappear.
 REPO_ROOT = pathlib.Path(torchtrade.__file__).parent.parent
 SCAN_ROOTS = [REPO_ROOT / "torchtrade", REPO_ROOT / "examples"]
 
@@ -50,9 +50,9 @@ def _infinite(node):
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "float":
         return bool(node.args) and _infinite(node.args[0])
     if isinstance(node, ast.Constant):
-        return isinstance(node.value, (int, float)) and math.isinf(node.value) or (
-            isinstance(node.value, str) and node.value.lstrip("-").lower().startswith("inf")
-        )
+        if isinstance(node.value, str):
+            return node.value.lstrip("-").lower().startswith("inf")
+        return isinstance(node.value, float) and math.isinf(node.value)
     return False
 
 
@@ -107,9 +107,9 @@ def test_no_spec_is_bounded_by_infinity():
 def _assert_specs_sample_finite(env, label):
     """A spec must produce a sample it would itself accept.
 
-    isfinite is the load-bearing assertion; is_in is near-tautological for Unbounded
-    and Categorical (it checks shape/dtype only) but would catch a shape or dtype
-    declaration that disagrees with what the spec generates.
+    isfinite is the load-bearing assertion. is_in is a strict subset of it -- it rejects
+    the NaN a two-sided-infinite Bounded produces, but accepts the inf a one-sided one
+    does -- kept as a second net on the NaN case, not as independent coverage.
     """
     for name in ("observation_spec", "reward_spec", "action_spec", "full_done_spec"):
         spec = getattr(env, name)
@@ -149,8 +149,9 @@ def test_offline_env_specs_sample_finite(sample_ohlcv_df, env_cls, config_cls, e
 
 
 class _StubObserver:
-    """Satisfies every live observer interface the spec builders read -- alpaca derives
-    the feature width from get_observations(), the futures bases from get_features()."""
+    """Satisfies every live observer interface the spec builders read: alpaca, binance and
+    bitget take the feature width from get_observations(); bybit and okx from
+    get_features(). All five read get_keys()."""
 
     def get_keys(self):
         return ["1Minute_10", "5Minute_10"]
@@ -184,10 +185,10 @@ def test_live_env_specs_sample_finite(env_cls):
     exchange needs different broker mocks to construct, and the specs are all this
     test is about."""
     env = env_cls.__new__(env_cls)
-    object.__setattr__(env, "observer", _StubObserver())
-    object.__setattr__(
-        env, "config", types.SimpleNamespace(window_sizes=[10, 10], include_base_features=False)
-    )
+    env.observer = _StubObserver()
+    # include_base_features=True so the shared _declare_base_features_spec runs: that spec
+    # has a documented history of drifting per-exchange (#61) and is otherwise unexercised.
+    env.config = types.SimpleNamespace(window_sizes=[10, 10], include_base_features=True)
     env_cls._build_observation_specs(env)
 
     sample = env.observation_spec.rand()
@@ -196,3 +197,47 @@ def test_live_env_specs_sample_finite(env_cls):
         if value.is_floating_point():
             assert torch.isfinite(value).all(), f"{env_cls.__name__}.{key} sampled non-finite"
     assert env.observation_spec.is_in(sample)
+
+
+def test_live_env_discovery_covers_every_exchange():
+    """The parametrize above is only unskippable if discovery actually finds everything:
+    an exchange dropping out would silently shrink it and stay green."""
+    exchanges = {c.__module__.split(".")[3] for c in LIVE_ENVS}
+    assert exchanges == {"alpaca", "binance", "bitget", "bybit", "okx"}, exchanges
+    assert len(LIVE_ENVS) == 10, [c.__name__ for c in LIVE_ENVS]
+
+
+def test_transform_observation_spec_samples_finite():
+    """The transform is not an env, so the live parametrize cannot reach it -- without
+    this its spec is guarded only by the source scan."""
+    from torchrl.data import Composite
+    from torchtrade.envs.transforms.binance_ohlcv import BinanceOHLCVTransform
+    from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+    transform = BinanceOHLCVTransform.__new__(BinanceOHLCVTransform)
+    transform.observer = types.SimpleNamespace(
+        time_frames=[TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute)],
+        window_sizes=[60, 30],
+    )
+    transform._key_prefix = "ohlcv"
+    transform._n_features = 5
+
+    spec = transform.transform_observation_spec(Composite(shape=()))
+    sample = spec.rand()
+    for key in sample.keys():
+        assert torch.isfinite(sample[key]).all(), f"transform.{key} sampled non-finite"
+
+
+def test_polymarket_env_specs_sample_finite():
+    """PolymarketBetEnv subclasses EnvBase directly, not TorchTradeLiveEnv, so it is
+    invisible to the __subclasses__ discovery above."""
+    from unittest.mock import MagicMock
+
+    from torchtrade.envs.live.polymarket import PolymarketBetEnv, PolymarketBetEnvConfig
+
+    env = PolymarketBetEnv(
+        PolymarketBetEnvConfig(market_slug_prefix="btc-updown-5m-", dry_run=True),
+        scanner=MagicMock(),
+        trader=MagicMock(),
+    )
+    _assert_specs_sample_finite(env, "PolymarketBetEnv")
