@@ -62,7 +62,14 @@ class GoogleNewsTool(Tool):
         return entries
 
     def run(self, query: Optional[str] = None, as_of=None) -> str:
-        # as_of accepted for a future offline point-in-time mode; unused for now.
+        # RSS only serves current headlines, so ignoring as_of would leak future news
+        # into a backtest. Refuse rather than leak.
+        if as_of is not None:
+            raise NotImplementedError(
+                "google_news cannot serve point-in-time results: the RSS feed only "
+                "returns current headlines, so an as_of query would leak future news "
+                "into a backtest. Omit as_of to fetch live news."
+            )
         q = query or symbol_to_query(self.symbol)
         try:
             entries = self._fetch(q)

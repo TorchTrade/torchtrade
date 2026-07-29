@@ -13,7 +13,7 @@ env:
   exp_name: ${logger.exp_name}
   seed: 0
   backend: gym
-  data_path: Sebasdi/TorchTrade_btcusd_spot_1m_12_2024_to_09_2025
+  data_path: Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025
 
 # logger
 logger:

@@ -76,7 +76,7 @@ def main(cfg: DictConfig):  # noqa: F821
     test_df = df[0:(1440 * 14)]  # 14 days
     train_df = df[(1440 * 14):]
 
-    _, eval_env = make_environment(
+    train_env, eval_env = make_environment(
         train_df,
         test_df,
         cfg,
@@ -85,7 +85,7 @@ def main(cfg: DictConfig):  # noqa: F821
     )
     max_eval_steps = 10000
     # Create replay buffer
-    replay_buffer = make_offline_replay_buffer(cfg.replay_buffer)
+    replay_buffer = make_offline_replay_buffer(cfg.replay_buffer, train_env)
 
     # Create agent
     model = make_discrete_iql_model(cfg, eval_env, device)
@@ -165,7 +165,8 @@ def main(cfg: DictConfig):  # noqa: F821
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
                 fig = eval_env.base_env.render_history(return_fig=True)
-                action_history = eval_env.base_env.action_history[0]
+                # .history is one tracker per worker; .actions are binarized to -1/0/1.
+                action_history = eval_env.base_env.history[0].actions
                 hold_action = action_history.count(0)
                 buy_actions = action_history.count(1)
                 sell_actions = action_history.count(-1)

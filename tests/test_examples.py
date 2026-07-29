@@ -11,6 +11,7 @@ Similar to TorchRL's sota-tests approach.
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,11 +21,8 @@ import numpy as np
 # Get the repository root
 REPO_ROOT = Path(__file__).parent.parent
 
-# HuggingFace dataset path for real market data (replay buffer)
-HF_DATASET_PATH = "Torch-Trade/AlpacaLiveData_LongOnly-v0"
-
 # HuggingFace dataset path for market OHLCV data (used by online examples)
-HF_MARKET_DATA_PATH = "Torch-Trade/BTCUSD_sport_1m_12_2024_to_09_2025"
+HF_MARKET_DATA_PATH = "Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025"
 
 
 # =============================================================================
@@ -142,37 +140,6 @@ class TestOfflineEnvironments:
 # HuggingFace Dataset Tests
 # =============================================================================
 
-def _check_hf_dataset_available():
-    """Check if HuggingFace dataset is accessible."""
-    import os
-    import warnings
-    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-    try:
-        from datasets import load_dataset
-        ds = load_dataset(HF_DATASET_PATH, split="train", token=token)
-        return True
-    except Exception as e:
-        # Use warnings to make debug info visible in pytest output
-        warnings.warn(
-            f"HF dataset '{HF_DATASET_PATH}' check failed "
-            f"(token={'set' if token else 'NOT SET'}): {e}",
-            UserWarning
-        )
-        return False
-
-
-# Check once at module load time to avoid repeated slow checks
-_HF_DATASET_AVAILABLE = None
-
-
-def hf_dataset_available():
-    """Cached check for HuggingFace dataset availability."""
-    global _HF_DATASET_AVAILABLE
-    if _HF_DATASET_AVAILABLE is None:
-        _HF_DATASET_AVAILABLE = _check_hf_dataset_available()
-    return _HF_DATASET_AVAILABLE
-
-
 def _check_hf_market_data_available():
     """Check if HuggingFace market data dataset is accessible."""
     import os
@@ -203,93 +170,47 @@ def hf_market_data_available():
     return _HF_MARKET_DATA_AVAILABLE
 
 
-@pytest.mark.skipif(
-    not hf_dataset_available(),
-    reason=f"HuggingFace dataset '{HF_DATASET_PATH}' not accessible (may be private or require auth)"
-)
-class TestHuggingFaceDataset:
-    """Test loading and using HuggingFace dataset for offline RL."""
+class TestDatasetToTensorDict:
+    """Cover dataset_to_td, the HF -> TensorDict bridge the offline IQL example uses.
+    Built in-memory so the conversion is tested rather than HuggingFace availability."""
 
     @pytest.fixture
-    def hf_tensordict(self):
-        """Load HuggingFace dataset and convert to TensorDict."""
-        from datasets import load_dataset
+    def hf_dataset(self):
+        from datasets import Dataset
+        n, window, obs_dim = 16, 12, 4
+        rng = np.random.default_rng(0)
+        return Dataset.from_dict({
+            "observation": rng.standard_normal((n, window, obs_dim)).tolist(),
+            "action": rng.integers(0, 3, n).tolist(),
+            "next.observation": rng.standard_normal((n, window, obs_dim)).tolist(),
+            "next.reward": rng.standard_normal(n).tolist(),
+            "next.done": [False] * n,
+        })
+
+    def test_dotted_columns_become_nested_keys(self, hf_dataset):
+        """'next.reward' must become ('next', 'reward'), not a literal top-level key."""
         from torchtrade.utils import dataset_to_td
-        import os
 
-        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-        ds = load_dataset(HF_DATASET_PATH, split="train", token=token)
-        td = dataset_to_td(ds)
-        return td
+        td = dataset_to_td(hf_dataset)
 
-    def test_load_hf_dataset(self):
-        """Test that HuggingFace dataset can be loaded."""
-        from datasets import load_dataset
-        import os
+        assert td.batch_size == torch.Size([16])
+        assert td["next", "reward"].shape == (16,)
+        assert td["next", "observation"].shape == (16, 12, 4)
+        assert td["observation"].shape == (16, 12, 4)
+        assert "next.reward" not in td.keys()
 
-        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-        ds = load_dataset(HF_DATASET_PATH, split="train", token=token)
-        assert ds is not None
-        assert len(ds) > 0
-
-    def test_convert_dataset_to_tensordict(self, hf_tensordict):
-        """Test conversion from HuggingFace dataset to TensorDict."""
-        td = hf_tensordict
-        assert td is not None
-        assert td.batch_size[0] > 0
-
-    def test_tensordict_has_required_keys(self, hf_tensordict):
-        """Test that converted TensorDict has required RL keys."""
-        td = hf_tensordict
-
-        # Check for observation/action structure
-        all_keys = list(td.keys(include_nested=True, leaves_only=True))
-        key_names = [str(k) for k in all_keys]
-
-        # Should have action
-        assert "action" in td.keys(), f"Missing 'action' key. Available: {key_names}"
-
-        # Should have next dict with reward and done
-        assert "next" in td.keys() or any("next" in str(k) for k in all_keys), \
-            f"Missing 'next' structure. Available: {key_names}"
-
-    def test_tensordict_with_replay_buffer(self, hf_tensordict):
-        """Test that TensorDict can be used with TorchRL replay buffer."""
+    def test_converted_td_extends_replay_buffer(self, hf_dataset):
+        """Guards the downstream use in examples/offline_rl/iql/utils.py."""
         from torchrl.data import TensorDictReplayBuffer, LazyMemmapStorage
-        from torchrl.data.replay_buffers import SamplerWithoutReplacement
+        from torchtrade.utils import dataset_to_td
 
-        td = hf_tensordict
-        size = td.batch_size[0]
+        td = dataset_to_td(hf_dataset)
+        rb = TensorDictReplayBuffer(storage=LazyMemmapStorage(td.batch_size[0]), batch_size=8)
+        rb.extend(td)
 
-        # Create replay buffer
-        replay_buffer = TensorDictReplayBuffer(
-            storage=LazyMemmapStorage(size),
-            batch_size=min(32, size),
-            sampler=SamplerWithoutReplacement(drop_last=True),
-        )
-
-        # Extend buffer with data
-        replay_buffer.extend(td)
-
-        # Sample from buffer
-        sample = replay_buffer.sample()
-        assert sample is not None
-        assert sample.batch_size[0] == min(32, size)
-
-    def test_tensordict_shapes_valid(self, hf_tensordict):
-        """Test that TensorDict tensor shapes are valid for training."""
-        td = hf_tensordict
-
-        # Check action shape
-        if "action" in td.keys():
-            action = td["action"]
-            assert action.dim() >= 1, "Action should have at least 1 dimension"
-
-        # Check observation shapes (market data keys)
-        for key in td.keys():
-            if "market_data" in str(key):
-                obs = td[key]
-                assert obs.dim() >= 2, f"{key} should have at least 2 dimensions (batch, features)"
+        sample = rb.sample()
+        assert sample.batch_size[0] == 8
+        assert sample["next", "reward"].shape == (8,)
 
 
 # =============================================================================
@@ -317,16 +238,16 @@ EXAMPLE_COMMANDS = {
         "env.test_split_start=2025-07-01 "
     ),
 
-    # TODO: Enable offline IQL test once encoder shape mismatch is fixed
-    # "iql_offline": (
-    #     "python examples/offline_rl/iql/train.py "
-    #     "optim.gradient_steps=5 "
-    #     "replay_buffer.data_path=synthetic "
-    #     "replay_buffer.batch_size=16 "
-    #     "replay_buffer.buffer_size=50 "
-    #     "logger.backend= "
-    #     "logger.eval_iter=1000000 "
-    # ),
+    "iql_offline": (
+        "python examples/offline_rl/iql/train.py "
+        "optim.gradient_steps=5 "
+        "optim.device=cpu "
+        "replay_buffer.data_path=synthetic "
+        "replay_buffer.batch_size=16 "
+        "replay_buffer.buffer_size=50 "
+        "logger.backend= "
+        "logger.eval_iter=1000000 "
+    ),
 
     # ==========================================================================
     # DSAC Example
@@ -425,6 +346,11 @@ def run_command(command: str, timeout: int = 300) -> int:
     """
     env = os.environ.copy()
     env["WANDB_MODE"] = "disabled"  # Disable wandb logging
+
+    # Use the interpreter running the tests; a stale `python` on PATH would smoke-test
+    # the examples against a different torchrl than the one under test.
+    if command.startswith("python "):
+        command = sys.executable + command[len("python"):]
 
     process = subprocess.Popen(
         command,

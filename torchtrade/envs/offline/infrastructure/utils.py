@@ -27,7 +27,7 @@ def load_torch_trade_dataset(
 
     Example:
         >>> df = load_torch_trade_dataset()
-        >>> df = load_torch_trade_dataset("Torch-Trade/ethusdt_spot_1m", split="test")
+        >>> df = load_torch_trade_dataset("Torch-Trade/ethusdt_spot_1m_05_2021_to_03_2026", split="test")
     """
     import datasets
     dataset = datasets.load_dataset(dataset_name)
