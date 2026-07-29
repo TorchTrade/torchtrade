@@ -19,6 +19,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 import numpy as np
+import pandas as pd
 
 # Get the repository root
 REPO_ROOT = Path(__file__).parent.parent
@@ -295,6 +296,43 @@ def test_offline_buffer_routes_repo_ids_to_the_hub_and_paths_to_disk(
     iql_offline_utils.make_offline_replay_buffer(rb_cfg, env=None)
 
     assert reached_hub is goes_to_hub
+
+
+def test_offline_iql_config_builds_a_spot_env_whose_action_head_matches(iql_offline_utils):
+    """Loads the shipped config.yaml, so it also fails if a key the code reads was
+    deleted. The env must be spot (flat/long) -- pairing a short level with leverage=1
+    makes the env clip it to flat, giving the policy a dead action -- and the model's
+    action head must be derived from the env, not hardcoded, or the two silently desync
+    (a wrong head trains fine and never raises)."""
+    from omegaconf import OmegaConf
+
+    cfg = OmegaConf.load(REPO_ROOT / "examples" / "offline_rl" / "iql" / "config.yaml")
+    OmegaConf.update(cfg, "logger.exp_name", "test", merge=False)
+
+    n = 3000
+    rng = np.random.default_rng(0)
+    price = 100 + np.cumsum(rng.standard_normal(n) * 0.1)
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": price, "high": price + 0.5, "low": price - 0.5,
+        "close": price, "volume": rng.random(n) * 10,
+    })
+
+    raw_env = iql_offline_utils.env_maker(df, cfg)
+    assert raw_env.action_levels == [0, 1], f"not spot: {raw_env.action_levels}"
+    assert raw_env.leverage == 1
+
+    # Build it the way the example does -- the encoders need the batch dim.
+    train_env, eval_env = iql_offline_utils.make_environment(df, df, cfg)
+    try:
+        model = iql_offline_utils.make_discrete_iql_model(cfg, eval_env, torch.device("cpu"))
+        obs = eval_env.reset()
+        assert model[0](obs)["logits"].shape[-1] == eval_env.action_spec.n
+        assert model[1](obs)["state_action_value"].shape[-1] == eval_env.action_spec.n
+    finally:
+        for e in (train_env, eval_env):
+            if not e.is_closed:
+                e.close()
 
 
 def test_run_command_uses_the_interpreter_running_the_tests():

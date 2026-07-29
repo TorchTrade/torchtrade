@@ -41,8 +41,6 @@ import datasets
 
 @hydra.main(config_path="", config_name="config")
 def main(cfg: DictConfig):  # noqa: F821
-    #set_gym_backend(cfg.env.backend).set()
-
     # Create logger
     exp_name = generate_exp_name("TorchTrade-offline", cfg.logger.exp_name)
     logger = None

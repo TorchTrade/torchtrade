@@ -81,6 +81,9 @@ def env_maker(df, cfg, device="cpu"):
         slippage=cfg.env.slippage,
         transaction_fee=cfg.env.transaction_fee,
         bankrupt_threshold=cfg.env.bankrupt_threshold,
+        # Spot: flat/long only. The default [-1, 0, 1] pairs a short level with
+        # leverage=1, so the env clips it to flat and the policy carries a dead action.
+        action_levels=[0, 1],
         seed=cfg.env.seed,
     )
     return SequentialTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
@@ -224,10 +227,13 @@ def make_discrete_iql_model(cfg, env, device):
 
 
     encoder = SafeSequential(*encoders, account_state_encoder).to(device)
-    
+
+    # From the env, not hardcoded: the head must track cfg.env.action_levels.
+    num_actions = env.action_spec.n
+
     actor_net = MLP(
         num_cells=cfg.model.hidden_sizes,
-        out_features=3,
+        out_features=num_actions,
         activation_class=ACTIVATIONS[cfg.model.activation],
         device=device,
     )
@@ -253,7 +259,7 @@ def make_discrete_iql_model(cfg, env, device):
     # Define Critic Network
     qvalue_net = MLP(
         num_cells=cfg.model.hidden_sizes,
-        out_features=3,
+        out_features=num_actions,
         activation_class=ACTIVATIONS[cfg.model.activation],
         device=device,
     )
