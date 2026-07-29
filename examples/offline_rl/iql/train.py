@@ -83,7 +83,7 @@ def main(cfg: DictConfig):  # noqa: F821
         train_num_envs=1,
         eval_num_envs=1,
     )
-    max_eval_steps = 10000
+    max_eval_steps = cfg.logger.eval_steps
     # Create replay buffer
     replay_buffer = make_offline_replay_buffer(cfg.replay_buffer, train_env)
 

@@ -12,8 +12,8 @@ Similar to TorchRL's sota-tests approach.
 import os
 import subprocess
 import sys
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -129,16 +129,7 @@ class TestOnlineExamplesWithMocks:
 
 
 # =============================================================================
-# Offline Environment Tests (using synthetic data)
-# =============================================================================
-
-class TestOfflineEnvironments:
-    """Test offline environments with synthetic data (deprecated - use EXAMPLE_COMMANDS instead)."""
-    pass
-
-
-# =============================================================================
-# HuggingFace Dataset Tests
+# Offline data plumbing (dataset_to_td + replay buffer)
 # =============================================================================
 
 def _check_hf_market_data_available():
@@ -147,8 +138,10 @@ def _check_hf_market_data_available():
     import warnings
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     try:
-        from datasets import load_dataset
-        ds = load_dataset(HF_MARKET_DATA_PATH, split="train", token=token)
+        # Metadata only -- load_dataset here would pull ~1.4M rows at collection time
+        # just to answer a yes/no.
+        from huggingface_hub import HfApi
+        HfApi().dataset_info(HF_MARKET_DATA_PATH, token=token)
         return True
     except Exception as e:
         # Use warnings to make debug info visible in pytest output
@@ -171,39 +164,40 @@ def hf_market_data_available():
     return _HF_MARKET_DATA_AVAILABLE
 
 
-class TestDatasetToTensorDict:
-    """Cover dataset_to_td, the HF -> TensorDict bridge the offline IQL example uses.
-    Built in-memory so the conversion is tested rather than HuggingFace availability."""
-
-    @pytest.fixture
-    def hf_dataset(self):
-        from datasets import Dataset
-        n, window, obs_dim = 16, 12, 4
-        rng = np.random.default_rng(0)
-        return Dataset.from_dict({
-            "observation": rng.standard_normal((n, window, obs_dim)).tolist(),
-            "action": rng.integers(0, 3, n).tolist(),
-            "next.observation": rng.standard_normal((n, window, obs_dim)).tolist(),
-            "next.reward": rng.standard_normal(n).tolist(),
-            "next.done": [False] * n,
-        })
-
-    def test_dotted_columns_become_nested_keys(self, hf_dataset):
-        """'next.reward' must become ('next', 'reward'), not a literal top-level key."""
-        from torchtrade.utils import dataset_to_td
-
-        td = dataset_to_td(hf_dataset)
-
-        assert td.batch_size == torch.Size([16])
-        assert td["next", "reward"].shape == (16,)
-        assert td["next", "observation"].shape == (16, 12, 4)
-        assert td["observation"].shape == (16, 12, 4)
-        assert "next.reward" not in td.keys()
+@pytest.fixture
+def hf_dataset():
+    """An ordinary offline-RL transition dataset: dotted columns for the `next` subtd,
+    and no `next.terminated` (many real datasets only record `done`)."""
+    from datasets import Dataset
+    n, window, obs_dim = 16, 12, 4
+    rng = np.random.default_rng(0)
+    return Dataset.from_dict({
+        "observation": rng.standard_normal((n, window, obs_dim)).tolist(),
+        "action": rng.integers(0, 3, n).tolist(),
+        "next.observation": rng.standard_normal((n, window, obs_dim)).tolist(),
+        "next.reward": rng.standard_normal(n).tolist(),
+        "next.done": [False] * n,
+    })
 
 
-def _load_iql_offline_utils():
-    """Import examples/offline_rl/iql/utils.py under a unique name (several examples
-    ship a module called `utils`)."""
+def test_dotted_columns_become_nested_keys(hf_dataset):
+    """dataset_to_td's one non-trivial job: 'next.reward' must become
+    ('next', 'reward'), not a literal top-level key."""
+    from torchtrade.utils import dataset_to_td
+
+    td = dataset_to_td(hf_dataset)
+
+    assert td.batch_size == torch.Size([16])
+    assert td["next", "reward"].shape == (16,)
+    assert td["next", "observation"].shape == (16, 12, 4)
+    assert td["observation"].shape == (16, 12, 4)
+    assert "next.reward" not in td.keys()
+
+
+@pytest.fixture
+def iql_offline_utils():
+    # Loaded by path under a unique name: 8 examples ship a module called `utils` and
+    # examples/ has no __init__.py, so a plain import would poison sys.modules.
     import importlib.util
 
     path = REPO_ROOT / "examples" / "offline_rl" / "iql" / "utils.py"
@@ -214,7 +208,9 @@ def _load_iql_offline_utils():
 
 
 @pytest.mark.parametrize("source_shape", [(8,), (8, 1)], ids=["flat", "already-2d"])
-def test_offline_buffer_gives_reward_done_terminated_a_trailing_dim(tmp_path, source_shape):
+def test_offline_buffer_gives_reward_done_terminated_a_trailing_dim(
+    tmp_path, source_shape, iql_offline_utils
+):
     """Regression: DiscreteIQLLoss needs (*batch, 1) to match state_value and raises
     'All input tensors ... must share a unique shape' on flat (*batch,). dataset_to_td
     and tensordict.load both yield flat rewards, so make_offline_replay_buffer must add
@@ -234,11 +230,37 @@ def test_offline_buffer_gives_reward_done_terminated_a_trailing_dim(tmp_path, so
     }, batch_size=[n]).save(str(tmp_path))
 
     rb_cfg = SimpleNamespace(data_path=str(tmp_path), buffer_size=n, batch_size=4)
-    buffer = _load_iql_offline_utils().make_offline_replay_buffer(rb_cfg, env=None)
+    buffer = iql_offline_utils.make_offline_replay_buffer(rb_cfg, env=None)
 
     sample = buffer.sample()
     for key in (("next", "reward"), ("next", "done"), ("next", "terminated")):
         assert sample[key].shape == (4, 1), f"{key}: {sample[key].shape}"
+
+
+def test_offline_buffer_hf_branch_synthesises_missing_terminated(
+    monkeypatch, hf_dataset, iql_offline_utils
+):
+    """A replay dataset with next.done but no next.terminated is ordinary, and the loss
+    still needs terminated. Reaching into td.get() for an absent key returns None, so
+    this branch used to die with AttributeError before it ever got to the buffer."""
+    import datasets
+
+    monkeypatch.setattr(datasets, "load_dataset", lambda *a, **kw: hf_dataset)
+
+    rb_cfg = SimpleNamespace(data_path="Some-Org/some-transitions", buffer_size=16, batch_size=4)
+    buffer = iql_offline_utils.make_offline_replay_buffer(rb_cfg, env=None)
+
+    sample = buffer.sample()
+    assert sample["next", "terminated"].shape == (4, 1)
+    assert torch.equal(sample["next", "terminated"], sample["next", "done"])
+
+
+def test_run_command_uses_the_interpreter_running_the_tests():
+    """A stale `python` on PATH would smoke-test the examples against a different
+    torchrl than the pinned one, and pass."""
+    assert run_command(
+        'python -c "import sys; sys.exit(0 if sys.executable == %r else 1)"' % sys.executable
+    ) == 0
 
 
 # =============================================================================
@@ -275,6 +297,7 @@ EXAMPLE_COMMANDS = {
         "replay_buffer.buffer_size=50 "
         "logger.backend= "
         "logger.eval_iter=1000000 "
+        "logger.eval_steps=5 "
     ),
 
     # ==========================================================================

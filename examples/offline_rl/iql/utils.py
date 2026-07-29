@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import os
 
 import torch.nn
 import torch.optim
@@ -176,12 +177,21 @@ def make_replay_buffer(
     return replay_buffer
 
 
+def _is_hf_repo_id(path):
+    """An 'org/name' repo id, as opposed to a filesystem path. Anything that exists on
+    disk or is written as a path wins, so a relative buffer path isn't sent to the Hub."""
+    return (
+        "/" in path
+        and not path.startswith((".", "/"))
+        and not os.path.exists(path)
+    )
+
+
 def make_offline_replay_buffer(rb_cfg, env):
     if rb_cfg.data_path == "synthetic":
         # Roll out the env so the keys match observation_spec; a hand-built td doesn't.
         td = env.rollout(rb_cfg.buffer_size, break_when_any_done=False).reshape(-1)
-    elif "/" in rb_cfg.data_path and not rb_cfg.data_path.startswith("/"):
-        # HuggingFace dataset path (e.g., "Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
+    elif _is_hf_repo_id(rb_cfg.data_path):
         from datasets import load_dataset
         from torchtrade.utils import dataset_to_td
         ds = load_dataset(rb_cfg.data_path, split="train")
@@ -189,8 +199,12 @@ def make_offline_replay_buffer(rb_cfg, env):
     else:
         td = tensordict.load(rb_cfg.data_path)
 
-    # Value estimators need these as (*batch, 1) to match state_value; no branch above
-    # guarantees the trailing dim.
+    # dataset_to_td only yields the columns the dataset actually has, and the loss needs
+    # terminated. Without truncation info, done is the correct stand-in.
+    if ("next", "terminated") not in td.keys(include_nested=True):
+        td.set(("next", "terminated"), td.get(("next", "done")).clone())
+
+    # Value estimators need these as (*batch, 1) to match state_value.
     for key in (("next", "reward"), ("next", "done"), ("next", "terminated")):
         value = td.get(key)
         if value.ndim == td.ndim:
@@ -200,17 +214,11 @@ def make_offline_replay_buffer(rb_cfg, env):
     data = TensorDictReplayBuffer(
         pin_memory=False,
         prefetch=4,
-        #split_trajs=False,
         storage=LazyMemmapStorage(size),
         batch_size=rb_cfg.batch_size,
         sampler=SamplerWithoutReplacement(drop_last=True),
     )
     data.extend(td)
-    del td
-
-    # add reward2go if needed
-
-
     data.append_transform(DoubleToFloat())
 
     return data
@@ -325,9 +333,8 @@ def make_discrete_iql_model(cfg, env, device):
     # bounds, so sampling them yields NaN.
     example_td = env.reset().to(device)
     with torch.no_grad(), set_exploration_type(ExplorationType.RANDOM):
-        td = example_td
         for net in model:
-            net(td)
+            net(example_td)
 
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Total number of parameters: {total_params}")

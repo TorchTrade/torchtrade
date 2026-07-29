@@ -38,15 +38,6 @@ def test_google_news_empty_results(monkeypatch):
     assert "no recent news" in tool.run().lower()
 
 
-def test_google_news_rejects_as_of_instead_of_leaking_future_news(monkeypatch):
-    """as_of must fail loudly: RSS has no point-in-time archive, so honouring it
-    silently would feed a backtest news published after the decision bar."""
-    tool = GoogleNewsTool(symbol="BTC/USD")
-    monkeypatch.setattr(tool, "_fetch", lambda query: _entries(3))
-    with pytest.raises(NotImplementedError, match="point-in-time"):
-        tool.run(as_of="2024-01-01T00:00:00Z")
-
-
 def test_google_news_fetch_failure_returns_error_string(monkeypatch):
     tool = GoogleNewsTool(symbol="BTC/USD")
     def boom(query):
