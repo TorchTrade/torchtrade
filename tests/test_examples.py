@@ -146,13 +146,15 @@ def _check_hf_market_data_available():
         return False
 
 
-_HF_MARKET_DATA_AVAILABLE = _check_hf_market_data_available()
-
 # The example smoke tests are the ONLY thing covering the fixes that make the offline
 # IQL example run at all, and they skip when the dataset is unreachable -- i.e. they
 # fail open, which is exactly how the dead dataset paths stayed green for so long.
-# Set TORCHTRADE_REQUIRE_HF=1 (do this in CI) to turn that skip into a real failure.
-_REQUIRE_HF = os.environ.get("TORCHTRADE_REQUIRE_HF") == "1"
+# TORCHTRADE_REQUIRE_HF=1 (set in CI) turns that skip into a real failure, and
+# short-circuits the probe so CI never pays for a result it would discard.
+_SKIP_HF_EXAMPLES = (
+    os.environ.get("TORCHTRADE_REQUIRE_HF") != "1"
+    and not _check_hf_market_data_available()
+)
 
 
 # =============================================================================
@@ -255,13 +257,14 @@ def test_offline_buffer_hf_branch_synthesises_missing_terminated(
     ("Some-Org/some-transitions", True),   # org/name repo id
     ("./buf", False),                      # dot-relative on-disk buffer
     ("buf", False),                        # bare filename
-], ids=["repo-id", "dot-relative", "bare-name"])
+    ("<abs>", False),                      # absolute path (resolved below)
+], ids=["repo-id", "dot-relative", "bare-name", "absolute"])
 def test_offline_buffer_routes_repo_ids_to_the_hub_and_paths_to_disk(
     tmp_path, monkeypatch, hf_dataset, iql_offline_utils, data_path, goes_to_hub
 ):
     """A path written as a path must never be shipped to the Hub. Probing the filesystem
     can't decide this -- hydra chdirs into its run dir before this runs -- so the routing
-    is syntactic, and each of its conditions needs holding down."""
+    is syntactic. One row per condition, so none of them can rot unnoticed."""
     import datasets
     from tensordict import TensorDict
 
@@ -286,6 +289,8 @@ def test_offline_buffer_routes_repo_ids_to_the_hub_and_paths_to_disk(
 
     monkeypatch.setattr(datasets, "load_dataset", _fake_load_dataset)
 
+    if data_path == "<abs>":
+        data_path = str(tmp_path / "buf")
     rb_cfg = SimpleNamespace(data_path=data_path, buffer_size=n, batch_size=4)
     iql_offline_utils.make_offline_replay_buffer(rb_cfg, env=None)
 
@@ -461,7 +466,7 @@ def run_command(command: str, timeout: int = 300) -> int:
 
 
 @pytest.mark.skipif(
-    not _HF_MARKET_DATA_AVAILABLE and not _REQUIRE_HF,
+    _SKIP_HF_EXAMPLES,
     reason=f"HuggingFace market data '{HF_MARKET_DATA_PATH}' not accessible "
            f"(set TORCHTRADE_REQUIRE_HF=1 to fail instead of skip)"
 )
