@@ -12,6 +12,7 @@ Similar to TorchRL's sota-tests approach.
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -199,18 +200,45 @@ class TestDatasetToTensorDict:
         assert td["observation"].shape == (16, 12, 4)
         assert "next.reward" not in td.keys()
 
-    def test_converted_td_extends_replay_buffer(self, hf_dataset):
-        """Guards the downstream use in examples/offline_rl/iql/utils.py."""
-        from torchrl.data import TensorDictReplayBuffer, LazyMemmapStorage
-        from torchtrade.utils import dataset_to_td
 
-        td = dataset_to_td(hf_dataset)
-        rb = TensorDictReplayBuffer(storage=LazyMemmapStorage(td.batch_size[0]), batch_size=8)
-        rb.extend(td)
+def _load_iql_offline_utils():
+    """Import examples/offline_rl/iql/utils.py under a unique name (several examples
+    ship a module called `utils`)."""
+    import importlib.util
 
-        sample = rb.sample()
-        assert sample.batch_size[0] == 8
-        assert sample["next", "reward"].shape == (8,)
+    path = REPO_ROOT / "examples" / "offline_rl" / "iql" / "utils.py"
+    spec = importlib.util.spec_from_file_location("_iql_offline_utils", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("source_shape", [(8,), (8, 1)], ids=["flat", "already-2d"])
+def test_offline_buffer_gives_reward_done_terminated_a_trailing_dim(tmp_path, source_shape):
+    """Regression: DiscreteIQLLoss needs (*batch, 1) to match state_value and raises
+    'All input tensors ... must share a unique shape' on flat (*batch,). dataset_to_td
+    and tensordict.load both yield flat rewards, so make_offline_replay_buffer must add
+    the dim -- and must not add a second one to sources that already have it."""
+    from tensordict import TensorDict
+
+    n = 8
+    TensorDict({
+        "observation": torch.randn(n, 3),
+        "action": torch.randint(0, 3, (n,)),
+        "next": TensorDict({
+            "observation": torch.randn(n, 3),
+            "reward": torch.randn(*source_shape),
+            "done": torch.zeros(*source_shape, dtype=torch.bool),
+            "terminated": torch.zeros(*source_shape, dtype=torch.bool),
+        }, batch_size=[n]),
+    }, batch_size=[n]).save(str(tmp_path))
+
+    rb_cfg = SimpleNamespace(data_path=str(tmp_path), buffer_size=n, batch_size=4)
+    buffer = _load_iql_offline_utils().make_offline_replay_buffer(rb_cfg, env=None)
+
+    sample = buffer.sample()
+    for key in (("next", "reward"), ("next", "done"), ("next", "terminated")):
+        assert sample[key].shape == (4, 1), f"{key}: {sample[key].shape}"
 
 
 # =============================================================================
