@@ -334,7 +334,7 @@ from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvCo
 import datasets
 
 # Load historical data from HuggingFace
-df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_01_2020_to_12_2025")
+df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
 df = df["train"].to_pandas()
 df['0'] = pd.to_datetime(df['0'])
 

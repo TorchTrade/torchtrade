@@ -46,6 +46,9 @@ jobs:
           WANDB_MODE: disabled
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
+          # Fail, don't skip, if the datasets the example smoke tests need are
+          # unreachable -- a silent skip is how dead dataset paths stayed green.
+          TORCHTRADE_REQUIRE_HF: "1"
         run: |
           pytest tests/ -v --cov=torchtrade/envs --cov-report=term-missing --cov-report=xml
 

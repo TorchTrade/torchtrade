@@ -41,8 +41,6 @@ import datasets
 
 @hydra.main(config_path="", config_name="config")
 def main(cfg: DictConfig):  # noqa: F821
-    #set_gym_backend(cfg.env.backend).set()
-
     # Create logger
     exp_name = generate_exp_name("TorchTrade-offline", cfg.logger.exp_name)
     logger = None
@@ -76,16 +74,16 @@ def main(cfg: DictConfig):  # noqa: F821
     test_df = df[0:(1440 * 14)]  # 14 days
     train_df = df[(1440 * 14):]
 
-    _, eval_env = make_environment(
+    train_env, eval_env = make_environment(
         train_df,
         test_df,
         cfg,
         train_num_envs=1,
         eval_num_envs=1,
     )
-    max_eval_steps = 10000
+    max_eval_steps = cfg.logger.eval_steps
     # Create replay buffer
-    replay_buffer = make_offline_replay_buffer(cfg.replay_buffer)
+    replay_buffer = make_offline_replay_buffer(cfg.replay_buffer, train_env)
 
     # Create agent
     model = make_discrete_iql_model(cfg, eval_env, device)
@@ -161,11 +159,11 @@ def main(cfg: DictConfig):  # noqa: F821
                     auto_cast_to_device=True,
                     break_when_any_done=True,
                 )
-                eval_rollout.squeeze()
                 eval_reward = eval_rollout["next", "reward"].sum(-2).mean().item()
                 metrics_to_log["eval/reward"] = eval_reward
                 fig = eval_env.base_env.render_history(return_fig=True)
-                action_history = eval_env.base_env.action_history[0]
+                # .history is one tracker per worker; .actions are binarized to -1/0/1.
+                action_history = eval_env.base_env.history[0].actions
                 hold_action = action_history.count(0)
                 buy_actions = action_history.count(1)
                 sell_actions = action_history.count(-1)
@@ -185,6 +183,8 @@ def main(cfg: DictConfig):  # noqa: F821
     pbar.close()
     if not eval_env.is_closed:
         eval_env.close()
+    if not train_env.is_closed:
+        train_env.close()
 
 
     

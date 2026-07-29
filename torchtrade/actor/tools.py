@@ -61,8 +61,7 @@ class GoogleNewsTool(Tool):
             })
         return entries
 
-    def run(self, query: Optional[str] = None, as_of=None) -> str:
-        # as_of accepted for a future offline point-in-time mode; unused for now.
+    def run(self, query: Optional[str] = None) -> str:
         q = query or symbol_to_query(self.symbol)
         try:
             entries = self._fetch(q)
