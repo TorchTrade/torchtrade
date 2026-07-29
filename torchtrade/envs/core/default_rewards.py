@@ -25,11 +25,9 @@ def log_return_reward(history) -> float:
         Log return reward, or -10.0 if bankrupt, or 0.0 if insufficient history
 
     Examples:
-        >>> # Use as default
-        >>> config = SequentialTradingEnvConfig(
-        ...     trading_mode="spot",
-        ...     reward_function=log_return_reward  # This is the default
-        ... )
+        >>> # This is the default; passing it explicitly is equivalent
+        >>> config = SequentialTradingEnvConfig(action_levels=[0, 1])  # spot
+        >>> env = SequentialTradingEnv(df, config, reward_function=log_return_reward)
 
         >>> # Or customize it
         >>> def scaled_log_return(history):
@@ -67,10 +65,8 @@ def sharpe_ratio_reward(history) -> float:
         Sharpe ratio clipped to [-10.0, 10.0], or 0.0 if insufficient history
 
     Examples:
-        >>> config = SequentialTradingEnvConfig(
-        ...     trading_mode="spot",
-        ...     reward_function=sharpe_ratio_reward
-        ... )
+        >>> config = SequentialTradingEnvConfig(action_levels=[0, 1])  # spot
+        >>> env = SequentialTradingEnv(df, config, reward_function=sharpe_ratio_reward)
     """
     if len(history.portfolio_values) < 3:
         return 0.0
@@ -104,10 +100,8 @@ def drawdown_penalty_reward(history) -> float:
         Log return with drawdown penalty
 
     Examples:
-        >>> config = SequentialTradingEnvConfig(
-        ...     trading_mode="spot",
-        ...     reward_function=drawdown_penalty_reward
-        ... )
+        >>> config = SequentialTradingEnvConfig(action_levels=[0, 1])  # spot
+        >>> env = SequentialTradingEnv(df, config, reward_function=drawdown_penalty_reward)
     """
     if len(history.portfolio_values) < 2:
         return 0.0
