@@ -32,7 +32,7 @@ from typing import Optional
 import requests
 import torch
 from tensordict import TensorDict, TensorDictBase
-from torchrl.data import Binary, Bounded, Categorical
+from torchrl.data import Binary, Categorical, Unbounded
 from torchrl.data.tensor_specs import Composite
 from torchrl.envs import EnvBase
 
@@ -242,16 +242,12 @@ class PolymarketBetEnv(EnvBase):
         # Specs, Binary for bool flags (per TorchRL spec semantics) and
         # reward inside a Composite so RewardSum-style transforms work.
         self.observation_spec = Composite(
-            market_state=Bounded(
-                low=0.0, high=float("inf"), shape=(4,), dtype=torch.float32
-            ),
+            market_state=Unbounded(shape=(4,), dtype=torch.float32),
             shape=(),
         )
         self.action_spec = Categorical(2)
         self.reward_spec = Composite(
-            reward=Bounded(
-                low=-float("inf"), high=float("inf"), shape=(1,), dtype=torch.float32
-            ),
+            reward=Unbounded(shape=(1,), dtype=torch.float32),
             shape=(),
         )
         # Declare only terminated/truncated; TorchRL derives `done` automatically

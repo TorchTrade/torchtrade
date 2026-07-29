@@ -20,7 +20,7 @@ from typing import Callable, List, Optional
 import numpy as np
 import torch
 from tensordict import TensorDictBase
-from torchrl.data import Bounded
+from torchrl.data import Unbounded
 from torchrl.envs.transforms import Transform
 
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
@@ -36,7 +36,7 @@ class BinanceOHLCVTransform(Transform):
     :meth:`BinanceObservationClass.get_observations` and writes one tensor per
     ``(timeframe, window)`` pair into the next-step TensorDict, keyed
     ``{key_prefix}_{TimeFrame.obs_key_freq()}_{window}``. The
-    ``observation_spec`` is extended with matching ``Bounded`` entries so
+    ``observation_spec`` is extended with matching ``Unbounded`` entries so
     ``check_env_specs`` passes.
 
     Args:
@@ -158,11 +158,6 @@ class BinanceOHLCVTransform(Transform):
         ):
             observation_spec.set(
                 self._key(tf, window),
-                Bounded(
-                    low=-float("inf"),
-                    high=float("inf"),
-                    shape=(window, self._n_features),
-                    dtype=torch.float32,
-                ),
+                Unbounded(shape=(window, self._n_features), dtype=torch.float32),
             )
         return observation_spec

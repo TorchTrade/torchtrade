@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import torch
 from tensordict import TensorDictBase
-from torchrl.data import Bounded
+from torchrl.data import Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import PositionState, position_direction_from_status
@@ -231,7 +231,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         if self.config.include_base_features:
             self.observation_spec.set(
                 "base_features",
-                Bounded(low=-torch.inf, high=torch.inf, shape=(base_window, 4), dtype=torch.float),
+                Unbounded(shape=(base_window, 4), dtype=torch.float),
             )
 
     def _check_termination(self, portfolio_value: float) -> bool:

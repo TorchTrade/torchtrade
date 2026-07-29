@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 import numpy as np
 import torch
-from torchrl.data import Bounded
+from torchrl.data import Unbounded
 from torchrl.envs import EnvBase
 
 logger = logging.getLogger(__name__)
@@ -52,12 +52,7 @@ class TorchTradeBaseEnv(EnvBase):
             self.slippage = config.slippage
 
         # Create reward spec (common across all environments)
-        self.reward_spec = Bounded(
-            low=-torch.inf,
-            high=torch.inf,
-            shape=(1,),
-            dtype=torch.float
-        )
+        self.reward_spec = Unbounded(shape=(1,), dtype=torch.float)
 
         super().__init__()
 
