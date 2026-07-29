@@ -11,7 +11,6 @@ from torchrl.data import Categorical, Composite, Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import HistoryTracker, PositionState
-from tensordict import TensorDict
 
 
 class TorchTradeOfflineEnv(TorchTradeBaseEnv):

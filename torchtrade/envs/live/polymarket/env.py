@@ -32,7 +32,7 @@ from typing import Optional
 import requests
 import torch
 from tensordict import TensorDict, TensorDictBase
-from torchrl.data import Binary, Bounded, Categorical, Unbounded
+from torchrl.data import Binary, Categorical, Unbounded
 from torchrl.data.tensor_specs import Composite
 from torchrl.envs import EnvBase
 
