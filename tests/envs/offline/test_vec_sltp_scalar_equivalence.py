@@ -478,32 +478,34 @@ def _flat_df_with_wick(bar=20, low=None, high=None, n=50):
 class TestSLTPScalarVecEquivalenceEntryBar:
     """Both envs must apply the entry bar to a freshly-opened position (#268)."""
 
-    @pytest.mark.parametrize("bars_after_entry", [1, 2], ids=["next-bar", "two-bars-later"])
     @pytest.mark.parametrize("leverage,sl_levels,tp_levels,wick_low,wick_high,expected_exit", [
         (1, [-0.025], [0.50], 80.0, None, "sltp_sl"),
         (10, [-0.50], [0.50], 88.0, None, "liquidation"),
         (1, [-0.50], [0.025], None, 120.0, "sltp_tp"),  # the branch the fix never ran
     ], ids=["stop-loss", "liquidation", "take-profit"])
     def test_entry_bar_exit_matches_scalar(
-        self, bars_after_entry, leverage, sl_levels, tp_levels, wick_low, wick_high, expected_exit
+        self, leverage, sl_levels, tp_levels, wick_low, wick_high, expected_exit
     ):
         """Both envs forked this ordering separately, so both could drift separately.
 
         The equivalence suite passed on main because the bug was symmetric — both envs
         skipped the entry bar identically. The value-pinning tests in
         test_sequential_sltp.py are what catch the shared bug; this catches divergence.
+        Only the entry-bar timing is covered here: the held-position path is already
+        exercised by the trend-based cases above.
         """
         crash_bar = 20
         df = _flat_df_with_wick(bar=crash_bar, low=wick_low, high=wick_high)
 
-        # reset caches bar 10 (window_sizes=[10]), so step k executes at bar 10+k.
-        open_step = crash_bar - bars_after_entry - 10
-        actions = [0] * open_step + [1] + [0] * (bars_after_entry + 2)
+        # reset caches bar 10 (window_sizes=[10]), so step k executes at bar 10+k, and
+        # the position opens one bar before the wick.
+        open_step = crash_bar - 1 - 10
+        actions = [0] * open_step + [1] + [0] * 3
 
         mismatches = _run_sltp_sequence(
             df, actions, leverage=leverage,
             sl_levels=sl_levels, tp_levels=tp_levels,
-            label=f"sltp-entry-bar-{leverage}x-{bars_after_entry}",
+            label=f"sltp-entry-bar-{leverage}x-{expected_exit}",
             expect_action_type=expected_exit,
         )
         assert not mismatches, "\n".join(mismatches)
@@ -527,6 +529,9 @@ class TestSLTPScalarVecEquivalenceEntryBar:
             df, actions, leverage=2,
             sl_levels=[-0.025, -0.50], tp_levels=[0.025, 0.50],
             label="sltp-entry-bar-switch",
+            # The hardcoded indices and the delicately balanced levels make this the
+            # scenario most likely to quietly stop testing anything.
+            expect_action_type="sltp_sl",
         )
         assert not mismatches, "\n".join(mismatches)
 

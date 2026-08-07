@@ -397,17 +397,21 @@ class TestSLTPRegression:
 
     @pytest.mark.parametrize("bars_after_entry", [1, 2], ids=["next-bar", "two-bars-later"])
     @pytest.mark.parametrize(
-        "leverage,stoploss_pct,wick_low,fee,expected_exit,expected_balance,expected_terminated", [
+        "leverage,sl_pct,tp_pct,wick_low,wick_high,fee,"
+        "expected_exit,expected_balance,expected_terminated", [
             # The fee rows pin exact values because the next-bar path is the only place
             # an entry fee and an exit fee land in one step; "cheaper than free" would
             # hold just as well if one were charged twice.
-            (1, -0.025, 80.0, 0.0, "sltp_sl", 9750.0, False),
-            (1, -0.025, 80.0, 0.001, "sltp_sl", 9730.519481, False),
-            (10, -0.50, 88.0, 0.0, "liquidation", 400.0, True),
-            (10, -0.50, 88.0, 0.001, "liquidation", 306.534653, True),
-        ], ids=["stop-loss", "stop-loss-fee", "liquidation", "liquidation-fee"])
+            (1, -0.025, 0.50, 80.0, None, 0.0, "sltp_sl", 9750.0, False),
+            (1, -0.025, 0.50, 80.0, None, 0.001, "sltp_sl", 9730.519481, False),
+            (10, -0.50, 0.50, 88.0, None, 0.0, "liquidation", 400.0, True),
+            (10, -0.50, 0.50, 88.0, None, 0.001, "liquidation", 306.534653, True),
+            # The fix repeats the trigger->fill-price mapping, so pin the take-profit
+            # side too: a wrong fill here is invisible to every other assertion.
+            (1, -0.50, 0.025, None, 120.0, 0.0, "sltp_tp", 10250.0, False),
+        ], ids=["stop-loss", "stop-loss-fee", "liquidation", "liquidation-fee", "take-profit"])
     def test_exit_fires_on_the_first_bar_the_position_is_exposed_to(
-        self, bars_after_entry, leverage, stoploss_pct, wick_low, fee,
+        self, bars_after_entry, leverage, sl_pct, tp_pct, wick_low, wick_high, fee,
         expected_exit, expected_balance, expected_terminated
     ):
         """The outcome must not depend on how soon after entry the crash lands (#268).
@@ -431,7 +435,10 @@ class TestSLTPRegression:
             "close": prices.copy(),
             "volume": np.ones(n) * 1000,
         })
-        df.loc[crash_bar, "low"] = wick_low
+        if wick_low is not None:
+            df.loc[crash_bar, "low"] = wick_low
+        else:
+            df.loc[crash_bar, "high"] = wick_high
 
         config = SequentialTradingEnvSLTPConfig(
             leverage=leverage,
@@ -443,8 +450,8 @@ class TestSLTPRegression:
             slippage=0.0,
             seed=42,
             random_start=False,
-            stoploss_levels=[stoploss_pct],
-            takeprofit_levels=[0.50],
+            stoploss_levels=[sl_pct],
+            takeprofit_levels=[tp_pct],
         )
         env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
         td = env.reset()
@@ -461,7 +468,7 @@ class TestSLTPRegression:
             td = env.step(action_td)
 
         assert env.position.position_size == 0, (
-            f"a wick to {wick_low} {bars_after_entry} bar(s) after entry must close the "
+            f"a wick {bars_after_entry} bar(s) after entry must close the "
             f"position, but position_size={env.position.position_size}"
         )
         assert env.history.action_types[-1] == expected_exit
@@ -481,7 +488,9 @@ class TestSLTPRegression:
         assert account_state[0].item() == pytest.approx(0.0), "exposure_pct must read flat"
         assert account_state[1].item() == pytest.approx(0.0), "direction must read flat"
         assert account_state[3].item() == pytest.approx(0.0), "holding_time must read flat"
-        assert td["next"]["reward"].item() < 0, "the round trip lost money"
+        assert (td["next"]["reward"].item() < 0) is (expected_balance < 10000), (
+            "the reward must carry the sign of the round trip"
+        )
         assert bool(td["next"]["terminated"].item()) is expected_terminated
         env.close()
 
