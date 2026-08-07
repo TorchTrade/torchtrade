@@ -26,6 +26,24 @@ from tests.conftest import simple_feature_fn
 TF_1MIN = TimeFrame(1, TimeFrameUnit.Minute)
 
 
+def _flat_df_with_wick(bar, low=None, high=None, n=50):
+    """Flat 100.0 series with one bar carrying a single excursion."""
+    prices = np.full(n, 100.0)
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": prices.copy(),
+        "high": prices.copy(),
+        "low": prices.copy(),
+        "close": prices.copy(),
+        "volume": np.ones(n) * 1000,
+    })
+    if low is not None:
+        df.loc[bar, "low"] = low
+    if high is not None:
+        df.loc[bar, "high"] = high
+    return df
+
+
 def _make_sltp_vec_env(df, leverage=1, num_envs=4, fee=0.0, sl_levels=None, tp_levels=None, max_traj=50):
     """Create a vectorized SLTP env for testing."""
     if sl_levels is None:
@@ -169,6 +187,33 @@ class TestVecSLTPTriggers:
         assert (env._tp_prices == 0).all(), "TP price should be cleared"
         env.close()
 
+    def test_entry_bar_check_targets_the_env_that_opened(self):
+        """The entry-bar exit mask must line up per env (#268).
+
+        Every other test of this path has all envs doing the same thing, where a per-env
+        misalignment is the identity. Aiming the check at a sibling env passes the whole
+        offline suite, so only diverging envs can catch it.
+        """
+        df = _flat_df_with_wick(20, low=80.0)
+
+        env = _make_sltp_vec_env(
+            df, leverage=1, num_envs=2, sl_levels=[-0.025], tp_levels=[0.50],
+        )
+        td = env.reset()
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+
+        for step in range(10):
+            action_td = (td if step == 0 else td["next"]).clone()
+            # env 0 opens into the wick bar; env 1 stays flat throughout
+            action_td["action"] = torch.tensor(
+                [long_idx if step == 9 else 0, 0], dtype=torch.long
+            )
+            td = env.step(action_td)
+
+        assert env._position_sizes.tolist() == [0.0, 0.0]
+        assert env._balances.tolist() == pytest.approx([975.0, 1000.0])
+        env.close()
+
     def test_sl_fires_on_a_mid_bar_wick_when_execute_on_is_coarse(self):
         """A wick inside the execution bar must close the position (issue #267).
 
@@ -176,18 +221,8 @@ class TestVecSLTPTriggers:
         hardcoded column index and re-implements the trigger in tensor form, so it is an
         independent consumer of both the aggregation and the column order.
         """
-        n = 240
-        prices = np.full(n, 100.0)
-        df = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
-            "open": prices.copy(),
-            "high": prices.copy(),
-            "low": prices.copy(),
-            "close": prices.copy(),
-            "volume": np.ones(n) * 1000,
-        })
         # Mid-bar, not the final sub-bar, of the 03:00 execution bar.
-        df.loc[183, "low"] = 95.0
+        df = _flat_df_with_wick(183, low=95.0, n=240)
 
         tf_15min = TimeFrame(15, TimeFrameUnit.Minute)
         config = VectorizedSequentialTradingEnvSLTPConfig(

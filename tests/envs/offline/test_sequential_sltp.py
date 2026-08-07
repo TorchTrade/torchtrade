@@ -395,6 +395,107 @@ class TestSLTPEdgeCases:
 class TestSLTPRegression:
     """Regression tests for known SLTP issues."""
 
+    @pytest.mark.parametrize("bars_after_entry", [1, 2], ids=["next-bar", "two-bars-later"])
+    @pytest.mark.parametrize(
+        "leverage,sl_pct,tp_pct,wick_low,wick_high,fee,"
+        "expected_exit,expected_balance,expected_terminated", [
+            # The fee rows pin exact values rather than an inequality: a double-charged
+            # fee is also "cheaper than free". On the next-bar arm both fees land in a
+            # single step, which happens nowhere else in the codebase.
+            (1, -0.025, 0.50, 80.0, None, 0.0, "sltp_sl", 9750.0, False),
+            (1, -0.025, 0.50, 80.0, None, 0.001, "sltp_sl", 9730.519481, False),
+            (10, -0.50, 0.50, 88.0, None, 0.0, "liquidation", 400.0, True),
+            (10, -0.50, 0.50, 88.0, None, 0.001, "liquidation", 306.534653, True),
+            # The fix repeats the trigger->fill-price mapping, so pin the take-profit
+            # side too: a wrong fill here is invisible to every other assertion.
+            (1, -0.50, 0.025, None, 120.0, 0.0, "sltp_tp", 10250.0, False),
+        ], ids=["stop-loss", "stop-loss-fee", "liquidation", "liquidation-fee", "take-profit"])
+    def test_exit_fires_on_the_first_bar_the_position_is_exposed_to(
+        self, bars_after_entry, leverage, sl_pct, tp_pct, wick_low, wick_high, fee,
+        expected_exit, expected_balance, expected_terminated
+    ):
+        """The outcome must not depend on how soon after entry the crash lands (#268).
+
+        _step advanced the sampler and checked triggers against bar N+1 *before* opening
+        the position at bar N's close, so a position opened one bar before a crash had
+        its first check on bar N+2 and rode straight through it. Entering two bars early
+        exited correctly, which is what made the two paths disagree on identical data.
+        """
+        import numpy as np
+        import pandas as pd
+
+        n = 50
+        crash_bar = 20
+        prices = np.full(n, 100.0)
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": prices.copy(),
+            "high": prices.copy(),
+            "low": prices.copy(),
+            "close": prices.copy(),
+            "volume": np.ones(n) * 1000,
+        })
+        if wick_low is not None:
+            df.loc[crash_bar, "low"] = wick_low
+        else:
+            df.loc[crash_bar, "high"] = wick_high
+
+        config = SequentialTradingEnvSLTPConfig(
+            leverage=leverage,
+            initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=fee,
+            slippage=0.0,
+            seed=42,
+            random_start=False,
+            stoploss_levels=[sl_pct],
+            takeprofit_levels=[tp_pct],
+        )
+        env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
+        td = env.reset()
+
+        # reset caches bar 10 (window_sizes=[10]), so step k executes at bar 10+k and
+        # advances onto bar 11+k. The crash bar is therefore reached during exit_step
+        # whatever bar the position was opened on — that sameness is the point.
+        exit_step = crash_bar - 10 - 1
+        open_step = crash_bar - bars_after_entry - 10
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+        for step in range(exit_step + 1):
+            action_td = (td if step == 0 else td["next"]).clone()
+            action_td["action"] = torch.tensor(long_idx if step == open_step else 0)
+            td = env.step(action_td)
+
+        assert env.position.position_size == 0, (
+            f"a wick {bars_after_entry} bar(s) after entry must close the "
+            f"position, but position_size={env.position.position_size}"
+        )
+        assert env.history.action_types[-1] == expected_exit
+        # An entry-bar exit records only the exit. HistoryTracker has one row per step
+        # and the exit is what determines the ending state, matching what already
+        # happens when a previously-held position triggers. It is now reachable one bar
+        # earlier, so trade counts drawn from action_types under-count entries -- pinned
+        # here so that stays a decision rather than a surprise.
+        assert env.history.action_types.count("long") == (0 if bars_after_entry == 1 else 1)
+        assert env.balance == pytest.approx(expected_balance)
+
+        # The exit must be applied BEFORE the observation, reward and termination are
+        # built. Nothing else pins that: with the exit moved after them the internal
+        # balance is still right, so every other assertion here passes while the policy
+        # is handed an open levered position on a step the env already closed.
+        account_state = td["next"]["account_state"]
+        assert account_state[0].item() == pytest.approx(0.0), "exposure_pct must read flat"
+        assert account_state[1].item() == pytest.approx(0.0), "direction must read flat"
+        assert account_state[3].item() == pytest.approx(0.0), "holding_time must read flat"
+        reward = td["next"]["reward"].item()
+        if expected_balance < 10000:
+            assert reward < 0, "a losing round trip must produce a negative reward"
+        else:
+            assert reward > 0, "a winning round trip must produce a positive reward"
+        assert bool(td["next"]["terminated"].item()) == expected_terminated
+        env.close()
+
     @pytest.mark.parametrize("leverage,stoploss_pct,wick_low,expected_exit,expected_balance", [
         (1, -0.02, 95.0, "sltp_sl", 9800.0),      # SL at 98, no liquidation at 1x
         (10, -0.50, 88.0, "liquidation", 400.0),  # SL at 50 untouched; liquidation at 90.4
