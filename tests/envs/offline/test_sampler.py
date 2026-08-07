@@ -395,17 +395,14 @@ class TestSamplerObservations:
 class TestSamplerBaseFeatures:
     """Tests for base feature retrieval."""
 
-    @pytest.mark.parametrize("execute_on,sub_bars", [
-        (TimeFrame(1, TimeFrameUnit.Minute), 1),
-        (TimeFrame(1, TimeFrameUnit.Hour), 60),
-    ], ids=["source-frequency", "coarser"])
-    def test_execution_bar_aggregates_its_sub_bars(self, sample_ohlcv_df, execute_on, sub_bars):
+    def test_execution_bar_aggregates_its_sub_bars(self, sample_ohlcv_df):
         """Execution bars must aggregate their sub-bars, not copy the final one.
 
         .last() collapses high/low onto the last sub-bar, so the SL/TP and liquidation
-        checks that read this range would never fire. The source-frequency case is the
-        config every SLTP and replay test uses, where the two agree.
+        checks that read this range would never fire. Only a coarse execute_on can show
+        this; at source frequency the two agree, which is why the bug survived.
         """
+        execute_on = TimeFrame(1, TimeFrameUnit.Hour)
         sampler = MarketDataObservationSampler(
             df=sample_ohlcv_df,
             time_frames=[execute_on],
@@ -421,8 +418,6 @@ class TestSamplerBaseFeatures:
             (indexed.index >= timestamp)
             & (indexed.index < timestamp + pd.Timedelta(execute_on.to_pandas_freq()))
         ]
-        assert len(source) == sub_bars
-
         # approx, not ==: execute_base_tensor is float32 over a float64 source.
         assert base_features["open"] == pytest.approx(source["open"].iloc[0])
         assert base_features["high"] == pytest.approx(source["high"].max())
@@ -430,11 +425,10 @@ class TestSamplerBaseFeatures:
         assert base_features["close"] == pytest.approx(source["close"].iloc[-1])
         assert base_features["volume"] == pytest.approx(source["volume"].sum())
 
-        if sub_bars > 1:
-            # Without a real excursion beyond the last sub-bar the assertions above
-            # hold under .last() too, and the case stops discriminating.
-            assert source["high"].max() > source["high"].iloc[-1]
-            assert source["low"].min() < source["low"].iloc[-1]
+        # Without a real excursion beyond the last sub-bar the assertions above hold
+        # under .last() too, and the test stops discriminating.
+        assert source["high"].max() > source["high"].iloc[-1]
+        assert source["low"].min() < source["low"].iloc[-1]
 
     def test_gap_bar_is_flat_rather_than_a_replay_of_the_previous_range(self, sample_ohlcv_df):
         """A bar with no source rows must not inherit the previous bar's high/low.
