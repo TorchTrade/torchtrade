@@ -169,6 +169,59 @@ class TestVecSLTPTriggers:
         assert (env._tp_prices == 0).all(), "TP price should be cleared"
         env.close()
 
+    def test_sl_fires_on_a_mid_bar_wick_when_execute_on_is_coarse(self):
+        """A wick inside the execution bar must close the position (issue #267).
+
+        This env never calls get_base_features: it slices execute_base_tensor by
+        hardcoded column index and re-implements the trigger in tensor form, so it is an
+        independent consumer of both the aggregation and the column order.
+        """
+        n = 240
+        prices = np.full(n, 100.0)
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": prices.copy(),
+            "high": prices.copy(),
+            "low": prices.copy(),
+            "close": prices.copy(),
+            "volume": np.ones(n) * 1000,
+        })
+        # Mid-bar, not the final sub-bar, of the 03:00 execution bar.
+        df.loc[183, "low"] = 95.0
+
+        tf_15min = TimeFrame(15, TimeFrameUnit.Minute)
+        config = VectorizedSequentialTradingEnvSLTPConfig(
+            num_envs=2,
+            leverage=1,
+            stoploss_levels=[-0.02],
+            takeprofit_levels=[0.50],
+            initial_cash=10000,
+            time_frames=[tf_15min],
+            window_sizes=[10],
+            execute_on=tf_15min,
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            random_start=False,
+        )
+        env = VectorizedSequentialTradingEnvSLTP(df, config, simple_feature_fn)
+        td = env.reset()
+
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+        action_td = td.clone()
+        action_td["action"] = torch.full((2,), long_idx, dtype=torch.long)
+        td = env.step(action_td)
+        assert (env._position_sizes > 0).all(), "long should be open before the wick bar"
+
+        hold_td = td["next"].clone()
+        hold_td["action"] = torch.zeros(2, dtype=torch.long)
+        env.step(hold_td)
+
+        assert (env._position_sizes == 0).all(), (
+            "wick to 95.0 inside the execution bar must close the position"
+        )
+        env.close()
+
 
 # ============================================================================
 # PARTIAL RESET TESTS

@@ -395,12 +395,12 @@ class TestSLTPEdgeCases:
 class TestSLTPRegression:
     """Regression tests for known SLTP issues."""
 
-    @pytest.mark.parametrize("leverage,stoploss_pct,wick_low", [
-        (1, -0.02, 95.0),    # SL at 98, no liquidation at 1x
-        (10, -0.50, 88.0),   # SL at 50 untouched; liquidation (~90.5) fires
+    @pytest.mark.parametrize("leverage,stoploss_pct,wick_low,expected_exit,expected_balance", [
+        (1, -0.02, 95.0, "sltp_sl", 9800.0),      # SL at 98, no liquidation at 1x
+        (10, -0.50, 88.0, "liquidation", 400.0),  # SL at 50 untouched; liquidation at 90.4
     ], ids=["stop-loss", "liquidation"])
     def test_exit_fires_on_a_mid_bar_wick_when_execute_on_is_coarse(
-        self, leverage, stoploss_pct, wick_low
+        self, leverage, stoploss_pct, wick_low, expected_exit, expected_balance
     ):
         """A wick inside the execution bar must close the position (issue #267).
 
@@ -414,7 +414,7 @@ class TestSLTPRegression:
         import numpy as np
         import pandas as pd
 
-        n = 600
+        n = 240
         prices = np.full(n, 100.0)
         df = pd.DataFrame({
             "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
@@ -454,10 +454,21 @@ class TestSLTPRegression:
         hold_td["action"] = torch.tensor(0)
         env.step(hold_td)
 
+        # Pinned so the two ways this can break report themselves, rather than surfacing
+        # as an unexplained still-open position below.
+        assert env._cached_base_features["low"] == pytest.approx(wick_low), (
+            "the bar the position is checked against must report the wick: either the "
+            "step landed on a different bar, or the bar did not aggregate its sub-bars"
+        )
         assert env.position.position_size == 0, (
             f"wick to {wick_low} inside the execution bar must close the position, "
             f"but position_size={env.position.position_size}"
         )
+        # Without this the parametrize labels live only in prose: any exit satisfies the
+        # assertion above, so a change making SL leverage-scaled would silently turn the
+        # liquidation case into a second stop-loss case.
+        assert env.history.action_types[-1] == expected_exit
+        assert env.balance == pytest.approx(expected_balance)
         env.close()
 
     def test_short_bracket_prices_not_inverted(self, sample_ohlcv_df):

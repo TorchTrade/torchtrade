@@ -146,8 +146,10 @@ class MarketDataObservationSampler:
         self.exec_times = exec_times[exec_times >= self.min_start_time]
         # create base features of execution time frame (we'll keep DataFrame for column names but also build tensors)
         # SL/TP and liquidation checks read this bar's high/low, so it must span the
-        # whole bar, not just the final sub-bar.
-        execute_base_raw = self.df.resample(execute_on.to_pandas_freq()).agg(full_agg)
+        # whole bar, not just the final sub-bar. Only OHLCV is ever read here (aux
+        # features reach observations via resampled_dfs), and excluding aux keeps the
+        # row[:5] positional contract exact rather than merely conventional.
+        execute_base_raw = self.df.resample(execute_on.to_pandas_freq()).agg(ohlcv_agg)
 
         # Detect and warn about data gaps
         nan_mask = execute_base_raw["close"].isna()
@@ -194,14 +196,10 @@ class MarketDataObservationSampler:
                 warnings.warn(warning_msg, UserWarning, stacklevel=2)
 
         execute_base_filled = execute_base_raw.ffill()
-        # A gap bar has no trades to derive a range from, and forward-filling one would
-        # re-trigger SL/TP on the excursion the position already lived through in the
-        # previous bar. Collapse it to a flat bar at the last known price.
-        for col in ("open", "high", "low"):
-            execute_base_filled.loc[nan_mask, col] = execute_base_filled.loc[nan_mask, "close"]
+        # A gap bar has no trades of its own; forward-filling its range would let SL/TP
+        # re-trigger on the excursion the position already lived through one bar earlier.
+        execute_base_filled.loc[nan_mask, ["open", "high", "low"]] = execute_base_filled.loc[nan_mask, "close"]
         self.execute_base_features_df = execute_base_filled[self.min_start_time:]
-        if aux_cols:
-            self.execute_base_features_df[aux_cols] = self.execute_base_features_df[aux_cols].fillna(0)
         if len(self.execute_base_features_df) == 0:
             raise ValueError("No execute_on base features available after min_start_time")
 

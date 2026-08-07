@@ -213,6 +213,9 @@ class TestAuxiliaryColumns:
         assert ohlcv.open > 50  # Prices start at ~100, not funding_rate ~0.001
         assert ohlcv.close > 50
         assert ohlcv.volume == 1000
+        # Positions 1 and 2 specifically: the vectorized envs read high/low by hardcoded
+        # column index, so swapping them in ohlcv_agg would invert every SL/TP check.
+        assert ohlcv.high >= ohlcv.close >= ohlcv.low
 
     def test_auxiliary_resampling_uses_last(self, ohlcv_with_aux_df):
         """Auxiliary columns should use 'last' aggregation when resampled."""
@@ -458,8 +461,9 @@ class TestSamplerBaseFeatures:
         assert gap["high"] == pytest.approx(gap["close"])
         assert gap["low"] == pytest.approx(gap["close"])
         assert gap["volume"] == 0.0
-        # Only meaningful if the bar it copies from actually had a range to inherit.
-        assert previous["high"] > previous["low"]
+        # Both the high and low assertions only discriminate if the bar they would have
+        # been filled from sits strictly inside its own range.
+        assert previous["high"] > previous["close"] > previous["low"]
 
 
 class TestSamplerHelperMethods:
