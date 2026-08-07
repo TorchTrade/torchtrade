@@ -520,3 +520,35 @@ def test_a_failed_position_fetch_does_not_report_flat(exchange):
         f"{exchange} reported {status.get('position_status')!r} for a failed fetch; "
         "None here means flat and would be traded on"
     )
+
+
+def test_reading_a_field_off_an_unknown_status_says_why():
+    """The trade-sizing paths read .qty/.mark_price directly, not via the direction rule.
+
+    They are fail-closed either way -- the sentinel has no such fields -- but a bare
+    AttributeError from inside order sizing does not say that the exchange was unreachable.
+    """
+    for field in ("qty", "mark_price", "notional_value", "market_value"):
+        with pytest.raises(PositionUnknownError, match="did not report the position"):
+            getattr(POSITION_UNKNOWN, field)
+
+
+@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit"])
+def test_position_sizing_refuses_an_unknown_status(exchange):
+    """_get_current_position_quantity must not size an order off a phantom flat account.
+
+    Its `position.qty if position is not None else 0.0` reads an outage as 0 quantity,
+    which is the second half of the traced doubling: the delta is computed against a
+    position the exchange never said was gone.
+    """
+    import importlib
+    env_mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
+    env_cls = next(
+        c for c in vars(env_mod).values()
+        if isinstance(c, type) and hasattr(c, "_get_current_position_quantity")
+    )
+    env = SimpleNamespace(
+        trader=SimpleNamespace(get_status=lambda: {"position_status": POSITION_UNKNOWN})
+    )
+    with pytest.raises(PositionUnknownError):
+        env_cls._get_current_position_quantity(env)

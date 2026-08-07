@@ -10,6 +10,10 @@ from typing import Dict, List, Union
 POSITION_DUST_EPS = 1e-9
 
 
+class PositionUnknownError(RuntimeError):
+    """Raised when an unknown exchange status reaches code that needs a real direction."""
+
+
 class _PositionUnknown:
     """The exchange did not answer, which is not the same as answering "flat"."""
 
@@ -25,6 +29,14 @@ class _PositionUnknown:
         # outage from silently taking the flat branch.
         return True
 
+    def __getattr__(self, name):
+        # Reading qty/mark_price/notional_value off this would otherwise be a bare
+        # AttributeError from deep inside a sizing path. Every reader is fail-closed
+        # either way; this only makes the reason legible.
+        raise PositionUnknownError(
+            f"cannot read {name!r}: the exchange did not report the position"
+        )
+
     def __repr__(self):
         return "POSITION_UNKNOWN"
 
@@ -33,10 +45,6 @@ class _PositionUnknown:
 # from None, which is a confirmed-flat account: reading a failed call as flat is how a
 # held position gets re-bought every bar of an outage.
 POSITION_UNKNOWN = _PositionUnknown()
-
-
-class PositionUnknownError(RuntimeError):
-    """Raised when an unknown exchange status reaches code that needs a real direction."""
 
 
 def position_direction_from_status(position_status) -> int:
