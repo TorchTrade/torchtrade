@@ -169,6 +169,68 @@ class TestVecSLTPTriggers:
         assert (env._tp_prices == 0).all(), "TP price should be cleared"
         env.close()
 
+    @pytest.mark.parametrize("bars_after_entry", [1, 2], ids=["next-bar", "two-bars-later"])
+    @pytest.mark.parametrize("leverage,stoploss_pct,wick_low,expected_balance", [
+        (1, -0.025, 80.0, 9750.0),
+        (10, -0.50, 88.0, 400.0),
+    ], ids=["stop-loss", "liquidation"])
+    def test_exit_fires_on_the_first_bar_the_position_is_exposed_to(
+        self, bars_after_entry, leverage, stoploss_pct, wick_low, expected_balance
+    ):
+        """Same invariant as the scalar env (#268), which this env forked separately.
+
+        Trades executed at bar N's close after the trigger pass had already run against
+        bar N+1, so a position opened one bar before a crash was first checked on bar
+        N+2. The balances here are the scalar env's, so the two stay in step.
+        """
+        n = 50
+        crash_bar = 20
+        prices = np.full(n, 100.0)
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": prices.copy(),
+            "high": prices.copy(),
+            "low": prices.copy(),
+            "close": prices.copy(),
+            "volume": np.ones(n) * 1000,
+        })
+        df.loc[crash_bar, "low"] = wick_low
+
+        config = VectorizedSequentialTradingEnvSLTPConfig(
+            num_envs=2,
+            leverage=leverage,
+            stoploss_levels=[stoploss_pct],
+            takeprofit_levels=[0.50],
+            initial_cash=10000,
+            time_frames=[TF_1MIN],
+            window_sizes=[10],
+            execute_on=TF_1MIN,
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            random_start=False,
+        )
+        env = VectorizedSequentialTradingEnvSLTP(df, config, simple_feature_fn)
+        td = env.reset()
+
+        exit_step = crash_bar - 10 - 1
+        open_step = crash_bar - bars_after_entry - 10
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+        for step in range(exit_step + 1):
+            action_td = (td if step == 0 else td["next"]).clone()
+            idx = long_idx if step == open_step else 0
+            action_td["action"] = torch.full((2,), idx, dtype=torch.long)
+            td = env.step(action_td)
+
+        assert (env._position_sizes == 0).all(), (
+            f"a wick to {wick_low} {bars_after_entry} bar(s) after entry must close the "
+            f"position, but sizes={env._position_sizes.tolist()}"
+        )
+        # rel=1e-4: these balances are float32 here and float64 in the scalar env, and a
+        # real ordering regression is off by the whole stop distance, not by 2e-3.
+        assert env._balances.tolist() == pytest.approx([expected_balance] * 2, rel=1e-4)
+        env.close()
+
     def test_sl_fires_on_a_mid_bar_wick_when_execute_on_is_coarse(self):
         """A wick inside the execution bar must close the position (issue #267).
 

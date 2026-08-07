@@ -397,6 +397,20 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         else:
             trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
 
+        # A position opened at bar N's close is exposed to bar N+1 straight away, but the
+        # checks above ran against whatever was held BEFORE this step. Without this pass
+        # the new position's first check would be bar N+2, and bar N+1's range would never
+        # be applied to it. Reuses the bar already fetched above, so no lookahead: the
+        # agent committed to its action on bar N's close alone.
+        if trade_info.get("side") in ("long", "short"):
+            if self._check_liquidation(base_features):
+                trade_info = self._execute_liquidation()
+            else:
+                entry_trigger = self._check_sltp_trigger(base_features)
+                if entry_trigger is not None:
+                    execution_price = self.stop_loss if entry_trigger == "sl" else self.take_profit
+                    trade_info = self._execute_sltp_close(execution_price, entry_trigger)
+
         # Update position flag based on actual position size
         if trade_info["executed"]:
             if self.position.position_size > 0:

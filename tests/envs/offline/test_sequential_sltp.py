@@ -395,6 +395,72 @@ class TestSLTPEdgeCases:
 class TestSLTPRegression:
     """Regression tests for known SLTP issues."""
 
+    @pytest.mark.parametrize("bars_after_entry", [1, 2], ids=["next-bar", "two-bars-later"])
+    @pytest.mark.parametrize("leverage,stoploss_pct,wick_low,expected_exit,expected_balance", [
+        (1, -0.025, 80.0, "sltp_sl", 9750.0),
+        (10, -0.50, 88.0, "liquidation", 400.0),
+    ], ids=["stop-loss", "liquidation"])
+    def test_exit_fires_on_the_first_bar_the_position_is_exposed_to(
+        self, bars_after_entry, leverage, stoploss_pct, wick_low, expected_exit, expected_balance
+    ):
+        """The outcome must not depend on how soon after entry the crash lands (#268).
+
+        _step advanced the sampler and checked triggers against bar N+1 *before* opening
+        the position at bar N's close, so a position opened one bar before a crash had
+        its first check on bar N+2 and rode straight through it. Entering two bars early
+        exited correctly, which is what made the two paths disagree on identical data.
+        """
+        import numpy as np
+        import pandas as pd
+
+        n = 50
+        crash_bar = 20
+        prices = np.full(n, 100.0)
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": prices.copy(),
+            "high": prices.copy(),
+            "low": prices.copy(),
+            "close": prices.copy(),
+            "volume": np.ones(n) * 1000,
+        })
+        df.loc[crash_bar, "low"] = wick_low
+
+        config = SequentialTradingEnvSLTPConfig(
+            leverage=leverage,
+            initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            random_start=False,
+            stoploss_levels=[stoploss_pct],
+            takeprofit_levels=[0.50],
+        )
+        env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
+        td = env.reset()
+
+        # reset caches bar 10 (window_sizes=[10]), so step k executes at bar 10+k and
+        # advances onto bar 11+k. The crash bar is therefore reached during exit_step
+        # whatever bar the position was opened on — that sameness is the point.
+        exit_step = crash_bar - 10 - 1
+        open_step = crash_bar - bars_after_entry - 10
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+        for step in range(exit_step + 1):
+            action_td = (td if step == 0 else td["next"]).clone()
+            action_td["action"] = torch.tensor(long_idx if step == open_step else 0)
+            td = env.step(action_td)
+
+        assert env.position.position_size == 0, (
+            f"a wick to {wick_low} {bars_after_entry} bar(s) after entry must close the "
+            f"position, but position_size={env.position.position_size}"
+        )
+        assert env.history.action_types[-1] == expected_exit
+        assert env.balance == pytest.approx(expected_balance)
+        env.close()
+
     @pytest.mark.parametrize("leverage,stoploss_pct,wick_low,expected_exit,expected_balance", [
         (1, -0.02, 95.0, "sltp_sl", 9800.0),      # SL at 98, no liquidation at 1x
         (10, -0.50, 88.0, "liquidation", 400.0),  # SL at 50 untouched; liquidation at 90.4
