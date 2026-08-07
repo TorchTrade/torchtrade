@@ -433,6 +433,34 @@ class TestSamplerBaseFeatures:
             assert source["high"].max() > source["high"].iloc[-1]
             assert source["low"].min() < source["low"].iloc[-1]
 
+    def test_gap_bar_is_flat_rather_than_a_replay_of_the_previous_range(self, sample_ohlcv_df):
+        """A bar with no source rows must not inherit the previous bar's high/low.
+
+        Forward-filling the range would hand SL/TP the excursion the position already
+        lived through one bar earlier, letting a single move stop it out twice.
+        """
+        execute_on = TimeFrame(15, TimeFrameUnit.Minute)
+        gap_start, gap_end = pd.Timestamp("2024-01-01 03:00"), pd.Timestamp("2024-01-01 03:15")
+        df = sample_ohlcv_df[
+            (sample_ohlcv_df["timestamp"] < gap_start) | (sample_ohlcv_df["timestamp"] >= gap_end)
+        ]
+
+        with pytest.warns(UserWarning, match="DATA GAPS"):
+            sampler = MarketDataObservationSampler(
+                df=df, time_frames=[execute_on], window_sizes=[5], execute_on=execute_on,
+            )
+
+        gap = sampler.get_base_features(gap_start)
+        previous = sampler.get_base_features(gap_start - pd.Timedelta("15min"))
+
+        assert gap["close"] == pytest.approx(previous["close"])
+        assert gap["open"] == pytest.approx(gap["close"])
+        assert gap["high"] == pytest.approx(gap["close"])
+        assert gap["low"] == pytest.approx(gap["close"])
+        assert gap["volume"] == 0.0
+        # Only meaningful if the bar it copies from actually had a range to inherit.
+        assert previous["high"] > previous["low"]
+
 
 class TestSamplerHelperMethods:
     """Tests for helper methods."""

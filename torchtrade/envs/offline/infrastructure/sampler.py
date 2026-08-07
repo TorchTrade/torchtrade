@@ -193,7 +193,13 @@ class MarketDataObservationSampler:
 """
                 warnings.warn(warning_msg, UserWarning, stacklevel=2)
 
-        self.execute_base_features_df = execute_base_raw.ffill()[self.min_start_time:]
+        execute_base_filled = execute_base_raw.ffill()
+        # A gap bar has no trades to derive a range from, and forward-filling one would
+        # re-trigger SL/TP on the excursion the position already lived through in the
+        # previous bar. Collapse it to a flat bar at the last known price.
+        for col in ("open", "high", "low"):
+            execute_base_filled.loc[nan_mask, col] = execute_base_filled.loc[nan_mask, "close"]
+        self.execute_base_features_df = execute_base_filled[self.min_start_time:]
         if aux_cols:
             self.execute_base_features_df[aux_cols] = self.execute_base_features_df[aux_cols].fillna(0)
         if len(self.execute_base_features_df) == 0:

@@ -395,6 +395,71 @@ class TestSLTPEdgeCases:
 class TestSLTPRegression:
     """Regression tests for known SLTP issues."""
 
+    @pytest.mark.parametrize("leverage,stoploss_pct,wick_low", [
+        (1, -0.02, 95.0),    # SL at 98, no liquidation at 1x
+        (10, -0.50, 88.0),   # SL at 50 untouched; liquidation (~90.5) fires
+    ], ids=["stop-loss", "liquidation"])
+    def test_exit_fires_on_a_mid_bar_wick_when_execute_on_is_coarse(
+        self, leverage, stoploss_pct, wick_low
+    ):
+        """A wick inside the execution bar must close the position (issue #267).
+
+        The sampler built execution bars with .last(), so high/low collapsed onto the
+        final sub-bar and any excursion earlier in the bar was invisible. Both exits
+        that read that range are covered here, because the sampler feeds them both.
+
+        The wick sits mid-bar, not on the last sub-bar, so it is only visible once the
+        bar aggregates its sub-bars.
+        """
+        import numpy as np
+        import pandas as pd
+
+        n = 600
+        prices = np.full(n, 100.0)
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": prices.copy(),
+            "high": prices.copy(),
+            "low": prices.copy(),
+            "close": prices.copy(),
+            "volume": np.ones(n) * 1000,
+        })
+        # Minute 183 sits inside the 03:00 bar (minutes 180-194), which is the first
+        # bar the position is exposed to, and is not that bar's final sub-bar.
+        df.loc[183, "low"] = wick_low
+
+        config = SequentialTradingEnvSLTPConfig(
+            leverage=leverage,
+            initial_cash=10000,
+            execute_on=TimeFrame(15, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(15, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            transaction_fee=0.0,
+            slippage=0.0,
+            seed=42,
+            random_start=False,
+            stoploss_levels=[stoploss_pct],
+            takeprofit_levels=[0.50],
+        )
+        env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
+        td = env.reset()
+
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+        open_td = td.clone()
+        open_td["action"] = torch.tensor(long_idx)
+        td_next = env.step(open_td)
+        assert env.position.position_size > 0, "long should be open before the wick bar"
+
+        hold_td = td_next["next"].clone()
+        hold_td["action"] = torch.tensor(0)
+        env.step(hold_td)
+
+        assert env.position.position_size == 0, (
+            f"wick to {wick_low} inside the execution bar must close the position, "
+            f"but position_size={env.position.position_size}"
+        )
+        env.close()
+
     def test_short_bracket_prices_not_inverted(self, sample_ohlcv_df):
         """Short positions must have SL above entry and TP below entry (issue #149)."""
         config = SequentialTradingEnvSLTPConfig(
