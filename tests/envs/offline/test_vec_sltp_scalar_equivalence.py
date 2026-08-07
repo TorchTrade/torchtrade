@@ -121,8 +121,15 @@ def _run_sltp_sequence(
     label="",
     include_hold=True,
     include_close=False,
+    expect_action_type=None,
 ):
-    """Run a sequence of actions through both envs and compare at every step."""
+    """Run a sequence of actions through both envs and compare at every step.
+
+    Args:
+        expect_action_type: if given, the run must actually record this action type
+            (e.g. "sltp_sl"), so a scenario that stops reaching its bracket is reported
+            rather than passing as a pair of idle envs.
+    """
     scalar, vec = _make_sltp_pair(
         df,
         leverage=leverage,
@@ -201,6 +208,14 @@ def _run_sltp_sequence(
 
         if td_s["next"]["done"].item() or td_v["next"]["done"].item():
             break
+
+    # Without this a scenario whose action indices or wick stop reaching a bracket
+    # degrades into "both envs held cash identically" and still passes.
+    if expect_action_type is not None and expect_action_type not in scalar.history.action_types:
+        all_mismatches.append(
+            f"[{label}] path never exercised: no {expect_action_type} in "
+            f"{scalar.history.action_types}"
+        )
 
     scalar.close()
     vec.close()
@@ -442,17 +457,35 @@ class TestSLTPScalarVecEquivalenceTrending:
 # ============================================================================
 
 
+def _flat_df_with_wick(bar=20, low=None, high=None, n=50):
+    """Flat 100.0 series with one bar carrying a single excursion."""
+    prices = np.full(n, 100.0)
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": prices.copy(),
+        "high": prices.copy(),
+        "low": prices.copy(),
+        "close": prices.copy(),
+        "volume": np.ones(n) * 1000,
+    })
+    if low is not None:
+        df.loc[bar, "low"] = low
+    if high is not None:
+        df.loc[bar, "high"] = high
+    return df
+
+
 class TestSLTPScalarVecEquivalenceEntryBar:
     """Both envs must apply the entry bar to a freshly-opened position (#268)."""
 
     @pytest.mark.parametrize("bars_after_entry", [1, 2], ids=["next-bar", "two-bars-later"])
-    @pytest.mark.parametrize("leverage,sl_levels,tp_levels,wick_low,wick_high", [
-        (1, [-0.025], [0.50], 80.0, None),    # stop-loss
-        (10, [-0.50], [0.50], 88.0, None),    # liquidation
-        (1, [-0.50], [0.025], None, 120.0),   # take-profit: the branch the fix never ran
+    @pytest.mark.parametrize("leverage,sl_levels,tp_levels,wick_low,wick_high,expected_exit", [
+        (1, [-0.025], [0.50], 80.0, None, "sltp_sl"),
+        (10, [-0.50], [0.50], 88.0, None, "liquidation"),
+        (1, [-0.50], [0.025], None, 120.0, "sltp_tp"),  # the branch the fix never ran
     ], ids=["stop-loss", "liquidation", "take-profit"])
     def test_entry_bar_exit_matches_scalar(
-        self, bars_after_entry, leverage, sl_levels, tp_levels, wick_low, wick_high
+        self, bars_after_entry, leverage, sl_levels, tp_levels, wick_low, wick_high, expected_exit
     ):
         """Both envs forked this ordering separately, so both could drift separately.
 
@@ -460,21 +493,8 @@ class TestSLTPScalarVecEquivalenceEntryBar:
         skipped the entry bar identically. The value-pinning tests in
         test_sequential_sltp.py are what catch the shared bug; this catches divergence.
         """
-        n = 50
         crash_bar = 20
-        prices = np.full(n, 100.0)
-        df = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
-            "open": prices.copy(),
-            "high": prices.copy(),
-            "low": prices.copy(),
-            "close": prices.copy(),
-            "volume": np.ones(n) * 1000,
-        })
-        if wick_low is not None:
-            df.loc[crash_bar, "low"] = wick_low
-        else:
-            df.loc[crash_bar, "high"] = wick_high
+        df = _flat_df_with_wick(bar=crash_bar, low=wick_low, high=wick_high)
 
         # reset caches bar 10 (window_sizes=[10]), so step k executes at bar 10+k.
         open_step = crash_bar - bars_after_entry - 10
@@ -484,28 +504,18 @@ class TestSLTPScalarVecEquivalenceEntryBar:
             df, actions, leverage=leverage,
             sl_levels=sl_levels, tp_levels=tp_levels,
             label=f"sltp-entry-bar-{leverage}x-{bars_after_entry}",
+            expect_action_type=expected_exit,
         )
         assert not mismatches, "\n".join(mismatches)
-
 
     def test_entry_bar_exit_after_direction_switch(self):
         """A switch opens a position too, and each env recognises that differently.
 
-        The scalar env gates on the trade_info side, the vectorized one on
-        switch_mask | open_from_flat. Nothing else covers the switch path, so a refactor
-        could reopen #268 for switches in one env only.
+        The scalar env gates on trade_info["executed"] plus a non-zero position size,
+        the vectorized one on switch_mask | open_from_flat. Nothing else covers the
+        switch path, so a refactor could reopen #268 for switches in one env only.
         """
-        n = 50
-        prices = np.full(n, 100.0)
-        df = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
-            "open": prices.copy(),
-            "high": prices.copy(),
-            "low": prices.copy(),
-            "close": prices.copy(),
-            "volume": np.ones(n) * 1000,
-        })
-        df.loc[20, "high"] = 120.0
+        df = _flat_df_with_wick(bar=20, high=120.0)
 
         # Levels chosen so the incoming long survives bar 20 (SL 50, TP 150) while the
         # short opened into it does not (SL 102.5). Otherwise the long's own trigger

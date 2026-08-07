@@ -182,7 +182,9 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         """Execute one step for all environments with SLTP timing.
 
         SLTP timing differs from base: advance FIRST, then check triggers.
-        Priority: liquidation > SL/TP trigger > agent action.
+        Priority: liquidation > SL/TP trigger > agent action > the same liquidation and
+        SL/TP checks again for positions the agent action opened, since the first pass
+        ran before they existed and bar N+1 is the first bar they are exposed to.
         """
         N = self._num_envs
 
