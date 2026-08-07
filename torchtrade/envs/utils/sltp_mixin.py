@@ -28,10 +28,9 @@ class SLTPMixin:
         the exchange's actual state, preventing position stacking when bracket
         orders fail but the main order succeeds.
 
-        An unknown status raises via position_direction_from_status. Syncing it would read
-        the outage as the position having vanished -- indistinguishable here from an SL/TP
-        fill -- and clear active_stop_loss/active_take_profit while the real position still
-        carries its brackets on the exchange. Riding an outage out instead is #295.
+        An unknown status raises rather than syncing: it is indistinguishable here from an
+        SL/TP fill, and would clear brackets the exchange still holds. In practice _step
+        raises earlier, on its own status read.
 
         Args:
             position_status: Position status from trader.get_status(), None if the

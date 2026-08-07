@@ -1,6 +1,5 @@
 """Order executor for OKX Futures trading using python-okx."""
 import logging
-from torchtrade.envs.core.state import POSITION_UNKNOWN
 import math
 from dataclasses import dataclass
 from enum import Enum
@@ -8,6 +7,7 @@ from typing import Dict, List, Optional
 
 from torchtrade.envs.live.okx.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
+from torchtrade.envs.core.state import POSITION_UNKNOWN
 
 logger = logging.getLogger(__name__)
 

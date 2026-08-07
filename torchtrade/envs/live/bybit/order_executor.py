@@ -1,12 +1,12 @@
 """Order executor for Bybit Futures trading using pybit."""
 import logging
-from torchtrade.envs.core.state import POSITION_UNKNOWN
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
 
 from torchtrade.envs.live.bybit.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
+from torchtrade.envs.core.state import POSITION_UNKNOWN
 
 logger = logging.getLogger(__name__)
 

@@ -10,10 +10,7 @@ from tensordict import TensorDictBase
 from torchrl.data import Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
-from torchtrade.envs.core.state import (
-    PositionState,
-    position_direction_from_status,
-)
+from torchtrade.envs.core.state import PositionState, position_direction_from_status
 from torchtrade.envs.utils.termination import is_bankrupt
 
 
@@ -214,11 +211,8 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         Only the direction is reconciled, not the size: a PARTIAL external close leaves the
         direction intact and is still invisible to the guard. Pre-existing, not fixed here.
 
-        An unknown status raises via position_direction_from_status rather than syncing to
-        the 0 an unreachable exchange would otherwise produce -- which is what let a held
-        position read as flat and get re-bought every bar of an outage. Riding an outage out
-        on the cached position instead is #295; it needs every _step and _get_observation to
-        stop raising first, so half of it here would be a tolerance the env does not have.
+        An unknown status raises rather than syncing to the 0 an unreachable exchange
+        would produce. In practice _step raises earlier, on its own status read.
         """
         observed = position_direction_from_status(position_status)
 

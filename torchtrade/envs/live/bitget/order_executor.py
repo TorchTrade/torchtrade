@@ -1,5 +1,4 @@
 import logging
-from torchtrade.envs.core.state import POSITION_UNKNOWN
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Union
@@ -9,6 +8,7 @@ import ccxt
 from torchtrade.envs.live.bitget.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.common_types import OrderStatus
+from torchtrade.envs.core.state import POSITION_UNKNOWN
 
 logger = logging.getLogger(__name__)
 

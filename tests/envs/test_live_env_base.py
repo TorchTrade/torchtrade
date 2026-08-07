@@ -4,6 +4,10 @@ These replace the per-exchange copies of the same assertions. Testing a shared m
 once is only sound if every env actually inherits it -- so the unit test here is paired
 with a guard that asserts exactly that. If an exchange ever re-adds its own override, the
 guard fails and tells you to test that exchange separately.
+
+It also holds the tests for what an unreachable exchange must NOT look like (#270),
+which is the same invariant seen from the other side: a flat account must read flat, and
+an exchange that did not answer must not read as either.
 """
 
 import ast
@@ -526,20 +530,19 @@ def test_reading_a_field_off_an_unknown_status_says_why():
         POSITION_UNKNOWN.qty
 
 
-@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit"])
-def test_position_sizing_refuses_an_unknown_status(exchange):
+@pytest.mark.parametrize(
+    "env_cls",
+    [c for c in NON_SLTP_ENVS if "_get_current_position_quantity" in vars(c)],
+    ids=lambda c: c.__name__,
+)
+def test_position_sizing_refuses_an_unknown_status(env_cls):
     """_get_current_position_quantity must not size an order off a phantom flat account.
 
     Its `position.qty if position is not None else 0.0` reads an outage as 0 quantity,
-    which is the second half of the traced doubling: the delta is computed against a
-    position the exchange never said was gone.
+    so the delta is computed against a position the exchange never said was gone. _step
+    normally raises earlier, on its own status read -- this is the path when the outage
+    begins between the two get_status() calls inside a single step.
     """
-    import importlib
-    env_mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
-    env_cls = next(
-        c for c in vars(env_mod).values()
-        if isinstance(c, type) and hasattr(c, "_get_current_position_quantity")
-    )
     env = SimpleNamespace(
         trader=SimpleNamespace(get_status=lambda: {"position_status": POSITION_UNKNOWN})
     )

@@ -15,24 +15,29 @@ class PositionUnknownError(RuntimeError):
 
 
 class _PositionUnknown:
-    """The exchange did not answer, which is not the same as answering "flat"."""
+    """The exchange did not report a position we can trust, which is not "flat".
+
+    Covers both a call that failed and one the exchange answered with an error code.
+
+    Truthy, by leaving __bool__ alone: alpaca reads the status as
+    ``position_status.current_price if position_status else 0.0``
+    (env.py:195,239,270,345 and env_sltp.py:140), so a falsy sentinel would quietly
+    substitute a fallback price instead of stopping.
+    """
 
     _instance = None
 
     def __new__(cls):
+        # Identity survives pickling and copying, which is what makes `is
+        # POSITION_UNKNOWN` safe as the check at every call site.
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __bool__(self):
-        # `if position_status:` is a live-path idiom, and returning True there stops an
-        # outage from silently taking the flat branch.
-        return True
-
     def __getattr__(self, name):
-        # Reading qty/mark_price/notional_value off this would otherwise be a bare
-        # AttributeError from deep inside a sizing path. Every reader is fail-closed
-        # either way; this only makes the reason legible.
+        # This is the guard every live _step actually hits: all ten read a field off the
+        # status (mark_price/current_price) before anything else looks at it. A bare
+        # AttributeError would also fail closed; raising here says why.
         raise PositionUnknownError(
             f"cannot read {name!r}: the exchange did not report the position"
         )

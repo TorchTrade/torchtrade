@@ -262,6 +262,9 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         Calculate total portfolio value for Alpaca.
 
         Returns cash + position_market_value.
+
+        Raises PositionUnknownError on an unknown status: cash alone feeds
+        _check_termination, and for a held position that reads as a near-total loss.
         """
         status = self.trader.get_status()
         position_status = status.get("position_status", None)

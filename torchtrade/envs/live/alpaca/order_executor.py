@@ -31,12 +31,16 @@ _POSITION_NOT_FOUND_CODE = 40410000
 
 
 def _is_position_not_found(exc: APIError) -> bool:
-    """True only for Alpaca's flat-account error, not for 429/5xx/auth failures."""
+    """True only for Alpaca's flat-account error, not for 429/5xx/auth failures.
+
+    A real flat account always parses: Alpaca returns the documented JSON body. So an
+    unparseable body means something other than Alpaca answered -- a proxy, a gateway, a
+    maintenance page -- and its 404 says nothing about whether a position exists.
+    """
     try:
         return int(exc.code) == _POSITION_NOT_FOUND_CODE
-    except Exception:
-        # Body was not the documented JSON, so we cannot tell -- treat as unreachable.
-        return getattr(exc, "status_code", None) == 404
+    except (ValueError, KeyError, TypeError):
+        return False
 
 
 

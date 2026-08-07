@@ -13,10 +13,7 @@ import torch
 from tensordict import TensorDict, TensorDictBase
 
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import (
-    advance_hold_counter,
-    position_direction_from_status,
-)
+from torchtrade.envs.core.state import advance_hold_counter, position_direction_from_status
 
 
 class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):

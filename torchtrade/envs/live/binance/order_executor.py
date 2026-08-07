@@ -1,5 +1,4 @@
 import logging
-from torchtrade.envs.core.state import POSITION_UNKNOWN
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Union
@@ -9,6 +8,7 @@ from dotenv import load_dotenv
 
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.common_types import MarginType, OrderStatus
+from torchtrade.envs.core.state import POSITION_UNKNOWN
 
 load_dotenv()
 
