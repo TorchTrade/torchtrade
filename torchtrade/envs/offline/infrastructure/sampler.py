@@ -42,7 +42,8 @@ class MarketDataObservationSampler:
                 f"Got columns: {list(df.columns)}"
             )
 
-        # Reorder: OHLCV first, then auxiliary (preserves row[:5] slicing for base features)
+        # Canonical OHLCV-first order for self.df. The row[:5] contract itself comes from
+        # ohlcv_agg's key order, since pandas orders .agg(dict) output by dict key.
         ohlcv_cols = ["open", "high", "low", "close", "volume"]
         aux_cols = [c for c in df.columns if c not in required_columns]
         df = df[["timestamp"] + ohlcv_cols + aux_cols]
@@ -144,9 +145,11 @@ class MarketDataObservationSampler:
         exec_times = self.df.resample(execute_on.to_pandas_freq()).first().index
         self.min_start_time = latest_first_step + self.max_lookback + max_offset
         self.exec_times = exec_times[exec_times >= self.min_start_time]
-        # create base features of execution time frame (we'll keep DataFrame for column names but also build tensors)
-        # Use ffill() to handle any NaN values from missing data periods
-        execute_base_raw = self.df.resample(execute_on.to_pandas_freq()).last()
+        # SL/TP and liquidation checks read this bar's high/low, so it must span the
+        # whole bar, not just the final sub-bar. Only OHLCV is ever read here (aux
+        # features reach observations via resampled_dfs), and excluding aux keeps the
+        # row[:5] positional contract exact rather than merely conventional.
+        execute_base_raw = self.df.resample(execute_on.to_pandas_freq()).agg(ohlcv_agg)
 
         # Detect and warn about data gaps
         nan_mask = execute_base_raw["close"].isna()
@@ -192,9 +195,15 @@ class MarketDataObservationSampler:
 """
                 warnings.warn(warning_msg, UserWarning, stacklevel=2)
 
-        self.execute_base_features_df = execute_base_raw.ffill()[self.min_start_time:]
-        if aux_cols:
-            self.execute_base_features_df[aux_cols] = self.execute_base_features_df[aux_cols].fillna(0)
+        execute_base_filled = execute_base_raw.ffill()
+        # A bar with no source rows has no trades of its own; forward-filling its range
+        # would let SL/TP re-trigger on the excursion the position already lived through
+        # one bar earlier. Narrower than nan_mask on purpose: a bar that merely lacks a
+        # usable close still has a real high/low, and discarding that would re-create the
+        # too-narrow range this aggregation exists to fix.
+        empty_bars = self.df.resample(execute_on.to_pandas_freq()).size() == 0
+        execute_base_filled.loc[empty_bars, ["open", "high", "low"]] = execute_base_filled.loc[empty_bars, "close"]
+        self.execute_base_features_df = execute_base_filled[self.min_start_time:]
         if len(self.execute_base_features_df) == 0:
             raise ValueError("No execute_on base features available after min_start_time")
 

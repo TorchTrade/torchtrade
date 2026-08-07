@@ -213,6 +213,9 @@ class TestAuxiliaryColumns:
         assert ohlcv.open > 50  # Prices start at ~100, not funding_rate ~0.001
         assert ohlcv.close > 50
         assert ohlcv.volume == 1000
+        # Positions 1 and 2 specifically: the vectorized envs read high/low by hardcoded
+        # column index, so swapping them in ohlcv_agg would invert every SL/TP check.
+        assert ohlcv.high >= ohlcv.close >= ohlcv.low
 
     def test_auxiliary_resampling_uses_last(self, ohlcv_with_aux_df):
         """Auxiliary columns should use 'last' aggregation when resampled."""
@@ -392,46 +395,92 @@ class TestSamplerObservations:
 class TestSamplerBaseFeatures:
     """Tests for base feature retrieval."""
 
-    def test_get_base_features_returns_ohlcv(
-        self, sample_ohlcv_df, default_timeframes, default_window_sizes, execute_timeframe
-    ):
-        """get_base_features should return OHLCV dict."""
+    def test_execution_bar_aggregates_its_sub_bars(self, sample_ohlcv_df):
+        """Execution bars must aggregate their sub-bars, not copy the final one.
+
+        .last() collapses high/low onto the last sub-bar, so the SL/TP and liquidation
+        checks that read this range would never fire. Only a coarse execute_on can show
+        this; at source frequency the two agree, which is why the bug survived.
+        """
+        execute_on = TimeFrame(1, TimeFrameUnit.Hour)
         sampler = MarketDataObservationSampler(
             df=sample_ohlcv_df,
-            time_frames=default_timeframes,
-            window_sizes=default_window_sizes,
-            execute_on=execute_timeframe,
+            time_frames=[execute_on],
+            window_sizes=[5],
+            execute_on=execute_on,
         )
         sampler.reset(random_start=False)
-
         _, timestamp, _ = sampler.get_sequential_observation()
         base_features = sampler.get_base_features(timestamp)
 
-        assert "open" in base_features
-        assert "high" in base_features
-        assert "low" in base_features
-        assert "close" in base_features
-        assert "volume" in base_features
+        indexed = sample_ohlcv_df.set_index("timestamp")
+        source = indexed[
+            (indexed.index >= timestamp)
+            & (indexed.index < timestamp + pd.Timedelta(execute_on.to_pandas_freq()))
+        ]
+        # approx, not ==: execute_base_tensor is float32 over a float64 source.
+        assert base_features["open"] == pytest.approx(source["open"].iloc[0])
+        assert base_features["high"] == pytest.approx(source["high"].max())
+        assert base_features["low"] == pytest.approx(source["low"].min())
+        assert base_features["close"] == pytest.approx(source["close"].iloc[-1])
+        assert base_features["volume"] == pytest.approx(source["volume"].sum())
 
-    def test_base_features_are_valid_numbers(
-        self, sample_ohlcv_df, default_timeframes, default_window_sizes, execute_timeframe
-    ):
-        """Base features should be valid positive numbers."""
-        sampler = MarketDataObservationSampler(
-            df=sample_ohlcv_df,
-            time_frames=default_timeframes,
-            window_sizes=default_window_sizes,
-            execute_on=execute_timeframe,
-        )
-        sampler.reset(random_start=False)
+        # Without a real excursion beyond the last sub-bar the assertions above hold
+        # under .last() too, and the test stops discriminating.
+        assert source["high"].max() > source["high"].iloc[-1]
+        assert source["low"].min() < source["low"].iloc[-1]
 
-        _, timestamp, _ = sampler.get_sequential_observation()
-        base_features = sampler.get_base_features(timestamp)
+    def test_gap_bar_is_flat_rather_than_a_replay_of_the_previous_range(self, sample_ohlcv_df):
+        """A bar with no source rows must not inherit the previous bar's high/low.
 
-        assert base_features["open"] > 0
-        assert base_features["high"] >= base_features["low"]
-        assert base_features["close"] > 0
-        assert base_features["volume"] >= 0
+        Forward-filling the range would hand SL/TP the excursion the position already
+        lived through one bar earlier, letting a single move stop it out twice.
+        """
+        execute_on = TimeFrame(15, TimeFrameUnit.Minute)
+        gap_start, gap_end = pd.Timestamp("2024-01-01 03:00"), pd.Timestamp("2024-01-01 03:15")
+        df = sample_ohlcv_df[
+            (sample_ohlcv_df["timestamp"] < gap_start) | (sample_ohlcv_df["timestamp"] >= gap_end)
+        ]
+
+        with pytest.warns(UserWarning, match="DATA GAPS"):
+            sampler = MarketDataObservationSampler(
+                df=df, time_frames=[execute_on], window_sizes=[5], execute_on=execute_on,
+            )
+
+        gap = sampler.get_base_features(gap_start)
+        previous = sampler.get_base_features(gap_start - pd.Timedelta("15min"))
+
+        assert gap["close"] == pytest.approx(previous["close"])
+        assert gap["open"] == pytest.approx(gap["close"])
+        assert gap["high"] == pytest.approx(gap["close"])
+        assert gap["low"] == pytest.approx(gap["close"])
+        assert gap["volume"] == 0.0
+        # Both the high and low assertions only discriminate if the bar they would have
+        # been filled from sits strictly inside its own range.
+        assert previous["high"] > previous["close"] > previous["low"]
+
+    def test_bar_without_a_usable_close_keeps_its_real_range(self, sample_ohlcv_df):
+        """Only bars with no source rows are flattened.
+
+        A bar whose close is unusable still traded, and its high/low are the range SL/TP
+        must see. Flattening it would re-create the too-narrow range this aggregation
+        exists to fix.
+        """
+        execute_on = TimeFrame(15, TimeFrameUnit.Minute)
+        bar_start, bar_end = pd.Timestamp("2024-01-01 03:00"), pd.Timestamp("2024-01-01 03:15")
+        df = sample_ohlcv_df.copy()
+        in_bar = (df["timestamp"] >= bar_start) & (df["timestamp"] < bar_end)
+        df.loc[in_bar, "close"] = np.nan
+        df.loc[in_bar, "low"] = 42.0  # a real excursion a stop must still see
+
+        with pytest.warns(UserWarning, match="DATA GAPS"):
+            sampler = MarketDataObservationSampler(
+                df=df, time_frames=[execute_on], window_sizes=[5], execute_on=execute_on,
+            )
+
+        bar = sampler.get_base_features(bar_start)
+        assert bar["low"] == pytest.approx(42.0)
+        assert bar["high"] > bar["low"], "a bar that traded must not be flattened"
 
 
 class TestSamplerHelperMethods:
