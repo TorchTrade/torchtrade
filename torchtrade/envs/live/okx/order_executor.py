@@ -1,5 +1,6 @@
 """Order executor for OKX Futures trading using python-okx."""
 import logging
+from torchtrade.envs.core.state import POSITION_UNKNOWN
 import math
 from dataclasses import dataclass
 from enum import Enum
@@ -328,7 +329,7 @@ class OKXFuturesOrderClass:
             if str(code) != "0":
                 msg = response.get("msg", "unknown error")
                 logger.error(f"get_positions failed (code={code}): {msg}")
-                status["position_status"] = None
+                status["position_status"] = POSITION_UNKNOWN
                 return status
 
             positions = response.get("data", [])
@@ -337,7 +338,7 @@ class OKXFuturesOrderClass:
             non_zero = [p for p in positions if float(p.get("pos", 0)) != 0]
             if len(non_zero) > 1:
                 logger.error("Multiple open positions in LONG_SHORT mode are not supported by this env")
-                status["position_status"] = None
+                status["position_status"] = POSITION_UNKNOWN
                 return status
             pos = non_zero[0] if non_zero else None
 
@@ -377,7 +378,7 @@ class OKXFuturesOrderClass:
 
         except Exception as e:
             logger.error(f"Error getting status: {str(e)}")
-            status["position_status"] = None
+            status["position_status"] = POSITION_UNKNOWN
 
         return status
 

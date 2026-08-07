@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 from typing import Dict, List, Optional, Union
 
+from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
+
 from alpaca.trading.enums import OrderSide, OrderType, QueryOrderStatus, TimeInForce, OrderClass
 from alpaca.trading.requests import (
     ClosePositionRequest,
@@ -19,6 +21,7 @@ from dotenv import load_dotenv
 
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.common_types import OrderStatus
+from torchtrade.envs.core.state import POSITION_UNKNOWN
 
 logger = logging.getLogger(__name__)
 
@@ -303,15 +306,24 @@ class AlpacaOrderClass:
                     unrealized_plpc=float(position.unrealized_plpc),
                     current_price=float(position.current_price),
                 )
+            except APIError as e:
+                # Alpaca reports a flat account by raising, so flat and failure share one
+                # channel here. An APIError means the request reached Alpaca and it
+                # answered -- that is the flat case.
+                logger.debug(f"No open position for {self.symbol}: {e}")
+                status["position_status"] = None
             except Exception as e:
-                logger.warning(f"Error getting position status: {str(e)}")
-                status["position_status"] = None  # No open position
+                # Never got an answer (timeout, connection reset). Not the same as flat:
+                # reading it as flat is how a held position gets re-bought every bar.
+                logger.error(f"Position status unavailable: {str(e)}")
+                status["position_status"] = POSITION_UNKNOWN
 
             return status
 
         except Exception as e:
             logger.error(f"Error getting status: {str(e)}", exc_info=True)
-            return {}
+            # An empty dict reads as flat downstream, same bug one level up.
+            return {"position_status": POSITION_UNKNOWN}
 
     def get_open_orders(self) -> List[Dict]:
         """

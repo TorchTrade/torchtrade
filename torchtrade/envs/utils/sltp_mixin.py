@@ -2,7 +2,10 @@
 
 import logging
 
-from torchtrade.envs.core.state import position_direction_from_status
+from torchtrade.envs.core.state import (
+    POSITION_UNKNOWN,
+    position_direction_from_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +35,23 @@ class SLTPMixin:
             position_status: Position status from trader.get_status(), or None
                 if no position exists on the exchange.
 
+        An unknown status leaves everything alone and reports no closure. Syncing it would
+        read the outage as the position having vanished -- indistinguishable here from an
+        SL/TP fill -- and clear active_stop_loss/active_take_profit while the real position
+        still carries its brackets on the exchange.
+
         Returns:
             True if a position was closed since the last step (SL/TP trigger
             or external closure), False otherwise.
         """
+        if position_status is POSITION_UNKNOWN:
+            logger.warning(
+                "Exchange status unavailable; keeping the last confirmed position (%s) "
+                "and its brackets rather than reading this as a close.",
+                self.position.current_position,
+            )
+            return False
+
         prev_position = self.position.current_position
         self.position.current_position = position_direction_from_status(position_status)
 

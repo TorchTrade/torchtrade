@@ -18,7 +18,13 @@ import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
-from torchtrade.envs.core.state import PositionState, advance_hold_counter
+from torchtrade.envs.core.state import (
+    POSITION_UNKNOWN,
+    PositionState,
+    PositionUnknownError,
+    advance_hold_counter,
+    position_direction_from_status,
+)
 
 
 def _subclasses(cls):
@@ -391,4 +397,126 @@ def test_hold_counter_is_only_advanced_inside_get_observation(path):
     assert not offenders, (
         f"{path} calls advance_hold_counter() outside _get_observation():\n  "
         + "\n  ".join(offenders)
+    )
+
+
+# ============================================================================
+# UNKNOWN EXCHANGE STATUS (#270)
+# ============================================================================
+
+
+def test_unknown_status_is_not_a_direction():
+    """The whole bug in one assertion: an unreachable exchange must not read as flat.
+
+    Every caller that has not been taught about an outage falls through to 0 otherwise,
+    and 0 means "flat" -- which is how a held position gets re-bought every bar.
+    """
+    assert position_direction_from_status(None) == 0            # confirmed flat
+    with pytest.raises(PositionUnknownError):
+        position_direction_from_status(POSITION_UNKNOWN)
+
+
+def test_unknown_status_is_truthy():
+    """`if position_status:` is a live-path idiom; falsy would take the flat branch."""
+    assert bool(POSITION_UNKNOWN) is True
+    assert bool(None) is False
+
+
+@pytest.mark.parametrize("sync", [
+    TorchTradeLiveEnv._sync_position_from_exchange,
+    SLTPMixin._sync_position_from_exchange,
+], ids=["base", "sltp"])
+def test_unknown_status_leaves_the_cached_position_alone(sync):
+    """Both sync forks must keep the last confirmed position on an outage.
+
+    Preserving current_action_level is what lets the duplicate-action guard suppress the
+    agent's repeat; syncing to flat resets it and the repeat becomes a second entry.
+    """
+    env = SimpleNamespace(position=PositionState(), active_stop_loss=97.5, active_take_profit=110.0)
+    env.position.current_position = 1
+    env.position.current_action_level = 1.0
+    env.position.hold_counter = 7
+
+    result = sync(env, POSITION_UNKNOWN)
+
+    assert env.position.current_position == 1
+    assert env.position.current_action_level == 1.0
+    assert env.position.hold_counter == 7
+    # The SLTP fork returns "was the position closed?" -- an outage is not a close, and
+    # reporting one would clear brackets the exchange still holds.
+    assert result in (None, False)
+    assert env.active_stop_loss == 97.5
+    assert env.active_take_profit == 110.0
+
+
+@pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
+def test_unknown_status_refuses_to_build_account_state(env_cls):
+    """An outage must not produce an account_state at all, rather than a flat-looking one.
+
+    account_state has no way to say "unknown", and the flat branch would report a held
+    position as flat -- invariant #3. Fails closed like get_account_balance() beside it.
+    """
+    env = SimpleNamespace(
+        observer=SimpleNamespace(
+            get_observations=lambda **k: {}, get_keys=lambda: []
+        ),
+        trader=SimpleNamespace(
+            get_status=lambda: {"position_status": POSITION_UNKNOWN},
+            get_account_balance=lambda: {"total_margin_balance": 1000.0},
+        ),
+        config=SimpleNamespace(include_base_features=False, leverage=10),
+        position=PositionState(),
+    )
+    with pytest.raises(PositionUnknownError):
+        env_cls._get_observation(env)
+
+
+def _executor_with_failing_position_fetch(exchange):
+    """Build a real order executor whose position fetch raises, as in an outage."""
+    def boom(*a, **k):
+        raise ConnectionError("simulated outage")
+
+    if exchange == "binance":
+        from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+        client = SimpleNamespace(futures_position_information=boom, futures_exchange_info=boom)
+        return BinanceFuturesOrderClass(
+            symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10, client=client
+        )
+    if exchange == "bitget":
+        from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
+        client = SimpleNamespace(fetch_positions=boom, load_markets=boom, markets={})
+        return BitgetFuturesOrderClass(
+            symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10, client=client
+        )
+    if exchange == "bybit":
+        from torchtrade.envs.live.bybit.order_executor import (
+            BybitFuturesOrderClass, MarginMode, PositionMode,
+        )
+        client = SimpleNamespace(get_positions=boom, get_instruments_info=boom)
+        return BybitFuturesOrderClass(
+            symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10,
+            margin_mode=MarginMode.ISOLATED, position_mode=PositionMode.ONE_WAY,
+            api_key="k", api_secret="s", client=client,
+        )
+    if exchange == "alpaca":
+        from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
+        client = SimpleNamespace(get_open_position=boom, get_account=boom, get_asset=boom)
+        return AlpacaOrderClass(symbol="BTCUSD", trade_mode="quantity", client=client)
+    raise AssertionError(f"unhandled exchange {exchange}")
+
+
+@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "alpaca"])
+def test_a_failed_position_fetch_does_not_report_flat(exchange):
+    """get_status must distinguish "the account is flat" from "the call failed".
+
+    Collapsing both to None is the root cause of #270: every consumer downstream then
+    reads an outage as an empty account, and a held position gets re-bought.
+    """
+    executor = _executor_with_failing_position_fetch(exchange)
+
+    status = executor.get_status()
+
+    assert status.get("position_status") is POSITION_UNKNOWN, (
+        f"{exchange} reported {status.get('position_status')!r} for a failed fetch; "
+        "None here means flat and would be traded on"
     )

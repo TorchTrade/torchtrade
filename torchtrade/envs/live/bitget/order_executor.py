@@ -1,4 +1,5 @@
 import logging
+from torchtrade.envs.core.state import POSITION_UNKNOWN
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Union
@@ -585,7 +586,7 @@ class BitgetFuturesOrderClass:
 
         except Exception as e:
             logger.error(f"Error getting status: {str(e)}")
-            status["position_status"] = None
+            status["position_status"] = POSITION_UNKNOWN
 
         return status
 

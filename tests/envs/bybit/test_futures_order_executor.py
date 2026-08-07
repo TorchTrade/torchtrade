@@ -2,6 +2,7 @@
 
 import pytest
 from unittest.mock import MagicMock
+from torchtrade.envs.core.state import POSITION_UNKNOWN
 
 
 class TestBybitFuturesOrderClass:
@@ -586,11 +587,15 @@ class TestBybitFuturesOrderClass:
         assert result is expected
 
     def test_get_status_validates_retcode(self, order_executor, mock_pybit_client):
-        """get_status must return position_status=None on non-zero retCode."""
+        """A non-zero retCode is a failed call, not an empty account (#270).
+
+        Reporting None here would let the env trade as though it were flat while a
+        real position sits on the exchange.
+        """
         mock_pybit_client.get_positions = MagicMock(return_value={
             "retCode": 10001,
             "retMsg": "Invalid parameter",
             "result": {"list": []},
         })
         status = order_executor.get_status()
-        assert status["position_status"] is None
+        assert status["position_status"] is POSITION_UNKNOWN

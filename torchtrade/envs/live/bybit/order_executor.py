@@ -1,5 +1,6 @@
 """Order executor for Bybit Futures trading using pybit."""
 import logging
+from torchtrade.envs.core.state import POSITION_UNKNOWN
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
@@ -318,7 +319,7 @@ class BybitFuturesOrderClass:
             if ret_code is not None and int(ret_code) != 0:
                 ret_msg = response.get("retMsg", "unknown error")
                 logger.error(f"get_positions failed (retCode={ret_code}): {ret_msg}")
-                status["position_status"] = None
+                status["position_status"] = POSITION_UNKNOWN
                 return status
 
             positions = response.get("result", {}).get("list", [])
@@ -357,7 +358,7 @@ class BybitFuturesOrderClass:
 
         except Exception as e:
             logger.error(f"Error getting status: {str(e)}")
-            status["position_status"] = None
+            status["position_status"] = POSITION_UNKNOWN
 
         return status
 

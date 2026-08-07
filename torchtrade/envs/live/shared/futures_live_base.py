@@ -13,7 +13,10 @@ import torch
 from tensordict import TensorDict, TensorDictBase
 
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import advance_hold_counter, position_direction_from_status
+from torchtrade.envs.core.state import (
+    advance_hold_counter,
+    position_direction_from_status,
+)
 
 
 class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
@@ -68,7 +71,11 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         position_status = status.get("position_status", None)
 
         # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
-        # close take the position branch and read stale fields off it.
+        # close take the position branch and read stale fields off it. An unknown status
+        # raises here rather than taking the flat branch below, which would report a held
+        # position as flat (invariant #3) -- fail-closed like get_account_balance() above,
+        # which already raises rather than inventing a balance. #295 adds a stale-but-marked
+        # observation so a blip need not end the episode.
         position_direction = float(position_direction_from_status(position_status))
         if advance_hold:
             advance_hold_counter(self.position, position_direction)

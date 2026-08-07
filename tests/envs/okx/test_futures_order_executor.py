@@ -2,6 +2,7 @@
 
 import pytest
 from unittest.mock import MagicMock
+from torchtrade.envs.core.state import POSITION_UNKNOWN
 
 
 class TestOKXFuturesOrderClass:
@@ -224,11 +225,15 @@ class TestOKXFuturesOrderClass:
         assert status["position_status"].liquidation_price == expected
 
     def test_get_status_validates_code(self, order_executor, mock_okx_account_client):
-        """get_status must return position_status=None on non-zero code."""
+        """A non-zero code is a failed call, not an empty account (#270).
+
+        Reporting None here would let the env trade as though it were flat while a
+        real position sits on the exchange.
+        """
         mock_okx_account_client.get_positions = MagicMock(return_value={
             "code": "51001", "msg": "Invalid parameter", "data": [],
         })
-        assert order_executor.get_status()["position_status"] is None
+        assert order_executor.get_status()["position_status"] is POSITION_UNKNOWN
 
     def test_account_balance_empty_raises(self, order_executor, mock_okx_account_client):
         """get_account_balance raises when data is empty."""
