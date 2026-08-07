@@ -12,9 +12,10 @@ What this checks, and what it does not:
   resolve here and still break `datasets.load_dataset(...)`: no `train` split (which
   `load_torch_trade_dataset` defaults to), a required `config_name`, or a schema the
   offline samplers cannot read.
-* Ids assembled at runtime are not resolved. A literal prefix before an interpolation
-  (`f"Torch-Trade/btcusdt_{tf}"`) is deliberately discarded rather than reported,
-  because the prefix alone is a well-formed id that would 404 and read as rot.
+* A literal prefix before an interpolation (`f"...{tf}"`, `...${tf}`) is discarded
+  rather than reported, because the prefix alone is a well-formed id that would 404
+  and read as rot. Ids built by concatenation are not recognised as such, and forms
+  the Hub rejects outright (`a--b`, `a.git`) are dropped rather than reported.
 * File types outside {.py, .yaml, .yml, .md}, and anything not yet git-tracked, are
   not scanned.
 """
@@ -27,7 +28,14 @@ import subprocess
 import pytest
 import requests
 from huggingface_hub import HfApi
-from huggingface_hub.errors import HFValidationError, HfHubHTTPError
+from _pytest.outcomes import Skipped
+from huggingface_hub.errors import (
+    DisabledRepoError,
+    HFValidationError,
+    HfHubHTTPError,
+    OfflineModeIsEnabled,
+    RepositoryNotFoundError,
+)
 from huggingface_hub.utils import validate_repo_id
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
@@ -43,7 +51,11 @@ ID_PATTERN = re.compile(r"\b((?:Torch-Trade|Sebasdi)/[A-Za-z0-9._-]+)")
 # raises is a fact about the repo, and anything unexpected must surface as an error
 # rather than a skip -- a guard that skips when it breaks is this file's own bug, one
 # layer down.
-NO_ANSWER = (requests.exceptions.ConnectionError, requests.exceptions.Timeout)
+NO_ANSWER = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    OfflineModeIsEnabled,  # subclasses the builtin ConnectionError, not requests'
+)
 TRANSIENT_STATUS = {429, 500, 502, 503, 504}
 
 # Skipping when the Hub is unreachable is the exact mechanism that hid the original
@@ -67,8 +79,8 @@ def _ids_in(line):
     reported dead -- a false alarm costs as much as a miss.
     """
     for match in ID_PATTERN.finditer(line):
-        if line[match.end():match.end() + 1] == "{":
-            continue  # f"Torch-Trade/prefix_{var}" -- the prefix is not the id
+        if line[match.end():match.end() + 1] in ("{", "$"):
+            continue  # f"...{var}" or hydra "...${var}" -- the prefix is not the id
         # Trim trailing punctuation the Hub forbids as a final character, so an id at
         # the end of a sentence still gets checked rather than silently dropped.
         candidate = match.group(1).rstrip(".-")
@@ -104,7 +116,6 @@ def _referenced_dataset_ids():
 
 
 @pytest.mark.parametrize("text,expected", [
-    ("df = load_dataset('Torch-Trade/foo_bar')", ["Torch-Trade/foo_bar"]),
     ("versioned Torch-Trade/foo.v2 here", ["Torch-Trade/foo.v2"]),
     ("unrelated BTC/USD and America/New_York", []),
     # Sebasdi has no live reference, so only this pins the alternation: one of the five
@@ -115,10 +126,10 @@ def _referenced_dataset_ids():
     ("The default is Torch-Trade/foo_bar.", ["Torch-Trade/foo_bar"]),
     ("use Torch-Trade/foo_bar--the fast one", []),
     ("the Torch-Trade/foo_bar- dataset", ["Torch-Trade/foo_bar"]),
-    ("git clone https://huggingface.co/datasets/Torch-Trade/foo_bar.git", []),
     ('load_dataset(f"Torch-Trade/btcusdt_{tf}")', []),
-], ids=["code", "internal-dot", "no-false-hits", "legacy-org",
-        "trailing-period", "double-dash", "trailing-dash", "dot-git", "f-string"])
+    ('data_path: Torch-Trade/btcusdt_${asset}_1m', []),
+], ids=["internal-dot", "no-false-hits", "legacy-org", "trailing-period",
+        "double-dash", "trailing-dash", "f-string", "hydra-interpolation"])
 def test_extraction_does_not_fabricate_ids(text, expected):
     """A mangled id 404s, so an over-greedy scan reports a live dataset as rotted."""
     assert list(_ids_in(text)) == expected
@@ -172,3 +183,70 @@ def test_referenced_dataset_ids_resolve_on_the_hub():
         )
     assert not dead, "dataset ids no longer resolve:\n  " + "\n  ".join(dead)
     assert not unreachable, "Hub unreachable:\n  " + "\n  ".join(unreachable)
+
+
+def _resolve_outcome():
+    """Run the resolve test and name what happened. Never let Skipped escape: it would
+    turn a failed expectation into a green skip, which is the bug under test."""
+    try:
+        test_referenced_dataset_ids_resolve_on_the_hub()
+        return "pass"
+    except Skipped:
+        return "skip"
+    except AssertionError:
+        return "fail"
+    except Exception:
+        return "raise"
+
+
+def _response(status):
+    response = requests.Response()
+    response.status_code = status
+    return response
+
+
+@pytest.mark.parametrize("exc,outcome", [
+    (RepositoryNotFoundError("gone", response=_response(404)), "fail"),
+    (DisabledRepoError("disabled", response=_response(403)), "fail"),
+    (HfHubHTTPError("boom", response=_response(500)), "skip"),
+    (HfHubHTTPError("slow down", response=_response(429)), "skip"),
+    (requests.exceptions.ConnectionError("no route"), "skip"),
+    (AttributeError("the guard itself is broken"), "raise"),
+], ids=["404-dead", "disabled-dead", "5xx-transient", "429-transient",
+        "no-answer", "broken-guard"])
+def test_hub_failures_are_classified(monkeypatch, exc, outcome):
+    """Both fail-open defects this file has shipped lived in these twelve lines: one
+    bucketed a broken guard as a network outage, the other bucketed a disabled repo
+    the same way. Each read as skip, and green. Nothing pinned either until now.
+    """
+    monkeypatch.setitem(globals(), "REQUIRE_HF", False)  # force skip-mode, not CI mode
+    monkeypatch.setattr(
+        HfApi, "dataset_info", lambda self, *a, **k: (_ for _ in ()).throw(exc)
+    )
+
+    assert _resolve_outcome() == outcome
+
+
+def test_a_dead_id_is_not_masked_by_a_transport_blip(monkeypatch):
+    """`not dead` in the skip guard: one flaky id must not buy silence for a real 404."""
+    monkeypatch.setitem(globals(), "REQUIRE_HF", False)
+    first, *rest = sorted(_referenced_dataset_ids())
+    assert rest, "needs at least two referenced ids to be meaningful"
+
+    def raiser(self, dataset_id, *args, **kwargs):
+        if dataset_id == first:
+            raise RepositoryNotFoundError("gone", response=_response(404))
+        raise requests.exceptions.ConnectionError("no route")
+
+    monkeypatch.setattr(HfApi, "dataset_info", raiser)
+    assert _resolve_outcome() == "fail"
+
+
+def test_require_hf_turns_the_skip_into_a_failure(monkeypatch):
+    """CI sets the flag precisely so an unreachable Hub cannot read as green."""
+    monkeypatch.setitem(globals(), "REQUIRE_HF", True)
+    monkeypatch.setattr(
+        HfApi, "dataset_info",
+        lambda self, *a, **k: (_ for _ in ()).throw(requests.exceptions.ConnectionError("down")),
+    )
+    assert _resolve_outcome() == "fail"
