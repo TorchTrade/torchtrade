@@ -399,9 +399,9 @@ class TestSLTPRegression:
     @pytest.mark.parametrize(
         "leverage,sl_pct,tp_pct,wick_low,wick_high,fee,"
         "expected_exit,expected_balance,expected_terminated", [
-            # The fee rows pin exact values because the next-bar path is the only place
-            # an entry fee and an exit fee land in one step; "cheaper than free" would
-            # hold just as well if one were charged twice.
+            # The fee rows pin exact values rather than an inequality: a double-charged
+            # fee is also "cheaper than free". On the next-bar arm both fees land in a
+            # single step, which happens nowhere else in the codebase.
             (1, -0.025, 0.50, 80.0, None, 0.0, "sltp_sl", 9750.0, False),
             (1, -0.025, 0.50, 80.0, None, 0.001, "sltp_sl", 9730.519481, False),
             (10, -0.50, 0.50, 88.0, None, 0.0, "liquidation", 400.0, True),

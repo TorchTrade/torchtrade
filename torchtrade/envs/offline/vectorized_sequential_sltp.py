@@ -226,6 +226,8 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         # opened at bar N's close is already exposed to bar N+1. Same bar, no lookahead --
         # the action was chosen on bar N's close alone. Must precede the portfolio values
         # below, or reward and termination read balances that ignore this exit.
+        # Scoped to the newly opened: re-checking a survivor of the first pass is a no-op
+        # only while this check stays idempotent, which nothing enforces.
         if opened_mask.any():
             self._apply_exit_checks(new_high, new_low, eligible=opened_mask)
 
