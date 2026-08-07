@@ -498,6 +498,18 @@ def _executor_with_failing_position_fetch(exchange):
             margin_mode=MarginMode.ISOLATED, position_mode=PositionMode.ONE_WAY,
             api_key="k", api_secret="s", client=client,
         )
+    if exchange == "okx":
+        from torchtrade.envs.live.okx.order_executor import (
+            OKXFuturesOrderClass, MarginMode, PositionMode,
+        )
+        return OKXFuturesOrderClass(
+            symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True, leverage=10,
+            margin_mode=MarginMode.ISOLATED, position_mode=PositionMode.NET,
+            api_key="k", api_secret="s", passphrase="p",
+            client=SimpleNamespace(),
+            account_client=SimpleNamespace(get_positions=boom, set_leverage=boom),
+            public_client=SimpleNamespace(get_instruments=boom),
+        )
     if exchange == "alpaca":
         from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
         client = SimpleNamespace(get_open_position=boom, get_account=boom, get_asset=boom)
@@ -505,7 +517,7 @@ def _executor_with_failing_position_fetch(exchange):
     raise AssertionError(f"unhandled exchange {exchange}")
 
 
-@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "alpaca"])
+@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx", "alpaca"])
 def test_a_failed_position_fetch_does_not_report_flat(exchange):
     """get_status must distinguish "the account is flat" from "the call failed".
 
@@ -552,3 +564,50 @@ def test_position_sizing_refuses_an_unknown_status(exchange):
     )
     with pytest.raises(PositionUnknownError):
         env_cls._get_current_position_quantity(env)
+
+
+@pytest.mark.parametrize("exchange", ["binance", "bitget"])
+def test_an_outage_does_not_re_enter_a_position_the_agent_already_holds(exchange):
+    """The traced failure from #270, end to end, not just its parts.
+
+    Holding a long, the exchange stops answering, and the agent asks for the level it is
+    already at. Previously: the sync read "flat", cleared current_action_level, the
+    duplicate-action guard no longer matched, the quantity re-query also read 0, and the
+    env bought the position a second time -- every bar of the outage.
+
+    The component assertions can all hold while this composite still trades, which is why
+    it is asserted here rather than inferred.
+    """
+    import importlib
+    env_mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
+    env_cls = next(
+        c for c in vars(env_mod).values()
+        if isinstance(c, type) and c.__module__ == env_mod.__name__
+        and "_execute_trade_if_needed" in vars(c)
+    )
+
+    orders = []
+    env = SimpleNamespace(
+        position=PositionState(),
+        trader=SimpleNamespace(
+            get_status=lambda: {"position_status": POSITION_UNKNOWN},
+            trade=lambda *a, **k: orders.append(("trade", a, k)),
+            close_position=lambda *a, **k: orders.append(("close", a, k)),
+        ),
+    )
+    env.position.current_position = 1
+    env.position.current_action_level = 1.0
+    env._create_trade_info = lambda **kw: {"executed": kw.get("executed", False)}
+    # Records rather than raises: without it a reverted guard fails this test with an
+    # AttributeError, which proves only that the guard stopped firing -- not that no
+    # order was placed, which is the claim.
+    def _sized(*a, **k):
+        orders.append(("sized", a, k))
+        return {"executed": True}
+    env._execute_fractional_action = _sized
+
+    env_cls._sync_position_from_exchange(env, env.trader.get_status()["position_status"])
+    trade_info = env_cls._execute_trade_if_needed(env, 1.0)
+
+    assert orders == [], f"an outage must not place an order, but {exchange} sent {orders}"
+    assert trade_info["executed"] is False
