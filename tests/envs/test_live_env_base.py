@@ -419,16 +419,18 @@ def test_unknown_status_is_not_a_direction():
 def test_unknown_status_is_truthy():
     """`if position_status:` is a live-path idiom; falsy would take the flat branch."""
     assert bool(POSITION_UNKNOWN) is True
-    assert bool(None) is False
 
 
 
-@pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
-def test_unknown_status_refuses_to_build_account_state(env_cls):
+def test_unknown_status_refuses_to_build_account_state():
     """An outage must not produce an account_state at all, rather than a flat-looking one.
 
     account_state has no way to say "unknown", and the flat branch would report a held
     position as flat -- invariant #3. Fails closed like get_account_balance() beside it.
+
+    One case, not one per env: all 12 futures envs resolve _get_observation to this same
+    implementation, and test_no_futures_env_reforks_the_shared_observation is what proves
+    they still do. Parametrizing would run one function twelve times.
     """
     env = SimpleNamespace(
         observer=SimpleNamespace(
@@ -437,12 +439,17 @@ def test_unknown_status_refuses_to_build_account_state(env_cls):
         trader=SimpleNamespace(
             get_status=lambda: {"position_status": POSITION_UNKNOWN},
             get_account_balance=lambda: {"total_margin_balance": 1000.0},
+            # Present so a regression fails on "DID NOT RAISE" rather than on a gap in
+            # the fake, which would say nothing about what the env reported.
+            get_mark_price=lambda: 100.0,
         ),
         config=SimpleNamespace(include_base_features=False, leverage=10),
         position=PositionState(),
+        account_state_key="account_state",
+        market_data_keys=[],
     )
     with pytest.raises(PositionUnknownError):
-        env_cls._get_observation(env)
+        TorchTradeFuturesLiveEnv._get_observation(env)
 
 
 def _executor_with_failing_position_fetch(exchange):
@@ -514,9 +521,9 @@ def test_reading_a_field_off_an_unknown_status_says_why():
     They are fail-closed either way -- the sentinel has no such fields -- but a bare
     AttributeError from inside order sizing does not say that the exchange was unreachable.
     """
-    for field in ("qty", "mark_price", "notional_value", "market_value"):
-        with pytest.raises(PositionUnknownError, match="did not report the position"):
-            getattr(POSITION_UNKNOWN, field)
+    # One field is the whole contract: __getattr__ does not branch on the name.
+    with pytest.raises(PositionUnknownError, match="did not report the position"):
+        POSITION_UNKNOWN.qty
 
 
 @pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit"])
