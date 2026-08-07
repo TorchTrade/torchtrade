@@ -489,13 +489,11 @@ class TestSLTPRegression:
         assert account_state[1].item() == pytest.approx(0.0), "direction must read flat"
         assert account_state[3].item() == pytest.approx(0.0), "holding_time must read flat"
         reward = td["next"]["reward"].item()
-        # Non-zero first: on the take-profit row the sign check alone reads
-        # `False is False` for a reward frozen at 0, so it would pass a stale reward.
-        assert reward != 0.0, "an exit that moved the balance must move the reward"
-        assert (reward < 0) is (expected_balance < 10000), (
-            "the reward must carry the sign of the round trip"
-        )
-        assert bool(td["next"]["terminated"].item()) is expected_terminated
+        if expected_balance < 10000:
+            assert reward < 0, "a losing round trip must produce a negative reward"
+        else:
+            assert reward > 0, "a winning round trip must produce a positive reward"
+        assert bool(td["next"]["terminated"].item()) == expected_terminated
         env.close()
 
     @pytest.mark.parametrize("leverage,stoploss_pct,wick_low,expected_exit,expected_balance", [

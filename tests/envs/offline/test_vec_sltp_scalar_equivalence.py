@@ -453,7 +453,7 @@ class TestSLTPScalarVecEquivalenceTrending:
 
 
 # ============================================================================
-# LIQUIDATION EQUIVALENCE (FUTURES)
+# ENTRY-BAR EQUIVALENCE
 # ============================================================================
 
 
@@ -534,6 +534,11 @@ class TestSLTPScalarVecEquivalenceEntryBar:
             expect_action_type="sltp_sl",
         )
         assert not mismatches, "\n".join(mismatches)
+
+
+# ============================================================================
+# LIQUIDATION EQUIVALENCE (FUTURES)
+# ============================================================================
 
 
 class TestSLTPScalarVecEquivalenceLiquidation:

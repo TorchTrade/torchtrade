@@ -26,6 +26,24 @@ from tests.conftest import simple_feature_fn
 TF_1MIN = TimeFrame(1, TimeFrameUnit.Minute)
 
 
+def _flat_df_with_wick(bar, low=None, high=None, n=50):
+    """Flat 100.0 series with one bar carrying a single excursion."""
+    prices = np.full(n, 100.0)
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": prices.copy(),
+        "high": prices.copy(),
+        "low": prices.copy(),
+        "close": prices.copy(),
+        "volume": np.ones(n) * 1000,
+    })
+    if low is not None:
+        df.loc[bar, "low"] = low
+    if high is not None:
+        df.loc[bar, "high"] = high
+    return df
+
+
 def _make_sltp_vec_env(df, leverage=1, num_envs=4, fee=0.0, sl_levels=None, tp_levels=None, max_traj=50):
     """Create a vectorized SLTP env for testing."""
     if sl_levels is None:
@@ -176,17 +194,7 @@ class TestVecSLTPTriggers:
         misalignment is the identity. Aiming the check at a sibling env passes the whole
         offline suite, so only diverging envs can catch it.
         """
-        n = 50
-        prices = np.full(n, 100.0)
-        df = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
-            "open": prices.copy(),
-            "high": prices.copy(),
-            "low": prices.copy(),
-            "close": prices.copy(),
-            "volume": np.ones(n) * 1000,
-        })
-        df.loc[20, "low"] = 80.0
+        df = _flat_df_with_wick(20, low=80.0)
 
         env = _make_sltp_vec_env(
             df, leverage=1, num_envs=2, sl_levels=[-0.025], tp_levels=[0.50],
@@ -213,18 +221,8 @@ class TestVecSLTPTriggers:
         hardcoded column index and re-implements the trigger in tensor form, so it is an
         independent consumer of both the aggregation and the column order.
         """
-        n = 240
-        prices = np.full(n, 100.0)
-        df = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
-            "open": prices.copy(),
-            "high": prices.copy(),
-            "low": prices.copy(),
-            "close": prices.copy(),
-            "volume": np.ones(n) * 1000,
-        })
         # Mid-bar, not the final sub-bar, of the 03:00 execution bar.
-        df.loc[183, "low"] = 95.0
+        df = _flat_df_with_wick(183, low=95.0, n=240)
 
         tf_15min = TimeFrame(15, TimeFrameUnit.Minute)
         config = VectorizedSequentialTradingEnvSLTPConfig(
