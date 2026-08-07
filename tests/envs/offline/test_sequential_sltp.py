@@ -396,14 +396,18 @@ class TestSLTPRegression:
     """Regression tests for known SLTP issues."""
 
     @pytest.mark.parametrize("bars_after_entry", [1, 2], ids=["next-bar", "two-bars-later"])
-    @pytest.mark.parametrize("fee", [0.0, 0.001], ids=["no-fee", "with-fee"])
     @pytest.mark.parametrize(
-        "leverage,stoploss_pct,wick_low,expected_exit,expected_balance,expected_terminated", [
-            (1, -0.025, 80.0, "sltp_sl", 9750.0, False),
-            (10, -0.50, 88.0, "liquidation", 400.0, True),
-        ], ids=["stop-loss", "liquidation"])
+        "leverage,stoploss_pct,wick_low,fee,expected_exit,expected_balance,expected_terminated", [
+            # The fee rows pin exact values because the next-bar path is the only place
+            # an entry fee and an exit fee land in one step; "cheaper than free" would
+            # hold just as well if one were charged twice.
+            (1, -0.025, 80.0, 0.0, "sltp_sl", 9750.0, False),
+            (1, -0.025, 80.0, 0.001, "sltp_sl", 9730.519481, False),
+            (10, -0.50, 88.0, 0.0, "liquidation", 400.0, True),
+            (10, -0.50, 88.0, 0.001, "liquidation", 306.534653, True),
+        ], ids=["stop-loss", "stop-loss-fee", "liquidation", "liquidation-fee"])
     def test_exit_fires_on_the_first_bar_the_position_is_exposed_to(
-        self, bars_after_entry, fee, leverage, stoploss_pct, wick_low,
+        self, bars_after_entry, leverage, stoploss_pct, wick_low, fee,
         expected_exit, expected_balance, expected_terminated
     ):
         """The outcome must not depend on how soon after entry the crash lands (#268).
@@ -467,13 +471,7 @@ class TestSLTPRegression:
         # earlier, so trade counts drawn from action_types under-count entries -- pinned
         # here so that stays a decision rather than a surprise.
         assert env.history.action_types.count("long") == (0 if bars_after_entry == 1 else 1)
-        if fee == 0.0:
-            assert env.balance == pytest.approx(expected_balance)
-        else:
-            # Entry and exit fees both land in one step on the next-bar path, which is
-            # the only place in the codebase that happens. Pin that it costs the same
-            # either way rather than being charged twice or dropped.
-            assert env.balance < expected_balance
+        assert env.balance == pytest.approx(expected_balance)
 
         # The exit must be applied BEFORE the observation, reward and termination are
         # built. Nothing else pins that: with the exit moved after them the internal
