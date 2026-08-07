@@ -42,7 +42,8 @@ class MarketDataObservationSampler:
                 f"Got columns: {list(df.columns)}"
             )
 
-        # Reorder: OHLCV first, then auxiliary (preserves row[:5] slicing for base features)
+        # Canonical OHLCV-first order for self.df. The row[:5] contract itself comes from
+        # ohlcv_agg's key order, since pandas orders .agg(dict) output by dict key.
         ohlcv_cols = ["open", "high", "low", "close", "volume"]
         aux_cols = [c for c in df.columns if c not in required_columns]
         df = df[["timestamp"] + ohlcv_cols + aux_cols]
@@ -144,7 +145,6 @@ class MarketDataObservationSampler:
         exec_times = self.df.resample(execute_on.to_pandas_freq()).first().index
         self.min_start_time = latest_first_step + self.max_lookback + max_offset
         self.exec_times = exec_times[exec_times >= self.min_start_time]
-        # create base features of execution time frame (we'll keep DataFrame for column names but also build tensors)
         # SL/TP and liquidation checks read this bar's high/low, so it must span the
         # whole bar, not just the final sub-bar. Only OHLCV is ever read here (aux
         # features reach observations via resampled_dfs), and excluding aux keeps the

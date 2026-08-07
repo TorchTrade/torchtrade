@@ -217,6 +217,12 @@ class TestVecSLTPTriggers:
         hold_td["action"] = torch.zeros(2, dtype=torch.long)
         env.step(hold_td)
 
+        # Column 2 is low: pinning it here separates a mislanded step from a bar that
+        # did not aggregate, and checks the hardcoded index this env reads by.
+        assert torch.allclose(env._base_tensor[env._step_indices, 2], torch.tensor(95.0)), (
+            "the bar the position is checked against must report the wick: either the "
+            "step landed on a different bar, or the bar did not aggregate its sub-bars"
+        )
         assert (env._position_sizes == 0).all(), (
             "wick to 95.0 inside the execution bar must close the position"
         )
