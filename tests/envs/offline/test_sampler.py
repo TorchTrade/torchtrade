@@ -433,6 +433,47 @@ class TestSamplerBaseFeatures:
         assert base_features["close"] > 0
         assert base_features["volume"] >= 0
 
+    @pytest.mark.parametrize("exec_value,exec_unit", [
+        (15, TimeFrameUnit.Minute),
+        (1, TimeFrameUnit.Hour),
+    ], ids=["15min", "1hour"])
+    def test_execution_bar_is_aggregated_not_last_sub_bar(
+        self, sample_ohlcv_df, exec_value, exec_unit
+    ):
+        """Execution bars must aggregate their sub-bars, not copy the final one.
+
+        Resampling with .last() takes the last valid value per column, so high/low
+        collapse to the final sub-bar's range. Every SL/TP and liquidation check reads
+        this range, so a too-narrow bar means stops that fire in reality never fire in
+        the backtest.
+        """
+        execute_on = TimeFrame(exec_value, exec_unit)
+        sampler = MarketDataObservationSampler(
+            df=sample_ohlcv_df,
+            time_frames=[execute_on],
+            window_sizes=[5],
+            execute_on=execute_on,
+        )
+        sampler.reset(random_start=False)
+        _, timestamp, _ = sampler.get_sequential_observation()
+        base_features = sampler.get_base_features(timestamp)
+
+        source = sample_ohlcv_df.set_index("timestamp").loc[
+            timestamp:timestamp + pd.Timedelta(execute_on.to_pandas_freq()) - pd.Timedelta("1min")
+        ]
+        assert len(source) > 1, "bar must span multiple sub-bars for this to discriminate"
+
+        assert base_features["open"] == pytest.approx(source["open"].iloc[0])
+        assert base_features["high"] == pytest.approx(source["high"].max())
+        assert base_features["low"] == pytest.approx(source["low"].min())
+        assert base_features["close"] == pytest.approx(source["close"].iloc[-1])
+        assert base_features["volume"] == pytest.approx(source["volume"].sum())
+
+        # The bug is silent unless the aggregate genuinely differs from the last
+        # sub-bar: close matches either way, so only the range can discriminate.
+        assert source["high"].max() > source["high"].iloc[-1]
+        assert source["low"].min() < source["low"].iloc[-1]
+
 
 class TestSamplerHelperMethods:
     """Tests for helper methods."""

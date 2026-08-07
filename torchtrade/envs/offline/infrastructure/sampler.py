@@ -145,8 +145,10 @@ class MarketDataObservationSampler:
         self.min_start_time = latest_first_step + self.max_lookback + max_offset
         self.exec_times = exec_times[exec_times >= self.min_start_time]
         # create base features of execution time frame (we'll keep DataFrame for column names but also build tensors)
-        # Use ffill() to handle any NaN values from missing data periods
-        execute_base_raw = self.df.resample(execute_on.to_pandas_freq()).last()
+        # Must aggregate like resampled_dfs: .last() would take the final sub-bar's
+        # OHLCV, collapsing the bar's true high/low range that SL/TP and liquidation
+        # checks depend on.
+        execute_base_raw = self.df.resample(execute_on.to_pandas_freq()).agg(full_agg)
 
         # Detect and warn about data gaps
         nan_mask = execute_base_raw["close"].isna()
