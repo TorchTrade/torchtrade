@@ -345,10 +345,14 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         1. Liquidation check on bar N+1 (highest priority)
         2. SL/TP trigger check on bar N+1 (bracket orders)
         3. New action execution at bar N price
+        4. Liquidation and SL/TP again on bar N+1, for a position opened by step 3
 
         The sampler is advanced BEFORE checking SL/TP so that triggers are
         evaluated against the first unseen bar (bar N+1), not the stale bar
-        (bar N) that the agent already observed.
+        (bar N) that the agent already observed. Steps 1-2 see only the position
+        held coming in, so step 4 covers the one opened during this step -- bar
+        N+1 is the first bar it is exposed to, and without it that position
+        would not be checked until bar N+2.
         """
         self.step_counter += 1
 
@@ -397,12 +401,12 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         else:
             trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
 
-        # A position opened at bar N's close is exposed to bar N+1 straight away, but the
-        # checks above ran against whatever was held BEFORE this step. Without this pass
-        # the new position's first check would be bar N+2, and bar N+1's range would never
-        # be applied to it. Reuses the bar already fetched above, so no lookahead: the
-        # agent committed to its action on bar N's close alone.
-        if trade_info.get("side") in ("long", "short"):
+        # The checks above ran against the position held BEFORE this step, but a position
+        # opened at bar N's close is already exposed to bar N+1. Same bar, no lookahead --
+        # the action was chosen on bar N's close alone. Must precede the portfolio value
+        # and the history record below, or both read a state that ignores this exit.
+        # executed with an open position means a successful open, direction switches too.
+        if trade_info["executed"] and self.position.position_size != 0:
             if self._check_liquidation(base_features):
                 trade_info = self._execute_liquidation()
             else:

@@ -5,6 +5,8 @@ Runs both environments with identical configs and action sequences,
 comparing ALL observable state at every step. Any divergence is a bug.
 """
 
+import numpy as np
+import pandas as pd
 import pytest
 import torch
 
@@ -438,6 +440,85 @@ class TestSLTPScalarVecEquivalenceTrending:
 # ============================================================================
 # LIQUIDATION EQUIVALENCE (FUTURES)
 # ============================================================================
+
+
+class TestSLTPScalarVecEquivalenceEntryBar:
+    """Both envs must apply the entry bar to a freshly-opened position (#268)."""
+
+    @pytest.mark.parametrize("bars_after_entry", [1, 2], ids=["next-bar", "two-bars-later"])
+    @pytest.mark.parametrize("leverage,sl_levels,tp_levels,wick_low,wick_high", [
+        (1, [-0.025], [0.50], 80.0, None),    # stop-loss
+        (10, [-0.50], [0.50], 88.0, None),    # liquidation
+        (1, [-0.50], [0.025], None, 120.0),   # take-profit: the branch the fix never ran
+    ], ids=["stop-loss", "liquidation", "take-profit"])
+    def test_entry_bar_exit_matches_scalar(
+        self, bars_after_entry, leverage, sl_levels, tp_levels, wick_low, wick_high
+    ):
+        """Both envs forked this ordering separately, so both could drift separately.
+
+        The equivalence suite passed on main because the bug was symmetric — both envs
+        skipped the entry bar identically. The value-pinning tests in
+        test_sequential_sltp.py are what catch the shared bug; this catches divergence.
+        """
+        n = 50
+        crash_bar = 20
+        prices = np.full(n, 100.0)
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": prices.copy(),
+            "high": prices.copy(),
+            "low": prices.copy(),
+            "close": prices.copy(),
+            "volume": np.ones(n) * 1000,
+        })
+        if wick_low is not None:
+            df.loc[crash_bar, "low"] = wick_low
+        else:
+            df.loc[crash_bar, "high"] = wick_high
+
+        # reset caches bar 10 (window_sizes=[10]), so step k executes at bar 10+k.
+        open_step = crash_bar - bars_after_entry - 10
+        actions = [0] * open_step + [1] + [0] * (bars_after_entry + 2)
+
+        mismatches = _run_sltp_sequence(
+            df, actions, leverage=leverage,
+            sl_levels=sl_levels, tp_levels=tp_levels,
+            label=f"sltp-entry-bar-{leverage}x-{bars_after_entry}",
+        )
+        assert not mismatches, "\n".join(mismatches)
+
+
+    def test_entry_bar_exit_after_direction_switch(self):
+        """A switch opens a position too, and each env recognises that differently.
+
+        The scalar env gates on the trade_info side, the vectorized one on
+        switch_mask | open_from_flat. Nothing else covers the switch path, so a refactor
+        could reopen #268 for switches in one env only.
+        """
+        n = 50
+        prices = np.full(n, 100.0)
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": prices.copy(),
+            "high": prices.copy(),
+            "low": prices.copy(),
+            "close": prices.copy(),
+            "volume": np.ones(n) * 1000,
+        })
+        df.loc[20, "high"] = 120.0
+
+        # Levels chosen so the incoming long survives bar 20 (SL 50, TP 150) while the
+        # short opened into it does not (SL 102.5). Otherwise the long's own trigger
+        # preempts the switch and the path under test never runs -- see #292.
+        wide_long, tight_short = 4, 5
+        actions = [0] * 5 + [wide_long] + [0] * 3 + [tight_short] + [0] * 2
+
+        mismatches = _run_sltp_sequence(
+            df, actions, leverage=2,
+            sl_levels=[-0.025, -0.50], tp_levels=[0.025, 0.50],
+            label="sltp-entry-bar-switch",
+        )
+        assert not mismatches, "\n".join(mismatches)
 
 
 class TestSLTPScalarVecEquivalenceLiquidation:

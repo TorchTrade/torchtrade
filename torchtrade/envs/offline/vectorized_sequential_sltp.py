@@ -96,9 +96,10 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
     Timing (different from base vectorized env):
         1. Save bar N close as trade prices (with slippage)
         2. Advance step index to bar N+1
-        3. Check liquidation on bar N+1 (futures only)
-        4. Check SL/TP triggers on bar N+1 (SL before TP)
-        5. Execute trades at bar N price (skip triggered envs)
+        3. Check liquidation then SL/TP on bar N+1, for positions held coming in
+        4. Execute trades at bar N price (skip triggered envs)
+        5. Re-check bar N+1 for positions opened by step 4 -- it is the first bar
+           they are exposed to, and steps 3 ran before they existed
         6. Compute rewards from bar N+1 prices
 
     Args:
@@ -184,7 +185,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         Priority: liquidation > SL/TP trigger > agent action.
         """
         N = self._num_envs
-        leverage = float(self.config.leverage)
 
         # 1. Decode actions via tensor lookup
         action_indices = tensordict["action"]
@@ -212,25 +212,20 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         new_low = self._base_tensor[self._step_indices, 2]
         new_close = self._base_tensor[self._step_indices, 3]
 
-        # 5+6. Check liquidation, then SL/TP, on bar N+1 against positions held
-        # coming into this step.
-        triggered_mask = self._apply_exit_checks(
-            torch.ones(N, dtype=torch.bool), new_high, new_low
-        )
+        # 5. Check liquidation, then SL/TP, on bar N+1 against positions held coming in
+        triggered_mask = self._apply_exit_checks(new_high, new_low)
 
-        # 7. Execute trades at bar N price (skip triggered envs)
+        # 6. Execute trades at bar N price (skip triggered envs)
         opened_mask = self._execute_sltp_trades(
             sides, sl_pcts, tp_pcts, trade_prices, triggered_mask
         )
 
-        # 7b. A position opened at bar N's close is exposed to bar N+1 straight away,
-        # but the checks above ran against what was held BEFORE this step. Without this
-        # pass the new position's first check would be bar N+2. Reuses the bar already
-        # fetched above, so no lookahead: the action was chosen on bar N's close alone.
-        # Must run before the portfolio values below, or reward and termination read
-        # balances that ignore the exit.
+        # 7. The check above ran against what was held BEFORE this step, but a position
+        # opened at bar N's close is already exposed to bar N+1. Same bar, no lookahead --
+        # the action was chosen on bar N's close alone. Must precede the portfolio values
+        # below, or reward and termination read balances that ignore this exit.
         if opened_mask.any():
-            self._apply_exit_checks(opened_mask, new_high, new_low)
+            self._apply_exit_checks(new_high, new_low, eligible=opened_mask)
 
         # 8. Compute rewards: log(new_pv / old_pv)
         new_pvs = self._compute_portfolio_values(new_close)
@@ -260,14 +255,22 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         return obs_td
 
     def _apply_exit_checks(
-        self, eligible: torch.Tensor, new_high: torch.Tensor, new_low: torch.Tensor
+        self,
+        new_high: torch.Tensor,
+        new_low: torch.Tensor,
+        eligible: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        """Close eligible positions whose bar range hit liquidation or a bracket.
+        """Close positions whose bar range hit liquidation or a bracket.
 
-        Called twice per step — once for positions held coming in, once for positions
-        opened during the step — so both see the same bar. Returns the exited mask.
+        Args:
+            eligible: defaults to every open position; pass a mask to check only the
+                positions opened during this step against that same bar.
+
+        Returns the mask of envs that exited.
         """
         leverage = float(self.config.leverage)
+        if eligible is None:
+            eligible = self._position_sizes != 0
         exited = torch.zeros_like(eligible)
 
         # Liquidation takes priority over the brackets (futures only)
@@ -474,6 +477,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
             # Float32 tolerance for can_afford check
             can_afford = (margin_new + new_fee) <= self._balances * (1 + 1e-5)
             final_open = open_mask & can_afford
+            opened = final_open
 
             if final_open.any():
                 self._balances[final_open] -= (margin_new + new_fee)[final_open]
@@ -494,6 +498,5 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
                 self._tp_prices[final_open] = (
                     trade_prices * (1 + tp_pcts)
                 )[final_open]
-                opened = final_open
 
         return opened
