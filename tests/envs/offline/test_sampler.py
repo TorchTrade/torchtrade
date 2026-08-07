@@ -459,6 +459,29 @@ class TestSamplerBaseFeatures:
         # been filled from sits strictly inside its own range.
         assert previous["high"] > previous["close"] > previous["low"]
 
+    def test_bar_without_a_usable_close_keeps_its_real_range(self, sample_ohlcv_df):
+        """Only bars with no source rows are flattened.
+
+        A bar whose close is unusable still traded, and its high/low are the range SL/TP
+        must see. Flattening it would re-create the too-narrow range this aggregation
+        exists to fix.
+        """
+        execute_on = TimeFrame(15, TimeFrameUnit.Minute)
+        bar_start, bar_end = pd.Timestamp("2024-01-01 03:00"), pd.Timestamp("2024-01-01 03:15")
+        df = sample_ohlcv_df.copy()
+        in_bar = (df["timestamp"] >= bar_start) & (df["timestamp"] < bar_end)
+        df.loc[in_bar, "close"] = np.nan
+        df.loc[in_bar, "low"] = 42.0  # a real excursion a stop must still see
+
+        with pytest.warns(UserWarning, match="DATA GAPS"):
+            sampler = MarketDataObservationSampler(
+                df=df, time_frames=[execute_on], window_sizes=[5], execute_on=execute_on,
+            )
+
+        bar = sampler.get_base_features(bar_start)
+        assert bar["low"] == pytest.approx(42.0)
+        assert bar["high"] > bar["low"], "a bar that traded must not be flattened"
+
 
 class TestSamplerHelperMethods:
     """Tests for helper methods."""

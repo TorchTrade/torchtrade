@@ -196,9 +196,13 @@ class MarketDataObservationSampler:
                 warnings.warn(warning_msg, UserWarning, stacklevel=2)
 
         execute_base_filled = execute_base_raw.ffill()
-        # A gap bar has no trades of its own; forward-filling its range would let SL/TP
-        # re-trigger on the excursion the position already lived through one bar earlier.
-        execute_base_filled.loc[nan_mask, ["open", "high", "low"]] = execute_base_filled.loc[nan_mask, "close"]
+        # A bar with no source rows has no trades of its own; forward-filling its range
+        # would let SL/TP re-trigger on the excursion the position already lived through
+        # one bar earlier. Narrower than nan_mask on purpose: a bar that merely lacks a
+        # usable close still has a real high/low, and discarding that would re-create the
+        # too-narrow range this aggregation exists to fix.
+        empty_bars = self.df.resample(execute_on.to_pandas_freq()).size() == 0
+        execute_base_filled.loc[empty_bars, ["open", "high", "low"]] = execute_base_filled.loc[empty_bars, "close"]
         self.execute_base_features_df = execute_base_filled[self.min_start_time:]
         if len(self.execute_base_features_df) == 0:
             raise ValueError("No execute_on base features available after min_start_time")
