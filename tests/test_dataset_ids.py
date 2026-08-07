@@ -10,11 +10,13 @@ What this checks, and what it does not:
 * It resolves each id against the Hub with `HfApi().dataset_info` -- metadata only,
   one request per distinct id, no download. Existence is all that proves. A repo can
   resolve here and still break `datasets.load_dataset(...)`: no `train` split (which
-  `load_torch_trade_dataset` hardcodes), a required `config_name`, or a schema the
+  `load_torch_trade_dataset` defaults to), a required `config_name`, or a schema the
   offline samplers cannot read.
-* Ids assembled at runtime -- f-strings, concatenation -- are invisible to a text
-  scan, as are file types outside {.py, .yaml, .yml, .md} and anything not yet
-  git-tracked.
+* Ids assembled at runtime are not resolved. A literal prefix before an interpolation
+  (`f"Torch-Trade/btcusdt_{tf}"`) is deliberately discarded rather than reported,
+  because the prefix alone is a well-formed id that would 404 and read as rot.
+* File types outside {.py, .yaml, .yml, .md}, and anything not yet git-tracked, are
+  not scanned.
 """
 
 import os
@@ -23,7 +25,10 @@ import re
 import subprocess
 
 import pytest
-from huggingface_hub.errors import HFValidationError, RepositoryNotFoundError
+import requests
+from huggingface_hub import HfApi
+from huggingface_hub.errors import HFValidationError, HfHubHTTPError
+from huggingface_hub.utils import validate_repo_id
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
 SUFFIXES = {".py", ".yaml", ".yml", ".md"}
@@ -32,23 +37,46 @@ SUFFIXES = {".py", ".yaml", ".yml", ".md"}
 # instead would drown in `BTC/USD`, `America/New_York`, `train/actor_loss`. Third-party
 # ids the repo depends on (amazon/chronos-*, Qwen/*) are models, so `dataset_info` is
 # the wrong call for them -- they are out of scope, not overlooked.
-# The tail cannot end in `.`, or a sentence-final period in prose is swallowed into the
-# id and a live dataset reports as dead.
-ID_PATTERN = re.compile(
-    r"\b((?:Torch-Trade|Sebasdi)/[A-Za-z0-9_-](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?)"
-)
+ID_PATTERN = re.compile(r"\b((?:Torch-Trade|Sebasdi)/[A-Za-z0-9._-]+)")
+
+# Only ConnectionError/Timeout mean "no answer from the Hub". Everything the Hub itself
+# raises is a fact about the repo, and anything unexpected must surface as an error
+# rather than a skip -- a guard that skips when it breaks is this file's own bug, one
+# layer down.
+NO_ANSWER = (requests.exceptions.ConnectionError, requests.exceptions.Timeout)
+TRANSIENT_STATUS = {429, 500, 502, 503, 504}
 
 # Skipping when the Hub is unreachable is the exact mechanism that hid the original
 # rot, so CI sets this to turn the skip into a failure.
 REQUIRE_HF = os.environ.get("TORCHTRADE_REQUIRE_HF") == "1"
 
-# A floor, not an inventory: adding an id should not need a test edit, but silently
-# *losing* one should fail. `assert ids` alone cannot do that -- narrowing the pattern
-# or shrinking SUFFIXES leaves it green.
+# A floor, not an inventory: adding an id needs no edit here, but silently losing one
+# must fail. `assert ids` alone cannot do that -- narrowing the pattern or shrinking
+# SUFFIXES leaves it green.
 EXPECTED_IDS = {
     "Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025",
     "Torch-Trade/ethusdt_spot_1m_05_2021_to_03_2026",
 }
+
+
+def _ids_in(line):
+    """Well-formed ids on one line, minus runtime-assembled ones.
+
+    `validate_repo_id` is the Hub's own rule, so prose that runs an id into surrounding
+    punctuation (`foo--bar`, `foo-`, a `.git` clone URL) is dropped here rather than
+    reported dead -- a false alarm costs as much as a miss.
+    """
+    for match in ID_PATTERN.finditer(line):
+        if line[match.end():match.end() + 1] == "{":
+            continue  # f"Torch-Trade/prefix_{var}" -- the prefix is not the id
+        # Trim trailing punctuation the Hub forbids as a final character, so an id at
+        # the end of a sentence still gets checked rather than silently dropped.
+        candidate = match.group(1).rstrip(".-")
+        try:
+            validate_repo_id(candidate)
+        except HFValidationError:
+            continue
+        yield candidate
 
 
 def _referenced_dataset_ids():
@@ -65,34 +93,35 @@ def _referenced_dataset_ids():
         if not name or pathlib.Path(name).suffix not in SUFFIXES:
             continue
         path = REPO_ROOT / name
-        # Skip self: the ids pinned in EXPECTED_IDS would otherwise satisfy the scan on
-        # their own, so deleting every real reference would still look healthy.
+        # Skip self: this file carries deliberately fake ids as pattern fixtures, and
+        # scanning it would report them dead.
         if path.resolve() == this_file:
             continue
         for lineno, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
-            for match in ID_PATTERN.findall(line):
-                found.setdefault(match, set()).add(f"{name}:{lineno}")
+            for dataset_id in _ids_in(line):
+                found.setdefault(dataset_id, set()).add(f"{name}:{lineno}")
     return {k: sorted(v) for k, v in sorted(found.items())}
 
 
 @pytest.mark.parametrize("text,expected", [
     ("df = load_dataset('Torch-Trade/foo_bar')", ["Torch-Trade/foo_bar"]),
-    ("data_path: Torch-Trade/foo_bar", ["Torch-Trade/foo_bar"]),
-    # A live id at the end of a sentence must not absorb the period: dataset_info
-    # raises HFValidationError on the mangled form, i.e. red CI for a healthy dataset.
-    ("The default is Torch-Trade/foo_bar.", ["Torch-Trade/foo_bar"]),
-    ("See Torch-Trade/foo_bar, which is live.", ["Torch-Trade/foo_bar"]),
     ("versioned Torch-Trade/foo.v2 here", ["Torch-Trade/foo.v2"]),
     ("unrelated BTC/USD and America/New_York", []),
-    # Sebasdi has no live references, so only this pins the alternation: one of the five
+    # Sebasdi has no live reference, so only this pins the alternation: one of the five
     # ids that died was Sebasdi/..., and a re-introduction must still be reported.
     ("legacy Sebasdi/TorchTrade_btcusd_spot_1m", ["Sebasdi/TorchTrade_btcusd_spot_1m"]),
-], ids=["code", "yaml", "trailing-period", "trailing-comma", "internal-dot",
-        "no-false-hits", "legacy-org"])
-def test_pattern_extracts_ids_without_mangling_them(text, expected):
-    """A mangled id resolves to nothing on the Hub, so an over-greedy pattern reports a
-    healthy dataset as dead -- a false alarm is as corrosive here as a miss."""
-    assert ID_PATTERN.findall(text) == expected
+    # Trailing punctuation is trimmed so the id is still checked; genuinely malformed
+    # forms are dropped. Either way a healthy dataset must never be reported dead.
+    ("The default is Torch-Trade/foo_bar.", ["Torch-Trade/foo_bar"]),
+    ("use Torch-Trade/foo_bar--the fast one", []),
+    ("the Torch-Trade/foo_bar- dataset", ["Torch-Trade/foo_bar"]),
+    ("git clone https://huggingface.co/datasets/Torch-Trade/foo_bar.git", []),
+    ('load_dataset(f"Torch-Trade/btcusdt_{tf}")', []),
+], ids=["code", "internal-dot", "no-false-hits", "legacy-org",
+        "trailing-period", "double-dash", "trailing-dash", "dot-git", "f-string"])
+def test_extraction_does_not_fabricate_ids(text, expected):
+    """A mangled id 404s, so an over-greedy scan reports a live dataset as rotted."""
+    assert list(_ids_in(text)) == expected
 
 
 def test_extraction_still_finds_the_known_references():
@@ -101,33 +130,41 @@ def test_extraction_still_finds_the_known_references():
     ids = _referenced_dataset_ids()
 
     missing = EXPECTED_IDS - set(ids)
-    assert not missing, f"stopped finding known ids: {sorted(missing)}"
+    assert not missing, (
+        f"stopped finding known ids: {sorted(missing)} -- either the scan regressed, or "
+        "these references were intentionally removed and EXPECTED_IDS needs updating"
+    )
 
     suffixes = {
         pathlib.Path(ref.rsplit(":", 1)[0]).suffix for refs in ids.values() for ref in refs
     }
-    assert {".py", ".yaml"} <= suffixes, f"stopped scanning a file type: found {sorted(suffixes)}"
+    # .md included deliberately: "docs were never checked" is half the original bug.
+    assert {".py", ".yaml", ".md"} <= suffixes, f"stopped scanning a file type: {sorted(suffixes)}"
 
 
 def test_referenced_dataset_ids_resolve_on_the_hub():
     """A dataset id in source, a config or the docs must still exist.
 
     There is no reachability pre-check: probing with one of the ids under test means the
-    most-referenced dataset dying would read as "Hub down" and skip. Instead each failure
-    is classified -- a missing repo fails, a transport error skips unless CI demands it.
+    most-referenced dataset dying would read as "Hub down" and skip.
     """
-    from huggingface_hub import HfApi
-
     api = HfApi()
     dead, unreachable = [], []
     for dataset_id, refs in _referenced_dataset_ids().items():
         try:
             api.dataset_info(dataset_id)
-        except (RepositoryNotFoundError, HFValidationError) as exc:
-            dead.append(f"{dataset_id} ({type(exc).__name__})\n      " + "\n      ".join(refs))
-        except Exception as exc:
+        except HfHubHTTPError as exc:
+            status = getattr(exc.response, "status_code", None)
+            entry = f"{dataset_id} ({type(exc).__name__} {status})"
+            if status in TRANSIENT_STATUS:
+                unreachable.append(entry)
+            else:
+                dead.append(entry + "\n      " + "\n      ".join(refs))
+        except NO_ANSWER as exc:
             unreachable.append(f"{dataset_id} ({type(exc).__name__})")
 
+    # `not dead` is load-bearing: a genuine 404 must not be masked by a transport blip
+    # on some other id.
     if unreachable and not dead and not REQUIRE_HF:
         pytest.skip(
             f"HuggingFace Hub unreachable ({len(unreachable)} ids); "
