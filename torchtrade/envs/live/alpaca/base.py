@@ -14,7 +14,6 @@ from torchtrade.envs.core.state import (
     POSITION_UNKNOWN,
     HistoryTracker,
     PositionState,
-    PositionUnknownError,
     advance_hold_counter,
     position_direction_from_status,
 )
@@ -270,16 +269,11 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         account = self.trader.client.get_account()
         self.balance = float(account.cash)
 
-        if position_status is POSITION_UNKNOWN:
-            # Falling through to the flat branch would drop a held position's market value
-            # and feed cash alone to _check_termination -- an outage would read as a
-            # near-total loss and could terminate the episode as bankrupt.
-            raise PositionUnknownError(
-                "cannot value the portfolio: the exchange did not report the position"
-            )
-
         if position_status is None:
             return self.balance
+        # An unknown status raises on the .market_value read rather than taking the flat
+        # branch above: cash alone feeds _check_termination, and for a held position that
+        # is most of the portfolio missing -- an outage would read as a near-total loss.
         return self.balance + position_status.market_value
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
