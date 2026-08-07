@@ -25,6 +25,20 @@ from torchtrade.envs.core.state import POSITION_UNKNOWN
 
 logger = logging.getLogger(__name__)
 
+# Alpaca's error code for "position does not exist" -- the one APIError that means the
+# account is genuinely flat rather than unreachable.
+_POSITION_NOT_FOUND_CODE = 40410000
+
+
+def _is_position_not_found(exc: APIError) -> bool:
+    """True only for Alpaca's flat-account error, not for 429/5xx/auth failures."""
+    try:
+        return int(exc.code) == _POSITION_NOT_FOUND_CODE
+    except Exception:
+        # Body was not the documented JSON, so we cannot tell -- treat as unreachable.
+        return getattr(exc, "status_code", None) == 404
+
+
 
 # Common Time in Force Options:
 # GTC (Good Till Canceled) – The order remains open until it is executed or manually canceled by the trader. It does not expire at the end of the trading day.
@@ -308,10 +322,15 @@ class AlpacaOrderClass:
                 )
             except APIError as e:
                 # Alpaca reports a flat account by raising, so flat and failure share one
-                # channel here. An APIError means the request reached Alpaca and it
-                # answered -- that is the flat case.
-                logger.debug(f"No open position for {self.symbol}: {e}")
-                status["position_status"] = None
+                # channel. 40410000 ("position does not exist") is the only APIError that
+                # means flat -- a 429, a 5xx or an auth failure is an answer we cannot read
+                # as an empty account, which would be this same bug one layer in.
+                if _is_position_not_found(e):
+                    logger.debug(f"No open position for {self.symbol}: {e}")
+                    status["position_status"] = None
+                else:
+                    logger.error(f"Position status unavailable: {e}")
+                    status["position_status"] = POSITION_UNKNOWN
             except Exception as e:
                 # Never got an answer (timeout, connection reset). Not the same as flat:
                 # reading it as flat is how a held position gets re-bought every bar.
@@ -323,7 +342,8 @@ class AlpacaOrderClass:
         except Exception as e:
             logger.error(f"Error getting status: {str(e)}", exc_info=True)
             # An empty dict reads as flat downstream, same bug one level up.
-            return {"position_status": POSITION_UNKNOWN}
+            status["position_status"] = POSITION_UNKNOWN
+            return status
 
     def get_open_orders(self) -> List[Dict]:
         """

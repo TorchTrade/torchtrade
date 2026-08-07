@@ -1,6 +1,5 @@
 """Base class for live trading environments."""
 
-import logging
 import time
 from abc import abstractmethod
 from datetime import datetime, timedelta
@@ -12,13 +11,10 @@ from torchrl.data import Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import (
-    POSITION_UNKNOWN,
     PositionState,
     position_direction_from_status,
 )
 from torchtrade.envs.utils.termination import is_bankrupt
-
-logger = logging.getLogger(__name__)
 
 
 class TorchTradeLiveEnv(TorchTradeBaseEnv):
@@ -218,19 +214,12 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         Only the direction is reconciled, not the size: a PARTIAL external close leaves the
         direction intact and is still invisible to the guard. Pre-existing, not fixed here.
 
-        An unknown status leaves the cache ALONE rather than syncing. The cache is the last
-        thing the exchange actually confirmed; overwriting it with the 0 that an unreachable
-        exchange would otherwise produce is what let a held position read as flat and get
-        re-bought every bar of an outage. Keeping it also leaves current_action_level intact,
-        so the duplicate-action guard still suppresses the agent's repeat.
+        An unknown status raises via position_direction_from_status rather than syncing to
+        the 0 an unreachable exchange would otherwise produce -- which is what let a held
+        position read as flat and get re-bought every bar of an outage. Riding an outage out
+        on the cached position instead is #295; it needs every _step and _get_observation to
+        stop raising first, so half of it here would be a tolerance the env does not have.
         """
-        if position_status is POSITION_UNKNOWN:
-            logger.warning(
-                "Exchange status unavailable; keeping the last confirmed position "
-                "(%s) rather than syncing to flat.", self.position.current_position
-            )
-            return
-
         observed = position_direction_from_status(position_status)
 
         if observed != self.position.current_position:

@@ -422,32 +422,6 @@ def test_unknown_status_is_truthy():
     assert bool(None) is False
 
 
-@pytest.mark.parametrize("sync", [
-    TorchTradeLiveEnv._sync_position_from_exchange,
-    SLTPMixin._sync_position_from_exchange,
-], ids=["base", "sltp"])
-def test_unknown_status_leaves_the_cached_position_alone(sync):
-    """Both sync forks must keep the last confirmed position on an outage.
-
-    Preserving current_action_level is what lets the duplicate-action guard suppress the
-    agent's repeat; syncing to flat resets it and the repeat becomes a second entry.
-    """
-    env = SimpleNamespace(position=PositionState(), active_stop_loss=97.5, active_take_profit=110.0)
-    env.position.current_position = 1
-    env.position.current_action_level = 1.0
-    env.position.hold_counter = 7
-
-    result = sync(env, POSITION_UNKNOWN)
-
-    assert env.position.current_position == 1
-    assert env.position.current_action_level == 1.0
-    assert env.position.hold_counter == 7
-    # The SLTP fork returns "was the position closed?" -- an outage is not a close, and
-    # reporting one would clear brackets the exchange still holds.
-    assert result in (None, False)
-    assert env.active_stop_loss == 97.5
-    assert env.active_take_profit == 110.0
-
 
 @pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
 def test_unknown_status_refuses_to_build_account_state(env_cls):
@@ -566,48 +540,98 @@ def test_position_sizing_refuses_an_unknown_status(exchange):
         env_cls._get_current_position_quantity(env)
 
 
-@pytest.mark.parametrize("exchange", ["binance", "bitget"])
-def test_an_outage_does_not_re_enter_a_position_the_agent_already_holds(exchange):
-    """The traced failure from #270, end to end, not just its parts.
+@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
+def test_an_outage_stops_the_step_before_it_can_trade(exchange):
+    """The traced failure from #270, driven through _step rather than reassembled.
 
-    Holding a long, the exchange stops answering, and the agent asks for the level it is
-    already at. Previously: the sync read "flat", cleared current_action_level, the
-    duplicate-action guard no longer matched, the quantity re-query also read 0, and the
-    env bought the position a second time -- every bar of the outage.
+    Holding a long, the exchange stops answering. Previously _step read that as an empty
+    account, the duplicate-action guard no longer matched, and the env bought the position
+    a second time -- every bar of the outage. _step must now fail closed, and above all
+    must place no order.
 
-    The component assertions can all hold while this composite still trades, which is why
-    it is asserted here rather than inferred.
+    Asserting through _step is the point. An earlier version of this test called the sync
+    and the trade path by hand, in an order _step cannot produce, and so proved nothing
+    about production -- _step raises on the status read before it ever reaches the sync.
     """
     import importlib
     env_mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
     env_cls = next(
         c for c in vars(env_mod).values()
-        if isinstance(c, type) and c.__module__ == env_mod.__name__
-        and "_execute_trade_if_needed" in vars(c)
+        if isinstance(c, type) and c.__module__ == env_mod.__name__ and "_step" in vars(c)
     )
 
     orders = []
+    def _sized(*a, **k):
+        orders.append("sized")
+        return {"executed": True}
+
     env = SimpleNamespace(
         position=PositionState(),
         trader=SimpleNamespace(
             get_status=lambda: {"position_status": POSITION_UNKNOWN},
-            trade=lambda *a, **k: orders.append(("trade", a, k)),
-            close_position=lambda *a, **k: orders.append(("close", a, k)),
+            get_mark_price=lambda: 100.0,
+            trade=lambda *a, **k: orders.append("trade"),
+            close_position=lambda *a, **k: orders.append("close"),
         ),
+        action_levels=[-1.0, 0.0, 1.0],
+        _create_trade_info=lambda **kw: {"executed": kw.get("executed", False)},
+        _execute_fractional_action=_sized,
+        _execute_trade_if_needed=_sized,
     )
     env.position.current_position = 1
     env.position.current_action_level = 1.0
-    env._create_trade_info = lambda **kw: {"executed": kw.get("executed", False)}
-    # Records rather than raises: without it a reverted guard fails this test with an
-    # AttributeError, which proves only that the guard stopped firing -- not that no
-    # order was placed, which is the claim.
-    def _sized(*a, **k):
-        orders.append(("sized", a, k))
-        return {"executed": True}
-    env._execute_fractional_action = _sized
+    # The real shared sync, so that if the status ever stops raising the step proceeds the
+    # way production would -- otherwise a regression surfaces as a missing-attribute error
+    # on the fake instead of as the order it placed.
+    env._sync_position_from_exchange = (
+        lambda ps: TorchTradeLiveEnv._sync_position_from_exchange(env, ps)
+    )
 
-    env_cls._sync_position_from_exchange(env, env.trader.get_status()["position_status"])
-    trade_info = env_cls._execute_trade_if_needed(env, 1.0)
+    try:
+        env_cls._step(env, {"action": 2})
+        failed_closed = False
+    except PositionUnknownError:
+        failed_closed = True
+    except Exception:
+        # The fake is deliberately too thin to finish a whole step. Getting far enough to
+        # fail on something else already means the status read did not stop it; whether
+        # that mattered is what `orders` below answers.
+        failed_closed = False
 
+    # Order matters: the money claim is "no order", and asserting it first means a
+    # regression reports that rather than "DID NOT RAISE".
     assert orders == [], f"an outage must not place an order, but {exchange} sent {orders}"
-    assert trade_info["executed"] is False
+    assert failed_closed, "an outage must fail closed rather than stepping on stale state"
+
+
+@pytest.mark.parametrize("body,expect_flat", [
+    ('{"code":40410000,"message":"position does not exist"}', True),
+    ('{"code":42910000,"message":"rate limit exceeded"}', False),
+    ('{"code":50010000,"message":"internal server error"}', False),
+    ("not the documented json", False),
+], ids=["no-position", "rate-limited", "server-error", "unparseable-body"])
+def test_alpaca_only_treats_its_not_found_error_as_flat(body, expect_flat):
+    """Alpaca raises for a flat account, so the error itself has to be read.
+
+    Every APIError meaning flat would put #270 back inside its own fix: a 429 during a
+    volatile minute, or a 5xx, would report a held position as gone.
+    """
+    from alpaca.common.exceptions import APIError
+    from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
+
+    def raise_api_error(*a, **k):
+        raise APIError(body)
+
+    executor = AlpacaOrderClass(
+        symbol="BTCUSD", trade_mode="quantity",
+        client=SimpleNamespace(get_open_position=raise_api_error),
+    )
+
+    position_status = executor.get_status()["position_status"]
+
+    if expect_flat:
+        assert position_status is None
+    else:
+        assert position_status is POSITION_UNKNOWN, (
+            f"{body[:40]!r} is an answer we cannot read as an empty account"
+        )
