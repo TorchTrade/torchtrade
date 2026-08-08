@@ -427,7 +427,6 @@ def test_unknown_status_is_truthy():
     assert bool(POSITION_UNKNOWN) is True
 
 
-
 def test_unknown_status_refuses_to_build_account_state():
     """An outage must not produce an account_state at all, rather than a flat-looking one.
 
@@ -535,7 +534,7 @@ def test_reading_a_field_off_an_unknown_status_says_why():
     They are fail-closed either way -- the sentinel has no such fields -- but a bare
     AttributeError from inside order sizing does not say that the exchange was unreachable.
     """
-    # One field is the whole contract: __getattr__ does not branch on the name.
+    # __getattr__ branches only on dunders, so one real field is the whole contract.
     with pytest.raises(PositionUnknownError, match="did not report the position"):
         POSITION_UNKNOWN.qty
 
@@ -552,6 +551,9 @@ def test_position_sizing_refuses_an_unknown_status(env_cls):
     so the delta is computed against a position the exchange never said was gone. _step
     normally raises earlier, on its own status read -- this is the path when the outage
     begins between the two get_status() calls inside a single step.
+
+    3 of 5: okx takes current_qty from _step, and alpaca spells the same second query
+    inline, so both are covered through _step by the composite test instead.
     """
     env = SimpleNamespace(
         trader=SimpleNamespace(get_status=lambda: {"position_status": POSITION_UNKNOWN})
@@ -779,3 +781,7 @@ def test_position_unknown_identity_survives_a_round_trip():
 
     assert pickle.loads(pickle.dumps(POSITION_UNKNOWN)) is POSITION_UNKNOWN
     assert copy.copy(POSITION_UNKNOWN) is POSITION_UNKNOWN
+    # deepcopy probes the instance for __deepcopy__; without the dunder escape hatch in
+    # __getattr__ that probe raises a trading error from inside a copy.
+    assert copy.deepcopy(POSITION_UNKNOWN) is POSITION_UNKNOWN
+    assert copy.deepcopy({"position_status": POSITION_UNKNOWN})["position_status"] is POSITION_UNKNOWN

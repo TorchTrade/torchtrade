@@ -36,10 +36,14 @@ class _PositionUnknown:
         return cls._instance
 
     def __getattr__(self, name):
+        if name.startswith("__") and name.endswith("__"):
+            # copy/pickle probe the instance for __deepcopy__ and friends. Answering
+            # those with a trading error breaks copying for a question that was never
+            # about the position.
+            raise AttributeError(name)
         # This is the guard every live _step actually hits: all ten read a field off the
-        # status before anything else looks at it -- directly in the futures envs, via a
-        # price helper in alpaca. A bare AttributeError would also fail closed; raising
-        # here says why.
+        # status (mark_price/current_price) before anything else looks at it. A bare
+        # AttributeError would also fail closed; raising here says why.
         raise PositionUnknownError(
             f"cannot read {name!r}: the exchange did not report the position"
         )

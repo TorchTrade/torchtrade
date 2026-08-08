@@ -6,7 +6,6 @@ from typing import Dict, List, Optional, Union
 
 from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
-
 from alpaca.trading.enums import OrderSide, OrderType, QueryOrderStatus, TimeInForce, OrderClass
 from alpaca.trading.requests import (
     ClosePositionRequest,
@@ -41,7 +40,6 @@ def _is_position_not_found(exc: APIError) -> bool:
         return int(exc.code) == _POSITION_NOT_FOUND_CODE
     except (ValueError, KeyError, TypeError):
         return False
-
 
 
 # Common Time in Force Options:
