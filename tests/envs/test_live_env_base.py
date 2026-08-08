@@ -563,7 +563,7 @@ def test_position_sizing_refuses_an_unknown_status(env_cls):
 
 
 @pytest.mark.parametrize("module", ["env", "env_sltp"])
-@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx", "alpaca"])
+@pytest.mark.parametrize("exchange", _FAILING_FETCH_EXCHANGES)
 def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
     """The traced failure from #270, driven through _step rather than reassembled.
 
@@ -757,11 +757,11 @@ def test_neither_sync_fork_treats_an_outage_as_flat(sync):
 
 
 def test_the_hand_listed_exchanges_match_the_discovered_ones():
-    """Two parametrize lists in this file are hand-written, against its own rule.
+    """The hand-written exchange list, against this file's "discovered, not hand-listed".
 
-    They cannot be derived -- each exchange's executor takes different constructor kwargs
-    -- so this asserts the lists instead, and names exchange #6 rather than letting it
-    quietly skip two of the three #270 parametrizations.
+    It cannot be derived -- each exchange's executor takes different constructor kwargs --
+    so the list is asserted instead. Both #270 parametrizations that cannot be derived now
+    read from it, so exchange #6 fails here rather than quietly skipping them.
     """
     # NON_SLTP_ENVS is one concrete env per exchange; LIVE_ENVS also carries the
     # intermediate futures base, whose module is "shared" rather than an exchange.
