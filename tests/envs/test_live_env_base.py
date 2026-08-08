@@ -416,7 +416,9 @@ def test_unknown_status_is_not_a_direction():
     and 0 means "flat" -- which is how a held position gets re-bought every bar.
     """
     assert position_direction_from_status(None) == 0            # confirmed flat
-    with pytest.raises(PositionUnknownError):
+    # match=: without it the explicit branch is dead weight, since reading .qty off the
+    # sentinel raises anyway. The message is the branch's only observable effect.
+    with pytest.raises(PositionUnknownError, match="must handle this"):
         position_direction_from_status(POSITION_UNKNOWN)
 
 
@@ -454,6 +456,14 @@ def test_unknown_status_refuses_to_build_account_state():
     )
     with pytest.raises(PositionUnknownError):
         TorchTradeFuturesLiveEnv._get_observation(env)
+
+
+# A rename would empty this and pytest would SKIP rather than fail -- the hazard this
+# file guards against elsewhere with its own len() assertions.
+_SIZING_ENVS = [c for c in NON_SLTP_ENVS if "_get_current_position_quantity" in vars(c)]
+assert len(_SIZING_ENVS) == 3, f"expected 3 envs that size from a live query, got {_SIZING_ENVS}"
+
+_FAILING_FETCH_EXCHANGES = ["binance", "bitget", "bybit", "okx", "alpaca"]
 
 
 def _executor_with_failing_position_fetch(exchange):
@@ -502,7 +512,7 @@ def _executor_with_failing_position_fetch(exchange):
     raise AssertionError(f"unhandled exchange {exchange}")
 
 
-@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx", "alpaca"])
+@pytest.mark.parametrize("exchange", _FAILING_FETCH_EXCHANGES)
 def test_a_failed_position_fetch_does_not_report_flat(exchange):
     """get_status must distinguish "the account is flat" from "the call failed".
 
@@ -532,7 +542,7 @@ def test_reading_a_field_off_an_unknown_status_says_why():
 
 @pytest.mark.parametrize(
     "env_cls",
-    [c for c in NON_SLTP_ENVS if "_get_current_position_quantity" in vars(c)],
+    _SIZING_ENVS,
     ids=lambda c: c.__name__,
 )
 def test_position_sizing_refuses_an_unknown_status(env_cls):
@@ -722,3 +732,50 @@ def test_alpaca_outer_failure_does_not_report_flat():
     executor.last_order_id = "some-order-id"   # forces the outer try to run and fail
 
     assert executor.get_status().get("position_status") is POSITION_UNKNOWN
+
+
+@pytest.mark.parametrize("sync", [
+    TorchTradeLiveEnv._sync_position_from_exchange,
+    SLTPMixin._sync_position_from_exchange,
+], ids=["base", "sltp"])
+def test_neither_sync_fork_treats_an_outage_as_flat(sync):
+    """Pins the contract #295 will edit.
+
+    Today _step raises on its own status read before either fork is reached, so making
+    these sync an outage to 0 changes nothing observable -- which is exactly why it needs
+    saying. #295 sets out to make an outage survivable, and will start here; without this
+    it could reintroduce the flat reading with the whole suite still green.
+    """
+    env = SimpleNamespace(position=PositionState(), active_stop_loss=0.0, active_take_profit=0.0)
+    env.position.current_position = 1
+    env.position.current_action_level = 1.0
+
+    with pytest.raises(PositionUnknownError):
+        sync(env, POSITION_UNKNOWN)
+
+
+def test_the_hand_listed_exchanges_match_the_discovered_ones():
+    """Two parametrize lists in this file are hand-written, against its own rule.
+
+    They cannot be derived -- each exchange's executor takes different constructor kwargs
+    -- so this asserts the lists instead, and names exchange #6 rather than letting it
+    quietly skip two of the three #270 parametrizations.
+    """
+    # NON_SLTP_ENVS is one concrete env per exchange; LIVE_ENVS also carries the
+    # intermediate futures base, whose module is "shared" rather than an exchange.
+    discovered = {c.__module__.split(".")[-2] for c in NON_SLTP_ENVS}
+    assert discovered == set(_FAILING_FETCH_EXCHANGES), (
+        f"hand-listed {sorted(_FAILING_FETCH_EXCHANGES)} but discovered {sorted(discovered)}"
+    )
+
+
+def test_position_unknown_identity_survives_a_round_trip():
+    """`is POSITION_UNKNOWN` is the check at every call site, so identity has to hold.
+
+    __new__ exists for this; without pinning it the docstring is an unverified claim.
+    """
+    import copy
+    import pickle
+
+    assert pickle.loads(pickle.dumps(POSITION_UNKNOWN)) is POSITION_UNKNOWN
+    assert copy.copy(POSITION_UNKNOWN) is POSITION_UNKNOWN
