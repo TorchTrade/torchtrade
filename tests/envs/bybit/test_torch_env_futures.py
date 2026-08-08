@@ -80,24 +80,17 @@ class TestBybitFuturesTorchTradingEnv:
                     trader=mock_trader,
                 )
 
-    def test_check_env_specs(self, env):
-        """Every _step writes a truncated key the default done spec omits (#272)."""
+    def test_check_env_specs_passes(self, env):
+        """check_env_specs must pass; it compares the whole emitted step against the
+        declared specs, which is what catches a done spec missing the truncated key
+        every _step writes (#272). fake_tensordict() -- what it builds the comparison
+        from -- is also what a collector pre-allocates its buffer from.
+        """
         from torchrl.envs.utils import check_env_specs
 
         with patch.object(type(env), "_wait_for_next_timestamp"):
             check_env_specs(env)
 
-    def test_the_collector_buffer_carries_truncated(self, env):
-        """The consequence the other tests only imply (#272).
-
-        fake_tensordict() IS what a collector pre-allocates its buffer from, so a key
-        missing here is a key missing from every batch it yields -- silently, since the
-        rollout itself still emits it and looks fine.
-
-        This is a property of the shared base, not of bybit; it lives here because the
-        env fixtures are per exchange.
-        """
-        assert "truncated" in env.fake_tensordict()["next"].keys()
 
     def test_action_spec(self, env):
         """Test action spec and levels are correctly defined."""

@@ -158,8 +158,12 @@ class TestAlpacaTorchTradingEnvReset:
             trader=mock_trader,
         )
 
-    def test_check_env_specs(self, env):
-        """Every _step writes a truncated key the default done spec omits (#272)."""
+    def test_check_env_specs_passes(self, env):
+        """check_env_specs must pass; it compares the whole emitted step against the
+        declared specs, which is what catches a done spec missing the truncated key
+        every _step writes (#272). fake_tensordict() -- what it builds the comparison
+        from -- is also what a collector pre-allocates its buffer from.
+        """
         from torchrl.envs.utils import check_env_specs
 
         with patch.object(type(env), "_wait_for_next_timestamp"):

@@ -9,6 +9,7 @@ real.
 """
 
 import ast
+import inspect
 import math
 import pathlib
 import types
@@ -21,6 +22,7 @@ from tensordict import TensorDictBase
 import torchtrade
 import torchtrade.envs  # noqa: F401 -- registers every live env as a subclass
 from tests.envs.test_live_env_base import _subclasses
+from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.offline import (
     OneStepTradingEnv,
@@ -249,3 +251,71 @@ def test_polymarket_env_specs_sample_finite():
         trader=MagicMock(),
     )
     _assert_specs_sample_finite(env, "PolymarketBetEnv")
+
+
+# ============================================================================
+# DONE SPEC (#272)
+# ============================================================================
+
+
+@pytest.mark.parametrize(
+    "env_cls",
+    # Exactly the envs that inherit the shared declaration. The vectorized ones subclass
+    # EnvBase directly, so they never reach it and their batched spec is an override.
+    LIVE_ENVS + [
+        cls for cls, _cfg, _kw in OFFLINE_ENVS if issubclass(cls, TorchTradeBaseEnv)
+    ],
+    ids=lambda c: c.__name__,
+)
+def test_no_env_declares_its_own_done_spec(env_cls):
+    """A second, per-env copy of the done spec is free to drift from the shared one.
+
+    TorchTradeBaseEnv.__init__ declares it once, for live and offline alike. This PR
+    deleted two duplicates of it -- one in core/live.py, one in core/offline_base.py --
+    and nothing else stops either coming back.
+
+    AST, not source text: assigning the NARROWER done_spec reproduces #272 exactly, since
+    it drops truncated, while never containing the string "full_done_spec".
+
+    The vectorized envs and polymarket subclass EnvBase directly, so they never reach
+    TorchTradeBaseEnv.__init__ and their own declarations are overrides, not duplicates --
+    the vectorized one is batched.
+    """
+    assigned = {
+        node.attr for node in ast.walk(ast.parse(inspect.getsource(env_cls)))
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store)
+    }
+    clashes = assigned & {"done_spec", "full_done_spec"}
+    assert not clashes, (
+        f"{env_cls.__name__} assigns {sorted(clashes)}; it inherits a done spec from "
+        "TorchTradeBaseEnv, and a second copy is free to drift"
+    )
+
+
+def test_a_collector_batch_carries_truncated(sample_ohlcv_df):
+    """The consequence #272 actually had, demonstrated rather than inferred.
+
+    A collector pre-allocates its buffer from fake_tensordict(), which is built from the
+    declared spec -- so an undeclared key is simply absent from every batch it yields, and
+    nothing raises. check_env_specs catches the same defect, but only because a test calls
+    it; a training run gets no signal at all, which is why this went unnoticed.
+    """
+    from torchrl.collectors import Collector
+
+    env = SequentialTradingEnv(
+        sample_ohlcv_df,
+        SequentialTradingEnvConfig(
+            time_frames=["5Min", "15Min"], window_sizes=[10, 10],
+            execute_on="5Min", initial_cash=1000,
+        ),
+    )
+    collector = Collector(env, frames_per_batch=3, total_frames=3)
+    try:
+        batch = next(iter(collector))
+    finally:
+        collector.shutdown()
+
+    assert "truncated" in batch["next"].keys(), (
+        "the collector yielded a batch without truncated, and did not raise -- "
+        "the value estimators read this key"
+    )
