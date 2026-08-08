@@ -1,3 +1,4 @@
+from unittest.mock import patch
 """
 Unit tests for AlpacaSLTPTorchTradingEnv (TorchRL-style environment with SL/TP).
 
@@ -201,6 +202,18 @@ class TestAlpacaSLTPTradingEnvReset:
             observer=mock_observer,
             trader=mock_trader,
         )
+
+    def test_check_env_specs(self, env):
+        """The emitted step must match the declared specs (#272).
+
+        No live env had this: every _step writes a truncated key that the default done
+        spec does not carry, so a collector pre-allocating from the spec dropped it.
+        """
+        from torchrl.envs.utils import check_env_specs
+
+        with patch("time.sleep"):
+            with patch.object(type(env), "_wait_for_next_timestamp"):
+                check_env_specs(env)
 
     def test_reset_returns_tensordict(self, env):
         """Test that reset returns a TensorDict."""

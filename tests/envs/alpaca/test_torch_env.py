@@ -4,7 +4,7 @@ Unit tests for AlpacaTorchTradingEnv (TorchRL-style environment).
 Tests environment initialization, reset, step, and trading mechanics using mock clients.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -157,6 +157,18 @@ class TestAlpacaTorchTradingEnvReset:
             observer=mock_observer,
             trader=mock_trader,
         )
+
+    def test_check_env_specs(self, env):
+        """The emitted step must match the declared specs (#272).
+
+        No live env had this: every _step writes a truncated key that the default done
+        spec does not carry, so a collector pre-allocating from the spec dropped it.
+        """
+        from torchrl.envs.utils import check_env_specs
+
+        with patch("time.sleep"):
+            with patch.object(type(env), "_wait_for_next_timestamp"):
+                check_env_specs(env)
 
     def test_reset_returns_tensordict(self, env):
         """Test that reset returns a TensorDict."""
