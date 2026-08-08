@@ -5,7 +5,7 @@ in a single _step() call using pure tensor operations. Extends
 VectorizedSequentialTradingEnv with bracket order support.
 
 Key differences from base vectorized env:
-    - SLTP timing: advance FIRST, then check triggers, then execute trades
+    - SLTP timing: advance, execute the agent's trade, then check triggers
     - trade_mode-aware position sizing (fractional, notional, quantity)
     - SL/TP bracket orders with intrabar trigger detection
     - SL checked before TP (pessimistic bias)
@@ -180,7 +180,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one step for all environments with SLTP timing.
 
-        SLTP timing differs from base: advance FIRST, then check triggers.
+        SLTP timing differs from base: the sampler advances before the checks.
 
         The agent's action fills at close(N) and bar N+1 unfolds afterwards, so the
         action runs first and the bar is applied to the resulting position. Checking
@@ -215,16 +215,14 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         new_low = self._base_tensor[self._step_indices, 2]
         new_close = self._base_tensor[self._step_indices, 3]
 
-        # 5. The agent's action, at bar N's price.
+        # 5. The agent's action, at bar N's price
         self._execute_sltp_trades(sides, sl_pcts, tp_pcts, trade_prices)
 
         # 6. Bar N+1, against whatever each env holds after the action. Must precede the
-        # portfolio values below, or reward and termination read balances that ignore
-        # this exit. Checking the incoming position first instead discarded the agent's
-        # action wherever the old bracket fired on N+1 (#292).
+        # portfolio values below, or reward and termination read balances that ignore it.
         self._apply_exit_checks(new_high, new_low)
 
-        # 8. Compute rewards: log(new_pv / old_pv)
+        # 7. Compute rewards: log(new_pv / old_pv)
         new_pvs = self._compute_portfolio_values(new_close)
         old_pvs = self._portfolio_values
         safe_old = old_pvs.clamp(min=1e-10)
@@ -234,7 +232,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
         self._portfolio_values = new_pvs
 
-        # 9. Compute termination signals
+        # 8. Compute termination signals
         terminated = new_pvs < (self._initial_pvs * self.bankrupt_threshold)
         truncated = (
             ((self._step_indices + 1) >= self._end_indices)
@@ -242,7 +240,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         )
         done = terminated | truncated
 
-        # 10. Build observation from bar N+1
+        # 9. Build observation from bar N+1
         obs_td = self._build_observation(new_close, portfolio_values=new_pvs)
         obs_td.set("reward", rewards.unsqueeze(-1))
         obs_td.set("terminated", terminated.unsqueeze(-1))
@@ -255,25 +253,16 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         self,
         new_high: torch.Tensor,
         new_low: torch.Tensor,
-        eligible: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        """Close positions whose bar range hit liquidation or a bracket.
-
-        Args:
-            eligible: defaults to every open position.
-
-        Returns the mask of envs that exited.
-        """
+    ) -> None:
+        """Close positions whose bar range hit liquidation or a bracket."""
         leverage = float(self.config.leverage)
-        if eligible is None:
-            eligible = self._position_sizes != 0
-        exited = torch.zeros_like(eligible)
+        exited = torch.zeros_like(self._position_sizes, dtype=torch.bool)
 
         # Liquidation takes priority over the brackets (futures only)
         if self.config.leverage > 1:
             liq_price = self._compute_liq_prices()
-            long_liq = eligible & (self._position_sizes > 0) & (new_low <= liq_price)
-            short_liq = eligible & (self._position_sizes < 0) & (new_high >= liq_price)
+            long_liq = (self._position_sizes > 0) & (new_low <= liq_price)
+            short_liq = (self._position_sizes < 0) & (new_high >= liq_price)
             liq_mask = long_liq | short_liq
 
             if liq_mask.any():
@@ -305,7 +294,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
                 # zeroed and SL/TP checks guard on has_position.
                 exited = exited | liq_mask
 
-        has_position = eligible & (self._position_sizes != 0) & ~exited
+        has_position = (self._position_sizes != 0) & ~exited
         has_brackets = (self._sl_prices > 0) | (self._tp_prices > 0)
         can_trigger = has_position & has_brackets
 
@@ -371,7 +360,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
                 )
                 exited = exited | sltp_trigger
 
-        return exited
 
     def _execute_sltp_trades(
         self,

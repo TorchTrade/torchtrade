@@ -382,20 +382,17 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         if self.config.lock_position_until_sltp and self.position.position_size != 0:
             side, sl_pct, tp_pct = None, None, None
 
-        # 1. The agent's action, at bar N's close.
         trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
 
-        # 2. Bar N+1, against whatever is held after the action. Must precede the
-        # portfolio value and the history record below, or both read a state that
-        # ignores this exit.
-        if self.position.position_size != 0:
-            if self._check_liquidation(base_features):
-                trade_info = self._execute_liquidation()
-            else:
-                trigger = self._check_sltp_trigger(base_features)
-                if trigger is not None:
-                    execution_price = self.stop_loss if trigger == "sl" else self.take_profit
-                    trade_info = self._execute_sltp_close(execution_price, trigger)
+        # Bar N+1, against whatever is held after the action. Must precede the portfolio
+        # value and the history record below, or both read a state that ignores this exit.
+        if self._check_liquidation(base_features):
+            trade_info = self._execute_liquidation()
+        else:
+            trigger = self._check_sltp_trigger(base_features)
+            if trigger is not None:
+                execution_price = self.stop_loss if trigger == "sl" else self.take_profit
+                trade_info = self._execute_sltp_close(execution_price, trigger)
 
         # Update position flag based on actual position size
         if trade_info["executed"]:
