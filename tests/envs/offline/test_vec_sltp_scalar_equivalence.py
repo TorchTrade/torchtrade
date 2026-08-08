@@ -520,8 +520,8 @@ class TestSLTPScalarVecEquivalenceEntryBar:
         df = _flat_df_with_wick(bar=20, high=120.0)
 
         # Levels chosen so the incoming long survives bar 20 (SL 50, TP 150) while the
-        # short opened into it does not (SL 102.5). Otherwise the long's own trigger
-        # preempts the switch and the path under test never runs -- see #292.
+        # short opened into it does not (SL 102.5), isolating the switch path from the
+        # incoming position's own bracket.
         wide_long, tight_short = 4, 5
         actions = [0] * 5 + [wide_long] + [0] * 3 + [tight_short] + [0] * 2
 
@@ -556,5 +556,38 @@ class TestSLTPScalarVecEquivalenceLiquidation:
             sl_levels=[-0.1], tp_levels=[0.2],
             max_traj=200,
             label=f"sltp-liquidation-{direction}"
+        )
+        assert not mismatches, "\n".join(mismatches)
+
+
+class TestSLTPAgentActionPrecedesNextBarTrigger:
+    """The agent's order executes at close(N); bar N+1 unfolds after it (#292).
+
+    _step advanced the sampler and checked the *pre-action* position against bar N+1
+    before running the agent's action, so a held position whose bracket fired on N+1
+    discarded the agent's order outright -- the account ended the step in a position it
+    had explicitly asked to leave, at a price it never chose, and had to re-issue.
+    """
+
+    def test_switch_is_not_cancelled_by_the_old_positions_trigger(self):
+        """Long TP's on the very bar the agent flips to short.
+
+        The long is closed at close(N)=100 by the agent, so its TP must never fire; the
+        short opens at 100 and bar N+1's range then applies to the short instead.
+        """
+        df = _flat_df_with_wick(bar=20, high=120.0)
+
+        # long: SL -2.5% / TP +2.5% -> TP 102.5, which bar 20's high of 120 would hit.
+        # The short opened at 100 has its SL at 102.5, so bar 20 stops the SHORT out --
+        # proving the bar applied to the position the agent actually asked for, and that
+        # the long was closed by the agent at close(N) rather than taking profit.
+        long_tight, short_tight = 1, 5
+        actions = [0] * 5 + [long_tight] + [0] * 3 + [short_tight] + [0] * 2
+
+        mismatches = _run_sltp_sequence(
+            df, actions, leverage=2,
+            sl_levels=[-0.025, -0.50], tp_levels=[0.025, 0.50],
+            label="sltp-292-switch-vs-trigger",
+            expect_action_type="sltp_sl",
         )
         assert not mismatches, "\n".join(mismatches)

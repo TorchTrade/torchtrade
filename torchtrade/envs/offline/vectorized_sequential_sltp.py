@@ -96,11 +96,10 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
     Timing (different from base vectorized env):
         1. Save bar N close as trade prices (with slippage)
         2. Advance step index to bar N+1
-        3. Check liquidation then SL/TP on bar N+1, for positions held coming in
-        4. Execute trades at bar N price (skip triggered envs)
-        5. Re-check bar N+1 for positions opened by step 4 -- it is the first bar
-           they are exposed to, and steps 3 ran before they existed
-        6. Compute rewards from bar N+1 prices
+        3. Execute trades at bar N price
+        4. Check liquidation then SL/TP on bar N+1, against whatever each env holds
+           after step 3
+        5. Compute rewards from bar N+1 prices
 
     Args:
         df: OHLCV DataFrame for backtesting
@@ -182,9 +181,11 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         """Execute one step for all environments with SLTP timing.
 
         SLTP timing differs from base: advance FIRST, then check triggers.
-        Priority: liquidation > SL/TP trigger > agent action > the same liquidation and
-        SL/TP checks again for positions the agent action opened, since the first pass
-        ran before they existed and bar N+1 is the first bar they are exposed to.
+
+        The agent's action fills at close(N) and bar N+1 unfolds afterwards, so the
+        action runs first and the bar is applied to the resulting position. Checking
+        the incoming position first instead discarded the action wherever the old
+        bracket fired on N+1 (#292).
         """
         N = self._num_envs
 
@@ -214,22 +215,14 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         new_low = self._base_tensor[self._step_indices, 2]
         new_close = self._base_tensor[self._step_indices, 3]
 
-        # 5. Check liquidation, then SL/TP, on bar N+1 against positions held coming in
-        triggered_mask = self._apply_exit_checks(new_high, new_low)
+        # 5. The agent's action, at bar N's price.
+        self._execute_sltp_trades(sides, sl_pcts, tp_pcts, trade_prices)
 
-        # 6. Execute trades at bar N price (skip triggered envs)
-        opened_mask = self._execute_sltp_trades(
-            sides, sl_pcts, tp_pcts, trade_prices, triggered_mask
-        )
-
-        # 7. The check above ran against what was held BEFORE this step, but a position
-        # opened at bar N's close is already exposed to bar N+1. Same bar, no lookahead --
-        # the action was chosen on bar N's close alone. Must precede the portfolio values
-        # below, or reward and termination read balances that ignore this exit.
-        # Scoped to the newly opened: re-checking a survivor of the first pass is a no-op
-        # only while this check stays idempotent, which nothing enforces.
-        if opened_mask.any():
-            self._apply_exit_checks(new_high, new_low, eligible=opened_mask)
+        # 6. Bar N+1, against whatever each env holds after the action. Must precede the
+        # portfolio values below, or reward and termination read balances that ignore
+        # this exit. Checking the incoming position first instead discarded the agent's
+        # action wherever the old bracket fired on N+1 (#292).
+        self._apply_exit_checks(new_high, new_low)
 
         # 8. Compute rewards: log(new_pv / old_pv)
         new_pvs = self._compute_portfolio_values(new_close)
@@ -267,8 +260,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         """Close positions whose bar range hit liquidation or a bracket.
 
         Args:
-            eligible: defaults to every open position; pass a mask to check only the
-                positions opened during this step against that same bar.
+            eligible: defaults to every open position.
 
         Returns the mask of envs that exited.
         """
@@ -387,8 +379,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         sl_pcts: torch.Tensor,
         tp_pcts: torch.Tensor,
         trade_prices: torch.Tensor,
-        triggered_mask: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> None:
         """Execute SLTP trades for all environments.
 
         Position sizing via trade_mode (fractional/notional/quantity). Handles:
@@ -397,11 +388,8 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         - Direction switch: close old, open new with brackets
         - Open from flat: open new with brackets
 
-        Returns the mask of envs that opened a position, so the caller can expose it to
-        the same bar the pre-existing positions were just checked against.
         """
         leverage = float(self.config.leverage)
-        active = ~triggered_mask
 
         is_long = self._position_sizes > 0
         is_short = self._position_sizes < 0
@@ -409,13 +397,13 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
         # Position locking: force HOLD for envs with open positions
         if self.config.lock_position_until_sltp:
-            has_position = (~is_flat) & active
+            has_position = ~is_flat
             if has_position.any():
                 sides = sides.clone()
                 sides[has_position] = 0  # Force HOLD
 
         # Hold: explicit hold or already in same direction
-        hold_mask = active & (
+        hold_mask = (
             (sides == 0)
             | ((sides == 1) & is_long)
             | ((sides == -1) & is_short)
@@ -424,15 +412,13 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         self._hold_counters[hold_with_pos] += 1
 
         # Close action (side=2) with existing position
-        close_action_mask = active & (sides == 2) & ~is_flat
+        close_action_mask = (sides == 2) & ~is_flat
 
         # Direction switch: want opposite direction
-        switch_mask = active & (
-            ((sides == 1) & is_short) | ((sides == -1) & is_long)
-        )
+        switch_mask = ((sides == 1) & is_short) | ((sides == -1) & is_long)
 
         # Open from flat: want position, currently flat
-        open_from_flat = active & ((sides == 1) | (sides == -1)) & is_flat
+        open_from_flat = ((sides == 1) | (sides == -1)) & is_flat
 
         # Close existing positions (direction switches + close actions)
         close_mask = switch_mask | close_action_mask
@@ -455,7 +441,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
         # Open new positions (direction switches + open from flat)
         open_mask = switch_mask | open_from_flat
-        opened = torch.zeros_like(open_mask)
         if open_mask.any():
             # Position sizing based on trade_mode
             if self.config.trade_mode == "fractional":
@@ -481,7 +466,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
             # Float32 tolerance for can_afford check
             can_afford = (margin_new + new_fee) <= self._balances * (1 + 1e-5)
             final_open = open_mask & can_afford
-            opened = final_open
 
             if final_open.any():
                 self._balances[final_open] -= (margin_new + new_fee)[final_open]
@@ -503,4 +487,3 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
                     trade_prices * (1 + tp_pcts)
                 )[final_open]
 
-        return opened

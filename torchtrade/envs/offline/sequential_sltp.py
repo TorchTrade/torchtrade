@@ -341,18 +341,19 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step with SLTP logic.
 
-        Priority order:
-        1. Liquidation check on bar N+1 (highest priority)
-        2. SL/TP trigger check on bar N+1 (bracket orders)
-        3. New action execution at bar N price
-        4. Liquidation and SL/TP again on bar N+1, for a position opened by step 3
+        Order:
+        1. Execute the agent's action at bar N's close
+        2. Liquidation, then SL/TP, on bar N+1 against whatever position results
 
-        The sampler is advanced BEFORE checking SL/TP so that triggers are
-        evaluated against the first unseen bar (bar N+1), not the stale bar
-        (bar N) that the agent already observed. Steps 1-2 see only the position
-        held coming in, so step 4 covers the one opened during this step -- bar
-        N+1 is the first bar it is exposed to, and without it that position
-        would not be checked until bar N+2.
+        The agent observes bar N and its order fills at close(N); bar N+1 unfolds
+        afterwards. So the action goes first and the bar is then applied to the
+        position actually held during it -- held-and-untouched, freshly opened, or
+        flipped alike. Checking the incoming position first instead discarded the
+        agent's order whenever the old bracket fired on N+1 (#292), leaving the
+        account in a position it had asked to leave, at a price it never chose.
+
+        The sampler is advanced before the check so triggers are evaluated against
+        the first unseen bar, never the bar the agent already acted on.
         """
         self.step_counter += 1
 
@@ -376,44 +377,25 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         self._cached_base_features = base_features
         new_price = base_features["close"]
 
-        # Priority 1: Check for liquidation on bar N+1 (futures only)
-        if self._check_liquidation(base_features):
-            trade_info = self._execute_liquidation()
+        # Locking discards the agent's action by config, so the position it is holding
+        # is what bar N+1 gets applied to below.
+        if self.config.lock_position_until_sltp and self.position.position_size != 0:
+            side, sl_pct, tp_pct = None, None, None
 
-        # Priority 2: Check for SL/TP trigger on bar N+1 (if in position)
-        elif self.position.position_size != 0:
-            sltp_trigger = self._check_sltp_trigger(base_features)
-            if sltp_trigger is not None:
-                # Determine execution price based on trigger type
-                if sltp_trigger == "sl":
-                    execution_price = self.stop_loss
-                else:  # "tp"
-                    execution_price = self.take_profit
-                trade_info = self._execute_sltp_close(execution_price, sltp_trigger)
-            elif self.config.lock_position_until_sltp:
-                # Position locked — ignore agent action, treat as HOLD
-                trade_info = self._execute_sltp_action(None, None, None, cached_price)
-            else:
-                # No trigger, execute new action at bar N price
-                trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
+        # 1. The agent's action, at bar N's close.
+        trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
 
-        # Priority 3: Execute new action at bar N price (if flat)
-        else:
-            trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
-
-        # The checks above ran against the position held BEFORE this step, but a position
-        # opened at bar N's close is already exposed to bar N+1. Same bar, no lookahead --
-        # the action was chosen on bar N's close alone. Must precede the portfolio value
-        # and the history record below, or both read a state that ignores this exit.
-        # executed with an open position means a successful open, direction switches too.
-        if trade_info["executed"] and self.position.position_size != 0:
+        # 2. Bar N+1, against whatever is held after the action. Must precede the
+        # portfolio value and the history record below, or both read a state that
+        # ignores this exit.
+        if self.position.position_size != 0:
             if self._check_liquidation(base_features):
                 trade_info = self._execute_liquidation()
             else:
-                entry_trigger = self._check_sltp_trigger(base_features)
-                if entry_trigger is not None:
-                    execution_price = self.stop_loss if entry_trigger == "sl" else self.take_profit
-                    trade_info = self._execute_sltp_close(execution_price, entry_trigger)
+                trigger = self._check_sltp_trigger(base_features)
+                if trigger is not None:
+                    execution_price = self.stop_loss if trigger == "sl" else self.take_profit
+                    trade_info = self._execute_sltp_close(execution_price, trigger)
 
         # Update position flag based on actual position size
         if trade_info["executed"]:
