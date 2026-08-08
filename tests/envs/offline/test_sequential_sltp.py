@@ -1314,10 +1314,9 @@ class TestAgentActionPrecedesNextBarTrigger:
             [HOLD] * 5 + [LONG_TIGHT] + [HOLD] * 3 + [SHORT_TIGHT] + [HOLD] * 2,
             leverage=2, sl_levels=[-0.025, -0.50], tp_levels=[0.025, 0.50], wick_high=120.0,
         )
-        assert "sltp_tp" not in env.history.action_types, (
-            "the incoming long's TP fired, so the agent's switch was discarded"
-        )
-        assert env.history.action_types[-3] == "sltp_sl", "the SHORT should have been stopped out"
+        # sltp_sl, not sltp_tp: the bar stopped out the SHORT the agent asked for,
+        # rather than taking profit on the long it had just closed.
+        assert env.history.action_types[-3] == "sltp_sl"
         assert env.position.position_size == 0
         assert env.balance == pytest.approx(9500.0)
 
@@ -1350,10 +1349,8 @@ class TestAgentActionPrecedesNextBarTrigger:
             leverage=2, sl_levels=[-0.025, -0.50], tp_levels=[0.025, 0.50],
             wick_high=120.0, include_close=True,
         )
-        # The close must be RECORDED as a close. A stale bracket firing on the now-flat
-        # account is a financial no-op (_execute_sltp_close returns early when flat), so
-        # it moves no balance -- it just overwrites the agent's close with a phantom
-        # hold, and history feeds binarize_action_type and the reward function.
+        # Recorded as a close, not sltp_tp: reverting the reorder books the bracket
+        # instead, which both changes this label and moves the balance below.
         assert env.history.action_types[-3] == "close"
         assert env.position.position_size == 0
         assert env.balance == pytest.approx(10000.0), "a flat round trip must not move the balance"

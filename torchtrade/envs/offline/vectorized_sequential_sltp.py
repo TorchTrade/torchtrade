@@ -256,7 +256,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
     ) -> None:
         """Close positions whose bar range hit liquidation or a bracket."""
         leverage = float(self.config.leverage)
-        exited = torch.zeros_like(self._position_sizes, dtype=torch.bool)
 
         # Liquidation takes priority over the brackets (futures only)
         if self.config.leverage > 1:
@@ -292,9 +291,8 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
                 # Note: SL/TP are NOT cleared on liquidation, matching scalar
                 # env behavior. Stale values are harmless since position is
                 # zeroed and SL/TP checks guard on has_position.
-                exited = exited | liq_mask
 
-        has_position = (self._position_sizes != 0) & ~exited
+        has_position = self._position_sizes != 0
         has_brackets = (self._sl_prices > 0) | (self._tp_prices > 0)
         can_trigger = has_position & has_brackets
 

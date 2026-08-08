@@ -510,30 +510,23 @@ class TestSLTPScalarVecEquivalenceEntryBar:
         )
         assert not mismatches, "\n".join(mismatches)
 
-    @pytest.mark.parametrize("incoming_bracket,label", [
-        (4, "incoming-survives"),      # control: long SL 50 / TP 150, bar 20 leaves it alone
-        (1, "incoming-would-tp"),      # long TP 102.5 -- bar 20 WOULD have fired it
-    ], ids=["incoming-survives", "incoming-would-tp"])
-    def test_switch_exposes_the_new_position_to_the_entry_bar(self, incoming_bracket, label):
+    def test_switch_exposes_the_new_position_to_the_entry_bar(self):
         """A switch opens a position too, and each env recognises that differently.
 
         Both envs open a switch through their own code path -- _execute_sltp_action
         against switch_mask | open_from_flat -- so a refactor could reopen #268 for
-        switches in one env only. The `incoming-would-tp` case additionally pins #292: the incoming
-        long's own TP sits inside bar 20, and it must NOT pre-empt the switch -- the
-        agent closed that long at close(N), so bar 20 belongs to the short instead.
-        Both cases must record sltp_sl, from the short's SL at 102.5; `incoming-survives`
-        is the control that proves the sltp_sl comes from the short's entry bar rather
-        than the incoming long, and catches no regression the other case does not.
+        switches in one env only. The incoming long's own TP sits inside bar 20 and
+        must NOT pre-empt the switch (#292): the agent closed that long at close(N),
+        so bar 20 belongs to the short, which its own SL at 102.5 then stops out.
         """
         df = _flat_df_with_wick(bar=20, high=120.0)
-        tight_short = 5
-        actions = [0] * 5 + [incoming_bracket] + [0] * 3 + [tight_short] + [0] * 2
+        long_tight, short_tight = 1, 5
+        actions = [0] * 5 + [long_tight] + [0] * 3 + [short_tight] + [0] * 2
 
         mismatches = _run_sltp_sequence(
             df, actions, leverage=2,
             sl_levels=[-0.025, -0.50], tp_levels=[0.025, 0.50],
-            label=f"sltp-entry-bar-switch-{label}",
+            label="sltp-entry-bar-switch",
             # The hardcoded indices and the delicately balanced levels make this the
             # scenario most likely to quietly stop testing anything.
             expect_action_type="sltp_sl",
@@ -568,7 +561,7 @@ class TestSLTPScalarVecEquivalenceCloseVsTrigger:
         mismatches = _run_sltp_sequence(
             df, actions, leverage=leverage,
             sl_levels=sl_levels, tp_levels=tp_levels,
-            label="sltp-close-vs-exit",
+            label=f"sltp-close-vs-exit-{leverage}x",
             include_close=True,
             expect_action_type="close",
         )
