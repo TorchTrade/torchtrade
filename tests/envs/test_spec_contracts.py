@@ -271,8 +271,8 @@ def test_no_env_declares_its_own_done_spec(env_cls):
     """A second, per-env copy of the done spec is free to drift from the shared one.
 
     TorchTradeBaseEnv.__init__ declares it once, for live and offline alike. This PR
-    deleted two duplicates of it -- one in core/live.py, one in core/offline_base.py --
-    and nothing else stops either coming back.
+    deleted the one surviving duplicate, in core/offline_base.py, and nothing else stops
+    it coming back -- in that class or any other on the way down.
 
     AST, not source text: assigning the NARROWER done_spec reproduces #272 exactly, since
     it drops truncated, while never containing the string "full_done_spec".
@@ -281,10 +281,17 @@ def test_no_env_declares_its_own_done_spec(env_cls):
     TorchTradeBaseEnv.__init__ and their own declarations are overrides, not duplicates --
     the vectorized one is batched.
     """
-    assigned = {
-        node.attr for node in ast.walk(ast.parse(inspect.getsource(env_cls)))
-        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store)
-    }
+    # The MRO, not just the leaf: the duplicate this PR removed lived in a BASE class,
+    # which inspect.getsource(leaf) never shows. Stop at the one legitimate owner, which
+    # also keeps torchrl's own source out.
+    assigned = set()
+    for klass in env_cls.__mro__:
+        if klass is TorchTradeBaseEnv:
+            break
+        assigned |= {
+            node.attr for node in ast.walk(ast.parse(inspect.getsource(klass)))
+            if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store)
+        }
     clashes = assigned & {"done_spec", "full_done_spec"}
     assert not clashes, (
         f"{env_cls.__name__} assigns {sorted(clashes)}; it inherits a done spec from "
@@ -317,5 +324,5 @@ def test_a_collector_batch_carries_truncated(sample_ohlcv_df):
 
     assert "truncated" in batch["next"].keys(), (
         "the collector yielded a batch without truncated, and did not raise -- "
-        "the value estimators read this key"
+        "a key absent from the spec is absent from every batch, with no error"
     )

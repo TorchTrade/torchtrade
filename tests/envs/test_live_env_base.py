@@ -785,8 +785,3 @@ def test_position_unknown_identity_survives_a_round_trip():
     # __getattr__ that probe raises a trading error from inside a copy.
     assert copy.deepcopy(POSITION_UNKNOWN) is POSITION_UNKNOWN
     assert copy.deepcopy({"position_status": POSITION_UNKNOWN})["position_status"] is POSITION_UNKNOWN
-
-
-# ============================================================================
-# DONE SPEC (#272)
-# ============================================================================
