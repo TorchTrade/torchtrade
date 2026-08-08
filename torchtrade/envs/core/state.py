@@ -19,10 +19,11 @@ class _PositionUnknown:
 
     Covers both a call that failed and one the exchange answered with an error code.
 
-    Truthy, by leaving __bool__ alone: alpaca reads the status as
-    ``position_status.current_price if position_status else 0.0``
-    (env.py:195,239,270,345 and env_sltp.py:140), so a falsy sentinel would quietly
-    substitute a fallback price instead of stopping.
+    Truthy, by leaving __bool__ alone. Every live env reads the status behind a
+    truthiness check -- ``if position_status:`` in the futures envs, and
+    ``position_status.<field> if position_status else <fallback>`` throughout alpaca --
+    so a falsy sentinel would quietly take the flat branch and substitute a fallback
+    price instead of stopping.
     """
 
     _instance = None
@@ -36,8 +37,9 @@ class _PositionUnknown:
 
     def __getattr__(self, name):
         # This is the guard every live _step actually hits: all ten read a field off the
-        # status (mark_price/current_price) before anything else looks at it. A bare
-        # AttributeError would also fail closed; raising here says why.
+        # status before anything else looks at it -- directly in the futures envs, via a
+        # price helper in alpaca. A bare AttributeError would also fail closed; raising
+        # here says why.
         raise PositionUnknownError(
             f"cannot read {name!r}: the exchange did not report the position"
         )
