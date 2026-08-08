@@ -28,9 +28,14 @@ class SLTPMixin:
         the exchange's actual state, preventing position stacking when bracket
         orders fail but the main order succeeds.
 
+        An unknown status raises rather than syncing: it is indistinguishable here from an
+        SL/TP fill, and would clear brackets the exchange still holds. In practice _step
+        raises earlier, on its own status read.
+
         Args:
-            position_status: Position status from trader.get_status(), or None
-                if no position exists on the exchange.
+            position_status: Position status from trader.get_status(), None if the
+                exchange confirmed no position, or POSITION_UNKNOWN if it did not
+                answer -- which raises rather than syncing.
 
         Returns:
             True if a position was closed since the last step (SL/TP trigger

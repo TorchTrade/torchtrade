@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 
 from torchtrade.envs.live.bybit.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
+from torchtrade.envs.core.state import POSITION_UNKNOWN
 
 logger = logging.getLogger(__name__)
 
@@ -318,7 +319,7 @@ class BybitFuturesOrderClass:
             if ret_code is not None and int(ret_code) != 0:
                 ret_msg = response.get("retMsg", "unknown error")
                 logger.error(f"get_positions failed (retCode={ret_code}): {ret_msg}")
-                status["position_status"] = None
+                status["position_status"] = POSITION_UNKNOWN
                 return status
 
             positions = response.get("result", {}).get("list", [])
@@ -357,7 +358,7 @@ class BybitFuturesOrderClass:
 
         except Exception as e:
             logger.error(f"Error getting status: {str(e)}")
-            status["position_status"] = None
+            status["position_status"] = POSITION_UNKNOWN
 
         return status
 

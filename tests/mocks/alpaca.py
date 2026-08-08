@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
+from alpaca.common.exceptions import APIError
 import uuid
 
 import numpy as np
@@ -207,10 +208,16 @@ class MockTradingClient:
         raise Exception(f"Order not found: {order_id}")
 
     def get_open_position(self, symbol_or_asset_id: str) -> MockPosition:
-        """Get open position for symbol."""
+        """Get open position for symbol.
+
+        Raises APIError, not a bare Exception: Alpaca signals a flat account by returning
+        an error, so the exception TYPE is the only thing separating "flat" from "the
+        request never reached Alpaca". A bare Exception here made the mock unable to
+        express that difference.
+        """
         if symbol_or_asset_id in self.positions:
             return self.positions[symbol_or_asset_id]
-        raise Exception(f"No position found for {symbol_or_asset_id}")
+        raise APIError('{"code":40410000,"message":"position does not exist"}')
 
     def get_all_positions(self) -> List[MockPosition]:
         """Get all open positions."""

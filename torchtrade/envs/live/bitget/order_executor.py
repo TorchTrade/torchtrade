@@ -8,6 +8,7 @@ import ccxt
 from torchtrade.envs.live.bitget.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.common_types import OrderStatus
+from torchtrade.envs.core.state import POSITION_UNKNOWN
 
 logger = logging.getLogger(__name__)
 
@@ -585,7 +586,7 @@ class BitgetFuturesOrderClass:
 
         except Exception as e:
             logger.error(f"Error getting status: {str(e)}")
-            status["position_status"] = None
+            status["position_status"] = POSITION_UNKNOWN
 
         return status
 

@@ -210,6 +210,9 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
 
         Only the direction is reconciled, not the size: a PARTIAL external close leaves the
         direction intact and is still invisible to the guard. Pre-existing, not fixed here.
+
+        An unknown status raises rather than syncing to the 0 an unreachable exchange
+        would produce. In practice _step raises earlier, on its own status read.
         """
         observed = position_direction_from_status(position_status)
 

@@ -4,6 +4,10 @@ These replace the per-exchange copies of the same assertions. Testing a shared m
 once is only sound if every env actually inherits it -- so the unit test here is paired
 with a guard that asserts exactly that. If an exchange ever re-adds its own override, the
 guard fails and tells you to test that exchange separately.
+
+It also holds the tests for what an unreachable exchange must NOT look like (#270),
+which is the same invariant seen from the other side: a flat account must read flat, and
+an exchange that did not answer must not read as either.
 """
 
 import ast
@@ -18,7 +22,13 @@ import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
-from torchtrade.envs.core.state import PositionState, advance_hold_counter
+from torchtrade.envs.core.state import (
+    POSITION_UNKNOWN,
+    PositionState,
+    PositionUnknownError,
+    advance_hold_counter,
+    position_direction_from_status,
+)
 
 
 def _subclasses(cls):
@@ -392,3 +402,386 @@ def test_hold_counter_is_only_advanced_inside_get_observation(path):
         f"{path} calls advance_hold_counter() outside _get_observation():\n  "
         + "\n  ".join(offenders)
     )
+
+
+# ============================================================================
+# UNKNOWN EXCHANGE STATUS (#270)
+# ============================================================================
+
+
+def test_unknown_status_is_not_a_direction():
+    """The whole bug in one assertion: an unreachable exchange must not read as flat.
+
+    Every caller that has not been taught about an outage falls through to 0 otherwise,
+    and 0 means "flat" -- which is how a held position gets re-bought every bar.
+    """
+    assert position_direction_from_status(None) == 0            # confirmed flat
+    # match=: without it the explicit branch is dead weight, since reading .qty off the
+    # sentinel raises anyway. The message is the branch's only observable effect.
+    with pytest.raises(PositionUnknownError, match="must handle this"):
+        position_direction_from_status(POSITION_UNKNOWN)
+
+
+def test_unknown_status_is_truthy():
+    """`if position_status:` is a live-path idiom; falsy would take the flat branch."""
+    assert bool(POSITION_UNKNOWN) is True
+
+
+def test_unknown_status_refuses_to_build_account_state():
+    """An outage must not produce an account_state at all, rather than a flat-looking one.
+
+    account_state has no way to say "unknown", and the flat branch would report a held
+    position as flat -- invariant #3. Fails closed like get_account_balance() beside it.
+
+    One case, not one per env: all 12 futures envs resolve _get_observation to this same
+    implementation, and test_no_futures_env_reforks_the_shared_observation is what proves
+    they still do. Parametrizing would run one function twelve times.
+    """
+    env = SimpleNamespace(
+        observer=SimpleNamespace(
+            get_observations=lambda **k: {}, get_keys=lambda: []
+        ),
+        trader=SimpleNamespace(
+            get_status=lambda: {"position_status": POSITION_UNKNOWN},
+            get_account_balance=lambda: {"total_margin_balance": 1000.0},
+            # Present so a regression fails on "DID NOT RAISE" rather than on a gap in
+            # the fake, which would say nothing about what the env reported.
+            get_mark_price=lambda: 100.0,
+        ),
+        config=SimpleNamespace(include_base_features=False, leverage=10),
+        position=PositionState(),
+        account_state_key="account_state",
+        market_data_keys=[],
+    )
+    with pytest.raises(PositionUnknownError):
+        TorchTradeFuturesLiveEnv._get_observation(env)
+
+
+# A rename would empty this and pytest would SKIP rather than fail -- the hazard this
+# file guards against elsewhere with its own len() assertions.
+_SIZING_ENVS = [c for c in NON_SLTP_ENVS if "_get_current_position_quantity" in vars(c)]
+assert len(_SIZING_ENVS) == 3, f"expected 3 envs that size from a live query, got {_SIZING_ENVS}"
+
+_FAILING_FETCH_EXCHANGES = ["binance", "bitget", "bybit", "okx", "alpaca"]
+
+
+def _executor_with_failing_position_fetch(exchange):
+    """Build a real order executor whose position fetch raises, as in an outage."""
+    def boom(*a, **k):
+        raise ConnectionError("simulated outage")
+
+    if exchange == "binance":
+        from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+        client = SimpleNamespace(futures_position_information=boom, futures_exchange_info=boom)
+        return BinanceFuturesOrderClass(
+            symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10, client=client
+        )
+    if exchange == "bitget":
+        from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
+        client = SimpleNamespace(fetch_positions=boom, load_markets=boom, markets={})
+        return BitgetFuturesOrderClass(
+            symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10, client=client
+        )
+    if exchange == "bybit":
+        from torchtrade.envs.live.bybit.order_executor import (
+            BybitFuturesOrderClass, MarginMode, PositionMode,
+        )
+        client = SimpleNamespace(get_positions=boom, get_instruments_info=boom)
+        return BybitFuturesOrderClass(
+            symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10,
+            margin_mode=MarginMode.ISOLATED, position_mode=PositionMode.ONE_WAY,
+            api_key="k", api_secret="s", client=client,
+        )
+    if exchange == "okx":
+        from torchtrade.envs.live.okx.order_executor import (
+            OKXFuturesOrderClass, MarginMode, PositionMode,
+        )
+        return OKXFuturesOrderClass(
+            symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True, leverage=10,
+            margin_mode=MarginMode.ISOLATED, position_mode=PositionMode.NET,
+            api_key="k", api_secret="s", passphrase="p",
+            client=SimpleNamespace(),
+            account_client=SimpleNamespace(get_positions=boom, set_leverage=boom),
+            public_client=SimpleNamespace(get_instruments=boom),
+        )
+    if exchange == "alpaca":
+        from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
+        client = SimpleNamespace(get_open_position=boom, get_account=boom, get_asset=boom)
+        return AlpacaOrderClass(symbol="BTCUSD", trade_mode="quantity", client=client)
+    raise AssertionError(f"unhandled exchange {exchange}")
+
+
+@pytest.mark.parametrize("exchange", _FAILING_FETCH_EXCHANGES)
+def test_a_failed_position_fetch_does_not_report_flat(exchange):
+    """get_status must distinguish "the account is flat" from "the call failed".
+
+    Collapsing both to None is the root cause of #270: every consumer downstream then
+    reads an outage as an empty account, and a held position gets re-bought.
+    """
+    executor = _executor_with_failing_position_fetch(exchange)
+
+    status = executor.get_status()
+
+    assert status.get("position_status") is POSITION_UNKNOWN, (
+        f"{exchange} reported {status.get('position_status')!r} for a failed fetch; "
+        "None here means flat and would be traded on"
+    )
+
+
+def test_reading_a_field_off_an_unknown_status_says_why():
+    """The trade-sizing paths read .qty/.mark_price directly, not via the direction rule.
+
+    They are fail-closed either way -- the sentinel has no such fields -- but a bare
+    AttributeError from inside order sizing does not say that the exchange was unreachable.
+    """
+    # __getattr__ branches only on dunders, so one real field is the whole contract.
+    with pytest.raises(PositionUnknownError, match="did not report the position"):
+        POSITION_UNKNOWN.qty
+
+
+@pytest.mark.parametrize(
+    "env_cls",
+    _SIZING_ENVS,
+    ids=lambda c: c.__name__,
+)
+def test_position_sizing_refuses_an_unknown_status(env_cls):
+    """_get_current_position_quantity must not size an order off a phantom flat account.
+
+    Its `position.qty if position is not None else 0.0` reads an outage as 0 quantity,
+    so the delta is computed against a position the exchange never said was gone. _step
+    normally raises earlier, on its own status read -- this is the path when the outage
+    begins between the two get_status() calls inside a single step.
+
+    3 of 5: okx takes current_qty from _step, and alpaca spells the same second query
+    inline, so both are covered through _step by the composite test instead.
+    """
+    env = SimpleNamespace(
+        trader=SimpleNamespace(get_status=lambda: {"position_status": POSITION_UNKNOWN})
+    )
+    with pytest.raises(PositionUnknownError):
+        env_cls._get_current_position_quantity(env)
+
+
+@pytest.mark.parametrize("module", ["env", "env_sltp"])
+@pytest.mark.parametrize("exchange", _FAILING_FETCH_EXCHANGES)
+def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
+    """The traced failure from #270, driven through _step rather than reassembled.
+
+    Holding a long, the exchange stops answering. Previously _step read that as an empty
+    account, the duplicate-action guard no longer matched, and the env bought the position
+    a second time -- every bar of the outage. _step must now fail closed, and above all
+    must place no order.
+
+    Asserting through _step is the point. An earlier version of this test called the sync
+    and the trade path by hand, in an order _step cannot produce, and so proved nothing
+    about production -- _step raises on the status read before it ever reaches the sync.
+    """
+    import importlib
+    env_mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
+    env_cls = next(
+        c for c in vars(env_mod).values()
+        if isinstance(c, type) and c.__module__ == env_mod.__name__ and "_step" in vars(c)
+    )
+
+    orders = []
+    unexpected = None
+
+    def _sized(*a, **k):
+        orders.append("sized")
+        return {"executed": True}
+
+    env = SimpleNamespace(
+        position=PositionState(),
+        trader=SimpleNamespace(
+            get_status=lambda: {"position_status": POSITION_UNKNOWN},
+            get_mark_price=lambda: 100.0,
+            trade=lambda *a, **k: orders.append("trade"),
+            close_position=lambda *a, **k: orders.append("close"),
+        ),
+        action_levels=[-1.0, 0.0, 1.0],
+        active_stop_loss=0.0,
+        active_take_profit=0.0,
+        _create_trade_info=lambda **kw: {"executed": kw.get("executed", False)},
+        _execute_fractional_action=_sized,
+        _execute_trade_if_needed=_sized,
+    )
+    env.position.current_position = 1
+    env.position.current_action_level = 1.0
+    # The real shared sync, so that if the status ever stops raising the step proceeds the
+    # way production would -- otherwise a regression surfaces as a missing-attribute error
+    # on the fake instead of as the order it placed.
+    if hasattr(env_cls, "_get_current_price"):
+        env._get_current_price = lambda ps=None: env_cls._get_current_price(env, ps)
+        env.observer = SimpleNamespace(get_current_price=lambda: 100.0)
+    sync_owner = SLTPMixin if module == "env_sltp" else TorchTradeLiveEnv
+    env._sync_position_from_exchange = (
+        lambda ps: sync_owner._sync_position_from_exchange(env, ps)
+    )
+
+    try:
+        env_cls._step(env, {"action": 2})
+        failed_closed = False
+    except PositionUnknownError:
+        failed_closed = True
+    except Exception as exc:
+        # The fake is deliberately too thin to finish a whole step. Whether getting this
+        # far mattered is what `orders` below answers -- but name the exception, or a gap
+        # in the fake reads as "the env did not fail closed", which it is not.
+        failed_closed = False
+        unexpected = exc
+
+    # Order matters: the money claim is "no order", and asserting it first means a
+    # regression reports that rather than "DID NOT RAISE".
+    assert orders == [], f"an outage must not place an order, but {exchange} sent {orders}"
+    assert failed_closed, (
+        "an outage must fail closed rather than stepping on stale state"
+        + (f"; stopped on {unexpected!r} instead" if unexpected else "")
+    )
+
+
+@pytest.mark.parametrize("body,expect_flat", [
+    ('{"code":40410000,"message":"position does not exist"}', True),
+    ('{"code":42910000,"message":"rate limit exceeded"}', False),
+    ('{"code":50010000,"message":"internal server error"}', False),
+    ("not the documented json", False),
+], ids=["no-position", "rate-limited", "server-error", "unparseable-body"])
+def test_alpaca_only_treats_its_not_found_error_as_flat(body, expect_flat):
+    """Alpaca raises for a flat account, so the error itself has to be read.
+
+    Every APIError meaning flat would put #270 back inside its own fix: a 429 during a
+    volatile minute, or a 5xx, would report a held position as gone.
+    """
+    from alpaca.common.exceptions import APIError
+    from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
+
+    def raise_api_error(*a, **k):
+        raise APIError(body)
+
+    executor = AlpacaOrderClass(
+        symbol="BTCUSD", trade_mode="quantity",
+        client=SimpleNamespace(get_open_position=raise_api_error),
+    )
+
+    position_status = executor.get_status()["position_status"]
+
+    if expect_flat:
+        assert position_status is None
+    else:
+        assert position_status is POSITION_UNKNOWN, (
+            f"{body[:40]!r} is an answer we cannot read as an empty account"
+        )
+
+
+def test_alpaca_refuses_to_build_account_state_on_an_unknown_status():
+    """Alpaca has its own _get_observation, so the futures test above does not reach it.
+
+    Its flat branch would report a held position as flat -- invariant #3 for the spot env.
+    """
+    from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
+
+    env = SimpleNamespace(
+        observer=SimpleNamespace(get_observations=lambda **k: {}, get_keys=lambda: []),
+        trader=SimpleNamespace(
+            get_status=lambda: {"position_status": POSITION_UNKNOWN},
+            client=SimpleNamespace(get_account=lambda: SimpleNamespace(cash="1000")),
+        ),
+        config=SimpleNamespace(include_base_features=False),
+        position=PositionState(),
+        # Present so a regression fails on the assertion below rather than on a gap in
+        # the fake, which would say nothing about what the env reported.
+        account_state_key="account_state",
+        market_data_keys=[],
+    )
+    with pytest.raises(PositionUnknownError):
+        AlpacaBaseTorchTradingEnv._get_observation(env)
+
+
+def test_alpaca_refuses_to_value_the_portfolio_on_an_unknown_status():
+    """Cash alone feeds _check_termination, so an outage would read as a near-total loss.
+
+    The flat branch returns the balance without the position's market value, which for a
+    held position is most of the portfolio -- enough to terminate the episode as bankrupt.
+    """
+    from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
+
+    env = SimpleNamespace(
+        trader=SimpleNamespace(
+            get_status=lambda: {"position_status": POSITION_UNKNOWN},
+            client=SimpleNamespace(get_account=lambda: SimpleNamespace(cash="1000")),
+        ),
+        balance=0.0,
+    )
+    with pytest.raises(PositionUnknownError):
+        AlpacaBaseTorchTradingEnv._get_portfolio_value(env)
+
+
+def test_alpaca_outer_failure_does_not_report_flat():
+    """get_status wraps everything in a second try, and it used to return {}.
+
+    An absent key reads as flat downstream exactly like an explicit None does, so the
+    outer handler needs the sentinel too. Reached by failing the order lookup, which runs
+    before the position fetch.
+    """
+    from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
+
+    def boom(*a, **k):
+        raise ConnectionError("simulated outage")
+
+    executor = AlpacaOrderClass(
+        symbol="BTCUSD", trade_mode="quantity",
+        client=SimpleNamespace(get_order_by_id=boom, get_open_position=boom),
+    )
+    executor.last_order_id = "some-order-id"   # forces the outer try to run and fail
+
+    assert executor.get_status().get("position_status") is POSITION_UNKNOWN
+
+
+@pytest.mark.parametrize("sync", [
+    TorchTradeLiveEnv._sync_position_from_exchange,
+    SLTPMixin._sync_position_from_exchange,
+], ids=["base", "sltp"])
+def test_neither_sync_fork_treats_an_outage_as_flat(sync):
+    """Pins the contract #295 will edit.
+
+    Today _step raises on its own status read before either fork is reached, so making
+    these sync an outage to 0 changes nothing observable -- which is exactly why it needs
+    saying. #295 sets out to make an outage survivable, and will start here; without this
+    it could reintroduce the flat reading with the whole suite still green.
+    """
+    env = SimpleNamespace(position=PositionState(), active_stop_loss=0.0, active_take_profit=0.0)
+    env.position.current_position = 1
+    env.position.current_action_level = 1.0
+
+    with pytest.raises(PositionUnknownError):
+        sync(env, POSITION_UNKNOWN)
+
+
+def test_the_hand_listed_exchanges_match_the_discovered_ones():
+    """The hand-written exchange list, against this file's "discovered, not hand-listed".
+
+    It cannot be derived -- each exchange's executor takes different constructor kwargs --
+    so the list is asserted instead. Both #270 parametrizations that cannot be derived now
+    read from it, so exchange #6 fails here rather than quietly skipping them.
+    """
+    # NON_SLTP_ENVS is one concrete env per exchange; LIVE_ENVS also carries the
+    # intermediate futures base, whose module is "shared" rather than an exchange.
+    discovered = {c.__module__.split(".")[-2] for c in NON_SLTP_ENVS}
+    assert discovered == set(_FAILING_FETCH_EXCHANGES), (
+        f"hand-listed {sorted(_FAILING_FETCH_EXCHANGES)} but discovered {sorted(discovered)}"
+    )
+
+
+def test_position_unknown_identity_survives_a_round_trip():
+    """`is POSITION_UNKNOWN` is the check at every call site, so identity has to hold.
+
+    __new__ exists for this; without pinning it the docstring is an unverified claim.
+    """
+    import copy
+    import pickle
+
+    assert pickle.loads(pickle.dumps(POSITION_UNKNOWN)) is POSITION_UNKNOWN
+    assert copy.copy(POSITION_UNKNOWN) is POSITION_UNKNOWN
+    # deepcopy probes the instance for __deepcopy__; without the dunder escape hatch in
+    # __getattr__ that probe raises a trading error from inside a copy.
+    assert copy.deepcopy(POSITION_UNKNOWN) is POSITION_UNKNOWN
+    assert copy.deepcopy({"position_status": POSITION_UNKNOWN})["position_status"] is POSITION_UNKNOWN

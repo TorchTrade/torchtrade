@@ -11,6 +11,7 @@ from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.core.state import (
+    POSITION_UNKNOWN,
     HistoryTracker,
     PositionState,
     advance_hold_counter,
@@ -261,6 +262,8 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         Calculate total portfolio value for Alpaca.
 
         Returns cash + position_market_value.
+
+        Raises PositionUnknownError on an unknown status -- see the comment on the return.
         """
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
@@ -270,6 +273,9 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         if position_status is None:
             return self.balance
+        # An unknown status raises on the .market_value read rather than taking the flat
+        # branch above: cash alone feeds _check_termination, and for a held position that
+        # is most of the portfolio missing -- an outage would read as a near-total loss.
         return self.balance + position_status.market_value
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:

@@ -10,13 +10,70 @@ from typing import Dict, List, Union
 POSITION_DUST_EPS = 1e-9
 
 
+class PositionUnknownError(RuntimeError):
+    """Raised when an unknown exchange status reaches code that needs a real direction."""
+
+
+class _PositionUnknown:
+    """The exchange did not report a position we can trust, which is not "flat".
+
+    Covers both a call that failed and one the exchange answered with an error code.
+
+    Truthy, by leaving __bool__ alone. Every live env reads the status behind a
+    truthiness check -- ``if position_status:`` in the futures envs, and
+    ``position_status.<field> if position_status else <fallback>`` throughout alpaca --
+    so a falsy sentinel would quietly take the flat branch and substitute a fallback
+    price instead of stopping.
+    """
+
+    _instance = None
+
+    def __new__(cls):
+        # Identity survives pickling and copying, which is what makes `is
+        # POSITION_UNKNOWN` safe as the check at every call site.
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __getattr__(self, name):
+        if name.startswith("__") and name.endswith("__"):
+            # copy/pickle probe the instance for __deepcopy__ and friends. Answering
+            # those with a trading error breaks copying for a question that was never
+            # about the position.
+            raise AttributeError(name)
+        # This is the guard every live _step actually hits: all ten read a field off the
+        # status (mark_price/current_price) before anything else looks at it. A bare
+        # AttributeError would also fail closed; raising here says why.
+        raise PositionUnknownError(
+            f"cannot read {name!r}: the exchange did not report the position"
+        )
+
+    def __repr__(self):
+        return "POSITION_UNKNOWN"
+
+
+# Returned by get_status() when the exchange call failed or reported an error. Distinct
+# from None, which is a confirmed-flat account: reading a failed call as flat is how a
+# held position gets re-bought every bar of an outage.
+POSITION_UNKNOWN = _PositionUnknown()
+
+
 def position_direction_from_status(position_status) -> int:
     """The direction the exchange holds: -1 short, 0 flat, +1 long. None means flat.
 
     The single rule for the LIVE envs: their position syncs, their resets, and the
     account_state they show the agent all go through here. The offline envs still derive
     direction their own way -- out of scope here, and not covered by this.
+
+    POSITION_UNKNOWN raises rather than returning a direction. A caller that has not been
+    taught to handle an unreachable exchange must fail loudly, because the alternative it
+    would otherwise fall into is 0, and reading an outage as flat is the whole bug.
     """
+    if position_status is POSITION_UNKNOWN:
+        raise PositionUnknownError(
+            "exchange status is unknown; the caller must handle this rather than "
+            "treating it as a direction"
+        )
     qty = 0.0 if position_status is None else float(position_status.qty)
     if abs(qty) <= POSITION_DUST_EPS:
         return 0

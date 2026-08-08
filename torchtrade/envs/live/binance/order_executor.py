@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.common_types import MarginType, OrderStatus
+from torchtrade.envs.core.state import POSITION_UNKNOWN
 
 load_dotenv()
 
@@ -347,7 +348,7 @@ class BinanceFuturesOrderClass:
 
         except Exception as e:
             logger.error(f"Error getting status: {str(e)}")
-            status["position_status"] = None
+            status["position_status"] = POSITION_UNKNOWN
 
         return status
 

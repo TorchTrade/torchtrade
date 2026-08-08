@@ -187,6 +187,11 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
 
         Returns:
             Current price, or 0.0 if unavailable
+
+        Raises:
+            PositionUnknownError: the exchange did not report the position. This is where
+                AlpacaTorchTradingEnv._step stops on an outage, before any trade is
+                sized; the SLTP env stops on its own inline read instead.
         """
         # Try position status first
         if position_status is None:
