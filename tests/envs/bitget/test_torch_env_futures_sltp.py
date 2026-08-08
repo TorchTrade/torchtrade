@@ -100,16 +100,11 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
                 return env
 
     def test_check_env_specs(self, env):
-        """The emitted step must match the declared specs (#272).
-
-        No live env had this: every _step writes a truncated key that the default done
-        spec does not carry, so a collector pre-allocating from the spec dropped it.
-        """
+        """Every _step writes a truncated key the default done spec omits (#272)."""
         from torchrl.envs.utils import check_env_specs
 
-        with patch("time.sleep"):
-            with patch.object(type(env), "_wait_for_next_timestamp"):
-                check_env_specs(env)
+        with patch.object(type(env), "_wait_for_next_timestamp"):
+            check_env_specs(env)
 
     def test_a_direct_flip_does_not_age_the_new_position(self, env, mock_trader):
         """A long flipped straight to a short (never through flat) is one step old (#49).

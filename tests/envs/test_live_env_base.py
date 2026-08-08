@@ -11,8 +11,8 @@ an exchange that did not answer must not read as either.
 """
 
 import ast
-import importlib
 import pathlib
+import textwrap
 import inspect
 import math
 from types import SimpleNamespace
@@ -795,16 +795,23 @@ def test_position_unknown_identity_survives_a_round_trip():
 
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
 def test_no_live_env_declares_its_own_done_spec(env_cls):
-    """full_done_spec is set once in TorchTradeLiveEnv.__init__, and must stay that way.
+    """A second, per-exchange copy of the done spec is free to drift from the shared one.
 
-    Every live _step writes a truncated key. TorchRL's default done spec carries only done
-    and terminated, so an env that misses the declaration fails check_env_specs and, worse,
-    a collector pre-allocating from the spec silently drops truncated -- which the value
-    estimators read. All ten were undeclared (#272); a per-exchange copy is how that
-    happens again.
+    AST, not source text (like the guards above), for two reasons: a subclass comment
+    mentioning full_done_spec must not fail this, and assigning the NARROWER done_spec
+    reproduces #272 exactly -- it drops truncated -- while never containing the string
+    "full_done_spec".
+
+    Polymarket declares its own and is correctly absent here: it subclasses EnvBase
+    directly, so it is not in LIVE_ENVS.
     """
-    source = inspect.getsource(env_cls)
-    assert "full_done_spec" not in source, (
-        f"{env_cls.__name__} sets full_done_spec itself; it inherits one from "
-        "TorchTradeLiveEnv and a second copy is free to drift"
+    tree = ast.parse(textwrap.dedent(inspect.getsource(env_cls)))
+    assigned = {
+        node.attr for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store)
+    }
+    clashes = assigned & {"done_spec", "full_done_spec"}
+    assert not clashes, (
+        f"{env_cls.__name__} assigns {sorted(clashes)}; it inherits a done spec from "
+        "TorchTradeLiveEnv, and a second copy is free to drift"
     )

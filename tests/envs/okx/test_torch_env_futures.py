@@ -52,16 +52,11 @@ class TestOKXFuturesTorchTradingEnv:
             )
 
     def test_check_env_specs(self, env):
-        """The emitted step must match the declared specs (#272).
-
-        No live env had this: every _step writes a truncated key that the default done
-        spec does not carry, so a collector pre-allocating from the spec dropped it.
-        """
+        """Every _step writes a truncated key the default done spec omits (#272)."""
         from torchrl.envs.utils import check_env_specs
 
-        with patch("time.sleep"):
-            with patch.object(type(env), "_wait_for_next_timestamp"):
-                check_env_specs(env)
+        with patch.object(type(env), "_wait_for_next_timestamp"):
+            check_env_specs(env)
 
     def test_action_spec(self, env):
         """Test action spec and levels are correctly defined."""

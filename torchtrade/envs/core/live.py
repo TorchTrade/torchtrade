@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import torch
 from tensordict import TensorDictBase
-from torchrl.data import Categorical, Composite, Unbounded
+from torchrl.data import Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import PositionState, position_direction_from_status
@@ -79,17 +79,6 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         # Initialize position state
         # Note: Subclasses may override this with their specific position tracking needs
         self.position = PositionState()
-
-        # Every live _step writes a truncated key, but TorchRL's default done spec only
-        # carries done and terminated -- so check_env_specs fails and a collector
-        # pre-allocating from the spec drops the key. Declared here rather than per
-        # exchange because it depends on nothing an exchange configures, which is what
-        # left all ten envs undeclared in the first place (#272).
-        self.full_done_spec = Composite(
-            done=Categorical(2, dtype=torch.bool, shape=(1,)),
-            terminated=Categorical(2, dtype=torch.bool, shape=(1,)),
-            truncated=Categorical(2, dtype=torch.bool, shape=(1,)),
-        )
 
     @abstractmethod
     def _init_trading_clients(
