@@ -573,15 +573,20 @@ class TestSLTPScalarVecEquivalencePriority:
     envs (#298).
 
     They encode the precedence differently -- the scalar as an if/else chain, the
-    vectorized as mask ordering inside _apply_exit_checks -- so one could be reordered
-    without the other, and the two exits differ by thousands on the same bar.
+    vectorized by zeroing the position inside the liquidation branch so the trigger
+    masks cannot see it -- so one could be reordered without the other. At this
+    harness's initial_cash of 1000 the liquidation leaves 40 where the stop would
+    leave 500; the scalar test pins the absolute figures.
+
+    The vec side has no action_types record, so its liquidation is pinned by numeric
+    parity with the scalar rather than by a label of its own.
     """
 
     def test_liquidation_wins_over_the_bracket_in_both_envs(self):
         df = _flat_df_with_wick(bar=20, low=88.0)
         # 10x long at 100: SL 95, liquidation 90.4, bar low 88 breaches both.
         long_action = 1
-        actions = [0] * 5 + [long_action] + [0] * 6
+        actions = [0] * 5 + [long_action] + [0] * 4
 
         mismatches = _run_sltp_sequence(
             df, actions, leverage=10,
