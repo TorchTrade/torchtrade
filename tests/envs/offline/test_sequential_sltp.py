@@ -1244,3 +1244,113 @@ class TestLockPositionUntilSLTP:
         config = SequentialTradingEnvSLTPConfig()
         assert config.lock_position_until_sltp is False
 
+
+HOLD = (None, None, None)
+CLOSE = ("close", None, None)
+LONG_TIGHT = ("long", -0.025, 0.025)
+SHORT_TIGHT = ("short", 0.025, -0.025)
+
+
+class TestAgentActionPrecedesNextBarTrigger:
+    """The agent's order fills at close(N); bar N+1 unfolds after it (#292).
+
+    _step checked the position held *coming into* the step against bar N+1 before
+    running the agent's action, so a held position whose bracket or liquidation fired
+    on N+1 discarded that action outright. The account ended the step in a position it
+    had asked to leave, at a price it never chose.
+
+    Balances are pinned, not just action types: booking the agent's close leg at the
+    bracket price rather than the market close it selected is the same class of error
+    and leaves every action_type assertion green.
+    """
+
+    def _run(self, actions, *, leverage, sl_levels, tp_levels, wick_high=None,
+             wick_low=None, include_close=False):
+        import numpy as np
+        import pandas as pd
+
+        n = 60
+        flat = np.full(n, 100.0)
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": flat.copy(), "high": flat.copy(), "low": flat.copy(),
+            "close": flat.copy(), "volume": np.ones(n) * 1000,
+        })
+        if wick_high is not None:
+            df.loc[20, "high"] = wick_high
+        if wick_low is not None:
+            df.loc[20, "low"] = wick_low
+
+        config = SequentialTradingEnvSLTPConfig(
+            leverage=leverage, initial_cash=10000,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10], transaction_fee=0.0, slippage=0.0,
+            seed=42, random_start=False,
+            stoploss_levels=sl_levels, takeprofit_levels=tp_levels,
+            include_close_action=include_close,
+        )
+        env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
+        # Resolved from the map, not hardcoded: enabling the close action shifts every
+        # index, which would silently turn these into a run of holds.
+        index_of = {spec: idx for idx, spec in env.action_map.items()}
+        td = env.reset()
+        for step, action in enumerate(actions):
+            action_td = (td if step == 0 else td["next"]).clone()
+            action_td["action"] = torch.tensor(index_of[action])
+            td = env.step(action_td)
+        return env
+
+    def test_switch_is_not_cancelled_by_the_incoming_positions_take_profit(self):
+        """Incoming long's TP sits inside bar 20; the agent flips to short on bar 19.
+
+        The long is closed by the agent at close(19)=100, so its TP must never fire.
+        The short opens at 100 and bar 20's spike stops IT out at 102.5 instead --
+        a 2.5% adverse move at 2x on the full portfolio, so 10000 -> 9500.
+        """
+        env = self._run(
+            # reset caches bar 10, so step k executes at bar 10+k: open at step 5 (bar 15),
+            # switch at step 9 (bar 19), and bar 20 is the step-9 exposure bar.
+            [HOLD] * 5 + [LONG_TIGHT] + [HOLD] * 3 + [SHORT_TIGHT] + [HOLD] * 2,
+            leverage=2, sl_levels=[-0.025, -0.50], tp_levels=[0.025, 0.50], wick_high=120.0,
+        )
+        # sltp_sl, not sltp_tp: the bar stopped out the SHORT the agent asked for,
+        # rather than taking profit on the long it had just closed.
+        assert env.history.action_types[-3] == "sltp_sl"
+        assert env.position.position_size == 0
+        assert env.balance == pytest.approx(9500.0)
+
+    def test_liquidation_does_not_cancel_the_agents_close(self):
+        """Same defect, liquidation instead of a bracket -- and here it is total.
+
+        A 10x long liquidates around 90.4 and bar 20 wicks to 88. The agent closes at
+        close(19)=100, so the position is gone before that bar and the account keeps its
+        capital; previously the pre-action liquidation check wiped it to near zero.
+        """
+        env = self._run(
+            [HOLD] * 5 + [("long", -0.50, 0.50)] + [HOLD] * 3 + [CLOSE] + [HOLD] * 2,
+            leverage=10, sl_levels=[-0.50], tp_levels=[0.50], wick_low=88.0,
+            include_close=True,
+        )
+        assert "liquidation" not in env.history.action_types, (
+            "the agent closed at close(19); bar 20 must not liquidate a position it had left"
+        )
+        assert env.position.position_size == 0
+        assert env.balance == pytest.approx(10000.0), "a flat round trip must not move the balance"
+
+    def test_agent_close_beats_a_bracket_firing_on_the_same_bar(self):
+        """The reorder applies to close actions, not only switches.
+
+        The agent closes at close(19)=100 for a flat round trip; the long's TP inside
+        bar 20 must not book a profit it did not ask for.
+        """
+        env = self._run(
+            [HOLD] * 5 + [LONG_TIGHT] + [HOLD] * 3 + [CLOSE] + [HOLD] * 2,
+            leverage=2, sl_levels=[-0.025, -0.50], tp_levels=[0.025, 0.50],
+            wick_high=120.0, include_close=True,
+        )
+        # Recorded as a close, not sltp_tp: reverting the reorder books the bracket
+        # instead, which both changes this label and moves the balance below.
+        assert env.history.action_types[-3] == "close"
+        assert env.position.position_size == 0
+        assert env.balance == pytest.approx(10000.0), "a flat round trip must not move the balance"

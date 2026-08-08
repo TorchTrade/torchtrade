@@ -509,3 +509,42 @@ class TestVecSLTPLockPosition:
 
         assert env._position_sizes[0].item() == pytest.approx(initial_size, rel=1e-6)
         env.close()
+
+
+class TestSLTPCanAfford:
+    """An SLTP open must be refused when the balance cannot fund it.
+
+    `final_open = open_mask & can_afford` is what stops the env funding a position it
+    cannot afford; nothing exercised it, so deleting the gate outright left the suite
+    green. Covers the open_from_flat path only -- the switch path, where a refused
+    reopen leaves the account flat rather than in its old position, is pre-existing
+    behaviour this PR does not change and is still uncovered in both envs.
+
+    Deliberately asserts only that the gate holds. The scalar and vectorized envs use
+    different tolerances here (1e-9 vs 1e-5) and pinning that divergence would cement
+    it -- it belongs with the leverage-dependent equivalence work in #293.
+    """
+
+    def test_unaffordable_open_is_refused_and_balance_never_goes_negative(
+        self, sample_ohlcv_df
+    ):
+        config = VectorizedSequentialTradingEnvSLTPConfig(
+            num_envs=1, initial_cash=100.0, leverage=1,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10], transaction_fee=0.0, slippage=0.0,
+            seed=42, random_start=False,
+            stoploss_levels=[-0.05], takeprofit_levels=[0.10],
+            # Fixed notional two orders of magnitude above the funded balance.
+            trade_mode="notional", quantity_per_trade=10_000.0,
+        )
+        env = VectorizedSequentialTradingEnvSLTP(sample_ohlcv_df, config)
+        td = env.reset()
+
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+        td["action"] = torch.full((1,), long_idx, dtype=torch.long)
+        env.step(td)
+
+        assert (env._position_sizes == 0).all(), "an unaffordable open must be refused"
+        assert env._balances.allclose(torch.full((1,), 100.0)), "a refused open must cost nothing"
+        env.close()

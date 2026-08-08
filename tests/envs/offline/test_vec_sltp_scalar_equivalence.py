@@ -510,20 +510,18 @@ class TestSLTPScalarVecEquivalenceEntryBar:
         )
         assert not mismatches, "\n".join(mismatches)
 
-    def test_entry_bar_exit_after_direction_switch(self):
+    def test_switch_exposes_the_new_position_to_the_entry_bar(self):
         """A switch opens a position too, and each env recognises that differently.
 
-        The scalar env gates on trade_info["executed"] plus a non-zero position size,
-        the vectorized one on switch_mask | open_from_flat. Nothing else covers the
-        switch path, so a refactor could reopen #268 for switches in one env only.
+        Both envs open a switch through their own code path -- _execute_sltp_action
+        against switch_mask | open_from_flat -- so a refactor could reopen #268 for
+        switches in one env only. The incoming long's own TP sits inside bar 20 and
+        must NOT pre-empt the switch (#292): the agent closed that long at close(N),
+        so bar 20 belongs to the short, which its own SL at 102.5 then stops out.
         """
         df = _flat_df_with_wick(bar=20, high=120.0)
-
-        # Levels chosen so the incoming long survives bar 20 (SL 50, TP 150) while the
-        # short opened into it does not (SL 102.5). Otherwise the long's own trigger
-        # preempts the switch and the path under test never runs -- see #292.
-        wide_long, tight_short = 4, 5
-        actions = [0] * 5 + [wide_long] + [0] * 3 + [tight_short] + [0] * 2
+        long_tight, short_tight = 1, 5
+        actions = [0] * 5 + [long_tight] + [0] * 3 + [short_tight] + [0] * 2
 
         mismatches = _run_sltp_sequence(
             df, actions, leverage=2,
@@ -536,9 +534,38 @@ class TestSLTPScalarVecEquivalenceEntryBar:
         assert not mismatches, "\n".join(mismatches)
 
 
-# ============================================================================
-# LIQUIDATION EQUIVALENCE (FUTURES)
-# ============================================================================
+class TestSLTPScalarVecEquivalenceCloseVsTrigger:
+    """A close action and a firing bracket on the same bar (#292).
+
+    The reorder applies to closes as well as switches, and each env recognises a close
+    through its own path -- _execute_sltp_action against close_action_mask -- so a
+    vec-only regression here is invisible to any test that never puts a close and a
+    trigger on the same bar.
+    """
+
+    @pytest.mark.parametrize("leverage,sl_levels,tp_levels,wick_high,wick_low", [
+        (2, [-0.025, -0.50], [0.025, 0.50], 120.0, None),
+        # Liquidation flavour: a 10x long liquidates near 90.4 and bar 20 wicks to 88.
+        # The held-and-hold version of this scenario passes under BOTH orderings, which
+        # is what made the scalar liquidation test dead before it sent a close.
+        (10, [-0.50], [0.50], None, 88.0),
+    ], ids=["bracket", "liquidation"])
+    def test_close_action_beats_an_exit_on_the_same_bar(
+        self, leverage, sl_levels, tp_levels, wick_high, wick_low
+    ):
+        df = _flat_df_with_wick(bar=20, high=wick_high, low=wick_low)
+        # With the close action enabled every index shifts by one: 2 is the first long.
+        long_action, close_action = 2, 1
+        actions = [0] * 5 + [long_action] + [0] * 3 + [close_action] + [0] * 2
+
+        mismatches = _run_sltp_sequence(
+            df, actions, leverage=leverage,
+            sl_levels=sl_levels, tp_levels=tp_levels,
+            label=f"sltp-close-vs-exit-{leverage}x",
+            include_close=True,
+            expect_action_type="close",
+        )
+        assert not mismatches, "\n".join(mismatches)
 
 
 class TestSLTPScalarVecEquivalenceLiquidation:
