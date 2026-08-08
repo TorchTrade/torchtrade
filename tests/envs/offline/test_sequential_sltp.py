@@ -1251,6 +1251,44 @@ LONG_TIGHT = ("long", -0.025, 0.025)
 SHORT_TIGHT = ("short", 0.025, -0.025)
 
 
+def _run_sltp(actions, *, leverage, sl_levels, tp_levels, wick_high=None,
+         wick_low=None, include_close=False):
+    import numpy as np
+    import pandas as pd
+
+    n = 60
+    flat = np.full(n, 100.0)
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": flat.copy(), "high": flat.copy(), "low": flat.copy(),
+        "close": flat.copy(), "volume": np.ones(n) * 1000,
+    })
+    if wick_high is not None:
+        df.loc[20, "high"] = wick_high
+    if wick_low is not None:
+        df.loc[20, "low"] = wick_low
+
+    config = SequentialTradingEnvSLTPConfig(
+        leverage=leverage, initial_cash=10000,
+        execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+        window_sizes=[10], transaction_fee=0.0, slippage=0.0,
+        seed=42, random_start=False,
+        stoploss_levels=sl_levels, takeprofit_levels=tp_levels,
+        include_close_action=include_close,
+    )
+    env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
+    # Resolved from the map, not hardcoded: enabling the close action shifts every
+    # index, which would silently turn these into a run of holds.
+    index_of = {spec: idx for idx, spec in env.action_map.items()}
+    td = env.reset()
+    for step, action in enumerate(actions):
+        action_td = (td if step == 0 else td["next"]).clone()
+        action_td["action"] = torch.tensor(index_of[action])
+        td = env.step(action_td)
+    return env
+
+
 class TestAgentActionPrecedesNextBarTrigger:
     """The agent's order fills at close(N); bar N+1 unfolds after it (#292).
 
@@ -1264,43 +1302,6 @@ class TestAgentActionPrecedesNextBarTrigger:
     and leaves every action_type assertion green.
     """
 
-    def _run(self, actions, *, leverage, sl_levels, tp_levels, wick_high=None,
-             wick_low=None, include_close=False):
-        import numpy as np
-        import pandas as pd
-
-        n = 60
-        flat = np.full(n, 100.0)
-        df = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
-            "open": flat.copy(), "high": flat.copy(), "low": flat.copy(),
-            "close": flat.copy(), "volume": np.ones(n) * 1000,
-        })
-        if wick_high is not None:
-            df.loc[20, "high"] = wick_high
-        if wick_low is not None:
-            df.loc[20, "low"] = wick_low
-
-        config = SequentialTradingEnvSLTPConfig(
-            leverage=leverage, initial_cash=10000,
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10], transaction_fee=0.0, slippage=0.0,
-            seed=42, random_start=False,
-            stoploss_levels=sl_levels, takeprofit_levels=tp_levels,
-            include_close_action=include_close,
-        )
-        env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
-        # Resolved from the map, not hardcoded: enabling the close action shifts every
-        # index, which would silently turn these into a run of holds.
-        index_of = {spec: idx for idx, spec in env.action_map.items()}
-        td = env.reset()
-        for step, action in enumerate(actions):
-            action_td = (td if step == 0 else td["next"]).clone()
-            action_td["action"] = torch.tensor(index_of[action])
-            td = env.step(action_td)
-        return env
-
     def test_switch_is_not_cancelled_by_the_incoming_positions_take_profit(self):
         """Incoming long's TP sits inside bar 20; the agent flips to short on bar 19.
 
@@ -1308,7 +1309,7 @@ class TestAgentActionPrecedesNextBarTrigger:
         The short opens at 100 and bar 20's spike stops IT out at 102.5 instead --
         a 2.5% adverse move at 2x on the full portfolio, so 10000 -> 9500.
         """
-        env = self._run(
+        env = _run_sltp(
             # reset caches bar 10, so step k executes at bar 10+k: open at step 5 (bar 15),
             # switch at step 9 (bar 19), and bar 20 is the step-9 exposure bar.
             [HOLD] * 5 + [LONG_TIGHT] + [HOLD] * 3 + [SHORT_TIGHT] + [HOLD] * 2,
@@ -1327,7 +1328,7 @@ class TestAgentActionPrecedesNextBarTrigger:
         close(19)=100, so the position is gone before that bar and the account keeps its
         capital; previously the pre-action liquidation check wiped it to near zero.
         """
-        env = self._run(
+        env = _run_sltp(
             [HOLD] * 5 + [("long", -0.50, 0.50)] + [HOLD] * 3 + [CLOSE] + [HOLD] * 2,
             leverage=10, sl_levels=[-0.50], tp_levels=[0.50], wick_low=88.0,
             include_close=True,
@@ -1344,7 +1345,7 @@ class TestAgentActionPrecedesNextBarTrigger:
         The agent closes at close(19)=100 for a flat round trip; the long's TP inside
         bar 20 must not book a profit it did not ask for.
         """
-        env = self._run(
+        env = _run_sltp(
             [HOLD] * 5 + [LONG_TIGHT] + [HOLD] * 3 + [CLOSE] + [HOLD] * 2,
             leverage=2, sl_levels=[-0.025, -0.50], tp_levels=[0.025, 0.50],
             wick_high=120.0, include_close=True,
@@ -1354,3 +1355,37 @@ class TestAgentActionPrecedesNextBarTrigger:
         assert env.history.action_types[-3] == "close"
         assert env.position.position_size == 0
         assert env.balance == pytest.approx(10000.0), "a flat round trip must not move the balance"
+
+
+class TestLiquidationTakesPriorityOverBrackets:
+    """When one bar breaches both the stop-loss and the liquidation price, the
+    liquidation must win (#298).
+
+    Both envs implement the precedence and their docstrings state it, but nothing
+    enforced it: swapping the two checks left the whole offline suite green, because
+    no test built a bar that could fire either. The two outcomes are not close -- a
+    bracket books a bounded loss at the stop price, a liquidation takes the margin --
+    so an accidental reorder silently changes what a levered position is worth on a
+    gap bar.
+    """
+
+    def test_a_bar_breaching_both_liquidates_rather_than_stopping_out(self):
+        """10x long at 100: SL at 95, liquidation at 90.4, and the bar wicks to 88.
+
+        Both exits close 1000 units, at different prices: liquidation at 90.4 leaves
+        10000 - 9600 = 400, the stop at 95 would leave 5000. The balance is what makes
+        the two orderings distinguishable -- an exit label alone could be blurred by a
+        future exit type reusing it.
+        """
+        env = _run_sltp(
+            [HOLD] * 5 + [("long", -0.05, 0.50)] + [HOLD] * 6,
+            leverage=10, sl_levels=[-0.05], tp_levels=[0.50], wick_low=88.0,
+        )
+        assert "liquidation" in env.history.action_types, (
+            "the stop-loss pre-empted the liquidation on a bar that breached both"
+        )
+        assert "sltp_sl" not in env.history.action_types
+        assert env.position.position_size == 0
+        assert env.balance == pytest.approx(400.0), (
+            "closed at the liquidation price 90.4; 5000 would mean the stop won"
+        )
