@@ -358,8 +358,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
                 self._tp_prices = torch.where(
                     sltp_trigger, self._zeros, self._tp_prices
                 )
-                exited = exited | sltp_trigger
-
 
     def _execute_sltp_trades(
         self,
@@ -375,7 +373,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         - Close: side=2 and has position
         - Direction switch: close old, open new with brackets
         - Open from flat: open new with brackets
-
         """
         leverage = float(self.config.leverage)
 

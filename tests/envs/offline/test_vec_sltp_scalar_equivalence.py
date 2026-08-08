@@ -511,18 +511,20 @@ class TestSLTPScalarVecEquivalenceEntryBar:
         assert not mismatches, "\n".join(mismatches)
 
     @pytest.mark.parametrize("incoming_bracket,label", [
-        (4, "incoming-survives"),      # long SL 50 / TP 150 -- bar 20 leaves it alone
+        (4, "incoming-survives"),      # control: long SL 50 / TP 150, bar 20 leaves it alone
         (1, "incoming-would-tp"),      # long TP 102.5 -- bar 20 WOULD have fired it
     ], ids=["incoming-survives", "incoming-would-tp"])
     def test_switch_exposes_the_new_position_to_the_entry_bar(self, incoming_bracket, label):
         """A switch opens a position too, and each env recognises that differently.
 
-        The scalar env gates on a non-zero position size post-action, the vectorized one
-        on switch_mask | open_from_flat, so a refactor could reopen #268 for switches in
-        one env only. The `incoming-would-tp` case additionally pins #292: the incoming
+        Both envs open a switch through their own code path -- _execute_sltp_action
+        against switch_mask | open_from_flat -- so a refactor could reopen #268 for
+        switches in one env only. The `incoming-would-tp` case additionally pins #292: the incoming
         long's own TP sits inside bar 20, and it must NOT pre-empt the switch -- the
         agent closed that long at close(N), so bar 20 belongs to the short instead.
-        Both cases must record sltp_sl, from the short's SL at 102.5.
+        Both cases must record sltp_sl, from the short's SL at 102.5; `incoming-survives`
+        is the control that proves the sltp_sl comes from the short's entry bar rather
+        than the incoming long, and catches no regression the other case does not.
         """
         df = _flat_df_with_wick(bar=20, high=120.0)
         tight_short = 5
@@ -542,22 +544,31 @@ class TestSLTPScalarVecEquivalenceEntryBar:
 class TestSLTPScalarVecEquivalenceCloseVsTrigger:
     """A close action and a firing bracket on the same bar (#292).
 
-    The reorder applies to closes as well as switches, and each env gates the close
-    differently -- scalar on the post-action position size, vectorized on
-    close_action_mask -- so a vec-only regression here is invisible to any test that
-    never puts a close and a trigger on the same bar.
+    The reorder applies to closes as well as switches, and each env recognises a close
+    through its own path -- _execute_sltp_action against close_action_mask -- so a
+    vec-only regression here is invisible to any test that never puts a close and a
+    trigger on the same bar.
     """
 
-    def test_close_action_beats_a_bracket_on_the_same_bar(self):
-        df = _flat_df_with_wick(bar=20, high=120.0)
-        # With the close action enabled every index shifts by one: 2 is the tight long.
-        long_tight, close_action = 2, 1
-        actions = [0] * 5 + [long_tight] + [0] * 3 + [close_action] + [0] * 2
+    @pytest.mark.parametrize("leverage,sl_levels,tp_levels,wick_high,wick_low", [
+        (2, [-0.025, -0.50], [0.025, 0.50], 120.0, None),
+        # Liquidation flavour: a 10x long liquidates near 90.4 and bar 20 wicks to 88.
+        # The held-and-hold version of this scenario passes under BOTH orderings, which
+        # is what made the scalar liquidation test dead before it sent a close.
+        (10, [-0.50], [0.50], None, 88.0),
+    ], ids=["bracket", "liquidation"])
+    def test_close_action_beats_an_exit_on_the_same_bar(
+        self, leverage, sl_levels, tp_levels, wick_high, wick_low
+    ):
+        df = _flat_df_with_wick(bar=20, high=wick_high, low=wick_low)
+        # With the close action enabled every index shifts by one: 2 is the first long.
+        long_action, close_action = 2, 1
+        actions = [0] * 5 + [long_action] + [0] * 3 + [close_action] + [0] * 2
 
         mismatches = _run_sltp_sequence(
-            df, actions, leverage=2,
-            sl_levels=[-0.025, -0.50], tp_levels=[0.025, 0.50],
-            label="sltp-close-vs-trigger",
+            df, actions, leverage=leverage,
+            sl_levels=sl_levels, tp_levels=tp_levels,
+            label="sltp-close-vs-exit",
             include_close=True,
             expect_action_type="close",
         )

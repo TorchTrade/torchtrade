@@ -509,3 +509,49 @@ class TestVecSLTPLockPosition:
 
         assert env._position_sizes[0].item() == pytest.approx(initial_size, rel=1e-6)
         env.close()
+
+
+class TestSLTPCanAfford:
+    """An SLTP open must be refused when the balance cannot fund it.
+
+    `final_open = open_mask & can_afford` is the only thing stopping _balances going
+    negative before the clamp; nothing exercised it, so deleting the gate outright left
+    the suite green. The switch path makes it reachable in a way the base env's does
+    not: the close leg lands first, so what the reopen can afford depends on it.
+
+    Deliberately asserts only that the gate holds. The scalar and vectorized envs use
+    different tolerances here (1e-9 vs 1e-5) and pinning that divergence would cement
+    it -- it belongs with the leverage-dependent equivalence work in #293.
+    """
+
+    def test_unaffordable_open_is_refused_and_balance_never_goes_negative(
+        self, sample_ohlcv_df
+    ):
+        import torch
+        from torchtrade.envs.offline import (
+            VectorizedSequentialTradingEnvSLTP,
+            VectorizedSequentialTradingEnvSLTPConfig,
+        )
+        from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+        config = VectorizedSequentialTradingEnvSLTPConfig(
+            num_envs=2, initial_cash=100.0, leverage=1,
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10], transaction_fee=0.0, slippage=0.0,
+            seed=42, random_start=False,
+            stoploss_levels=[-0.05], takeprofit_levels=[0.10],
+            # Fixed notional an order of magnitude above the funded balance.
+            trade_mode="notional", quantity_per_trade=10_000.0,
+        )
+        env = VectorizedSequentialTradingEnvSLTP(sample_ohlcv_df, config)
+        td = env.reset()
+
+        long_idx = next(i for i, v in env.action_map.items() if v[0] == "long")
+        td["action"] = torch.full((2,), long_idx, dtype=torch.long)
+        env.step(td)
+
+        assert (env._position_sizes == 0).all(), "an unaffordable open must be refused"
+        assert (env._balances >= 0).all(), "balance went negative before the clamp"
+        assert env._balances.allclose(torch.full((2,), 100.0)), "a refused open must cost nothing"
+        env.close()

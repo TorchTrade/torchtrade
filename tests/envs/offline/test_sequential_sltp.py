@@ -1245,7 +1245,6 @@ class TestLockPositionUntilSLTP:
         assert config.lock_position_until_sltp is False
 
 
-
 HOLD = (None, None, None)
 CLOSE = ("close", None, None)
 LONG_TIGHT = ("long", -0.025, 0.025)
@@ -1266,7 +1265,7 @@ class TestAgentActionPrecedesNextBarTrigger:
     """
 
     def _run(self, actions, *, leverage, sl_levels, tp_levels, wick_high=None,
-             wick_low=None, include_close=False, wick_bar=20):
+             wick_low=None, include_close=False):
         import numpy as np
         import pandas as pd
 
@@ -1278,9 +1277,9 @@ class TestAgentActionPrecedesNextBarTrigger:
             "close": flat.copy(), "volume": np.ones(n) * 1000,
         })
         if wick_high is not None:
-            df.loc[wick_bar, "high"] = wick_high
+            df.loc[20, "high"] = wick_high
         if wick_low is not None:
-            df.loc[wick_bar, "low"] = wick_low
+            df.loc[20, "low"] = wick_low
 
         config = SequentialTradingEnvSLTPConfig(
             leverage=leverage, initial_cash=10000,
@@ -1351,8 +1350,10 @@ class TestAgentActionPrecedesNextBarTrigger:
             leverage=2, sl_levels=[-0.025, -0.50], tp_levels=[0.025, 0.50],
             wick_high=120.0, include_close=True,
         )
-        assert "sltp_tp" not in env.history.action_types, (
-            "the bracket fired instead of the agent's close"
-        )
+        # The close must be RECORDED as a close. A stale bracket firing on the now-flat
+        # account is a financial no-op (_execute_sltp_close returns early when flat), so
+        # it moves no balance -- it just overwrites the agent's close with a phantom
+        # hold, and history feeds binarize_action_type and the reward function.
+        assert env.history.action_types[-3] == "close"
         assert env.position.position_size == 0
         assert env.balance == pytest.approx(10000.0), "a flat round trip must not move the balance"
