@@ -289,9 +289,10 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
                     self._hold_counters,
                 )
                 # Note: SL/TP are NOT cleared on liquidation, matching scalar
-                # env behavior. Stale values are harmless because the trigger
-                # masks below are gated on is_long/is_short, both False once the
-                # position is zeroed -- has_position alone would not stop them.
+                # env behavior. Stale values are harmless: the trigger masks
+                # below gate on can_trigger (via has_position) AND is_long/
+                # is_short, and every one of those is False once the position
+                # is zeroed here.
 
         has_position = self._position_sizes != 0
         has_brackets = (self._sl_prices > 0) | (self._tp_prices > 0)
