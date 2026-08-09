@@ -576,7 +576,7 @@ class TestSLTPScalarVecEquivalencePriority:
     vectorized by zeroing the position inside the liquidation branch so the trigger
     masks cannot see it -- so one could be reordered without the other. At this
     harness's initial_cash of 1000 the liquidation leaves 40 where the stop would
-    leave 500; the scalar test pins the absolute figures.
+    leave 500 -- the same scenario the scalar test pins at ten times the cash.
 
     The vec side has no action_types record, so its liquidation is pinned by numeric
     parity with the scalar rather than by a label of its own.
