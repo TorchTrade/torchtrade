@@ -152,7 +152,7 @@ def _run_sltp_sequence(
             .tolist()
         )
     all_mismatches = []
-    ever_open = False
+    steps_held = 0
 
     td_s = scalar.reset()
     td_v = vec.reset()
@@ -218,10 +218,12 @@ def _run_sltp_sequence(
                 f"[{label}] Step {step+1} {field}: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
             )
 
-        ever_open = ever_open or scalar.position.position_size != 0
+        steps_held += scalar.position.position_size != 0
 
         if td_s["next"]["done"].item() or td_v["next"]["done"].item():
             break
+
+    step_count = step + 1 if action_indices else 0
 
     # Without this a scenario whose action indices or wick stop reaching a bracket
     # degrades into "both envs held cash identically" and still passes.
@@ -233,11 +235,14 @@ def _run_sltp_sequence(
 
     # The random-action runs cannot name an expected action type, so this is their version
     # of the same guard: sizing that no balance can afford opens nothing, and two envs that
-    # both sit in cash for 100 steps agree about everything. Two cells shipped that way.
-    if random_steps is not None and not ever_open:
+    # both sit in cash agree about everything. Two cells shipped that way, holding a
+    # position 0 steps out of 100. The floor is 25% rather than "at least once" because
+    # every healthy cell measures 91-100%, so a cell that falls near the floor has already
+    # stopped exercising the engines even though it still trades.
+    if random_steps is not None and steps_held < 0.25 * step_count:
         all_mismatches.append(
-            f"[{label}] never opened a position in {random_steps} steps -- this cell is "
-            "comparing two idle envs, not two engines"
+            f"[{label}] held a position on only {steps_held}/{step_count} steps -- this "
+            "cell is mostly comparing two idle envs, not two engines"
         )
 
     scalar.close()
