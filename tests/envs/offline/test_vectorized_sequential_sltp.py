@@ -254,7 +254,8 @@ class TestVecSLTPTriggers:
 
         # Column 2 is low: pinning it here separates a mislanded step from a bar that
         # did not aggregate, and checks the hardcoded index this env reads by.
-        assert torch.allclose(env._base_tensor[env._step_indices, 2], torch.tensor(95.0)), (
+        lows = env._base_tensor[env._step_indices, 2]
+        assert torch.allclose(lows, torch.full_like(lows, 95.0)), (
             "the bar the position is checked against must report the wick: either the "
             "step landed on a different bar, or the bar did not aggregate its sub-bars"
         )
@@ -546,5 +547,7 @@ class TestSLTPCanAfford:
         env.step(td)
 
         assert (env._position_sizes == 0).all(), "an unaffordable open must be refused"
-        assert env._balances.allclose(torch.full((1,), 100.0)), "a refused open must cost nothing"
+        assert env._balances.allclose(
+            torch.full_like(env._balances, 100.0)
+        ), "a refused open must cost nothing"
         env.close()

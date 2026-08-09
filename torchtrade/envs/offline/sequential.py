@@ -32,6 +32,7 @@ from torchtrade.envs.utils.fractional_sizing import (
     calculate_fractional_position,
     PositionCalculationParams,
     validate_action_levels,
+    AFFORDABILITY_REL_TOL,
     POSITION_TOLERANCE_PCT,
     POSITION_TOLERANCE_ABS,
 )
@@ -728,10 +729,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         margin_required = notional_value / self.leverage
         fee = abs(notional_value) * self.transaction_fee
 
-        # Check if sufficient balance (relative tolerance for float round-trip errors:
-        # notional = PV / fee_multiplier * leverage, then margin = notional / leverage,
-        # fee = notional * fee_rate; round-trip can overshoot PV by ~1 ULP)
-        if margin_required + fee > self.balance * (1 + 1e-9):
+        if margin_required + fee > self.balance * (1 + AFFORDABILITY_REL_TOL):
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Deduct fee and margin
@@ -792,8 +790,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         fee = delta_notional * self.transaction_fee
         margin_required = delta_notional / self.leverage
 
-        # Check sufficient balance (relative tolerance for float round-trip errors)
-        if margin_required + fee > self.balance * (1 + 1e-9):
+        if margin_required + fee > self.balance * (1 + AFFORDABILITY_REL_TOL):
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Execute trade - deduct fee and additional margin

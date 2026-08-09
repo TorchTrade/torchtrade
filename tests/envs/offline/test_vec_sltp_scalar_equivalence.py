@@ -31,6 +31,8 @@ def _make_sltp_pair(
     max_traj=40,
     include_hold=True,
     include_close=False,
+    trade_mode="fractional",
+    lock=False,
 ):
     """Create matched scalar and N=1 vectorized SLTP envs."""
     if sl_levels is None:
@@ -38,51 +40,48 @@ def _make_sltp_pair(
     if tp_levels is None:
         tp_levels = [0.05, 0.1]
 
+    common = dict(
+        leverage=leverage,
+        stoploss_levels=sl_levels,
+        takeprofit_levels=tp_levels,
+        include_hold_action=include_hold,
+        include_close_action=include_close,
+        initial_cash=1000,
+        time_frames=[TF_1MIN],
+        window_sizes=[10],
+        execute_on=TF_1MIN,
+        transaction_fee=fee,
+        slippage=0.0,
+        seed=42,
+        max_traj_length=max_traj,
+        random_start=False,
+        trade_mode=trade_mode,
+        lock_position_until_sltp=lock,
+    )
+    # Ignored by the fractional path, which sizes off position_fraction instead.
+    if trade_mode != "fractional":
+        common["quantity_per_trade"] = 100.0
+
     scalar = SequentialTradingEnvSLTP(
-        df,
-        SequentialTradingEnvSLTPConfig(
-            leverage=leverage,
-            stoploss_levels=sl_levels,
-            takeprofit_levels=tp_levels,
-            include_hold_action=include_hold,
-            include_close_action=include_close,
-            initial_cash=1000,
-            time_frames=[TF_1MIN],
-            window_sizes=[10],
-            execute_on=TF_1MIN,
-            transaction_fee=fee,
-            slippage=0.0,
-            seed=42,
-            max_traj_length=max_traj,
-            random_start=False,
-        ),
-        simple_feature_fn,
+        df, SequentialTradingEnvSLTPConfig(**common), simple_feature_fn
     )
     vec = VectorizedSequentialTradingEnvSLTP(
-        df,
-        VectorizedSequentialTradingEnvSLTPConfig(
-            num_envs=1,
-            leverage=leverage,
-            stoploss_levels=sl_levels,
-            takeprofit_levels=tp_levels,
-            include_hold_action=include_hold,
-            include_close_action=include_close,
-            initial_cash=1000,
-            time_frames=[TF_1MIN],
-            window_sizes=[10],
-            execute_on=TF_1MIN,
-            transaction_fee=fee,
-            slippage=0.0,
-            seed=42,
-            max_traj_length=max_traj,
-            random_start=False,
-        ),
-        simple_feature_fn,
+        df, VectorizedSequentialTradingEnvSLTPConfig(num_envs=1, **common), simple_feature_fn
     )
     return scalar, vec
 
 
-def _compare_sltp_state(scalar, vec, step, label, atol=5e-4, rtol=1e-3):
+# Both engines compute money in float64 (MONEY_DTYPE), so "equivalent" can mean it.
+# Measured worst-case disagreement across this whole file is under 1e-12 -- they are not
+# bit-identical (at atol=rtol=0, 8 cases fail) but they are close to it, so 1e-9 leaves
+# ~1000x headroom. The previous 5e-4/1e-3 was loose enough to be nearly vacuous on money:
+# it swallowed a real 1.8e-4 balance divergence inside a computed tolerance of 0.24, which
+# is how the drift in #293 stayed invisible while only the binary done-flag caught anything.
+EQUIV_ATOL = 1e-9
+EQUIV_RTOL = 1e-9
+
+
+def _compare_sltp_state(scalar, vec, step, label, atol=EQUIV_ATOL, rtol=EQUIV_RTOL):
     """Compare all observable state between scalar and vectorized SLTP envs.
 
     Returns list of (field, scalar_val, vec_val) mismatches.
@@ -122,6 +121,10 @@ def _run_sltp_sequence(
     include_hold=True,
     include_close=False,
     expect_action_type=None,
+    trade_mode="fractional",
+    lock=False,
+    random_steps=None,
+    action_seed=0,
 ):
     """Run a sequence of actions through both envs and compare at every step.
 
@@ -139,13 +142,23 @@ def _run_sltp_sequence(
         max_traj=max_traj,
         include_hold=include_hold,
         include_close=include_close,
+        trade_mode=trade_mode,
+        lock=lock,
     )
+    if random_steps is not None:
+        # Drawn after construction so the draw respects the real action-space size, which
+        # changes with leverage (shorts) and include_close.
+        action_indices = (
+            np.random.default_rng(action_seed)
+            .integers(0, scalar.action_spec.n, size=random_steps)
+            .tolist()
+        )
     all_mismatches = []
 
     td_s = scalar.reset()
     td_v = vec.reset()
 
-    atol, rtol = 5e-4, 1e-3
+    atol, rtol = EQUIV_ATOL, EQUIV_RTOL
 
     # Compare initial state
     mismatches = _compare_sltp_state(scalar, vec, 0, label)
@@ -593,6 +606,39 @@ class TestSLTPScalarVecEquivalencePriority:
             sl_levels=[-0.05], tp_levels=[0.50],
             label="sltp-liquidation-over-bracket",
             expect_action_type="liquidation",
+        )
+        assert not mismatches, "\n".join(mismatches)
+
+
+class TestSLTPScalarVecEquivalenceTradeModesAndLock:
+    """The two axes this harness never varied, crossed with leverage (#293).
+
+    Every scenario above pins a hand-picked action sequence at the default
+    `trade_mode="fractional"` and `lock_position_until_sltp=False`. That left a real
+    divergence live for months: at leverage 25 with locking on, the vectorized env
+    terminated on bankruptcy a step the scalar env survived, because it accumulated money
+    in float32 and 100.0 - 2.4e-4 lands on the wrong side of a `<`.
+
+    Randomised actions rather than another hand-picked sequence: the hand-picked ones are
+    what missed it. The leverage axis is crossed in rather than fixed because leverage is
+    what scales an epsilon up onto a threshold -- at leverage 1 every combination here
+    already agreed, which is precisely why the gap was invisible.
+    """
+
+    @pytest.mark.parametrize("trade_mode", ["fractional", "notional", "quantity"])
+    @pytest.mark.parametrize("lock", [False, True], ids=["unlocked", "locked"])
+    @pytest.mark.parametrize("leverage", [1, 25], ids=["spot", "lev25"])
+    def test_random_actions_match(self, sample_ohlcv_df, trade_mode, lock, leverage):
+        mismatches = _run_sltp_sequence(
+            sample_ohlcv_df,
+            None,
+            leverage=leverage,
+            fee=0.001,
+            max_traj=120,
+            random_steps=100,
+            trade_mode=trade_mode,
+            lock=lock,
+            label=f"sltp-{trade_mode}-{'locked' if lock else 'unlocked'}-lev{leverage}",
         )
         assert not mismatches, "\n".join(mismatches)
 

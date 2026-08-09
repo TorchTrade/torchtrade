@@ -63,12 +63,18 @@ def _make_pair(df, leverage=1, fee=0.0, action_levels=None, max_traj=40):
     return scalar, vec
 
 
-def _compare_state(scalar, vec, step, label, atol=5e-4, rtol=1e-3):
+# Both engines compute money in float64 (MONEY_DTYPE), so the old atol=5e-4 -- sized to
+# absorb float32-vs-float64 ULP at balance=1000 -- no longer describes anything real. The
+# measured worst case across this file is under 1e-12; 1e-9 keeps ~1000x headroom. See the
+# same constants in test_vec_sltp_scalar_equivalence.py (#293).
+EQUIV_ATOL = 1e-9
+EQUIV_RTOL = 1e-9
+
+
+def _compare_state(scalar, vec, step, label, atol=EQUIV_ATOL, rtol=EQUIV_RTOL):
     """Compare all observable state between scalar and vectorized envs.
 
     Uses numpy-style allclose: |s - v| <= atol + rtol * max(|s|, |v|).
-    atol=5e-4 accommodates float32 (vec) vs float64 (scalar) precision differences
-    (~1.2e-4 ULP at balance=1000).
 
     Returns list of (field, scalar_val, vec_val) mismatches.
     """
@@ -127,8 +133,7 @@ def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, m
         action_td_v["action"] = torch.tensor([action_idx])
         td_v = vec.step(action_td_v)
 
-        # Tolerances: float32 (vec) vs float64 (scalar) precision
-        atol, rtol = 5e-4, 1e-3
+        atol, rtol = EQUIV_ATOL, EQUIV_RTOL
 
         # Compare rewards
         r_s = td_s["next"]["reward"].item()
