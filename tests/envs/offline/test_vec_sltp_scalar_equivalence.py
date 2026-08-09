@@ -5,6 +5,8 @@ Runs both environments with identical configs and action sequences,
 comparing ALL observable state at every step. Any divergence is a bug.
 """
 
+import collections
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -132,7 +134,6 @@ def _run_sltp_sequence(
             .tolist()
         )
     all_mismatches = []
-    steps_held = 0
 
     td_s = scalar.reset()
     td_v = vec.reset()
@@ -196,12 +197,8 @@ def _run_sltp_sequence(
                 f"[{label}] Step {step+1} {field}: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
             )
 
-        steps_held += scalar.position.position_size != 0
-
         if td_s["next"]["done"].item() or td_v["next"]["done"].item():
             break
-
-    step_count = step + 1 if action_indices else 0
 
     # Without this a scenario whose action indices or wick stop reaching a bracket
     # degrades into "both envs held cash identically" and still passes.
@@ -211,17 +208,21 @@ def _run_sltp_sequence(
             f"{scalar.history.action_types}"
         )
 
-    # The random-action runs cannot name an expected action type, so this is their version
-    # of the same guard: sizing that no balance can afford opens nothing, and two envs that
-    # both sit in cash agree about everything. Two cells shipped that way, holding a
-    # position 0 steps out of 100. The floor is 25% rather than "at least once" because
-    # every healthy cell measures 91-100%, so a cell that falls near the floor has already
-    # stopped exercising the engines even though it still trades.
-    if random_steps is not None and steps_held < 0.25 * step_count:
-        all_mismatches.append(
-            f"[{label}] held a position on only {steps_held}/{step_count} steps -- this "
-            "cell is mostly comparing two idle envs, not two engines"
-        )
+    # The random runs cannot name one expected action type, so this is their version of the
+    # same guard, and it counts what the run exercised rather than how long a position sat
+    # open. Both weaker forms shipped: first cells that opened nothing at all, then cells
+    # that opened once and held for 99 steps with no bracket ever firing -- which a
+    # "position was open" check reads as maximally healthy. Healthy cells measure 8-38
+    # opens and 4-13 bracket exits, so these floors have room.
+    if random_steps is not None:
+        kinds = collections.Counter(scalar.history.action_types)
+        opens = kinds["long"] + kinds["short"]
+        brackets = kinds["sltp_sl"] + kinds["sltp_tp"]
+        if opens < 2 or brackets < 1:
+            all_mismatches.append(
+                f"[{label}] exercised {opens} opens and {brackets} bracket exits "
+                f"({dict(kinds)}) -- this cell is not reaching the SLTP machinery"
+            )
 
     scalar.close()
     vec.close()
@@ -624,6 +625,10 @@ class TestSLTPScalarVecEquivalenceTradeModesAndLock:
             random_steps=100,
             trade_mode=trade_mode,
             lock=lock,
+            # The fixture only spans +5.9%/-1.7%, so the default +/-5% brackets can never
+            # trigger: as shipped this grid fired zero stops across all twelve cells.
+            sl_levels=[-0.005],
+            tp_levels=[0.005],
             label=f"sltp-{trade_mode}-{'locked' if lock else 'unlocked'}-lev{leverage}",
         )
         assert not mismatches, "\n".join(mismatches)

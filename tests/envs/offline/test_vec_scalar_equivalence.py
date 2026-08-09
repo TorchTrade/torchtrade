@@ -5,6 +5,8 @@ Runs both environments with identical configs and action sequences,
 comparing ALL observable state at every step. Any divergence is a bug.
 """
 
+import numpy as np
+import pandas as pd
 import pytest
 import torch
 
@@ -192,6 +194,77 @@ def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, m
     scalar.close()
     vec.close()
     return all_mismatches
+
+
+class TestScalarVecEquivalenceRandomActions:
+    """Randomised actions on the base env.
+
+    Every other cell in this file pins a hand-picked sequence -- the pattern that let the
+    float32 divergence in #293 live in the SLTP harness for months, and that the SLTP side
+    has since moved away from. Leverage 25 is crossed in because leverage is what scales an
+    epsilon up onto a threshold.
+
+    action_levels stays in {-1, 0, 1}: intermediate levels are where the engines genuinely
+    disagree (#302), which would swamp this with a known failure.
+    """
+
+    @pytest.mark.parametrize("leverage", [1, 25], ids=["spot", "lev25"])
+    def test_random_actions_match(self, sample_ohlcv_df, leverage):
+        levels = [-1.0, 0.0, 1.0] if leverage > 1 else [0.0, 1.0]
+        actions = np.random.default_rng(0).integers(0, len(levels), size=100).tolist()
+        mismatches = _run_sequence(
+            sample_ohlcv_df, actions, leverage=leverage, fee=0.001,
+            action_levels=levels, max_traj=120, label=f"random-lev{leverage}",
+        )
+        assert not mismatches, "\n".join(mismatches)
+
+
+class TestScalarVecEquivalenceIntermediateLevel:
+    """An intermediate action level must reach position sizing undamaged.
+
+    Every action_levels value elsewhere in this file is in {-1, 0, 1}, exact in float32
+    and float64 alike, which leaves MONEY_DTYPE on _action_levels_tensor unfalsifiable --
+    reverting that one line to float32 keeps the whole suite green. 0.1 is not exact:
+    float32 holds it as 0.10000000149, putting a 1.5e-8 relative error into the notional.
+
+    Only the open from flat is compared. Resizing an existing position is where the two
+    engines genuinely disagree (#302), so this must not depend on that being settled.
+    """
+
+    def test_open_at_intermediate_level_matches_scalar(self):
+        # Awkward cash and price on purpose: at round numbers the level's float32 error
+        # rounds away and the test silently stops discriminating.
+        price, cash = 97.3, 1234.5678
+        n = 60
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": price, "high": price, "low": price, "close": price, "volume": 1000.0,
+        }, index=range(n))
+        common = dict(
+            action_levels=[0.0, 0.1, 1.0], leverage=3, initial_cash=cash,
+            time_frames=[TF_1MIN], window_sizes=[10], execute_on=TF_1MIN,
+            transaction_fee=0.0007, seed=42, max_traj_length=20, random_start=False,
+        )
+        scalar = SequentialTradingEnv(df, SequentialTradingEnvConfig(**common))
+        vec = VectorizedSequentialTradingEnv(
+            df, VectorizedSequentialTradingEnvConfig(num_envs=1, **common)
+        )
+        td_s, td_v = scalar.reset(), vec.reset()
+        td_s["action"] = torch.tensor(1)
+        td_v["action"] = torch.tensor([1])
+        scalar.step(td_s)
+        vec.step(td_v)
+
+        s_size = scalar.position.position_size
+        v_size = float(vec._position_sizes[0])
+        assert s_size != 0, "the level did not open a position -- nothing is being compared"
+        rel = abs(s_size - v_size) / abs(s_size)
+        assert rel < 1e-12, (
+            f"position_size scalar={s_size!r} vec={v_size!r} rel={rel:.3e} -- an "
+            "intermediate action level is being rounded before it reaches the notional"
+        )
+        scalar.close()
+        vec.close()
 
 
 # ============================================================================

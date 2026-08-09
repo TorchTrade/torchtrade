@@ -536,10 +536,11 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         # 4. Apply slippage
         if self.slippage > 0:
-            # float32 draw (see _sample_initial_cash), widened for the product below.
+            # float32 draw, for the generator-stream reason in _sample_initial_cash. No
+            # cast: torch promotes the float64 price times this, bit-identically.
             noise = torch.empty(self._num_envs).uniform_(
                 1 - self.slippage, 1 + self.slippage, generator=self._rng
-            ).to(MONEY_DTYPE)
+            )
             trade_prices = trade_prices * noise
 
         # 5. Execute trades (skip liquidated envs — scalar env skips trade after liquidation)
