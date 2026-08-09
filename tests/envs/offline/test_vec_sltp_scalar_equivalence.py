@@ -33,6 +33,7 @@ def _make_sltp_pair(
     include_close=False,
     trade_mode="fractional",
     lock=False,
+    initial_cash=1000,
 ):
     """Create matched scalar and N=1 vectorized SLTP envs."""
     if sl_levels is None:
@@ -46,7 +47,7 @@ def _make_sltp_pair(
         takeprofit_levels=tp_levels,
         include_hold_action=include_hold,
         include_close_action=include_close,
-        initial_cash=1000,
+        initial_cash=initial_cash,
         time_frames=[TF_1MIN],
         window_sizes=[10],
         execute_on=TF_1MIN,
@@ -643,6 +644,59 @@ class TestSLTPScalarVecEquivalenceTradeModesAndLock:
             label=f"sltp-{trade_mode}-{'locked' if lock else 'unlocked'}-lev{leverage}",
         )
         assert not mismatches, "\n".join(mismatches)
+
+
+class TestAffordabilitySlackIsShared:
+    """Both engines must make the same accept/reject call on a marginal open (#293).
+
+    `can_afford` compares cost against `balance * (1 + AFFORDABILITY_REL_TOL)`. The
+    vectorized envs carried 1e-5 there against the scalar envs' 1e-9 -- a 10,000x window
+    in which the vectorized env opened a position the scalar env refused, leaving one
+    engine in cash and the other fully deployed at a zeroed balance. Nothing caught it:
+    reverting either side to 1e-5 left all 680 offline tests green.
+
+    The prices are flat at 100 so the cost is exact arithmetic: 100 notional at leverage 1
+    is 100 margin plus 0.1 fee, and initial_cash is set to overshoot that by a chosen
+    relative amount.
+    """
+
+    COST = 100.1  # 100.0 margin + 0.1 fee, at the flat price below
+
+    @pytest.mark.parametrize("overshoot,expect_open", [
+        (1e-11, True),
+        (3e-6, False),
+        (1e-3, False),
+    ], ids=["inside-slack", "inside-the-old-1e-5-window", "plainly-unaffordable"])
+    def test_both_engines_make_the_same_call(self, overshoot, expect_open):
+        n = 40
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1000.0,
+        }, index=range(n))
+        scalar, vec = _make_sltp_pair(
+            df, leverage=1, fee=0.001, sl_levels=[-0.05], tp_levels=[0.1],
+            max_traj=20, trade_mode="notional",
+            initial_cash=self.COST / (1 + overshoot),
+        )
+        td_s, td_v = scalar.reset(), vec.reset()
+        td_s["action"] = torch.tensor(1)
+        td_v["action"] = torch.tensor([1])
+        scalar.step(td_s)
+        vec.step(td_v)
+
+        opened_s = scalar.position.position_size != 0
+        opened_v = float(vec._position_sizes[0]) != 0
+        assert opened_s == opened_v, (
+            f"overshoot={overshoot}: scalar {'opened' if opened_s else 'refused'} but "
+            f"vec {'opened' if opened_v else 'refused'} -- the two engines disagree about "
+            "which opens are affordable"
+        )
+        assert opened_s == expect_open, (
+            f"overshoot={overshoot}: expected {'an open' if expect_open else 'a refusal'}, "
+            f"got {'an open' if opened_s else 'a refusal'}"
+        )
+        scalar.close()
+        vec.close()
 
 
 class TestSLTPScalarVecEquivalenceLiquidation:

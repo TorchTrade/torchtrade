@@ -115,10 +115,12 @@ class VectorizedSequentialTradingEnv(EnvBase):
         **EXPERIMENTAL**: Not battle-tested in production training runs.
 
         Equivalence against SequentialTradingEnv is verified by
-        tests/envs/offline/test_vec_scalar_equivalence.py, which agrees on every
-        binary outcome (exit timing, done flags) and on money to within 1e-9. That
-        is a claim about the axes the harness varies -- leverage, fee, action
-        levels -- not a general guarantee; an untested axis is untested.
+        tests/envs/offline/test_vec_scalar_equivalence.py: every binary outcome, and
+        money to within 1e-9. That is a claim about the axes the harness varies --
+        leverage and fee. It does NOT cover intermediate action_levels, where the two
+        engines are known to disagree (see #302): the scalar env resizes a position in
+        place with a weighted-average entry, the vectorized env always closes and
+        reopens.
 
     Processes N environments in a single _step() call using tensor operations.
     All state (balances, positions, step indices) is stored as (num_envs,) tensors
@@ -174,8 +176,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # Extract pre-computed data from sampler
         self._market_tensors = self._sampler.torch_tensors  # {key: (N, F)}
         self._obs_indices = self._sampler._obs_indices  # {key: ndarray}
-        # OHLCV the trades price off: float64 so a bracket price computed from it does not
-        # round before it is compared against a wick.
+        # float64: bracket prices are computed against these wicks.
         self._base_tensor = self._sampler.execute_base_tensor.to(MONEY_DTYPE)  # (M, F)
         self._total_exec_times = len(self._sampler._exec_times_arr)
         if self._total_exec_times == 0:
@@ -437,9 +438,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
         else:
             distance_to_liq = self._ones
 
-        # Money is float64 internally (see MONEY_DTYPE); the observation is the boundary
-        # where it becomes float32 again, because that is what the spec and the network
-        # expect. Cast the stack, not the parts, so a new element cannot miss it.
+        # float32 boundary for the spec. Cast the stack, not the parts, so a new element
+        # cannot miss it.
         account_state = torch.stack(
             [
                 exposure_pct,
@@ -587,7 +587,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         # 10. Build next observation (reuse already-computed PVs)
         obs_td = self._build_observation(new_prices, portfolio_values=new_pvs)
-        # .float(): reward is derived from float64 money but declared float32 (MONEY_DTYPE).
+        # reward_spec is float32.
         obs_td.set("reward", rewards.unsqueeze(-1).float())
         obs_td.set("terminated", terminated.unsqueeze(-1))
         obs_td.set("truncated", truncated.unsqueeze(-1))
@@ -685,9 +685,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
             )
             new_fee = notional_new * self.transaction_fee
 
-            can_afford = (margin_new + new_fee) <= self._balances * (
-                1 + AFFORDABILITY_REL_TOL
-            )
+            can_afford = (margin_new + new_fee) <= self._balances * (1 + AFFORDABILITY_REL_TOL)
             final_open = open_mask & can_afford
 
             if final_open.any():

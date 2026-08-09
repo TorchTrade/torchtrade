@@ -9,7 +9,14 @@ These tests verify the bounds are respected and slippage is actually applied.
 
 import pytest
 import pandas as pd
+import torch
 from torchtrade.envs.offline.sequential import SequentialTradingEnv, SequentialTradingEnvConfig
+from torchtrade.envs.offline import (
+    VectorizedSequentialTradingEnv,
+    VectorizedSequentialTradingEnvConfig,
+    VectorizedSequentialTradingEnvSLTP,
+    VectorizedSequentialTradingEnvSLTPConfig,
+)
 
 
 @pytest.fixture
@@ -346,6 +353,65 @@ class TestSlippageOnClose:
         unique_pnls = len(set([round(p, 2) for p in pnls]))
         assert unique_pnls > 5, \
             f"Only {unique_pnls} unique PnLs - close slippage not applied?"
+
+
+class TestVectorizedSlippage:
+    """The vectorized envs' slippage branch, which no test reached at all.
+
+    Verified by mutation: raising on the first line under `if self.slippage > 0:` in both
+    vectorized envs left the entire 2320-test suite green. Everything above builds the
+    scalar `SequentialTradingEnv` only.
+
+    Deliberately not an equivalence test against the scalar env: the scalar draws its noise
+    from the *global* RNG (`sequential.py:633`, bare `torch.empty(1).uniform_(...)` with no
+    generator) while the vectorized env draws from its own `self._rng`. Different streams by
+    construction, so the two can never agree on a slipped price -- only on the bounds.
+    """
+
+    @pytest.mark.parametrize("env_cls,config_cls,extra", [
+        (VectorizedSequentialTradingEnv, VectorizedSequentialTradingEnvConfig,
+         {"action_levels": [-1, 0, 1]}),
+        (VectorizedSequentialTradingEnvSLTP, VectorizedSequentialTradingEnvSLTPConfig,
+         {"stoploss_levels": [-0.5], "takeprofit_levels": [0.5]}),
+    ], ids=["base", "sltp"])
+    @pytest.mark.parametrize("slippage", [0.0, 0.01])
+    def test_entry_price_respects_slippage_bounds(
+        self, constant_price_df, env_cls, config_cls, extra, slippage
+    ):
+        """At slippage=0 the fill is exactly the market price; above it, inside the band.
+
+        Both cases matter: the zero case pins that the branch is skipped rather than
+        applying a silent 1.0 multiplier, and the non-zero case is the only thing that
+        executes the branch at all.
+        """
+        n_envs = 16
+        env = env_cls(
+            constant_price_df,
+            config_cls(
+                num_envs=n_envs, execute_on="1Hour", time_frames=["1Hour"],
+                window_sizes=[5], initial_cash=10000, transaction_fee=0.0,
+                slippage=slippage, leverage=2, random_start=False, seed=7, **extra,
+            ),
+        )
+        td = env.reset()
+        # Index 2 opens a long in both action maps: [-1,0,1] and hold/long for 1x1 SLTP.
+        td["action"] = torch.full((n_envs,), 2, dtype=torch.long)
+        env.step(td)
+
+        entries = env._entry_prices[env._position_sizes != 0]
+        assert entries.numel() > 0, "no env opened a position -- nothing was slipped"
+        market = 100.0
+        assert torch.all(entries >= market * (1 - slippage) - 1e-9)
+        assert torch.all(entries <= market * (1 + slippage) + 1e-9)
+
+        if slippage == 0.0:
+            assert torch.all(entries == market), "slippage=0 must fill at market"
+        else:
+            # Distinct fills across the batch: one shared draw broadcast to every env
+            # would sit inside the bounds and pass everything above.
+            assert entries.unique().numel() > 1, (
+                "every env got the same fill -- the noise is not per-env"
+            )
 
 
 if __name__ == "__main__":

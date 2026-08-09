@@ -90,11 +90,8 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
         Equivalence against SequentialTradingEnvSLTP is verified by
         tests/envs/offline/test_vec_sltp_scalar_equivalence.py across leverage,
-        trade_mode and lock_position_until_sltp, agreeing on every binary outcome
-        and on money to within 1e-9. The trade_mode and lock axes were added in
-        #293, where their absence had hidden a real divergence: this env computed
-        money in float32, and at leverage 25 the accumulated epsilon flipped a
-        bankruptcy comparison the scalar env did not trip.
+        trade_mode and lock_position_until_sltp: every binary outcome, and money
+        to within 1e-9.
 
     Processes N SLTP environments in a single _step() call using tensor
     operations. All state (balances, positions, SL/TP prices) is stored as
@@ -166,8 +163,10 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
             tp_list.append(tp if tp is not None else 0.0)
 
         self._action_sides = torch.tensor(sides_list, dtype=torch.long)
-        # MONEY_DTYPE, not float32: these multiply into bracket prices, and float32 here
-        # would round the product before it is ever assigned into a float64 tensor.
+        # float64 because of what is STORED, not what is computed: torch promotes, so a
+        # float32 level times a float64 price is already a float64 product. But float32
+        # holds 0.05 as 0.050000000745, putting the bracket at 104.999995 instead of
+        # 105.0 -- an error in the level itself, carried into every price it sizes.
         self._action_sl_pcts = torch.tensor(sl_list, dtype=MONEY_DTYPE)
         self._action_tp_pcts = torch.tensor(tp_list, dtype=MONEY_DTYPE)
 
@@ -252,7 +251,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
         # 9. Build observation from bar N+1
         obs_td = self._build_observation(new_close, portfolio_values=new_pvs)
-        # .float(): reward is derived from float64 money but declared float32 (MONEY_DTYPE).
+        # reward_spec is float32.
         obs_td.set("reward", rewards.unsqueeze(-1).float())
         obs_td.set("terminated", terminated.unsqueeze(-1))
         obs_td.set("truncated", truncated.unsqueeze(-1))
@@ -459,9 +458,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
             margin_new = notional / leverage
             new_fee = notional * self.transaction_fee
 
-            can_afford = (margin_new + new_fee) <= self._balances * (
-                1 + AFFORDABILITY_REL_TOL
-            )
+            can_afford = (margin_new + new_fee) <= self._balances * (1 + AFFORDABILITY_REL_TOL)
             final_open = open_mask & can_afford
 
             if final_open.any():
