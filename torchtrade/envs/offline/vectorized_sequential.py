@@ -274,9 +274,12 @@ class VectorizedSequentialTradingEnv(EnvBase):
         """Sample initial cash for n environments."""
         if isinstance(self.config.initial_cash, (tuple, list)):
             lo, hi = self.config.initial_cash
-            return torch.empty(n, dtype=MONEY_DTYPE).uniform_(
+            # Drawn float32 then widened: uniform_ consumes different generator bits at
+            # float64, which would change what every saved seed reproduces. This is an
+            # input, not accumulated state.
+            return torch.empty(n).uniform_(
                 float(lo), float(hi), generator=self._rng
-            )
+            ).to(MONEY_DTYPE)
         return torch.full((n,), float(self.config.initial_cash), dtype=MONEY_DTYPE)
 
     def _sample_start_indices(self, n: int) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -537,9 +540,10 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         # 4. Apply slippage
         if self.slippage > 0:
-            noise = torch.empty(self._num_envs, dtype=MONEY_DTYPE).uniform_(
+            # float32 draw (see _sample_initial_cash), widened for the product below.
+            noise = torch.empty(self._num_envs).uniform_(
                 1 - self.slippage, 1 + self.slippage, generator=self._rng
-            )
+            ).to(MONEY_DTYPE)
             trade_prices = trade_prices * noise
 
         # 5. Execute trades (skip liquidated envs — scalar env skips trade after liquidation)

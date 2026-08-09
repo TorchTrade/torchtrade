@@ -63,10 +63,9 @@ def _make_pair(df, leverage=1, fee=0.0, action_levels=None, max_traj=40):
     return scalar, vec
 
 
-# Both engines compute money in float64 (MONEY_DTYPE), so the old atol=5e-4 -- sized to
-# absorb float32-vs-float64 ULP at balance=1000 -- no longer describes anything real. The
-# measured worst case across this file is under 1e-12; 1e-9 keeps ~1000x headroom. See the
-# same constants in test_vec_sltp_scalar_equivalence.py (#293).
+# Both engines compute money in float64 (MONEY_DTYPE); measured worst-case disagreement
+# across this file is under 1e-12, so 1e-9 leaves ~1000x headroom. The previous 5e-4 was
+# sized to absorb float32-vs-float64 ULP, which no longer exists.
 EQUIV_ATOL = 1e-9
 EQUIV_RTOL = 1e-9
 

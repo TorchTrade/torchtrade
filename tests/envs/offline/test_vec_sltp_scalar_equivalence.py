@@ -58,9 +58,10 @@ def _make_sltp_pair(
         trade_mode=trade_mode,
         lock_position_until_sltp=lock,
     )
-    # Ignored by the fractional path, which sizes off position_fraction instead.
-    if trade_mode != "fractional":
-        common["quantity_per_trade"] = 100.0
+    # Ignored by the fractional path. 100.0 is $100 of notional; in quantity mode it is
+    # 100 *units*, ~$10,000 at this fixture's ~$100 prices, which no leverage-1 balance can
+    # afford -- so that cell would open nothing and compare two idle envs.
+    common["quantity_per_trade"] = 100.0 if trade_mode == "notional" else 1.0
 
     scalar = SequentialTradingEnvSLTP(
         df, SequentialTradingEnvSLTPConfig(**common), simple_feature_fn
@@ -71,12 +72,9 @@ def _make_sltp_pair(
     return scalar, vec
 
 
-# Both engines compute money in float64 (MONEY_DTYPE), so "equivalent" can mean it.
-# Measured worst-case disagreement across this whole file is under 1e-12 -- they are not
-# bit-identical (at atol=rtol=0, 8 cases fail) but they are close to it, so 1e-9 leaves
-# ~1000x headroom. The previous 5e-4/1e-3 was loose enough to be nearly vacuous on money:
-# it swallowed a real 1.8e-4 balance divergence inside a computed tolerance of 0.24, which
-# is how the drift in #293 stayed invisible while only the binary done-flag caught anything.
+# Both engines compute money in float64 (MONEY_DTYPE); measured worst-case disagreement
+# across this file is under 1e-12, so 1e-9 leaves ~1000x headroom. They are close to
+# bit-identical but not quite: at atol=rtol=0, 8 cases fail.
 EQUIV_ATOL = 1e-9
 EQUIV_RTOL = 1e-9
 
@@ -153,6 +151,7 @@ def _run_sltp_sequence(
             .tolist()
         )
     all_mismatches = []
+    ever_open = False
 
     td_s = scalar.reset()
     td_v = vec.reset()
@@ -218,6 +217,8 @@ def _run_sltp_sequence(
                 f"[{label}] Step {step+1} {field}: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
             )
 
+        ever_open = ever_open or scalar.position.position_size != 0
+
         if td_s["next"]["done"].item() or td_v["next"]["done"].item():
             break
 
@@ -227,6 +228,15 @@ def _run_sltp_sequence(
         all_mismatches.append(
             f"[{label}] path never exercised: no {expect_action_type} in "
             f"{scalar.history.action_types}"
+        )
+
+    # The random-action runs cannot name an expected action type, so this is their version
+    # of the same guard: sizing that no balance can afford opens nothing, and two envs that
+    # both sit in cash for 100 steps agree about everything. Two cells shipped that way.
+    if random_steps is not None and not ever_open:
+        all_mismatches.append(
+            f"[{label}] never opened a position in {random_steps} steps -- this cell is "
+            "comparing two idle envs, not two engines"
         )
 
     scalar.close()
@@ -610,22 +620,11 @@ class TestSLTPScalarVecEquivalencePriority:
 
 
 class TestSLTPScalarVecEquivalenceTradeModesAndLock:
-    """The two axes this harness never varied, crossed with leverage (#293).
+    """trade_mode and lock crossed with leverage -- the axes this harness never varied.
 
-    Every scenario above pins a hand-picked action sequence at the default
-    `trade_mode="fractional"` and `lock_position_until_sltp=False`. That left a real
-    divergence live for months: at leverage 25 with locking on, the vectorized env
-    terminated on bankruptcy a step the scalar env survived, because it accumulated money
-    in float32 and 100.0 - 2.4e-4 lands on the wrong side of a `<`.
-
-    Randomised actions rather than another hand-picked sequence: the hand-picked ones are
-    what missed it. Leverage is crossed in rather than fixed because it is what scales an
-    epsilon up onto a threshold -- #293 reported zero divergence at leverage 1.
-
-    That last part turns out to be a statement about the old tolerance, not about the
-    engines: with EQUIV_ATOL at 1e-9 the leverage-1 fractional and notional cells go red
-    under float32 too. Leverage decides whether the epsilon reaches a *threshold* and
-    flips an episode; it was never what decided whether the money drifted.
+    Randomised actions rather than another hand-picked sequence: hand-picked sequences are
+    what let the float32 divergence in #293 live here for months. Leverage is crossed in
+    because it is what scales an epsilon up onto a threshold and flips an episode.
     """
 
     @pytest.mark.parametrize("trade_mode", ["fractional", "notional", "quantity"])

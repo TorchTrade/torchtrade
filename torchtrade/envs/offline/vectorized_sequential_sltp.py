@@ -209,9 +209,10 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         # 2. Save bar N close as trade prices (with slippage)
         trade_prices = self._base_tensor[self._step_indices, 3].clone()
         if self.slippage > 0:
-            noise = torch.empty(N, dtype=MONEY_DTYPE).uniform_(
+            # float32 draw (see _sample_initial_cash), widened for the product below.
+            noise = torch.empty(N).uniform_(
                 1 - self.slippage, 1 + self.slippage, generator=self._rng
-            )
+            ).to(MONEY_DTYPE)
             trade_prices = trade_prices * noise
 
         # 3. Advance step indices to bar N+1
