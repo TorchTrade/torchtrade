@@ -147,7 +147,7 @@ only when configured (live path); without them the actor is single-shot as befor
 
 ```python
 from torchtrade.actor import LocalLLMActor
-from torchtrade.actor.tools import GoogleNewsTool
+from torchtrade.actor.tools import AdanosSentimentTool, GoogleNewsTool
 
 actor = LocalLLMActor(
     model="Qwen/Qwen2.5-0.5B-Instruct", backend="vllm",
@@ -155,7 +155,10 @@ actor = LocalLLMActor(
     account_state_labels=env.account_state,
     action_levels=env.action_levels,
     symbol="BTC/USD",
-    tools=[GoogleNewsTool(symbol="BTC/USD")],
+    tools=[
+        GoogleNewsTool(symbol="BTC/USD"),
+        AdanosSentimentTool(symbol="BTC/USD", asset_type="crypto"),
+    ],
     max_tool_iters=3,
 )
 ```
@@ -166,6 +169,15 @@ block, then continues until it emits `<answer>N</answer>`. Only conversations th
 call a tool are re-generated, so batched multi-symbol inference stays efficient.
 Tool use requires `backend="vllm"` (the transformers backend can't halt at
 `</tool>`) and the `[llm]` extra (adds `feedparser`).
+
+`AdanosSentimentTool` uses the official Adanos SDK and reads
+`ADANOS_API_KEY`. For stocks, choose `source="reddit"`, `"x"`, `"news"`, or
+`"polymarket"`; crypto sentiment currently uses Reddit. The tool accepts
+explicit inclusive UTC `from_date` and `to_date` arguments and returns a compact
+summary as additional evidence, not as a buy or sell signal. See the
+[Adanos API documentation](https://api.adanos.org/docs) for plan limits and
+field definitions. Install both optional extras with
+`pip install "torchtrade[llm,sentiment]"`.
 
 ---
 

@@ -1,7 +1,7 @@
 """Tests for LLM actor tools."""
 import pytest
 
-from torchtrade.actor.tools import GoogleNewsTool, symbol_to_query
+from torchtrade.actor.tools import AdanosSentimentTool, GoogleNewsTool, symbol_to_query
 
 
 @pytest.mark.parametrize("symbol,expected", [
@@ -87,3 +87,108 @@ def test_google_news_timeout_returns_error_string(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", stall)
     out = GoogleNewsTool(symbol="BTC/USD", timeout=0.01).run()
     assert "error" in out.lower()
+
+
+class _SentimentResult:
+    def __init__(self, data):
+        self.data = data
+
+    def to_dict(self):
+        return self.data
+
+
+def _fake_adanos(monkeypatch, result):
+    import sys
+    import types
+
+    calls = {}
+
+    class _Namespace:
+        def __init__(self, source):
+            self.source = source
+
+        def stock(self, symbol, **period):
+            calls["stock"] = (self.source, symbol, period)
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        def token(self, symbol, **period):
+            calls["token"] = (self.source, symbol, period)
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+    class _Client:
+        def __init__(self, **kwargs):
+            calls["client"] = kwargs
+            self.reddit = _Namespace("reddit")
+            self.x = _Namespace("x")
+            self.news = _Namespace("news")
+            self.polymarket = _Namespace("polymarket")
+            self.crypto = _Namespace("crypto")
+
+        def close(self):
+            calls["closed"] = True
+
+    module = types.ModuleType("adanos")
+    module.AdanosClient = _Client
+    monkeypatch.setitem(sys.modules, "adanos", module)
+    return calls
+
+
+def test_adanos_stock_uses_source_dates_and_closes_client(monkeypatch):
+    result = _SentimentResult({"ticker": "AAPL", "sentiment_score": 0.4, "top_mentions": ["omit"]})
+    calls = _fake_adanos(monkeypatch, result)
+    tool = AdanosSentimentTool(
+        symbol="AAPL/USD",
+        asset_type="stock",
+        source="news",
+        api_key="test-key",
+        timeout=2.5,
+    )
+
+    out = tool.run(from_date="2026-08-01", to_date="2026-08-08")
+
+    assert calls["client"] == {"api_key": "test-key", "timeout": 2.5}
+    assert calls["stock"] == (
+        "news", "AAPL", {"from_": "2026-08-01", "to": "2026-08-08"}
+    )
+    assert calls["closed"] is True
+    assert '"sentiment_score": 0.4' in out
+    assert "top_mentions" not in out
+
+
+def test_adanos_crypto_uses_token_endpoint(monkeypatch):
+    calls = _fake_adanos(monkeypatch, _SentimentResult({"symbol": "BTC", "buzz_score": 72.0}))
+    tool = AdanosSentimentTool(
+        symbol="BTC/USD",
+        asset_type="crypto",
+        api_key="test-key",
+    )
+
+    out = tool.run()
+
+    assert calls["token"] == ("crypto", "BTC", {})
+    assert '"asset_type": "crypto"' in out
+
+
+def test_adanos_missing_key_returns_error_without_fetch(monkeypatch):
+    monkeypatch.delenv("ADANOS_API_KEY", raising=False)
+    tool = AdanosSentimentTool(symbol="AAPL", asset_type="stock")
+    monkeypatch.setattr(tool, "_fetch", lambda *args: pytest.fail("must not fetch"))
+
+    assert "requires ADANOS_API_KEY" in tool.run()
+
+
+def test_adanos_failure_returns_error_string(monkeypatch):
+    calls = _fake_adanos(monkeypatch, TimeoutError("timed out"))
+    tool = AdanosSentimentTool(symbol="AAPL", asset_type="stock", api_key="test-key")
+
+    assert "error" in tool.run().lower()
+    assert calls["closed"] is True
+
+
+def test_adanos_rejects_non_reddit_crypto_source():
+    with pytest.raises(ValueError, match="Reddit"):
+        AdanosSentimentTool(symbol="BTC/USD", asset_type="crypto", source="news")

@@ -1,5 +1,7 @@
 """External information tools the LLM trading actor can call mid-reasoning."""
-from typing import Optional
+import json
+import os
+from typing import Literal, Optional
 from urllib.parse import quote_plus
 
 SYMBOL_QUERY_MAP = {
@@ -76,3 +78,88 @@ class GoogleNewsTool(Tool):
             published = e.get("published", "")
             lines.append(f"{i}. {title} — {source} · {published}".rstrip(" ·"))
         return "\n".join(lines)
+
+
+class AdanosSentimentTool(Tool):
+    """Structured Adanos sentiment context for the traded stock or crypto asset."""
+
+    name = "adanos_sentiment"
+    description = (
+        "adanos_sentiment(from_date?: YYYY-MM-DD, to_date?: YYYY-MM-DD): "
+        "market sentiment evidence for the traded asset; not a trade signal"
+    )
+    _STOCK_SOURCES = {"reddit", "x", "news", "polymarket"}
+    _OUTPUT_FIELDS = (
+        "ticker",
+        "symbol",
+        "company_name",
+        "name",
+        "found",
+        "sentiment_score",
+        "bullish_pct",
+        "bearish_pct",
+        "buzz_score",
+        "mentions",
+        "trend",
+        "period_days",
+    )
+
+    def __init__(
+        self,
+        symbol: str,
+        *,
+        asset_type: Literal["stock", "crypto"],
+        source: Literal["reddit", "x", "news", "polymarket"] = "reddit",
+        api_key: Optional[str] = None,
+        timeout: float = 5.0,
+    ):
+        if asset_type not in {"stock", "crypto"}:
+            raise ValueError("asset_type must be 'stock' or 'crypto'")
+        if source not in self._STOCK_SOURCES:
+            raise ValueError(f"unsupported Adanos source: {source}")
+        if asset_type == "crypto" and source != "reddit":
+            raise ValueError("Adanos crypto sentiment currently uses the Reddit source")
+
+        self.symbol = symbol.split("/")[0].split("-")[0].upper()
+        self.asset_type = asset_type
+        self.source = source
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def _fetch(self, api_key: str, from_date: Optional[str], to_date: Optional[str]):
+        """Fetch one asset summary through the official SDK."""
+        from adanos import AdanosClient
+
+        period = {key: value for key, value in {"from_": from_date, "to": to_date}.items() if value}
+        client = AdanosClient(api_key=api_key, timeout=self.timeout)
+        try:
+            if self.asset_type == "crypto":
+                return client.crypto.token(self.symbol, **period)
+            return getattr(client, self.source).stock(self.symbol, **period)
+        finally:
+            client.close()
+
+    def run(
+        self,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> str:
+        api_key = self.api_key or os.getenv("ADANOS_API_KEY")
+        if not api_key:
+            return "error: adanos_sentiment requires ADANOS_API_KEY"
+
+        try:
+            result = self._fetch(api_key, from_date, to_date)
+        except Exception as exc:  # never raise into a live trading step
+            return f"error: adanos_sentiment unavailable ({exc})"
+
+        if result is None:
+            return f"No Adanos sentiment data for '{self.symbol}'."
+        data = result.to_dict() if hasattr(result, "to_dict") else result
+        if not isinstance(data, dict):
+            return "error: adanos_sentiment returned an unexpected response"
+
+        summary = {field: data[field] for field in self._OUTPUT_FIELDS if field in data}
+        summary["asset_type"] = self.asset_type
+        summary["source"] = self.source
+        return "Adanos market sentiment: " + json.dumps(summary, ensure_ascii=True)

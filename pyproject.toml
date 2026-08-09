@@ -56,6 +56,9 @@ llm = [
     "feedparser>=6.0.0",
     "peft>=0.10.0",
 ]
+sentiment = [
+    "adanos>=2.7.0,<3",
+]
 chronos = [
     "chronos-forecasting",
 ]
