@@ -173,6 +173,31 @@ def test_adanos_crypto_uses_token_endpoint(monkeypatch):
     assert '"asset_type": "crypto"' in out
 
 
+def test_adanos_preserves_hyphenated_stock_ticker(monkeypatch):
+    calls = _fake_adanos(monkeypatch, _SentimentResult({"ticker": "BRK-B", "found": True}))
+    tool = AdanosSentimentTool(
+        symbol="BRK-B",
+        asset_type="stock",
+        api_key="test-key",
+    )
+
+    tool.run()
+
+    assert calls["stock"] == ("reddit", "BRK-B", {})
+
+
+def test_adanos_typed_error_response_is_not_sent_as_sentiment(monkeypatch):
+    result = _SentimentResult({"detail": {"message": "invalid period"}})
+    _fake_adanos(monkeypatch, result)
+    tool = AdanosSentimentTool(symbol="AAPL", asset_type="stock", api_key="test-key")
+
+    out = tool.run()
+
+    assert out.startswith("error: adanos_sentiment unavailable")
+    assert "invalid period" in out
+    assert "Adanos market sentiment:" not in out
+
+
 def test_adanos_missing_key_returns_error_without_fetch(monkeypatch):
     monkeypatch.delenv("ADANOS_API_KEY", raising=False)
     tool = AdanosSentimentTool(symbol="AAPL", asset_type="stock")

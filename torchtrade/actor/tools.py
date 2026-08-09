@@ -120,7 +120,10 @@ class AdanosSentimentTool(Tool):
         if asset_type == "crypto" and source != "reddit":
             raise ValueError("Adanos crypto sentiment currently uses the Reddit source")
 
-        self.symbol = symbol.split("/")[0].split("-")[0].upper()
+        base_symbol = symbol.split("/", 1)[0]
+        if asset_type == "crypto":
+            base_symbol = base_symbol.split("-", 1)[0]
+        self.symbol = base_symbol.upper()
         self.asset_type = asset_type
         self.source = source
         self.api_key = api_key
@@ -158,6 +161,9 @@ class AdanosSentimentTool(Tool):
         data = result.to_dict() if hasattr(result, "to_dict") else result
         if not isinstance(data, dict):
             return "error: adanos_sentiment returned an unexpected response"
+        if "detail" in data or "error" in data:
+            detail = data.get("detail", data.get("error"))
+            return "error: adanos_sentiment unavailable (" + json.dumps(detail, ensure_ascii=True) + ")"
 
         summary = {field: data[field] for field in self._OUTPUT_FIELDS if field in data}
         summary["asset_type"] = self.asset_type
