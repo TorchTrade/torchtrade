@@ -31,12 +31,10 @@ from torchtrade.envs.utils.fractional_sizing import (
 
 from torchtrade.envs.core.common_types import MarginType
 
-# Money is tracked in float64 to match the scalar envs, which compute in Python floats.
-# float32 has ~7 significant digits; leverage multiplies the absolute magnitudes, so the
-# accumulated relative epsilon lands on a bracket/bankruptcy boundary and flips a `<`.
-# That is not drift you can round away -- it is the two engines disagreeing about whether
-# a stop fired (#293). Every tensor holding money, a price, or a position size shares this
-# dtype; observations are cast back to float32 at the emission boundary for the network.
+# Money, prices and position sizes are tracked in float64 to match the scalar envs' Python
+# floats. In float32 the accumulated relative epsilon, scaled up by leverage, lands on a
+# bracket/bankruptcy boundary and flips it -- the two engines then disagree about whether a
+# stop fired (#293). Observations and rewards are cast back to float32 at emission.
 MONEY_DTYPE = torch.float64
 
 
@@ -116,8 +114,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         Equivalence against SequentialTradingEnv is verified by
         tests/envs/offline/test_vec_scalar_equivalence.py: every binary outcome, and
-        money to within 1e-9. That is a claim about the axes the harness varies --
-        leverage and fee. It does NOT cover intermediate action_levels, where the two
+        money to within 1e-9 -- a claim about the axes it varies, leverage and fee.
+        It does NOT cover intermediate action_levels, where the two
         engines are known to disagree (see #302): the scalar env resizes a position in
         place with a weighted-average entry, the vectorized env always closes and
         reopens.
@@ -275,9 +273,9 @@ class VectorizedSequentialTradingEnv(EnvBase):
         """Sample initial cash for n environments."""
         if isinstance(self.config.initial_cash, (tuple, list)):
             lo, hi = self.config.initial_cash
-            # Drawn float32 then widened: uniform_ consumes different generator bits at
-            # float64, which would change what every saved seed reproduces. This is an
-            # input, not accumulated state.
+            # Drawn in float32 then widened: at float64 uniform_ consumes different
+            # generator bits, changing what every saved seed reproduces. An input, not
+            # accumulated state.
             return torch.empty(n).uniform_(
                 float(lo), float(hi), generator=self._rng
             ).to(MONEY_DTYPE)
@@ -438,8 +436,6 @@ class VectorizedSequentialTradingEnv(EnvBase):
         else:
             distance_to_liq = self._ones
 
-        # float32 boundary for the spec. Cast the stack, not the parts, so a new element
-        # cannot miss it.
         account_state = torch.stack(
             [
                 exposure_pct,
@@ -450,7 +446,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
                 distance_to_liq,
             ],
             dim=-1,
-        ).float()  # (N, 6)
+        ).float()  # (N, 6); spec is float32 -- cast the stack so a new element cannot miss it
 
         obs_data = {"account_state": account_state}
 

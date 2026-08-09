@@ -163,10 +163,8 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
             tp_list.append(tp if tp is not None else 0.0)
 
         self._action_sides = torch.tensor(sides_list, dtype=torch.long)
-        # float64 because of what is STORED, not what is computed: torch promotes, so a
-        # float32 level times a float64 price is already a float64 product. But float32
-        # holds 0.05 as 0.050000000745, putting the bracket at 104.999995 instead of
-        # 105.0 -- an error in the level itself, carried into every price it sizes.
+        # float64 for the level itself, not the product (torch already promotes that):
+        # float32 holds 0.05 as 0.050000000745, putting the bracket at 104.999995.
         self._action_sl_pcts = torch.tensor(sl_list, dtype=MONEY_DTYPE)
         self._action_tp_pcts = torch.tensor(tp_list, dtype=MONEY_DTYPE)
 

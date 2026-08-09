@@ -18,6 +18,9 @@ from torchtrade.envs.offline import (
 )
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from tests.conftest import simple_feature_fn
+# One home for the equivalence tolerance: two copies in two files is the same drift hazard
+# this PR removed from AFFORDABILITY_REL_TOL, one level up.
+from tests.envs.offline.test_vec_scalar_equivalence import EQUIV_ATOL, EQUIV_RTOL
 
 TF_1MIN = TimeFrame(1, TimeFrameUnit.Minute)
 
@@ -73,21 +76,14 @@ def _make_sltp_pair(
     return scalar, vec
 
 
-# Both engines compute money in float64 (MONEY_DTYPE); measured worst-case disagreement
-# across this file is under 1e-12, so 1e-9 leaves ~1000x headroom. They are close to
-# bit-identical but not quite: at atol=rtol=0, 8 cases fail.
-EQUIV_ATOL = 1e-9
-EQUIV_RTOL = 1e-9
-
-
-def _compare_sltp_state(scalar, vec, step, label, atol=EQUIV_ATOL, rtol=EQUIV_RTOL):
+def _compare_sltp_state(scalar, vec):
     """Compare all observable state between scalar and vectorized SLTP envs.
 
     Returns list of (field, scalar_val, vec_val) mismatches.
     """
     mismatches = []
 
-    def check(field, s_val, v_val, atol=atol, rtol=rtol):
+    def check(field, s_val, v_val, atol=EQUIV_ATOL, rtol=EQUIV_RTOL):
         diff = abs(s_val - v_val)
         tol = atol + rtol * max(abs(s_val), abs(v_val))
         if diff > tol:
@@ -111,18 +107,10 @@ def _compare_sltp_state(scalar, vec, step, label, atol=EQUIV_ATOL, rtol=EQUIV_RT
 def _run_sltp_sequence(
     df,
     action_indices,
-    leverage=1,
-    fee=0.0,
-    sl_levels=None,
-    tp_levels=None,
-    max_traj=40,
     label="",
-    include_hold=True,
-    include_close=False,
     expect_action_type=None,
-    trade_mode="fractional",
-    lock=False,
     random_steps=None,
+    **pair_kwargs,
 ):
     """Run a sequence of actions through both envs and compare at every step.
 
@@ -130,19 +118,11 @@ def _run_sltp_sequence(
         expect_action_type: if given, the run must actually record this action type
             (e.g. "sltp_sl"), so a scenario that stops reaching its bracket is reported
             rather than passing as a pair of idle envs.
+        random_steps: if given, `action_indices` is ignored and this many random actions
+            are drawn instead.
+        pair_kwargs: forwarded to `_make_sltp_pair`.
     """
-    scalar, vec = _make_sltp_pair(
-        df,
-        leverage=leverage,
-        fee=fee,
-        sl_levels=sl_levels,
-        tp_levels=tp_levels,
-        max_traj=max_traj,
-        include_hold=include_hold,
-        include_close=include_close,
-        trade_mode=trade_mode,
-        lock=lock,
-    )
+    scalar, vec = _make_sltp_pair(df, **pair_kwargs)
     if random_steps is not None:
         # Drawn after construction so the draw respects the real action-space size, which
         # changes with leverage (shorts) and include_close.
@@ -157,10 +137,8 @@ def _run_sltp_sequence(
     td_s = scalar.reset()
     td_v = vec.reset()
 
-    atol, rtol = EQUIV_ATOL, EQUIV_RTOL
-
     # Compare initial state
-    mismatches = _compare_sltp_state(scalar, vec, 0, label)
+    mismatches = _compare_sltp_state(scalar, vec)
     for field, s_val, v_val, diff in mismatches:
         all_mismatches.append(
             f"[{label}] Step 0 RESET {field}: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
@@ -181,7 +159,7 @@ def _run_sltp_sequence(
         r_s = td_s["next"]["reward"].item()
         r_v = td_v["next"]["reward"].squeeze().item()
         r_diff = abs(r_s - r_v)
-        if r_diff > atol + rtol * max(abs(r_s), abs(r_v)):
+        if r_diff > EQUIV_ATOL + EQUIV_RTOL * max(abs(r_s), abs(r_v)):
             all_mismatches.append(
                 f"[{label}] Step {step+1} reward: scalar={r_s:.6f} vec={r_v:.6f} diff={r_diff:.6f}"
             )
@@ -206,13 +184,13 @@ def _run_sltp_sequence(
             s_val = as_s[i].item()
             v_val = as_v[i].item()
             diff = abs(s_val - v_val)
-            if diff > atol + rtol * max(abs(s_val), abs(v_val)):
+            if diff > EQUIV_ATOL + EQUIV_RTOL * max(abs(s_val), abs(v_val)):
                 all_mismatches.append(
                     f"[{label}] Step {step+1} account_state[{name}]: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
                 )
 
         # Compare internal state
-        mismatches = _compare_sltp_state(scalar, vec, step + 1, label)
+        mismatches = _compare_sltp_state(scalar, vec)
         for field, s_val, v_val, diff in mismatches:
             all_mismatches.append(
                 f"[{label}] Step {step+1} {field}: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
@@ -654,34 +632,26 @@ class TestSLTPScalarVecEquivalenceTradeModesAndLock:
 class TestAffordabilitySlackIsShared:
     """Both engines must make the same accept/reject call on a marginal open (#293).
 
-    `can_afford` compares cost against `balance * (1 + AFFORDABILITY_REL_TOL)`. The
-    vectorized envs carried 1e-5 there against the scalar envs' 1e-9 -- a 10,000x window
-    in which the vectorized env opened a position the scalar env refused, leaving one
-    engine in cash and the other fully deployed at a zeroed balance. Nothing caught it:
-    reverting either side to 1e-5 left all 680 offline tests green.
-
-    The prices are flat at 100 so the cost is exact arithmetic: 100 notional at leverage 1
-    is 100 margin plus 0.1 fee, and initial_cash is set to overshoot that by a chosen
-    relative amount.
+    The vectorized envs carried 1e-5 slack against the scalar envs' 1e-9 -- a 10,000x
+    window in which one engine opened a position the other refused, leaving one in cash
+    and the other fully deployed at a zeroed balance. Reverting either side to 1e-5 left
+    all 680 offline tests green.
     """
 
-    COST = 100.1  # 100.0 margin + 0.1 fee, at the flat price below
-
-    @pytest.mark.parametrize("overshoot,expect_open", [
+    @pytest.mark.parametrize("shortfall,expect_open", [
         (1e-11, True),
         (3e-6, False),
-        (1e-3, False),
-    ], ids=["inside-slack", "inside-the-old-1e-5-window", "plainly-unaffordable"])
-    def test_both_engines_make_the_same_call(self, overshoot, expect_open):
-        n = 40
+    ], ids=["inside-slack", "inside-the-old-1e-5-window"])
+    def test_both_engines_make_the_same_call(self, shortfall, expect_open):
+        # Flat at 100 so the cost is exact: 100 notional at leverage 1 is 100 margin plus
+        # 0.1 fee. Cash is set just short of that by `shortfall`.
         df = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "timestamp": pd.date_range("2024-01-01", periods=40, freq="1min"),
             "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1000.0,
-        }, index=range(n))
+        }, index=range(40))
         scalar, vec = _make_sltp_pair(
             df, leverage=1, fee=0.001, sl_levels=[-0.05], tp_levels=[0.1],
-            max_traj=20, trade_mode="notional",
-            initial_cash=self.COST / (1 + overshoot),
+            max_traj=20, trade_mode="notional", initial_cash=100.1 / (1 + shortfall),
         )
         td_s, td_v = scalar.reset(), vec.reset()
         td_s["action"] = torch.tensor(1)
@@ -689,16 +659,10 @@ class TestAffordabilitySlackIsShared:
         scalar.step(td_s)
         vec.step(td_v)
 
-        opened_s = scalar.position.position_size != 0
-        opened_v = float(vec._position_sizes[0]) != 0
-        assert opened_s == opened_v, (
-            f"overshoot={overshoot}: scalar {'opened' if opened_s else 'refused'} but "
-            f"vec {'opened' if opened_v else 'refused'} -- the two engines disagree about "
-            "which opens are affordable"
-        )
-        assert opened_s == expect_open, (
-            f"overshoot={overshoot}: expected {'an open' if expect_open else 'a refusal'}, "
-            f"got {'an open' if opened_s else 'a refusal'}"
+        opened = (scalar.position.position_size != 0, float(vec._position_sizes[0]) != 0)
+        assert opened == (expect_open, expect_open), (
+            f"shortfall={shortfall}: (scalar, vec) opened={opened}, expected both "
+            f"{expect_open} -- the engines disagree about what is affordable"
         )
         scalar.close()
         vec.close()

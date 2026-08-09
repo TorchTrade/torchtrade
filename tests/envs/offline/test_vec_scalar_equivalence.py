@@ -70,7 +70,7 @@ EQUIV_ATOL = 1e-9
 EQUIV_RTOL = 1e-9
 
 
-def _compare_state(scalar, vec, step, label, atol=EQUIV_ATOL, rtol=EQUIV_RTOL):
+def _compare_state(scalar, vec):
     """Compare all observable state between scalar and vectorized envs.
 
     Uses numpy-style allclose: |s - v| <= atol + rtol * max(|s|, |v|).
@@ -79,7 +79,7 @@ def _compare_state(scalar, vec, step, label, atol=EQUIV_ATOL, rtol=EQUIV_RTOL):
     """
     mismatches = []
 
-    def check(field, s_val, v_val, atol=atol, rtol=rtol):
+    def check(field, s_val, v_val, atol=EQUIV_ATOL, rtol=EQUIV_RTOL):
         diff = abs(s_val - v_val)
         tol = atol + rtol * max(abs(s_val), abs(v_val))
         if diff > tol:
@@ -117,7 +117,7 @@ def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, m
     td_v = vec.reset()
 
     # Compare initial state
-    mismatches = _compare_state(scalar, vec, 0, label)
+    mismatches = _compare_state(scalar, vec)
     for field, s_val, v_val, diff in mismatches:
         all_mismatches.append(f"[{label}] Step 0 RESET {field}: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}")
 
@@ -132,13 +132,11 @@ def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, m
         action_td_v["action"] = torch.tensor([action_idx])
         td_v = vec.step(action_td_v)
 
-        atol, rtol = EQUIV_ATOL, EQUIV_RTOL
-
         # Compare rewards
         r_s = td_s["next"]["reward"].item()
         r_v = td_v["next"]["reward"].squeeze().item()
         r_diff = abs(r_s - r_v)
-        if r_diff > atol + rtol * max(abs(r_s), abs(r_v)):
+        if r_diff > EQUIV_ATOL + EQUIV_RTOL * max(abs(r_s), abs(r_v)):
             all_mismatches.append(
                 f"[{label}] Step {step+1} reward: scalar={r_s:.6f} vec={r_v:.6f} diff={r_diff:.6f}"
             )
@@ -163,7 +161,7 @@ def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, m
             s_val = as_s[i].item()
             v_val = as_v[i].item()
             diff = abs(s_val - v_val)
-            if diff > atol + rtol * max(abs(s_val), abs(v_val)):
+            if diff > EQUIV_ATOL + EQUIV_RTOL * max(abs(s_val), abs(v_val)):
                 all_mismatches.append(
                     f"[{label}] Step {step+1} account_state[{name}]: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
                 )
@@ -174,14 +172,14 @@ def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, m
                 continue
             md_s = td_s["next"][key]
             md_v = td_v["next"][key].squeeze(0)
-            if not torch.allclose(md_s, md_v, atol=atol, rtol=rtol):
+            if not torch.allclose(md_s, md_v, atol=EQUIV_ATOL, rtol=EQUIV_RTOL):
                 max_diff = (md_s - md_v).abs().max().item()
                 all_mismatches.append(
                     f"[{label}] Step {step+1} {key}: max_diff={max_diff:.6f}"
                 )
 
         # Compare internal state
-        mismatches = _compare_state(scalar, vec, step + 1, label)
+        mismatches = _compare_state(scalar, vec)
         for field, s_val, v_val, diff in mismatches:
             all_mismatches.append(
                 f"[{label}] Step {step+1} {field}: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
