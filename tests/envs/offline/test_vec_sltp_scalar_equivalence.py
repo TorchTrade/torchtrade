@@ -124,7 +124,6 @@ def _run_sltp_sequence(
     trade_mode="fractional",
     lock=False,
     random_steps=None,
-    action_seed=0,
 ):
     """Run a sequence of actions through both envs and compare at every step.
 
@@ -149,7 +148,7 @@ def _run_sltp_sequence(
         # Drawn after construction so the draw respects the real action-space size, which
         # changes with leverage (shorts) and include_close.
         action_indices = (
-            np.random.default_rng(action_seed)
+            np.random.default_rng(0)
             .integers(0, scalar.action_spec.n, size=random_steps)
             .tolist()
         )
@@ -620,9 +619,13 @@ class TestSLTPScalarVecEquivalenceTradeModesAndLock:
     in float32 and 100.0 - 2.4e-4 lands on the wrong side of a `<`.
 
     Randomised actions rather than another hand-picked sequence: the hand-picked ones are
-    what missed it. The leverage axis is crossed in rather than fixed because leverage is
-    what scales an epsilon up onto a threshold -- at leverage 1 every combination here
-    already agreed, which is precisely why the gap was invisible.
+    what missed it. Leverage is crossed in rather than fixed because it is what scales an
+    epsilon up onto a threshold -- #293 reported zero divergence at leverage 1.
+
+    That last part turns out to be a statement about the old tolerance, not about the
+    engines: with EQUIV_ATOL at 1e-9 the leverage-1 fractional and notional cells go red
+    under float32 too. Leverage decides whether the epsilon reaches a *threshold* and
+    flips an episode; it was never what decided whether the money drifted.
     """
 
     @pytest.mark.parametrize("trade_mode", ["fractional", "notional", "quantity"])
