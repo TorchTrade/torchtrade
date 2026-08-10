@@ -1068,3 +1068,61 @@ class TestSamplerExhaustion:
         assert not result["next"]["terminated"].item()
 
         env.close()
+
+
+class TestExecutionPriceConvention:
+    """Pins WHEN a decision is made relative to the observation it is made on.
+
+    This convention is load-bearing and was previously implicit: nothing asserted
+    it, and `TestSamplerNoFutureLeakage::test_multi_timeframe_no_leakage_in_
+    execution_tf` only checks `obs["1Minute"]`, never the execute_on-keyed column.
+
+    Getting it backwards is expensive in both directions. Read it as "the bar's
+    label is the decision instant" and the aux/OHLCV aggregation looks like it
+    leaks a whole bar when it does not; "fixing" that makes every auxiliary
+    column stale by a bar relative to the price beside it. Read it as one bar
+    later than it is and real lookahead goes unnoticed.
+    """
+
+    @pytest.mark.parametrize("exec_tf", [
+        TimeFrame(1, TimeFrameUnit.Minute),
+        TimeFrame(1, TimeFrameUnit.Hour),
+    ], ids=["1Minute", "1Hour"])
+    def test_env_executes_at_the_last_close_the_agent_observed(self, exec_tf):
+        """The decision instant is the observed bar's CLOSE, not its label.
+
+        close is set to a running counter so every price identifies its own bar.
+        """
+        n = 60 * 30
+        counter = pd.Series(range(n), dtype=float) + 1000.0
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": counter, "high": counter + 0.5, "low": counter - 0.5,
+            "close": counter, "volume": 1000.0,
+        })
+        env = SequentialTradingEnv(df, SequentialTradingEnvConfig(
+            action_levels=[0, 1], initial_cash=100_000,
+            time_frames=[exec_tf], window_sizes=[4], execute_on=exec_tf,
+            random_start=False, seed=0,
+        ), simple_feature_fn)
+
+        executed = []
+        original = env._execute_trade_if_needed
+        env._execute_trade_if_needed = lambda action, price, *a, **k: (
+            executed.append(price), original(action, price, *a, **k))[1]
+
+        obs_key = f"market_data_{exec_tf.obs_key_freq()}_4"
+        close_col = env.sampler.resampled_dfs[exec_tf.obs_key_freq()].columns.get_loc(
+            "features_close"
+        )
+        td = env.reset()
+        for _ in range(3):
+            observed_close = td[obs_key][-1, close_col].item()
+            td["action"] = torch.tensor(1)
+            td = env.step(td)["next"]
+            assert executed[-1] == pytest.approx(observed_close), (
+                "the env must trade at the last close the agent saw; a mismatch "
+                "means the observation window and the execution price disagree "
+                "about which bar the decision belongs to"
+            )
+        env.close()
