@@ -525,7 +525,6 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         # Bar N+1's wick, against whatever the trade left open
         self._apply_liquidation(new_high, new_low)
-
         self._advance_hold_counters()
 
 
@@ -572,8 +571,9 @@ class VectorizedSequentialTradingEnv(EnvBase):
         (#298). Both engines apply it to the same slot -- bar N+1, post-trade -- so the
         money math is one copy rather than two that have not drifted yet.
 
-        Positions are zeroed rather than masked out downstream: every trigger gate in the
-        SLTP subclass reads has_position, so zeroing here is what stops a stale bracket.
+        Positions are zeroed rather than left for a downstream mask to skip. The SLTP
+        subclass depends on that -- see the note at its call site for which gates it
+        leaves False -- so this must not become a mask-and-defer.
         """
         if self.config.leverage <= 1:
             return

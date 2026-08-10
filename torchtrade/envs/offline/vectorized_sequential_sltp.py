@@ -233,9 +233,8 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
         # Age straight after the last thing that can move _position_sizes -- the same
         # invariant the base env keeps by calling this after _apply_liquidation, its own
-        # last position-moving step. This
-        # subclass overrides _step, so without the call nothing ages the counters here and
-        # holding_time reads 0 forever (#275).
+        # last position-moving step. This subclass overrides _step, so without the call
+        # nothing ages the counters here and holding_time reads 0 forever (#275).
         self._advance_hold_counters()
 
         # 7. Compute rewards: log(new_pv / old_pv)
@@ -274,10 +273,11 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         """Close positions whose bar range hit liquidation or a bracket."""
         leverage = float(self.config.leverage)
 
-        # Liquidation takes priority over the brackets (futures only). Shared with the
-        # base env; it zeroes the position, which is what stops a stale bracket firing on
-        # it below -- every trigger gate reads has_position. SL/TP are deliberately not
-        # cleared, matching the scalar env.
+        # Liquidation takes priority over the brackets (futures only), and shares its
+        # money math with the base env. SL/TP are NOT cleared on liquidation, matching the
+        # scalar env. Stale values are harmless: the trigger masks below gate on
+        # can_trigger (via has_position) AND is_long/is_short, and every one of those is
+        # False once _apply_liquidation has zeroed the position.
         self._apply_liquidation(new_high, new_low)
 
         has_position = self._position_sizes != 0
