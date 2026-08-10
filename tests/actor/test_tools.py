@@ -280,10 +280,20 @@ def test_polymarket_empty_result_is_not_an_error(monkeypatch):
     assert not out.startswith("error:")
 
 
-def test_polymarket_failure_returns_error_string(monkeypatch):
-    """Fail-open guard. Network errors are swallowed by the scanner, but a
-    non-string keyword from the model reaches _filter_markets and raises, and
-    the lazy import can fail — neither may propagate into a live trading step."""
-    _fake_scanner(monkeypatch, RuntimeError("boom"))
-    out = PolymarketTool(symbol="BTC/USD").run()
+@pytest.mark.parametrize("scanner_result,query", [
+    (RuntimeError("boom"), None),
+    ([], ["btc"]),
+    ([], 5),
+], ids=["scanner_raises", "list_query", "int_query"])
+def test_polymarket_failure_returns_error_string(monkeypatch, scanner_result, query):
+    """Fail-open guard, over every input that can reach it.
+
+    Network errors are swallowed by the scanner, but the lazy import can fail
+    and the model can emit a non-string `query` — parse_tool_calls hands args
+    through unvalidated. None of it may propagate out of run(): the caller's
+    per-tool guard would catch it, but then the model gets a Python signature
+    error instead of this tool's own message.
+    """
+    _fake_scanner(monkeypatch, scanner_result)
+    out = PolymarketTool(symbol="BTC/USD").run(query=query)
     assert out.startswith("error: polymarket")

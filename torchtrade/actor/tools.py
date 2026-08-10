@@ -14,9 +14,13 @@ _MAX_TEXT_CHARS = 140
 def _one_line(text: str) -> str:
     """Collapse text to a single capped line before it enters the model context.
 
-    Every free-text field the tool renders goes through this. A newline lets one
+    Applied to both free-text fields PolymarketTool renders. A newline lets one
     field occupy two numbered rows and fabricate a market the model then treats
     as tool-verified; the cap stops one field flooding the prompt.
+
+    Scoped to row forgery and length only -- it does not neutralise inline
+    markup such as a literal </tool_results>, which would still close the
+    results block early. GoogleNewsTool does not use this yet (see #308).
     """
     text = " ".join(text.split())
     return text[:_MAX_TEXT_CHARS] + "…" if len(text) > _MAX_TEXT_CHARS else text
@@ -137,8 +141,10 @@ class PolymarketTool(Tool):
         return ms.MarketScanner(config).scan()
 
     def run(self, query: Optional[str] = None) -> str:
-        q = _one_line(query or symbol_to_query(self.symbol))
         try:
+            # Inside the guard: `query` arrives unvalidated from the model, so
+            # normalising it can itself raise on a non-string.
+            q = _one_line(query or symbol_to_query(self.symbol))
             markets = self._scan(q)
         except Exception as exc:  # never raise into a live trading step
             return f"error: polymarket unavailable ({exc})"
