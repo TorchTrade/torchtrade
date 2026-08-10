@@ -1,11 +1,17 @@
-"""Contract tests for observation/reward spec declarations.
+"""Contract tests for spec declarations. Two unrelated contracts live here.
 
-TorchRL samples a Bounded spec as `uniform() * (high - low) + low`, so an infinite
-bound makes `.rand()` produce NaN (both bounds infinite) or inf (one bound infinite),
-and inf poisons a lazily-built network just as thoroughly. `check_env_specs()` catches
-neither: it builds its dummy batch from `spec.zero()` and a real rollout, never
-`.rand()`. Use `Unbounded(shape=..., dtype=...)`, or finite numbers where a bound is
-real.
+**Specs must be samplable.** TorchRL samples a Bounded spec as
+`uniform() * (high - low) + low`, so an infinite bound makes `.rand()` produce NaN (both
+bounds infinite) or inf (one bound infinite), and inf poisons a lazily-built network just
+as thoroughly. `check_env_specs()` catches neither: it builds its dummy batch from
+`spec.zero()` and a real rollout, never `.rand()`. Use `Unbounded(shape=..., dtype=...)`,
+or finite numbers where a bound is real.
+
+**The done spec is declared exactly once** (#272). Every `_step` writes a `truncated`
+key, but TorchRL's default done spec carries only `done` and `terminated`, so anything
+pre-allocating from the spec drops it with no error at all. `TorchTradeBaseEnv` now
+declares all three for live and offline alike; the tests at the end of this file guard
+that one declaration against both drift and silent loss.
 """
 
 import ast
@@ -280,6 +286,17 @@ def test_no_env_declares_its_own_done_spec(env_cls):
     The vectorized envs and polymarket subclass EnvBase directly, so they never reach
     TorchTradeBaseEnv.__init__ and their own declarations are overrides, not duplicates --
     the vectorized one is batched.
+
+    What this does NOT catch, deliberately: it matches attribute writes, so mutating the
+    inherited spec in place -- `del self.full_done_spec["truncated"]`, `.set(...)`, an
+    `output_spec[...]` write, or a helper defined outside the MRO -- reads as a Load and
+    passes. Verified. Those forms are all caught behaviourally by the ten
+    check_env_specs tests and by test_a_collector_batch_carries_truncated, which name the
+    missing key; closing them here would mean tracking aliases through the AST, and an
+    earlier attempt at name indirection in this file produced both false positives and
+    false negatives. The unique job left to this test is the duplicate that is still
+    IDENTICAL, and therefore invisible behaviourally until the day it drifts -- the
+    failure mode that cost this repo three diverging SLTP action maps.
     """
     # The MRO, not just the leaf: the duplicate this PR removed lived in a BASE class,
     # which inspect.getsource(leaf) never shows. Stop at the one legitimate owner, which
