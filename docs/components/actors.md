@@ -147,7 +147,7 @@ only when configured (live path); without them the actor is single-shot as befor
 
 ```python
 from torchtrade.actor import LocalLLMActor
-from torchtrade.actor.tools import GoogleNewsTool
+from torchtrade.actor.tools import GoogleNewsTool, PolymarketTool
 
 actor = LocalLLMActor(
     model="Qwen/Qwen2.5-0.5B-Instruct", backend="vllm",
@@ -155,10 +155,18 @@ actor = LocalLLMActor(
     account_state_labels=env.account_state,
     action_levels=env.action_levels,
     symbol="BTC/USD",
-    tools=[GoogleNewsTool(symbol="BTC/USD")],
+    tools=[
+        GoogleNewsTool(symbol="BTC/USD"),
+        PolymarketTool(symbol="BTC/USD"),
+    ],
     max_tool_iters=3,
 )
 ```
+
+Pass tools individually rather than bundling sources behind flags — the list is
+the configuration. Several tools still cost a single tool iteration, because the
+model may emit more than one `<tool>` block per turn and they all resolve into
+one `<tool_results>` block.
 
 The model calls a tool with `<tool name="google_news">{"query": "Bitcoin"}</tool>`
 (torchrl `XMLBlockParser` convention) and receives a `<tool_results>...</tool_results>`
@@ -166,6 +174,59 @@ block, then continues until it emits `<answer>N</answer>`. Only conversations th
 call a tool are re-generated, so batched multi-symbol inference stays efficient.
 Tool use requires `backend="vllm"` (the transformers backend can't halt at
 `</tool>`) and the `[llm]` extra (adds `feedparser`).
+
+#### `PolymarketTool`
+
+Prediction-market odds for the traded asset, from Polymarket's public Gamma API —
+free, no key, no account. It reuses the `MarketScanner` that backs
+`PolymarketBetEnv`, so it inherits that client's fetching, retry and filtering
+machinery — but sets its own budget and thresholds, which differ from the live
+env's (see below).
+
+```python
+PolymarketTool(symbol="BTC/USD", top_n=5, min_volume_24h=10_000,
+               min_liquidity=5_000, timeout=5.0)
+```
+
+The keyword defaults to the traded symbol via `symbol_to_query()` (`BTC` →
+`"Bitcoin"`); the model can override it per call with
+`<tool name="polymarket">{"query": "Fed"}</tool>`. Output is a ranked list of
+questions with the YES probability and 24h volume:
+
+```
+Prediction markets for 'Bitcoin':
+1. Will the price of Bitcoin be above $64,000 on August 10? — YES 97.0% · 24h vol $74,568
+2. Bitcoin Up or Down on August 10? — YES 32.4% · 24h vol $131,842
+```
+
+A row of strike-based markets is effectively a market-implied price distribution,
+which is information OHLCV cannot express. Probabilities are rendered to one
+decimal on purpose: a market at 0.9962 near resolution must not read as `100%`.
+
+Four things to keep in mind:
+
+- **`min_volume_24h` / `min_liquidity` are a content filter, not just noise
+  reduction.** Market questions are user-authored and land in the model's context
+  verbatim, so low-volume markets are the injection surface. Every free-text
+  field the tool renders — market questions *and* the model's own `query` — is
+  collapsed to a single capped line, because a newline would otherwise let one
+  field render as a second numbered row and fabricate a market. Lower these
+  floors deliberately.
+- **An empty result does not mean no markets exist.** `MarketScanner.scan()` logs
+  and returns `[]` when the Gamma API is unreachable, so the tool cannot tell an
+  outage from a genuinely empty result and deliberately says so rather than
+  asserting an absence it never verified.
+- **The tool blocks the collection step.** `_resolve_tools` resolves tool calls
+  sequentially across the batch, so per-call latency is serialised onto the
+  policy call inside `SyncDataCollector`/`env.rollout()`. The tool spends
+  `timeout=5.0` over 2 attempts — roughly 11s worst case, against the scanner's
+  default of roughly 48s. Budget that against **your** `execute_on` cadence, not
+  against `PolymarketBetEnv`'s: with `max_tool_iters=3` the worst case is ~33s
+  per conversation, which is comfortable on a `1Hour` step and most of the
+  budget on a `1Min` one.
+- **This is a live-path tool.** It returns markets that are open *now*, so using
+  it during offline replay would show a historical episode present-day
+  probabilities. Restrict it to live trading, as with `GoogleNewsTool`.
 
 ---
 

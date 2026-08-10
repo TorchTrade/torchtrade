@@ -624,3 +624,45 @@ class TestPublicMethodsRecoverFromTransientFailure:
         result = method("btc-updown-5m-") if method_name == "next_active_market" else method()
         assert assert_result(result)
         assert mock_get.call_count == 2
+
+
+@pytest.mark.parametrize("call", [
+    lambda s: s.scan(),
+    lambda s: s.next_active_market("btc-updown-5m-"),
+], ids=["scan", "next_active_market"])
+def test_network_budget_is_forwarded_from_config(monkeypatch, call):
+    """The 3x15s budget suits PolymarketBetEnv's ~5min cadence, but a caller on
+    a tighter loop needs to lower it. Both public entry points must honour the
+    config — next_active_market is the one PolymarketBetEnv calls every step.
+    Defaults must stay exactly as they were for existing callers.
+    """
+    import torchtrade.envs.live.polymarket.market_scanner as ms
+
+    captured = {}
+
+    def _fake_fetch(url, params, timeout=15.0, attempts=3, backoff=1.0):
+        captured.update(timeout=timeout, attempts=attempts)
+        return []
+
+    monkeypatch.setattr(ms, "_fetch_json_with_retry", _fake_fetch)
+
+    call(MarketScanner(MarketScannerConfig()))
+    assert captured == {"timeout": 15.0, "attempts": 3}
+
+    call(MarketScanner(MarketScannerConfig(timeout=5.0, retry_attempts=2)))
+    assert captured == {"timeout": 5.0, "attempts": 2}
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"retry_attempts": 0},
+    {"timeout": 0},
+], ids=["no_attempts", "no_timeout"])
+def test_config_rejects_a_network_budget_that_cannot_fetch(kwargs):
+    """retry_attempts=0 reads as "don't retry" but means "never call": the
+    retry loop body never runs, _fetch_json_with_retry returns None, and scan()
+    consumes it OUTSIDE its try -> TypeError. PolymarketBetEnv calls scan()
+    directly, so a network-config value would terminate a live run — precisely
+    what the retry policy exists to prevent. Reject at the boundary.
+    """
+    with pytest.raises(ValueError):
+        MarketScannerConfig(**kwargs)

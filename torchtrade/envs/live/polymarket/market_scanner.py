@@ -100,6 +100,21 @@ class MarketScannerConfig:
     # via the discovery flow (scan_markets.py) and use it as the stable identifier
     # for short-cadence recurring series (e.g. "btc-updown-5m-").
     slug_prefix: Optional[str] = None
+    # Network budget for one fetch. Defaults are sized for PolymarketBetEnv's
+    # ~5 min cadence (worst case ~48s, see _RETRY_ATTEMPTS above); callers on a
+    # tighter loop should lower both.
+    timeout: float = 15.0
+    retry_attempts: int = _RETRY_ATTEMPTS
+
+    def __post_init__(self):
+        # retry_attempts reads as "don't retry" but means "never call": the
+        # retry loop body would not run, _fetch_json_with_retry would return
+        # None, and scan() consumes that outside its try. Refuse at the
+        # boundary rather than let a config value kill a live run.
+        if self.retry_attempts < 1:
+            raise ValueError("retry_attempts must be >= 1 (1 = a single attempt)")
+        if self.timeout <= 0:
+            raise ValueError("timeout must be > 0")
 
 
 class MarketScanner:
@@ -247,7 +262,10 @@ class MarketScanner:
             }
         try:
             raw_markets = _fetch_json_with_retry(
-                f"{GAMMA_API_BASE}/markets", params=params
+                f"{GAMMA_API_BASE}/markets",
+                params=params,
+                timeout=self.config.timeout,
+                attempts=self.config.retry_attempts,
             )
         except Exception:
             logger.exception("Failed to fetch markets from Gamma API")
@@ -288,6 +306,8 @@ class MarketScanner:
                     "ascending": "true",
                     "end_date_min": now.isoformat(),
                 },
+                timeout=self.config.timeout,
+                attempts=self.config.retry_attempts,
             )
         except Exception:
             logger.exception("Failed to fetch upcoming markets from Gamma API")
