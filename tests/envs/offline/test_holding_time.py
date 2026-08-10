@@ -92,3 +92,47 @@ def test_sltp_holding_time_sequence(sample_ohlcv_df, leverage):
     seq = _drive(env, [1, 0, 0])
     assert seq == [0, 1, 2, 3]
     env.close()
+
+
+class TestHoldingTimeAcrossResize:
+    """A resized position keeps ageing -- it is the same position (#275).
+
+    account_state[3] is "steps since position opened". Both offline engines used to
+    hand-roll that: the scalar incremented it in the two no-trade branches only, so
+    _increase_position_size/_decrease_position_size never aged a position and a bar-by-bar
+    resize reported holding_time=1 forever; the vectorized env routed resizes through
+    close-then-reopen and reset it to 1 instead. Both now age once per step from the
+    post-trade direction, which is what advance_hold_counter has always specified.
+    """
+
+    LEVELS = [-1.0, -0.5, 0.0, 0.5, 1.0]
+
+    def _env(self, df, cls, cfg, **extra):
+        return cls(df, cfg(
+            action_levels=self.LEVELS, leverage=5, initial_cash=10000,
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)], window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            transaction_fee=0.0, slippage=0.0, seed=42, max_traj_length=30,
+            random_start=False, **extra,
+        ), simple_feature_fn)
+
+    def test_resizing_every_bar_still_ages(self, sample_ohlcv_df):
+        """The exact shape #275 reports: alternate full/half and the counter must climb."""
+        env = self._env(sample_ohlcv_df, SequentialTradingEnv, SequentialTradingEnvConfig)
+        seq = _drive(env, [4, 3, 4, 3, 4])
+        assert seq == [0, 1, 2, 3, 4, 5], (
+            f"holding_time went {seq} -- a position resized every bar is still the same "
+            "position and must report cumulative age"
+        )
+        env.close()
+
+    def test_direction_switch_restarts_but_resize_does_not(self, sample_ohlcv_df):
+        """The counterpart: a flip IS a new position, so it restarts at 1.
+
+        Without this the test above would pass on an env that simply never resets.
+        """
+        env = self._env(sample_ohlcv_df, SequentialTradingEnv, SequentialTradingEnvConfig)
+        # long full, resize to half, flip short half, resize short full
+        seq = _drive(env, [4, 3, 1, 0])
+        assert seq == [0, 1, 2, 1, 2], f"holding_time went {seq}"
+        env.close()

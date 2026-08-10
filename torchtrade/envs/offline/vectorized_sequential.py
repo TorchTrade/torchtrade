@@ -114,11 +114,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         Equivalence against SequentialTradingEnv is verified by
         tests/envs/offline/test_vec_scalar_equivalence.py: every binary outcome, and
-        money to within 1e-9 -- a claim about the axes it varies, leverage and fee.
-        It does NOT cover *resizing* a position through an intermediate action_level,
-        where the two engines are known to disagree (see #302): the scalar env resizes
-        in place with a weighted-average entry, the vectorized env always closes and
-        reopens. The open from flat at an intermediate level is covered.
+        money to within 1e-9, across leverage, fee, and intermediate action_levels
+        (opens, partial resizes and direction switches).
 
     Processes N environments in a single _step() call using tensor operations.
     All state (balances, positions, step indices) is stored as (num_envs,) tensors
@@ -253,6 +250,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
         self._position_sizes = torch.zeros(N, dtype=MONEY_DTYPE)
         self._entry_prices = torch.zeros(N, dtype=MONEY_DTYPE)
         self._hold_counters = torch.zeros(N, dtype=torch.long)
+        # The direction hold_counters is counting, so a direct flip restarts it.
+        self._hold_directions = torch.zeros(N, dtype=MONEY_DTYPE)
         self._prev_action_values = torch.full((N,), float("nan"), dtype=MONEY_DTYPE)
         self._step_indices = torch.zeros(N, dtype=torch.long)
         self._end_indices = torch.zeros(N, dtype=torch.long)
@@ -366,6 +365,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
         self._position_sizes[reset_mask] = 0.0
         self._entry_prices[reset_mask] = 0.0
         self._hold_counters[reset_mask] = 0
+        self._hold_directions[reset_mask] = 0.0
         self._prev_action_values[reset_mask] = float("nan")
         self._step_counters[reset_mask] = 0
 
@@ -548,6 +548,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
         if liq_mask is not None and liq_mask.any():
             action_values = torch.where(liq_mask, self._zeros, action_values)
         self._execute_trades(action_values, trade_prices)
+        self._advance_hold_counters()
 
         # 6. Advance step indices and counters
         self._step_indices += 1
@@ -593,6 +594,27 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         return obs_td
 
+    def _advance_hold_counters(self):
+        """Age every position by one step -- the tensor form of advance_hold_counter.
+
+        Called once per step from the post-trade state rather than inside the trade
+        branches, for the reason core/state.py gives: a branch that forgets to age is
+        invisible, and _execute_trades has six of them plus three early returns. A refused
+        resize is the case that proved it -- the position is still held, so it must still
+        age, and the scalar env ages it because its call sits in _step (#274, #275).
+        """
+        direction = self._position_sizes.sign()
+        self._hold_counters = torch.where(
+            direction == 0,
+            torch.zeros_like(self._hold_counters),
+            torch.where(
+                direction != self._hold_directions,
+                torch.ones_like(self._hold_counters),
+                self._hold_counters + 1,
+            ),
+        )
+        self._hold_directions = direction
+
     def _execute_trades(
         self, action_values: torch.Tensor, execution_prices: torch.Tensor
     ):
@@ -609,7 +631,6 @@ class VectorizedSequentialTradingEnv(EnvBase):
         same_action = (action_values == self._prev_action_values) & (
             self._position_sizes != 0
         )
-        self._hold_counters[same_action] += 1
 
         # Update prev action values
         self._prev_action_values.copy_(action_values)
@@ -643,14 +664,74 @@ class VectorizedSequentialTradingEnv(EnvBase):
         )
         within_tol = (target_sizes - self._position_sizes).abs() < tolerance
         hold_tol = need_trade & within_tol & (self._position_sizes != 0)
-        self._hold_counters[hold_tol] += 1
         need_trade = need_trade & ~hold_tol
 
         if not need_trade.any():
             return
 
-        # Close existing positions that need to change
-        close_mask = need_trade & (self._position_sizes != 0)
+        # Classify what each trading env is actually doing. The scalar env branches on
+        # this (_adjust_position_size -> _increase/_decrease vs close-then-open); the
+        # vectorized env used to send everything down close-then-open, which pays a full
+        # round trip of fees on a same-direction resize and throws the entry price away
+        # (#274). These four masks are disjoint and cover need_trade exactly, so no env
+        # can be charged by two branches.
+        has_pos = self._position_sizes != 0
+        wants_pos = action_values != 0
+        same_sign = self._position_sizes.sign() == target_sizes.sign()
+
+        is_resize = need_trade & has_pos & wants_pos & same_sign
+        is_switch = need_trade & has_pos & wants_pos & ~same_sign
+        is_close_to_flat = need_trade & has_pos & ~wants_pos
+
+        if is_resize.any():
+            # Target is sized off the PRE-trade portfolio value, as in the scalar env.
+            delta = target_sizes - self._position_sizes
+            delta_notional = (delta * execution_prices).abs()
+            is_increase = is_resize & (target_sizes.abs() > self._position_sizes.abs())
+            is_decrease = is_resize & ~is_increase
+
+            if is_increase.any():
+                fee = delta_notional * self.transaction_fee
+                margin_required = delta_notional / leverage
+                can_afford = (margin_required + fee) <= self._balances * (
+                    1 + AFFORDABILITY_REL_TOL
+                )
+                # An unaffordable increase must leave the env completely untouched, the
+                # way the scalar env early-returns executed=False -- not fall through.
+                final_inc = is_increase & can_afford
+                if final_inc.any():
+                    old_qty = self._position_sizes.abs()
+                    new_qty = delta.abs()
+                    total_qty = old_qty + new_qty
+                    # Quantity-weighted, matching _increase_position_size.
+                    weighted_entry = (
+                        self._entry_prices * old_qty + execution_prices * new_qty
+                    ) / total_qty.clamp(min=1e-12)
+
+                    self._balances[final_inc] -= (fee + margin_required)[final_inc]
+                    self._balances.clamp_(min=0.0)
+                    self._entry_prices[final_inc] = weighted_entry[final_inc]
+                    self._position_sizes[final_inc] = target_sizes[final_inc]
+
+            if is_decrease.any():
+                frac_close = 1.0 - (
+                    target_sizes.abs() / self._position_sizes.abs().clamp(min=1e-12)
+                )
+                closed_qty = self._position_sizes * frac_close
+                pnl = (execution_prices - self._entry_prices) * closed_qty
+                fee = (closed_qty * execution_prices).abs() * self.transaction_fee
+                # Freed margin is priced at entry, not at the current price.
+                freed_margin = (closed_qty * self._entry_prices).abs() / leverage
+
+                self._balances[is_decrease] += (pnl - fee + freed_margin)[is_decrease]
+                self._balances.clamp_(min=0.0)
+                self._position_sizes[is_decrease] = target_sizes[is_decrease]
+                # Entry price is deliberately untouched: partially closing does not
+                # re-price the remainder, so the liquidation price is unchanged.
+
+        # Close existing positions that need to change. Narrowed from "every env with a
+        # position that is trading" to switches and closes -- a resize is handled above.
+        close_mask = is_switch | is_close_to_flat
         if close_mask.any():
             # PnL works for both long and short via signed position_sizes:
             # Long:  (current - entry) * (+qty) = positive if price went up
@@ -666,10 +747,9 @@ class VectorizedSequentialTradingEnv(EnvBase):
             self._balances.clamp_(min=0.0)
             self._position_sizes[close_mask] = 0.0
             self._entry_prices[close_mask] = 0.0
-            self._hold_counters[close_mask] = 0
 
-        # Open new positions where action != 0 (both long and short)
-        open_mask = need_trade & (action_values != 0)
+        # Open new positions: from flat, or the second half of a direction switch.
+        open_mask = is_switch | (need_trade & ~has_pos & wants_pos)
         if open_mask.any():
             # Recalculate target with updated balance (after closing)
             pvs_new = self._compute_portfolio_values(execution_prices)
@@ -691,9 +771,6 @@ class VectorizedSequentialTradingEnv(EnvBase):
                 self._balances.clamp_(min=0.0)
                 self._position_sizes[final_open] = new_sizes[final_open]
                 self._entry_prices[final_open] = execution_prices[final_open]
-                # The bar a position OPENS on is holding_time=1, not 0 (matches the
-                # scalar SequentialTradingEnv / advance_hold_counter canonical rule).
-                self._hold_counters[final_open] = 1
 
     def close(self):
         """Clean up resources."""

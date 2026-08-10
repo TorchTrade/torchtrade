@@ -25,7 +25,11 @@ from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical
 
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
-from torchtrade.envs.core.state import HistoryTracker, binarize_action_type
+from torchtrade.envs.core.state import (
+    HistoryTracker,
+    advance_hold_counter,
+    binarize_action_type,
+)
 from torchtrade.envs.core.default_rewards import log_return_reward
 from torchtrade.envs.utils.timeframe import TimeFrame, normalize_timeframe_config
 from torchtrade.envs.utils.fractional_sizing import (
@@ -530,6 +534,15 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         else:
             trade_info = self._execute_trade_if_needed(desired_action, cached_price)
 
+        # Age the position once per step through the canonical rule, whatever happened
+        # above (#275). Five hand-rolled sites used to do this -- hold, tolerance-hold,
+        # open, close, liquidation -- and the resize path was simply never given one, so
+        # a position that was resized every bar reported holding_time=1 forever. Deriving
+        # the direction from the post-trade size means every path is covered by
+        # construction, including paths added later.
+        size = self.position.position_size
+        advance_hold_counter(self.position, 0.0 if size == 0 else (1.0 if size > 0 else -1.0))
+
         # Update position flag based on actual position size
         if trade_info["executed"]:
             if self.position.position_size > 0:
@@ -655,7 +668,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         """
         # If action hasn't changed and we already have a position, just hold
         if action_value == self._prev_action_value and self.position.position_size != 0:
-            self.position.hold_counter += 1
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
         self._prev_action_value = action_value
 
@@ -669,8 +681,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         # Check if already at target position (implicit hold)
         if abs(target_position_size - self.position.position_size) < tolerance:
-            if self.position.position_size != 0:
-                self.position.hold_counter += 1
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Execute appropriate position change
@@ -742,9 +752,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self.position.position_size = position_size
         self.position.position_value = abs(notional_value)
         self.position.entry_price = execution_price
-        # The bar a position OPENS on is holding_time=1, not 0 (see advance_hold_counter
-        # docstring in core/state.py for the canonical rule this must match).
-        self.position.hold_counter = 1
 
         # Set position direction
         if not self.allows_short:
@@ -878,7 +885,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self.position.entry_price = 0.0
         self.liquidation_price = 0.0
         self.position.current_position = 0
-        self.position.hold_counter = 0
 
         return {"executed": True, "side": "close", "fee_paid": fee, "liquidated": False}
 
@@ -914,7 +920,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         self.position.entry_price = 0.0
         self.liquidation_price = 0.0
         self.position.current_position = 0
-        self.position.hold_counter = 0
 
         return trade_info
 

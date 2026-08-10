@@ -208,8 +208,8 @@ class TestScalarVecEquivalenceIntermediateLevel:
     reverting that one line to float32 keeps the whole suite green. 0.1 is not exact:
     float32 holds it as 0.10000000149, putting a 1.5e-8 relative error into the notional.
 
-    Only the open from flat is compared. Resizing an existing position is where the two
-    engines genuinely disagree (#302), so this must not depend on that being settled.
+    Only the open from flat is compared here; resizing is covered by
+    TestScalarVecEquivalenceResize below.
     """
 
     def test_open_at_intermediate_level_matches_scalar(self):
@@ -244,6 +244,72 @@ class TestScalarVecEquivalenceIntermediateLevel:
             f"position_size scalar={s_size!r} vec={v_size!r} rel={rel:.3e} -- an "
             "intermediate action level is being rounded before it reaches the notional"
         )
+        scalar.close()
+        vec.close()
+
+
+# ============================================================================
+# PARTIAL RESIZE
+# ============================================================================
+
+
+class TestScalarVecEquivalenceResize:
+    """Changing an open position's size must trade only the delta in both engines (#274).
+
+    The vectorized env used to route every target change through close-then-reopen, so a
+    same-direction resize paid a full round trip of fees and threw away the entry price --
+    which also moves the liquidation price and unrealized_pnl_pct. Measured 3.46% of
+    portfolio over 8 steps at leverage 5.
+
+    This is the axis `action_levels` exists for and no cell ever used: with the default
+    {-1, 0, 1} every action is flat-or-full, so the resize branch is unreachable and the
+    two implementations coincide.
+    """
+
+    LEVELS = [-1.0, -0.5, 0.0, 0.5, 1.0]
+
+    @pytest.mark.parametrize("leverage,actions,label", [
+        (1, [4, 3, 4, 3, 4, 3], "oscillate-full-half"),
+        (5, [4, 3, 4, 3, 4, 3, 4, 3], "oscillate-levered"),
+        (5, [4, 4, 3, 3, 4, 4, 3, 3], "gradual"),
+        (5, [4, 3, 1, 0, 1, 3, 4, 0], "through-flat-and-short"),
+    ], ids=lambda v: v if isinstance(v, str) else None)
+    def test_resize_matches_scalar(self, sample_ohlcv_df, leverage, actions, label):
+        mismatches = _run_sequence(
+            sample_ohlcv_df, actions, leverage=leverage, fee=0.001,
+            action_levels=self.LEVELS, max_traj=60, label=f"resize-{label}",
+        )
+        assert not mismatches, "\n".join(mismatches)
+
+    def test_resize_pays_only_the_delta_fee(self, sample_ohlcv_df):
+        """Halving a position must cost the fee on the half, not on a full round trip.
+
+        The equivalence cells above would also fail if BOTH engines started closing and
+        reopening, so this pins the absolute cost rather than just agreement.
+        """
+        scalar, vec = _make_pair(
+            sample_ohlcv_df, leverage=1, fee=0.01, action_levels=self.LEVELS, max_traj=20
+        )
+        td_s, td_v = scalar.reset(), vec.reset()
+        td_s["action"] = torch.tensor(4)  # full
+        td_v["action"] = torch.tensor([4])
+        td_s, td_v = scalar.step(td_s)["next"], vec.step(td_v)["next"]
+        before = scalar.balance + abs(scalar.position.position_size) * scalar.position.entry_price
+
+        td_s["action"] = torch.tensor(3)  # half
+        td_v["action"] = torch.tensor([3])
+        scalar.step(td_s)
+        vec.step(td_v)
+
+        # A close-and-reopen at 1% would cost ~1.5% of notional here; a delta trade
+        # touches only the half being closed.
+        held = abs(scalar.position.position_size) * scalar.position.entry_price
+        cost = before - (scalar.balance + held)
+        assert cost < 0.011 * before, (
+            f"resize cost {cost:.4f} on a base of {before:.4f} -- that is a round trip, "
+            "not a delta trade"
+        )
+        assert abs(float(vec._position_sizes[0]) - scalar.position.position_size) < 1e-9
         scalar.close()
         vec.close()
 

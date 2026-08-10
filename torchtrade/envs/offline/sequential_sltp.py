@@ -26,7 +26,7 @@ from torchtrade.envs.offline.sequential import (
     SequentialTradingEnvConfig,
 )
 from torchtrade.envs.core.common import TradeMode, validate_trade_mode
-from torchtrade.envs.core.state import binarize_action_type
+from torchtrade.envs.core.state import advance_hold_counter, binarize_action_type
 from torchtrade.envs.utils.sltp_helpers import (
     calculate_long_bracket_prices,
     calculate_short_bracket_prices,
@@ -327,7 +327,6 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         self.position.position_value = 0.0
         self.position.entry_price = 0.0
         self.position.current_position = 0
-        self.position.hold_counter = 0
         self.liquidation_price = 0.0
         self.stop_loss = 0.0
         self.take_profit = 0.0
@@ -395,6 +394,11 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
                 execution_price = self.stop_loss if trigger == "sl" else self.take_profit
                 trade_info = self._execute_sltp_close(execution_price, trigger)
 
+        # Same canonical aging as SequentialTradingEnv (#275): one call per step off the
+        # post-trade size, so no exit path can be added later without ageing correctly.
+        size = self.position.position_size
+        advance_hold_counter(self.position, 0.0 if size == 0 else (1.0 if size > 0 else -1.0))
+
         # Update position flag based on actual position size
         if trade_info["executed"]:
             if self.position.position_size > 0:
@@ -461,8 +465,6 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         """
         # HOLD action
         if side is None:
-            if self.position.position_size != 0:
-                self.position.hold_counter += 1
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # CLOSE action
@@ -481,10 +483,8 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         # Check if already in same direction - if so, hold (ignore duplicate action)
         if side == "long" and self.position.position_size > 0:
-            self.position.hold_counter += 1
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
         if side == "short" and self.position.position_size < 0:
-            self.position.hold_counter += 1
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # If switching direction, close existing position first
@@ -565,9 +565,6 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         self.position.position_size = position_size if side == "long" else -abs(position_size)
         self.position.position_value = abs(notional_value)
         self.position.entry_price = execution_price
-        # The bar a position OPENS on is holding_time=1, not 0 (see advance_hold_counter
-        # docstring in core/state.py for the canonical rule this must match).
-        self.position.hold_counter = 1
 
         # Set position direction
         if self.leverage == 1:
