@@ -272,37 +272,11 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         """Close positions whose bar range hit liquidation or a bracket."""
         leverage = float(self.config.leverage)
 
-        # Liquidation takes priority over the brackets (futures only)
-        if self.config.leverage > 1:
-            liq_price = self._compute_liq_prices()
-            long_liq = (self._position_sizes > 0) & (new_low <= liq_price)
-            short_liq = (self._position_sizes < 0) & (new_high >= liq_price)
-            liq_mask = long_liq | short_liq
-
-            if liq_mask.any():
-                pnl = (liq_price - self._entry_prices) * self._position_sizes
-                margin_return = (
-                    self._position_sizes.abs() * self._entry_prices
-                ) / leverage
-                fee = (self._position_sizes.abs() * liq_price) * self.transaction_fee
-
-                self._balances = torch.where(
-                    liq_mask,
-                    self._balances + pnl - fee + margin_return,
-                    self._balances,
-                )
-                self._balances.clamp_(min=0.0)
-                self._position_sizes = torch.where(
-                    liq_mask, self._zeros, self._position_sizes
-                )
-                self._entry_prices = torch.where(
-                    liq_mask, self._zeros, self._entry_prices
-                )
-                # Note: SL/TP are NOT cleared on liquidation, matching scalar
-                # env behavior. Stale values are harmless: the trigger masks
-                # below gate on can_trigger (via has_position) AND is_long/
-                # is_short, and every one of those is False once the position
-                # is zeroed here.
+        # Liquidation takes priority over the brackets (futures only). Shared with the
+        # base env; it zeroes the position, which is what stops a stale bracket firing on
+        # it below -- every trigger gate reads has_position. SL/TP are deliberately not
+        # cleared, matching the scalar env.
+        self._apply_liquidation(new_high, new_low)
 
         has_position = self._position_sizes != 0
         has_brackets = (self._sl_prices > 0) | (self._tp_prices > 0)

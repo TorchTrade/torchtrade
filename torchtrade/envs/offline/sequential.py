@@ -511,7 +511,14 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         return td
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
-        """Execute one environment step."""
+        """Execute one environment step.
+
+        Order: the agent's action fills at close(N), then bar N+1 is applied to whatever
+        position that leaves. Checking the incoming bar first served a wick that had
+        already breached liquidation to the policy as a healthy position (#281), and
+        gating the trade on that check discarded a legitimate close or switch (#292).
+        SequentialTradingEnvSLTP has kept this order since #294 and #297.
+        """
         self.step_counter += 1
 
         # Guard: if sampler was exhausted in the previous step, terminate
@@ -519,7 +526,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         if self.truncated:
             return self._build_exhaustion_response()
 
-        # Cache base features and get current price
+        # Bar N price -- where the agent's action would execute
         cached_price = self._cached_base_features["close"]
 
         # Get desired action
@@ -528,18 +535,11 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             action_idx = action_idx.item()
         desired_action = self.action_levels[action_idx]
 
-        # Advance to bar N+1 before anything is decided against it. The old order checked
-        # liquidation against the bar that had ALREADY been shown to the policy one call
-        # ago, and left the freshly-fetched bar unchecked until the next call -- so a bar
-        # whose wick breached liquidation was served to the policy as a healthy position,
-        # with reward and termination landing a step late (#281).
+        # Advance to bar N+1 before anything is decided against it (#281).
         obs_dict, base_features = self._get_observation_scaffold()
         self._cached_base_features = base_features
 
-        # The action fills at bar N's close, chronologically before bar N+1 exists, so it
-        # runs unconditionally. The old mutually-exclusive if/else discarded a legitimate
-        # close or switch whenever liquidation fired -- the same defect #292 fixed for the
-        # SLTP env, which this ordering now mirrors (post-#294 and #297).
+        # Unconditional: the fill happens before bar N+1 exists (#292).
         trade_info = self._execute_trade_if_needed(desired_action, cached_price)
 
         # Bar N+1, against whatever the action above left open. Must precede the portfolio
@@ -649,11 +649,14 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         return position_size, notional_value, side
 
-    def _execute_trade_if_needed(self, desired_action: float, base_price: float = None) -> Dict:
-        """Execute trade using fractional position sizing."""
-        if base_price is None:
-            base_price = self.sampler.get_base_features(self.current_timestamp)["close"]
+    def _execute_trade_if_needed(self, desired_action: float, base_price: float) -> Dict:
+        """Execute trade using fractional position sizing.
 
+        base_price is required. It used to default to reading current_timestamp, which
+        was harmless while _step checked liquidation before advancing -- but _step now
+        advances to bar N+1 before trading (#281), so that fallback would price the fill
+        off the wrong bar. Better to fail loudly than to reintroduce it silently.
+        """
         # Apply slippage
         price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage).item()
         execution_price = base_price * price_noise

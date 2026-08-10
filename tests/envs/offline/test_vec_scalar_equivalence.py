@@ -593,12 +593,17 @@ class TestScalarVecEquivalenceTrending:
 class TestScalarVecEquivalenceLiquidation:
     """Verify liquidation behavior matches between scalar and vectorized envs."""
 
-    @pytest.mark.parametrize("open_idx,direction", [(2, "long"), (0, "short")],
-                             ids=["long", "short"])
-    def test_liquidation_equivalence(self, open_idx, direction, trending_down_df, trending_up_df):
-        """Both envs should liquidate at the same step with the same balance."""
-        # Long gets liquidated in downtrend, short in uptrend
-        df = trending_down_df if direction == "long" else trending_up_df
+    @pytest.mark.parametrize("open_idx,direction", [(2, "long"), (0, "short"), (2, "wick")],
+                             ids=["long", "short", "wick"])
+    def test_liquidation_equivalence(self, open_idx, direction, trending_down_df,
+                                     trending_up_df, wick_liquidation_df):
+        """Both envs should liquidate at the same step with the same balance.
+
+        The wick cell is the #281 shape: the trending frames breach on the close, so the
+        observation reads unhealthy either way and the check-order cannot be isolated.
+        """
+        df = {"long": trending_down_df, "short": trending_up_df,
+              "wick": wick_liquidation_df}[direction]
         actions = [open_idx] * 200
         mismatches = _run_sequence(
             df, actions, leverage=20, fee=0.001, max_traj=200,

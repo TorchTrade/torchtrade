@@ -128,6 +128,24 @@ def execute_timeframe():
 
 
 @pytest.fixture
+def wick_liquidation_df():
+    """Flat 100.0 series where one bar's LOW breaches but its close recovers.
+
+    The wick-only shape is what isolates #281: a bar that also closed through the
+    liquidation price reads unhealthy in the observation anyway, so the ordering bug is
+    invisible. trending_up_df/trending_down_df cannot express this -- their closes move.
+    """
+    n, bar, price = 40, 20, 100.0
+    lows = [price] * n
+    lows[bar] = 70.0
+    return pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": [price] * n, "high": [price] * n, "low": lows,
+        "close": [price] * n, "volume": [1000.0] * n,
+    })
+
+
+@pytest.fixture
 def trending_up_df():
     """Create synthetic data with clear upward trend for TP testing."""
     np.random.seed(42)
