@@ -281,33 +281,45 @@ class TestScalarVecEquivalenceResize:
         )
         assert not mismatches, "\n".join(mismatches)
 
-    def test_resize_pays_only_the_delta_fee(self, sample_ohlcv_df):
-        """Halving a position must cost the fee on the half, not on a full round trip.
+    def test_resize_charges_the_delta_fee_exactly(self):
+        """Halving a position must cost the fee on the half, to the cent.
 
-        The equivalence cells above would also fail if BOTH engines started closing and
-        reopening, so this pins the absolute cost rather than just agreement.
+        The equivalence cells above compare the two engines, so they stay green if BOTH
+        regress to close-and-reopen together. This pins the absolute number instead, and
+        pins it tightly: an earlier version of this test asserted only "cost < 1.1% of
+        base", which a doubled fee on the closed half slipped straight through.
+
+        Flat prices so the expectation is exact arithmetic with no PnL term.
         """
+        price, cash, fee = 100.0, 10000.0, 0.01
+        n = 40
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": price, "high": price, "low": price, "close": price, "volume": 1000.0,
+        }, index=range(n))
         scalar, vec = _make_pair(
-            sample_ohlcv_df, leverage=1, fee=0.01, action_levels=self.LEVELS, max_traj=20
+            df, leverage=1, fee=fee, action_levels=self.LEVELS, max_traj=20
         )
         td_s, td_v = scalar.reset(), vec.reset()
         td_s["action"] = torch.tensor(4)  # full
         td_v["action"] = torch.tensor([4])
         td_s, td_v = scalar.step(td_s)["next"], vec.step(td_v)["next"]
-        before = scalar.balance + abs(scalar.position.position_size) * scalar.position.entry_price
+
+        opened_qty = scalar.position.position_size
+        equity_before = scalar.balance + abs(opened_qty) * price
 
         td_s["action"] = torch.tensor(3)  # half
         td_v["action"] = torch.tensor([3])
         scalar.step(td_s)
         vec.step(td_v)
 
-        # A close-and-reopen at 1% would cost ~1.5% of notional here; a delta trade
-        # touches only the half being closed.
-        held = abs(scalar.position.position_size) * scalar.position.entry_price
-        cost = before - (scalar.balance + held)
-        assert cost < 0.011 * before, (
-            f"resize cost {cost:.4f} on a base of {before:.4f} -- that is a round trip, "
-            "not a delta trade"
+        # At a flat price the only cost of halving is the fee on the half being closed.
+        expected_fee = abs(opened_qty - scalar.position.position_size) * price * fee
+        equity_after = scalar.balance + abs(scalar.position.position_size) * price
+        charged = equity_before - equity_after
+        assert abs(charged - expected_fee) < 1e-6, (
+            f"halving charged {charged:.6f}, expected {expected_fee:.6f} -- that is not "
+            "a delta trade"
         )
         assert abs(float(vec._position_sizes[0]) - scalar.position.position_size) < 1e-9
         scalar.close()

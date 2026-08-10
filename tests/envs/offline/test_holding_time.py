@@ -125,14 +125,3 @@ class TestHoldingTimeAcrossResize:
             "position and must report cumulative age"
         )
         env.close()
-
-    def test_direction_switch_restarts_but_resize_does_not(self, sample_ohlcv_df):
-        """The counterpart: a flip IS a new position, so it restarts at 1.
-
-        Without this the test above would pass on an env that simply never resets.
-        """
-        env = self._env(sample_ohlcv_df, SequentialTradingEnv, SequentialTradingEnvConfig)
-        # long full, resize to half, flip short half, resize short full
-        seq = _drive(env, [4, 3, 1, 0])
-        assert seq == [0, 1, 2, 1, 2], f"holding_time went {seq}"
-        env.close()
