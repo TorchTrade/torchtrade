@@ -590,6 +590,74 @@ class TestScalarVecEquivalenceTrending:
 # ============================================================================
 
 
+class TestActionOnTheBreachingBarIsNotDiscarded:
+    """An action submitted on a liquidating bar must still execute (#292, via #281).
+
+    The agent's order fills at close(N), chronologically before bar N+1's wick exists, so
+    a close or a switch on that bar is a real trade that happened -- it cannot be undone
+    by what the next bar does. Both engines used to gate on liquidation and throw it away:
+    the scalar skipped _execute_trade_if_needed entirely, the vectorized rewrote the
+    action to 0.0.
+
+    That difference matters for what this pins. 0.0 IS the close action, so the vectorized
+    gate was a no-op for a close and only corrupted a switch -- a close-only test survives
+    it. The switch cell is the one that fails on both engines.
+
+    Money: holding into the wick ends at 200. Closing on that same bar should end at
+    10000, and the gated code gives 200 -- a 98% difference that nothing tested, because
+    the liquidation equivalence cells submit the same action every step and so never act
+    on a liquidating bar.
+    """
+
+    @pytest.mark.parametrize("is_vec", [False, True], ids=["scalar", "vectorized"])
+    @pytest.mark.parametrize("exit_action,expected_direction", [(1, 0.0), (0, -1.0)],
+                             ids=["close", "switch-to-short"])
+    def test_action_survives_the_liquidation_on_the_same_bar(
+        self, wick_liquidation_df, is_vec, exit_action, expected_direction
+    ):
+        common = dict(
+            action_levels=[-1.0, 0.0, 1.0], leverage=5, initial_cash=10000,
+            time_frames=[TF_1MIN], execute_on=TF_1MIN, window_sizes=[10],
+            transaction_fee=0.0, slippage=0.0, seed=42, max_traj_length=25,
+            random_start=False,
+        )
+        if is_vec:
+            env = VectorizedSequentialTradingEnv(
+                wick_liquidation_df,
+                VectorizedSequentialTradingEnvConfig(num_envs=1, **common),
+                simple_feature_fn,
+            )
+        else:
+            env = SequentialTradingEnv(
+                wick_liquidation_df, SequentialTradingEnvConfig(**common), simple_feature_fn
+            )
+
+        td = env.reset()
+        wrap = (lambda a: torch.tensor([a])) if is_vec else torch.tensor
+        for _ in range(9):  # hold the long up to, but not onto, the wick bar
+            td["action"] = wrap(2)
+            td = env.step(td)["next"]
+        td["action"] = wrap(exit_action)
+        td = env.step(td)["next"]
+
+        # Portfolio value, not balance: the switch leaves a position open, so its balance
+        # is 0.0 with the margin deducted, and asserting on balance fails correct code.
+        pv = (float(env._portfolio_values[0]) if is_vec
+              else env._get_portfolio_value(env._cached_base_features["close"]))
+        state = td["account_state"]
+        direction = float(state[0][1] if is_vec else state[1])
+
+        assert pv == pytest.approx(10000.0), (
+            f"portfolio {pv:.2f}, expected 10000 -- the order filled at close(N)=100 "
+            "before the wick, so it cannot be discarded by the wick"
+        )
+        assert direction == expected_direction, (
+            f"direction {direction}, expected {expected_direction} -- the action was "
+            "swallowed by the liquidation check"
+        )
+        env.close()
+
+
 class TestScalarVecEquivalenceLiquidation:
     """Verify liquidation behavior matches between scalar and vectorized envs."""
 
