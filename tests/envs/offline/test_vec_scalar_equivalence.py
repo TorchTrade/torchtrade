@@ -599,22 +599,22 @@ class TestActionOnTheBreachingBarIsNotDiscarded:
     the scalar skipped _execute_trade_if_needed entirely, the vectorized rewrote the
     action to 0.0.
 
-    That difference decides what each cell can catch. 0.0 IS the close action, so zeroing
-    it changes nothing: restoring the vectorized gate fails only the switch cell, while
-    restoring the scalar gate fails both of its cells. The vectorized close cell is grid
-    completeness, not a killer.
+    What each cell catches depends on how the gate is reconstructed. 0.0 IS the close
+    action, so a pure gate -- predict the mask, zero the action, leave liquidation after
+    the trade -- cannot change a close, and only the switch cell fails. Reconstructions
+    that also move liquidation ahead of the trade, which is the actual pre-PR shape, fail
+    the close cell too. All six cells kill at least one reconstruction.
 
     Money: holding into the wick ends at 200, closing on that same bar at 10000 -- a 98%
     difference that nothing tested, because the liquidation equivalence cells submit the
     same action every step and so never act on a liquidating bar.
 
-    The hold cell is a control, and it is load-bearing: the step count below is coupled to
-    wick_liquidation_df's breach bar, and that fixture is now shared. Moving the breach
-    by five bars makes every other cell pass while asserting nothing, because the exit
-    never lands on the wick at all. The control fails loudly when that happens.
-
-    Note this suite does NOT fail against pre-PR code -- reverting the ordering moves the
-    liquidation off this step entirely. It pins the gate, not the ordering.
+    The hold cell is a control, and it is load-bearing twice over. The step count below is
+    coupled to wick_liquidation_df's breach bar, so moving that breach makes every other
+    cell pass while asserting nothing -- the exit never lands on the wick at all -- and the
+    control is what fails loudly. It is also the only absolute pin on the vectorized
+    engine's exit timing: the equivalence harness goes green when BOTH engines regress
+    together, and this control does not.
     """
 
     @pytest.mark.parametrize("is_vec", [False, True], ids=["scalar", "vectorized"])
@@ -686,7 +686,7 @@ class TestScalarVecEquivalenceLiquidation:
         df = trending_down_df if direction == "long" else trending_up_df
         actions = [open_idx] * 200
         mismatches = _run_sequence(
-            df, actions, leverage=20, fee=0.001, max_traj=200,
+            df, actions, leverage=20, fee=0.01, max_traj=200,
             label=f"liquidation-{direction}"
         )
         assert not mismatches, "\n".join(mismatches)
