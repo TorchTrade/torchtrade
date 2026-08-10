@@ -9,7 +9,8 @@ Key differences from base vectorized env:
     - trade_mode-aware position sizing (fractional, notional, quantity)
     - SL/TP bracket orders with intrabar trigger detection
     - SL checked before TP (pessimistic bias)
-    - Triggered positions close at bracket price, not market price
+    - Triggered positions close at bracket price, except a stop the bar gapped past,
+      which fills at the open
 """
 
 from dataclasses import dataclass
@@ -311,12 +312,8 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
             sltp_trigger = sl_trigger | tp_trigger
             if sltp_trigger.any():
-                # A stop is a market order once touched, so a bar that GAPPED past it
-                # fills at the open, not at the stop (#280). A take-profit is a limit
-                # order and is deliberately NOT gap-adjusted -- chasing a favourable gap
-                # would make the backtest optimistic, against this module's stated bias.
-                # min/max self-selects: a bar that merely wicks through has its open
-                # beyond the bracket and returns the bracket unchanged.
+                # Tensorised stop_fill_price: a gapped stop fills at the open, and a
+                # take-profit deliberately does not chase a gap (#280).
                 stop_fill = torch.where(
                     is_long,
                     torch.minimum(new_open, self._sl_prices),

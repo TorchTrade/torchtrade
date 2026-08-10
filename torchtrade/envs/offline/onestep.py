@@ -22,12 +22,12 @@ import pandas as pd
 import torch
 from tensordict import TensorDictBase
 
-from torchtrade.envs.utils.sltp_helpers import gap_aware_fill
 from torchtrade.envs.offline.sequential_sltp import (
     SequentialTradingEnvSLTP,
     SequentialTradingEnvSLTPConfig,
 )
 from torchtrade.envs.core.state import binarize_action_type
+from torchtrade.envs.utils.sltp_helpers import stop_fill_price
 
 
 @dataclass
@@ -372,32 +372,16 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
 
             close_price = ohlcv_base_values["close"]
 
-            # Save trigger prices before checks (execution resets them to 0)
-            saved_sl = self.stop_loss
-            saved_tp = self.take_profit
-            saved_liq = self.liquidation_price
-            # Captured before the checks: they zero the position, and the gap-aware fill
-            # below needs to know which side it was.
-            was_long = self.position.position_size > 0
-
-            # Check liquidation first (futures only, highest priority)
+            # Liquidation first (futures only, highest priority). Both exits leave the
+            # position flat, so compute_return's price argument is ignored -- portfolio
+            # value is then just the balance, which already holds the realised fill.
             if self.leverage > 1:
                 if trigger_result := self._check_liquidation_in_rollout(ohlcv_base_values):
-                    self.rollout_returns.append(self.compute_return(saved_liq))
+                    self.rollout_returns.append(self.compute_return(close_price))
                     return trigger_result, obs_dict
 
-            # Check SL/TP triggers
             if trigger_result := self._check_sltp_triggers(ohlcv_base_values):
-                # Must match what _execute_sltp_close actually filled at, or the reward
-                # and the realised PnL disagree (#280).
-                is_tp = trigger_result.get("side") == "sltp_tp"
-                trigger_price = gap_aware_fill(
-                    saved_tp if is_tp else saved_sl,
-                    ohlcv_base_values["open"],
-                    is_long=was_long,
-                    is_stop=not is_tp,
-                )
-                self.rollout_returns.append(self.compute_return(trigger_price))
+                self.rollout_returns.append(self.compute_return(close_price))
                 return trigger_result, obs_dict
 
             # No trigger — accumulate return at close price
@@ -468,8 +452,7 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
                     low_price <= self.stop_loss or
                     close_price <= self.stop_loss):
                     return self._execute_sltp_close(
-                        gap_aware_fill(self.stop_loss, open_price, is_long=True, is_stop=True),
-                        "sl",
+                        stop_fill_price(self.stop_loss, open_price, is_long=True), "sl"
                     )
 
             # TP triggers when price rises above TP level
@@ -486,8 +469,7 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
                     high_price >= self.stop_loss or
                     close_price >= self.stop_loss):
                     return self._execute_sltp_close(
-                        gap_aware_fill(self.stop_loss, open_price, is_long=False, is_stop=True),
-                        "sl",
+                        stop_fill_price(self.stop_loss, open_price, is_long=False), "sl"
                     )
 
             # TP triggers when price drops below TP level

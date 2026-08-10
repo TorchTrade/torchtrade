@@ -92,23 +92,20 @@ def calculate_bracket_prices(side: str, entry_price: float, sl_pct: float, tp_pc
         raise ValueError(f"Invalid side: {side}. Must be 'long' or 'short'.")
 
 
-def gap_aware_fill(bracket_price: float, open_price: float, is_long: bool, is_stop: bool) -> float:
-    """Price a triggered bracket, accounting for a bar that gapped past it (#280).
+def stop_fill_price(stop_price: float, open_price: float, is_long: bool) -> float:
+    """Price a triggered stop, accounting for a bar that gapped past it (#280).
 
     A stop is a market order once touched, so a bar that opens beyond it fills at the
     open, not at the stop: long entry 100 with a stop at 97.5, on a bar opening at 85,
-    fills near 85. Booking 97.5 understates the loss by 12.8% of notional, on exactly the
-    moves that hurt most.
+    fills near 85.
 
-    A take-profit is NOT gap-adjusted. It is a limit order, which fills at its limit even
-    when price runs past, and chasing a favourable gap up to the open would make the
-    backtest more optimistic -- the opposite of the pessimism this module is built on
-    ("we assume the worst case ... so live trading can only outperform the backtest").
-    A maintainer wanting take-profit-market semantics should change this deliberately.
+    There is deliberately no take-profit counterpart. A take-profit is a limit order,
+    which fills at its limit even when price runs past, and chasing a favourable gap up
+    to the open would make the backtest more optimistic -- the opposite of the pessimism
+    this module is built on ("we assume the worst case ... so live trading can only
+    outperform the backtest").
 
     The min/max self-selects, so there is no separate is-this-a-gap branch: a bar that
-    merely wicks through has open beyond the bracket and returns the bracket unchanged.
+    merely wicks through has open beyond the stop and returns the stop unchanged.
     """
-    if not is_stop:
-        return bracket_price
-    return min(open_price, bracket_price) if is_long else max(open_price, bracket_price)
+    return min(open_price, stop_price) if is_long else max(open_price, stop_price)

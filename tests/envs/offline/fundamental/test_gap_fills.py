@@ -1,4 +1,4 @@
-"""A bracket that a bar gapped past must fill at the open, not at the bracket (#280).
+"""A stop that a bar gapped past must fill at the open, not at the stop (#280).
 
 All four engines that trigger brackets share the rule, so all four are pinned here:
 scalar SLTP, vectorized SLTP, OneStep, and the replay executor. The bug shipped in every
@@ -11,35 +11,32 @@ import pytest
 import torch
 
 from torchtrade.envs.offline import (
+    OneStepTradingEnv,
+    OneStepTradingEnvConfig,
     SequentialTradingEnvSLTP,
     SequentialTradingEnvSLTPConfig,
     VectorizedSequentialTradingEnvSLTP,
     VectorizedSequentialTradingEnvSLTPConfig,
 )
 from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
-from torchtrade.envs.utils.sltp_helpers import gap_aware_fill
+from torchtrade.envs.utils.sltp_helpers import stop_fill_price
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 TF_1MIN = TimeFrame(1, TimeFrameUnit.Minute)
 
 
-@pytest.mark.parametrize("bracket,open_price,is_long,is_stop,expected", [
+@pytest.mark.parametrize("stop,open_price,is_long,expected", [
     # A stop is a market order once touched: a gap past it fills at the open.
-    (97.5, 85.0, True, True, 85.0),
-    (102.5, 115.0, False, True, 115.0),
-    # A bar that merely wicks through opens beyond the bracket, so min/max returns the
-    # bracket unchanged -- which is why the rule needs no separate is-this-a-gap branch.
-    (97.5, 100.0, True, True, 97.5),
-    (102.5, 100.0, False, True, 102.5),
-    # A take-profit is a limit order and is deliberately NOT gap-adjusted. Chasing a
-    # favourable gap would make the backtest optimistic, against this module's stated
-    # pessimism bias ("live trading can only outperform the backtest").
-    (110.0, 130.0, True, False, 110.0),
-    (90.0, 70.0, False, False, 90.0),
-], ids=["long-stop-gap", "short-stop-gap", "long-stop-wick", "short-stop-wick",
-        "long-tp-favourable-gap", "short-tp-favourable-gap"])
-def test_gap_aware_fill_rule(bracket, open_price, is_long, is_stop, expected):
-    assert gap_aware_fill(bracket, open_price, is_long, is_stop) == expected
+    (97.5, 85.0, True, 85.0),
+    (102.5, 115.0, False, 115.0),
+    # A bar that merely wicks through opens beyond the stop, so min/max returns the stop
+    # unchanged -- which is why the rule needs no separate is-this-a-gap branch. These
+    # two cells are what fails if someone "simplifies" the rule to `return open_price`.
+    (97.5, 100.0, True, 97.5),
+    (102.5, 100.0, False, 102.5),
+], ids=["long-gap", "short-gap", "long-wick", "short-wick"])
+def test_stop_fill_price_rule(stop, open_price, is_long, expected):
+    assert stop_fill_price(stop, open_price, is_long) == expected
 
 
 def _gap_df(gap_to, n=40, bar=20, price=100.0):
@@ -57,7 +54,9 @@ def _gap_df(gap_to, n=40, bar=20, price=100.0):
     # Booking the stop instead would leave 9500, overstating by 2500.
     (85.0, 1, 7000.0),
     (115.0, 2, 7000.0),
-    # Take-profit is NOT chased: 2.5% at 2x = 5%, whatever the gap.
+    # Take-profit is a limit order, so it is NOT chased: 2.5% at 2x = 5%, whatever the
+    # gap. This is the deliberate asymmetry -- the cells that fail if someone adds a
+    # take-profit counterpart to stop_fill_price for symmetry's sake.
     (130.0, 1, 10500.0),
     (70.0, 2, 10500.0),
 ], ids=["long-stop-gap", "short-stop-gap", "long-tp-gap", "short-tp-gap"])
@@ -88,6 +87,38 @@ def test_sltp_engines_fill_a_gapped_bracket_alike(gap_to, open_idx, expected_bal
     assert balance == pytest.approx(expected_balance), (
         f"balance {balance:.2f}, expected {expected_balance} -- a stop that the bar "
         "gapped past must fill at the open, and a take-profit must not chase a gap"
+    )
+    env.close()
+
+
+@pytest.mark.parametrize("gap_to,action", [
+    (85.0, 1),    # long, entry 100, stop 97.5, bar opens at 85
+    (115.0, 2),   # short, entry 100, stop 102.5, bar opens at 115
+], ids=["long-stop-gap", "short-stop-gap"])
+def test_onestep_fills_a_gapped_stop_at_the_open(gap_to, action):
+    """OneStep re-forks the trigger check, so the scalar cells above do not cover it.
+
+    Asserting the balance is enough: the reward is the telescoping sum of per-step log
+    returns, hence a pure function of the balance path. Booking the stop would give 9500.
+    """
+    config = OneStepTradingEnvConfig(
+        leverage=2, stoploss_levels=[-0.025], takeprofit_levels=[0.025],
+        initial_cash=10000, time_frames=[TF_1MIN], window_sizes=[10], execute_on=TF_1MIN,
+        transaction_fee=0.0, slippage=0.0, seed=42, max_traj_length=45,
+        include_hold_action=True,
+    )
+    env = OneStepTradingEnv(_gap_df(gap_to, n=60, bar=45), config)
+
+    # OneStep forces random_start=True; seek() is the one-shot deterministic override.
+    env.sampler.seek(0)
+    td = env.reset()
+    td["action"] = torch.tensor(action)
+    env.step(td)
+
+    assert env.position.position_size == 0, "the stop should have closed the position"
+    assert env.balance == pytest.approx(7000.0), (
+        f"balance {env.balance:.2f} -- a 15% adverse gap at 2x is 30% of equity; "
+        f"filling at the stop instead of the open ({gap_to}) would leave 9500"
     )
     env.close()
 

@@ -31,9 +31,9 @@ from torchtrade.envs.core.state import (
     binarize_action_type,
 )
 from torchtrade.envs.utils.sltp_helpers import (
-    gap_aware_fill,
     calculate_long_bracket_prices,
     calculate_short_bracket_prices,
+    stop_fill_price,
 )
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.fractional_sizing import AFFORDABILITY_REL_TOL
@@ -395,12 +395,12 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         else:
             trigger = self._check_sltp_trigger(base_features)
             if trigger is not None:
-                execution_price = gap_aware_fill(
-                    self.stop_loss if trigger == "sl" else self.take_profit,
-                    base_features["open"],
-                    is_long=self.position.position_size > 0,
-                    is_stop=trigger == "sl",
-                )
+                if trigger == "sl":
+                    execution_price = stop_fill_price(
+                        self.stop_loss, base_features["open"], self.position.position_size > 0
+                    )
+                else:
+                    execution_price = self.take_profit
                 trade_info = self._execute_sltp_close(execution_price, trigger)
 
         # Same canonical aging as SequentialTradingEnv (#275): one call per step off the
