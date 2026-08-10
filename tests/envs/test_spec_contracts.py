@@ -283,20 +283,16 @@ def test_no_env_declares_its_own_done_spec(env_cls):
     AST, not source text: assigning the NARROWER done_spec reproduces #272 exactly, since
     it drops truncated, while never containing the string "full_done_spec".
 
-    The vectorized envs and polymarket subclass EnvBase directly, so they never reach
-    TorchTradeBaseEnv.__init__ and their own declarations are overrides, not duplicates --
-    the vectorized one is batched.
-
-    What this does NOT catch, deliberately: it matches attribute writes, so mutating the
-    inherited spec in place -- `del self.full_done_spec["truncated"]`, `.set(...)`, an
-    `output_spec[...]` write, or a helper defined outside the MRO -- reads as a Load and
-    passes. Verified. Those forms are all caught behaviourally by the ten
+    What this does NOT catch: it matches attribute writes, so reaching the spec any other
+    way -- `del self.full_done_spec["truncated"]`, `.set(...)`, an `output_spec[...]`
+    write, `setattr(self, "full_done_spec", ...)`, or a helper outside the MRO -- passes.
+    Every one of those except `setattr` is caught behaviourally by the ten
     check_env_specs tests and by test_a_collector_batch_carries_truncated, which name the
-    missing key; closing them here would mean tracking aliases through the AST, and an
-    earlier attempt at name indirection in this file produced both false positives and
-    false negatives. The unique job left to this test is the duplicate that is still
-    IDENTICAL, and therefore invisible behaviourally until the day it drifts -- the
-    failure mode that cost this repo three diverging SLTP action maps.
+    missing key.
+
+    The unique job left to this test is the duplicate that is still IDENTICAL: no
+    behavioural test can see it until the day it drifts, which is the failure mode that
+    left this repo with three diverging SLTP action maps.
     """
     # The MRO, not just the leaf: the duplicate this PR removed lived in a BASE class,
     # which inspect.getsource(leaf) never shows. Stop at the one legitimate owner, which
