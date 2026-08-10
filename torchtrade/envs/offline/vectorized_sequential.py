@@ -479,13 +479,13 @@ class VectorizedSequentialTradingEnv(EnvBase):
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one step for all environments simultaneously.
 
-        Matches scalar SequentialTradingEnv order:
-        1. Check liquidation at current bar (before trade)
-        2. Execute trades (non-liquidated envs only)
-        3. Advance step index
-        4. Compute rewards from new prices
+        Order: the agent's action fills at close(N), then bar N+1 is applied to whatever
+        position that leaves. Checking the incoming bar first served a wick that had
+        already breached liquidation to the policy as a healthy position (#281), and
+        zeroing the action for liquidated envs discarded a legitimate close or switch
+        (the vector form of #292). SequentialTradingEnv keeps the same order.
         """
-        # 1. Get actions and convert to action values
+        # Actions -> action values
         action_indices = tensordict["action"]
         if action_indices.dim() > 1:
             action_indices = action_indices.squeeze(-1)
@@ -495,42 +495,10 @@ class VectorizedSequentialTradingEnv(EnvBase):
             )
         action_values = self._action_levels_tensor[action_indices.long()]
 
-        # 2. Check forced liquidation BEFORE trade (futures only)
-        # Uses current bar's intrabar extremes, matching scalar env's _check_liquidation
-        liq_mask = None
-        if self.config.leverage > 1:
-            liq_price = self._compute_liq_prices()
-            low_prices = self._base_tensor[self._step_indices, 2]   # intrabar low
-            high_prices = self._base_tensor[self._step_indices, 1]  # intrabar high
-            long_liq = (self._position_sizes > 0) & (low_prices <= liq_price)
-            short_liq = (self._position_sizes < 0) & (high_prices >= liq_price)
-            liq_mask = long_liq | short_liq
-            if liq_mask.any():
-                # PnL at liquidation price (works for both directions via signed sizes)
-                pnl = (liq_price - self._entry_prices) * self._position_sizes
-                margin_return = (
-                    self._position_sizes.abs() * self._entry_prices
-                ) / float(self.config.leverage)
-                fee = (
-                    self._position_sizes.abs() * liq_price
-                ) * self.transaction_fee
-                self._balances = torch.where(
-                    liq_mask,
-                    self._balances + pnl - fee + margin_return,
-                    self._balances,
-                )
-                self._balances.clamp_(min=0.0)
-                self._position_sizes = torch.where(
-                    liq_mask, self._zeros, self._position_sizes
-                )
-                self._entry_prices = torch.where(
-                    liq_mask, self._zeros, self._entry_prices
-                )
-
-        # 3. Get current prices (trade execution prices)
+        # Bar N close: where the agent's action fills
         trade_prices = self._base_tensor[self._step_indices, 3].clone()
 
-        # 4. Apply slippage
+        # Slippage on the fill price
         if self.slippage > 0:
             # float32 draw, for the generator-stream reason in _sample_initial_cash. No
             # cast: torch promotes the float64 price times this, bit-identically.
@@ -539,13 +507,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
             )
             trade_prices = trade_prices * noise
 
-        # 5. Execute trades (skip liquidated envs — scalar env skips trade after liquidation)
-        if liq_mask is not None and liq_mask.any():
-            action_values = torch.where(liq_mask, self._zeros, action_values)
-        self._execute_trades(action_values, trade_prices)
-        self._advance_hold_counters()
-
-        # 6. Advance step indices and counters
+        # Advance to bar N+1 before anything is decided against it (#281)
         self._step_indices += 1
         self._step_counters += 1
 
@@ -553,13 +515,23 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # their observation doesn't matter since they'll be auto-reset)
         self._step_indices.clamp_(max=self._total_exec_times - 1)
 
-        # 7. Get new prices for observation and reward computation
+        # Bar N+1
+        new_high = self._base_tensor[self._step_indices, 1]
+        new_low = self._base_tensor[self._step_indices, 2]
         new_prices = self._base_tensor[self._step_indices, 3]
+
+        # Unconditional: the fill happens before bar N+1 exists (#292)
+        self._execute_trades(action_values, trade_prices)
+
+        # Bar N+1's wick, against whatever the trade left open
+        self._apply_liquidation(new_high, new_low)
+        self._advance_hold_counters()
+
 
         # Compute portfolio values (mode-aware)
         new_pvs = self._compute_portfolio_values(new_prices)
 
-        # 7. Compute rewards: log(new_pv / old_pv)
+        # Rewards: log(new_pv / old_pv)
         old_pvs = self._portfolio_values
         # Guard against non-positive values
         safe_old = old_pvs.clamp(min=1e-10)
@@ -568,10 +540,10 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # Bankruptcy: large negative reward
         rewards = torch.where(new_pvs <= 0, torch.full_like(rewards, -10.0), rewards)
 
-        # 8. Update stored portfolio values
+        # Update stored portfolio values
         self._portfolio_values = new_pvs
 
-        # 9. Compute termination signals
+        # Termination signals
         terminated = new_pvs < (self._initial_pvs * self.bankrupt_threshold)
         truncated = (
             ((self._step_indices + 1) >= self._end_indices)
@@ -579,7 +551,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
         )
         done = terminated | truncated
 
-        # 10. Build next observation (reuse already-computed PVs)
+        # Build next observation (reuse already-computed PVs)
         obs_td = self._build_observation(new_prices, portfolio_values=new_pvs)
         # reward_spec is float32.
         obs_td.set("reward", rewards.unsqueeze(-1).float())
@@ -588,6 +560,42 @@ class VectorizedSequentialTradingEnv(EnvBase):
         obs_td.set("done", done.unsqueeze(-1))
 
         return obs_td
+
+    def _apply_liquidation(
+        self, high_prices: torch.Tensor, low_prices: torch.Tensor
+    ) -> None:
+        """Close every position whose bar range breached its liquidation price.
+
+        Shared with VectorizedSequentialTradingEnvSLTP, which runs it first inside
+        _apply_exit_checks so a bracket cannot fire on a position this already closed
+        (#298). Both engines apply it to the same slot -- bar N+1, post-trade -- so the
+        money math is one copy rather than two that have not drifted yet.
+
+        Positions are zeroed rather than left for a downstream mask to skip. The SLTP
+        subclass depends on that -- see the note at its call site for which gates it
+        leaves False -- so this must not become a mask-and-defer.
+        """
+        if self.config.leverage <= 1:
+            return
+        liq_price = self._compute_liq_prices()
+        long_liq = (self._position_sizes > 0) & (low_prices <= liq_price)
+        short_liq = (self._position_sizes < 0) & (high_prices >= liq_price)
+        liq_mask = long_liq | short_liq
+        if not liq_mask.any():
+            return
+
+        # PnL at the liquidation price (both directions, via signed sizes)
+        pnl = (liq_price - self._entry_prices) * self._position_sizes
+        margin_return = (
+            self._position_sizes.abs() * self._entry_prices
+        ) / float(self.config.leverage)
+        fee = (self._position_sizes.abs() * liq_price) * self.transaction_fee
+        self._balances = torch.where(
+            liq_mask, self._balances + pnl - fee + margin_return, self._balances
+        )
+        self._balances.clamp_(min=0.0)
+        self._position_sizes = torch.where(liq_mask, self._zeros, self._position_sizes)
+        self._entry_prices = torch.where(liq_mask, self._zeros, self._entry_prices)
 
     def _advance_hold_counters(self):
         """Age every position by one step -- the tensor form of advance_hold_counter.

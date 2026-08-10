@@ -494,6 +494,13 @@ class TestSequentialEnvTermination:
 
         Long: bar has low=85 but close=100. Liq ~90.4 → low triggers liquidation.
         Short: bar has high=115 but close=100. Liq ~109.6 → high triggers liquidation.
+
+        The wick-only shape is what makes this load-bearing. A bar that also closed
+        through the liquidation price would read unhealthy in the observation anyway; only
+        a wick that recovers can be served to the policy as a healthy position. Because
+        the assertions run after a single hold, this also pins the exit to the breaching
+        bar rather than the one after it (#281) -- under the old ordering the position is
+        still open here.
         """
         import numpy as np
 
@@ -536,9 +543,12 @@ class TestSequentialEnvTermination:
         liq_price = env.liquidation_price
         assert liq_lo < liq_price < liq_hi, f"Liq price should be ~{(liq_lo+liq_hi)/2}, got {liq_price}"
 
-        # Step 2: Hold — sampler advances to bar 12 (wick but close=100)
+        # Step 2: hold by RE-SUBMITTING the opening action. Index 1 is action_levels[1]
+        # == 0.0 -- a close, not a hold -- so this test used to flatten the position on a
+        # clean bar and then assert position_size == 0, which passed without a liquidation
+        # ever happening (history read ['hold', 'long', 'flat'], balance back at 10000).
         hold_td = td["next"].clone()
-        hold_td["action"] = torch.tensor(1)  # Hold
+        hold_td["action"] = torch.tensor(action_idx)
         td = env.step(hold_td)
 
         # Position MUST be liquidated by the intrabar wick
@@ -546,6 +556,9 @@ class TestSequentialEnvTermination:
             f"{direction} position should be liquidated by intrabar wick "
             f"({bar12_field}={bar12_value} vs liq={liq_price}), "
             f"but position_size={env.position.position_size}"
+        )
+        assert "liquidation" in env.history.action_types, (
+            f"position ended flat without a liquidation: {env.history.action_types}"
         )
 
         env.close()

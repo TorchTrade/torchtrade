@@ -926,6 +926,3 @@ class TestVecEnvInsufficientBalance:
             if td["next"]["done"].all():
                 break
         env.close()
-
-
-

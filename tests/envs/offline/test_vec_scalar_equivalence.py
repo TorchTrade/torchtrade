@@ -590,18 +590,103 @@ class TestScalarVecEquivalenceTrending:
 # ============================================================================
 
 
+class TestActionOnTheBreachingBarIsNotDiscarded:
+    """An action submitted on a liquidating bar must still execute (#292, via #281).
+
+    The agent's order fills at close(N), chronologically before bar N+1's wick exists, so
+    a close or a switch on that bar is a real trade that happened -- it cannot be undone
+    by what the next bar does. Both engines used to gate on liquidation and throw it away:
+    the scalar skipped _execute_trade_if_needed entirely, the vectorized rewrote the
+    action to 0.0.
+
+    What each cell catches depends on how the gate is reconstructed. 0.0 IS the close
+    action, so a pure gate -- predict the mask, zero the action, leave liquidation after
+    the trade -- cannot change a close, and only the switch cell fails. Reconstructions
+    that also move liquidation ahead of the trade, which is the actual pre-PR shape, fail
+    the close cell too. All six cells kill at least one reconstruction.
+
+    Money: holding into the wick ends at 200, closing on that same bar at 10000 -- a 98%
+    difference that nothing tested, because the liquidation equivalence cells submit the
+    same action every step and so never act on a liquidating bar.
+
+    The hold cell is a control, and it is load-bearing twice over. The step count below is
+    coupled to wick_liquidation_df's breach bar, so moving that breach makes every other
+    cell pass while asserting nothing -- the exit never lands on the wick at all -- and the
+    control is what fails loudly. It is also the only absolute pin on the vectorized
+    engine's exit timing: the equivalence harness goes green when BOTH engines regress
+    together, and this control does not.
+    """
+
+    @pytest.mark.parametrize("is_vec", [False, True], ids=["scalar", "vectorized"])
+    @pytest.mark.parametrize("exit_action,expected_direction,expected_pv", [
+        (2, 0.0, 200.0),     # control: hold into the wick and it liquidates
+        (1, 0.0, 10000.0),   # close
+        (0, -1.0, 10000.0),  # switch to short
+    ], ids=["hold-liquidates", "close", "switch-to-short"])
+    def test_action_survives_the_liquidation_on_the_same_bar(
+        self, wick_liquidation_df, is_vec, exit_action, expected_direction, expected_pv
+    ):
+        common = dict(
+            action_levels=[-1.0, 0.0, 1.0], leverage=5, initial_cash=10000,
+            time_frames=[TF_1MIN], execute_on=TF_1MIN, window_sizes=[10],
+            transaction_fee=0.0, slippage=0.0, seed=42, max_traj_length=25,
+            random_start=False,
+        )
+        if is_vec:
+            env = VectorizedSequentialTradingEnv(
+                wick_liquidation_df,
+                VectorizedSequentialTradingEnvConfig(num_envs=1, **common),
+                simple_feature_fn,
+            )
+        else:
+            env = SequentialTradingEnv(
+                wick_liquidation_df, SequentialTradingEnvConfig(**common), simple_feature_fn
+            )
+
+        td = env.reset()
+        wrap = (lambda a: torch.tensor([a])) if is_vec else torch.tensor
+        for _ in range(9):  # hold the long up to, but not onto, the wick bar
+            td["action"] = wrap(2)
+            td = env.step(td)["next"]
+        td["action"] = wrap(exit_action)
+        td = env.step(td)["next"]
+
+        # Portfolio value, not balance: the switch leaves a position open, so its balance
+        # is 0.0 with the margin deducted, and asserting on balance fails correct code.
+        pv = float(env._portfolio_values[0]) if is_vec else env._get_portfolio_value()
+        state = td["account_state"]
+        direction = float(state[0][1] if is_vec else state[1])
+
+        assert pv == pytest.approx(expected_pv), (
+            f"portfolio {pv:.2f}, expected {expected_pv} -- the order filled at "
+            "close(N)=100 before the wick, so the wick cannot discard it"
+        )
+        assert direction == expected_direction, (
+            f"direction {direction}, expected {expected_direction} -- the action was "
+            "swallowed by the liquidation check"
+        )
+        env.close()
+
+
 class TestScalarVecEquivalenceLiquidation:
     """Verify liquidation behavior matches between scalar and vectorized envs."""
 
     @pytest.mark.parametrize("open_idx,direction", [(2, "long"), (0, "short")],
                              ids=["long", "short"])
-    def test_liquidation_equivalence(self, open_idx, direction, trending_down_df, trending_up_df):
-        """Both envs should liquidate at the same step with the same balance."""
-        # Long gets liquidated in downtrend, short in uptrend
+    def test_liquidation_equivalence(self, open_idx, direction, trending_down_df,
+                                     trending_up_df):
+        """Both envs should liquidate at the same step with the same balance.
+
+        A wick-shaped frame was tried here and removed: an equivalence harness diverges on
+        any one-sided ordering change whatever the frame looks like, so the cell caught
+        nothing these two do not, and for a JOINT change it goes green like the rest.
+        Frame shape only earns its keep against an absolute assertion, which is where
+        wick_liquidation_df is used instead (TestActionOnTheBreachingBarIsNotDiscarded).
+        """
         df = trending_down_df if direction == "long" else trending_up_df
         actions = [open_idx] * 200
         mismatches = _run_sequence(
-            df, actions, leverage=20, fee=0.001, max_traj=200,
+            df, actions, leverage=20, fee=0.01, max_traj=200,
             label=f"liquidation-{direction}"
         )
         assert not mismatches, "\n".join(mismatches)
