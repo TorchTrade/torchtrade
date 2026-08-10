@@ -147,7 +147,7 @@ only when configured (live path); without them the actor is single-shot as befor
 
 ```python
 from torchtrade.actor import LocalLLMActor
-from torchtrade.actor.tools import GoogleNewsTool
+from torchtrade.actor.tools import GoogleNewsTool, PolymarketTool
 
 actor = LocalLLMActor(
     model="Qwen/Qwen2.5-0.5B-Instruct", backend="vllm",
@@ -155,10 +155,18 @@ actor = LocalLLMActor(
     account_state_labels=env.account_state,
     action_levels=env.action_levels,
     symbol="BTC/USD",
-    tools=[GoogleNewsTool(symbol="BTC/USD")],
+    tools=[
+        GoogleNewsTool(symbol="BTC/USD"),
+        PolymarketTool(symbol="BTC/USD"),
+    ],
     max_tool_iters=3,
 )
 ```
+
+Pass tools individually rather than bundling sources behind flags — the list is
+the configuration. Several tools still cost a single tool iteration, because the
+model may emit more than one `<tool>` block per turn and they all resolve into
+one `<tool_results>` block.
 
 The model calls a tool with `<tool name="google_news">{"query": "Bitcoin"}</tool>`
 (torchrl `XMLBlockParser` convention) and receives a `<tool_results>...</tool_results>`
@@ -166,6 +174,40 @@ block, then continues until it emits `<answer>N</answer>`. Only conversations th
 call a tool are re-generated, so batched multi-symbol inference stays efficient.
 Tool use requires `backend="vllm"` (the transformers backend can't halt at
 `</tool>`) and the `[llm]` extra (adds `feedparser`).
+
+#### `PolymarketTool`
+
+Prediction-market odds for the traded asset, from Polymarket's public Gamma API —
+free, no key, no account. It reuses the `MarketScanner` that backs
+`PolymarketBetEnv`, so it inherits that client's retry policy and filtering.
+
+```python
+PolymarketTool(symbol="BTC/USD", top_n=5, min_volume_24h=10_000, min_liquidity=5_000)
+```
+
+The keyword defaults to the traded symbol via `symbol_to_query()` (`BTC` →
+`"Bitcoin"`); the model can override it per call with
+`<tool name="polymarket">{"query": "Fed"}</tool>`. Output is a ranked list of
+questions with the YES probability and 24h volume:
+
+```
+Prediction markets for 'Bitcoin':
+1. Will the price of Bitcoin be above $64,000 on August 10? — YES 97% · 24h vol $74,568
+2. Bitcoin Up or Down on August 10? — YES 32% · 24h vol $131,842
+```
+
+A row of strike-based markets is effectively a market-implied price distribution,
+which is information OHLCV cannot express.
+
+Two things to keep in mind:
+
+- **`min_volume_24h` / `min_liquidity` are a content filter, not just noise
+  reduction.** Market questions are user-authored and land in the model's context
+  verbatim, so low-volume markets are the injection surface. Lower these floors
+  deliberately.
+- **This is a live-path tool.** It returns markets that are open *now*, so using
+  it during offline replay would show a historical episode present-day
+  probabilities. Restrict it to live trading, as with `GoogleNewsTool`.
 
 ---
 

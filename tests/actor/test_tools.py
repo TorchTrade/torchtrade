@@ -1,7 +1,7 @@
 """Tests for LLM actor tools."""
 import pytest
 
-from torchtrade.actor.tools import GoogleNewsTool, symbol_to_query
+from torchtrade.actor.tools import GoogleNewsTool, PolymarketTool, symbol_to_query
 
 
 @pytest.mark.parametrize("symbol,expected", [
@@ -87,3 +87,116 @@ def test_google_news_timeout_returns_error_string(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", stall)
     out = GoogleNewsTool(symbol="BTC/USD", timeout=0.01).run()
     assert "error" in out.lower()
+
+
+def _market(question="Will Bitcoin exceed $100k by March 2026?", yes_price=0.72, volume_24h=50_000.0):
+    """Build a PolymarketMarket the way MarketScanner.scan() would return it."""
+    from torchtrade.envs.live.polymarket.market_scanner import PolymarketMarket
+
+    return PolymarketMarket(
+        market_id="1", condition_id="0x1", question=question, description="",
+        slug="slug", yes_token_id="y", no_token_id="n",
+        yes_price=yes_price, no_price=1.0 - yes_price,
+        volume_24h=volume_24h, total_volume=1_500_000.0, liquidity=200_000.0,
+        spread=0.02, end_date="2027-03-01T00:00:00Z", tags=[], neg_risk=False,
+    )
+
+
+def _fake_scanner(monkeypatch, result):
+    """Swap MarketScanner for a stub; capture the config the tool builds.
+
+    Mocks the scanner rather than HTTP: the Gamma client, its retry policy and
+    its filtering are already covered by tests/envs/polymarket/.
+    """
+    captured = {}
+
+    class _Scanner:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def scan(self):
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+    import torchtrade.envs.live.polymarket.market_scanner as ms
+    monkeypatch.setattr(ms, "MarketScanner", _Scanner)
+    return captured
+
+
+@pytest.mark.parametrize("symbol,query,expected", [
+    ("BTC/USD", None, "Bitcoin"),          # symbol routed through symbol_to_query
+    ("ETH/USD", None, "Ethereum"),
+    ("BTC/USD", "Fed rate cut", "Fed rate cut"),  # explicit query wins over the symbol
+])
+def test_polymarket_keyword_comes_from_symbol_unless_query_given(
+    monkeypatch, symbol, query, expected
+):
+    """The model can steer the search, but defaults to the traded asset."""
+    captured = _fake_scanner(monkeypatch, [_market()])
+    PolymarketTool(symbol=symbol).run(query=query)
+    assert captured["config"].keyword == expected
+
+
+def test_polymarket_forwards_caps_and_spam_thresholds_to_scanner(monkeypatch):
+    """Volume/liquidity floors are the spam filter keeping junk markets out of
+    the model's context — they must reach the scanner, not be dropped."""
+    captured = _fake_scanner(monkeypatch, [])
+    PolymarketTool(
+        symbol="BTC/USD", top_n=3, min_volume_24h=1234.0, min_liquidity=567.0
+    ).run()
+    assert captured["config"].max_markets == 3
+    assert captured["config"].min_volume_24h == 1234.0
+    assert captured["config"].min_liquidity == 567.0
+
+
+def test_polymarket_reports_probability_not_raw_price(monkeypatch):
+    """A 0.72 YES price is a 72% probability — the model reads percentages."""
+    _fake_scanner(monkeypatch, [_market(question="Will BTC hit 100k?", yes_price=0.72)])
+    out = PolymarketTool(symbol="BTC/USD").run()
+    assert "Will BTC hit 100k?" in out
+    assert "72%" in out
+
+
+def test_polymarket_truncates_long_question(monkeypatch):
+    """Market questions are user-authored on Polymarket and land in the model's
+    context verbatim — cap their length so one market can't flood the prompt."""
+    long_question = "Q" * 400
+    _fake_scanner(monkeypatch, [_market(question=long_question)])
+    out = PolymarketTool(symbol="BTC/USD", question_chars=60).run()
+    assert long_question not in out
+    assert "Q" * 60 in out
+    # Mark the cut: a question clipped mid-number ("...September 202") otherwise
+    # reads to the model as a complete, and wrong, statement.
+    assert "Q…" in out
+
+
+def test_polymarket_short_question_is_not_marked_as_truncated(monkeypatch):
+    """The ellipsis must mean something — only clipped questions carry it."""
+    _fake_scanner(monkeypatch, [_market(question="Short one?")])
+    out = PolymarketTool(symbol="BTC/USD", question_chars=60).run()
+    assert "…" not in out
+
+
+def test_polymarket_no_markets_returns_message(monkeypatch):
+    """An empty result is not an error, and must not read as one."""
+    _fake_scanner(monkeypatch, [])
+    out = PolymarketTool(symbol="BTC/USD").run()
+    assert "error" not in out.lower()
+    assert "Bitcoin" in out
+
+
+def test_polymarket_failure_returns_error_string(monkeypatch):
+    """Fail-open: a scanner blow-up degrades to a string, never into a live step."""
+    _fake_scanner(monkeypatch, RuntimeError("gamma down"))
+    out = PolymarketTool(symbol="BTC/USD").run()
+    assert out.startswith("error: polymarket")
+
+
+def test_polymarket_does_not_hide_markets_resolving_within_a_day(monkeypatch):
+    """MarketScannerConfig defaults to a 24h minimum time-to-resolution, built
+    for slow discovery. An intraday agent cares most about markets resolving
+    soon, so the tool must not inherit that floor."""
+    captured = _fake_scanner(monkeypatch, [])
+    PolymarketTool(symbol="BTC/USD").run()
+    assert captured["config"].min_time_to_resolution_hours == 0
