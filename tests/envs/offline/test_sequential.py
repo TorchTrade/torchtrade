@@ -494,6 +494,13 @@ class TestSequentialEnvTermination:
 
         Long: bar has low=85 but close=100. Liq ~90.4 → low triggers liquidation.
         Short: bar has high=115 but close=100. Liq ~109.6 → high triggers liquidation.
+
+        The wick-only shape is what makes this load-bearing. A bar that also closed
+        through the liquidation price would read unhealthy in the observation anyway; only
+        a wick that recovers can be served to the policy as a healthy position. Because
+        the assertions run after a single hold, this also pins the exit to the breaching
+        bar rather than the one after it (#281) -- under the old ordering the position is
+        still open here.
         """
         import numpy as np
 
@@ -1061,59 +1068,3 @@ class TestSamplerExhaustion:
         assert not result["next"]["terminated"].item()
 
         env.close()
-
-
-# ============================================================================
-# LIQUIDATION IS OBSERVED ON THE BAR IT HAPPENS (#281)
-# ============================================================================
-
-
-def _wick_df(n=40, bar=20, low=70.0, price=100.0):
-    """Flat series where one bar's LOW breaches but its close recovers."""
-    lows = [price] * n
-    lows[bar] = low
-    return pd.DataFrame({
-        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
-        "open": [price] * n, "high": [price] * n, "low": lows,
-        "close": [price] * n, "volume": [1000.0] * n,
-    })
-
-
-def _liquidation_step_and_observation(env, is_vec, steps=12):
-    """Step a held 5x long and return (step it liquidated on, dir on the prior step)."""
-    td = env.reset()
-    prev_direction = None
-    for step in range(steps):
-        td["action"] = torch.tensor([2]) if is_vec else torch.tensor(2)
-        td = env.step(td)["next"]
-        state = td["account_state"]
-        direction = float(state[0][1] if is_vec else state[1])
-        flat = direction == 0
-        if flat:
-            return step, prev_direction
-        prev_direction = direction
-    return None, prev_direction
-
-
-def test_liquidation_lands_on_the_breaching_bar_scalar():
-    """The policy must never be shown a healthy position on a bar that already killed it.
-
-    Liquidation used to be checked at the START of the next step, against the bar whose
-    observation had already been handed to the policy -- so a bar whose wick breached the
-    liquidation price was served as dir=+1, dist_to_liq=0.196, pv=10000, and the exit
-    landed a step late. This pins the exit to the breaching bar itself (#281).
-
-    A wick-only breach is the load-bearing shape: if the close breached too, the
-    observation would look unhealthy anyway and the ordering bug would be invisible.
-    """
-    env = SequentialTradingEnv(_wick_df(), SequentialTradingEnvConfig(
-        action_levels=[-1.0, 0.0, 1.0], leverage=5, initial_cash=10000,
-        time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-        execute_on=TimeFrame(1, TimeFrameUnit.Minute), window_sizes=[10],
-        transaction_fee=0.0, slippage=0.0, seed=42, max_traj_length=25,
-        random_start=False,
-    ), simple_feature_fn)
-    step, _ = _liquidation_step_and_observation(env, is_vec=False)
-    assert step == 9, f"liquidation observed on step {step}, expected the breaching bar 9"
-    assert "liquidation" in env.history.action_types, env.history.action_types
-    env.close()
