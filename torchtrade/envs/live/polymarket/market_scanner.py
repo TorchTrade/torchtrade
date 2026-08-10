@@ -100,6 +100,12 @@ class MarketScannerConfig:
     # via the discovery flow (scan_markets.py) and use it as the stable identifier
     # for short-cadence recurring series (e.g. "btc-updown-5m-").
     slug_prefix: Optional[str] = None
+    # Network budget for one scan. The defaults are sized for PolymarketBetEnv's
+    # ~5 min cadence (worst case ~48s, see _RETRY_ATTEMPTS above). A caller that
+    # blocks something tighter -- the LLM actor's tool loop resolves calls
+    # sequentially on the collector's step -- must lower both.
+    timeout: float = 15.0
+    retry_attempts: int = _RETRY_ATTEMPTS
 
 
 class MarketScanner:
@@ -247,7 +253,10 @@ class MarketScanner:
             }
         try:
             raw_markets = _fetch_json_with_retry(
-                f"{GAMMA_API_BASE}/markets", params=params
+                f"{GAMMA_API_BASE}/markets",
+                params=params,
+                timeout=self.config.timeout,
+                attempts=self.config.retry_attempts,
             )
         except Exception:
             logger.exception("Failed to fetch markets from Gamma API")
@@ -288,6 +297,8 @@ class MarketScanner:
                     "ascending": "true",
                     "end_date_min": now.isoformat(),
                 },
+                timeout=self.config.timeout,
+                attempts=self.config.retry_attempts,
             )
         except Exception:
             logger.exception("Failed to fetch upcoming markets from Gamma API")

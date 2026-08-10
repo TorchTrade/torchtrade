@@ -182,7 +182,8 @@ free, no key, no account. It reuses the `MarketScanner` that backs
 `PolymarketBetEnv`, so it inherits that client's retry policy and filtering.
 
 ```python
-PolymarketTool(symbol="BTC/USD", top_n=5, min_volume_24h=10_000, min_liquidity=5_000)
+PolymarketTool(symbol="BTC/USD", top_n=5, min_volume_24h=10_000,
+               min_liquidity=5_000, timeout=5.0)
 ```
 
 The keyword defaults to the traded symbol via `symbol_to_query()` (`BTC` →
@@ -192,19 +193,32 @@ questions with the YES probability and 24h volume:
 
 ```
 Prediction markets for 'Bitcoin':
-1. Will the price of Bitcoin be above $64,000 on August 10? — YES 97% · 24h vol $74,568
-2. Bitcoin Up or Down on August 10? — YES 32% · 24h vol $131,842
+1. Will the price of Bitcoin be above $64,000 on August 10? — YES 97.0% · 24h vol $74,568
+2. Bitcoin Up or Down on August 10? — YES 32.4% · 24h vol $131,842
 ```
 
 A row of strike-based markets is effectively a market-implied price distribution,
-which is information OHLCV cannot express.
+which is information OHLCV cannot express. Probabilities are rendered to one
+decimal on purpose: a market at 0.9962 near resolution must not read as `100%`.
 
-Two things to keep in mind:
+Four things to keep in mind:
 
 - **`min_volume_24h` / `min_liquidity` are a content filter, not just noise
   reduction.** Market questions are user-authored and land in the model's context
-  verbatim, so low-volume markets are the injection surface. Lower these floors
-  deliberately.
+  verbatim, so low-volume markets are the injection surface. The tool also
+  collapses whitespace in every question, because a newline would otherwise let
+  one market render as two numbered rows and fabricate a market. Lower these
+  floors deliberately.
+- **An empty result does not mean no markets exist.** `MarketScanner.scan()` logs
+  and returns `[]` when the Gamma API is unreachable, so the tool cannot tell an
+  outage from a genuinely empty result and deliberately says so rather than
+  asserting an absence it never verified.
+- **The tool blocks the collection step.** `_resolve_tools` resolves tool calls
+  sequentially across the batch, so per-call latency is serialised onto the
+  policy call inside `SyncDataCollector`/`env.rollout()`. The tool therefore
+  passes a tighter network budget than `PolymarketBetEnv` uses (`timeout=5.0`,
+  2 attempts ≈ 11s worst case, against the scanner's default ≈ 48s). Raise
+  `timeout` only if you understand that cost.
 - **This is a live-path tool.** It returns markets that are open *now*, so using
   it during offline replay would show a historical episode present-day
   probabilities. Restrict it to live trading, as with `GoogleNewsTool`.

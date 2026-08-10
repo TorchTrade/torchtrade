@@ -624,3 +624,24 @@ class TestPublicMethodsRecoverFromTransientFailure:
         result = method("btc-updown-5m-") if method_name == "next_active_market" else method()
         assert assert_result(result)
         assert mock_get.call_count == 2
+
+
+def test_scan_forwards_network_budget_from_config(monkeypatch):
+    """The 3x15s retry budget suits PolymarketBetEnv's ~5min cadence, but a
+    caller on a tighter loop (the LLM actor's tool blocks a collection step)
+    needs to lower it. Defaults must stay as they are for existing callers."""
+    import torchtrade.envs.live.polymarket.market_scanner as ms
+
+    captured = {}
+
+    def _fake_fetch(url, params, timeout=15.0, attempts=3, backoff=1.0):
+        captured.update(timeout=timeout, attempts=attempts)
+        return []
+
+    monkeypatch.setattr(ms, "_fetch_json_with_retry", _fake_fetch)
+
+    MarketScanner(MarketScannerConfig()).scan()
+    assert captured == {"timeout": 15.0, "attempts": 3}
+
+    MarketScanner(MarketScannerConfig(timeout=5.0, retry_attempts=2)).scan()
+    assert captured == {"timeout": 5.0, "attempts": 2}

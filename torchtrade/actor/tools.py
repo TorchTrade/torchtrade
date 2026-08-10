@@ -7,6 +7,9 @@ SYMBOL_QUERY_MAP = {
     "XRP": "XRP", "ADA": "Cardano",
 }
 
+# Longest market question rendered into the model's context, per market.
+_MAX_QUESTION_CHARS = 140
+
 
 def symbol_to_query(symbol: str) -> str:
     """Map a trading symbol to a news search term ('BTC/USD' -> 'Bitcoin')."""
@@ -93,13 +96,13 @@ class PolymarketTool(Tool):
         top_n: int = 5,
         min_volume_24h: float = 10_000.0,
         min_liquidity: float = 5_000.0,
-        question_chars: int = 140,
+        timeout: float = 5.0,
     ):
         self.symbol = symbol
         self.top_n = top_n
         self.min_volume_24h = min_volume_24h
         self.min_liquidity = min_liquidity
-        self.question_chars = question_chars
+        self.timeout = timeout
 
     def _scan(self, keyword: str) -> list:
         """Fetch matching markets. Thin seam over the live-env Gamma scanner,
@@ -107,16 +110,20 @@ class PolymarketTool(Tool):
         # lazy: torchtrade.actor.tools imports without the live-env stack
         from torchtrade.envs.live.polymarket import market_scanner as ms
 
-        return ms.MarketScanner(ms.MarketScannerConfig(
+        config = ms.MarketScannerConfig(
             keyword=keyword,
             max_markets=self.top_n,
             min_volume_24h=self.min_volume_24h,
             min_liquidity=self.min_liquidity,
-            # The scanner defaults to a 24h floor, tuned for slow discovery. A
-            # market resolving in six hours is the most decision-relevant thing
-            # we can show an intraday agent, so keep everything unresolved.
+            # Scanner defaults to a 24h floor; an intraday agent wants exactly
+            # the soon-resolving markets that floor hides.
             min_time_to_resolution_hours=0,
-        )).scan()
+            # Its 3x15s retry budget suits a ~5min live loop. The tool loop is
+            # sequential and blocks the collector's step, so spend far less.
+            timeout=self.timeout,
+            retry_attempts=2,
+        )
+        return ms.MarketScanner(config).scan()
 
     def run(self, query: Optional[str] = None) -> str:
         q = query or symbol_to_query(self.symbol)
@@ -125,14 +132,20 @@ class PolymarketTool(Tool):
         except Exception as exc:  # never raise into a live trading step
             return f"error: polymarket unavailable ({exc})"
         if not markets:
-            return f"No prediction markets for '{q}'."
+            # MarketScanner.scan() logs and returns [] on fetch failure, so we
+            # cannot tell an outage from a genuinely empty result. Never assert
+            # an absence we did not verify -- "no markets on this asset" is
+            # itself a signal the model will trade on.
+            return f"No Polymarket markets matched '{q}' (none open, or Gamma unavailable)."
         lines = [f"Prediction markets for '{q}':"]
-        for i, m in enumerate(markets, 1):
-            question = m.question
-            if len(question) > self.question_chars:
-                question = question[: self.question_chars] + "…"
+        for i, m in enumerate(markets[: self.top_n], 1):
+            # Questions are user-authored: collapse whitespace so a newline
+            # cannot forge a second numbered row in the model's context.
+            question = " ".join(m.question.split())
+            if len(question) > _MAX_QUESTION_CHARS:
+                question = question[:_MAX_QUESTION_CHARS] + "…"
             lines.append(
                 f"{i}. {question} — "
-                f"YES {m.yes_price * 100:.0f}% · 24h vol ${m.volume_24h:,.0f}"
+                f"YES {m.yes_price * 100:.1f}% · 24h vol ${m.volume_24h:,.0f}"
             )
         return "\n".join(lines)
