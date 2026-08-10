@@ -671,17 +671,19 @@ class TestActionOnTheBreachingBarIsNotDiscarded:
 class TestScalarVecEquivalenceLiquidation:
     """Verify liquidation behavior matches between scalar and vectorized envs."""
 
-    @pytest.mark.parametrize("open_idx,direction", [(2, "long"), (0, "short"), (2, "wick")],
-                             ids=["long", "short", "wick"])
+    @pytest.mark.parametrize("open_idx,direction", [(2, "long"), (0, "short")],
+                             ids=["long", "short"])
     def test_liquidation_equivalence(self, open_idx, direction, trending_down_df,
-                                     trending_up_df, wick_liquidation_df):
+                                     trending_up_df):
         """Both envs should liquidate at the same step with the same balance.
 
-        The wick cell is the #281 shape: the trending frames breach on the close, so the
-        observation reads unhealthy either way and the check-order cannot be isolated.
+        A wick-shaped frame was tried here and removed: an equivalence harness diverges on
+        any one-sided ordering change whatever the frame looks like, so the cell caught
+        nothing these two do not, and for a JOINT change it goes green like the rest.
+        Frame shape only earns its keep against an absolute assertion, which is where
+        wick_liquidation_df is used instead (TestActionOnTheBreachingBarIsNotDiscarded).
         """
-        df = {"long": trending_down_df, "short": trending_up_df,
-              "wick": wick_liquidation_df}[direction]
+        df = trending_down_df if direction == "long" else trending_up_df
         actions = [open_idx] * 200
         mismatches = _run_sequence(
             df, actions, leverage=20, fee=0.001, max_traj=200,
