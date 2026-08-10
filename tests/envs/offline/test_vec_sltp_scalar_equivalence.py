@@ -65,7 +65,7 @@ def _make_sltp_pair(
         lock_position_until_sltp=lock,
     )
     # Ignored by the fractional path. 100.0 is $100 of notional; in quantity mode it is
-    # 100 *units*, ~$10,000 at this fixture's ~$100 prices, which no leverage-1 balance can
+    # 100 *units*, ~$10,000 at these fixtures' ~$100 prices, which no leverage-1 balance can
     # afford -- so that cell would open nothing and compare two idle envs.
     common["quantity_per_trade"] = 100.0 if trade_mode == "notional" else 1.0
 
@@ -108,7 +108,7 @@ def _compare_sltp_state(scalar, vec):
 
 def _run_sltp_sequence(
     df,
-    action_indices,
+    action_indices=None,
     label="",
     expect_action_type=None,
     random_steps=None,
@@ -464,8 +464,8 @@ class TestSLTPScalarVecEquivalenceTrending:
 # ============================================================================
 
 
-def _flat_df_with_wick(bar=20, low=None, high=None, n=50):
-    """Flat 100.0 series with one bar carrying a single excursion."""
+def _flat_df(bar=20, low=None, high=None, n=50):
+    """Flat 100.0 series, optionally with one bar carrying a single excursion."""
     prices = np.full(n, 100.0)
     df = pd.DataFrame({
         "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
@@ -502,7 +502,7 @@ class TestSLTPScalarVecEquivalenceEntryBar:
         exercised by the trend-based cases above.
         """
         crash_bar = 20
-        df = _flat_df_with_wick(bar=crash_bar, low=wick_low, high=wick_high)
+        df = _flat_df(bar=crash_bar, low=wick_low, high=wick_high)
 
         # reset caches bar 10 (window_sizes=[10]), so step k executes at bar 10+k, and
         # the position opens one bar before the wick.
@@ -526,7 +526,7 @@ class TestSLTPScalarVecEquivalenceEntryBar:
         must NOT pre-empt the switch (#292): the agent closed that long at close(N),
         so bar 20 belongs to the short, which its own SL at 102.5 then stops out.
         """
-        df = _flat_df_with_wick(bar=20, high=120.0)
+        df = _flat_df(bar=20, high=120.0)
         long_tight, short_tight = 1, 5
         actions = [0] * 5 + [long_tight] + [0] * 3 + [short_tight] + [0] * 2
 
@@ -560,7 +560,7 @@ class TestSLTPScalarVecEquivalenceCloseVsTrigger:
     def test_close_action_beats_an_exit_on_the_same_bar(
         self, leverage, sl_levels, tp_levels, wick_high, wick_low
     ):
-        df = _flat_df_with_wick(bar=20, high=wick_high, low=wick_low)
+        df = _flat_df(bar=20, high=wick_high, low=wick_low)
         # With the close action enabled every index shifts by one: 2 is the first long.
         long_action, close_action = 2, 1
         actions = [0] * 5 + [long_action] + [0] * 3 + [close_action] + [0] * 2
@@ -590,7 +590,7 @@ class TestSLTPScalarVecEquivalencePriority:
     """
 
     def test_liquidation_wins_over_the_bracket_in_both_envs(self):
-        df = _flat_df_with_wick(bar=20, low=88.0)
+        df = _flat_df(bar=20, low=88.0)
         # 10x long at 100: SL 95, liquidation 90.4, bar low 88 breaches both.
         long_action = 1
         actions = [0] * 5 + [long_action] + [0] * 4
@@ -618,7 +618,6 @@ class TestSLTPScalarVecEquivalenceTradeModesAndLock:
     def test_random_actions_match(self, sample_ohlcv_df, trade_mode, lock, leverage):
         mismatches = _run_sltp_sequence(
             sample_ohlcv_df,
-            None,
             leverage=leverage,
             fee=0.001,
             max_traj=120,
@@ -640,7 +639,7 @@ class TestAffordabilitySlackIsShared:
     The vectorized envs carried 1e-5 slack against the scalar envs' 1e-9 -- a 10,000x
     window in which one engine opened a position the other refused, leaving one in cash
     and the other fully deployed at a zeroed balance. Reverting either side to 1e-5 left
-    all 680 offline tests green.
+    the whole offline suite green.
     """
 
     @pytest.mark.parametrize("shortfall,expect_open", [
@@ -648,12 +647,10 @@ class TestAffordabilitySlackIsShared:
         (3e-6, False),
     ], ids=["inside-slack", "inside-the-old-1e-5-window"])
     def test_both_engines_make_the_same_call(self, shortfall, expect_open):
-        # Flat at 100 so the cost is exact: 100 notional at leverage 1 is 100 margin plus
-        # 0.1 fee. Cash is set just short of that by `shortfall`.
-        df = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=40, freq="1min"),
-            "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1000.0,
-        }, index=range(40))
+        # Flat at 100, and _make_sltp_pair sizes notional mode at quantity_per_trade=100,
+        # so the cost is exact: 100 margin at leverage 1 plus 0.1 fee. Cash is set just
+        # short of that 100.1 by `shortfall`.
+        df = _flat_df(n=40)
         scalar, vec = _make_sltp_pair(
             df, leverage=1, fee=0.001, sl_levels=[-0.05], tp_levels=[0.1],
             max_traj=20, trade_mode="notional", initial_cash=100.1 / (1 + shortfall),

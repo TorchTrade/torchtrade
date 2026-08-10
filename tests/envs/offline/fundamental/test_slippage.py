@@ -360,7 +360,7 @@ class TestVectorizedSlippage:
     first line under `if self.slippage > 0:` left the whole suite green.
 
     Bounds only, not equivalence against the scalar env: the scalar draws from the global
-    RNG (`sequential.py:633`, no `generator=`) and the vectorized env from its own
+    RNG (`_execute_trade_if_needed`, no `generator=`) and the vectorized env from its own
     `self._rng`, so the two can never agree on a slipped price.
     """
 

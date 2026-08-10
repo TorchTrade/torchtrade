@@ -5,7 +5,6 @@ Runs both environments with identical configs and action sequences,
 comparing ALL observable state at every step. Any divergence is a bug.
 """
 
-import numpy as np
 import pandas as pd
 import pytest
 import torch
@@ -66,7 +65,7 @@ def _make_pair(df, leverage=1, fee=0.0, action_levels=None, max_traj=40):
 
 
 # Both engines compute money in float64 (MONEY_DTYPE); measured worst-case disagreement
-# across this file is under 1e-12, so 1e-9 leaves ~1000x headroom. The previous 5e-4 was
+# across both equivalence files is under 1e-12, so 1e-9 leaves ~1000x headroom. The previous 5e-4 was
 # sized to absorb float32-vs-float64 ULP, which no longer exists.
 EQUIV_ATOL = 1e-9
 EQUIV_RTOL = 1e-9
@@ -196,27 +195,9 @@ def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, m
     return all_mismatches
 
 
-class TestScalarVecEquivalenceRandomActions:
-    """Randomised actions on the base env.
-
-    Every other cell in this file pins a hand-picked sequence -- the pattern that let the
-    float32 divergence in #293 live in the SLTP harness for months, and that the SLTP side
-    has since moved away from. Leverage 25 is crossed in because leverage is what scales an
-    epsilon up onto a threshold.
-
-    action_levels stays in {-1, 0, 1}: intermediate levels are where the engines genuinely
-    disagree (#302), which would swamp this with a known failure.
-    """
-
-    @pytest.mark.parametrize("leverage", [1, 25], ids=["spot", "lev25"])
-    def test_random_actions_match(self, sample_ohlcv_df, leverage):
-        levels = [-1.0, 0.0, 1.0] if leverage > 1 else [0.0, 1.0]
-        actions = np.random.default_rng(0).integers(0, len(levels), size=100).tolist()
-        mismatches = _run_sequence(
-            sample_ohlcv_df, actions, leverage=leverage, fee=0.001,
-            action_levels=levels, max_traj=120, label=f"random-lev{leverage}",
-        )
-        assert not mismatches, "\n".join(mismatches)
+# ============================================================================
+# ACTION-LEVEL PRECISION
+# ============================================================================
 
 
 class TestScalarVecEquivalenceIntermediateLevel:

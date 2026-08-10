@@ -115,10 +115,10 @@ class VectorizedSequentialTradingEnv(EnvBase):
         Equivalence against SequentialTradingEnv is verified by
         tests/envs/offline/test_vec_scalar_equivalence.py: every binary outcome, and
         money to within 1e-9 -- a claim about the axes it varies, leverage and fee.
-        It does NOT cover intermediate action_levels, where the two
-        engines are known to disagree (see #302): the scalar env resizes a position in
-        place with a weighted-average entry, the vectorized env always closes and
-        reopens.
+        It does NOT cover *resizing* a position through an intermediate action_level,
+        where the two engines are known to disagree (see #302): the scalar env resizes
+        in place with a weighted-average entry, the vectorized env always closes and
+        reopens. The open from flat at an intermediate level is covered.
 
     Processes N environments in a single _step() call using tensor operations.
     All state (balances, positions, step indices) is stored as (num_envs,) tensors
@@ -174,7 +174,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # Extract pre-computed data from sampler
         self._market_tensors = self._sampler.torch_tensors  # {key: (N, F)}
         self._obs_indices = self._sampler._obs_indices  # {key: ndarray}
-        # float64: bracket prices are computed against these wicks.
+        # float64: the wicks feed liquidation checks here and bracket triggers in the
+        # SLTP subclass, and the close column feeds every money computation.
         self._base_tensor = self._sampler.execute_base_tensor.to(MONEY_DTYPE)  # (M, F)
         self._total_exec_times = len(self._sampler._exec_times_arr)
         if self._total_exec_times == 0:
@@ -441,7 +442,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
                 exposure_pct,
                 position_direction,
                 unrealized_pnl_pct,
-                self._hold_counters.to(MONEY_DTYPE),
+                self._hold_counters.to(MONEY_DTYPE),  # not money; the stack needs one dtype
                 leverage_tensor,
                 distance_to_liq,
             ],
