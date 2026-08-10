@@ -1058,6 +1058,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Tool use">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#polymarkettool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PolymarketTool
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -1355,6 +1372,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Tool use">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#polymarkettool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PolymarketTool
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -1664,7 +1698,7 @@ must always emit a valid action.</p>
 <p>Configure <code>tools=[...]</code> to let the actor call tools before deciding. Tools run
 only when configured (live path); without them the actor is single-shot as before.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.actor</span><span class="w"> </span><span class="kn">import</span> <span class="n">LocalLLMActor</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.actor.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">GoogleNewsTool</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.actor.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">GoogleNewsTool</span><span class="p">,</span> <span class="n">PolymarketTool</span>
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
 </span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">actor</span> <span class="o">=</span> <span class="n">LocalLLMActor</span><span class="p">(</span>
 </span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;Qwen/Qwen2.5-0.5B-Instruct&quot;</span><span class="p">,</span> <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;vllm&quot;</span><span class="p">,</span>
@@ -1672,16 +1706,68 @@ only when configured (live path); without them the actor is single-shot as befor
 </span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">account_state_labels</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">account_state</span><span class="p">,</span>
 </span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="n">action_levels</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">action_levels</span><span class="p">,</span>
 </span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="p">,</span>
-</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>    <span class="n">tools</span><span class="o">=</span><span class="p">[</span><span class="n">GoogleNewsTool</span><span class="p">(</span><span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="p">)],</span>
-</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>    <span class="n">max_tool_iters</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
-</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="p">)</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>    <span class="n">tools</span><span class="o">=</span><span class="p">[</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>        <span class="n">GoogleNewsTool</span><span class="p">(</span><span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="p">),</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>        <span class="n">PolymarketTool</span><span class="p">(</span><span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="p">),</span>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>    <span class="p">],</span>
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>    <span class="n">max_tool_iters</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="p">)</span>
 </span></code></pre></div>
+<p>Pass tools individually rather than bundling sources behind flags — the list is
+the configuration. Several tools still cost a single tool iteration, because the
+model may emit more than one <code>&lt;tool&gt;</code> block per turn and they all resolve into
+one <code>&lt;tool_results&gt;</code> block.</p>
 <p>The model calls a tool with <code>&lt;tool name="google_news"&gt;{"query": "Bitcoin"}&lt;/tool&gt;</code>
 (torchrl <code>XMLBlockParser</code> convention) and receives a <code>&lt;tool_results&gt;...&lt;/tool_results&gt;</code>
 block, then continues until it emits <code>&lt;answer&gt;N&lt;/answer&gt;</code>. Only conversations that
 call a tool are re-generated, so batched multi-symbol inference stays efficient.
 Tool use requires <code>backend="vllm"</code> (the transformers backend can't halt at
 <code>&lt;/tool&gt;</code>) and the <code>[llm]</code> extra (adds <code>feedparser</code>).</p>
+<h4 id="polymarkettool"><code>PolymarketTool</code><a class="headerlink" href="#polymarkettool" title="Permanent link">&para;</a></h4>
+<p>Prediction-market odds for the traded asset, from Polymarket's public Gamma API —
+free, no key, no account. It reuses the <code>MarketScanner</code> that backs
+<code>PolymarketBetEnv</code>, so it inherits that client's fetching, retry and filtering
+machinery — but sets its own budget and thresholds, which differ from the live
+env's (see below).</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">PolymarketTool</span><span class="p">(</span><span class="n">symbol</span><span class="o">=</span><span class="s2">&quot;BTC/USD&quot;</span><span class="p">,</span> <span class="n">top_n</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">min_volume_24h</span><span class="o">=</span><span class="mi">10_000</span><span class="p">,</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>               <span class="n">min_liquidity</span><span class="o">=</span><span class="mi">5_000</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span>
+</span></code></pre></div>
+<p>The keyword defaults to the traded symbol via <code>symbol_to_query()</code> (<code>BTC</code> →
+<code>"Bitcoin"</code>); the model can override it per call with
+<code>&lt;tool name="polymarket"&gt;{"query": "Fed"}&lt;/tool&gt;</code>. Output is a ranked list of
+questions with the YES probability and 24h volume:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Prediction markets for &#39;Bitcoin&#39;:
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>1. Will the price of Bitcoin be above $64,000 on August 10? — YES 97.0% · 24h vol $74,568
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>2. Bitcoin Up or Down on August 10? — YES 32.4% · 24h vol $131,842
+</span></code></pre></div>
+<p>A row of strike-based markets is effectively a market-implied price distribution,
+which is information OHLCV cannot express. Probabilities are rendered to one
+decimal on purpose: a market at 0.9962 near resolution must not read as <code>100%</code>.</p>
+<p>Four things to keep in mind:</p>
+<ul>
+<li><strong><code>min_volume_24h</code> / <code>min_liquidity</code> are a content filter, not just noise
+  reduction.</strong> Market questions are user-authored and land in the model's context
+  verbatim, so low-volume markets are the injection surface. Every free-text
+  field the tool renders — market questions <em>and</em> the model's own <code>query</code> — is
+  collapsed to a single capped line, because a newline would otherwise let one
+  field render as a second numbered row and fabricate a market. Lower these
+  floors deliberately.</li>
+<li><strong>An empty result does not mean no markets exist.</strong> <code>MarketScanner.scan()</code> logs
+  and returns <code>[]</code> when the Gamma API is unreachable, so the tool cannot tell an
+  outage from a genuinely empty result and deliberately says so rather than
+  asserting an absence it never verified.</li>
+<li><strong>The tool blocks the collection step.</strong> <code>_resolve_tools</code> resolves tool calls
+  sequentially across the batch, so per-call latency is serialised onto the
+  policy call inside <code>SyncDataCollector</code>/<code>env.rollout()</code>. The tool spends
+  <code>timeout=5.0</code> over 2 attempts — roughly 11s worst case, against the scanner's
+  default of roughly 48s. Budget that against <strong>your</strong> <code>execute_on</code> cadence, not
+  against <code>PolymarketBetEnv</code>'s: with <code>max_tool_iters=3</code> the worst case is ~33s
+  per conversation, which is comfortable on a <code>1Hour</code> step and most of the
+  budget on a <code>1Min</code> one.</li>
+<li><strong>This is a live-path tool.</strong> It returns markets that are open <em>now</em>, so using
+  it during offline replay would show a historical episode present-day
+  probabilities. Restrict it to live trading, as with <code>GoogleNewsTool</code>.</li>
+</ul>
 <hr />
 <h2 id="see-also">See Also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
