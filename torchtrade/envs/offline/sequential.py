@@ -528,11 +528,24 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             action_idx = action_idx.item()
         desired_action = self.action_levels[action_idx]
 
-        # Check for liquidation or execute trade
-        if self._check_liquidation(self._cached_base_features):
+        # Advance to bar N+1 before anything is decided against it. The old order checked
+        # liquidation against the bar that had ALREADY been shown to the policy one call
+        # ago, and left the freshly-fetched bar unchecked until the next call -- so a bar
+        # whose wick breached liquidation was served to the policy as a healthy position,
+        # with reward and termination landing a step late (#281).
+        obs_dict, base_features = self._get_observation_scaffold()
+        self._cached_base_features = base_features
+
+        # The action fills at bar N's close, chronologically before bar N+1 exists, so it
+        # runs unconditionally. The old mutually-exclusive if/else discarded a legitimate
+        # close or switch whenever liquidation fired -- the same defect #292 fixed for the
+        # SLTP env, which this ordering now mirrors (post-#294 and #297).
+        trade_info = self._execute_trade_if_needed(desired_action, cached_price)
+
+        # Bar N+1, against whatever the action above left open. Must precede the portfolio
+        # value and the history record below, or both read a state that ignores this exit.
+        if self._check_liquidation(base_features):
             trade_info = self._execute_liquidation()
-        else:
-            trade_info = self._execute_trade_if_needed(desired_action, cached_price)
 
         # Age the position once per step through the canonical rule, whatever happened
         # above (#275). Five hand-rolled sites used to do this -- hold, tolerance-hold,
@@ -551,9 +564,9 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             else:
                 self.position.current_position = 0  # Flat
 
-        # Get updated state (advances timestamp and caches new base features)
-        next_tensordict = self._get_observation()
-        new_price = self._cached_base_features["close"]
+        # Built from bar N+1, which the liquidation check above has already been applied to.
+        next_tensordict = self._build_observation_from_data(obs_dict, base_features)
+        new_price = base_features["close"]
         new_portfolio_value = self._get_portfolio_value(new_price)
 
         # Add coverage tracking indices (only during training with random_start)

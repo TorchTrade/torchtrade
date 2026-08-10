@@ -536,9 +536,12 @@ class TestSequentialEnvTermination:
         liq_price = env.liquidation_price
         assert liq_lo < liq_price < liq_hi, f"Liq price should be ~{(liq_lo+liq_hi)/2}, got {liq_price}"
 
-        # Step 2: Hold — sampler advances to bar 12 (wick but close=100)
+        # Step 2: hold by RE-SUBMITTING the opening action. Index 1 is action_levels[1]
+        # == 0.0 -- a close, not a hold -- so this test used to flatten the position on a
+        # clean bar and then assert position_size == 0, which passed without a liquidation
+        # ever happening (history read ['hold', 'long', 'flat'], balance back at 10000).
         hold_td = td["next"].clone()
-        hold_td["action"] = torch.tensor(1)  # Hold
+        hold_td["action"] = torch.tensor(action_idx)
         td = env.step(hold_td)
 
         # Position MUST be liquidated by the intrabar wick
@@ -546,6 +549,9 @@ class TestSequentialEnvTermination:
             f"{direction} position should be liquidated by intrabar wick "
             f"({bar12_field}={bar12_value} vs liq={liq_price}), "
             f"but position_size={env.position.position_size}"
+        )
+        assert "liquidation" in env.history.action_types, (
+            f"position ended flat without a liquidation: {env.history.action_types}"
         )
 
         env.close()
@@ -1055,3 +1061,59 @@ class TestSamplerExhaustion:
         assert not result["next"]["terminated"].item()
 
         env.close()
+
+
+# ============================================================================
+# LIQUIDATION IS OBSERVED ON THE BAR IT HAPPENS (#281)
+# ============================================================================
+
+
+def _wick_df(n=40, bar=20, low=70.0, price=100.0):
+    """Flat series where one bar's LOW breaches but its close recovers."""
+    lows = [price] * n
+    lows[bar] = low
+    return pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": [price] * n, "high": [price] * n, "low": lows,
+        "close": [price] * n, "volume": [1000.0] * n,
+    })
+
+
+def _liquidation_step_and_observation(env, is_vec, steps=12):
+    """Step a held 5x long and return (step it liquidated on, dir on the prior step)."""
+    td = env.reset()
+    prev_direction = None
+    for step in range(steps):
+        td["action"] = torch.tensor([2]) if is_vec else torch.tensor(2)
+        td = env.step(td)["next"]
+        state = td["account_state"]
+        direction = float(state[0][1] if is_vec else state[1])
+        flat = direction == 0
+        if flat:
+            return step, prev_direction
+        prev_direction = direction
+    return None, prev_direction
+
+
+def test_liquidation_lands_on_the_breaching_bar_scalar():
+    """The policy must never be shown a healthy position on a bar that already killed it.
+
+    Liquidation used to be checked at the START of the next step, against the bar whose
+    observation had already been handed to the policy -- so a bar whose wick breached the
+    liquidation price was served as dir=+1, dist_to_liq=0.196, pv=10000, and the exit
+    landed a step late. This pins the exit to the breaching bar itself (#281).
+
+    A wick-only breach is the load-bearing shape: if the close breached too, the
+    observation would look unhealthy anyway and the ordering bug would be invisible.
+    """
+    env = SequentialTradingEnv(_wick_df(), SequentialTradingEnvConfig(
+        action_levels=[-1.0, 0.0, 1.0], leverage=5, initial_cash=10000,
+        time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+        execute_on=TimeFrame(1, TimeFrameUnit.Minute), window_sizes=[10],
+        transaction_fee=0.0, slippage=0.0, seed=42, max_traj_length=25,
+        random_start=False,
+    ), simple_feature_fn)
+    step, _ = _liquidation_step_and_observation(env, is_vec=False)
+    assert step == 9, f"liquidation observed on step {step}, expected the breaching bar 9"
+    assert "liquidation" in env.history.action_types, env.history.action_types
+    env.close()

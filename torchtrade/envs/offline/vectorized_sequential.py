@@ -495,9 +495,35 @@ class VectorizedSequentialTradingEnv(EnvBase):
             )
         action_values = self._action_levels_tensor[action_indices.long()]
 
-        # 2. Check forced liquidation BEFORE trade (futures only)
-        # Uses current bar's intrabar extremes, matching scalar env's _check_liquidation
-        liq_mask = None
+        # 3. Get current prices (trade execution prices)
+        trade_prices = self._base_tensor[self._step_indices, 3].clone()
+
+        # 4. Apply slippage
+        if self.slippage > 0:
+            # float32 draw, for the generator-stream reason in _sample_initial_cash. No
+            # cast: torch promotes the float64 price times this, bit-identically.
+            noise = torch.empty(self._num_envs).uniform_(
+                1 - self.slippage, 1 + self.slippage, generator=self._rng
+            )
+            trade_prices = trade_prices * noise
+
+        # 5. Advance to bar N+1 before anything is decided against it. The old order
+        # checked liquidation against the bar already shown to the policy one step ago and
+        # left the new bar unchecked, so a wick that breached liquidation was served as a
+        # healthy position (#281). This mirrors VectorizedSequentialTradingEnvSLTP.
+        self._step_indices += 1
+        self._step_counters += 1
+
+        # Clamp to valid range (done envs may be past the end;
+        # their observation doesn't matter since they'll be auto-reset)
+        self._step_indices.clamp_(max=self._total_exec_times - 1)
+
+        # 6. Execute trades at bar N's price, unconditionally. The old code zeroed the
+        # action for liquidated envs, which discarded a legitimate close or switch -- the
+        # vector form of the mutually-exclusive if/else #292 fixed for the SLTP env.
+        self._execute_trades(action_values, trade_prices)
+
+        # 7. Bar N+1's wick, against whatever the trade above left open.
         if self.config.leverage > 1:
             liq_price = self._compute_liq_prices()
             low_prices = self._base_tensor[self._step_indices, 2]   # intrabar low
@@ -527,31 +553,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
                     liq_mask, self._zeros, self._entry_prices
                 )
 
-        # 3. Get current prices (trade execution prices)
-        trade_prices = self._base_tensor[self._step_indices, 3].clone()
 
-        # 4. Apply slippage
-        if self.slippage > 0:
-            # float32 draw, for the generator-stream reason in _sample_initial_cash. No
-            # cast: torch promotes the float64 price times this, bit-identically.
-            noise = torch.empty(self._num_envs).uniform_(
-                1 - self.slippage, 1 + self.slippage, generator=self._rng
-            )
-            trade_prices = trade_prices * noise
-
-        # 5. Execute trades (skip liquidated envs — scalar env skips trade after liquidation)
-        if liq_mask is not None and liq_mask.any():
-            action_values = torch.where(liq_mask, self._zeros, action_values)
-        self._execute_trades(action_values, trade_prices)
         self._advance_hold_counters()
-
-        # 6. Advance step indices and counters
-        self._step_indices += 1
-        self._step_counters += 1
-
-        # Clamp to valid range (done envs may be past the end;
-        # their observation doesn't matter since they'll be auto-reset)
-        self._step_indices.clamp_(max=self._total_exec_times - 1)
 
         # 7. Get new prices for observation and reward computation
         new_prices = self._base_tensor[self._step_indices, 3]
