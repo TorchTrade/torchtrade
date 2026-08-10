@@ -282,7 +282,14 @@ class TestScalarVecEquivalenceResize:
         (5, FUTURES_LEVELS, [0, 1, 0, 1]),
         # open, decrease, close to flat, open short, flip, increase, flip
         (5, FUTURES_LEVELS, [4, 3, 2, 1, 3, 4, 0]),
-    ], ids=["oscillate-spot", "oscillate-levered", "oscillate-short", "through-flat"])
+        # 0.5 -> 0.505 is a 1% target change: inside POSITION_TOLERANCE_PCT while a
+        # position is open. Both engines drop that step before classifying it, so the
+        # canonical ageing call is the only thing that ages the position -- and nothing
+        # else in the suite ever enters that branch holding anything. Re-adding either
+        # engine's removed `hold_counter += 1` there passed all 691 offline tests.
+        (5, [0.0, 0.5, 0.505, 1.0], [1, 2, 2, 1, 3]),
+    ], ids=["oscillate-spot", "oscillate-levered", "oscillate-short", "through-flat",
+            "tolerance-hold"])
     def test_resize_matches_scalar(self, sample_ohlcv_df, leverage, levels, actions):
         mismatches = _run_sequence(
             sample_ohlcv_df, actions, leverage=leverage, fee=0.001,
@@ -343,7 +350,11 @@ class TestScalarVecEquivalenceResize:
         vec.close()
 
     def test_resize_charges_the_delta_fee_exactly(self):
-        """Halving a position must cost the fee on the half, to the cent.
+        """Halving a position must cost the fee on the delta it traded, to the cent.
+
+        Precisely: fee == |change in size| * price * rate. It pins the charge against the
+        size actually reached, not that the size reached was the right target -- any target
+        error lights up dozens of tests elsewhere, so that division of labour is deliberate.
 
         The equivalence cells above compare the two engines, so they stay green if BOTH
         regress to close-and-reopen together. This pins the absolute number instead, and
