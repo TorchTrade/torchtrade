@@ -5,6 +5,7 @@ Runs both environments with identical configs and action sequences,
 comparing ALL observable state at every step. Any divergence is a bug.
 """
 
+import pandas as pd
 import pytest
 import torch
 
@@ -63,18 +64,23 @@ def _make_pair(df, leverage=1, fee=0.0, action_levels=None, max_traj=40):
     return scalar, vec
 
 
-def _compare_state(scalar, vec, step, label, atol=5e-4, rtol=1e-3):
+# Both engines compute money in float64 (MONEY_DTYPE); measured worst-case disagreement
+# across both equivalence files is under 1e-12, so 1e-9 leaves ~1000x headroom. The previous 5e-4 was
+# sized to absorb float32-vs-float64 ULP, which no longer exists.
+EQUIV_ATOL = 1e-9
+EQUIV_RTOL = 1e-9
+
+
+def _compare_state(scalar, vec):
     """Compare all observable state between scalar and vectorized envs.
 
     Uses numpy-style allclose: |s - v| <= atol + rtol * max(|s|, |v|).
-    atol=5e-4 accommodates float32 (vec) vs float64 (scalar) precision differences
-    (~1.2e-4 ULP at balance=1000).
 
     Returns list of (field, scalar_val, vec_val) mismatches.
     """
     mismatches = []
 
-    def check(field, s_val, v_val, atol=atol, rtol=rtol):
+    def check(field, s_val, v_val, atol=EQUIV_ATOL, rtol=EQUIV_RTOL):
         diff = abs(s_val - v_val)
         tol = atol + rtol * max(abs(s_val), abs(v_val))
         if diff > tol:
@@ -112,7 +118,7 @@ def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, m
     td_v = vec.reset()
 
     # Compare initial state
-    mismatches = _compare_state(scalar, vec, 0, label)
+    mismatches = _compare_state(scalar, vec)
     for field, s_val, v_val, diff in mismatches:
         all_mismatches.append(f"[{label}] Step 0 RESET {field}: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}")
 
@@ -127,14 +133,11 @@ def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, m
         action_td_v["action"] = torch.tensor([action_idx])
         td_v = vec.step(action_td_v)
 
-        # Tolerances: float32 (vec) vs float64 (scalar) precision
-        atol, rtol = 5e-4, 1e-3
-
         # Compare rewards
         r_s = td_s["next"]["reward"].item()
         r_v = td_v["next"]["reward"].squeeze().item()
         r_diff = abs(r_s - r_v)
-        if r_diff > atol + rtol * max(abs(r_s), abs(r_v)):
+        if r_diff > EQUIV_ATOL + EQUIV_RTOL * max(abs(r_s), abs(r_v)):
             all_mismatches.append(
                 f"[{label}] Step {step+1} reward: scalar={r_s:.6f} vec={r_v:.6f} diff={r_diff:.6f}"
             )
@@ -159,7 +162,7 @@ def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, m
             s_val = as_s[i].item()
             v_val = as_v[i].item()
             diff = abs(s_val - v_val)
-            if diff > atol + rtol * max(abs(s_val), abs(v_val)):
+            if diff > EQUIV_ATOL + EQUIV_RTOL * max(abs(s_val), abs(v_val)):
                 all_mismatches.append(
                     f"[{label}] Step {step+1} account_state[{name}]: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
                 )
@@ -170,14 +173,14 @@ def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, m
                 continue
             md_s = td_s["next"][key]
             md_v = td_v["next"][key].squeeze(0)
-            if not torch.allclose(md_s, md_v, atol=atol, rtol=rtol):
+            if not torch.allclose(md_s, md_v, atol=EQUIV_ATOL, rtol=EQUIV_RTOL):
                 max_diff = (md_s - md_v).abs().max().item()
                 all_mismatches.append(
                     f"[{label}] Step {step+1} {key}: max_diff={max_diff:.6f}"
                 )
 
         # Compare internal state
-        mismatches = _compare_state(scalar, vec, step + 1, label)
+        mismatches = _compare_state(scalar, vec)
         for field, s_val, v_val, diff in mismatches:
             all_mismatches.append(
                 f"[{label}] Step {step+1} {field}: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
@@ -190,6 +193,59 @@ def _run_sequence(df, action_indices, leverage=1, fee=0.0, action_levels=None, m
     scalar.close()
     vec.close()
     return all_mismatches
+
+
+# ============================================================================
+# ACTION-LEVEL PRECISION
+# ============================================================================
+
+
+class TestScalarVecEquivalenceIntermediateLevel:
+    """An intermediate action level must reach position sizing undamaged.
+
+    Every action_levels value elsewhere in this file is in {-1, 0, 1}, exact in float32
+    and float64 alike, which leaves MONEY_DTYPE on _action_levels_tensor unfalsifiable --
+    reverting that one line to float32 keeps the whole suite green. 0.1 is not exact:
+    float32 holds it as 0.10000000149, putting a 1.5e-8 relative error into the notional.
+
+    Only the open from flat is compared. Resizing an existing position is where the two
+    engines genuinely disagree (#302), so this must not depend on that being settled.
+    """
+
+    def test_open_at_intermediate_level_matches_scalar(self):
+        # Awkward cash and price on purpose: at round numbers the level's float32 error
+        # rounds away and the test silently stops discriminating.
+        price, cash = 97.3, 1234.5678
+        n = 60
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": price, "high": price, "low": price, "close": price, "volume": 1000.0,
+        }, index=range(n))
+        common = dict(
+            action_levels=[0.0, 0.1, 1.0], leverage=3, initial_cash=cash,
+            time_frames=[TF_1MIN], window_sizes=[10], execute_on=TF_1MIN,
+            transaction_fee=0.0007, seed=42, max_traj_length=20, random_start=False,
+        )
+        scalar = SequentialTradingEnv(df, SequentialTradingEnvConfig(**common))
+        vec = VectorizedSequentialTradingEnv(
+            df, VectorizedSequentialTradingEnvConfig(num_envs=1, **common)
+        )
+        td_s, td_v = scalar.reset(), vec.reset()
+        td_s["action"] = torch.tensor(1)
+        td_v["action"] = torch.tensor([1])
+        scalar.step(td_s)
+        vec.step(td_v)
+
+        s_size = scalar.position.position_size
+        v_size = float(vec._position_sizes[0])
+        assert s_size != 0, "the level did not open a position -- nothing is being compared"
+        rel = abs(s_size - v_size) / abs(s_size)
+        assert rel < 1e-12, (
+            f"position_size scalar={s_size!r} vec={v_size!r} rel={rel:.3e} -- an "
+            "intermediate action level is being rounded before it reaches the notional"
+        )
+        scalar.close()
+        vec.close()
 
 
 # ============================================================================

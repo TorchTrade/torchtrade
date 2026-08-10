@@ -21,6 +21,13 @@ class PositionCalculationParams:
 POSITION_TOLERANCE_PCT = 0.02  # 2% - relative tolerance as fraction of target position
 POSITION_TOLERANCE_ABS = 0.001  # Absolute minimum tolerance for very small positions
 
+# Affordability slack for "can I open this position?": notional = PV / fee_multiplier *
+# leverage, then margin = notional / leverage and fee = notional * fee_rate -- a round-trip
+# that can overshoot PV by ~1 ULP, so without slack a position sized from the full balance
+# refuses itself. Scalar and vectorized envs MUST share this number or they disagree about
+# which opens are affordable.
+AFFORDABILITY_REL_TOL = 1e-9
+
 
 def calculate_fractional_position(params: PositionCalculationParams) -> Tuple[float, float, str]:
     """Calculate position size from fractional action value.

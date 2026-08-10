@@ -24,11 +24,18 @@ from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservation
 from torchtrade.envs.utils.timeframe import TimeFrame, normalize_timeframe_config
 from torchtrade.envs.utils.fractional_sizing import (
     validate_action_levels,
+    AFFORDABILITY_REL_TOL,
     POSITION_TOLERANCE_PCT,
     POSITION_TOLERANCE_ABS,
 )
 
 from torchtrade.envs.core.common_types import MarginType
+
+# Money, prices and position sizes are tracked in float64 to match the scalar envs' Python
+# floats. In float32 the accumulated relative epsilon, scaled up by leverage, lands on a
+# bracket/bankruptcy boundary and flips it -- the two engines then disagree about whether a
+# stop fired (#293). Observations and rewards are cast back to float32 at emission.
+MONEY_DTYPE = torch.float64
 
 
 @dataclass
@@ -103,10 +110,15 @@ class VectorizedSequentialTradingEnv(EnvBase):
     """Vectorized sequential trading environment.
 
     .. warning::
-        **EXPERIMENTAL**: This environment passes extensive equivalence tests
-        against SequentialTradingEnv, but has not been battle-tested in
-        production training runs. Use with caution and verify results against
-        the scalar implementation.
+        **EXPERIMENTAL**: Not battle-tested in production training runs.
+
+        Equivalence against SequentialTradingEnv is verified by
+        tests/envs/offline/test_vec_scalar_equivalence.py: every binary outcome, and
+        money to within 1e-9 -- a claim about the axes it varies, leverage and fee.
+        It does NOT cover *resizing* a position through an intermediate action_level,
+        where the two engines are known to disagree (see #302): the scalar env resizes
+        in place with a weighted-average entry, the vectorized env always closes and
+        reopens. The open from flat at an intermediate level is covered.
 
     Processes N environments in a single _step() call using tensor operations.
     All state (balances, positions, step indices) is stored as (num_envs,) tensors
@@ -141,7 +153,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         # Action levels as tensor
         self._action_levels_tensor = torch.tensor(
-            config.action_levels, dtype=torch.float32
+            config.action_levels, dtype=MONEY_DTYPE
         )
         # Clamp negative actions for spot mode (no shorts)
         if config.leverage == 1:
@@ -162,7 +174,9 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # Extract pre-computed data from sampler
         self._market_tensors = self._sampler.torch_tensors  # {key: (N, F)}
         self._obs_indices = self._sampler._obs_indices  # {key: ndarray}
-        self._base_tensor = self._sampler.execute_base_tensor  # (M, F)
+        # float64: the wicks feed liquidation checks here and bracket triggers in the
+        # SLTP subclass, and the close column feeds every money computation.
+        self._base_tensor = self._sampler.execute_base_tensor.to(MONEY_DTYPE)  # (M, F)
         self._total_exec_times = len(self._sampler._exec_times_arr)
         if self._total_exec_times == 0:
             raise ValueError("Dataset has no execution times - cannot create environment")
@@ -235,21 +249,21 @@ class VectorizedSequentialTradingEnv(EnvBase):
             self._rng.manual_seed(config.seed)
 
         # Allocate state tensors
-        self._balances = torch.zeros(N)
-        self._position_sizes = torch.zeros(N)
-        self._entry_prices = torch.zeros(N)
+        self._balances = torch.zeros(N, dtype=MONEY_DTYPE)
+        self._position_sizes = torch.zeros(N, dtype=MONEY_DTYPE)
+        self._entry_prices = torch.zeros(N, dtype=MONEY_DTYPE)
         self._hold_counters = torch.zeros(N, dtype=torch.long)
-        self._prev_action_values = torch.full((N,), float("nan"))
+        self._prev_action_values = torch.full((N,), float("nan"), dtype=MONEY_DTYPE)
         self._step_indices = torch.zeros(N, dtype=torch.long)
         self._end_indices = torch.zeros(N, dtype=torch.long)
         self._step_counters = torch.zeros(N, dtype=torch.long)
         self._max_traj_lengths = torch.zeros(N, dtype=torch.long)
-        self._initial_pvs = torch.zeros(N)
-        self._portfolio_values = torch.zeros(N)
+        self._initial_pvs = torch.zeros(N, dtype=MONEY_DTYPE)
+        self._portfolio_values = torch.zeros(N, dtype=MONEY_DTYPE)
 
         # Constants
-        self._ones = torch.ones(N)
-        self._zeros = torch.zeros(N)
+        self._ones = torch.ones(N, dtype=MONEY_DTYPE)
+        self._zeros = torch.zeros(N, dtype=MONEY_DTYPE)
 
     def _set_seed(self, seed: Optional[int] = None):
         if seed is not None:
@@ -260,8 +274,13 @@ class VectorizedSequentialTradingEnv(EnvBase):
         """Sample initial cash for n environments."""
         if isinstance(self.config.initial_cash, (tuple, list)):
             lo, hi = self.config.initial_cash
-            return torch.empty(n).uniform_(float(lo), float(hi), generator=self._rng)
-        return torch.full((n,), float(self.config.initial_cash))
+            # Drawn in float32 then widened: at float64 uniform_ consumes different
+            # generator bits, changing what every saved seed reproduces. An input, not
+            # accumulated state.
+            return torch.empty(n).uniform_(
+                float(lo), float(hi), generator=self._rng
+            ).to(MONEY_DTYPE)
+        return torch.full((n,), float(self.config.initial_cash), dtype=MONEY_DTYPE)
 
     def _sample_start_indices(self, n: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """Sample random start indices and compute end indices.
@@ -423,12 +442,12 @@ class VectorizedSequentialTradingEnv(EnvBase):
                 exposure_pct,
                 position_direction,
                 unrealized_pnl_pct,
-                self._hold_counters.float(),
+                self._hold_counters.to(MONEY_DTYPE),  # not money; the stack needs one dtype
                 leverage_tensor,
                 distance_to_liq,
             ],
             dim=-1,
-        )  # (N, 6)
+        ).float()  # (N, 6); spec is float32 -- cast the stack so a new element cannot miss it
 
         obs_data = {"account_state": account_state}
 
@@ -518,6 +537,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         # 4. Apply slippage
         if self.slippage > 0:
+            # float32 draw, for the generator-stream reason in _sample_initial_cash. No
+            # cast: torch promotes the float64 price times this, bit-identically.
             noise = torch.empty(self._num_envs).uniform_(
                 1 - self.slippage, 1 + self.slippage, generator=self._rng
             )
@@ -564,7 +585,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         # 10. Build next observation (reuse already-computed PVs)
         obs_td = self._build_observation(new_prices, portfolio_values=new_pvs)
-        obs_td.set("reward", rewards.unsqueeze(-1))
+        # reward_spec is float32.
+        obs_td.set("reward", rewards.unsqueeze(-1).float())
         obs_td.set("terminated", terminated.unsqueeze(-1))
         obs_td.set("truncated", truncated.unsqueeze(-1))
         obs_td.set("done", done.unsqueeze(-1))
@@ -661,10 +683,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
             )
             new_fee = notional_new * self.transaction_fee
 
-            # Check sufficient balance (float32 needs larger tolerance than float64:
-            # scalar env uses 1e-9 with float64, but float32 division+multiplication
-            # round-trip can overshoot by up to ~1e-4 at balance=1000, so we use 1e-5)
-            can_afford = (margin_new + new_fee) <= self._balances * (1 + 1e-5)
+            can_afford = (margin_new + new_fee) <= self._balances * (1 + AFFORDABILITY_REL_TOL)
             final_open = open_mask & can_afford
 
             if final_open.any():

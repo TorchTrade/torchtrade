@@ -5,6 +5,8 @@ Runs both environments with identical configs and action sequences,
 comparing ALL observable state at every step. Any divergence is a bug.
 """
 
+import collections
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -18,6 +20,9 @@ from torchtrade.envs.offline import (
 )
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from tests.conftest import simple_feature_fn
+# One home for the equivalence tolerance: two copies in two files is the same drift hazard
+# this PR removed from AFFORDABILITY_REL_TOL, one level up.
+from tests.envs.offline.test_vec_scalar_equivalence import EQUIV_ATOL, EQUIV_RTOL
 
 TF_1MIN = TimeFrame(1, TimeFrameUnit.Minute)
 
@@ -31,6 +36,9 @@ def _make_sltp_pair(
     max_traj=40,
     include_hold=True,
     include_close=False,
+    trade_mode="fractional",
+    lock=False,
+    initial_cash=1000,
 ):
     """Create matched scalar and N=1 vectorized SLTP envs."""
     if sl_levels is None:
@@ -38,58 +46,46 @@ def _make_sltp_pair(
     if tp_levels is None:
         tp_levels = [0.05, 0.1]
 
+    common = dict(
+        leverage=leverage,
+        stoploss_levels=sl_levels,
+        takeprofit_levels=tp_levels,
+        include_hold_action=include_hold,
+        include_close_action=include_close,
+        initial_cash=initial_cash,
+        time_frames=[TF_1MIN],
+        window_sizes=[10],
+        execute_on=TF_1MIN,
+        transaction_fee=fee,
+        slippage=0.0,
+        seed=42,
+        max_traj_length=max_traj,
+        random_start=False,
+        trade_mode=trade_mode,
+        lock_position_until_sltp=lock,
+    )
+    # Ignored by the fractional path. 100.0 is $100 of notional; in quantity mode it is
+    # 100 *units*, ~$10,000 at these fixtures' ~$100 prices, which no leverage-1 balance can
+    # afford -- so that cell would open nothing and compare two idle envs.
+    common["quantity_per_trade"] = 100.0 if trade_mode == "notional" else 1.0
+
     scalar = SequentialTradingEnvSLTP(
-        df,
-        SequentialTradingEnvSLTPConfig(
-            leverage=leverage,
-            stoploss_levels=sl_levels,
-            takeprofit_levels=tp_levels,
-            include_hold_action=include_hold,
-            include_close_action=include_close,
-            initial_cash=1000,
-            time_frames=[TF_1MIN],
-            window_sizes=[10],
-            execute_on=TF_1MIN,
-            transaction_fee=fee,
-            slippage=0.0,
-            seed=42,
-            max_traj_length=max_traj,
-            random_start=False,
-        ),
-        simple_feature_fn,
+        df, SequentialTradingEnvSLTPConfig(**common), simple_feature_fn
     )
     vec = VectorizedSequentialTradingEnvSLTP(
-        df,
-        VectorizedSequentialTradingEnvSLTPConfig(
-            num_envs=1,
-            leverage=leverage,
-            stoploss_levels=sl_levels,
-            takeprofit_levels=tp_levels,
-            include_hold_action=include_hold,
-            include_close_action=include_close,
-            initial_cash=1000,
-            time_frames=[TF_1MIN],
-            window_sizes=[10],
-            execute_on=TF_1MIN,
-            transaction_fee=fee,
-            slippage=0.0,
-            seed=42,
-            max_traj_length=max_traj,
-            random_start=False,
-        ),
-        simple_feature_fn,
+        df, VectorizedSequentialTradingEnvSLTPConfig(num_envs=1, **common), simple_feature_fn
     )
     return scalar, vec
 
 
-def _compare_sltp_state(scalar, vec, step, label, atol=5e-4, rtol=1e-3):
+def _compare_sltp_state(scalar, vec):
     """Compare all observable state between scalar and vectorized SLTP envs.
 
     Returns list of (field, scalar_val, vec_val) mismatches.
     """
     mismatches = []
 
-    def check(field, s_val, v_val, atol=atol, rtol=rtol):
+    def check(field, s_val, v_val, atol=EQUIV_ATOL, rtol=EQUIV_RTOL):
         diff = abs(s_val - v_val)
         tol = atol + rtol * max(abs(s_val), abs(v_val))
         if diff > tol:
@@ -112,16 +108,11 @@ def _compare_sltp_state(scalar, vec, step, label, atol=5e-4, rtol=1e-3):
 
 def _run_sltp_sequence(
     df,
-    action_indices,
-    leverage=1,
-    fee=0.0,
-    sl_levels=None,
-    tp_levels=None,
-    max_traj=40,
+    action_indices=None,
     label="",
-    include_hold=True,
-    include_close=False,
     expect_action_type=None,
+    random_steps=None,
+    **pair_kwargs,
 ):
     """Run a sequence of actions through both envs and compare at every step.
 
@@ -129,26 +120,26 @@ def _run_sltp_sequence(
         expect_action_type: if given, the run must actually record this action type
             (e.g. "sltp_sl"), so a scenario that stops reaching its bracket is reported
             rather than passing as a pair of idle envs.
+        random_steps: if given, `action_indices` is ignored and this many random actions
+            are drawn instead.
+        pair_kwargs: forwarded to `_make_sltp_pair`.
     """
-    scalar, vec = _make_sltp_pair(
-        df,
-        leverage=leverage,
-        fee=fee,
-        sl_levels=sl_levels,
-        tp_levels=tp_levels,
-        max_traj=max_traj,
-        include_hold=include_hold,
-        include_close=include_close,
-    )
+    scalar, vec = _make_sltp_pair(df, **pair_kwargs)
+    if random_steps is not None:
+        # Drawn after construction so the draw respects the real action-space size, which
+        # changes with leverage (shorts) and include_close.
+        action_indices = (
+            np.random.default_rng(0)
+            .integers(0, scalar.action_spec.n, size=random_steps)
+            .tolist()
+        )
     all_mismatches = []
 
     td_s = scalar.reset()
     td_v = vec.reset()
 
-    atol, rtol = 5e-4, 1e-3
-
     # Compare initial state
-    mismatches = _compare_sltp_state(scalar, vec, 0, label)
+    mismatches = _compare_sltp_state(scalar, vec)
     for field, s_val, v_val, diff in mismatches:
         all_mismatches.append(
             f"[{label}] Step 0 RESET {field}: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
@@ -169,7 +160,7 @@ def _run_sltp_sequence(
         r_s = td_s["next"]["reward"].item()
         r_v = td_v["next"]["reward"].squeeze().item()
         r_diff = abs(r_s - r_v)
-        if r_diff > atol + rtol * max(abs(r_s), abs(r_v)):
+        if r_diff > EQUIV_ATOL + EQUIV_RTOL * max(abs(r_s), abs(r_v)):
             all_mismatches.append(
                 f"[{label}] Step {step+1} reward: scalar={r_s:.6f} vec={r_v:.6f} diff={r_diff:.6f}"
             )
@@ -194,13 +185,13 @@ def _run_sltp_sequence(
             s_val = as_s[i].item()
             v_val = as_v[i].item()
             diff = abs(s_val - v_val)
-            if diff > atol + rtol * max(abs(s_val), abs(v_val)):
+            if diff > EQUIV_ATOL + EQUIV_RTOL * max(abs(s_val), abs(v_val)):
                 all_mismatches.append(
                     f"[{label}] Step {step+1} account_state[{name}]: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
                 )
 
         # Compare internal state
-        mismatches = _compare_sltp_state(scalar, vec, step + 1, label)
+        mismatches = _compare_sltp_state(scalar, vec)
         for field, s_val, v_val, diff in mismatches:
             all_mismatches.append(
                 f"[{label}] Step {step+1} {field}: scalar={s_val:.6f} vec={v_val:.6f} diff={diff:.6f}"
@@ -216,6 +207,22 @@ def _run_sltp_sequence(
             f"[{label}] path never exercised: no {expect_action_type} in "
             f"{scalar.history.action_types}"
         )
+
+    # The random runs cannot name one expected action type, so this is their version of the
+    # same guard, and it counts what the run exercised rather than how long a position sat
+    # open. Both weaker forms shipped: first cells that opened nothing at all, then cells
+    # that opened once and held for 99 steps with no bracket ever firing -- which a
+    # "position was open" check reads as maximally healthy. Healthy cells measure 8-38
+    # opens and 4-13 bracket exits, so these floors have room.
+    if random_steps is not None:
+        kinds = collections.Counter(scalar.history.action_types)
+        opens = kinds["long"] + kinds["short"]
+        brackets = kinds["sltp_sl"] + kinds["sltp_tp"]
+        if opens < 2 or brackets < 1:
+            all_mismatches.append(
+                f"[{label}] exercised {opens} opens and {brackets} bracket exits "
+                f"({dict(kinds)}) -- this cell is not reaching the SLTP machinery"
+            )
 
     scalar.close()
     vec.close()
@@ -457,8 +464,8 @@ class TestSLTPScalarVecEquivalenceTrending:
 # ============================================================================
 
 
-def _flat_df_with_wick(bar=20, low=None, high=None, n=50):
-    """Flat 100.0 series with one bar carrying a single excursion."""
+def _flat_df(bar=20, low=None, high=None, n=50):
+    """Flat 100.0 series, optionally with one bar carrying a single excursion."""
     prices = np.full(n, 100.0)
     df = pd.DataFrame({
         "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
@@ -495,7 +502,7 @@ class TestSLTPScalarVecEquivalenceEntryBar:
         exercised by the trend-based cases above.
         """
         crash_bar = 20
-        df = _flat_df_with_wick(bar=crash_bar, low=wick_low, high=wick_high)
+        df = _flat_df(bar=crash_bar, low=wick_low, high=wick_high)
 
         # reset caches bar 10 (window_sizes=[10]), so step k executes at bar 10+k, and
         # the position opens one bar before the wick.
@@ -519,7 +526,7 @@ class TestSLTPScalarVecEquivalenceEntryBar:
         must NOT pre-empt the switch (#292): the agent closed that long at close(N),
         so bar 20 belongs to the short, which its own SL at 102.5 then stops out.
         """
-        df = _flat_df_with_wick(bar=20, high=120.0)
+        df = _flat_df(bar=20, high=120.0)
         long_tight, short_tight = 1, 5
         actions = [0] * 5 + [long_tight] + [0] * 3 + [short_tight] + [0] * 2
 
@@ -553,7 +560,7 @@ class TestSLTPScalarVecEquivalenceCloseVsTrigger:
     def test_close_action_beats_an_exit_on_the_same_bar(
         self, leverage, sl_levels, tp_levels, wick_high, wick_low
     ):
-        df = _flat_df_with_wick(bar=20, high=wick_high, low=wick_low)
+        df = _flat_df(bar=20, high=wick_high, low=wick_low)
         # With the close action enabled every index shifts by one: 2 is the first long.
         long_action, close_action = 2, 1
         actions = [0] * 5 + [long_action] + [0] * 3 + [close_action] + [0] * 2
@@ -583,7 +590,7 @@ class TestSLTPScalarVecEquivalencePriority:
     """
 
     def test_liquidation_wins_over_the_bracket_in_both_envs(self):
-        df = _flat_df_with_wick(bar=20, low=88.0)
+        df = _flat_df(bar=20, low=88.0)
         # 10x long at 100: SL 95, liquidation 90.4, bar low 88 breaches both.
         long_action = 1
         actions = [0] * 5 + [long_action] + [0] * 4
@@ -595,6 +602,79 @@ class TestSLTPScalarVecEquivalencePriority:
             expect_action_type="liquidation",
         )
         assert not mismatches, "\n".join(mismatches)
+
+
+class TestSLTPScalarVecEquivalenceTradeModesAndLock:
+    """trade_mode and lock crossed with leverage -- the axes this harness never varied.
+
+    Randomised actions rather than another hand-picked sequence: hand-picked sequences are
+    what let the float32 divergence in #293 live here for months. Leverage is crossed in
+    because it is what scales an epsilon up onto a threshold and flips an episode.
+    """
+
+    @pytest.mark.parametrize("trade_mode", ["fractional", "notional", "quantity"])
+    @pytest.mark.parametrize("lock", [False, True], ids=["unlocked", "locked"])
+    @pytest.mark.parametrize("leverage", [1, 25], ids=["spot", "lev25"])
+    def test_random_actions_match(self, sample_ohlcv_df, trade_mode, lock, leverage):
+        if lock and leverage == 1:
+            pytest.skip(
+                "lock is inert in spot: with no shorts and no close action the agent can "
+                "only ask for long or hold, and re-asking for long is already a no-op via "
+                "the duplicate-action guard. Measured byte-identical to the unlocked twin "
+                "(same action histogram, balance and position), so this cell is a copy."
+            )
+        mismatches = _run_sltp_sequence(
+            sample_ohlcv_df,
+            leverage=leverage,
+            fee=0.001,
+            max_traj=120,
+            random_steps=100,
+            trade_mode=trade_mode,
+            lock=lock,
+            # The fixture only spans +5.9%/-1.7%, so the default +/-5% brackets can never
+            # trigger: as shipped this grid fired zero stops across all twelve cells.
+            sl_levels=[-0.005],
+            tp_levels=[0.005],
+            label=f"sltp-{trade_mode}-{'locked' if lock else 'unlocked'}-lev{leverage}",
+        )
+        assert not mismatches, "\n".join(mismatches)
+
+
+class TestAffordabilitySlackIsShared:
+    """Both engines must make the same accept/reject call on a marginal open (#293).
+
+    The vectorized envs carried 1e-5 slack against the scalar envs' 1e-9 -- a 10,000x
+    window in which one engine opened a position the other refused, leaving one in cash
+    and the other fully deployed at a zeroed balance. Reverting either side to 1e-5 left
+    the whole offline suite green.
+    """
+
+    @pytest.mark.parametrize("shortfall,expect_open", [
+        (1e-11, True),
+        (3e-6, False),
+    ], ids=["inside-slack", "inside-the-old-1e-5-window"])
+    def test_both_engines_make_the_same_call(self, shortfall, expect_open):
+        # Flat at 100, and _make_sltp_pair sizes notional mode at quantity_per_trade=100,
+        # so the cost is exact: 100 margin at leverage 1 plus 0.1 fee. Cash is set just
+        # short of that 100.1 by `shortfall`.
+        df = _flat_df(n=40)
+        scalar, vec = _make_sltp_pair(
+            df, leverage=1, fee=0.001, sl_levels=[-0.05], tp_levels=[0.1],
+            max_traj=20, trade_mode="notional", initial_cash=100.1 / (1 + shortfall),
+        )
+        td_s, td_v = scalar.reset(), vec.reset()
+        td_s["action"] = torch.tensor(1)
+        td_v["action"] = torch.tensor([1])
+        scalar.step(td_s)
+        vec.step(td_v)
+
+        opened = (scalar.position.position_size != 0, float(vec._position_sizes[0]) != 0)
+        assert opened == (expect_open, expect_open), (
+            f"shortfall={shortfall}: (scalar, vec) opened={opened}, expected both "
+            f"{expect_open} -- the engines disagree about what is affordable"
+        )
+        scalar.close()
+        vec.close()
 
 
 class TestSLTPScalarVecEquivalenceLiquidation:

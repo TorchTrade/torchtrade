@@ -22,10 +22,12 @@ from torchrl.data import Categorical
 
 from torchtrade.envs.core.common import TradeMode, validate_trade_mode
 from torchtrade.envs.offline.vectorized_sequential import (
+    MONEY_DTYPE,
     VectorizedSequentialTradingEnv,
     VectorizedSequentialTradingEnvConfig,
 )
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
+from torchtrade.envs.utils.fractional_sizing import AFFORDABILITY_REL_TOL
 
 _SIDE_MAP = {"long": 1, "short": -1, "close": 2}
 
@@ -84,10 +86,12 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
     """Vectorized sequential trading environment with stop-loss/take-profit support.
 
     .. warning::
-        **EXPERIMENTAL**: This environment passes extensive equivalence tests
-        against SequentialTradingEnvSLTP, but has not been battle-tested in
-        production training runs. Use with caution and verify results against
-        the scalar implementation.
+        **EXPERIMENTAL**: Not battle-tested in production training runs.
+
+        Equivalence against SequentialTradingEnvSLTP is verified by
+        tests/envs/offline/test_vec_sltp_scalar_equivalence.py across leverage,
+        trade_mode and lock_position_until_sltp: every binary outcome, and money
+        to within 1e-9.
 
     Processes N SLTP environments in a single _step() call using tensor
     operations. All state (balances, positions, SL/TP prices) is stored as
@@ -159,12 +163,14 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
             tp_list.append(tp if tp is not None else 0.0)
 
         self._action_sides = torch.tensor(sides_list, dtype=torch.long)
-        self._action_sl_pcts = torch.tensor(sl_list, dtype=torch.float32)
-        self._action_tp_pcts = torch.tensor(tp_list, dtype=torch.float32)
+        # float64 for the level itself, not the product (torch already promotes that):
+        # float32 holds 0.05 as 0.050000000745, putting the bracket at 104.999995.
+        self._action_sl_pcts = torch.tensor(sl_list, dtype=MONEY_DTYPE)
+        self._action_tp_pcts = torch.tensor(tp_list, dtype=MONEY_DTYPE)
 
         # SL/TP state tensors
-        self._sl_prices = torch.zeros(N)
-        self._tp_prices = torch.zeros(N)
+        self._sl_prices = torch.zeros(N, dtype=MONEY_DTYPE)
+        self._tp_prices = torch.zeros(N, dtype=MONEY_DTYPE)
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset environments, including SL/TP state."""
@@ -200,6 +206,8 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         # 2. Save bar N close as trade prices (with slippage)
         trade_prices = self._base_tensor[self._step_indices, 3].clone()
         if self.slippage > 0:
+            # float32 draw, for the generator-stream reason in _sample_initial_cash. No
+            # cast: torch promotes the float64 price times this, bit-identically.
             noise = torch.empty(N).uniform_(
                 1 - self.slippage, 1 + self.slippage, generator=self._rng
             )
@@ -242,7 +250,8 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
         # 9. Build observation from bar N+1
         obs_td = self._build_observation(new_close, portfolio_values=new_pvs)
-        obs_td.set("reward", rewards.unsqueeze(-1))
+        # reward_spec is float32.
+        obs_td.set("reward", rewards.unsqueeze(-1).float())
         obs_td.set("terminated", terminated.unsqueeze(-1))
         obs_td.set("truncated", truncated.unsqueeze(-1))
         obs_td.set("done", done.unsqueeze(-1))
@@ -448,8 +457,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
             margin_new = notional / leverage
             new_fee = notional * self.transaction_fee
 
-            # Float32 tolerance for can_afford check
-            can_afford = (margin_new + new_fee) <= self._balances * (1 + 1e-5)
+            can_afford = (margin_new + new_fee) <= self._balances * (1 + AFFORDABILITY_REL_TOL)
             final_open = open_mask & can_afford
 
             if final_open.any():

@@ -32,6 +32,7 @@ from torchtrade.envs.utils.sltp_helpers import (
     calculate_short_bracket_prices,
 )
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
+from torchtrade.envs.utils.fractional_sizing import AFFORDABILITY_REL_TOL
 
 
 @dataclass
@@ -551,8 +552,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         margin_required = notional_value / self.leverage
         fee = abs(notional_value) * self.transaction_fee
 
-        # Check sufficient balance (relative tolerance for float round-trip errors)
-        if margin_required + fee > self.balance * (1 + 1e-9):
+        if margin_required + fee > self.balance * (1 + AFFORDABILITY_REL_TOL):
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Deduct fee and margin

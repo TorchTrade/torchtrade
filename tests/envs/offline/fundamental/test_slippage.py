@@ -9,7 +9,14 @@ These tests verify the bounds are respected and slippage is actually applied.
 
 import pytest
 import pandas as pd
+import torch
 from torchtrade.envs.offline.sequential import SequentialTradingEnv, SequentialTradingEnvConfig
+from torchtrade.envs.offline import (
+    VectorizedSequentialTradingEnv,
+    VectorizedSequentialTradingEnvConfig,
+    VectorizedSequentialTradingEnvSLTP,
+    VectorizedSequentialTradingEnvSLTPConfig,
+)
 
 
 @pytest.fixture
@@ -346,6 +353,53 @@ class TestSlippageOnClose:
         unique_pnls = len(set([round(p, 2) for p in pnls]))
         assert unique_pnls > 5, \
             f"Only {unique_pnls} unique PnLs - close slippage not applied?"
+
+
+class TestVectorizedSlippage:
+    """The vectorized envs' slippage branch, which no test reached at all: raising on the
+    first line under `if self.slippage > 0:` left the whole suite green.
+
+    Bounds only, not equivalence against the scalar env: the scalar draws from the global
+    RNG (`_execute_trade_if_needed`, no `generator=`) and the vectorized env from its own
+    `self._rng`, so the two can never agree on a slipped price.
+    """
+
+    @pytest.mark.parametrize("env_cls,config_cls,extra", [
+        (VectorizedSequentialTradingEnv, VectorizedSequentialTradingEnvConfig,
+         {"action_levels": [-1, 0, 1]}),
+        (VectorizedSequentialTradingEnvSLTP, VectorizedSequentialTradingEnvSLTPConfig,
+         {"stoploss_levels": [-0.5], "takeprofit_levels": [0.5]}),
+    ], ids=["base", "sltp"])
+    def test_entry_price_respects_slippage_bounds(
+        self, constant_price_df, env_cls, config_cls, extra
+    ):
+        """Fills land inside the band, and every env draws its own noise.
+
+        No slippage=0 case: every cell of both equivalence files already runs the
+        vectorized env at slippage=0 against the scalar env's unslipped fill at 1e-9, so a
+        stray multiplier there fails 73 of them.
+        """
+        n_envs, slippage, market = 16, 0.01, 100.0
+        env = env_cls(
+            constant_price_df,
+            config_cls(
+                num_envs=n_envs, execute_on="1Hour", time_frames=["1Hour"],
+                window_sizes=[5], initial_cash=10000, transaction_fee=0.0,
+                slippage=slippage, leverage=2, random_start=False, seed=7, **extra,
+            ),
+        )
+        td = env.reset()
+        # Index 2 opens a position in both action maps, though not the same side: long for
+        # [-1, 0, 1], short for the 1x1 SLTP map (0=hold, 1=long, 2=short).
+        td["action"] = torch.full((n_envs,), 2, dtype=torch.long)
+        env.step(td)
+
+        entries = env._entry_prices[env._position_sizes != 0]
+        assert entries.numel() > 0, "no env opened a position -- nothing was slipped"
+        assert torch.all(entries >= market * (1 - slippage))
+        assert torch.all(entries <= market * (1 + slippage))
+        # One shared draw broadcast to every env would sit inside the bounds and pass.
+        assert entries.unique().numel() > 1, "the noise is not per-env"
 
 
 if __name__ == "__main__":

@@ -328,6 +328,39 @@ class TestVecEnvEdgeCases:
 
         env.close()
 
+    def test_seeded_draws_stay_on_the_float32_stream(self, sample_ohlcv_df):
+        """MONEY_DTYPE widened the money state; the RNG draws must not widen with it.
+
+        torch's uniform_ consumes more generator bits at float64, so drawing initial cash
+        (or slippage noise) straight into MONEY_DTYPE shifts every subsequent draw and
+        silently changes the trajectory a saved seed reproduces -- seed 42 moved from
+        [1382.27, 1415.00, 882.86, 1459.31] to [558.15, 562.91, 623.59, 552.58] while
+        every test stayed green, because they only assert the values land inside the range.
+
+        Pinned against a reconstructed float32 stream rather than hardcoded numbers, so it
+        keeps its meaning if the range or env count changes.
+        """
+        n, lo, hi, seed = 4, 500.0, 1500.0, 42
+        env = VectorizedSequentialTradingEnv(
+            sample_ohlcv_df,
+            VectorizedSequentialTradingEnvConfig(
+                num_envs=n, initial_cash=(lo, hi), time_frames=[TF_1MIN],
+                window_sizes=[10], execute_on=TF_1MIN, max_traj_length=20,
+                random_start=False, seed=seed,
+            ),
+            simple_feature_fn,
+        )
+        env.reset()
+
+        generator = torch.Generator().manual_seed(seed)
+        expected = torch.empty(n).uniform_(lo, hi, generator=generator)
+        assert torch.equal(env._balances.float(), expected), (
+            f"initial cash {env._balances.tolist()} != the float32 stream's "
+            f"{expected.tolist()} -- the draw widened to MONEY_DTYPE and every saved seed "
+            "now reproduces a different trajectory"
+        )
+        env.close()
+
 
 # ============================================================================
 # FEE TESTS

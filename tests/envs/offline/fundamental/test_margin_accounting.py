@@ -11,6 +11,7 @@ Tests critical calculations that MUST be correct:
 
 import pytest
 import pandas as pd
+import torch
 from torchtrade.envs.offline.sequential import SequentialTradingEnv, SequentialTradingEnvConfig
 
 
@@ -594,6 +595,50 @@ class TestMultiTimeframeHandling:
         pv_multi = env_multi._get_portfolio_value()
         assert abs(pv_single - pv_multi) < 1, \
             f"Single TF PV {pv_single:.2f} != Multi TF {pv_multi:.2f}"
+
+
+class TestAffordabilitySlackOnScaleUp:
+    """Scaling up an existing position must respect AFFORDABILITY_REL_TOL.
+
+    An open from flat is algebraically pinned: it sizes from portfolio value and pays from
+    balance, and those are the same number while flat, so cost == pv * |action| and the
+    overshoot is ~1 ULP. Scaling up is not. It sizes the *delta* from portfolio value but
+    still pays from balance, and once a position is open those differ -- so the relative
+    shortfall is continuous in the price move since entry and sweeps straight through the
+    1e-9..1e-5 window that separated the scalar and vectorized envs before #293.
+
+    The base env's other two call sites are equivalent mutants (the vectorized env never
+    resizes in place -- it closes and reopens, so every env in open_mask is flat there).
+    This is the one that can drift, and at 1e-5 it accepts an open it cannot pay for and
+    logs "Negative balance detected" before clamping to zero.
+    """
+
+    def test_scale_up_respects_the_shared_slack(self):
+        drift = 1e-6
+        prices = [100.0 * (1 + drift) ** i for i in range(40)]
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=40, freq="1min"),
+            "open": prices, "high": prices, "low": prices, "close": prices,
+            "volume": [1000.0] * 40,
+        }, index=range(40))
+        env = SequentialTradingEnv(df, SequentialTradingEnvConfig(
+            action_levels=[0.0, 0.5, 1.0], leverage=2, initial_cash=1000.0,
+            time_frames=["1Min"], window_sizes=[10], execute_on="1Min",
+            transaction_fee=0.0, slippage=0.0, seed=42, max_traj_length=30,
+            random_start=False,
+        ))
+        td = env.reset()
+        for action in (1, 2):  # half size, then ask for full one bar later
+            td["action"] = torch.tensor(action)
+            td = env.step(td)["next"]
+
+        # Half size is ~10 units against ~20 for full; the scale-up must be refused.
+        assert env.position.position_size < 15.0, (
+            f"the scale-up was accepted at position_size={env.position.position_size!r}, "
+            f"balance={env.balance!r} -- the base env's affordability slack has drifted "
+            "above AFFORDABILITY_REL_TOL"
+        )
+        env.close()
 
 
 if __name__ == "__main__":
