@@ -1,5 +1,6 @@
 """State management dataclasses for TorchTrade environments."""
 
+import math
 from dataclasses import asdict, dataclass, field, fields
 from typing import Dict, List, Union
 
@@ -221,6 +222,17 @@ class HistoryTracker:
             Number of steps in the history
         """
         return len(self.base_prices)
+
+
+def advance_hold_counter_from_size(position: PositionState) -> None:
+    """advance_hold_counter for the offline envs, which own the signed size directly.
+
+    The live envs pass a direction read off the exchange (position_direction_from_status).
+    Offline, position.position_size IS the truth, so the conversion belongs here rather
+    than hand-rolled once per engine -- which is the drift this rule exists to stop.
+    """
+    size = position.position_size
+    advance_hold_counter(position, math.copysign(1.0, size) if size else 0.0)
 
 
 def advance_hold_counter(position: PositionState, direction: float) -> None:

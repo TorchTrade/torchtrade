@@ -230,6 +230,12 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         # portfolio values below, or reward and termination read balances that ignore it.
         self._apply_exit_checks(new_high, new_low)
 
+        # Age straight after the last thing that can move _position_sizes -- the same
+        # invariant the base env keeps by calling this right after _execute_trades. This
+        # subclass overrides _step, so without the call nothing ages the counters here and
+        # holding_time reads 0 forever (#275).
+        self._advance_hold_counters()
+
         # 7. Compute rewards: log(new_pv / old_pv)
         new_pvs = self._compute_portfolio_values(new_close)
         old_pvs = self._portfolio_values
@@ -239,11 +245,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         rewards = torch.where(new_pvs <= 0, torch.full_like(rewards, -10.0), rewards)
 
         self._portfolio_values = new_pvs
-
-        # Same canonical ageing as the base env (#275). This subclass inherits
-        # _hold_directions but overrides _step, so without this call the tensor is
-        # allocated and never read and the four offline engines count holds two ways.
-        self._advance_hold_counters()
 
         # 8. Compute termination signals
         terminated = new_pvs < (self._initial_pvs * self.bankrupt_threshold)
@@ -390,14 +391,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
             if has_position.any():
                 sides = sides.clone()
                 sides[has_position] = 0  # Force HOLD
-
-        # Hold: explicit hold or already in same direction
-        hold_mask = (
-            (sides == 0)
-            | ((sides == 1) & is_long)
-            | ((sides == -1) & is_short)
-        )
-        hold_with_pos = hold_mask & ~is_flat
 
         # Close action (side=2) with existing position
         close_action_mask = (sides == 2) & ~is_flat

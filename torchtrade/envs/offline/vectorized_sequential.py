@@ -594,7 +594,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         Called once per step from the post-trade state rather than inside the trade
         branches, for the reason core/state.py gives: a branch that forgets to age is
-        invisible, and _execute_trades has six of them plus three early returns. A refused
+        invisible, and every branch and early return in _execute_trades would need one. A refused
         resize is the case that proved it -- the position is still held, so it must still
         age, and the scalar env ages it because its call sits in _step (#274, #275).
         """
@@ -702,7 +702,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
                     new_qty = delta.abs()
                     total_qty = old_qty + new_qty
                     # Quantity-weighted, matching _increase_position_size.
-                    # clamp: flat lanes would divide by zero here and are masked out below
+                    # clamp: a lane that is flat AND has a zero target divides by zero here;
+                    # every such lane is outside final_inc and discarded below
                     weighted_entry = (
                         self._entry_prices * old_qty + execution_prices * new_qty
                     ) / total_qty.clamp(min=1e-12)

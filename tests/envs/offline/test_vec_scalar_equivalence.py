@@ -266,17 +266,27 @@ class TestScalarVecEquivalenceResize:
     two implementations coincide.
     """
 
-    LEVELS = [-1.0, -0.5, 0.0, 0.5, 1.0]
+    # Signed levels only where shorts exist: at leverage 1 the env clips negatives and
+    # warns, so a spot cell declaring them reads as an oversight.
+    SPOT_LEVELS = [0.0, 0.5, 1.0]
+    FUTURES_LEVELS = [-1.0, -0.5, 0.0, 0.5, 1.0]
 
-    @pytest.mark.parametrize("leverage,actions,label", [
-        (1, [4, 3, 4, 3, 4, 3], "oscillate-full-half"),
-        (5, [4, 3, 4, 3, 4, 3, 4, 3], "oscillate-levered"),
-        (5, [4, 3, 1, 0, 1, 3, 4, 0], "through-flat-and-short"),
-    ], ids=["oscillate-full-half", "oscillate-levered", "through-flat-and-short"])
-    def test_resize_matches_scalar(self, sample_ohlcv_df, leverage, actions, label):
+    @pytest.mark.parametrize("leverage,levels,actions", [
+        # same sequence spot and levered, so the cell pair isolates leverage
+        (1, SPOT_LEVELS, [2, 1, 2, 1, 2, 1]),
+        (5, FUTURES_LEVELS, [4, 3, 4, 3, 4, 3]),
+        # shorts resize through the same branches with every sign flipped: closed_qty,
+        # pnl and freed_margin all carry it. Nothing exercised that until this cell --
+        # the sequence it replaced refused one short resize for affordability and held
+        # the other inside the tolerance band, so both compared two idle engines.
+        (5, FUTURES_LEVELS, [0, 1, 0, 1]),
+        # open, decrease, close to flat, open short, flip, increase, flip
+        (5, FUTURES_LEVELS, [4, 3, 2, 1, 3, 4, 0]),
+    ], ids=["oscillate-spot", "oscillate-levered", "oscillate-short", "through-flat"])
+    def test_resize_matches_scalar(self, sample_ohlcv_df, leverage, levels, actions):
         mismatches = _run_sequence(
             sample_ohlcv_df, actions, leverage=leverage, fee=0.001,
-            action_levels=self.LEVELS, max_traj=60, label=f"resize-{label}",
+            action_levels=levels, max_traj=60, label=f"resize-lev{leverage}",
         )
         assert not mismatches, "\n".join(mismatches)
 
@@ -293,7 +303,8 @@ class TestScalarVecEquivalenceResize:
         that already contains the position; and a small increase is swallowed by the 2%
         tolerance band before affordability is ever consulted. The drifting price here is
         the shape TestAffordabilitySlackOnScaleUp uses: the delta is ~10 units against a
-        ~0.4 tolerance, so the refusal is genuinely about cost.
+        ~0.4 tolerance, so the refusal is genuinely about cost. (Same shape as
+        TestAffordabilitySlackOnScaleUp in fundamental/test_margin_accounting.py.)
         """
         drift, n = 1e-6, 40
         prices = [100.0 * (1 + drift) ** i for i in range(n)]
@@ -348,30 +359,34 @@ class TestScalarVecEquivalenceResize:
             "open": price, "high": price, "low": price, "close": price, "volume": 1000.0,
         }, index=range(n))
         scalar, vec = _make_pair(
-            df, leverage=1, fee=fee, action_levels=self.LEVELS, max_traj=20
+            df, leverage=1, fee=fee, action_levels=self.SPOT_LEVELS, max_traj=20
         )
         td_s, td_v = scalar.reset(), vec.reset()
-        td_s["action"] = torch.tensor(4)  # full
-        td_v["action"] = torch.tensor([4])
+        td_s["action"] = torch.tensor(2)  # full
+        td_v["action"] = torch.tensor([2])
         td_s, td_v = scalar.step(td_s)["next"], vec.step(td_v)["next"]
 
         opened_qty = scalar.position.position_size
         equity_before = scalar.balance + abs(opened_qty) * price
+        vec_equity_before = float(vec._balances[0]) + abs(float(vec._position_sizes[0])) * price
 
-        td_s["action"] = torch.tensor(3)  # half
-        td_v["action"] = torch.tensor([3])
+        td_s["action"] = torch.tensor(1)  # half
+        td_v["action"] = torch.tensor([1])
         scalar.step(td_s)
         vec.step(td_v)
 
         # At a flat price the only cost of halving is the fee on the half being closed.
         expected_fee = abs(opened_qty - scalar.position.position_size) * price * fee
-        equity_after = scalar.balance + abs(scalar.position.position_size) * price
-        charged = equity_before - equity_after
-        assert abs(charged - expected_fee) < 1e-6, (
-            f"halving charged {charged:.6f}, expected {expected_fee:.6f} -- that is not "
-            "a delta trade"
-        )
-        assert abs(float(vec._position_sizes[0]) - scalar.position.position_size) < 1e-9
+        for name, equity_before_, balance, size in (
+            ("scalar", equity_before, scalar.balance, scalar.position.position_size),
+            ("vec", vec_equity_before, float(vec._balances[0]),
+             float(vec._position_sizes[0])),
+        ):
+            charged = equity_before_ - (balance + abs(size) * price)
+            assert abs(charged - expected_fee) < 1e-6, (
+                f"{name} halving charged {charged:.6f}, expected {expected_fee:.6f} -- "
+                "that is not a delta trade"
+            )
         scalar.close()
         vec.close()
 

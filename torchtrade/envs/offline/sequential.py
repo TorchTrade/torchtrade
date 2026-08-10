@@ -12,7 +12,6 @@ Key Features:
     - Fractional position sizing with configurable action levels
 """
 
-import math
 import warnings
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union, Callable
@@ -28,7 +27,7 @@ from torchrl.data import Categorical
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.core.state import (
     HistoryTracker,
-    advance_hold_counter,
+    advance_hold_counter_from_size,
     binarize_action_type,
 )
 from torchtrade.envs.core.default_rewards import log_return_reward
@@ -541,8 +540,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         # a position that was resized every bar reported holding_time=1 forever. Deriving
         # the direction from the post-trade size means every path is covered by
         # construction, including paths added later.
-        size = self.position.position_size
-        advance_hold_counter(self.position, math.copysign(1.0, size) if size else 0.0)
+        advance_hold_counter_from_size(self.position)
 
         # Update position flag based on actual position size
         if trade_info["executed"]:

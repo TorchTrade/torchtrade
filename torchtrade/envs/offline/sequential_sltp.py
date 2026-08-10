@@ -16,8 +16,6 @@ Key Features:
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
 
-import math
-
 import pandas as pd
 import torch
 from tensordict import TensorDictBase
@@ -28,7 +26,10 @@ from torchtrade.envs.offline.sequential import (
     SequentialTradingEnvConfig,
 )
 from torchtrade.envs.core.common import TradeMode, validate_trade_mode
-from torchtrade.envs.core.state import advance_hold_counter, binarize_action_type
+from torchtrade.envs.core.state import (
+    advance_hold_counter_from_size,
+    binarize_action_type,
+)
 from torchtrade.envs.utils.sltp_helpers import (
     calculate_long_bracket_prices,
     calculate_short_bracket_prices,
@@ -398,8 +399,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         # Same canonical aging as SequentialTradingEnv (#275): one call per step off the
         # post-trade size, so no exit path can be added later without ageing correctly.
-        size = self.position.position_size
-        advance_hold_counter(self.position, math.copysign(1.0, size) if size else 0.0)
+        advance_hold_counter_from_size(self.position)
 
         # Update position flag based on actual position size
         if trade_info["executed"]:
