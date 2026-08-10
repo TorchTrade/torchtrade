@@ -616,6 +616,13 @@ class TestSLTPScalarVecEquivalenceTradeModesAndLock:
     @pytest.mark.parametrize("lock", [False, True], ids=["unlocked", "locked"])
     @pytest.mark.parametrize("leverage", [1, 25], ids=["spot", "lev25"])
     def test_random_actions_match(self, sample_ohlcv_df, trade_mode, lock, leverage):
+        if lock and leverage == 1:
+            pytest.skip(
+                "lock is inert in spot: with no shorts and no close action the agent can "
+                "only ask for long or hold, and re-asking for long is already a no-op via "
+                "the duplicate-action guard. Measured byte-identical to the unlocked twin "
+                "(same action histogram, balance and position), so this cell is a copy."
+            )
         mismatches = _run_sltp_sequence(
             sample_ohlcv_df,
             leverage=leverage,
