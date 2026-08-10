@@ -7,8 +7,19 @@ SYMBOL_QUERY_MAP = {
     "XRP": "XRP", "ADA": "Cardano",
 }
 
-# Longest market question rendered into the model's context, per market.
-_MAX_QUESTION_CHARS = 140
+# Longest free-text field rendered into the model's context, per field.
+_MAX_TEXT_CHARS = 140
+
+
+def _one_line(text: str) -> str:
+    """Collapse text to a single capped line before it enters the model context.
+
+    Every free-text field the tool renders goes through this. A newline lets one
+    field occupy two numbered rows and fabricate a market the model then treats
+    as tool-verified; the cap stops one field flooding the prompt.
+    """
+    text = " ".join(text.split())
+    return text[:_MAX_TEXT_CHARS] + "…" if len(text) > _MAX_TEXT_CHARS else text
 
 
 def symbol_to_query(symbol: str) -> str:
@@ -106,7 +117,7 @@ class PolymarketTool(Tool):
 
     def _scan(self, keyword: str) -> list:
         """Fetch matching markets. Thin seam over the live-env Gamma scanner,
-        which already owns the retry policy, parsing and filtering."""
+        which already owns the fetch, retry, parsing and filtering machinery."""
         # lazy: torchtrade.actor.tools imports without the live-env stack
         from torchtrade.envs.live.polymarket import market_scanner as ms
 
@@ -118,15 +129,15 @@ class PolymarketTool(Tool):
             # Scanner defaults to a 24h floor; an intraday agent wants exactly
             # the soon-resolving markets that floor hides.
             min_time_to_resolution_hours=0,
-            # Its 3x15s retry budget suits a ~5min live loop. The tool loop is
-            # sequential and blocks the collector's step, so spend far less.
+            # Far below the scanner's default budget: this call blocks a
+            # collector step, not a 5-minute live loop.
             timeout=self.timeout,
             retry_attempts=2,
         )
         return ms.MarketScanner(config).scan()
 
     def run(self, query: Optional[str] = None) -> str:
-        q = query or symbol_to_query(self.symbol)
+        q = _one_line(query or symbol_to_query(self.symbol))
         try:
             markets = self._scan(q)
         except Exception as exc:  # never raise into a live trading step
@@ -139,13 +150,8 @@ class PolymarketTool(Tool):
             return f"No Polymarket markets matched '{q}' (none open, or Gamma unavailable)."
         lines = [f"Prediction markets for '{q}':"]
         for i, m in enumerate(markets[: self.top_n], 1):
-            # Questions are user-authored: collapse whitespace so a newline
-            # cannot forge a second numbered row in the model's context.
-            question = " ".join(m.question.split())
-            if len(question) > _MAX_QUESTION_CHARS:
-                question = question[:_MAX_QUESTION_CHARS] + "…"
             lines.append(
-                f"{i}. {question} — "
+                f"{i}. {_one_line(m.question)} — "
                 f"YES {m.yes_price * 100:.1f}% · 24h vol ${m.volume_24h:,.0f}"
             )
         return "\n".join(lines)

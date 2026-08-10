@@ -179,7 +179,9 @@ Tool use requires `backend="vllm"` (the transformers backend can't halt at
 
 Prediction-market odds for the traded asset, from Polymarket's public Gamma API —
 free, no key, no account. It reuses the `MarketScanner` that backs
-`PolymarketBetEnv`, so it inherits that client's retry policy and filtering.
+`PolymarketBetEnv`, so it inherits that client's fetching, retry and filtering
+machinery — but sets its own budget and thresholds, which differ from the live
+env's (see below).
 
 ```python
 PolymarketTool(symbol="BTC/USD", top_n=5, min_volume_24h=10_000,
@@ -205,9 +207,10 @@ Four things to keep in mind:
 
 - **`min_volume_24h` / `min_liquidity` are a content filter, not just noise
   reduction.** Market questions are user-authored and land in the model's context
-  verbatim, so low-volume markets are the injection surface. The tool also
-  collapses whitespace in every question, because a newline would otherwise let
-  one market render as two numbered rows and fabricate a market. Lower these
+  verbatim, so low-volume markets are the injection surface. Every free-text
+  field the tool renders — market questions *and* the model's own `query` — is
+  collapsed to a single capped line, because a newline would otherwise let one
+  field render as a second numbered row and fabricate a market. Lower these
   floors deliberately.
 - **An empty result does not mean no markets exist.** `MarketScanner.scan()` logs
   and returns `[]` when the Gamma API is unreachable, so the tool cannot tell an
@@ -215,10 +218,12 @@ Four things to keep in mind:
   asserting an absence it never verified.
 - **The tool blocks the collection step.** `_resolve_tools` resolves tool calls
   sequentially across the batch, so per-call latency is serialised onto the
-  policy call inside `SyncDataCollector`/`env.rollout()`. The tool therefore
-  passes a tighter network budget than `PolymarketBetEnv` uses (`timeout=5.0`,
-  2 attempts ≈ 11s worst case, against the scanner's default ≈ 48s). Raise
-  `timeout` only if you understand that cost.
+  policy call inside `SyncDataCollector`/`env.rollout()`. The tool spends
+  `timeout=5.0` over 2 attempts — roughly 11s worst case, against the scanner's
+  default of roughly 48s. Budget that against **your** `execute_on` cadence, not
+  against `PolymarketBetEnv`'s: with `max_tool_iters=3` the worst case is ~33s
+  per conversation, which is comfortable on a `1Hour` step and most of the
+  budget on a `1Min` one.
 - **This is a live-path tool.** It returns markets that are open *now*, so using
   it during offline replay would show a historical episode present-day
   probabilities. Restrict it to live trading, as with `GoogleNewsTool`.
