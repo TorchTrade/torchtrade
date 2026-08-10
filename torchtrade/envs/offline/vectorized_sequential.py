@@ -594,9 +594,10 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         Called once per step from the post-trade state rather than inside the trade
         branches, for the reason core/state.py gives: a branch that forgets to age is
-        invisible, and every branch and early return in _execute_trades would need one. A refused
-        resize is the case that proved it -- the position is still held, so it must still
-        age, and the scalar env ages it because its call sits in _step (#274, #275).
+        invisible, and every branch and early return in _execute_trades would need one.
+        A refused resize is the case that proved it: the position is still held, so it
+        must still age, and the scalar env ages it because its call sits in _step
+        (#274, #275).
         """
         direction = self._position_sizes.sign()
         self._hold_counters = torch.where(
@@ -620,12 +621,14 @@ class VectorizedSequentialTradingEnv(EnvBase):
         - Tolerance-based holding (avoid churn from small price drift)
         - Long and short positions
         - Direction switches (long→short, short→long): close then reopen
+        - Same-direction resizes: trade only the delta (weighted-average entry on an
+          increase, entry untouched on a decrease)
         - Leverage-aware margin and fee calculations
         """
+        has_position = self._position_sizes != 0
+
         # Same action optimization (#187): if action unchanged and has position, hold
-        same_action = (action_values == self._prev_action_values) & (
-            self._position_sizes != 0
-        )
+        same_action = (action_values == self._prev_action_values) & has_position
 
         # Update prev action values
         self._prev_action_values.copy_(action_values)
@@ -658,7 +661,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
             min=POSITION_TOLERANCE_ABS
         )
         within_tol = (target_sizes - self._position_sizes).abs() < tolerance
-        hold_tol = need_trade & within_tol & (self._position_sizes != 0)
+        hold_tol = need_trade & within_tol & has_position
         need_trade = need_trade & ~hold_tol
 
         if not need_trade.any():
@@ -672,14 +675,13 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # need_trade that has anything to do -- an env that is flat and asked to stay flat
         # matches none of them, which is the correct no-op. Disjointness is what stops an
         # env being charged by two branches.
-        has_pos = self._position_sizes != 0
-        wants_pos = action_values != 0
+        wants_position = action_values != 0
         same_sign = self._position_sizes.sign() == target_sizes.sign()
 
-        is_resize = need_trade & has_pos & wants_pos & same_sign
-        is_switch = need_trade & has_pos & wants_pos & ~same_sign
-        is_close_to_flat = need_trade & has_pos & ~wants_pos
-        is_open_from_flat = need_trade & ~has_pos & wants_pos
+        is_resize = need_trade & has_position & wants_position & same_sign
+        is_switch = need_trade & has_position & wants_position & ~same_sign
+        is_close_to_flat = need_trade & has_position & ~wants_position
+        is_open_from_flat = need_trade & ~has_position & wants_position
 
         if is_resize.any():
             # Target is sized off the PRE-trade portfolio value, as in the scalar env.

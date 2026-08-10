@@ -302,9 +302,9 @@ class TestScalarVecEquivalenceResize:
         almost always affordable, because the target is derived from a portfolio value
         that already contains the position; and a small increase is swallowed by the 2%
         tolerance band before affordability is ever consulted. The drifting price here is
-        the shape TestAffordabilitySlackOnScaleUp uses: the delta is ~10 units against a
-        ~0.4 tolerance, so the refusal is genuinely about cost. (Same shape as
-        TestAffordabilitySlackOnScaleUp in fundamental/test_margin_accounting.py.)
+        the shape TestAffordabilitySlackOnScaleUp (fundamental/test_margin_accounting.py)
+        uses: the delta is ~10 units against a ~0.4 tolerance, so the refusal is
+        genuinely about cost.
         """
         drift, n = 1e-6, 40
         prices = [100.0 * (1 + drift) ** i for i in range(n)]
