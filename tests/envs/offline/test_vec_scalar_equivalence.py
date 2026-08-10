@@ -599,21 +599,32 @@ class TestActionOnTheBreachingBarIsNotDiscarded:
     the scalar skipped _execute_trade_if_needed entirely, the vectorized rewrote the
     action to 0.0.
 
-    That difference matters for what this pins. 0.0 IS the close action, so the vectorized
-    gate was a no-op for a close and only corrupted a switch -- a close-only test survives
-    it. The switch cell is the one that fails on both engines.
+    That difference decides what each cell can catch. 0.0 IS the close action, so zeroing
+    it changes nothing: restoring the vectorized gate fails only the switch cell, while
+    restoring the scalar gate fails both of its cells. The vectorized close cell is grid
+    completeness, not a killer.
 
-    Money: holding into the wick ends at 200. Closing on that same bar should end at
-    10000, and the gated code gives 200 -- a 98% difference that nothing tested, because
-    the liquidation equivalence cells submit the same action every step and so never act
-    on a liquidating bar.
+    Money: holding into the wick ends at 200, closing on that same bar at 10000 -- a 98%
+    difference that nothing tested, because the liquidation equivalence cells submit the
+    same action every step and so never act on a liquidating bar.
+
+    The hold cell is a control, and it is load-bearing: the step count below is coupled to
+    wick_liquidation_df's breach bar, and that fixture is now shared. Moving the breach
+    by five bars makes every other cell pass while asserting nothing, because the exit
+    never lands on the wick at all. The control fails loudly when that happens.
+
+    Note this suite does NOT fail against pre-PR code -- reverting the ordering moves the
+    liquidation off this step entirely. It pins the gate, not the ordering.
     """
 
     @pytest.mark.parametrize("is_vec", [False, True], ids=["scalar", "vectorized"])
-    @pytest.mark.parametrize("exit_action,expected_direction", [(1, 0.0), (0, -1.0)],
-                             ids=["close", "switch-to-short"])
+    @pytest.mark.parametrize("exit_action,expected_direction,expected_pv", [
+        (2, 0.0, 200.0),     # control: hold into the wick and it liquidates
+        (1, 0.0, 10000.0),   # close
+        (0, -1.0, 10000.0),  # switch to short
+    ], ids=["hold-liquidates", "close", "switch-to-short"])
     def test_action_survives_the_liquidation_on_the_same_bar(
-        self, wick_liquidation_df, is_vec, exit_action, expected_direction
+        self, wick_liquidation_df, is_vec, exit_action, expected_direction, expected_pv
     ):
         common = dict(
             action_levels=[-1.0, 0.0, 1.0], leverage=5, initial_cash=10000,
@@ -642,14 +653,13 @@ class TestActionOnTheBreachingBarIsNotDiscarded:
 
         # Portfolio value, not balance: the switch leaves a position open, so its balance
         # is 0.0 with the margin deducted, and asserting on balance fails correct code.
-        pv = (float(env._portfolio_values[0]) if is_vec
-              else env._get_portfolio_value(env._cached_base_features["close"]))
+        pv = float(env._portfolio_values[0]) if is_vec else env._get_portfolio_value()
         state = td["account_state"]
         direction = float(state[0][1] if is_vec else state[1])
 
-        assert pv == pytest.approx(10000.0), (
-            f"portfolio {pv:.2f}, expected 10000 -- the order filled at close(N)=100 "
-            "before the wick, so it cannot be discarded by the wick"
+        assert pv == pytest.approx(expected_pv), (
+            f"portfolio {pv:.2f}, expected {expected_pv} -- the order filled at "
+            "close(N)=100 before the wick, so the wick cannot discard it"
         )
         assert direction == expected_direction, (
             f"direction {direction}, expected {expected_direction} -- the action was "

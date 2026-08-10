@@ -515,19 +515,19 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # their observation doesn't matter since they'll be auto-reset)
         self._step_indices.clamp_(max=self._total_exec_times - 1)
 
+        # Bar N+1
+        new_high = self._base_tensor[self._step_indices, 1]
+        new_low = self._base_tensor[self._step_indices, 2]
+        new_prices = self._base_tensor[self._step_indices, 3]
+
         # Unconditional: the fill happens before bar N+1 exists (#292)
         self._execute_trades(action_values, trade_prices)
 
         # Bar N+1's wick, against whatever the trade left open
-        self._apply_liquidation(
-            self._base_tensor[self._step_indices, 1],  # intrabar high
-            self._base_tensor[self._step_indices, 2],  # intrabar low
-        )
+        self._apply_liquidation(new_high, new_low)
 
         self._advance_hold_counters()
 
-        # New prices for observation and reward
-        new_prices = self._base_tensor[self._step_indices, 3]
 
         # Compute portfolio values (mode-aware)
         new_pvs = self._compute_portfolio_values(new_prices)

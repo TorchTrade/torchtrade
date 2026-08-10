@@ -186,7 +186,8 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one step for all environments with SLTP timing.
 
-        SLTP timing differs from base: the sampler advances before the checks.
+        Same order as VectorizedSequentialTradingEnv since #281: the sampler
+        advances before the checks in both.
 
         The agent's action fills at close(N) and bar N+1 unfolds afterwards, so the
         action runs first and the bar is applied to the resulting position. Checking
@@ -231,7 +232,8 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         self._apply_exit_checks(new_high, new_low)
 
         # Age straight after the last thing that can move _position_sizes -- the same
-        # invariant the base env keeps by calling this right after _execute_trades. This
+        # invariant the base env keeps by calling this after _apply_liquidation, its own
+        # last position-moving step. This
         # subclass overrides _step, so without the call nothing ages the counters here and
         # holding_time reads 0 forever (#275).
         self._advance_hold_counters()
