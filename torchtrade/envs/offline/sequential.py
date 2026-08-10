@@ -12,6 +12,7 @@ Key Features:
     - Fractional position sizing with configurable action levels
 """
 
+import math
 import warnings
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union, Callable
@@ -541,7 +542,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         # the direction from the post-trade size means every path is covered by
         # construction, including paths added later.
         size = self.position.position_size
-        advance_hold_counter(self.position, 0.0 if size == 0 else (1.0 if size > 0 else -1.0))
+        advance_hold_counter(self.position, math.copysign(1.0, size) if size else 0.0)
 
         # Update position flag based on actual position size
         if trade_info["executed"]:

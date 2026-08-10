@@ -49,6 +49,13 @@ def _drive(env, actions):
     (10, [-1, 0, 1], [2, 2, 2, 1, 0, 0], [0, 1, 2, 3, 0, 1, 2]),
     # futures DIRECT flip: open long, hold, flip straight to short (no flat bar), hold
     (10, [-1, 0, 1], [2, 2, 0, 0], [0, 1, 2, 1, 2]),
+    # RESIZE every bar (#275): a half/full oscillation is one position all along, so it
+    # keeps ageing. Before the fix this reported 1 forever -- the scalar env incremented
+    # only in its two no-trade branches and the resize path never got one.
+    (5, [-1.0, -0.5, 0.0, 0.5, 1.0], [4, 3, 4, 3, 4], [0, 1, 2, 3, 4, 5]),
+    # resize, then a direct flip OUT of the resized position, then resize the new short:
+    # the flip cell above never leaves a resized position, so it cannot catch this.
+    (5, [-1.0, -0.5, 0.0, 0.5, 1.0], [4, 3, 1, 0], [0, 1, 2, 1, 2]),
 ])
 def test_sequential_holding_time_sequence(sample_ohlcv_df, leverage, action_levels, actions, expected):
     """The opening bar reads 1, holds increment, close resets to 0, a reopen restarts at 1."""
@@ -92,36 +99,3 @@ def test_sltp_holding_time_sequence(sample_ohlcv_df, leverage):
     seq = _drive(env, [1, 0, 0])
     assert seq == [0, 1, 2, 3]
     env.close()
-
-
-class TestHoldingTimeAcrossResize:
-    """A resized position keeps ageing -- it is the same position (#275).
-
-    account_state[3] is "steps since position opened". Both offline engines used to
-    hand-roll that: the scalar incremented it in the two no-trade branches only, so
-    _increase_position_size/_decrease_position_size never aged a position and a bar-by-bar
-    resize reported holding_time=1 forever; the vectorized env routed resizes through
-    close-then-reopen and reset it to 1 instead. Both now age once per step from the
-    post-trade direction, which is what advance_hold_counter has always specified.
-    """
-
-    LEVELS = [-1.0, -0.5, 0.0, 0.5, 1.0]
-
-    def _env(self, df, cls, cfg, **extra):
-        return cls(df, cfg(
-            action_levels=self.LEVELS, leverage=5, initial_cash=10000,
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)], window_sizes=[10],
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            transaction_fee=0.0, slippage=0.0, seed=42, max_traj_length=30,
-            random_start=False, **extra,
-        ), simple_feature_fn)
-
-    def test_resizing_every_bar_still_ages(self, sample_ohlcv_df):
-        """The exact shape #275 reports: alternate full/half and the counter must climb."""
-        env = self._env(sample_ohlcv_df, SequentialTradingEnv, SequentialTradingEnvConfig)
-        seq = _drive(env, [4, 3, 4, 3, 4])
-        assert seq == [0, 1, 2, 3, 4, 5], (
-            f"holding_time went {seq} -- a position resized every bar is still the same "
-            "position and must report cumulative age"
-        )
-        env.close()

@@ -273,13 +273,57 @@ class TestScalarVecEquivalenceResize:
         (5, [4, 3, 4, 3, 4, 3, 4, 3], "oscillate-levered"),
         (5, [4, 4, 3, 3, 4, 4, 3, 3], "gradual"),
         (5, [4, 3, 1, 0, 1, 3, 4, 0], "through-flat-and-short"),
-    ], ids=lambda v: v if isinstance(v, str) else None)
+    ], ids=["oscillate-full-half", "oscillate-levered", "gradual", "through-flat-and-short"])
     def test_resize_matches_scalar(self, sample_ohlcv_df, leverage, actions, label):
         mismatches = _run_sequence(
             sample_ohlcv_df, actions, leverage=leverage, fee=0.001,
             action_levels=self.LEVELS, max_traj=60, label=f"resize-{label}",
         )
         assert not mismatches, "\n".join(mismatches)
+
+    def test_a_refused_resize_still_ages_the_position(self):
+        """An increase the balance cannot afford must change nothing except the age.
+
+        This is the case that forced ageing out of the trade branches and into one call
+        per step: the position is still held, so it must still age, but no branch runs to
+        age it. An earlier version of this PR incremented inside the resize branch and got
+        this wrong in the vectorized env while the scalar env got it right.
+
+        At fee=0.05 and leverage 1, going 0.95 -> 1.0 costs more than the remaining
+        balance, so the trade is refused outright rather than partially filled.
+        """
+        price, n = 100.0, 40
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": price, "high": price, "low": price, "close": price, "volume": 1000.0,
+        }, index=range(n))
+        scalar, vec = _make_pair(
+            df, leverage=1, fee=0.05, action_levels=[0.0, 0.8, 0.95, 1.0], max_traj=20
+        )
+        td_s, td_v = scalar.reset(), vec.reset()
+        td_s["action"] = torch.tensor(2)  # 0.95
+        td_v["action"] = torch.tensor([2])
+        td_s, td_v = scalar.step(td_s)["next"], vec.step(td_v)["next"]
+        size_before, balance_before = scalar.position.position_size, scalar.balance
+
+        td_s["action"] = torch.tensor(3)  # 1.0 -- unaffordable
+        td_v["action"] = torch.tensor([3])
+        scalar.step(td_s)
+        vec.step(td_v)
+
+        assert scalar.position.position_size == size_before, "the resize was not refused"
+        assert scalar.balance == balance_before, "a refused resize must cost nothing"
+        assert scalar.position.hold_counter == 2, (
+            f"hold_counter={scalar.position.hold_counter} -- a refused resize leaves the "
+            "position held, so it must still age"
+        )
+        assert float(vec._position_sizes[0]) == size_before
+        assert int(vec._hold_counters[0]) == 2, (
+            f"vec hold_counter={int(vec._hold_counters[0])} -- the vectorized env stopped "
+            "ageing a position no branch touched"
+        )
+        scalar.close()
+        vec.close()
 
     def test_resize_charges_the_delta_fee_exactly(self):
         """Halving a position must cost the fee on the half, to the cent.

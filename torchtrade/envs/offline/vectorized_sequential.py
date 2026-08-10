@@ -526,11 +526,6 @@ class VectorizedSequentialTradingEnv(EnvBase):
                 self._entry_prices = torch.where(
                     liq_mask, self._zeros, self._entry_prices
                 )
-                self._hold_counters = torch.where(
-                    liq_mask,
-                    torch.zeros_like(self._hold_counters),
-                    self._hold_counters,
-                )
 
         # 3. Get current prices (trade execution prices)
         trade_prices = self._base_tensor[self._step_indices, 3].clone()
@@ -673,8 +668,10 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # this (_adjust_position_size -> _increase/_decrease vs close-then-open); the
         # vectorized env used to send everything down close-then-open, which pays a full
         # round trip of fees on a same-direction resize and throws the entry price away
-        # (#274). These four masks are disjoint and cover need_trade exactly, so no env
-        # can be charged by two branches.
+        # (#274). These four masks are disjoint, and together they cover every env in
+        # need_trade that has anything to do -- an env that is flat and asked to stay flat
+        # matches none of them, which is the correct no-op. Disjointness is what stops an
+        # env being charged by two branches.
         has_pos = self._position_sizes != 0
         wants_pos = action_values != 0
         same_sign = self._position_sizes.sign() == target_sizes.sign()
@@ -682,6 +679,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
         is_resize = need_trade & has_pos & wants_pos & same_sign
         is_switch = need_trade & has_pos & wants_pos & ~same_sign
         is_close_to_flat = need_trade & has_pos & ~wants_pos
+        is_open_from_flat = need_trade & ~has_pos & wants_pos
 
         if is_resize.any():
             # Target is sized off the PRE-trade portfolio value, as in the scalar env.
@@ -704,6 +702,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
                     new_qty = delta.abs()
                     total_qty = old_qty + new_qty
                     # Quantity-weighted, matching _increase_position_size.
+                    # clamp: flat lanes would divide by zero here and are masked out below
                     weighted_entry = (
                         self._entry_prices * old_qty + execution_prices * new_qty
                     ) / total_qty.clamp(min=1e-12)
@@ -714,6 +713,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
                     self._position_sizes[final_inc] = target_sizes[final_inc]
 
             if is_decrease.any():
+                # clamp: same reason as above -- flat lanes are discarded by is_decrease
                 frac_close = 1.0 - (
                     target_sizes.abs() / self._position_sizes.abs().clamp(min=1e-12)
                 )
@@ -749,7 +749,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
             self._entry_prices[close_mask] = 0.0
 
         # Open new positions: from flat, or the second half of a direction switch.
-        open_mask = is_switch | (need_trade & ~has_pos & wants_pos)
+        open_mask = is_switch | is_open_from_flat
         if open_mask.any():
             # Recalculate target with updated balance (after closing)
             pvs_new = self._compute_portfolio_values(execution_prices)
