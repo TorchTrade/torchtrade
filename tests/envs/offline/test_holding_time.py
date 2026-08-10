@@ -49,6 +49,10 @@ def _drive(env, actions):
     (10, [-1, 0, 1], [2, 2, 2, 1, 0, 0], [0, 1, 2, 3, 0, 1, 2]),
     # futures DIRECT flip: open long, hold, flip straight to short (no flat bar), hold
     (10, [-1, 0, 1], [2, 2, 0, 0], [0, 1, 2, 1, 2]),
+    # RESIZE every bar (#275): a half/full oscillation is one position all along, so it
+    # keeps ageing. Before the fix this reported 1 forever -- the scalar env incremented
+    # only in its two no-trade branches and the resize path never got one.
+    (5, [-1.0, -0.5, 0.0, 0.5, 1.0], [4, 3, 4, 3, 4], [0, 1, 2, 3, 4, 5]),
 ])
 def test_sequential_holding_time_sequence(sample_ohlcv_df, leverage, action_levels, actions, expected):
     """The opening bar reads 1, holds increment, close resets to 0, a reopen restarts at 1."""

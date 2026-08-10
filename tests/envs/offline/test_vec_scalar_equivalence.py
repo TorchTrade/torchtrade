@@ -208,8 +208,8 @@ class TestScalarVecEquivalenceIntermediateLevel:
     reverting that one line to float32 keeps the whole suite green. 0.1 is not exact:
     float32 holds it as 0.10000000149, putting a 1.5e-8 relative error into the notional.
 
-    Only the open from flat is compared. Resizing an existing position is where the two
-    engines genuinely disagree (#302), so this must not depend on that being settled.
+    Only the open from flat is compared here; resizing is covered by
+    TestScalarVecEquivalenceResize below.
     """
 
     def test_open_at_intermediate_level_matches_scalar(self):
@@ -244,6 +244,160 @@ class TestScalarVecEquivalenceIntermediateLevel:
             f"position_size scalar={s_size!r} vec={v_size!r} rel={rel:.3e} -- an "
             "intermediate action level is being rounded before it reaches the notional"
         )
+        scalar.close()
+        vec.close()
+
+
+# ============================================================================
+# PARTIAL RESIZE
+# ============================================================================
+
+
+class TestScalarVecEquivalenceResize:
+    """Changing an open position's size must trade only the delta in both engines (#274).
+
+    The vectorized env used to route every target change through close-then-reopen, so a
+    same-direction resize paid a full round trip of fees and threw away the entry price --
+    which also moves the liquidation price and unrealized_pnl_pct. Measured 3.46% of
+    portfolio over 8 steps at leverage 5.
+
+    This is the axis `action_levels` exists for and no cell ever used: with the default
+    {-1, 0, 1} every action is flat-or-full, so the resize branch is unreachable and the
+    two implementations coincide.
+    """
+
+    # Signed levels only where shorts exist: at leverage 1 the env clips negatives and
+    # warns, so a spot cell declaring them reads as an oversight.
+    SPOT_LEVELS = [0.0, 0.5, 1.0]
+    FUTURES_LEVELS = [-1.0, -0.5, 0.0, 0.5, 1.0]
+
+    @pytest.mark.parametrize("leverage,levels,actions", [
+        # same sequence spot and levered, so the cell pair isolates leverage
+        (1, SPOT_LEVELS, [2, 1, 2, 1, 2, 1]),
+        (5, FUTURES_LEVELS, [4, 3, 4, 3, 4, 3]),
+        # shorts resize through the same branches with every sign flipped: closed_qty,
+        # pnl and freed_margin all carry it. Nothing exercised that until this cell --
+        # the sequence it replaced refused one short resize for affordability and held
+        # the other inside the tolerance band, so both compared two idle engines.
+        (5, FUTURES_LEVELS, [0, 1, 0, 1]),
+        # open, decrease, close to flat, open short, flip, increase, flip
+        (5, FUTURES_LEVELS, [4, 3, 2, 1, 3, 4, 0]),
+        # 0.5 -> 0.505 is a 1% target change: inside POSITION_TOLERANCE_PCT while a
+        # position is open. Both engines drop that step before classifying it, so the
+        # canonical ageing call is the only thing that ages the position -- and nothing
+        # else in the suite ever enters that branch holding anything. Re-adding either
+        # engine's removed `hold_counter += 1` there passed all 691 offline tests.
+        (5, [0.0, 0.5, 0.505, 1.0], [1, 2, 2, 1, 3]),
+    ], ids=["oscillate-spot", "oscillate-levered", "oscillate-short", "through-flat",
+            "tolerance-hold"])
+    def test_resize_matches_scalar(self, sample_ohlcv_df, leverage, levels, actions):
+        mismatches = _run_sequence(
+            sample_ohlcv_df, actions, leverage=leverage, fee=0.001,
+            action_levels=levels, max_traj=60, label=f"resize-lev{leverage}",
+        )
+        assert not mismatches, "\n".join(mismatches)
+
+    def test_an_unaffordable_increase_changes_nothing_but_the_age(self):
+        """An increase the balance cannot pay for must be refused whole, and still age.
+
+        This is the case that forced ageing out of the trade branches into one call per
+        step: the position is still held, so it must still age, but no trade branch runs
+        to age it. An earlier version of this PR incremented inside the resize branch and
+        got exactly this wrong in the vectorized env while the scalar env got it right.
+
+        Reaching the affordability path takes care. Scaling up under fractional sizing is
+        almost always affordable, because the target is derived from a portfolio value
+        that already contains the position; and a small increase is swallowed by the 2%
+        tolerance band before affordability is ever consulted. The drifting price here is
+        the shape TestAffordabilitySlackOnScaleUp (fundamental/test_margin_accounting.py)
+        uses: the delta is ~10 units against a ~0.4 tolerance, so the refusal is
+        genuinely about cost.
+        """
+        drift, n = 1e-6, 40
+        prices = [100.0 * (1 + drift) ** i for i in range(n)]
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": prices, "high": prices, "low": prices, "close": prices,
+            "volume": [1000.0] * n,
+        }, index=range(n))
+        scalar, vec = _make_pair(
+            df, leverage=2, fee=0.0, action_levels=[0.0, 0.5, 1.0], max_traj=20
+        )
+        td_s, td_v = scalar.reset(), vec.reset()
+        td_s["action"] = torch.tensor(1)  # half
+        td_v["action"] = torch.tensor([1])
+        td_s, td_v = scalar.step(td_s)["next"], vec.step(td_v)["next"]
+        size_before, balance_before = scalar.position.position_size, scalar.balance
+
+        td_s["action"] = torch.tensor(2)  # full -- costs more than the balance
+        td_v["action"] = torch.tensor([2])
+        scalar.step(td_s)
+        vec.step(td_v)
+
+        for name, size, balance, held in (
+            ("scalar", scalar.position.position_size, scalar.balance,
+             scalar.position.hold_counter),
+            ("vec", float(vec._position_sizes[0]), float(vec._balances[0]),
+             int(vec._hold_counters[0])),
+        ):
+            assert size == size_before, f"{name} filled an unaffordable increase"
+            assert balance == balance_before, f"{name} paid for a refused increase"
+            assert held == 2, (
+                f"{name} hold_counter={held} -- a refused increase leaves the position "
+                "held, so it must still age"
+            )
+        scalar.close()
+        vec.close()
+
+    def test_resize_charges_the_delta_fee_exactly(self):
+        """Halving a position must cost the fee on the delta it traded, to the cent.
+
+        Precisely: fee == |change in size| * price * rate. It pins the charge against the
+        size actually reached, not that the size reached was the right target -- any target
+        error lights up dozens of tests elsewhere, so that division of labour is deliberate.
+
+        The equivalence cells above compare the two engines, so they stay green if BOTH
+        regress to close-and-reopen together. This pins the absolute number instead, and
+        pins it tightly: an earlier version of this test asserted only "cost < 1.1% of
+        base", which a doubled fee on the closed half slipped straight through.
+
+        Flat prices so the expectation is exact arithmetic with no PnL term.
+        """
+        price, cash, fee = 100.0, 10000.0, 0.01
+        n = 40
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+            "open": price, "high": price, "low": price, "close": price, "volume": 1000.0,
+        }, index=range(n))
+        scalar, vec = _make_pair(
+            df, leverage=1, fee=fee, action_levels=self.SPOT_LEVELS, max_traj=20
+        )
+        td_s, td_v = scalar.reset(), vec.reset()
+        td_s["action"] = torch.tensor(2)  # full
+        td_v["action"] = torch.tensor([2])
+        td_s, td_v = scalar.step(td_s)["next"], vec.step(td_v)["next"]
+
+        opened_qty = scalar.position.position_size
+        equity_before = scalar.balance + abs(opened_qty) * price
+        vec_equity_before = float(vec._balances[0]) + abs(float(vec._position_sizes[0])) * price
+
+        td_s["action"] = torch.tensor(1)  # half
+        td_v["action"] = torch.tensor([1])
+        scalar.step(td_s)
+        vec.step(td_v)
+
+        # At a flat price the only cost of halving is the fee on the half being closed.
+        expected_fee = abs(opened_qty - scalar.position.position_size) * price * fee
+        for name, equity_before_, balance, size in (
+            ("scalar", equity_before, scalar.balance, scalar.position.position_size),
+            ("vec", vec_equity_before, float(vec._balances[0]),
+             float(vec._position_sizes[0])),
+        ):
+            charged = equity_before_ - (balance + abs(size) * price)
+            assert abs(charged - expected_fee) < 1e-6, (
+                f"{name} halving charged {charged:.6f}, expected {expected_fee:.6f} -- "
+                "that is not a delta trade"
+            )
         scalar.close()
         vec.close()
 

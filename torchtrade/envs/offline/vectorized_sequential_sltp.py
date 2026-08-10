@@ -230,6 +230,12 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         # portfolio values below, or reward and termination read balances that ignore it.
         self._apply_exit_checks(new_high, new_low)
 
+        # Age straight after the last thing that can move _position_sizes -- the same
+        # invariant the base env keeps by calling this right after _execute_trades. This
+        # subclass overrides _step, so without the call nothing ages the counters here and
+        # holding_time reads 0 forever (#275).
+        self._advance_hold_counters()
+
         # 7. Compute rewards: log(new_pv / old_pv)
         new_pvs = self._compute_portfolio_values(new_close)
         old_pvs = self._portfolio_values
@@ -292,11 +298,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
                 self._entry_prices = torch.where(
                     liq_mask, self._zeros, self._entry_prices
                 )
-                self._hold_counters = torch.where(
-                    liq_mask,
-                    torch.zeros_like(self._hold_counters),
-                    self._hold_counters,
-                )
                 # Note: SL/TP are NOT cleared on liquidation, matching scalar
                 # env behavior. Stale values are harmless: the trigger masks
                 # below gate on can_trigger (via has_position) AND is_long/
@@ -356,11 +357,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
                 self._entry_prices = torch.where(
                     sltp_trigger, self._zeros, self._entry_prices
                 )
-                self._hold_counters = torch.where(
-                    sltp_trigger,
-                    torch.zeros_like(self._hold_counters),
-                    self._hold_counters,
-                )
                 self._sl_prices = torch.where(
                     sltp_trigger, self._zeros, self._sl_prices
                 )
@@ -396,15 +392,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
                 sides = sides.clone()
                 sides[has_position] = 0  # Force HOLD
 
-        # Hold: explicit hold or already in same direction
-        hold_mask = (
-            (sides == 0)
-            | ((sides == 1) & is_long)
-            | ((sides == -1) & is_short)
-        )
-        hold_with_pos = hold_mask & ~is_flat
-        self._hold_counters[hold_with_pos] += 1
-
         # Close action (side=2) with existing position
         close_action_mask = (sides == 2) & ~is_flat
 
@@ -428,7 +415,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
             self._balances.clamp_(min=0.0)
             self._position_sizes[close_mask] = 0.0
             self._entry_prices[close_mask] = 0.0
-            self._hold_counters[close_mask] = 0
             # Note: SL/TP NOT cleared here, matching scalar env behavior.
             # Stale values are harmless (guarded by has_position).
             # For switches, new brackets are set in the open section below.
@@ -465,9 +451,6 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
                 self._balances.clamp_(min=0.0)
                 self._position_sizes[final_open] = new_sizes[final_open]
                 self._entry_prices[final_open] = trade_prices[final_open]
-                # The bar a position OPENS on is holding_time=1, not 0 (matches the
-                # scalar SequentialTradingEnvSLTP / advance_hold_counter canonical rule).
-                self._hold_counters[final_open] = 1
 
                 # Set bracket prices: entry * (1 + pct)
                 # E.g. Long entry=100, sl_pct=-0.05 → sl_price=95
