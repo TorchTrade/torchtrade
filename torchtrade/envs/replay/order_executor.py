@@ -4,6 +4,8 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, Optional
 
+from torchtrade.envs.utils.sltp_helpers import gap_aware_fill
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,6 +78,7 @@ class ReplayOrderExecutor:
 
         high = float(ohlc["high"])
         low = float(ohlc["low"])
+        open_price = float(ohlc["open"])
 
         # Check SL first (pessimistic -- matching offline env)
         sl_triggered = False
@@ -95,7 +98,14 @@ class ReplayOrderExecutor:
 
         # SL wins over TP (pessimistic)
         if sl_triggered:
-            self._close_at_price(self.sl_price)
+            # A bar that GAPPED past the stop fills at the open, not the stop (#280).
+            # Take-profit is a limit order and stays at its bracket.
+            self._close_at_price(
+                gap_aware_fill(
+                    self.sl_price, open_price,
+                    is_long=self.position_qty > 0, is_stop=True,
+                )
+            )
         elif tp_triggered:
             self._close_at_price(self.tp_price)
 

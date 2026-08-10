@@ -220,6 +220,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         self._step_indices.clamp_(max=self._total_exec_times - 1)
 
         # 4. Get bar N+1 OHLCV for trigger checks
+        new_open = self._base_tensor[self._step_indices, 0]
         new_high = self._base_tensor[self._step_indices, 1]
         new_low = self._base_tensor[self._step_indices, 2]
         new_close = self._base_tensor[self._step_indices, 3]
@@ -229,7 +230,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
         # 6. Bar N+1, against whatever each env holds after the action. Must precede the
         # portfolio values below, or reward and termination read balances that ignore it.
-        self._apply_exit_checks(new_high, new_low)
+        self._apply_exit_checks(new_high, new_low, new_open)
 
         # Age straight after the last thing that can move _position_sizes -- the same
         # invariant the base env keeps by calling this after _apply_liquidation, its own
@@ -269,6 +270,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         self,
         new_high: torch.Tensor,
         new_low: torch.Tensor,
+        new_open: torch.Tensor,
     ) -> None:
         """Close positions whose bar range hit liquidation or a bracket."""
         leverage = float(self.config.leverage)
@@ -309,10 +311,18 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
             sltp_trigger = sl_trigger | tp_trigger
             if sltp_trigger.any():
-                # Close at bracket price (not market price)
-                exec_price = torch.where(
-                    sl_trigger, self._sl_prices, self._tp_prices
+                # A stop is a market order once touched, so a bar that GAPPED past it
+                # fills at the open, not at the stop (#280). A take-profit is a limit
+                # order and is deliberately NOT gap-adjusted -- chasing a favourable gap
+                # would make the backtest optimistic, against this module's stated bias.
+                # min/max self-selects: a bar that merely wicks through has its open
+                # beyond the bracket and returns the bracket unchanged.
+                stop_fill = torch.where(
+                    is_long,
+                    torch.minimum(new_open, self._sl_prices),
+                    torch.maximum(new_open, self._sl_prices),
                 )
+                exec_price = torch.where(sl_trigger, stop_fill, self._tp_prices)
 
                 pnl = (exec_price - self._entry_prices) * self._position_sizes
                 close_notional = (self._position_sizes * exec_price).abs()
