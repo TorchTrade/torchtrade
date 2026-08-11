@@ -371,11 +371,7 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
 
             close_price = ohlcv_base_values["close"]
 
-            # Liquidation outranks the brackets; the helper is a no-op at leverage 1.
-            trigger_result = (
-                self._check_liquidation_in_rollout(ohlcv_base_values)
-                or self._check_sltp_triggers(ohlcv_base_values)
-            )
+            trigger_result = self._apply_bar_exits(ohlcv_base_values)
             # One append per bar, exit or not: an exit leaves the position flat, so
             # compute_return ignores this price and reads the balance, which already
             # holds the realised fill.
@@ -390,49 +386,6 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
             obs_dict = self.sampler.get_observation(self.current_timestamp)
 
         return trade_info, obs_dict
-
-    def _check_liquidation_in_rollout(self, ohlcv: dict) -> Optional[Dict]:
-        """Check if liquidation should trigger during rollout (futures only).
-
-        This is separate from the parent _check_liquidation() to return
-        trade_info directly for the rollout flow.
-
-        Args:
-            ohlcv: Dictionary with keys "open", "high", "low", "close", "volume"
-
-        Returns:
-            trade_info dict if liquidation triggered, None otherwise
-        """
-        if self.leverage == 1:
-            return None
-
-        if self.position.position_size == 0:
-            return None
-
-        if self.position.position_size > 0:
-            if ohlcv["low"] <= self.liquidation_price:
-                return self._execute_liquidation()
-        else:
-            if ohlcv["high"] >= self.liquidation_price:
-                return self._execute_liquidation()
-
-        return None
-
-    def _check_sltp_triggers(self, ohlcv: dict) -> Optional[Dict]:
-        """Fire a bracket during rollout, returning trade_info rather than a label.
-
-        The detection rule and the fill pricing both live on the parent (#316). This used
-        to re-implement both under a name one letter from the parent's, which is why #280
-        had to be fixed in two scalar places. The fork was verified identical to the
-        parent over 300k well-formed bars before deletion; the two could only ever part
-        on a bar whose close fell outside [low, high], which the sampler cannot produce.
-        """
-        trigger = self._check_sltp_trigger(ohlcv)
-        if trigger is None:
-            return None
-        return self._execute_sltp_close(
-            self._sltp_execution_price(trigger, ohlcv["open"]), trigger
-        )
 
     def _execute_sltp_action(
         self, side: Optional[str], sl_pct: Optional[float], tp_pct: Optional[float], base_price: float

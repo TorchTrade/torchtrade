@@ -298,17 +298,29 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         return None
 
-    def _sltp_execution_price(self, trigger: str, open_price: float) -> float:
-        """Price a fired bracket. Shared so a fill rule cannot be fixed in only one place.
+    def _apply_bar_exits(self, ohlcv: dict) -> Optional[Dict]:
+        """Apply a bar to the held position: liquidation first, then a bracket.
 
-        #280 had to be applied twice in scalar code because OneStep re-forked the trigger
-        check and its own price selection alongside it.
+        The single home for the whole exit surface -- detection, priority, fill pricing
+        and booking. OneStep re-forked all four of those (#316), which is why the gapped
+        stop in #280 had to be fixed in two separate scalar places.
+
+        Returns the trade_info of whatever fired, or None if the position survived.
         """
+        if self._check_liquidation(ohlcv):
+            return self._execute_liquidation()
+
+        trigger = self._check_sltp_trigger(ohlcv)
+        if trigger is None:
+            return None
+
         if trigger == "sl":
-            return stop_fill_price(
-                self.stop_loss, open_price, is_long=self.position.position_size > 0
+            execution_price = stop_fill_price(
+                self.stop_loss, ohlcv["open"], is_long=self.position.position_size > 0
             )
-        return self.take_profit
+        else:
+            execution_price = self.take_profit
+        return self._execute_sltp_close(execution_price, trigger)
 
     def _execute_sltp_close(self, execution_price: float, trigger_type: str) -> Dict:
         """Execute SL/TP triggered close.
@@ -403,14 +415,9 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         # Bar N+1, against whatever is held after the action. Must precede the portfolio
         # value and the history record below, or both read a state that ignores this exit.
-        if self._check_liquidation(base_features):
-            trade_info = self._execute_liquidation()
-        else:
-            trigger = self._check_sltp_trigger(base_features)
-            if trigger is not None:
-                trade_info = self._execute_sltp_close(
-                    self._sltp_execution_price(trigger, base_features["open"]), trigger
-                )
+        exit_info = self._apply_bar_exits(base_features)
+        if exit_info is not None:
+            trade_info = exit_info
 
         # Same canonical aging as SequentialTradingEnv (#275): one call per step off the
         # post-trade size, so no exit path can be added later without ageing correctly.
