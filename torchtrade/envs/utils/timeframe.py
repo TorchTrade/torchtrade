@@ -8,7 +8,6 @@ and Binance environments. It includes:
 """
 
 from enum import Enum
-from functools import total_ordering
 from typing import List, Union, Tuple
 import pandas as pd
 import re
@@ -22,7 +21,6 @@ class TimeFrameUnit(Enum):
     Day = 'D'       # Pandas freq for days
 
 
-@total_ordering
 class TimeFrame:
     """Represents a time interval with value and unit.
 
@@ -69,11 +67,39 @@ class TimeFrame:
             return NotImplemented
         return self.value == other.value and self.unit == other.unit
 
+    # Ordering compares DURATION; equality compares (value, unit). Two different keys, on
+    # purpose: 60Minute and 1Hour are the same length but produce different observation
+    # keys, and parse_timeframe_string warns that models trained on one will not work
+    # with the other.
+    #
+    # That is precisely why @total_ordering cannot be used here. It derives __gt__ as
+    # `not (self < other or self == other)`, so for two equal-duration spellings neither
+    # branch held and BOTH directions returned True -- which made sampler.py's
+    # `if tf > execute_on` shift a 60Minute frame that was not coarser than execute_on,
+    # leaving it a full bar stale (#282). So all four comparisons are spelled out.
     def __lt__(self, other):
-        """Less than comparison based on total minutes."""
+        """Less than, by total duration."""
         if not isinstance(other, TimeFrame):
             return NotImplemented
         return self.to_minutes() < other.to_minutes()
+
+    def __le__(self, other):
+        """Less than or equal, by total duration."""
+        if not isinstance(other, TimeFrame):
+            return NotImplemented
+        return self.to_minutes() <= other.to_minutes()
+
+    def __gt__(self, other):
+        """Greater than, by total duration."""
+        if not isinstance(other, TimeFrame):
+            return NotImplemented
+        return self.to_minutes() > other.to_minutes()
+
+    def __ge__(self, other):
+        """Greater than or equal, by total duration."""
+        if not isinstance(other, TimeFrame):
+            return NotImplemented
+        return self.to_minutes() >= other.to_minutes()
 
     def __hash__(self):
         """Make TimeFrame hashable for use in sets and as dict keys."""

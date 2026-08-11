@@ -137,8 +137,12 @@ class MarketDataObservationSampler:
         latest_first_step = max(first_time_stamps)
 
         # Calculate offset needed for higher timeframes (to account for END-time indexing)
-        # We need extra data to ensure sufficient lookback after the offset
-        higher_tf_offsets = [tf_to_timedelta(tf) for tf in time_frames if tf != execute_on]
+        # We need extra data to ensure sufficient lookback after the offset.
+        # Must be the SAME test as the shift above -- reserving an offset for a timeframe
+        # that was never shifted just discards leading data. `!= execute_on` compared
+        # (value, unit), so 60Minute against execute_on=1Hour reserved an hour it did not
+        # need, and finer timeframes reserved their own period for no reason (#282).
+        higher_tf_offsets = [tf_to_timedelta(tf) for tf in time_frames if tf > execute_on]
         max_offset = max(higher_tf_offsets) if higher_tf_offsets else pd.Timedelta(0)
 
         # Filter execution times

@@ -1881,3 +1881,42 @@ class TestPerTimeframeFeatureProcessing:
         num_features = sampler.get_num_features_per_timeframe()
         assert num_features["1Minute"] == expected_1min
         assert num_features["5Minute"] == expected_5min
+
+
+class TestTimeframeSpellingIsNotObservable:
+    """Two spellings of the same duration must sample the same data (#282).
+
+    They stay distinct objects on purpose -- the observation key differs, and the parser
+    warns that models trained on one will not transfer. But the DATA behind that key must
+    not depend on the spelling, and it did: `if tf > execute_on` in the resample loop was
+    true in both directions for equal durations, so a 60Minute frame against
+    execute_on=1Hour took the anti-lookahead shift meant for coarser bars and went a
+    full bar stale.
+    """
+
+    def test_same_duration_different_spelling_samples_identically(self):
+        n = 60 * 40
+        ts = pd.date_range("2024-01-01", periods=n, freq="1min")
+        close = np.arange(n, dtype=float) + 1000.0  # close identifies its own minute
+        df = pd.DataFrame({
+            "timestamp": ts, "open": close, "high": close + 0.5,
+            "low": close - 0.5, "close": close, "volume": 1000.0,
+        })
+        execute_on = TimeFrame(1, TimeFrameUnit.Hour)
+
+        def sample_last_close(tf):
+            sampler = MarketDataObservationSampler(
+                df=df.copy(), time_frames=[tf], window_sizes=[4],
+                execute_on=execute_on, max_traj_length=5, seed=0,
+            )
+            sampler.reset()
+            obs, timestamp, _ = sampler.get_sequential_observation()
+            return obs[tf.obs_key_freq()][-1, 3].item(), timestamp  # col 3 == close
+
+        as_hours = sample_last_close(TimeFrame(1, TimeFrameUnit.Hour))
+        as_minutes = sample_last_close(TimeFrame(60, TimeFrameUnit.Minute))
+
+        assert as_hours == as_minutes, (
+            f"1Hour saw {as_hours}, 60Minute saw {as_minutes} -- same duration, "
+            "same execute_on, so the spelling must not change the data"
+        )

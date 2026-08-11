@@ -481,6 +481,34 @@ class TestTimeFrameComparison:
         assert not (tf_1day < tf_24hours)
         assert not (tf_24hours < tf_1day)
 
+    def test_greater_than_equal_durations(self):
+        """The mirror of test_less_than_equal_durations, which nobody wrote (#282).
+
+        @total_ordering derives __gt__ as `not (self < other or self == other)`. __lt__
+        compares duration while __eq__ compares (value, unit) -- deliberately, since the
+        two spellings produce different observation keys and the parser warns that models
+        trained on one will not work with the other. So for equal durations neither
+        branch is true and BOTH directions returned True: 1Hour > 60Minute *and*
+        60Minute > 1Hour.
+
+        sampler.py reads `tf > execute_on` to pick which timeframes get the
+        anti-lookahead shift, so a 60Minute frame against execute_on=1Hour was shifted
+        forward by its own period and went a full bar stale.
+        """
+        pairs = [
+            (TimeFrame(1, TimeFrameUnit.Hour), TimeFrame(60, TimeFrameUnit.Minute)),
+            (TimeFrame(1, TimeFrameUnit.Day), TimeFrame(24, TimeFrameUnit.Hour)),
+            (TimeFrame(1, TimeFrameUnit.Day), TimeFrame(1440, TimeFrameUnit.Minute)),
+        ]
+        for a, b in pairs:
+            assert not (a > b), f"{a!r} > {b!r} despite equal duration"
+            assert not (b > a), f"{b!r} > {a!r} despite equal duration"
+            # Still distinct objects -- equality is intentionally structural.
+            assert a != b
+            # and the inclusive operators must agree with that
+            assert a >= b and b >= a
+            assert a <= b and b <= a
+
     def test_greater_than_same_unit(self):
         """Greater-than should work correctly for same unit."""
         tf_5min = TimeFrame(5, TimeFrameUnit.Minute)
