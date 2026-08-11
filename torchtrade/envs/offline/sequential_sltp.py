@@ -269,6 +269,48 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         return None
 
+    def _stop_is_reached_first(self, trigger: Optional[str], ohlcv: dict) -> bool:
+        """Does a triggered stop sit between entry and the liquidation price? (#300)
+
+        Liquidation otherwise outranks the bracket, and for a take-profit that is right:
+        the two sit on OPPOSITE sides of entry, so a bar that reached both says nothing
+        about which came first, and assuming the worse of two irreconcilable orderings is
+        the only sound choice -- the same reasoning as SL-before-TP.
+
+        A stop-loss is not that case. It sits on the SAME side as liquidation, so price
+        cannot reach the further level without crossing the nearer one on the way, and the
+        bar's own extreme is enough to know which. Booking a liquidation when the stop was
+        crossed first is not pessimism, it is an outcome the data contradicts -- and an
+        expensive one: at 10x on 10000 cash it leaves 400 where the stop leaves 5000.
+
+        The exception is a bar that OPENED past liquidation. Nothing was crossed on the
+        way there, the margin was already gone when the bar began, and no resting order
+        could have worked first.
+
+        Scope: this covers a gap at the bar BOUNDARY, which OHLC records. A hole INSIDE a
+        bar does not appear in OHLC at all -- price can jump 96 to 88 without ever
+        printing 95 -- and there this fills the stop where the old rule liquidated, i.e.
+        trades one unresolvable case from pessimistic to optimistic. Same class as #280,
+        and not visible at this resolution.
+
+        The `trigger != "sl"` guard below is geometrically unreachable rather than
+        load-bearing: if liquidation fired and the stop is nearer, price passed the stop,
+        so _check_sltp_trigger has already returned "sl". It is kept because it states the
+        rule, and because it is the twin of the vectorized mask's own sl_trigger term.
+        """
+        if trigger != "sl":
+            return False
+
+        is_long = self.position.position_size > 0
+        open_price = ohlcv["open"]
+        if is_long:
+            gapped_past_liquidation = open_price <= self.liquidation_price
+            stop_is_nearer = self.stop_loss > self.liquidation_price
+        else:
+            gapped_past_liquidation = open_price >= self.liquidation_price
+            stop_is_nearer = self.stop_loss < self.liquidation_price
+        return stop_is_nearer and not gapped_past_liquidation
+
     def _apply_bar_exits(self, ohlcv: dict) -> Optional[Dict]:
         """Apply a bar to the held position: liquidation first, then a bracket.
 
@@ -278,10 +320,11 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         Returns the trade_info of whatever fired, or None if the position survived.
         """
-        if self._check_liquidation(ohlcv):
+        trigger = self._check_sltp_trigger(ohlcv)
+
+        if self._check_liquidation(ohlcv) and not self._stop_is_reached_first(trigger, ohlcv):
             return self._execute_liquidation()
 
-        trigger = self._check_sltp_trigger(ohlcv)
         if trigger is None:
             return None
 

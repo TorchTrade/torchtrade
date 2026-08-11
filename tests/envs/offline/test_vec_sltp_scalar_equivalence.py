@@ -464,7 +464,7 @@ class TestSLTPScalarVecEquivalenceTrending:
 # ============================================================================
 
 
-def _flat_df(bar=20, low=None, high=None, n=50):
+def _flat_df(bar=20, low=None, high=None, open_=None, n=50):
     """Flat 100.0 series, optionally with one bar carrying a single excursion."""
     prices = np.full(n, 100.0)
     df = pd.DataFrame({
@@ -479,6 +479,8 @@ def _flat_df(bar=20, low=None, high=None, n=50):
         df.loc[bar, "low"] = low
     if high is not None:
         df.loc[bar, "high"] = high
+    if open_ is not None:  # the bar GAPPED to its open rather than trading there
+        df.loc[bar, "open"] = open_
     return df
 
 
@@ -576,30 +578,50 @@ class TestSLTPScalarVecEquivalenceCloseVsTrigger:
 
 
 class TestSLTPScalarVecEquivalencePriority:
-    """A bar breaching both the stop and the liquidation price must liquidate in BOTH
-    envs (#298).
+    """Both envs must resolve a double-breach bar the same way (#298, #300).
 
-    They encode the precedence differently -- the scalar as an if/else chain, the
-    vectorized by zeroing the position inside the liquidation branch so the trigger
-    masks cannot see it -- so one could be reordered without the other. At this
-    harness's initial_cash of 1000 the liquidation leaves 40 where the stop would
-    leave 500 -- the same scenario the scalar test pins at ten times the cash.
+    They encode the precedence differently -- the scalar as a guard inside
+    _apply_bar_exits, the vectorized as an exemption mask handed to _apply_liquidation --
+    so one could change without the other.
 
-    The vec side has no action_types record, so its liquidation is pinned by numeric
-    parity with the scalar rather than by a label of its own.
+    Every cell matters because the rule is conditional on three things at once, each of
+    which one engine could get wrong alone: whether the stop lies between entry and the
+    liquidation price, whether the bar merely GAPPED past both, and which side the
+    position is on. The take-profit cell is here because a take-profit sits on the OTHER
+    side of entry, so its ordering is unresolvable and the liquidation must still stand --
+    an engine that exempted take-profits too would pass every stop cell.
+
+    The vec side has no action_types record, so its exit is pinned by numeric parity with
+    the scalar rather than by a label of its own.
     """
 
-    def test_liquidation_wins_over_the_bracket_in_both_envs(self):
-        df = _flat_df(bar=20, low=88.0)
-        # 10x long at 100: SL 95, liquidation 90.4, bar low 88 breaches both.
-        long_action = 1
-        actions = [0] * 5 + [long_action] + [0] * 4
+    @pytest.mark.parametrize(
+        "side,sl_levels,tp_levels,low,high,gap_open,expect", [
+            # 10x LONG at 100, liquidation 90.4.
+            ("long", [-0.05], [0.50], 88.0, None, None, "sltp_sl"),        # stop 95, inside
+            ("long", [-0.15], [0.50], 84.0, None, None, "liquidation"),    # stop 85, beyond
+            ("long", [-0.05], [0.50], 85.0, None, 85.0, "liquidation"),    # gapped past it
+            ("long", [-0.50], [0.10], 88.0, 112.0, None, "liquidation"),   # take-profit loses
+            # 10x SHORT at 100, liquidation 109.6. Every short branch is separate code,
+            # and a vec-only short regression is what this file exists to catch.
+            ("short", [-0.50], [0.05], None, 112.0, None, "sltp_sl"),      # stop 105, inside
+            ("short", [-0.50], [0.15], None, 116.0, None, "liquidation"),  # stop 115, beyond
+            ("short", [-0.50], [0.05], None, 115.0, 115.0, "liquidation"), # gapped past it
+        ],
+        ids=["long-stop-inside", "long-stop-beyond", "long-gapped", "long-take-profit",
+             "short-stop-inside", "short-stop-beyond", "short-gapped"],
+    )
+    def test_both_envs_agree_which_exit_price_reaches_first(
+        self, side, sl_levels, tp_levels, low, high, gap_open, expect
+    ):
+        df = _flat_df(bar=20, low=low, high=high, open_=gap_open)
+        actions = [0] * 5 + [1 if side == "long" else 2] + [0] * 4
 
         mismatches = _run_sltp_sequence(
             df, actions, leverage=10,
-            sl_levels=[-0.05], tp_levels=[0.50],
-            label="sltp-liquidation-over-bracket",
-            expect_action_type="liquidation",
+            sl_levels=sl_levels, tp_levels=tp_levels,
+            label=f"sltp-priority-{side}-{expect}-sl{sl_levels[0]}",
+            expect_action_type=expect,
         )
         assert not mismatches, "\n".join(mismatches)
 

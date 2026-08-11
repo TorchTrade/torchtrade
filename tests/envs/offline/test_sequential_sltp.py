@@ -1145,7 +1145,7 @@ SHORT_TIGHT = ("short", 0.025, -0.025)
 
 
 def _run_sltp(actions, *, leverage, sl_levels, tp_levels, wick_high=None,
-              wick_low=None, include_close=False):
+              wick_low=None, wick_open=None, include_close=False):
     """Run `actions` through a flat 100.0 series carrying one wick at bar 20.
 
     reset() caches bar 10, so action k executes at bar 10+k and is exposed to bar
@@ -1166,6 +1166,8 @@ def _run_sltp(actions, *, leverage, sl_levels, tp_levels, wick_high=None,
         df.loc[20, "high"] = wick_high
     if wick_low is not None:
         df.loc[20, "low"] = wick_low
+    if wick_open is not None:  # a bar that GAPPED to its open rather than trading down to it
+        df.loc[20, "open"] = wick_open
 
     config = SequentialTradingEnvSLTPConfig(
         leverage=leverage, initial_cash=10000,
@@ -1256,55 +1258,84 @@ class TestAgentActionPrecedesNextBarTrigger:
         assert env.balance == pytest.approx(10000.0), "a flat round trip must not move the balance"
 
 
-class TestLiquidationTakesPriorityOverBrackets:
-    """When one bar breaches both a bracket and the liquidation price, the liquidation
-    must win (#298).
+class TestLiquidationVsBracketOnADoubleBreachBar:
+    """Which exit wins when one bar breaches both a bracket and liquidation (#298, #300).
 
-    Nothing held this. A double-breach bar has existed since
-    TestSLTPRegression::test_liquidation_triggers_on_next_bar_futures, but no test
-    asserted anything that *distinguishes* the two exits, so swapping the checks left
-    the whole offline suite green. All four quadrants of direction x trigger are
+    Liquidation wins against a TAKE-PROFIT, and that is a pessimistic convention rather
+    than a physical claim: the two sit on opposite sides of entry, so a bar reaching both
+    says nothing about the order, and assuming the worse of two irreconcilable orderings
+    is the only sound choice -- the same reasoning as SL-before-TP.
+
+    The STOP-LOSS rows are the other case, and used to answer the same way (#300). A stop
+    sits on the same side as liquidation, so price cannot reach the further level without
+    crossing the nearer one, and the bar's own extreme says which. Booking a liquidation
+    where the stop was crossed first is not pessimism but an outcome the data contradicts:
+    400 instead of 5000 here, a 12.5x gap.
+
+    Nothing held this before #298: double-breach bars existed in the suite, but no test
+    asserted anything that *distinguishes* the two exits, so swapping the checks left the
+    whole offline suite green. All four quadrants of direction x trigger are
     covered because each is invisible to the other three: a reorder scoped to one of
     them passes every test the others pin.
-
-    What this pins is the env's documented pessimistic convention, not a claim about
-    physical fill order; #300 tracks whether the rule should be conditional. Either
-    way this class pins today's behaviour.
     """
+
+    def test_a_bar_that_gapped_past_liquidation_still_liquidates(self):
+        """A stop nearer than liquidation does NOT save a position on a gapped bar.
+
+        The exemption rests on continuity -- price crossing the nearer level on its way to
+        the further one. A bar that OPENS past the liquidation price crossed nothing: the
+        margin was gone before it began, and no resting order could have worked first.
+
+        Same 10x long as the long-stop row (stop 95, liquidation 90.4), but the bar opens
+        at 85 rather than trading down to 88.
+        """
+        env = _run_sltp(
+            [HOLD] * 5 + [("long", -0.05, 0.50)] + [HOLD] * 4,
+            leverage=10, sl_levels=[-0.05], tp_levels=[0.50],
+            wick_low=85.0, wick_open=85.0,
+        )
+        assert "liquidation" in env.history.action_types, (
+            f"a gapped-open bar must liquidate, not fill the stop -- got "
+            f"{env.history.action_types}"
+        )
+        # 400 is an #314 number: the liquidation books at liq_price even though the bar
+        # opened below it. When that is fixed this expectation moves with it.
+        assert env.balance == pytest.approx(400.0)
 
     # The action tuple is spelled out rather than derived: create_sltp_action_map
     # stores a short as ("short", tp, sl) -- the pair swapped, not negated -- so a
     # derived tuple raises KeyError rather than opening the wrong position.
     @pytest.mark.parametrize(
-        "action,stoploss_levels,takeprofit_levels,wick_low,wick_high,armed", [
+        "action,stoploss_levels,takeprofit_levels,wick_low,wick_high,armed,expected_balance", [
             # 10x long: liquidation 90.4, SL 95, low 88 breaches both.
-            (("long", -0.05, 0.50), [-0.05], [0.50], 88.0, None, "stop_loss"),
+            (("long", -0.05, 0.50), [-0.05], [0.50], 88.0, None, "stop_loss", 5000.0),
             # 10x short: liquidation 109.6, SL 105, high 112 breaches both. The short
             # branches of _check_liquidation, _check_sltp_trigger and
             # _execute_liquidation are all separate code from the long ones.
-            (("short", 0.05, -0.50), [-0.50], [0.05], None, 112.0, "stop_loss"),
+            (("short", 0.05, -0.50), [-0.50], [0.05], None, 112.0, "stop_loss", 5000.0),
             # 10x long: liquidation 90.4 on the low, TP 150 on the high. The SL is put
             # at 50, outside the bar, so the documented SL-before-TP bias cannot mask
             # the TP.
-            (("long", -0.50, 0.50), [-0.50], [0.50], 88.0, 155.0, "take_profit"),
+            (("long", -0.50, 0.50), [-0.50], [0.50], 88.0, 155.0, "take_profit", 400.0),
             # 10x short: liquidation 109.6 on the high, TP 90 on the low, SL 150
             # outside the bar. Only a mutation scoped to BOTH short and tp reaches
             # this one, which is why it is the quadrant that stayed hidden longest.
-            (("short", 0.50, -0.10), [-0.10], [0.50], 88.0, 112.0, "take_profit"),
+            (("short", 0.50, -0.10), [-0.10], [0.50], 88.0, 112.0, "take_profit", 400.0),
         ],
         ids=["long-stop", "short-stop", "long-take-profit", "short-take-profit"],
     )
-    def test_a_bar_breaching_both_liquidates_rather_than_closing_at_the_bracket(
-        self, action, stoploss_levels, takeprofit_levels, wick_low, wick_high, armed
+    def test_the_exit_price_reaches_first_is_the_one_that_fires(
+        self, action, stoploss_levels, takeprofit_levels, wick_low, wick_high, armed,
+        expected_balance,
     ):
-        """All four liquidate 1000 units at a liquidation price 9.6 from entry, so all
-        four balance 400 -- one number, because the liquidation arm is agnostic to both
-        direction and bracket type. The discrimination is in the counterfactuals, which
-        are row-specific: the stop would leave 5000, the long TP 60000, the short TP
-        20000.
+        """The take-profit rows liquidate 1000 units 9.6 from entry, balancing 400. The
+        stop rows fill at a stop 5.0 from entry, balancing 5000 -- the 12x gap that makes
+        this worth conditioning on rather than always taking the liquidation.
 
-        The label is what fires today; the balance is the backstop that survives a
-        future exit type reusing it.
+        The counterfactuals are row-specific and that is the point: on a stop row 400
+        means liquidation wrongly pre-empted a stop the price crossed first, and on a
+        take-profit row 60000 (long) or 20000 (short) means the bracket wrongly
+        pre-empted a liquidation whose ordering the bar cannot resolve.
         """
         # Opens at index 5 (bar 15) and holds; the four trailing holds land the
         # position on bar 20, which is where the wick is.
@@ -1313,20 +1344,33 @@ class TestLiquidationTakesPriorityOverBrackets:
             leverage=10, sl_levels=stoploss_levels, tp_levels=takeprofit_levels,
             wick_low=wick_low, wick_high=wick_high,
         )
-        assert "liquidation" in env.history.action_types, (
-            "a bracket exit pre-empted the liquidation on a bar that breached both"
-        )
-        # Liquidation deliberately leaves the brackets armed, so the price can be read
-        # back afterwards. Asserting it lies INSIDE the bar pins the collision itself:
-        # a level moved off the wick and a wick shrunk off the level both fail here,
-        # where pinning the price as a constant would only catch the first.
-        price = getattr(env, armed)
+        stop_wins = armed == "stop_loss"
+        exits = env.history.action_types
+        if stop_wins:
+            assert "sltp_sl" in exits, (
+                "liquidation pre-empted a stop that sits between entry and the "
+                f"liquidation price, so price crossed it first -- got {exits}"
+            )
+        else:
+            assert "liquidation" in exits, (
+                "a take-profit pre-empted the liquidation on a bar that breached both, "
+                f"where the ordering is genuinely unresolvable -- got {exits}"
+            )
+        # Pins the collision itself: a level moved off the wick and a wick shrunk off the
+        # level both fail here, where pinning the price as a constant catches only the
+        # first. On a stop row the level is consumed by the exit, so it is read from the
+        # config rather than off the env.
         low = wick_low if wick_low is not None else 100.0
         high = wick_high if wick_high is not None else 100.0
+        # action[1] is the stop pct the action map hands the bracket calculator, already
+        # signed per side (negative long, positive short) -- not stoploss_levels[0], which
+        # the map SWAPS with the take-profit for shorts.
+        price = 100.0 * (1 + action[1]) if stop_wins else getattr(env, armed)
         assert low <= price <= high, (
             f"{armed}={price} sits outside the bar [{low}, {high}] -- this row no "
             "longer tests a double breach"
         )
-        assert env.balance == pytest.approx(400.0), (
-            "closed at the liquidation price; anything else means the bracket won"
+        assert env.balance == pytest.approx(expected_balance), (
+            f"expected {expected_balance}; a stop row landing on 400 means liquidation "
+            "won, and a take-profit row leaving 400 means it did not"
         )
