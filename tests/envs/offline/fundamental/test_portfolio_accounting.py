@@ -399,8 +399,15 @@ class TestHistoryRecording:
         assert any(at in ["flat", "close"] for at in futures_env.history.action_types), \
             f"Futures close should be 'flat' or 'close', got {futures_env.history.action_types}"
 
-    def test_sltp_triggers_recorded(self, price_change_df):
-        """SL/TP triggers should be recorded as sltp_sl or sltp_tp."""
+    def test_sltp_triggers_recorded(self):
+        """SL/TP triggers should be recorded as sltp_sl or sltp_tp.
+
+        Recording only. The trigger bar here opens at 106, past the 105 take-profit, so
+        this does reach a gapped bracket -- but the FILL PRICE it produces is pinned by
+        test_gap_fills.py, which owns that rule across all four engines. Asserting it
+        again here would only restate a branch (`execution_price = self.take_profit`)
+        that depends on neither the bar nor the leverage.
+        """
         config = SequentialTradingEnvSLTPConfig(
             execute_on="1Hour",
             time_frames=["1Hour"],
@@ -412,6 +419,10 @@ class TestHistoryRecording:
             stoploss_levels=[-0.05],  # 5% SL
             takeprofit_levels=[0.05],  # 5% TP
             include_hold_action=True,
+            # Without this the start bar is random, and most starts land ON the 106 bar,
+            # where entry is 106 and the take-profit at 111.3 is never reached. The test
+            # passed only because the default seed happens to start at index 1.
+            random_start=False,
         )
 
         # Create data that will trigger TP
@@ -429,18 +440,11 @@ class TestHistoryRecording:
         env = SequentialTradingEnvSLTP(df, config)
         td = env.reset()
 
-        # Open long
+        # Open long. The bracket fires on the very next bar, inside this same step, so
+        # there is nothing to hold for.
         td["action"] = 1
-        td = env.step(td)["next"]
+        env.step(td)
 
-        # Hold until TP triggers
-        for _ in range(5):
-            if td["done"]:
-                break
-            td["action"] = 0
-            td = env.step(td)["next"]
-
-        # Check if TP was recorded
         has_sltp_exit = any(at in ["sltp_sl", "sltp_tp"] for at in env.history.action_types)
         assert has_sltp_exit, \
             f"SL/TP trigger should be recorded, got {env.history.action_types}"
