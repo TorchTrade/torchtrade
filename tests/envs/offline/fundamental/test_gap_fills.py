@@ -27,9 +27,15 @@ TF_1MIN = TimeFrame(1, TimeFrameUnit.Minute)
 
 
 def _gap_df(gap_to, n=40, bar=20):
-    """Flat series at 100 where one bar gaps to `gap_to` and stays there for the bar."""
+    """Flat series at 100 where one bar opens at `gap_to`, having gapped there.
+
+    The gap bar is a real bar, not a point: open, high, low and close all differ, so a
+    fill booked at the low or the close is distinguishable from one booked at the open.
+    """
     o, h, l, c = ([100.0] * n for _ in range(4))
-    o[bar] = h[bar] = l[bar] = c[bar] = gap_to
+    drift = 2.0 if gap_to < 100.0 else -2.0
+    o[bar], c[bar] = gap_to, gap_to + drift
+    h[bar], l[bar] = max(gap_to, c[bar]) + 1.0, min(gap_to, c[bar]) - 1.0
     return pd.DataFrame({
         "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
         "open": o, "high": h, "low": l, "close": c, "volume": [1000.0] * n,

@@ -302,7 +302,8 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         """Execute SL/TP triggered close.
 
         Args:
-            execution_price: Price at which SL/TP triggered
+            execution_price: Price at which to execute (a gapped stop fills at the bar
+                open, not at the bracket, so this is not the trigger price)
             trigger_type: Either "sl" or "tp"
 
         Returns:
