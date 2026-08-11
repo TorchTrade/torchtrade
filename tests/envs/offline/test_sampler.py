@@ -2,6 +2,7 @@
 Tests for MarketDataObservationSampler.
 """
 
+import datetime
 import warnings
 
 import numpy as np
@@ -2252,39 +2253,48 @@ def test_malformed_ohlc_is_rejected_at_ingestion(field, value, ok):
             build()
 
 
-@pytest.mark.parametrize("start,days,gappy", [
-    ("2024-10-28", 11, False),  # window starts BEFORE the fall-back
-    ("2024-11-03", 8, False),   # window starts ON it -- poisons any regenerated grid
-    ("2024-03-08", 8, False),   # spring forward: the 23h bin
-    ("2024-11-01", 10, True),   # a dropped day, as a weekend or halt gives
-], ids=["before-transition", "on-transition", "spring-forward", "gappy"])
-def test_a_coarse_bar_is_never_visible_before_its_bin_closes(start, days, gappy):
+@pytest.mark.parametrize("start,days,gappy,tz", [
+    ("2024-10-28", 11, False, "America/New_York"),  # window starts BEFORE the fall-back
+    ("2024-11-03", 8, False, "America/New_York"),   # starts ON it -- poisons a regenerated grid
+    ("2024-03-08", 8, False, "America/New_York"),   # spring forward: the 23h bin, LATE not early
+    ("2024-11-01", 10, True, "America/New_York"),   # a dropped calendar day (weekend, halt)
+    ("2024-03-07", 8, False, "America/Havana"),     # DST step lands ON local midnight
+], ids=["before-transition", "on-transition", "spring-forward", "gappy", "midnight-dst"])
+def test_a_coarse_bar_is_labelled_exactly_when_its_bin_closes(start, days, gappy, tz):
     """A tz-aware Day bin is 23h or 25h wide across DST, not 24h (#320).
 
     Coarse frames are relabelled to their END so only completed bars are visible. Any
     arithmetic on a bar's own label gets this wrong: a fixed +1D labels a 25h bin an hour
-    before it closed, so the agent sees it early. That is lookahead, not staleness.
+    before it closed, so the agent sees it early -- lookahead, not staleness.
 
-    The four cells are the four ways label arithmetic fails, and each caught a real
-    defect. `on-transition` is why DatetimeIndex.shift is not the fix -- it regenerates
-    from bin_starts[0] + period, so a window starting on the transition day is wrong for
-    EVERY bar, not just one. `gappy` is why it silently is not the fix either: dropna
-    clears index.freq and .shift then degrades to the fixed arithmetic it replaced.
+    Each cell is a way that arithmetic fails, and each caught a real defect:
+      on-transition   DatetimeIndex.shift regenerates from bin_starts[0] + period, so a
+                      window starting on the transition day is wrong for EVERY bar.
+      gappy           dropna clears index.freq and .shift silently degrades to the fixed
+                      arithmetic it replaced. The cut is on a LOCAL calendar boundary --
+                      an absolute 72h Timedelta straddles two dates across a 25h day and
+                      drops nothing.
+      spring-forward  the only LATE-direction case, which an "is not early" assertion
+                      cannot see.
+      midnight-dst    zones whose DST step lands on local midnight make that midnight
+                      nonexistent, where a tz-aware date_range raises but resample does
+                      not.
 
-    The oracle deliberately does not reuse the production code path: an oracle built from
-    the same call under test moves with it and is blind to exactly these regressions.
+    Asserts EQUALITY, not absence of lookahead: a coarse frame stale by whole bins is
+    also wrong, and passes any one-sided check. The oracle is the calendar definition of
+    a day boundary -- it uses neither resample nor date_range, so it cannot move with the
+    implementation the way a re-derived one would.
     """
     execute_on = TimeFrame(1, TimeFrameUnit.Hour)
-    tz = "America/New_York"
-    idx = pd.date_range(pd.Timestamp(start, tz=tz), periods=days * 24, freq="1h")
+    idx = pd.date_range(pd.Timestamp(start, tz="UTC"), periods=days * 24, freq="1h").tz_convert(tz)
     close = 100 + np.arange(len(idx), dtype=float)
     df = pd.DataFrame({
         "timestamp": idx, "open": close, "high": close + 1, "low": close - 1,
         "close": close, "volume": 1000.0,
     })
     if gappy:
-        cut = pd.Timestamp(start, tz=tz)
-        df = df[(df.timestamp < cut + pd.Timedelta("3D")) | (df.timestamp >= cut + pd.Timedelta("4D"))]
+        drop = sorted({t.date() for t in df.timestamp})[3]  # one whole LOCAL day
+        df = df[[t.date() != drop for t in df.timestamp]]
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # the gappy cell trips the data-gap banner
@@ -2295,15 +2305,14 @@ def test_a_coarse_bar_is_never_visible_before_its_bin_closes(start, days, gappy)
             execute_on=execute_on,
         )
 
-    # Independent oracle: each bin's real close is where the next bin starts, taken off a
-    # date_range grid rather than by shifting any label.
-    full = df.set_index("timestamp").resample("1D").agg({"close": "last"})
-    edges = pd.date_range(full.index[0], periods=len(full) + 1, freq="1D", tz=tz)
-    true_ends = edges[1:][full.index.get_indexer(full.dropna().index)]
+    # Oracle: a day bin ends at the next local calendar midnight. Pure definition.
+    dates = sorted({t.date() for t in df.timestamp})
+    want = pd.DatetimeIndex(
+        [pd.Timestamp(d + datetime.timedelta(days=1)).tz_localize(
+            tz, nonexistent="shift_forward", ambiguous=True) for d in dates]
+    )
 
-    labelled = sampler.resampled_dfs["1Day"].index
-    early = [(a, b) for a, b in zip(labelled, true_ends) if a < b]
-    assert not early, (
-        f"{len(early)} of {len(labelled)} coarse bar(s) labelled before they closed, "
-        f"e.g. {early[0][0]} vs a real close of {early[0][1]} -- seen early"
+    got = sampler.resampled_dfs["1Day"].index
+    assert list(got) == list(want), (
+        f"labelled {list(got)[:3]}... but the bins close at {list(want)[:3]}..."
     )

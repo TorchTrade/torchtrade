@@ -136,6 +136,11 @@ class MarketDataObservationSampler:
             if aux_cols:
                 resampled[aux_cols] = resampled[aux_cols].ffill().fillna(0)
 
+            # Before the relabel: it reads bin_starts[0], which IndexErrors on an empty
+            # frame and would mask this message when a coarse frame is listed first.
+            if len(resampled) == 0:
+                raise ValueError(f"Resampled dataframe for timeframe {tf.obs_key_freq()} is empty")
+
             # Fix lookahead bias: shift higher timeframe bars forward by their period
             # This ensures bars are indexed by their END time, not START time
             # Only completed bars will be visible to the agent at any execution time
@@ -153,10 +158,25 @@ class MarketDataObservationSampler:
                 # so a window STARTING on a transition day is off for every bar, and it
                 # silently degrades to fixed arithmetic once dropna clears index.freq --
                 # which any gap (a weekend, a halt) does.
-                edges = pd.date_range(
-                    bin_starts[0], periods=len(bin_starts) + 1,
-                    freq=tf.to_pandas_freq(), tz=bin_starts.tz,
-                )
+                n_edges = len(bin_starts) + 1
+                freq = tf.to_pandas_freq()
+                if bin_starts.tz is None or tf < TimeFrame(1, TimeFrameUnit.Day):
+                    edges = pd.date_range(
+                        bin_starts[0], periods=n_edges, freq=freq, tz=bin_starts.tz
+                    )
+                else:
+                    # Day-or-longer tz-aware bins follow LOCAL midnight, and in zones whose
+                    # DST step lands ON midnight (Havana, Beirut, Santiago, ...) that
+                    # midnight is nonexistent or ambiguous -- tz-aware date_range raises
+                    # there while resample resolves it. Walk the wall clock and re-localize
+                    # the way resample's own binner does, so those zones keep working.
+                    # Sub-day bins must NOT take this path: they walk absolute time, and a
+                    # wall-clock walk would skip an hour at spring-forward.
+                    edges = pd.date_range(
+                        bin_starts[0].tz_localize(None), periods=n_edges, freq=freq
+                    ).tz_localize(
+                        bin_starts.tz, nonexistent="shift_forward", ambiguous=True
+                    )
                 # rename: the END labels must keep the index's name, which the
                 # feature-processing path below reset_index()es on.
                 resampled.index = edges[1:][
@@ -178,9 +198,6 @@ class MarketDataObservationSampler:
                 if "index" in resampled.columns:
                     resampled = resampled.drop(columns=["index"])
 
-            # ensure not empty
-            if len(resampled) == 0:
-                raise ValueError(f"Resampled dataframe for timeframe {tf.obs_key_freq()} is empty")
 
             self.resampled_dfs[tf.obs_key_freq()] = resampled
             first_time_stamps.append(resampled.index.min())
