@@ -206,7 +206,6 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
 
         next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
         next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))
-        next_tensordict.set("truncated", torch.tensor([False], dtype=torch.bool))
         next_tensordict.set("terminated", torch.tensor([done], dtype=torch.bool))
 
         return next_tensordict

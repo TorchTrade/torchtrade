@@ -271,14 +271,19 @@ class TestAlpacaTorchTradingEnvStep:
         assert "reward" in td_out.keys()
 
     def test_step_contains_done(self, env):
-        """Test that step returns done flag."""
-        env.reset()
-        td_in = TensorDict({"action": torch.tensor(1)}, batch_size=())
-        td_out = env._step(td_in)
+        """A stepped env emits the whole done family (#272).
 
-        assert "done" in td_out.keys()
-        assert "terminated" in td_out.keys()
-        assert "truncated" in td_out.keys()
+        Goes through step(), not _step(): truncated is filled by EnvBase from the done
+        spec, so asserting it on _step's raw output would pin a hardcoded write rather
+        than the spec that makes the collector work (#313).
+        """
+        td = env.reset()
+        td["action"] = torch.tensor(1)
+        nxt = env.step(td)["next"]
+
+        for key in ("done", "terminated", "truncated"):
+            assert key in nxt.keys(), f"{key} missing from the emitted step"
+        assert nxt["truncated"].dtype is torch.bool
 
     def test_step_buy_action(self, env):
         """Test buy action (action=2)."""
