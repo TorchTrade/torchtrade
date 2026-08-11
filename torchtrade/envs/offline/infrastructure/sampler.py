@@ -126,11 +126,12 @@ class MarketDataObservationSampler:
         self.resampled_dfs: Dict[str, pd.DataFrame] = {}
         first_time_stamps = []
         for tf, proc_fn in zip(time_frames, processing_fns):
-            resampled = (
-                self.df.resample(tf.to_pandas_freq())
-                .agg(full_agg)
-                .dropna(subset=list(ohlcv_agg.keys()))
-            )
+            binned = self.df.resample(tf.to_pandas_freq()).agg(full_agg)
+            # The complete bin grid, before empty bins are dropped. A bin's real END is
+            # where the NEXT bin starts, so the END labels below are read off this grid
+            # rather than computed from a bar's own label (#320).
+            bin_starts = binned.index
+            resampled = binned.dropna(subset=list(ohlcv_agg.keys()))
             # Forward-fill auxiliary NaN (sparse aux data persists last known value)
             if aux_cols:
                 resampled[aux_cols] = resampled[aux_cols].ffill().fillna(0)
@@ -140,12 +141,27 @@ class MarketDataObservationSampler:
             # Only completed bars will be visible to the agent at any execution time
             # Only shift timeframes that are HIGHER (coarser) than the execution timeframe
             if tf > execute_on:
-                # .shift(freq=) walks the offset's own calendar rather than adding a fixed
-                # duration. They agree everywhere except a tz-aware Day-or-longer bin
-                # across a DST boundary, where the real bin is 23h or 25h wide: a fixed
-                # +1D there labels a 25h bin an hour before it closed, making it visible
-                # early. That is lookahead, not staleness (#320).
-                resampled.index = resampled.index.shift(1, freq=tf.to_pandas_freq())
+                # Relabel each bar to where its bin actually ends: the start of the next
+                # bin on the full grid. Arithmetic on the label instead -- whether a fixed
+                # +period or DatetimeIndex.shift -- is wrong on a tz-aware Day-or-longer
+                # frame, because those bins follow LOCAL midnight and are 23h or 25h wide
+                # across a DST transition. A fixed +1D labels a 25h bin an hour before it
+                # closed, i.e. shows it early: lookahead, not staleness (#320).
+                #
+                # Reading the grid rather than shifting also survives the two cases that
+                # make .shift unusable here: it regenerates from `bin_starts[0] + period`,
+                # so a window STARTING on a transition day is off for every bar, and it
+                # silently degrades to fixed arithmetic once dropna clears index.freq --
+                # which any gap (a weekend, a halt) does.
+                edges = pd.date_range(
+                    bin_starts[0], periods=len(bin_starts) + 1,
+                    freq=tf.to_pandas_freq(), tz=bin_starts.tz,
+                )
+                # rename: the END labels must keep the index's name, which the
+                # feature-processing path below reset_index()es on.
+                resampled.index = edges[1:][
+                    bin_starts.get_indexer(resampled.index)
+                ].rename(bin_starts.name)
 
             if proc_fn is not None:
                 resampled = proc_fn(resampled)

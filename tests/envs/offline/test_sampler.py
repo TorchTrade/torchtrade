@@ -2,6 +2,8 @@
 Tests for MarketDataObservationSampler.
 """
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -2250,39 +2252,58 @@ def test_malformed_ohlc_is_rejected_at_ingestion(field, value, ok):
             build()
 
 
-def test_coarse_bar_is_not_visible_before_a_dst_lengthened_day_closes():
-    """A Day bin spanning a DST fall-back is 25h wide, not 24h (#320).
+@pytest.mark.parametrize("start,days,gappy", [
+    ("2024-10-28", 11, False),  # window starts BEFORE the fall-back
+    ("2024-11-03", 8, False),   # window starts ON it -- poisons any regenerated grid
+    ("2024-03-08", 8, False),   # spring forward: the 23h bin
+    ("2024-11-01", 10, True),   # a dropped day, as a weekend or halt gives
+], ids=["before-transition", "on-transition", "spring-forward", "gappy"])
+def test_a_coarse_bar_is_never_visible_before_its_bin_closes(start, days, gappy):
+    """A tz-aware Day bin is 23h or 25h wide across DST, not 24h (#320).
 
-    Coarse frames are relabelled to their END so only completed bars are visible. Adding
-    a FIXED 1D to the bin's start labels a 25h bin an hour before it actually closed, so
-    the agent sees it early -- lookahead, not staleness.
+    Coarse frames are relabelled to their END so only completed bars are visible. Any
+    arithmetic on a bar's own label gets this wrong: a fixed +1D labels a 25h bin an hour
+    before it closed, so the agent sees it early. That is lookahead, not staleness.
 
-    The mirror of this on the execution side is refused outright by the guard from #282
-    (tz-aware plus execute_on >= Day). That guard does not reach here: a Day OBSERVATION
-    frame under a sub-day execute_on is a supported config, and is what this pins.
+    The four cells are the four ways label arithmetic fails, and each caught a real
+    defect. `on-transition` is why DatetimeIndex.shift is not the fix -- it regenerates
+    from bin_starts[0] + period, so a window starting on the transition day is wrong for
+    EVERY bar, not just one. `gappy` is why it silently is not the fix either: dropna
+    clears index.freq and .shift then degrades to the fixed arithmetic it replaced.
+
+    The oracle deliberately does not reuse the production code path: an oracle built from
+    the same call under test moves with it and is blind to exactly these regressions.
     """
     execute_on = TimeFrame(1, TimeFrameUnit.Hour)
-    idx = pd.date_range("2024-10-28", "2024-11-08", freq="1h", tz="America/New_York")
+    tz = "America/New_York"
+    idx = pd.date_range(pd.Timestamp(start, tz=tz), periods=days * 24, freq="1h")
     close = 100 + np.arange(len(idx), dtype=float)
     df = pd.DataFrame({
         "timestamp": idx, "open": close, "high": close + 1, "low": close - 1,
         "close": close, "volume": 1000.0,
     })
+    if gappy:
+        cut = pd.Timestamp(start, tz=tz)
+        df = df[(df.timestamp < cut + pd.Timedelta("3D")) | (df.timestamp >= cut + pd.Timedelta("4D"))]
 
-    sampler = MarketDataObservationSampler(
-        df=df,
-        time_frames=[execute_on, TimeFrame(1, TimeFrameUnit.Day)],
-        window_sizes=[4, 2],
-        execute_on=execute_on,
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # the gappy cell trips the data-gap banner
+        sampler = MarketDataObservationSampler(
+            df=df,
+            time_frames=[execute_on, TimeFrame(1, TimeFrameUnit.Day)],
+            window_sizes=[4, 2],
+            execute_on=execute_on,
+        )
 
-    # The truth: each bin's real close is where the NEXT bin starts.
-    raw = df.set_index("timestamp").resample("1D").agg({"close": "last"}).dropna()
-    true_ends = raw.index.shift(1, freq="1D")
+    # Independent oracle: each bin's real close is where the next bin starts, taken off a
+    # date_range grid rather than by shifting any label.
+    full = df.set_index("timestamp").resample("1D").agg({"close": "last"})
+    edges = pd.date_range(full.index[0], periods=len(full) + 1, freq="1D", tz=tz)
+    true_ends = edges[1:][full.index.get_indexer(full.dropna().index)]
 
     labelled = sampler.resampled_dfs["1Day"].index
     early = [(a, b) for a, b in zip(labelled, true_ends) if a < b]
     assert not early, (
-        f"{len(early)} coarse bar(s) labelled before they closed, e.g. {early[0][0]} "
-        f"vs a real close of {early[0][1]} -- the agent would see them early"
+        f"{len(early)} of {len(labelled)} coarse bar(s) labelled before they closed, "
+        f"e.g. {early[0][0]} vs a real close of {early[0][1]} -- seen early"
     )
