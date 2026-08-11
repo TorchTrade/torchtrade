@@ -168,12 +168,6 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
 
         return next_tensordict
 
-    def _get_current_position_quantity(self) -> float:
-        """Get current position quantity from trader status."""
-        status = self.trader.get_status()
-        position = status.get("position_status")
-        return position.qty if position is not None else 0.0
-
     def _create_trade_info(self, executed=False, **kwargs) -> Dict:
         """Create trade info dictionary with defaults."""
         info = {

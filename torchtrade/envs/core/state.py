@@ -81,6 +81,31 @@ def position_direction_from_status(position_status) -> int:
     return 1 if qty > 0 else -1
 
 
+def position_qty_from_status(position_status) -> float:
+    """The signed size the exchange holds, with dust read as flat. None means flat.
+
+    The size twin of position_direction_from_status, and it exists for the same reason:
+    the account_state paths honoured the dust rule while the TRADE paths hand-rolled
+    `position.qty if position is not None else 0.0`, so a 1e-12 residual made
+    `abs(current_qty) > 0` true on a flat account. That called close_position() on nothing
+    and still advanced current_action_level from a trade that never happened, freezing the
+    duplicate-action guard (#283).
+
+    Returning exactly 0.0 rather than the residual means every downstream `== 0`,
+    `abs(...) > 0` and `< 0` test is correct without each one repeating the epsilon.
+
+    POSITION_UNKNOWN raises, for the same reason it does there: an outage read as flat is
+    the whole bug.
+    """
+    if position_status is POSITION_UNKNOWN:
+        raise PositionUnknownError(
+            "exchange status is unknown; the caller must handle this rather than "
+            "treating it as a size"
+        )
+    qty = 0.0 if position_status is None else float(position_status.qty)
+    return 0.0 if abs(qty) <= POSITION_DUST_EPS else qty
+
+
 def binarize_action_type(action_type: str) -> int:
     """Convert action type string to binarized action value.
 
