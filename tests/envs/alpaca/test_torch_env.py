@@ -806,3 +806,37 @@ class TestAlpacaTorchTradingEnvSeed:
         # Should not raise
 
 
+
+
+def test_bankruptcy_baseline_counts_a_position_that_has_not_settled_yet():
+    """__init__ closes positions, then pins the baseline -- but the close does not block.
+
+    close_all_positions() submits market orders and returns. Reading account.cash at that
+    instant excludes whatever is still tied up in the unsettled position, so an env
+    constructed holding $9k of BTC against $1k cash pinned its baseline at 1000 and
+    _check_termination then fired below $100 instead of $1000 -- a 10x understatement of
+    the account it is protecting (#284).
+
+    The baseline must be the same quantity termination compares against, which is
+    _get_portfolio_value: cash PLUS position value. Reading account.cash made it a
+    different measurement, which is why settlement timing could change it at all.
+    """
+    class UnsettledTrader(MockTrader):
+        def close_all_positions(self):
+            return {}  # submitted, not filled -- the position is still open
+
+    trader = UnsettledTrader(initial_cash=1000.0)
+    trader.position_qty, trader.avg_entry_price = 0.09, 100000.0
+    trader.position_value = 9000.0
+
+    env = AlpacaTorchTradingEnv(
+        config=AlpacaTradingEnvConfig(symbol="BTC/USD", window_sizes=[10]),
+        observer=MockObserver(window_sizes=[10]),
+        trader=trader,
+    )
+
+    assert env.initial_portfolio_value == pytest.approx(10000.0), (
+        f"baseline {env.initial_portfolio_value} ignores the {trader.position_value} "
+        "still held in an unsettled position"
+    )
+    env.close()

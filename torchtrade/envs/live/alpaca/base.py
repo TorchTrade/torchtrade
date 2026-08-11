@@ -103,10 +103,17 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.trader.close_all_positions()
         self.trader.cancel_open_orders()
 
-        # Get initial portfolio value
-        account = self.trader.client.get_account()
-        cash = float(account.cash)
-        self.initial_portfolio_value = cash
+        # The env's own measure, not account.cash. close_all_positions() above submits
+        # market orders and does not block, so cash at this instant excludes whatever is
+        # still tied up in an unsettled position: constructed holding $9k of BTC against
+        # $1k cash, the baseline pinned at 1000 and _check_termination then fired below
+        # $100 rather than $1000 (#284).
+        #
+        # Using _get_portfolio_value rather than account.portfolio_value keeps the
+        # baseline the SAME quantity that termination compares against -- cash plus
+        # position value -- so the two cannot drift apart. The futures bases already read
+        # an equity figure for this reason.
+        self.initial_portfolio_value = self._get_portfolio_value()
 
         # Build observation specs
         self._build_observation_specs()
