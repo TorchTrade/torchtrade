@@ -286,13 +286,14 @@ def test_no_env_declares_its_own_done_spec(env_cls):
     What this does NOT catch: it matches attribute writes, so reaching the spec any other
     way -- `del self.full_done_spec["truncated"]`, `.set(...)`, an `output_spec[...]`
     write, `setattr(self, "full_done_spec", ...)`, or a helper outside the MRO -- passes.
-    Every one of those except `setattr` is caught behaviourally by the ten
-    check_env_specs tests and by test_a_collector_batch_carries_truncated, which name the
-    missing key.
 
-    The unique job left to this test is the duplicate that is still IDENTICAL: no
-    behavioural test can see it until the day it drifts, which is the failure mode that
-    left this repo with three diverging SLTP action maps.
+    What happens to those next turns on the payload, not the form. Any of them that
+    removes or narrows truncated is still caught by the ten check_env_specs tests and by
+    test_a_collector_batch_carries_truncated, which name the missing key. Any of them
+    that installs an IDENTICAL copy is caught by neither -- and that is the same blind
+    spot this test exists to close for plain assignment: a copy nothing can see until the
+    day it drifts, which is the failure mode that left this repo with three diverging
+    SLTP action maps.
     """
     # The MRO, not just the leaf: the duplicate this PR removed lived in a BASE class,
     # which inspect.getsource(leaf) never shows. Stop at the one legitimate owner, which
