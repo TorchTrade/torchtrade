@@ -519,11 +519,13 @@ class TestOneStepRegression:
     """Regression tests for known OneStep issues."""
 
     @pytest.mark.parametrize("method", [
-        "_apply_bar_exits",      # liquidation-then-bracket priority, and fill pricing
-        "_check_liquidation",    # liquidation detection
-        "_execute_liquidation",  # booking a liquidation
-        "_check_sltp_trigger",   # intrabar SL/TP detection
-        "_execute_sltp_close",   # booking a bracket close
+        "_apply_bar_exits",            # liquidation-then-bracket priority, and pricing
+        "has_liquidation",             # the enable gate OneStep hand-rolled as leverage==1
+        "_check_liquidation",          # liquidation detection
+        "_calculate_liquidation_price",  # where it fires, and at what price it books
+        "_execute_liquidation",        # booking a liquidation
+        "_check_sltp_trigger",         # intrabar SL/TP detection
+        "_execute_sltp_close",         # booking a bracket close
     ])
     def test_onestep_does_not_refork_the_exit_rules(self, method):
         """OneStep must inherit the whole exit surface, never redefine any of it (#316).

@@ -376,7 +376,7 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
             # compute_return ignores this price and reads the balance, which already
             # holds the realised fill.
             self.rollout_returns.append(self.compute_return(close_price))
-            if trigger_result:
+            if trigger_result is not None:
                 return trigger_result, obs_dict
 
         # If loop never executed (truncated from start), reuse the last
