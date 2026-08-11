@@ -242,6 +242,36 @@ def test_polymarket_newline_cannot_forge_a_row(monkeypatch, via):
     assert "URGENT" in out  # neutralised inline, not silently dropped
 
 
+@pytest.mark.parametrize("field", ["title", "source", "published", "query"],
+                         ids=["title", "source", "published", "model"])
+def test_google_news_newline_cannot_forge_a_row(field):
+    """Same forgery as the Polymarket case, on a strictly worse trust boundary (#308).
+
+    There the third-party text is a Polymarket question, and there is a volume floor
+    limiting which markets reach the prompt at all. Here title/source/published come
+    straight from an RSS feed -- authored by whoever gets a headline indexed by Google
+    News -- and the news path has no content filter of any kind.
+
+    All four rendered fields are covered because the guard is per-field: sanitising the
+    title alone would leave source and published able to forge a row on their own.
+    """
+    entry = {"title": "Real headline", "source": "Reuters", "published": "2h ago"}
+    payload = "Real" + _FORGED_ROW
+    kwargs = {}
+    if field == "query":
+        kwargs["query"] = payload
+    else:
+        entry[field] = payload
+
+    tool = GoogleNewsTool(symbol="BTC/USD")
+    tool._fetch = lambda q: [entry]
+    out = tool.run(**kwargs)
+
+    rows = [line for line in out.splitlines() if line[:2] in ("1.", "2.")]
+    assert len(rows) == 1, f"{field} forged a second row:\n{out}"
+    assert "URGENT" in out  # neutralised inline, not silently dropped
+
+
 def test_polymarket_caps_rendered_rows_at_top_n(monkeypatch):
     """The cap is pushed into MarketScannerConfig.max_markets, but context
     hygiene must not rest on an upstream contract holding — if max_markets
