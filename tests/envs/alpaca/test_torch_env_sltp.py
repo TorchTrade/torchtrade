@@ -1,7 +1,8 @@
 """
 Unit tests for AlpacaSLTPTorchTradingEnv (TorchRL-style environment with SL/TP).
 
-Tests environment initialization, reset, step, action mapping, and bracket order mechanics.
+Tests environment initialization, reset, step, and bracket action mapping. Bracket FILL
+pricing is not covered here -- that belongs to the order executor and the offline engines.
 """
 
 from unittest.mock import patch
@@ -224,7 +225,7 @@ class TestAlpacaSLTPTradingEnvStep:
 
         # Action 1 maps to first SL/TP combination
         td_in = TensorDict({"action": torch.tensor(1)}, batch_size=())
-        td_out = env._step(td_in)
+        env._step(td_in)
 
         assert env.position.current_position == 1
 
