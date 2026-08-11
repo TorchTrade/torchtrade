@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 import numpy as np
 import torch
-from torchrl.data import Unbounded
+from torchrl.data import Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
 
 logger = logging.getLogger(__name__)
@@ -53,6 +53,15 @@ class TorchTradeBaseEnv(EnvBase):
 
         # Create reward spec (common across all environments)
         self.reward_spec = Unbounded(shape=(1,), dtype=torch.float)
+
+        # Every _step writes a truncated key, but TorchRL's default done spec carries only
+        # done and terminated -- anything pre-allocating from the spec (collectors,
+        # ParallelEnv) then drops it silently (#272).
+        self.full_done_spec = Composite(
+            done=Categorical(2, dtype=torch.bool, shape=(1,)),
+            terminated=Categorical(2, dtype=torch.bool, shape=(1,)),
+            truncated=Categorical(2, dtype=torch.bool, shape=(1,)),
+        )
 
         super().__init__()
 

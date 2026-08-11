@@ -2,6 +2,7 @@
 
 import pytest
 import torch
+from torchrl.envs.utils import check_env_specs
 import numpy as np
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
@@ -79,6 +80,12 @@ class TestBybitFuturesTorchTradingEnv:
                     observer=mock_observer,
                     trader=mock_trader,
                 )
+
+    def test_check_env_specs_passes(self, env):
+        """check_env_specs compares the emitted step against every declared spec;
+        catches a done spec missing the truncated key each _step writes (#272)."""
+        with patch.object(type(env), "_wait_for_next_timestamp"):
+            check_env_specs(env)
 
     def test_action_spec(self, env):
         """Test action spec and levels are correctly defined."""

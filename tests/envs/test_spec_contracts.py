@@ -1,14 +1,21 @@
-"""Contract tests for observation/reward spec declarations.
+"""Contract tests for spec declarations. Two unrelated contracts live here.
 
-TorchRL samples a Bounded spec as `uniform() * (high - low) + low`, so an infinite
-bound makes `.rand()` produce NaN (both bounds infinite) or inf (one bound infinite),
-and inf poisons a lazily-built network just as thoroughly. `check_env_specs()` catches
-neither: it builds its dummy batch from `spec.zero()` and a real rollout, never
-`.rand()`. Use `Unbounded(shape=..., dtype=...)`, or finite numbers where a bound is
-real.
+**Specs must be samplable.** TorchRL samples a Bounded spec as
+`uniform() * (high - low) + low`, so an infinite bound makes `.rand()` produce NaN (both
+bounds infinite) or inf (one bound infinite), and inf poisons a lazily-built network just
+as thoroughly. `check_env_specs()` catches neither: it builds its dummy batch from
+`spec.zero()` and a real rollout, never `.rand()`. Use `Unbounded(shape=..., dtype=...)`,
+or finite numbers where a bound is real.
+
+**The done spec is declared exactly once** (#272). Every `_step` writes a `truncated`
+key, but TorchRL's default done spec carries only `done` and `terminated`, so anything
+pre-allocating from the spec drops it with no error at all. `TorchTradeBaseEnv` now
+declares all three for live and offline alike; the tests at the end of this file guard
+that one declaration against both drift and silent loss.
 """
 
 import ast
+import inspect
 import math
 import pathlib
 import types
@@ -21,6 +28,7 @@ from tensordict import TensorDictBase
 import torchtrade
 import torchtrade.envs  # noqa: F401 -- registers every live env as a subclass
 from tests.envs.test_live_env_base import _subclasses
+from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.offline import (
     OneStepTradingEnv,
@@ -249,3 +257,92 @@ def test_polymarket_env_specs_sample_finite():
         trader=MagicMock(),
     )
     _assert_specs_sample_finite(env, "PolymarketBetEnv")
+
+
+# ============================================================================
+# DONE SPEC (#272)
+# ============================================================================
+
+
+@pytest.mark.parametrize(
+    "env_cls",
+    # Exactly the envs that inherit the shared declaration. The vectorized ones subclass
+    # EnvBase directly, so they never reach it and their batched spec is an override.
+    LIVE_ENVS + [
+        cls for cls, _cfg, _kw in OFFLINE_ENVS if issubclass(cls, TorchTradeBaseEnv)
+    ],
+    ids=lambda c: c.__name__,
+)
+def test_no_env_declares_its_own_done_spec(env_cls):
+    """A second, per-env copy of the done spec is free to drift from the shared one.
+
+    TorchTradeBaseEnv.__init__ declares it once, for live and offline alike. This PR
+    deleted the one surviving duplicate, in core/offline_base.py, and nothing else stops
+    it coming back -- in that class or any other on the way down.
+
+    AST, not source text: assigning the NARROWER done_spec reproduces #272 exactly, since
+    it drops truncated, while never containing the string "full_done_spec".
+
+    What this does NOT catch: it matches attribute writes, so reaching the spec any other
+    way -- `del self.full_done_spec["truncated"]`, `.set(...)`, an `output_spec[...]`
+    write, `setattr(self, "full_done_spec", ...)`, or a helper outside the MRO -- passes.
+
+    What happens to those next turns on the payload, not the form. Any of them that
+    removes or narrows truncated is still caught by the ten check_env_specs tests and by
+    test_a_collector_batch_carries_truncated, which name the missing key. Any of them
+    that installs an IDENTICAL copy is caught by neither -- and that is the same blind
+    spot this test exists to close for plain assignment: a copy nothing can see until the
+    day it drifts, which is the failure mode that left this repo with three diverging
+    SLTP action maps.
+    """
+    # The MRO, not just the leaf: the duplicate this PR removed lived in a BASE class,
+    # which inspect.getsource(leaf) never shows. Stop at the one legitimate owner, which
+    # also keeps torchrl's own source out.
+    assigned = set()
+    for klass in env_cls.__mro__:
+        if klass is TorchTradeBaseEnv:
+            break
+        assigned |= {
+            node.attr for node in ast.walk(ast.parse(inspect.getsource(klass)))
+            if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store)
+        }
+    clashes = assigned & {"done_spec", "full_done_spec"}
+    assert not clashes, (
+        f"{env_cls.__name__} assigns {sorted(clashes)}; it inherits a done spec from "
+        "TorchTradeBaseEnv, and a second copy is free to drift"
+    )
+
+
+def test_a_collector_batch_carries_truncated(sample_ohlcv_df):
+    """The consequence #272 actually had, demonstrated rather than inferred.
+
+    A collector pre-allocates its buffer from fake_tensordict(), which is built from the
+    declared spec -- so an undeclared key is simply absent from every batch it yields, and
+    nothing raises. check_env_specs catches the same defect, but only because a test calls
+    it; a training run gets no signal at all, which is why this went unnoticed.
+
+    The env here is offline, which never had the bug -- its spec already declared
+    truncated. The mechanism is env-agnostic and a collector is cheap on this side, where
+    the live envs would need broker mocks and a patched clock. So this pins the shared
+    declaration going forward; the ten check_env_specs tests are what cover the live
+    regression itself.
+    """
+    from torchrl.collectors import Collector
+
+    env = SequentialTradingEnv(
+        sample_ohlcv_df,
+        SequentialTradingEnvConfig(
+            time_frames=["5Min", "15Min"], window_sizes=[10, 10],
+            execute_on="5Min", initial_cash=1000,
+        ),
+    )
+    collector = Collector(env, frames_per_batch=3, total_frames=3)
+    try:
+        batch = next(iter(collector))
+    finally:
+        collector.shutdown()
+
+    assert "truncated" in batch["next"].keys(), (
+        "the collector yielded a batch without truncated, and did not raise -- "
+        "a key absent from the spec is absent from every batch, with no error"
+    )

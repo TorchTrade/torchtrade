@@ -4,8 +4,11 @@ Unit tests for AlpacaSLTPTorchTradingEnv (TorchRL-style environment with SL/TP).
 Tests environment initialization, reset, step, action mapping, and bracket order mechanics.
 """
 
+from unittest.mock import patch
+
 import pytest
 import torch
+from torchrl.envs.utils import check_env_specs
 from tensordict import TensorDict
 
 from torchtrade.envs.live.alpaca.env_sltp import (
@@ -201,6 +204,12 @@ class TestAlpacaSLTPTradingEnvReset:
             observer=mock_observer,
             trader=mock_trader,
         )
+
+    def test_check_env_specs_passes(self, env):
+        """check_env_specs compares the emitted step against every declared spec;
+        catches a done spec missing the truncated key each _step writes (#272)."""
+        with patch.object(type(env), "_wait_for_next_timestamp"):
+            check_env_specs(env)
 
     def test_reset_returns_tensordict(self, env):
         """Test that reset returns a TensorDict."""

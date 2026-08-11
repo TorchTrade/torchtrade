@@ -2,6 +2,7 @@
 
 import pytest
 import torch
+from torchrl.envs.utils import check_env_specs
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
@@ -41,6 +42,12 @@ class TestBybitFuturesSLTPTorchTradingEnv:
                     observer=mock_env_observer,
                     trader=mock_env_trader,
                 )
+
+    def test_check_env_specs_passes(self, env):
+        """check_env_specs compares the emitted step against every declared spec;
+        catches a done spec missing the truncated key each _step writes (#272)."""
+        with patch.object(type(env), "_wait_for_next_timestamp"):
+            check_env_specs(env)
 
     def test_a_direct_flip_does_not_age_the_new_position(self, env, mock_env_trader):
         """A long flipped straight to a short (never through flat) is one step old (#49).

@@ -4,10 +4,11 @@ Unit tests for AlpacaTorchTradingEnv (TorchRL-style environment).
 Tests environment initialization, reset, step, and trading mechanics using mock clients.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from torchrl.envs.utils import check_env_specs
 from tensordict import TensorDict
 
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
@@ -157,6 +158,12 @@ class TestAlpacaTorchTradingEnvReset:
             observer=mock_observer,
             trader=mock_trader,
         )
+
+    def test_check_env_specs_passes(self, env):
+        """check_env_specs compares the emitted step against every declared spec;
+        catches a done spec missing the truncated key each _step writes (#272)."""
+        with patch.object(type(env), "_wait_for_next_timestamp"):
+            check_env_specs(env)
 
     def test_reset_returns_tensordict(self, env):
         """Test that reset returns a TensorDict."""
@@ -626,8 +633,6 @@ class TestAlpacaFractionalPositionResizing:
     ])
     def test_fractional_resizing_executes(self, env, first_action, second_action, should_execute):
         """Changing action level within same direction must trigger trade."""
-        from unittest.mock import patch, MagicMock
-
         trade_executed = {"executed": True, "amount": 100, "side": "buy", "success": True}
 
         with patch.object(env, '_execute_fractional_action', return_value=trade_executed) as mock_exec:
