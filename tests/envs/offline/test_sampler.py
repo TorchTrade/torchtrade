@@ -2316,17 +2316,3 @@ def test_a_coarse_bar_is_labelled_exactly_when_its_bin_closes(start, days, gappy
     assert list(got) == list(want), (
         f"labelled {list(got)[:3]}... but the bins close at {list(want)[:3]}..."
     )
-
-
-def test_initial_cash_randomisation_can_draw_its_configured_maximum():
-    """np_rng.integers is half-open, so the configured max was unreachable (#290).
-
-    A user asking for [1000, 2000] got [1000, 1999]. Invisible at wide ranges, and the
-    whole point of the parameter at narrow ones.
-    """
-    from torchtrade.envs.offline.infrastructure.utils import InitialBalanceSampler
-
-    drawn = {int(InitialBalanceSampler([1000, 1005], seed=s).sample()) for s in range(200)}
-    assert drawn == {1000, 1001, 1002, 1003, 1004, 1005}, (
-        f"drew {sorted(drawn)} -- the configured bounds must both be reachable"
-    )

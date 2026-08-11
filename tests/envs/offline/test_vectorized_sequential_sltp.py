@@ -568,4 +568,7 @@ def test_vec_sltp_env_keeps_its_configured_action_levels(sample_ohlcv_df):
     )
     env = VectorizedSequentialTradingEnvSLTP(sample_ohlcv_df, config)
     assert env.action_levels == [-1, 0, 1]
+    # And the tensor the parent derives from them: restoring only the list would leave the
+    # env answering "what are my levels" two different ways.
+    assert env._action_levels_tensor.tolist() == [-1.0, 0.0, 1.0]
     env.close()

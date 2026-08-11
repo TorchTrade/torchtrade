@@ -301,24 +301,43 @@ class TestAlpacaSLTPTradingEnvClose:
         assert env.trader.position_qty == 0.0
 
 
-def test_sltp_history_records_price_and_position_on_a_flat_bar():
-    """The SLTP env read the price inline and never recorded the position (#290).
+@pytest.mark.parametrize("sltp", [True, False], ids=["sltp", "plain"])
+def test_alpaca_history_records_price_and_position_on_a_flat_bar(sltp):
+    """The SLTP env read the price inline, and neither env recorded the position (#290).
 
     `position_status.current_price if position_status else 0.0` gives 0 on every flat bar,
     where the non-SLTP sibling has a three-tier fallback -- so a reward function reading
-    history.base_prices saw a price of zero whenever the agent was out of the market. And
-    neither alpaca env passed position=, so history.positions was all zeros while every
-    other exchange recorded it.
+    history.base_prices saw zero whenever the agent was out of the market.
+
+    And neither alpaca env passed position= to record_step, so history.positions was all
+    zeros while every other exchange recorded it. BOTH envs are covered because the fix is
+    per-env: dropping it from the non-SLTP one passed the entire 2139-test suite.
     """
-    config = AlpacaSLTPTradingEnvConfig(symbol="BTC/USD", window_sizes=[10])
-    trader = MockTrader(initial_cash=10000.0)
-    env = AlpacaSLTPTorchTradingEnv(
-        config=config, observer=MockObserver(window_sizes=[10]), trader=trader
+    from torchtrade.envs.live.alpaca.env import (
+        AlpacaTorchTradingEnv, AlpacaTradingEnvConfig,
     )
+
+    trader = MockTrader(initial_cash=10000.0)
+    observer = MockObserver(window_sizes=[10])
+    if sltp:
+        env = AlpacaSLTPTorchTradingEnv(
+            config=AlpacaSLTPTradingEnvConfig(symbol="BTC/USD", window_sizes=[10]),
+            observer=observer, trader=trader,
+        )
+        open_action, hold_action = 1, 0
+    else:
+        env = AlpacaTorchTradingEnv(
+            config=AlpacaTradingEnvConfig(symbol="BTC/USD", window_sizes=[10]),
+            observer=observer, trader=trader,
+        )
+        open_action, hold_action = 2, 0  # action_levels [0.0, 0.5, 1.0]
     env._wait_for_next_timestamp = lambda: None
 
+    def step(a):
+        env._step(TensorDict({"action": torch.tensor(a)}, batch_size=()))
+
     env.reset()
-    env._step(TensorDict({"action": torch.tensor(0)}, batch_size=()))  # hold, stays flat
+    step(hold_action)
     # Asserted on the EXCHANGE, not on env.position.position_size: that field is never
     # assigned on any alpaca env, so it reads 0.0 while the exchange holds a position and
     # the guard would pass either way.
@@ -328,8 +347,8 @@ def test_sltp_history_records_price_and_position_on_a_flat_bar():
         "should have supplied one"
     )
 
-    env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))  # open a bracket
-    env._step(TensorDict({"action": torch.tensor(0)}, batch_size=()))  # hold it
+    step(open_action)
+    step(hold_action)
     # The recorded size is the one held ENTERING the bar, as on every other live env, so
     # it appears on the bar AFTER the one that opened the position.
     assert env.history.positions[-1] != 0, (

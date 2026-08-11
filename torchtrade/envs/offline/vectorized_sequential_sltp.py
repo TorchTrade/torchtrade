@@ -136,11 +136,11 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
             include_close_action=config.include_close_action,
         )
 
-        # Parent requires action_levels with >= 2 elements, but SLTP envs
-        # don't use fractional sizing. Temporarily set dummy levels for
-        # parent init, then restore. This is safe because the parent only
-        # reads action_levels during __init__ to build its action spec,
-        # which we override immediately after.
+        # Parent requires action_levels with >= 2 elements, but SLTP envs don't use
+        # fractional sizing. Dummy levels for parent init, restored below -- on the
+        # config, on the instance AND on the tensor the parent derives, because it copies
+        # all three during its own __init__ and "we override the action spec afterwards"
+        # covers only the first of them (#290).
         original_action_levels = config.action_levels
         config.action_levels = [0.0, 1.0]
 
@@ -152,6 +152,9 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         # as BaseLLMActor(action_levels=env.action_levels), gets [0.0, 1.0] (#290).
         config.action_levels = original_action_levels
         self.action_levels = original_action_levels
+        self._action_levels_tensor = torch.tensor(original_action_levels, dtype=MONEY_DTYPE)
+        if config.leverage == 1:  # same predicate as the parent, to stay twinned
+            self._action_levels_tensor = self._action_levels_tensor.clamp(min=0.0)
 
         # Override action spec with SLTP action count
         num_actions = len(self.action_map)
