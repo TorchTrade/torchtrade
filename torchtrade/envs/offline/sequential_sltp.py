@@ -286,6 +286,17 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         The exception is a bar that OPENED past liquidation. Nothing was crossed on the
         way there, the margin was already gone when the bar began, and no resting order
         could have worked first.
+
+        Scope: this covers a gap at the bar BOUNDARY, which OHLC records. A hole INSIDE a
+        bar does not appear in OHLC at all -- price can jump 96 to 88 without ever
+        printing 95 -- and there this fills the stop where the old rule liquidated, i.e.
+        trades one unresolvable case from pessimistic to optimistic. Same class as #280,
+        and not visible at this resolution.
+
+        The `trigger != "sl"` guard below is geometrically unreachable rather than
+        load-bearing: if liquidation fired and the stop is nearer, price passed the stop,
+        so _check_sltp_trigger has already returned "sl". It is kept because it states the
+        rule, and because it is the twin of the vectorized mask's own sl_trigger term.
         """
         if trigger != "sl":
             return False

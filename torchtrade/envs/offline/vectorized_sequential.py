@@ -565,7 +565,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
         self,
         high_prices: torch.Tensor,
         low_prices: torch.Tensor,
-        exempt: Optional[torch.Tensor] = None,
+        exempt_fn: Optional[Callable[[], torch.Tensor]] = None,
     ) -> None:
         """Close every position whose bar range breached its liquidation price.
 
@@ -578,9 +578,11 @@ class VectorizedSequentialTradingEnv(EnvBase):
         subclass depends on that -- see the note at its call site for which gates it
         leaves False -- so this must not become a mask-and-defer.
 
-        `exempt` marks lanes whose stop-loss sits between entry and the liquidation price,
-        so price crossed the stop on the way (#300). The base env has no brackets and
-        never passes it.
+        `exempt_fn` returns the lanes whose stop-loss sits between entry and the
+        liquidation price, so price crossed the stop on the way (#300). A callable rather
+        than a tensor because the mask costs a full set of tensor ops and is discarded on
+        the overwhelming majority of steps -- calling it behind the early-out below keeps
+        it off the hot path. The base env has no brackets and never passes it.
         """
         if self.config.leverage <= 1:
             return
@@ -588,10 +590,12 @@ class VectorizedSequentialTradingEnv(EnvBase):
         long_liq = (self._position_sizes > 0) & (low_prices <= liq_price)
         short_liq = (self._position_sizes < 0) & (high_prices >= liq_price)
         liq_mask = long_liq | short_liq
-        if exempt is not None:
-            liq_mask = liq_mask & ~exempt
         if not liq_mask.any():
             return
+        if exempt_fn is not None:
+            liq_mask = liq_mask & ~exempt_fn()
+            if not liq_mask.any():
+                return
 
         # PnL at the liquidation price (both directions, via signed sizes)
         pnl = (liq_price - self._entry_prices) * self._position_sizes

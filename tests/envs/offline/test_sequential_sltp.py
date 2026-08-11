@@ -1278,9 +1278,6 @@ class TestLiquidationVsBracketOnADoubleBreachBar:
     the whole offline suite green. All four quadrants of direction x trigger are
     covered because each is invisible to the other three: a reorder scoped to one of
     them passes every test the others pin.
-
-    All four quadrants of direction x trigger are covered because each is invisible to
-    the other three: a reorder scoped to one of them passes every test the others pin.
     """
 
     def test_a_bar_that_gapped_past_liquidation_still_liquidates(self):
@@ -1302,6 +1299,8 @@ class TestLiquidationVsBracketOnADoubleBreachBar:
             f"a gapped-open bar must liquidate, not fill the stop -- got "
             f"{env.history.action_types}"
         )
+        # 400 is an #314 number: the liquidation books at liq_price even though the bar
+        # opened below it. When that is fixed this expectation moves with it.
         assert env.balance == pytest.approx(400.0)
 
     # The action tuple is spelled out rather than derived: create_sltp_action_map
@@ -1358,10 +1357,6 @@ class TestLiquidationVsBracketOnADoubleBreachBar:
                 "a take-profit pre-empted the liquidation on a bar that breached both, "
                 f"where the ordering is genuinely unresolvable -- got {exits}"
             )
-        # Liquidation deliberately leaves the brackets armed, so the price can be read
-        # back afterwards. Asserting it lies INSIDE the bar pins the collision itself:
-        # a level moved off the wick and a wick shrunk off the level both fail here,
-        # where pinning the price as a constant would only catch the first.
         # Pins the collision itself: a level moved off the wick and a wick shrunk off the
         # level both fail here, where pinning the price as a constant catches only the
         # first. On a stop row the level is consumed by the exit, so it is read from the

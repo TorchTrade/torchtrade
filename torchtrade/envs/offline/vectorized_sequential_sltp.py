@@ -315,7 +315,8 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         # is NOT exempt. A bar that opened past liquidation is not exempt either: nothing
         # was crossed on the way, the margin was gone before the bar began.
         self._apply_liquidation(
-            new_high, new_low, exempt=self._stop_reached_first_mask(new_open, new_high, new_low)
+            new_high, new_low,
+            exempt_fn=lambda: self._stop_reached_first_mask(new_open, new_high, new_low),
         )
 
         has_position = self._position_sizes != 0
