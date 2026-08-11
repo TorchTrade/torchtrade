@@ -789,7 +789,7 @@ def test_position_unknown_identity_survives_a_round_trip():
     assert copy.deepcopy({"position_status": POSITION_UNKNOWN})["position_status"] is POSITION_UNKNOWN
 
 
-@pytest.mark.parametrize("env_cls", NON_SLTP_ENVS, ids=lambda c: c.__name__)
+@pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
 def test_no_live_env_reforks_the_position_quantity_accessor(env_cls):
     """The size accessor lives on the shared base, and must stay there (#283).
 
@@ -799,7 +799,10 @@ def test_no_live_env_reforks_the_position_quantity_accessor(env_cls):
     that never happened.
 
     Structural, not behavioural: a re-forked copy that has not drifted yet passes every
-    behavioural test, which is exactly how three of them survived.
+    behavioural test, which is exactly how three of them survived. Over FUTURES_ENVS, not
+    just the non-SLTP ones: the SLTP variants inherit the accessor without calling it
+    today, so a fork there would be dead code -- and dead-but-wrong is the state the three
+    originals were in.
     """
     assert "_get_current_position_quantity" not in vars(env_cls), (
         f"{env_cls.__name__} redefines _get_current_position_quantity. The dust rule "
@@ -827,3 +830,35 @@ def test_a_dust_residual_does_not_look_like_a_position_to_the_trade_path(env_cls
     assert env_cls._get_current_position_quantity(env) == 0.0, (
         "a 1e-12 residual must read as flat, not as a position to close"
     )
+
+
+@pytest.mark.parametrize("qty,expected", [
+    (None, 0.0),        # no position at all
+    (0.0, 0.0),
+    (1e-12, 0.0),       # dust left by a full close
+    (-1e-12, 0.0),
+    (1e-9, 0.0),        # exactly at the epsilon, which is inclusive
+    (1.1e-9, 1.1e-9),   # just past it: a real, if tiny, position
+    (2.5, 2.5),
+    ("2.5", 2.5),       # exchanges return strings; the old form passed one through
+], ids=["none", "zero", "dust-long", "dust-short", "at-eps", "past-eps", "long", "string"])
+def test_position_qty_from_status_is_the_one_size_rule(qty, expected):
+    """Direct cover for the helper (#283), which okx reaches without the accessor.
+
+    The string cell is not hypothetical: binance, bybit and okx all read qty off the wire
+    as a string. They coerce at construction today, but the deleted hand-rolled form
+    returned whatever it was given, so an uncoerced path would have made the downstream
+    `abs(current_qty) > 0` raise TypeError rather than size an order.
+    """
+    from torchtrade.envs.core.state import position_qty_from_status
+
+    status = None if qty is None else SimpleNamespace(qty=qty)
+    assert position_qty_from_status(status) == expected
+
+
+def test_position_qty_from_status_refuses_an_unknown_status():
+    """An outage is not flat -- the same rule position_direction_from_status enforces."""
+    from torchtrade.envs.core.state import position_qty_from_status
+
+    with pytest.raises(PositionUnknownError):
+        position_qty_from_status(POSITION_UNKNOWN)
