@@ -82,9 +82,10 @@ def gappy_ohlcv_df():
     1/25 - 0.004 maintenance = 3.6%, and a gap wider than it liquidates the position
     before a bracket can fire, degenerating the cell into a liquidation test.
 
-    2% sits between measured cliffs: below ~0.5% gaps stop clearing the bracket, and at
-    ~3% the first liquidations appear. Direction alternates so long and short brackets are
-    each exercised.
+    2% sits between measured cliffs: gaps stop clearing the bracket below ~0.3% (0.2%
+    yields zero gapped fills, 0.5% already degrades to 30 of 51), and the first
+    liquidations appear at ~3%. Direction alternates so long and short brackets are each
+    exercised.
     """
     rng = np.random.default_rng(20260811)
     n = 1440

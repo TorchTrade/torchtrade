@@ -213,7 +213,7 @@ def _run_sltp_sequence(
     # open. Both weaker forms shipped: first cells that opened nothing at all, then cells
     # that opened once and held for 99 steps with no bracket ever firing -- which a
     # "position was open" check reads as maximally healthy. Healthy cells measure 8-38
-    # opens and 4-22 bracket exits, so these floors have room.
+    # opens and 4-13 bracket exits, so these floors have room.
     if random_steps is not None:
         kinds = collections.Counter(scalar.history.action_types)
         opens = kinds["long"] + kinds["short"]
@@ -615,21 +615,7 @@ class TestSLTPScalarVecEquivalenceTradeModesAndLock:
     @pytest.mark.parametrize("trade_mode", ["fractional", "notional", "quantity"])
     @pytest.mark.parametrize("lock", [False, True], ids=["unlocked", "locked"])
     @pytest.mark.parametrize("leverage", [1, 25], ids=["spot", "lev25"])
-    @pytest.mark.parametrize("fixture", ["sample_ohlcv_df", "gappy_ohlcv_df"],
-                             ids=["continuous", "gappy"])
-    def test_random_actions_match(self, request, fixture, trade_mode, lock, leverage):
-        """The gappy arm exists because this harness was structurally blind to #280.
-
-        Every fixture it used built open == previous close, so no bar could open beyond a
-        bracket and the gap-fill rule was never reached. What the gappy arm buys is
-        detection of a ONE-ENGINE drift: reverting the rule in only the vectorized engine
-        used to leave every cell green, and now fails 9, all on this arm.
-
-        It does NOT catch a revert of both engines -- measured 18/18 green. This harness
-        only compares the two engines to each other, so a shared wrong answer is invisible
-        here by construction, whatever the fixture. That case is pinned directly by
-        tests/envs/offline/fundamental/test_gap_fills.py (#315).
-        """
+    def test_random_actions_match(self, sample_ohlcv_df, trade_mode, lock, leverage):
         if lock and leverage == 1:
             pytest.skip(
                 "lock is inert in spot: with no shorts and no close action the agent can "
@@ -638,22 +624,50 @@ class TestSLTPScalarVecEquivalenceTradeModesAndLock:
                 "(same action histogram, balance and position), so this cell is a copy."
             )
         mismatches = _run_sltp_sequence(
-            request.getfixturevalue(fixture),
+            sample_ohlcv_df,
             leverage=leverage,
             fee=0.001,
             max_traj=120,
             random_steps=100,
             trade_mode=trade_mode,
             lock=lock,
-            # Both fixtures need these overrides. The continuous one spans only
-            # +5.9%/-1.7%, so the default +/-5% brackets never trigger -- as shipped this
-            # grid fired zero stops across all twelve cells. The gappy one gaps 2%, whose
-            # widest excursion from an entry is ~2.9% over ten bars, so it does not reach
-            # +/-5% either.
+            # The fixture only spans +5.9%/-1.7%, so the default +/-5% brackets can never
+            # trigger: as shipped this grid fired zero stops across all twelve cells.
             sl_levels=[-0.005],
             tp_levels=[0.005],
-            label=f"sltp-{'gappy' if 'gappy' in fixture else 'continuous'}"
-                  f"-{trade_mode}-{'locked' if lock else 'unlocked'}-lev{leverage}",
+            label=f"sltp-{trade_mode}-{'locked' if lock else 'unlocked'}-lev{leverage}",
+        )
+        assert not mismatches, "\n".join(mismatches)
+
+    @pytest.mark.parametrize("lock", [False, True], ids=["unlocked", "locked"])
+    def test_random_actions_match_across_a_gap(self, gappy_ohlcv_df, lock):
+        """The same comparison on bars that GAP, which no other fixture can produce (#315).
+
+        Not here to catch a one-engine revert of the gap rule itself -- test_gap_fills.py
+        pins that directly. What only this reaches is the DOWNSTREAM consumers of a gapped
+        fill price: fee, margin and PnL are all computed off exec_price, and a mutant that
+        charges the exit fee against the bracket while leaving the PnL fix intact kills
+        these two cells and nothing else in the offline or replay suites. test_gap_fills.py
+        runs at zero fee, so nothing there observes those consumers; the grid above has
+        fees but never gaps, so exec_price equals the bracket and the mutation is a no-op.
+
+        Two cells, not a fixture axis over the grid above: measured across 11 gap
+        mutations, trade_mode and leverage are pure duplication on gappy data, and only
+        the lock axis and the presence of shorts change what is reached.
+        """
+        mismatches = _run_sltp_sequence(
+            gappy_ohlcv_df,
+            leverage=25,
+            fee=0.001,
+            max_traj=120,
+            random_steps=100,
+            trade_mode="notional",
+            lock=lock,
+            # 2% gaps never reach the default +/-5% brackets, so the grid's overrides are
+            # needed here too.
+            sl_levels=[-0.005],
+            tp_levels=[0.005],
+            label=f"sltp-gappy-{'locked' if lock else 'unlocked'}",
         )
         assert not mismatches, "\n".join(mismatches)
 
