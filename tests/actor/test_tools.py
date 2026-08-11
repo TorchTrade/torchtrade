@@ -43,12 +43,20 @@ def test_google_news_empty_results(monkeypatch):
     assert "no recent news" in tool.run().lower()
 
 
-def test_google_news_fetch_failure_returns_error_string(monkeypatch):
+@pytest.mark.parametrize("query", [None, 5, ["a"]], ids=["default", "int", "list"])
+def test_google_news_failure_returns_error_string(monkeypatch, query):
+    """Nothing in run() may raise into a live trading step -- including normalising the
+    query, which parse_tool_calls hands through unvalidated so it need not be a string.
+
+    The non-string cells mirror the Polymarket ones. #308 moved the _one_line(query) call
+    ahead of the try and reintroduced exactly the AttributeError a fix one day earlier
+    had removed there; this is what catches that.
+    """
     tool = GoogleNewsTool(symbol="BTC/USD")
-    def boom(query):
+    def boom(q):
         raise ConnectionError("network down")
     monkeypatch.setattr(tool, "_fetch", boom)
-    out = tool.run()                          # must NOT raise
+    out = tool.run() if query is None else tool.run(query=query)  # must NOT raise
     assert "error" in out.lower()
 
 

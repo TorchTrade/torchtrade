@@ -81,13 +81,16 @@ class GoogleNewsTool(Tool):
         return entries
 
     def run(self, query: Optional[str] = None) -> str:
-        # Every field rendered below is collapsed to one line (#308). A newline in any of
-        # them lets one entry occupy two numbered rows and fabricate a headline the model
-        # is told to treat as verified tool output. Unlike PolymarketTool's query, the
-        # title/source/published fields come from an RSS feed -- authored by whoever gets
-        # a headline indexed by Google News -- so this is a third-party boundary.
-        q = _one_line(query or symbol_to_query(self.symbol))
+        # Every feed field rendered below is collapsed to one line (#308). A newline in
+        # any of them lets one entry occupy two numbered rows and fabricate a headline the
+        # model cannot distinguish from genuine tool output. Unlike PolymarketTool's
+        # query, title/source/published come from an RSS feed -- authored by whoever gets
+        # a headline indexed by Google News -- so this is a third-party boundary, and the
+        # news path has no volume floor or other content filter.
         try:
+            # Inside the guard: `query` arrives unvalidated from the model, so
+            # normalising it can itself raise on a non-string.
+            q = _one_line(query or symbol_to_query(self.symbol))
             entries = self._fetch(q)
         except Exception as exc:  # never raise into a live trading step
             return f"error: google_news unavailable ({exc})"
