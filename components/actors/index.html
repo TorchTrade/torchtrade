@@ -1062,6 +1062,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#googlenewstool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GoogleNewsTool
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#polymarkettool" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1375,6 +1386,17 @@
   
     <nav class="md-nav" aria-label="Tool use">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#googlenewstool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GoogleNewsTool
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#polymarkettool" class="md-nav__link">
@@ -1723,6 +1745,23 @@ block, then continues until it emits <code>&lt;answer&gt;N&lt;/answer&gt;</code>
 call a tool are re-generated, so batched multi-symbol inference stays efficient.
 Tool use requires <code>backend="vllm"</code> (the transformers backend can't halt at
 <code>&lt;/tool&gt;</code>) and the <code>[llm]</code> extra (adds <code>feedparser</code>).</p>
+<h4 id="googlenewstool"><code>GoogleNewsTool</code><a class="headerlink" href="#googlenewstool" title="Permanent link">&para;</a></h4>
+<p>Recent headlines for the traded asset, from Google News RSS — free, no key. Requires
+the <code>[llm]</code> extra (adds <code>feedparser</code>).</p>
+<ul>
+<li><strong>Headlines are a third-party trust boundary.</strong> <code>title</code> and <code>source</code> are authored by
+  whoever gets a story indexed by Google News (<code>published</code> is Google's own), and unlike
+  <code>PolymarketTool</code> there is no volume floor or other content filter deciding what
+  reaches the prompt — only a <code>top_n</code> count cap. Every rendered field is collapsed to
+  a single capped line before it enters the context, because a newline would
+  otherwise let one entry occupy two numbered rows and fabricate a headline the model
+  cannot distinguish from genuine tool output (#308).</li>
+<li><strong>That guard covers row forgery and length, not inline markup.</strong> A literal
+  <code>&lt;/tool_results&gt;</code> in a headline would still close the results block early; tracked
+  in #330.</li>
+<li><strong>This is a live-path tool.</strong> It returns news as of <em>now</em>, so using it during
+  offline replay would show a historical episode present-day headlines.</li>
+</ul>
 <h4 id="polymarkettool"><code>PolymarketTool</code><a class="headerlink" href="#polymarkettool" title="Permanent link">&para;</a></h4>
 <p>Prediction-market odds for the traded asset, from Polymarket's public Gamma API —
 free, no key, no account. It reuses the <code>MarketScanner</code> that backs
