@@ -423,8 +423,9 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
 
         The detection rule and the fill pricing both live on the parent (#316). This used
         to re-implement both under a name one letter from the parent's, which is why #280
-        had to be fixed in two scalar places. Verified identical over 9,604 well-formed
-        OHLC combinations before the fork was deleted.
+        had to be fixed in two scalar places. The fork was verified identical to the
+        parent over 300k well-formed bars before deletion; the two could only ever part
+        on a bar whose close fell outside [low, high], which the sampler cannot produce.
         """
         trigger = self._check_sltp_trigger(ohlcv)
         if trigger is None:

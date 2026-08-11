@@ -499,6 +499,30 @@ class TestOneStepIntegration:
 class TestOneStepRegression:
     """Regression tests for known OneStep issues."""
 
+    @pytest.mark.parametrize("method", [
+        "_check_sltp_trigger",     # intrabar SL/TP detection
+        "_sltp_execution_price",   # which price a fired bracket fills at
+        "_execute_sltp_close",     # booking the close
+    ])
+    def test_onestep_does_not_refork_the_bracket_rules(self, method):
+        """OneStep must inherit these, never redefine them (#316).
+
+        It used to carry its own copy of the detection rule under
+        _check_sltp_triggers -- one letter from the parent's _check_sltp_trigger -- along
+        with its own fill pricing. The copies had not drifted, but they meant #280 had to
+        be fixed in two scalar places and the OneStep half shipped untested.
+
+        A structural guard rather than a behavioural one: the live envs have the same
+        shape of check in tests/envs/test_live_env_base.py, and its absence here is how
+        the fork survived. Behavioural equivalence cannot catch a re-fork that has not
+        drifted yet.
+        """
+        assert method not in vars(OneStepTradingEnv), (
+            f"OneStepTradingEnv redefines {method}. Bracket detection, pricing and "
+            "booking live on SequentialTradingEnvSLTP so a fill rule cannot be fixed in "
+            "only one of them -- delegate instead of re-forking."
+        )
+
     def test_done_flag_always_true_after_step(self, onestep_env):
         """Done flag should always be True after step (one-step setting)."""
         td = onestep_env.reset()
