@@ -1358,9 +1358,15 @@ class TestLookaheadBiasFix:
         """
         CRITICAL: The execution timeframe itself should NOT be shifted.
 
-        Only higher timeframes (tf != execute_on) should be shifted.
-        The execution timeframe represents when we're making decisions,
-        so it must remain at its natural timing.
+        Only strictly coarser timeframes (tf > execute_on) are shifted. The predicate
+        used to be `!= execute_on`, which compared (value, unit) and so shifted a
+        60Minute frame against execute_on=1Hour -- the same duration -- leaving it a bar
+        stale (#282). This test still passes under that bug, since it never constructs
+        an equal-duration pair, so the predicate is spelled out here rather than left to
+        the test name.
+
+        The execution timeframe represents when we're making decisions, so it must
+        remain at its natural timing.
         """
         sampler = MarketDataObservationSampler(
             df=lookahead_test_df,
@@ -1519,9 +1525,11 @@ class TestSamplerMultiTimeframeAlignment:
         """
         Higher timeframe bars should be properly structured.
 
-        Note: Pandas resampling indexes bars by START time. A 5-min bar at 00:05:00
-        contains data from 00:05:00-00:09:59. When queried at 00:07:00, we see this
-        bar which includes "future" close from 00:09:59.
+        Note: pandas resampling labels bars by START time, and this class runs with
+        execute_on=1Minute, so a coarser 5-min bar IS shifted to its END label before it
+        can be seen -- the "future close" this note used to describe is not reachable
+        here. What remains true is the narrower point: a bar aggregates its whole span,
+        which is why a bar must be bounded by when it CLOSES, not when it starts.
 
         This test verifies the structure is correct, not that there's no lookahead.
         See TestSamplerNoFutureLeakage for lookahead discussion.
@@ -2046,5 +2054,47 @@ class TestObservationTimeframesShareOneInstant:
                     f"{minute:.0f}, which is {minute - decision_instant:.0f} past the "
                     f"decision instant {decision_instant:.0f}"
                 )
+            if truncated:
+                break
+
+
+    def test_three_timeframes_spanning_both_sides_of_execute_on(self):
+        """The realistic shape from docs/guides/sampler.md, and the only config where
+        the fine search key and the coarse END-shift both apply at once.
+
+        Each side has a different correct answer, which is the point: fine and exec end
+        at the decision instant, while coarse holds the last bar that has CLOSED -- it
+        is still mid-bar at that instant, so showing it would be lookahead.
+        """
+        fine = TimeFrame(1, TimeFrameUnit.Minute)
+        exec_tf = TimeFrame(15, TimeFrameUnit.Minute)
+        coarse = TimeFrame(1, TimeFrameUnit.Hour)
+
+        sampler = MarketDataObservationSampler(
+            df=self._counter_df(), time_frames=[fine, exec_tf, coarse],
+            window_sizes=[4, 4, 4], execute_on=exec_tf, max_traj_length=10, seed=0,
+        )
+        sampler.reset(random_start=False)
+        start = pd.Timestamp("2024-01-01 00:00:00")
+
+        for _ in range(6):
+            obs, timestamp, truncated = sampler.get_sequential_observation()
+            bin_start = (timestamp - start).total_seconds() / 60
+            decision_instant = bin_start + exec_tf.to_minutes() - 1
+
+            fine_last = obs[fine.obs_key_freq()][-1, 3].item() - 1000.0
+            exec_last = obs[exec_tf.obs_key_freq()][-1, 3].item() - 1000.0
+            coarse_last = obs[coarse.obs_key_freq()][-1, 3].item() - 1000.0
+
+            assert fine_last == decision_instant == exec_last, (
+                f"at {timestamp}: fine={fine_last:.0f} exec={exec_last:.0f}, both should "
+                f"be the decision instant {decision_instant:.0f}"
+            )
+            # The coarse bar is END-labelled, so it is only shown once closed. It may
+            # therefore trail, but must never reach past the decision instant.
+            assert coarse_last <= decision_instant, (
+                f"at {timestamp}: coarse={coarse_last:.0f} is past the decision instant "
+                f"{decision_instant:.0f}"
+            )
             if truncated:
                 break

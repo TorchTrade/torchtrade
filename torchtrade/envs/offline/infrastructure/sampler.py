@@ -138,10 +138,8 @@ class MarketDataObservationSampler:
 
         # Calculate offset needed for higher timeframes (to account for END-time indexing)
         # We need extra data to ensure sufficient lookback after the offset.
-        # Must be the SAME test as the shift above -- reserving an offset for a timeframe
-        # that was never shifted just discards leading data. `!= execute_on` compared
-        # (value, unit), so 60Minute against execute_on=1Hour reserved an hour it did not
-        # need, and finer timeframes reserved their own period for no reason (#282).
+        # Must be the SAME test as the shift above: reserving an offset for a timeframe
+        # that was never shifted only discards leading data (#282).
         higher_tf_offsets = [tf_to_timedelta(tf) for tf in time_frames if tf > execute_on]
         max_offset = max(higher_tf_offsets) if higher_tf_offsets else pd.Timedelta(0)
 
@@ -355,6 +353,11 @@ class MarketDataObservationSampler:
         Not the last bar that *starts* inside the bin: pandas aggregates a bar across
         its whole span, so one starting at minute 70 with a 7-minute period carries a
         close from minute 76 -- past a bin ending at 75, and into the future.
+
+        Assumes a tz-naive index, as every dataset in this repo is. Minute and Hour
+        resample as fixed-width offsets and are DST-immune regardless, but a tz-AWARE
+        index with execute_on=Day anchors bins to local midnight, making them 23h or 25h
+        while _exec_period_ns stays 24h -- which would overshoot on a short day.
         """
         fine_period_ns = self._fine_period_ns.get(key)
         if fine_period_ns is None:

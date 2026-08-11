@@ -67,16 +67,12 @@ class TimeFrame:
             return NotImplemented
         return self.value == other.value and self.unit == other.unit
 
-    # Ordering compares DURATION; equality compares (value, unit). Two different keys, on
-    # purpose: 60Minute and 1Hour are the same length but produce different observation
-    # keys, and parse_timeframe_string warns that models trained on one will not work
-    # with the other.
-    #
-    # That is precisely why @total_ordering cannot be used here. It derives __gt__ as
-    # `not (self < other or self == other)`, so for two equal-duration spellings neither
-    # branch held and BOTH directions returned True -- which made sampler.py's
-    # `if tf > execute_on` shift a 60Minute frame that was not coarser than execute_on,
-    # leaving it a full bar stale (#282). So all four comparisons are spelled out.
+    # Ordering compares DURATION, equality compares (value, unit) -- so this is
+    # deliberately NOT a total order: for 60Minute vs 1Hour, <, > and == are all False.
+    # The sampler relies on that (`tf > execute_on` and `tf < execute_on` are not
+    # complements; equal durations fall through both). @total_ordering would derive
+    # __gt__ from those two keys and return True in BOTH directions (#282), so all four
+    # comparisons are spelled out.
     def __lt__(self, other):
         """Less than, by total duration."""
         if not isinstance(other, TimeFrame):
