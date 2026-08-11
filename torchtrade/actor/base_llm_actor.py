@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Callable, List, Optional, Union
 import torch
 
 from torchtrade.actor.parsers import extract_action, parse_tool_calls
-from torchtrade.actor.tools import Tool
+from torchtrade.actor.tools import Tool, _one_line
 
 if TYPE_CHECKING:
     from tensordict import TensorDict
@@ -228,17 +228,22 @@ class BaseLLMActor(ABC):
         for idx, call in enumerate(calls, 1):
             name = call["name"]
             tool = self._tools_by_name.get(name)
+            # Collapsed before rendering: the parser captures a tool name with [^"]+,
+            # which matches newlines, and a bad kwarg name is echoed back inside the
+            # TypeError -- either one lets the model's own text occupy an extra row of
+            # this block and forge a tool result (#308). `result` is the tool's job.
+            safe_name = _one_line(str(name))
             if tool is None:
-                lines.append(f"Tool {name} (call {idx}) failed:")
-                lines.append(f"  Error: unknown tool '{name}'")
+                lines.append(f"Tool {safe_name} (call {idx}) failed:")
+                lines.append(f"  Error: unknown tool '{safe_name}'")
                 continue
             try:
                 result = tool.run(**call["args"])
-                lines.append(f"Tool {name} (call {idx}) succeeded:")
+                lines.append(f"Tool {safe_name} (call {idx}) succeeded:")
                 lines.append(f"  Result: {result}")
             except Exception as exc:  # per-tool guard; never crash a live step
-                lines.append(f"Tool {name} (call {idx}) failed:")
-                lines.append(f"  Error: {exc}")
+                lines.append(f"Tool {safe_name} (call {idx}) failed:")
+                lines.append(f"  Error: {_one_line(str(exc))}")
         lines.append("</tool_results>")
         return "\n".join(lines)
 

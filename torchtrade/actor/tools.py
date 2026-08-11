@@ -14,13 +14,14 @@ _MAX_TEXT_CHARS = 140
 def _one_line(text: str) -> str:
     """Collapse text to a single capped line before it enters the model context.
 
-    Applied to both free-text fields PolymarketTool renders. A newline lets one
-    field occupy two numbered rows and fabricate a market the model then treats
-    as tool-verified; the cap stops one field flooding the prompt.
+    Applied to every free-text field PolymarketTool and GoogleNewsTool render. A
+    newline lets one field occupy two numbered rows and fabricate an entry the
+    model cannot distinguish from genuine tool output; the cap stops one field flooding the
+    prompt.
 
     Scoped to row forgery and length only -- it does not neutralise inline
     markup such as a literal </tool_results>, which would still close the
-    results block early. GoogleNewsTool does not use this yet (see #308).
+    results block early (#330).
     """
     text = " ".join(text.split())
     return text[:_MAX_TEXT_CHARS] + "…" if len(text) > _MAX_TEXT_CHARS else text
@@ -80,8 +81,16 @@ class GoogleNewsTool(Tool):
         return entries
 
     def run(self, query: Optional[str] = None) -> str:
-        q = query or symbol_to_query(self.symbol)
+        # Every feed field rendered below is collapsed to one line (#308). A newline in
+        # any of them lets one entry occupy two numbered rows and fabricate a headline the
+        # model cannot distinguish from genuine tool output. Unlike PolymarketTool's
+        # query, title/source/published come from an RSS feed -- authored by whoever gets
+        # a headline indexed by Google News -- so this is a third-party boundary, and the
+        # news path has no volume floor or other content filter.
         try:
+            # Inside the guard: `query` arrives unvalidated from the model, so
+            # normalising it can itself raise on a non-string.
+            q = _one_line(query or symbol_to_query(self.symbol))
             entries = self._fetch(q)
         except Exception as exc:  # never raise into a live trading step
             return f"error: google_news unavailable ({exc})"
@@ -89,9 +98,9 @@ class GoogleNewsTool(Tool):
             return f"No recent news for '{q}'."
         lines = [f"Top news for '{q}':"]
         for i, e in enumerate(entries[: self.top_n], 1):
-            title = e.get("title", "")
-            source = e.get("source", "")
-            published = e.get("published", "")
+            title = _one_line(e.get("title", ""))
+            source = _one_line(e.get("source", ""))
+            published = _one_line(e.get("published", ""))
             lines.append(f"{i}. {title} — {source} · {published}".rstrip(" ·"))
         return "\n".join(lines)
 

@@ -175,6 +175,24 @@ call a tool are re-generated, so batched multi-symbol inference stays efficient.
 Tool use requires `backend="vllm"` (the transformers backend can't halt at
 `</tool>`) and the `[llm]` extra (adds `feedparser`).
 
+#### `GoogleNewsTool`
+
+Recent headlines for the traded asset, from Google News RSS — free, no key. Requires
+the `[llm]` extra (adds `feedparser`).
+
+- **Headlines are a third-party trust boundary.** `title` and `source` are authored by
+  whoever gets a story indexed by Google News (`published` is Google's own), and unlike
+  `PolymarketTool` there is no volume floor or other content filter deciding what
+  reaches the prompt — only a `top_n` count cap. Every rendered field is collapsed to
+  a single capped line before it enters the context, because a newline would
+  otherwise let one entry occupy two numbered rows and fabricate a headline the model
+  cannot distinguish from genuine tool output (#308).
+- **That guard covers row forgery and length, not inline markup.** A literal
+  `</tool_results>` in a headline would still close the results block early; tracked
+  in #330.
+- **This is a live-path tool.** It returns news as of *now*, so using it during
+  offline replay would show a historical episode present-day headlines.
+
 #### `PolymarketTool`
 
 Prediction-market odds for the traded asset, from Polymarket's public Gamma API —
