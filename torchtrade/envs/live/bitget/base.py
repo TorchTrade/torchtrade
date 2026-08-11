@@ -212,7 +212,6 @@ class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         # Get current state
         balance = self.trader.get_account_balance()
         self.balance = balance.get("available_balance", 0)
-        self.last_portfolio_value = self._get_portfolio_value()
 
         status = self.trader.get_status()
         position_status = status.get("position_status")

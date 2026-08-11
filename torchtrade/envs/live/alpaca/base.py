@@ -300,7 +300,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Get current state
         account = self.trader.client.get_account()
         self.balance = float(account.cash)
-        self.last_portfolio_value = self.balance
 
         status = self.trader.get_status()
         position_status = status.get("position_status")

@@ -825,9 +825,12 @@ def test_bankruptcy_baseline_counts_a_position_that_has_not_settled_yet():
         def close_all_positions(self):
             return {}  # submitted, not filled -- the position is still open
 
-    trader = UnsettledTrader(initial_cash=1000.0)
-    trader.position_qty, trader.avg_entry_price = 0.09, 100000.0
-    trader.position_value = 9000.0
+    # 1234 + 8765, chosen so the expected 9999 collides with nothing: MockTrader
+    # defaults initial_cash to 10000, so an expected 10000 would pass against
+    # account.cash too if someone ever dropped the explicit cash argument.
+    trader = UnsettledTrader(initial_cash=1234.0)
+    trader.position_qty, trader.avg_entry_price = 0.08765, 100000.0
+    trader.position_value = 8765.0
 
     env = AlpacaTorchTradingEnv(
         config=AlpacaTradingEnvConfig(symbol="BTC/USD", window_sizes=[10]),
@@ -835,7 +838,7 @@ def test_bankruptcy_baseline_counts_a_position_that_has_not_settled_yet():
         trader=trader,
     )
 
-    assert env.initial_portfolio_value == pytest.approx(10000.0), (
+    assert env.initial_portfolio_value == pytest.approx(9999.0), (
         f"baseline {env.initial_portfolio_value} ignores the {trader.position_value} "
         "still held in an unsettled position"
     )
