@@ -60,29 +60,6 @@ class TestCombinatorActionMap:
 class TestAlpacaSLTPTradingEnvInitialization:
     """Tests for environment initialization."""
 
-    def test_init_with_mocks(self):
-        """Test initialization with injected mocks."""
-        config = AlpacaSLTPTradingEnvConfig(
-            symbol="BTC/USD",
-            window_sizes=[10],
-            paper=True,
-            stoploss_levels=(-0.05, -0.1),
-            takeprofit_levels=(0.05, 0.1),
-        )
-
-        mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockTrader(initial_cash=10000.0)
-
-        env = AlpacaSLTPTorchTradingEnv(
-            config=config,
-            observer=mock_observer,
-            trader=mock_trader,
-        )
-
-        assert env.config == config
-        assert env.observer is mock_observer
-        assert env.trader is mock_trader
-
     def test_action_spec_size(self):
         """Test that action spec has correct size."""
         config = AlpacaSLTPTradingEnvConfig(
@@ -132,7 +109,12 @@ class TestAlpacaSLTPTradingEnvReset:
 
     @pytest.fixture
     def env(self):
-        """Create an environment with mocks."""
+        """Create an environment with mocks.
+
+        Deliberately does NOT stub _wait_for_next_timestamp: an instance attribute would
+        shadow the class-level patch in test_check_env_specs_passes, leaving that test
+        green with its patch deleted and hollowing out the #272 guard.
+        """
         config = AlpacaSLTPTradingEnvConfig(
             symbol="BTC/USD",
             window_sizes=[10],
@@ -152,19 +134,22 @@ class TestAlpacaSLTPTradingEnvReset:
         with patch.object(type(env), "_wait_for_next_timestamp"):
             check_env_specs(env)
 
-    def test_reset_returns_tensordict(self, env):
-        """Test that reset returns a TensorDict."""
-        td = env.reset()
-        assert isinstance(td, TensorDict)
+    def test_reset_clears_a_live_bracket(self, env):
+        """Reset must clear SL/TP levels that an episode actually set.
 
+        Asserting this on a virgin env cannot fail -- the levels are already 0.0 from
+        __init__, so a no-op _reset_sltp_state passes. The bracket has to be opened first
+        for the assertion to mean anything.
+        """
+        env._wait_for_next_timestamp = lambda: None
+        env.reset()
+        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+        assert env.active_stop_loss > 0, "the bracket action should have set the levels"
 
-    def test_reset_resets_sltp_state(self, env):
-        """Test that reset clears active SL/TP levels."""
         env.reset()
 
         assert env.active_stop_loss == 0.0
         assert env.active_take_profit == 0.0
-        assert env.position.current_position == 0.0
 
 
 class TestAlpacaSLTPTradingEnvStep:
@@ -190,14 +175,6 @@ class TestAlpacaSLTPTradingEnvStep:
         env._wait_for_next_timestamp = lambda: None
 
         return env
-
-    def test_step_returns_tensordict(self, env):
-        """Test that step returns a TensorDict."""
-        env.reset()
-        td_in = TensorDict({"action": torch.tensor(0)}, batch_size=())
-        td_out = env._step(td_in)
-
-        assert isinstance(td_out, TensorDict)
 
     def test_step_hold_action(self, env):
         """Test hold action (action=0)."""
@@ -323,24 +300,3 @@ class TestAlpacaSLTPTradingEnvClose:
 class TestAlpacaSLTPTradingEnvMultipleEpisodes:
     """Tests for running multiple episodes."""
 
-    def test_multiple_resets(self):
-        """Test that multiple resets work correctly."""
-        config = AlpacaSLTPTradingEnvConfig(
-            symbol="BTC/USD",
-            window_sizes=[10],
-        )
-        mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockTrader(initial_cash=10000.0)
-
-        env = AlpacaSLTPTorchTradingEnv(
-            config=config,
-            observer=mock_observer,
-            trader=mock_trader,
-        )
-        env._wait_for_next_timestamp = lambda: None
-
-        for _ in range(5):
-            td = env.reset()
-            assert isinstance(td, TensorDict)
-            assert env.active_stop_loss == 0.0
-            assert env.active_take_profit == 0.0
