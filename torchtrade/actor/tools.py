@@ -16,7 +16,7 @@ def _one_line(text: str) -> str:
 
     Applied to every free-text field PolymarketTool and GoogleNewsTool render. A
     newline lets one field occupy two numbered rows and fabricate an entry the
-    model then treats as tool-verified; the cap stops one field flooding the
+    model cannot distinguish from genuine tool output; the cap stops one field flooding the
     prompt.
 
     Scoped to row forgery and length only -- it does not neutralise inline

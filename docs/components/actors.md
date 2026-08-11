@@ -180,8 +180,8 @@ Tool use requires `backend="vllm"` (the transformers backend can't halt at
 Recent headlines for the traded asset, from Google News RSS — free, no key. Requires
 the `[llm]` extra (adds `feedparser`).
 
-- **Headlines are a third-party trust boundary.** `title`, `source` and `published`
-  are authored by whoever gets a story indexed by Google News, and unlike
+- **Headlines are a third-party trust boundary.** `title` and `source` are authored by
+  whoever gets a story indexed by Google News (`published` is Google's own), and unlike
   `PolymarketTool` there is no volume floor or other content filter deciding what
   reaches the prompt — only a `top_n` count cap. Every rendered field is collapsed to
   a single capped line before it enters the context, because a newline would
