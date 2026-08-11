@@ -160,7 +160,10 @@ of the observation by up to a full execution bar.
 - Timeframes **coarser** than `execute_on` are shifted forward by their period during
   resampling, so they are indexed by their END time and only completed bars are visible.
 - Timeframes **finer** than `execute_on` keep their own labels but are looked up with the
-  last instant inside the current execution bin, so they end where the fill happens.
+  last bar that *closes* at or before the execution bin ends, so they end where the fill
+  happens. Note "closes", not "starts": a bar is aggregated across its whole span, so one
+  that merely starts inside the bin can carry a close from after it — a 7-minute bar
+  beginning at minute 70 closes at 76, past a bin ending at 75.
 - A coarse bar that completes *inside* the current bin is not shown until the next step.
   That only arises when the coarse grid does not align with `execute_on` (e.g. 90-minute
   bars under hourly execution); it is conservative, never leaky.

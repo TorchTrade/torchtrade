@@ -378,7 +378,13 @@ class MarketDataObservationSampler:
         return exec_ts_ns + self._exec_period_ns - fine_period_ns
 
     def get_observation(self, timestamp: pd.Timestamp) -> Dict[str, torch.Tensor]:
-        """Return observation dict: { timeframe_key: tensor(shape=[ws, features]) }"""
+        """Return observation dict: { timeframe_key: tensor(shape=[ws, features]) }
+
+        `timestamp` must be an execution bin's START label, as `exec_times` produces and
+        `get_sequential_observation` returns. A timestamp part-way through a bin is
+        resolved against that bin, so a finer frame would end after the instant asked
+        for -- see _search_ts.
+        """
         obs: Dict[str, torch.Tensor] = {}
         # convert timestamp to int64 ns
         ts_int = int(timestamp.value)  # pd.Timestamp.value is int64 ns

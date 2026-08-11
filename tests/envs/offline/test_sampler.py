@@ -1993,12 +1993,23 @@ class TestObservationTimeframesShareOneInstant:
             "low": close - 0.5, "close": close, "volume": 1000.0,
         })
 
-    @pytest.mark.parametrize("fine,exec_tf", [
-        (TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(1, TimeFrameUnit.Hour)),
-        (TimeFrame(5, TimeFrameUnit.Minute), TimeFrame(1, TimeFrameUnit.Hour)),
-        (TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(15, TimeFrameUnit.Minute)),
-    ], ids=["1min_under_1h", "5min_under_1h", "1min_under_15min"])
-    def test_finer_window_ends_where_the_execute_on_window_ends(self, fine, exec_tf):
+    def test_finer_window_ends_where_the_execute_on_window_ends(self):
+        """Kept for one dimension only: a fine frame that is NOT 1-minute.
+
+        Review showed the 1Minute params here never fired without
+        TestSamplerNoFutureLeakage::test_multi_timeframe_no_leakage_in_execution_tf
+        also firing -- it asserts the identical relation over six execute_on values
+        instead of three. What does not exist elsewhere is a fine frame whose `value`
+        exceeds execute_on's, which is the only place a `.value`-vs-duration comparison
+        slip in TimeFrame.__gt__ shows up.
+
+        Folding this into that test is not free: it parametrizes execute_on over six
+        values including 5Minute, and a duplicate timeframe silently collapses in
+        resampled_dfs (3 requested, 2 returned), so the 5Minute case would quietly
+        degrade.
+        """
+        fine = TimeFrame(5, TimeFrameUnit.Minute)
+        exec_tf = TimeFrame(1, TimeFrameUnit.Hour)
         sampler = MarketDataObservationSampler(
             df=self._counter_df(), time_frames=[fine, exec_tf], window_sizes=[4, 4],
             execute_on=exec_tf, max_traj_length=8, seed=0,
@@ -2141,6 +2152,18 @@ class TestObservationTimeframesShareOneInstant:
             assert coarse_last <= decision_instant, (
                 f"at {timestamp}: coarse={coarse_last:.0f} is past the decision instant "
                 f"{decision_instant:.0f}"
+            )
+            # ...nor trail further than one coarse bar plus the exec bin it is read in.
+            # Derivable, not tuned: the visible coarse bar closes at floor(B/c)*c - 1, so
+            # with B a multiple of exec the lag is (B mod c) + exec < c + exec. Without
+            # this, `tf < execute_on` in _fine_period_ns can be weakened to `!=` -- the
+            # same spelling-vs-duration slip this branch exists to remove -- and coarse
+            # frames silently go an extra bar stale with the whole suite green.
+            coarse_limit = coarse.to_minutes() + exec_tf.to_minutes()
+            assert decision_instant - coarse_last < coarse_limit, (
+                f"at {timestamp}: coarse={coarse_last:.0f} is "
+                f"{decision_instant - coarse_last:.0f} min behind the decision instant "
+                f"{decision_instant:.0f}, past the {coarse_limit:.0f} min bound"
             )
             if truncated:
                 break
