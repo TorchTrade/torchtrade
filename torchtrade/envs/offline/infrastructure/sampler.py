@@ -78,6 +78,19 @@ class MarketDataObservationSampler:
         df = df.set_index("timestamp").sort_index()
         self.df = df
 
+        # A tz-aware index anchors Day bins to LOCAL midnight, so a DST spring-forward
+        # day is 23h wide while the fixed period below stays 24h -- and the bound would
+        # then reach an hour past the bin's real close. That is lookahead, not
+        # staleness. Nothing in this repo produces a tz-aware index, so refuse it at the
+        # boundary rather than carry a silent wrong number (#282).
+        if df.index.tz is not None and execute_on >= TimeFrame(1, TimeFrameUnit.Day):
+            raise ValueError(
+                f"execute_on={execute_on.obs_key_freq()} needs a tz-naive index: "
+                "day-or-longer bins follow local midnight, so DST transitions make them "
+                "23h or 25h wide and the observation window would run past the bin's "
+                "close. Convert to UTC and drop the timezone."
+            )
+
         self.time_frames = time_frames
         self.window_sizes = window_sizes
         self.max_traj_length = max_traj_length
@@ -137,8 +150,10 @@ class MarketDataObservationSampler:
         latest_first_step = max(first_time_stamps)
 
         # Calculate offset needed for higher timeframes (to account for END-time indexing)
-        # We need extra data to ensure sufficient lookback after the offset
-        higher_tf_offsets = [tf_to_timedelta(tf) for tf in time_frames if tf != execute_on]
+        # We need extra data to ensure sufficient lookback after the offset.
+        # Must be the SAME test as the shift above: reserving an offset for a timeframe
+        # that was never shifted only discards leading data (#282).
+        higher_tf_offsets = [tf_to_timedelta(tf) for tf in time_frames if tf > execute_on]
         max_offset = max(higher_tf_offsets) if higher_tf_offsets else pd.Timedelta(0)
 
         # Filter execution times
@@ -231,6 +246,15 @@ class MarketDataObservationSampler:
         # Using .as_unit('ns') ensures searchsorted comparisons are consistent.
         exec_ts_int64 = self.exec_times.as_unit('ns').asi8  # int64 nanoseconds
 
+        # Finer-than-execute_on frames are labelled by their bar's START -- only coarser
+        # ones get shifted to END labels above -- so looking one up at the exec bin's
+        # start label returns a bar that has barely begun (#282). See _search_ts.
+        self._exec_period_ns = tf_to_timedelta(execute_on).value
+        self._fine_period_ns = {
+            tf.obs_key_freq(): tf_to_timedelta(tf).value
+            for tf in time_frames if tf < execute_on
+        }
+
         # Convert resampled dfs to torch tensors for fast slicing.
         # Also convert timestamp indices to int64 (ns) and store as torch.long for searchsorted.
         self.torch_tensors: Dict[str, torch.FloatTensor] = {}
@@ -246,7 +270,9 @@ class MarketDataObservationSampler:
             self.torch_idx[key] = torch.from_numpy(ts_int64).to(torch.long)  # sorted 1D long tensor
 
             # Use numpy searchsorted once at init instead of torch searchsorted per step
-            obs_idx = np.searchsorted(ts_int64, exec_ts_int64, side='right') - 1
+            obs_idx = np.searchsorted(
+                ts_int64, self._search_ts(key, exec_ts_int64), side='right'
+            ) - 1
             self._obs_indices[key] = obs_idx
 
         # Execute-on base features tensor + index
@@ -330,18 +356,48 @@ class MarketDataObservationSampler:
 
         return obs, timestamp, truncated, ohlcv
 
+    def _search_ts(self, key: str, exec_ts_ns):
+        """Where to look `key` up, given an execution bin's start label.
+
+        Works on a scalar or an int64 array, so both lookup paths share one rule.
+
+        A frame at or coarser than execute_on is searched at the label itself. A finer
+        one is searched at the last label whose bar CLOSES at or before the bin ends.
+        Not the last bar that *starts* inside the bin: pandas aggregates a bar across
+        its whole span, so one starting at minute 70 with a 7-minute period carries a
+        close from minute 76 -- past a bin ending at 75, and into the future.
+
+        Assumes a tz-naive index, as every dataset in this repo is. Minute and Hour
+        resample as fixed-width offsets and are DST-immune regardless, but a tz-AWARE
+        index with execute_on=Day anchors bins to local midnight, making them 23h or 25h
+        while _exec_period_ns stays 24h -- which would overshoot on a short day.
+        """
+        fine_period_ns = self._fine_period_ns.get(key)
+        if fine_period_ns is None:
+            return exec_ts_ns
+        return exec_ts_ns + self._exec_period_ns - fine_period_ns
+
     def get_observation(self, timestamp: pd.Timestamp) -> Dict[str, torch.Tensor]:
-        """Return observation dict: { timeframe_key: tensor(shape=[ws, features]) }"""
+        """Return observation dict: { timeframe_key: tensor(shape=[ws, features]) }
+
+        `timestamp` must be an execution bin's START label, as `exec_times` produces and
+        `get_sequential_observation` returns. A timestamp part-way through a bin is
+        resolved against that bin, so a finer frame would end after the instant asked
+        for -- see _search_ts.
+        """
         obs: Dict[str, torch.Tensor] = {}
         # convert timestamp to int64 ns
         ts_int = int(timestamp.value)  # pd.Timestamp.value is int64 ns
-        ts_t = torch.tensor(ts_int, dtype=torch.long)
 
         for tf, ws in zip(self.time_frames, self.window_sizes):
             key = tf.obs_key_freq()
 
             arr = self.torch_tensors[key]           # (N, F) float tensor
             idx_tensor = self.torch_idx[key]        # (N,) long sorted tensor
+
+            # Same rule as the precomputed path, or a finer frame would land on a
+            # different bar here than in get_sequential_observation()
+            ts_t = torch.tensor(self._search_ts(key, ts_int), dtype=torch.long)
 
             # pos = insertion index where ts_t would be placed (right=True)
             pos_t = torch.searchsorted(idx_tensor, ts_t, right=True)  # tensor([pos]) dtype long

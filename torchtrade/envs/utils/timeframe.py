@@ -8,7 +8,6 @@ and Binance environments. It includes:
 """
 
 from enum import Enum
-from functools import total_ordering
 from typing import List, Union, Tuple
 import pandas as pd
 import re
@@ -22,7 +21,6 @@ class TimeFrameUnit(Enum):
     Day = 'D'       # Pandas freq for days
 
 
-@total_ordering
 class TimeFrame:
     """Represents a time interval with value and unit.
 
@@ -69,11 +67,35 @@ class TimeFrame:
             return NotImplemented
         return self.value == other.value and self.unit == other.unit
 
+    # Ordering compares DURATION, equality compares (value, unit) -- so this is
+    # deliberately NOT a total order: for 60Minute vs 1Hour, <, > and == are all False.
+    # The sampler relies on that (`tf > execute_on` and `tf < execute_on` are not
+    # complements; equal durations fall through both). @total_ordering would derive
+    # __gt__ from those two keys and return True in BOTH directions (#282), so all four
+    # comparisons are spelled out.
     def __lt__(self, other):
-        """Less than comparison based on total minutes."""
+        """Less than, by total duration."""
         if not isinstance(other, TimeFrame):
             return NotImplemented
         return self.to_minutes() < other.to_minutes()
+
+    def __le__(self, other):
+        """Less than or equal, by total duration."""
+        if not isinstance(other, TimeFrame):
+            return NotImplemented
+        return self.to_minutes() <= other.to_minutes()
+
+    def __gt__(self, other):
+        """Greater than, by total duration."""
+        if not isinstance(other, TimeFrame):
+            return NotImplemented
+        return self.to_minutes() > other.to_minutes()
+
+    def __ge__(self, other):
+        """Greater than or equal, by total duration."""
+        if not isinstance(other, TimeFrame):
+            return NotImplemented
+        return self.to_minutes() >= other.to_minutes()
 
     def __hash__(self):
         """Make TimeFrame hashable for use in sets and as dict keys."""
