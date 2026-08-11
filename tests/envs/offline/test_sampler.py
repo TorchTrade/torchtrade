@@ -2009,29 +2009,42 @@ class TestObservationTimeframesShareOneInstant:
             if truncated:
                 break
 
-    def test_finer_window_never_reaches_into_the_next_bin(self):
-        """The bound must stay strictly inside the current execute_on bin.
+    @pytest.mark.parametrize("exec_tf,fine", [
+        (TimeFrame(15, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute)),
+        (TimeFrame(15, TimeFrameUnit.Minute), TimeFrame(7, TimeFrameUnit.Minute)),
+        (TimeFrame(1, TimeFrameUnit.Hour), TimeFrame(45, TimeFrameUnit.Minute)),
+        (TimeFrame(1, TimeFrameUnit.Hour), TimeFrame(25, TimeFrameUnit.Minute)),
+    ], ids=["5_divides_15", "7_does_not", "45_does_not", "25_does_not"])
+    def test_fine_bar_straddling_the_bin_end_is_not_served(self, exec_tf, fine):
+        """A fine bar may only be served once it has CLOSED at or before the bin end.
 
-        Extending the fine window to the decision instant recovers granularity the agent
-        already has via obs[execute_on]. Overshooting by one tick would hand it the next
-        bin, which has not happened yet.
+        pandas aggregates a bar across its whole span, so a bar that merely STARTS
+        inside the execution bin can carry a close from after the bin. With
+        execute_on=15Minute and a 7Minute frame, the bar labelled minute 70 spans
+        [70, 77) and closes at 76 -- past a bin whose decision instant is 74.
+
+        The first version of this fix bounded on "the last bar starting inside the bin"
+        and leaked exactly that: 6 minutes here, 30 with 45Minute under 1Hour. Divisor
+        pairs are immune because their boundaries line up and nothing straddles, which
+        is why every other test in this file missed it -- they are all divisors.
         """
-        exec_tf = TimeFrame(1, TimeFrameUnit.Hour)
-        fine = TimeFrame(1, TimeFrameUnit.Minute)
         sampler = MarketDataObservationSampler(
-            df=self._counter_df(), time_frames=[fine, exec_tf], window_sizes=[4, 4],
-            execute_on=exec_tf, max_traj_length=8, seed=0,
+            df=self._counter_df(), time_frames=[fine, exec_tf], window_sizes=[3, 3],
+            execute_on=exec_tf, max_traj_length=12, seed=0,
         )
         sampler.reset(random_start=False)
         start = pd.Timestamp("2024-01-01 00:00:00")
 
-        for _ in range(5):
+        for _ in range(8):
             obs, timestamp, truncated = sampler.get_sequential_observation()
-            bin_end_minute = (timestamp - start).total_seconds() / 60 + 60  # exclusive
+            bin_start = (timestamp - start).total_seconds() / 60
+            decision_instant = bin_start + exec_tf.to_minutes() - 1
             for value in obs[fine.obs_key_freq()][:, 3].tolist():
-                assert value - 1000.0 < bin_end_minute, (
-                    f"at {timestamp}: fine window contains minute {value - 1000.0:.0f}, "
-                    f"which is in the NEXT bin (starts {bin_end_minute:.0f})"
+                minute = value - 1000.0
+                assert minute <= decision_instant, (
+                    f"at {timestamp}: {fine.obs_key_freq()} window carries minute "
+                    f"{minute:.0f}, which is {minute - decision_instant:.0f} past the "
+                    f"decision instant {decision_instant:.0f}"
                 )
             if truncated:
                 break

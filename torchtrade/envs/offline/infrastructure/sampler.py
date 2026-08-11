@@ -235,20 +235,14 @@ class MarketDataObservationSampler:
         # Using .as_unit('ns') ensures searchsorted comparisons are consistent.
         exec_ts_int64 = self.exec_times.as_unit('ns').asi8  # int64 nanoseconds
 
-        # Timeframes FINER than execute_on need a later search key. The resample loop
-        # shifts only coarser ones to END labels, so a finer frame is still labelled by
-        # its bar's START -- and searching it with the exec bin's start label returns the
-        # bar that starts there, leaving the fine window up to a full exec bar behind the
-        # close the trade actually fills at (#282). The execute_on frame lands right with
-        # the plain label only because its bin is already aggregated through the bin's
-        # end; a finer index has real per-bar granularity and does not.
-        #
-        # Exclusive upper bound, by one nanosecond: the window must reach the last bar
-        # inside the current bin and never the first bar of the next one, which has not
-        # happened at decision time.
-        exec_period_ns = tf_to_timedelta(execute_on).value
-        fine_keys = {tf.obs_key_freq() for tf in time_frames if tf < execute_on}
-        fine_ts_int64 = exec_ts_int64 + exec_period_ns - 1
+        # Finer-than-execute_on frames are labelled by their bar's START -- only coarser
+        # ones get shifted to END labels above -- so looking one up at the exec bin's
+        # start label returns a bar that has barely begun (#282). See _search_ts.
+        self._exec_period_ns = tf_to_timedelta(execute_on).value
+        self._fine_period_ns = {
+            tf.obs_key_freq(): tf_to_timedelta(tf).value
+            for tf in time_frames if tf < execute_on
+        }
 
         # Convert resampled dfs to torch tensors for fast slicing.
         # Also convert timestamp indices to int64 (ns) and store as torch.long for searchsorted.
@@ -265,8 +259,9 @@ class MarketDataObservationSampler:
             self.torch_idx[key] = torch.from_numpy(ts_int64).to(torch.long)  # sorted 1D long tensor
 
             # Use numpy searchsorted once at init instead of torch searchsorted per step
-            search_ts = fine_ts_int64 if key in fine_keys else exec_ts_int64
-            obs_idx = np.searchsorted(ts_int64, search_ts, side='right') - 1
+            obs_idx = np.searchsorted(
+                ts_int64, self._search_ts(key, exec_ts_int64), side='right'
+            ) - 1
             self._obs_indices[key] = obs_idx
 
         # Execute-on base features tensor + index
@@ -350,18 +345,37 @@ class MarketDataObservationSampler:
 
         return obs, timestamp, truncated, ohlcv
 
+    def _search_ts(self, key: str, exec_ts_ns):
+        """Where to look `key` up, given an execution bin's start label.
+
+        Works on a scalar or an int64 array, so both lookup paths share one rule.
+
+        A frame at or coarser than execute_on is searched at the label itself. A finer
+        one is searched at the last label whose bar CLOSES at or before the bin ends.
+        Not the last bar that *starts* inside the bin: pandas aggregates a bar across
+        its whole span, so one starting at minute 70 with a 7-minute period carries a
+        close from minute 76 -- past a bin ending at 75, and into the future.
+        """
+        fine_period_ns = self._fine_period_ns.get(key)
+        if fine_period_ns is None:
+            return exec_ts_ns
+        return exec_ts_ns + self._exec_period_ns - fine_period_ns
+
     def get_observation(self, timestamp: pd.Timestamp) -> Dict[str, torch.Tensor]:
         """Return observation dict: { timeframe_key: tensor(shape=[ws, features]) }"""
         obs: Dict[str, torch.Tensor] = {}
         # convert timestamp to int64 ns
         ts_int = int(timestamp.value)  # pd.Timestamp.value is int64 ns
-        ts_t = torch.tensor(ts_int, dtype=torch.long)
 
         for tf, ws in zip(self.time_frames, self.window_sizes):
             key = tf.obs_key_freq()
 
             arr = self.torch_tensors[key]           # (N, F) float tensor
             idx_tensor = self.torch_idx[key]        # (N,) long sorted tensor
+
+            # Same rule as the precomputed path, or a finer frame would land on a
+            # different bar here than in get_sequential_observation()
+            ts_t = torch.tensor(self._search_ts(key, ts_int), dtype=torch.long)
 
             # pos = insertion index where ts_t would be placed (right=True)
             pos_t = torch.searchsorted(idx_tensor, ts_t, right=True)  # tensor([pos]) dtype long
