@@ -213,7 +213,7 @@ def _run_sltp_sequence(
     # open. Both weaker forms shipped: first cells that opened nothing at all, then cells
     # that opened once and held for 99 steps with no bracket ever firing -- which a
     # "position was open" check reads as maximally healthy. Healthy cells measure 8-38
-    # opens and 4-13 bracket exits, so these floors have room.
+    # opens and 4-22 bracket exits, so these floors have room.
     if random_steps is not None:
         kinds = collections.Counter(scalar.history.action_types)
         opens = kinds["long"] + kinds["short"]
@@ -621,11 +621,15 @@ class TestSLTPScalarVecEquivalenceTradeModesAndLock:
         """The gappy arm exists because this harness was structurally blind to #280.
 
         Every fixture it used built open == previous close, so no bar could open beyond a
-        bracket -- reverting the gapped-stop rule in BOTH engines left all of these cells
-        green. The harness only detects divergence between the engines, so a shared wrong
-        answer needs a fixture that can produce the input at all (#315).
+        bracket and the gap-fill rule was never reached. What the gappy arm buys is
+        detection of a ONE-ENGINE drift: reverting the rule in only the vectorized engine
+        used to leave every cell green, and now fails 9, all on this arm.
+
+        It does NOT catch a revert of both engines -- measured 18/18 green. This harness
+        only compares the two engines to each other, so a shared wrong answer is invisible
+        here by construction, whatever the fixture. That case is pinned directly by
+        tests/envs/offline/fundamental/test_gap_fills.py (#315).
         """
-        df = request.getfixturevalue(fixture)
         if lock and leverage == 1:
             pytest.skip(
                 "lock is inert in spot: with no shorts and no close action the agent can "
@@ -634,19 +638,22 @@ class TestSLTPScalarVecEquivalenceTradeModesAndLock:
                 "(same action histogram, balance and position), so this cell is a copy."
             )
         mismatches = _run_sltp_sequence(
-            df,
+            request.getfixturevalue(fixture),
             leverage=leverage,
             fee=0.001,
             max_traj=120,
             random_steps=100,
             trade_mode=trade_mode,
             lock=lock,
-            # The continuous fixture only spans +5.9%/-1.7%, so the default +/-5% brackets
-            # can never trigger: as shipped this grid fired zero stops across all twelve
-            # cells. The gappy fixture's 6% jumps clear these levels outright.
+            # Both fixtures need these overrides. The continuous one spans only
+            # +5.9%/-1.7%, so the default +/-5% brackets never trigger -- as shipped this
+            # grid fired zero stops across all twelve cells. The gappy one gaps 2%, whose
+            # widest excursion from an entry is ~2.9% over ten bars, so it does not reach
+            # +/-5% either.
             sl_levels=[-0.005],
             tp_levels=[0.005],
-            label=f"sltp-{fixture}-{trade_mode}-{'locked' if lock else 'unlocked'}-lev{leverage}",
+            label=f"sltp-{'gappy' if 'gappy' in fixture else 'continuous'}"
+                  f"-{trade_mode}-{'locked' if lock else 'unlocked'}-lev{leverage}",
         )
         assert not mismatches, "\n".join(mismatches)
 

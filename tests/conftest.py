@@ -71,18 +71,20 @@ def sample_ohlcv_df():
 def gappy_ohlcv_df():
     """Random walk whose bars periodically GAP: open[i] != close[i-1].
 
-    Every other OHLCV fixture in this file builds `open = np.roll(close, 1)`, so
-    `open[i] == close[i-1]` exactly and a bar can never open beyond a bracket set off the
-    previous close. That is a structural blind spot, not an oversight in any one test: it
-    is why the gapped-stop mispricing in #280 survived the whole suite in four separate
-    engines (#315).
+    Every other OHLCV fixture in this file has `open[i] == close[i-1]` exactly, so a bar
+    can never open beyond a bracket set off the previous close. That is a structural blind
+    spot, not an oversight in any one test: it is why the gapped-stop mispricing in #280
+    survived the whole suite in four separate engines (#315).
 
     Gap size is bounded on both sides. It must be large against the walk's own volatility
     (0.1% per bar) so a gap clears a bracket outright rather than grazing it, and small
     against the liquidation band at the highest leverage under test -- at 25x that band is
-    ~4%, and a gap wider than it liquidates the position before any bracket can fire,
-    which degenerates the cell into a liquidation test. 2% satisfies both. Direction
-    alternates so long and short brackets are each exercised.
+    1/25 - 0.004 maintenance = 3.6%, and a gap wider than it liquidates the position
+    before a bracket can fire, degenerating the cell into a liquidation test.
+
+    2% sits between measured cliffs: below ~0.5% gaps stop clearing the bracket, and at
+    ~3% the first liquidations appear. Direction alternates so long and short brackets are
+    each exercised.
     """
     rng = np.random.default_rng(20260811)
     n = 1440
