@@ -11,6 +11,7 @@ Similar to TorchRL's sota-tests approach.
 
 import os
 import shlex
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -478,18 +479,23 @@ def run_command(command: str, timeout: int = 300) -> int:
     env = os.environ.copy()
     env["WANDB_MODE"] = "disabled"  # Disable wandb logging
 
+    argv = shlex.split(command)
     # Use the interpreter running the tests; a stale `python` on PATH would smoke-test
     # the examples against a different torchrl than the one under test.
-    if command.startswith("python "):
-        command = shlex.quote(sys.executable) + command[len("python"):]
+    if argv and argv[0] == "python":
+        argv[0] = sys.executable
 
+    # No shell: with shell=True the child of Popen is /bin/sh, so killing it on timeout
+    # leaves the training run itself alive. start_new_session puts the example in its own
+    # process group, which is what makes the killpg below reach the run AND anything it
+    # spawned -- ParallelEnv workers outlive their parent otherwise (#312).
     process = subprocess.Popen(
-        command,
-        shell=True,
+        argv,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         cwd=str(REPO_ROOT),
         env=env,
+        start_new_session=True,
     )
 
     try:
@@ -499,7 +505,9 @@ def run_command(command: str, timeout: int = 300) -> int:
             print(stdout.decode() if stdout else "")
         return process.returncode
     except subprocess.TimeoutExpired:
-        process.kill()
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        # Reap it, or the timed-out example stays a zombie for the rest of the session.
+        process.communicate()
         raise
 
 
