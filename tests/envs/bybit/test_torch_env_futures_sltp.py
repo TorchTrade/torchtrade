@@ -775,12 +775,14 @@ class TestWithReplayData:
         n = 200
         timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
         base = 50000 + np.cumsum(np.random.default_rng(42).normal(0, 50, n))
+        # close drawn off base can land outside a high/low drawn off base alone (#326).
+        close = base + np.random.default_rng(45).normal(0, 20, n)
         return pd.DataFrame({
             "timestamp": timestamps,
             "open": base,
-            "high": base + np.abs(np.random.default_rng(43).normal(30, 20, n)),
-            "low": base - np.abs(np.random.default_rng(44).normal(30, 20, n)),
-            "close": base + np.random.default_rng(45).normal(0, 20, n),
+            "high": np.maximum(base + np.abs(np.random.default_rng(43).normal(30, 20, n)), np.maximum(base, close)),
+            "low": np.minimum(base - np.abs(np.random.default_rng(44).normal(30, 20, n)), np.minimum(base, close)),
+            "close": close,
             "volume": np.random.default_rng(46).uniform(100, 1000, n),
         })
 

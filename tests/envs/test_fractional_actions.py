@@ -34,11 +34,16 @@ def sample_df():
     dates = pd.date_range(start='2024-01-01', periods=1000, freq='1Min')
     close_prices = 50000 + np.cumsum(np.random.randn(1000) * 100)  # Random walk around 50k
 
+    # high/low drawn off close alone can land inside a separately drawn open, giving a
+    # bar that claims a high below its own open (#326).
+    open_prices = close_prices + np.random.randn(1000) * 10
+    high_prices = close_prices + np.abs(np.random.randn(1000) * 20)
+    low_prices = close_prices - np.abs(np.random.randn(1000) * 20)
     df = pd.DataFrame({
         'timestamp': dates,
-        'open': close_prices + np.random.randn(1000) * 10,
-        'high': close_prices + np.abs(np.random.randn(1000) * 20),
-        'low': close_prices - np.abs(np.random.randn(1000) * 20),
+        'open': open_prices,
+        'high': np.maximum(high_prices, np.maximum(open_prices, close_prices)),
+        'low': np.minimum(low_prices, np.minimum(open_prices, close_prices)),
         'close': close_prices,
         'volume': np.random.randint(100, 1000, 1000)
     })

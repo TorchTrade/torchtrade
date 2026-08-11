@@ -42,6 +42,27 @@ class MarketDataObservationSampler:
                 f"Got columns: {list(df.columns)}"
             )
 
+        # A bar whose high/low do not bracket its open and close is not a bar. Every exit
+        # rule reads the extreme to decide whether a level was touched, and the scalar
+        # stop-loss additionally reads the open to price a gapped fill (#280) -- so on a
+        # malformed row those two disagree, and the engines can answer differently (#326).
+        # Rejecting here rather than guarding in the rules is the boundary-validation
+        # invariant: a guard that absorbs the nonsense makes it silent.
+        # On numpy arrays rather than DataFrame.max(axis=1), which materialises a
+        # two-column copy twice -- 287ms vs 7.6ms on a 2.5M-row frame, paid once per
+        # ParallelEnv worker.
+        o, h, l, c = (df[k].to_numpy() for k in ("open", "high", "low", "close"))
+        bad = (h < np.maximum(o, c)) | (l > np.minimum(o, c))
+        if bad.any():
+            first = int(np.argmax(bad))
+            raise ValueError(
+                f"Malformed OHLC in {int(bad.sum())} of {len(df)} rows. First at position "
+                f"{first} (index {df.index[first]}): open={o[first]}, high={h[first]}, "
+                f"low={l[first]}, close={c[first]}. high must be >= max(open, close) and "
+                "low <= min(open, close) -- if you built these bars, clamp high/low around "
+                "open and close rather than drawing them off close alone."
+            )
+
         # Canonical OHLCV-first order for self.df. The row[:5] contract itself comes from
         # ohlcv_agg's key order, since pandas orders .agg(dict) output by dict key.
         ohlcv_cols = ["open", "high", "low", "close", "volume"]

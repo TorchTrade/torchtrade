@@ -244,14 +244,18 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         low_price = ohlcv["low"]
         close_price = ohlcv["close"]
 
-        # Open, extreme and close are all tested for each side, and the stop is tested
-        # before the take-profit. On a well-formed bar the extreme subsumes the other two,
-        # so this is the plainer statement of the same rule -- verified identical over
-        # 300k well-formed bars. It differs only where high/low fail to bracket open and
-        # close, and there it is the STRICTLY more pessimistic form: the stop still wins,
-        # where an ordering that deferred the close test would hand the bar to the
-        # take-profit. Nothing validates OHLC at ingestion, so that case is reachable from
-        # a caller's DataFrame, and the pessimistic answer is the one to converge on.
+        # Stop before take-profit, deliberately (see the docstring's pessimism note).
+        #
+        # The extreme alone would do. #326 rejects malformed bars at ingestion, and
+        # resampling preserves that -- open/high/low/close aggregate as first/max/min/last,
+        # all selections from rows inside the bar, and `last` skips NaN, so the surviving
+        # close always comes from a row whose own high the max already covers (checked
+        # over 60 NaN-scattered frames: zero malformed resampled bars). So
+        # min(open, low, close) IS low here.
+        #
+        # The triple stays because it states the rule without depending on that chain:
+        # until #316 these three lines were forked across two engines whose only
+        # disagreement was on exactly the malformed case.
         if self.position.position_size > 0:
             if self.stop_loss > 0 and min(open_price, low_price, close_price) <= self.stop_loss:
                 return "sl"
