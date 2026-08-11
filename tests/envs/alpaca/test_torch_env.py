@@ -806,3 +806,44 @@ class TestAlpacaTorchTradingEnvSeed:
         # Should not raise
 
 
+
+
+def test_bankruptcy_baseline_counts_a_position_that_has_not_settled_yet():
+    """__init__ closes positions, then pins the baseline -- but the close does not block.
+
+    close_all_positions() submits market orders and returns. Reading account.cash at that
+    instant excludes whatever is still tied up in the unsettled position, so an env
+    constructed holding 8765 of BTC against 1234 cash pinned its baseline at 1234 rather
+    than 9999, and _check_termination then fired an order of magnitude too low -- on the
+    account it exists to protect (#284).
+
+    The baseline must be the same quantity termination compares against, which is
+    _get_portfolio_value: cash PLUS position value. Reading account.cash made it a
+    different measurement, which is why settlement timing could change it at all.
+    """
+    class UnsettledTrader(MockTrader):
+        def close_all_positions(self):
+            return {}  # submitted, not filled -- the position is still open
+
+    # 1234 + 8765, chosen so the expected 9999 collides with nothing: MockTrader
+    # defaults initial_cash to 10000, so an expected 10000 would pass against
+    # account.cash too if someone ever dropped the explicit cash argument.
+    trader = UnsettledTrader(initial_cash=1234.0)
+    trader.position_qty, trader.avg_entry_price = 0.08765, 100000.0
+    trader.position_value = 8765.0
+
+    env = AlpacaTorchTradingEnv(
+        config=AlpacaTradingEnvConfig(symbol="BTC/USD", window_sizes=[10]),
+        observer=MockObserver(window_sizes=[10]),
+        trader=trader,
+    )
+
+    # The fixture carries all of this test's power and nothing else asserts it: swap
+    # UnsettledTrader back for a plain MockTrader and the close settles, cash becomes 9999
+    # on its own, and the test passes against the bug.
+    assert trader.position_qty > 0, "fixture no longer models an unsettled close"
+    assert env.initial_portfolio_value == pytest.approx(9999.0), (
+        f"baseline {env.initial_portfolio_value} ignores the {trader.position_value} "
+        "still held in an unsettled position"
+    )
+    env.close()
