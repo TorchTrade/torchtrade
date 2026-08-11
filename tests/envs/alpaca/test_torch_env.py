@@ -813,9 +813,9 @@ def test_bankruptcy_baseline_counts_a_position_that_has_not_settled_yet():
 
     close_all_positions() submits market orders and returns. Reading account.cash at that
     instant excludes whatever is still tied up in the unsettled position, so an env
-    constructed holding $9k of BTC against $1k cash pinned its baseline at 1000 and
-    _check_termination then fired below $100 instead of $1000 -- a 10x understatement of
-    the account it is protecting (#284).
+    constructed holding 8765 of BTC against 1234 cash pinned its baseline at 1234 rather
+    than 9999, and _check_termination then fired an order of magnitude too low -- on the
+    account it exists to protect (#284).
 
     The baseline must be the same quantity termination compares against, which is
     _get_portfolio_value: cash PLUS position value. Reading account.cash made it a
@@ -838,6 +838,10 @@ def test_bankruptcy_baseline_counts_a_position_that_has_not_settled_yet():
         trader=trader,
     )
 
+    # The fixture carries all of this test's power and nothing else asserts it: swap
+    # UnsettledTrader back for a plain MockTrader and the close settles, cash becomes 9999
+    # on its own, and the test passes against the bug.
+    assert trader.position_qty > 0, "fixture no longer models an unsettled close"
     assert env.initial_portfolio_value == pytest.approx(9999.0), (
         f"baseline {env.initial_portfolio_value} ignores the {trader.position_value} "
         "still held in an unsettled position"
