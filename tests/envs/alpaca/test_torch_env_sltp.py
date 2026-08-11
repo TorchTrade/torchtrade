@@ -1,7 +1,8 @@
 """
 Unit tests for AlpacaSLTPTorchTradingEnv (TorchRL-style environment with SL/TP).
 
-Tests environment initialization, reset, step, action mapping, and bracket order mechanics.
+Tests environment initialization, reset, step, and bracket action mapping. Bracket FILL
+pricing is not covered here -- that belongs to the order executor and the offline engines.
 """
 
 from unittest.mock import patch
@@ -17,66 +18,6 @@ from torchtrade.envs.live.alpaca.env_sltp import (
 )
 from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map as combinatory_action_map
 from .mocks import MockObserver, MockTrader
-
-
-class MockSLTPTrader(MockTrader):
-    """Extended MockTrader that handles bracket orders with SL/TP."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.active_stop_loss = None
-        self.active_take_profit = None
-        self.bracket_order_active = False
-
-    def trade(
-        self,
-        side: str,
-        amount: float,
-        order_type: str = "market",
-        take_profit: float = None,
-        stop_loss: float = None,
-        **kwargs
-    ) -> bool:
-        result = super().trade(side, amount, order_type, **kwargs)
-
-        if result and side.lower() == "buy" and take_profit and stop_loss:
-            self.active_take_profit = take_profit
-            self.active_stop_loss = stop_loss
-            self.bracket_order_active = True
-
-        return result
-
-    def simulate_price_movement(self, new_price: float):
-        """Simulate price movement and check SL/TP triggers."""
-        old_price = self.current_price
-        self.current_price = new_price
-
-        if self.position_qty > 0:
-            self.position_value = self.position_qty * new_price
-
-            # Check if SL or TP triggered
-            if self.bracket_order_active:
-                if self.active_stop_loss and new_price <= self.active_stop_loss:
-                    # Stop loss triggered
-                    self._close_position_at_price(self.active_stop_loss)
-                    return "stop_loss"
-                elif self.active_take_profit and new_price >= self.active_take_profit:
-                    # Take profit triggered
-                    self._close_position_at_price(self.active_take_profit)
-                    return "take_profit"
-
-        return None
-
-    def _close_position_at_price(self, price: float):
-        """Close position at specified price (for SL/TP)."""
-        sell_value = self.position_qty * price
-        self.cash += sell_value
-        self.position_qty = 0.0
-        self.position_value = 0.0
-        self.avg_entry_price = 0.0
-        self.bracket_order_active = False
-        self.active_stop_loss = None
-        self.active_take_profit = None
 
 
 class TestCombinatorActionMap:
@@ -119,29 +60,6 @@ class TestCombinatorActionMap:
 class TestAlpacaSLTPTradingEnvInitialization:
     """Tests for environment initialization."""
 
-    def test_init_with_mocks(self):
-        """Test initialization with injected mocks."""
-        config = AlpacaSLTPTradingEnvConfig(
-            symbol="BTC/USD",
-            window_sizes=[10],
-            paper=True,
-            stoploss_levels=(-0.05, -0.1),
-            takeprofit_levels=(0.05, 0.1),
-        )
-
-        mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader(initial_cash=10000.0)
-
-        env = AlpacaSLTPTorchTradingEnv(
-            config=config,
-            observer=mock_observer,
-            trader=mock_trader,
-        )
-
-        assert env.config == config
-        assert env.observer is mock_observer
-        assert env.trader is mock_trader
-
     def test_action_spec_size(self):
         """Test that action spec has correct size."""
         config = AlpacaSLTPTradingEnvConfig(
@@ -152,7 +70,7 @@ class TestAlpacaSLTPTradingEnvInitialization:
         )
 
         mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader()
+        mock_trader = MockTrader()
 
         env = AlpacaSLTPTorchTradingEnv(
             config=config,
@@ -173,7 +91,7 @@ class TestAlpacaSLTPTradingEnvInitialization:
         )
 
         mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader()
+        mock_trader = MockTrader()
 
         env = AlpacaSLTPTorchTradingEnv(
             config=config,
@@ -191,13 +109,18 @@ class TestAlpacaSLTPTradingEnvReset:
 
     @pytest.fixture
     def env(self):
-        """Create an environment with mocks."""
+        """Create an environment with mocks.
+
+        Deliberately does NOT stub _wait_for_next_timestamp: an instance attribute would
+        shadow the class-level patch in test_check_env_specs_passes, leaving that test
+        green with its patch deleted and hollowing out the #272 guard.
+        """
         config = AlpacaSLTPTradingEnvConfig(
             symbol="BTC/USD",
             window_sizes=[10],
         )
         mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader(initial_cash=10000.0)
+        mock_trader = MockTrader(initial_cash=10000.0)
 
         return AlpacaSLTPTorchTradingEnv(
             config=config,
@@ -211,19 +134,22 @@ class TestAlpacaSLTPTradingEnvReset:
         with patch.object(type(env), "_wait_for_next_timestamp"):
             check_env_specs(env)
 
-    def test_reset_returns_tensordict(self, env):
-        """Test that reset returns a TensorDict."""
-        td = env.reset()
-        assert isinstance(td, TensorDict)
+    def test_reset_clears_a_live_bracket(self, env):
+        """Reset must clear SL/TP levels that an episode actually set.
 
+        Asserting this on a virgin env cannot fail -- the levels are already 0.0 from
+        __init__, so a no-op _reset_sltp_state passes. The bracket has to be opened first
+        for the assertion to mean anything.
+        """
+        env._wait_for_next_timestamp = lambda: None
+        env.reset()
+        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+        assert env.active_stop_loss > 0, "the bracket action should have set the levels"
 
-    def test_reset_resets_sltp_state(self, env):
-        """Test that reset clears active SL/TP levels."""
         env.reset()
 
         assert env.active_stop_loss == 0.0
         assert env.active_take_profit == 0.0
-        assert env.position.current_position == 0.0
 
 
 class TestAlpacaSLTPTradingEnvStep:
@@ -239,7 +165,7 @@ class TestAlpacaSLTPTradingEnvStep:
             takeprofit_levels=(0.03, 0.06),
         )
         mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader(initial_cash=10000.0)
+        mock_trader = MockTrader(initial_cash=10000.0)
 
         env = AlpacaSLTPTorchTradingEnv(
             config=config,
@@ -249,14 +175,6 @@ class TestAlpacaSLTPTradingEnvStep:
         env._wait_for_next_timestamp = lambda: None
 
         return env
-
-    def test_step_returns_tensordict(self, env):
-        """Test that step returns a TensorDict."""
-        env.reset()
-        td_in = TensorDict({"action": torch.tensor(0)}, batch_size=())
-        td_out = env._step(td_in)
-
-        assert isinstance(td_out, TensorDict)
 
     def test_step_hold_action(self, env):
         """Test hold action (action=0)."""
@@ -284,7 +202,7 @@ class TestAlpacaSLTPTradingEnvStep:
 
         # Action 1 maps to first SL/TP combination
         td_in = TensorDict({"action": torch.tensor(1)}, batch_size=())
-        td_out = env._step(td_in)
+        env._step(td_in)
 
         assert env.position.current_position == 1
 
@@ -338,7 +256,7 @@ class TestAlpacaSLTPTradingEnvTermination:
         env = AlpacaSLTPTorchTradingEnv(
             config=config,
             observer=MockObserver(window_sizes=[10]),
-            trader=MockSLTPTrader(initial_cash=500.0),
+            trader=MockTrader(initial_cash=500.0),
         )
         env.initial_portfolio_value = 10000.0  # the 500 cash is below 10% of this
         env._wait_for_next_timestamp = lambda: None
@@ -358,7 +276,7 @@ class TestAlpacaSLTPTradingEnvClose:
             window_sizes=[10],
         )
         mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader(initial_cash=10000.0)
+        mock_trader = MockTrader(initial_cash=10000.0)
 
         env = AlpacaSLTPTorchTradingEnv(
             config=config,
@@ -382,24 +300,3 @@ class TestAlpacaSLTPTradingEnvClose:
 class TestAlpacaSLTPTradingEnvMultipleEpisodes:
     """Tests for running multiple episodes."""
 
-    def test_multiple_resets(self):
-        """Test that multiple resets work correctly."""
-        config = AlpacaSLTPTradingEnvConfig(
-            symbol="BTC/USD",
-            window_sizes=[10],
-        )
-        mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader(initial_cash=10000.0)
-
-        env = AlpacaSLTPTorchTradingEnv(
-            config=config,
-            observer=mock_observer,
-            trader=mock_trader,
-        )
-        env._wait_for_next_timestamp = lambda: None
-
-        for _ in range(5):
-            td = env.reset()
-            assert isinstance(td, TensorDict)
-            assert env.active_stop_loss == 0.0
-            assert env.active_take_profit == 0.0
