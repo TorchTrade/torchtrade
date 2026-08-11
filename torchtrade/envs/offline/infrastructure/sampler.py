@@ -78,6 +78,19 @@ class MarketDataObservationSampler:
         df = df.set_index("timestamp").sort_index()
         self.df = df
 
+        # A tz-aware index anchors Day bins to LOCAL midnight, so a DST spring-forward
+        # day is 23h wide while the fixed period below stays 24h -- and the bound would
+        # then reach an hour past the bin's real close. That is lookahead, not
+        # staleness. Nothing in this repo produces a tz-aware index, so refuse it at the
+        # boundary rather than carry a silent wrong number (#282).
+        if df.index.tz is not None and execute_on >= TimeFrame(1, TimeFrameUnit.Day):
+            raise ValueError(
+                f"execute_on={execute_on.obs_key_freq()} needs a tz-naive index: "
+                "day-or-longer bins follow local midnight, so DST transitions make them "
+                "23h or 25h wide and the observation window would run past the bin's "
+                "close. Convert to UTC and drop the timezone."
+            )
+
         self.time_frames = time_frames
         self.window_sizes = window_sizes
         self.max_traj_length = max_traj_length

@@ -2054,6 +2054,48 @@ class TestObservationTimeframesShareOneInstant:
                     f"{minute:.0f}, which is {minute - decision_instant:.0f} past the "
                     f"decision instant {decision_instant:.0f}"
                 )
+
+            # Safety alone is satisfiable by any stale bound, and staleness is what
+            # #282 was about. The window must end on the FRESHEST legal bar: if the
+            # last legal one is [L, L+f) then the next closes at L+2f, past the bin,
+            # so the lag can never reach a full fine period.
+            newest = obs[fine.obs_key_freq()][-1, 3].item() - 1000.0
+            assert decision_instant - newest < fine.to_minutes(), (
+                f"at {timestamp}: {fine.obs_key_freq()} ends at {newest:.0f}, "
+                f"{decision_instant - newest:.0f} min behind the decision instant "
+                f"{decision_instant:.0f} -- a whole {fine.to_minutes():.0f}-min bar "
+                f"was available and withheld"
+            )
+            if truncated:
+                break
+
+    def test_both_lookup_paths_agree_for_a_finer_frame(self):
+        """get_observation(ts) must return what get_sequential_observation() returned.
+
+        They are separate implementations -- one precomputes indices at init, the other
+        searches at call time -- and the fine-frame rule was originally applied to only
+        the first, so they disagreed by up to a full execution bar.
+
+        Reachable, not theoretical: sequential.py and onestep.py both fall back to
+        get_observation() for the terminal observation of a truncated episode, which is
+        exactly what a value estimate bootstraps from.
+        """
+        fine = TimeFrame(1, TimeFrameUnit.Minute)
+        exec_tf = TimeFrame(15, TimeFrameUnit.Minute)
+        sampler = MarketDataObservationSampler(
+            df=self._counter_df(), time_frames=[fine, exec_tf], window_sizes=[4, 4],
+            execute_on=exec_tf, max_traj_length=10, seed=0,
+        )
+        sampler.reset(random_start=False)
+
+        for _ in range(5):
+            sequential, timestamp, truncated = sampler.get_sequential_observation()
+            direct = sampler.get_observation(timestamp)
+            for key in (fine.obs_key_freq(), exec_tf.obs_key_freq()):
+                assert torch.equal(sequential[key], direct[key]), (
+                    f"at {timestamp}: {key} differs between the sequential and the "
+                    f"timestamp-lookup paths"
+                )
             if truncated:
                 break
 
@@ -2098,3 +2140,45 @@ class TestObservationTimeframesShareOneInstant:
             )
             if truncated:
                 break
+
+
+    @pytest.mark.parametrize("exec_tf,should_raise", [
+        (TimeFrame(1, TimeFrameUnit.Day), True),
+        (TimeFrame(2, TimeFrameUnit.Day), True),
+        (TimeFrame(1, TimeFrameUnit.Hour), False),   # Tick offsets are DST-immune
+        (TimeFrame(1, TimeFrameUnit.Minute), False),
+    ], ids=["1day", "2day", "1hour_ok", "1min_ok"])
+    def test_tz_aware_index_refused_only_for_day_or_longer(self, exec_tf, should_raise):
+        """Day-or-longer bins follow LOCAL midnight, so a DST day is 23h or 25h wide
+        while the search bound uses a fixed 24h period. On a spring-forward day that
+        reaches an hour past the bin's real close -- lookahead, not staleness.
+
+        Minute and Hour resample as fixed-width Tick offsets and are immune, so the
+        guard must not reject them; rejecting every tz-aware config would needlessly
+        break intraday users who are not exposed to this at all.
+
+        The guard is deliberately broader than the hazard: it rejects ANY tz-aware
+        index at Day or longer, including fixed-offset zones like UTC that have no DST
+        and are therefore safe. Deciding whether a given zone actually transitions
+        inside the data's span is more machinery than the case is worth, and the error
+        tells the caller exactly what to do instead.
+        """
+        n = 60 * 24 * 4
+        ts = pd.date_range("2024-03-08", periods=n, freq="1min", tz="UTC")
+        close = np.arange(n, dtype=float) + 1000.0
+        df = pd.DataFrame({
+            "timestamp": ts, "open": close, "high": close + 0.5,
+            "low": close - 0.5, "close": close, "volume": 1000.0,
+        })
+
+        def build():
+            return MarketDataObservationSampler(
+                df=df, time_frames=[exec_tf], window_sizes=[3],
+                execute_on=exec_tf, max_traj_length=5, seed=0,
+            )
+
+        if should_raise:
+            with pytest.raises(ValueError, match="tz-naive"):
+                build()
+        else:
+            build()  # must not raise
