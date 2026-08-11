@@ -467,7 +467,7 @@ EXAMPLE_COMMANDS = {
 
 def run_command(command: str, timeout: int = 300) -> int:
     """
-    Run a shell command and return the exit code.
+    Run an example command (deliberately with no shell) and return its exit code.
 
     Args:
         command: The command to run
@@ -486,9 +486,9 @@ def run_command(command: str, timeout: int = 300) -> int:
         argv[0] = sys.executable
 
     # No shell: with shell=True the child of Popen is /bin/sh, so killing it on timeout
-    # leaves the training run itself alive. start_new_session puts the example in its own
-    # process group, which is what makes the killpg below reach the run AND anything it
-    # spawned -- ParallelEnv workers outlive their parent otherwise (#312).
+    # leaves the training run itself alive -- the actual bug in #312. start_new_session
+    # puts the example in its own group so the killpg below reaches whatever it spawned
+    # in turn, whether or not that thing cleans up after its own parent.
     process = subprocess.Popen(
         argv,
         stdout=subprocess.PIPE,
@@ -504,10 +504,17 @@ def run_command(command: str, timeout: int = 300) -> int:
             print(f"Command failed with exit code {process.returncode}")
             print(stdout.decode() if stdout else "")
         return process.returncode
-    except subprocess.TimeoutExpired:
+    except BaseException:
+        # BaseException, not TimeoutExpired: start_new_session took the example out of
+        # pytest's process group, so a terminal Ctrl-C no longer reaches it. Catching only
+        # the timeout would close that door and open this one -- and aborting a slow run by
+        # hand is far more common than hitting the 300s budget.
+        #
+        # Not `finally`: on the success path communicate() has already reaped the child,
+        # and getpgid on a reaped pid raises ProcessLookupError, which would then crash
+        # every passing test.
         os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        # Reap it, or the timed-out example stays a zombie for the rest of the session.
-        process.communicate()
+        process.communicate()  # reap, or it lingers as a zombie for the session
         raise
 
 
@@ -557,3 +564,32 @@ class TestExampleImports:
         )
         assert TimeFrame is not None
         assert TimeFrameUnit is not None
+
+
+def test_run_command_kills_what_the_example_spawned(tmp_path):
+    """A timed-out example must not leave a training process behind (#312).
+
+    The original bug: shell=True made Popen's child /bin/sh, so process.kill() killed the
+    shell and the run survived -- burning CPU for the rest of the session under exactly
+    the load that timed it out. This is the only test that fails if shell=True returns.
+    """
+    import time
+
+    pidfile = tmp_path / "grandchild.pid"
+    src = ("import subprocess,sys,time;"
+           "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);"
+           f"open({str(pidfile)!r},'w').write(str(p.pid));"
+           "time.sleep(60)")
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_command(f'python -c "{src}"', timeout=3)
+
+    grandchild = int(pidfile.read_text())
+    for _ in range(50):  # reparenting and reaping are not instant
+        try:
+            os.kill(grandchild, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.1)
+    os.kill(grandchild, signal.SIGKILL)
+    pytest.fail(f"grandchild {grandchild} survived the timeout")
