@@ -244,59 +244,50 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         low_price = ohlcv["low"]
         close_price = ohlcv["close"]
 
+        # Open, extreme and close are all tested for each side, and the stop is tested
+        # before the take-profit. On a well-formed bar the extreme subsumes the other two,
+        # so this is the plainer statement of the same rule -- verified identical over
+        # 300k well-formed bars. It differs only where high/low fail to bracket open and
+        # close, and there it is the STRICTLY more pessimistic form: the stop still wins,
+        # where an ordering that deferred the close test would hand the bar to the
+        # take-profit. Nothing validates OHLC at ingestion, so that case is reachable from
+        # a caller's DataFrame, and the pessimistic answer is the one to converge on.
         if self.position.position_size > 0:
-            # Long position
-            # SL triggers when price drops below SL level
-            if self.stop_loss > 0:
-                # Check open first (immediate trigger at bar open)
-                if open_price <= self.stop_loss:
-                    return "sl"
-                # Check if low touched SL (triggered intrabar)
-                if low_price <= self.stop_loss:
-                    return "sl"
-
-            # TP triggers when price rises above TP level
-            if self.take_profit > 0:
-                # Check open first
-                if open_price >= self.take_profit:
-                    return "tp"
-                # Check if high touched TP (triggered intrabar)
-                if high_price >= self.take_profit:
-                    return "tp"
-
-            # Final check at close price
-            if self.stop_loss > 0 and close_price <= self.stop_loss:
+            if self.stop_loss > 0 and min(open_price, low_price, close_price) <= self.stop_loss:
                 return "sl"
-            if self.take_profit > 0 and close_price >= self.take_profit:
+            if self.take_profit > 0 and max(open_price, high_price, close_price) >= self.take_profit:
                 return "tp"
-
         else:
-            # Short position
-            # SL triggers when price rises above SL level
-            if self.stop_loss > 0:
-                # Check open first
-                if open_price >= self.stop_loss:
-                    return "sl"
-                # Check if high touched SL (triggered intrabar)
-                if high_price >= self.stop_loss:
-                    return "sl"
-
-            # TP triggers when price drops below TP level
-            if self.take_profit > 0:
-                # Check open first
-                if open_price <= self.take_profit:
-                    return "tp"
-                # Check if low touched TP (triggered intrabar)
-                if low_price <= self.take_profit:
-                    return "tp"
-
-            # Final check at close price
-            if self.stop_loss > 0 and close_price >= self.stop_loss:
+            if self.stop_loss > 0 and max(open_price, high_price, close_price) >= self.stop_loss:
                 return "sl"
-            if self.take_profit > 0 and close_price <= self.take_profit:
+            if self.take_profit > 0 and min(open_price, low_price, close_price) <= self.take_profit:
                 return "tp"
 
         return None
+
+    def _apply_bar_exits(self, ohlcv: dict) -> Optional[Dict]:
+        """Apply a bar to the held position: liquidation first, then a bracket.
+
+        The single home for the whole exit surface -- detection, priority, fill pricing
+        and booking. OneStep re-forked all four of those (#316), which is why the gapped
+        stop in #280 had to be fixed in two separate scalar places.
+
+        Returns the trade_info of whatever fired, or None if the position survived.
+        """
+        if self._check_liquidation(ohlcv):
+            return self._execute_liquidation()
+
+        trigger = self._check_sltp_trigger(ohlcv)
+        if trigger is None:
+            return None
+
+        if trigger == "sl":
+            execution_price = stop_fill_price(
+                self.stop_loss, ohlcv["open"], is_long=self.position.position_size > 0
+            )
+        else:
+            execution_price = self.take_profit
+        return self._execute_sltp_close(execution_price, trigger)
 
     def _execute_sltp_close(self, execution_price: float, trigger_type: str) -> Dict:
         """Execute SL/TP triggered close.
@@ -391,20 +382,9 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         # Bar N+1, against whatever is held after the action. Must precede the portfolio
         # value and the history record below, or both read a state that ignores this exit.
-        if self._check_liquidation(base_features):
-            trade_info = self._execute_liquidation()
-        else:
-            trigger = self._check_sltp_trigger(base_features)
-            if trigger is not None:
-                if trigger == "sl":
-                    execution_price = stop_fill_price(
-                        self.stop_loss,
-                        base_features["open"],
-                        is_long=self.position.position_size > 0,
-                    )
-                else:
-                    execution_price = self.take_profit
-                trade_info = self._execute_sltp_close(execution_price, trigger)
+        exit_info = self._apply_bar_exits(base_features)
+        if exit_info is not None:
+            trade_info = exit_info
 
         # Same canonical aging as SequentialTradingEnv (#275): one call per step off the
         # post-trade size, so no exit path can be added later without ageing correctly.

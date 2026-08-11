@@ -11,7 +11,11 @@ Uses parametrization to test both trading modes with maximum code reuse.
 import pytest
 import torch
 
-from torchtrade.envs.offline import OneStepTradingEnv, OneStepTradingEnvConfig
+from torchtrade.envs.offline import (
+    OneStepTradingEnv,
+    OneStepTradingEnvConfig,
+    SequentialTradingEnvSLTP,
+)
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from tests.conftest import simple_feature_fn, validate_account_state
 
@@ -223,12 +227,18 @@ class TestOneStepRolloutSimulation:
         action_td["action"] = torch.tensor(4)  # Long 100%
         next_td = env.step(action_td)
 
-        # Should terminate (liquidation or natural end)
-        assert next_td["next"]["done"].item()
-
-        # Reward should reflect loss
-        reward = next_td["next"]["reward"]
-        # Typically negative due to downtrend
+        # `done` is trivially true for every OneStep episode, and so is a zero balance --
+        # measured, the position wipes out either way. What liquidation actually does is
+        # CAP the loss by exiting early: it fires at bar 107 for a terminal reward of
+        # -2.19, where a position that rides the same downtrend to bankruptcy runs to bar
+        # 135 for -3.30. The upper bound is what makes this test fail when the liquidation
+        # check is stubbed out; the lower bound keeps it honest that a wipeout happened.
+        assert env.position.position_size == 0.0
+        reward = next_td["next"]["reward"].item()
+        assert -3.0 < reward < -1.0, (
+            f"reward {reward:.3f}: a 20x long into a downtrend should be liquidated, "
+            "capping the loss short of what riding the trend to bankruptcy costs"
+        )
         env.close()
 
 
@@ -355,20 +365,29 @@ class TestOneStepRewardAccumulation:
         assert isinstance(reward, float)
 
     def test_transaction_costs_included(self, onestep_env, trading_mode):
-        """Terminal reward should include transaction costs."""
-        onestep_env.transaction_fee = 0.1  # 10% fee
+        """A fee must make the terminal reward strictly worse.
 
-        td = onestep_env.reset()
-
-        # Buy and hold
+        Asserted as a comparison against the same episode run fee-free. The absolute
+        reward is not predictable from the fixture, and this test previously asserted
+        nothing at all -- it set a fee, stepped, bound `reward`, and ended.
+        """
         buy_action = 2 if trading_mode == 1 else 4
-        action_td = td.clone()
-        action_td["action"] = torch.tensor(buy_action)
-        next_td = onestep_env.step(action_td)
 
-        # Reward should reflect fees (likely negative unless huge price move)
-        reward = next_td["next"]["reward"].item()
-        # Hard to assert exact value, but it should be impacted by fees
+        def run(fee):
+            onestep_env.transaction_fee = fee
+            # seek() pins the start bar. OneStep forces random_start=True, so without it
+            # the two runs begin at different bars and the comparison measures the
+            # fixture, not the fee -- it passed even with the fee zeroed out entirely.
+            onestep_env.sampler.seek(0)
+            td = onestep_env.reset()
+            td["action"] = torch.tensor(buy_action)
+            return onestep_env.step(td)["next"]["reward"].item()
+
+        free = run(0.0)
+        charged = run(0.1)
+        assert charged < free, (
+            f"reward {charged:.6f} with a 10% fee is not worse than {free:.6f} without"
+        )
 
 
 # ============================================================================
@@ -498,6 +517,38 @@ class TestOneStepIntegration:
 
 class TestOneStepRegression:
     """Regression tests for known OneStep issues."""
+
+    @pytest.mark.parametrize("method", [
+        "_apply_bar_exits",            # liquidation-then-bracket priority, and pricing
+        "has_liquidation",             # the enable gate OneStep hand-rolled as leverage==1
+        "_check_liquidation",          # liquidation detection
+        "_calculate_liquidation_price",  # where it fires, and at what price it books
+        "_execute_liquidation",        # booking a liquidation
+        "_check_sltp_trigger",         # intrabar SL/TP detection
+        "_execute_sltp_close",         # booking a bracket close
+    ])
+    def test_onestep_does_not_refork_the_exit_rules(self, method):
+        """OneStep must inherit the whole exit surface, never redefine any of it (#316).
+
+        It used to carry two forks: _check_sltp_triggers, one letter from the parent's
+        _check_sltp_trigger, and _check_liquidation_in_rollout. Neither had drifted, but
+        they meant the gapped stop in #280 had to be fixed in two scalar places and the
+        OneStep half shipped untested.
+
+        Structural rather than behavioural, because behavioural equivalence cannot catch
+        a re-fork that has not drifted YET -- which is exactly what both of these were.
+        The live envs carry the same shape of guard in tests/envs/test_live_env_base.py,
+        and its absence on the offline side is how these two survived.
+
+        Identity, not `method not in vars(...)`: that form passes for any name matching
+        nothing, so renaming a parent method would leave every cell green and guarding
+        nothing. getattr raises instead.
+        """
+        assert getattr(OneStepTradingEnv, method) is getattr(SequentialTradingEnvSLTP, method), (
+            f"OneStepTradingEnv redefines {method}. Exit detection, priority, fill "
+            "pricing and booking all live on SequentialTradingEnvSLTP so a rule cannot "
+            "be fixed in only one of them -- delegate instead of re-forking."
+        )
 
     def test_done_flag_always_true_after_step(self, onestep_env):
         """Done flag should always be True after step (one-step setting)."""
