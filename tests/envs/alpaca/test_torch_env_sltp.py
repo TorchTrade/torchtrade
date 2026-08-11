@@ -304,3 +304,37 @@ class TestAlpacaSLTPTradingEnvClose:
 class TestAlpacaSLTPTradingEnvMultipleEpisodes:
     """Tests for running multiple episodes."""
 
+
+
+def test_sltp_history_records_price_and_position_on_a_flat_bar():
+    """The SLTP env read the price inline and never recorded the position (#290).
+
+    `position_status.current_price if position_status else 0.0` gives 0 on every flat bar,
+    where the non-SLTP sibling has a three-tier fallback -- so a reward function reading
+    history.base_prices saw a price of zero whenever the agent was out of the market. And
+    neither alpaca env passed position=, so history.positions was all zeros while every
+    other exchange recorded it.
+    """
+    config = AlpacaSLTPTradingEnvConfig(symbol="BTC/USD", window_sizes=[10])
+    trader = MockTrader(initial_cash=10000.0)
+    env = AlpacaSLTPTorchTradingEnv(
+        config=config, observer=MockObserver(window_sizes=[10]), trader=trader
+    )
+    env._wait_for_next_timestamp = lambda: None
+
+    env.reset()
+    env._step(TensorDict({"action": torch.tensor(0)}, batch_size=()))  # hold, stays flat
+    assert env.position.position_size == 0, "this cell must exercise the FLAT path"
+    assert env.history.base_prices[-1] > 0, (
+        f"flat bar recorded price {env.history.base_prices[-1]} -- the fallback chain "
+        "should have supplied one"
+    )
+
+    env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))  # open a bracket
+    env._step(TensorDict({"action": torch.tensor(0)}, batch_size=()))  # hold it
+    # The recorded size is the one held ENTERING the bar, as on every other live env, so
+    # it appears on the bar AFTER the one that opened the position.
+    assert env.history.positions[-1] != 0, (
+        "an open position must reach history.positions, not stay at the 0.0 default"
+    )
+    env.close()

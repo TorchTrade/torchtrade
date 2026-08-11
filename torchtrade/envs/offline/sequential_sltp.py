@@ -174,8 +174,13 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         # Initialize parent class (sets up base SequentialTradingEnv)
         super().__init__(df, config, feature_preprocessing_fn, reward_function)
 
-        # Restore original action_levels
+        # Restore original action_levels -- on the CONFIG and on the instance. The parent
+        # copies the dummy onto self during __init__, and restoring only the config left
+        # self.action_levels at [0.0] forever, so allows_short read False on every SLTP
+        # env including 125x futures, and render_history drew those episodes as spot
+        # (#290).
         config.action_levels = original_action_levels
+        self.action_levels = original_action_levels
 
         # Override action spec with SLTP action space
         self.action_spec = Categorical(len(self.action_map))

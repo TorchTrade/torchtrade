@@ -77,4 +77,8 @@ class InitialBalanceSampler:
         if isinstance(self.initial_cash, (int, float)):
             return float(self.initial_cash)
 
-        return float(self.np_rng.integers(self.initial_cash[0], self.initial_cash[1]))
+        # endpoint=True: integers() is half-open, so the configured maximum was the one
+        # value the sampler could never draw (#290).
+        return float(
+            self.np_rng.integers(self.initial_cash[0], self.initial_cash[1], endpoint=True)
+        )

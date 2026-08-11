@@ -137,7 +137,13 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         # Get current price from trader status (avoids redundant observation call)
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        current_price = position_status.current_price if position_status else 0.0
+        # Shared fallback chain, not an inline read: a flat bar has no position_status,
+        # and the inline form recorded a price of 0 for it (#290).
+        current_price = self._get_current_price(position_status)
+        # From the exchange, as every other live env does: the alpaca envs never populate
+        # self.position.position_size, so reading it recorded a flat history forever
+        # (#290). This is the size held ENTERING the bar, matching bybit.
+        position_size = position_status.qty if position_status else 0.0
 
         # Sync position state from exchange — this is the source of truth.
         # Detects SL/TP closures AND fixes state drift from failed bracket orders.
@@ -173,7 +179,8 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
             price=current_price,
             action=action_value,
             reward=0.0,  # Placeholder, will be set after reward calculation
-            portfolio_value=new_portfolio_value
+            portfolio_value=new_portfolio_value,
+            position=position_size,
         )
 
         # Calculate reward using UPDATED history tracker
