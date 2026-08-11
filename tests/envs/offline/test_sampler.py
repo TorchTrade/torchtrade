@@ -2248,3 +2248,41 @@ def test_malformed_ohlc_is_rejected_at_ingestion(field, value, ok):
     else:
         with pytest.raises(ValueError, match="position 5"):
             build()
+
+
+def test_coarse_bar_is_not_visible_before_a_dst_lengthened_day_closes():
+    """A Day bin spanning a DST fall-back is 25h wide, not 24h (#320).
+
+    Coarse frames are relabelled to their END so only completed bars are visible. Adding
+    a FIXED 1D to the bin's start labels a 25h bin an hour before it actually closed, so
+    the agent sees it early -- lookahead, not staleness.
+
+    The mirror of this on the execution side is refused outright by the guard from #282
+    (tz-aware plus execute_on >= Day). That guard does not reach here: a Day OBSERVATION
+    frame under a sub-day execute_on is a supported config, and is what this pins.
+    """
+    execute_on = TimeFrame(1, TimeFrameUnit.Hour)
+    idx = pd.date_range("2024-10-28", "2024-11-08", freq="1h", tz="America/New_York")
+    close = 100 + np.arange(len(idx), dtype=float)
+    df = pd.DataFrame({
+        "timestamp": idx, "open": close, "high": close + 1, "low": close - 1,
+        "close": close, "volume": 1000.0,
+    })
+
+    sampler = MarketDataObservationSampler(
+        df=df,
+        time_frames=[execute_on, TimeFrame(1, TimeFrameUnit.Day)],
+        window_sizes=[4, 2],
+        execute_on=execute_on,
+    )
+
+    # The truth: each bin's real close is where the NEXT bin starts.
+    raw = df.set_index("timestamp").resample("1D").agg({"close": "last"}).dropna()
+    true_ends = raw.index.shift(1, freq="1D")
+
+    labelled = sampler.resampled_dfs["1Day"].index
+    early = [(a, b) for a, b in zip(labelled, true_ends) if a < b]
+    assert not early, (
+        f"{len(early)} coarse bar(s) labelled before they closed, e.g. {early[0][0]} "
+        f"vs a real close of {early[0][1]} -- the agent would see them early"
+    )

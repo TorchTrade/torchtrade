@@ -140,8 +140,12 @@ class MarketDataObservationSampler:
             # Only completed bars will be visible to the agent at any execution time
             # Only shift timeframes that are HIGHER (coarser) than the execution timeframe
             if tf > execute_on:
-                offset = pd.Timedelta(tf.to_pandas_freq())
-                resampled.index = resampled.index + offset
+                # .shift(freq=) walks the offset's own calendar rather than adding a fixed
+                # duration. They agree everywhere except a tz-aware Day-or-longer bin
+                # across a DST boundary, where the real bin is 23h or 25h wide: a fixed
+                # +1D there labels a 25h bin an hour before it closed, making it visible
+                # early. That is lookahead, not staleness (#320).
+                resampled.index = resampled.index.shift(1, freq=tf.to_pandas_freq())
 
             if proc_fn is not None:
                 resampled = proc_fn(resampled)
