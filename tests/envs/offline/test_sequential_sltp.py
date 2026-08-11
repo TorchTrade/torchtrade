@@ -1270,12 +1270,11 @@ class TestLiquidationVsBracketOnADoubleBreachBar:
     sits on the same side as liquidation, so price cannot reach the further level without
     crossing the nearer one, and the bar's own extreme says which. Booking a liquidation
     where the stop was crossed first is not pessimism but an outcome the data contradicts:
-    400 instead of 5000 here.
+    400 instead of 5000 here, a 12.5x gap.
 
-    Nothing held this. A double-breach bar has existed since
-    TestSLTPRegression::test_liquidation_triggers_on_next_bar_futures, but no test
-    asserted anything that *distinguishes* the two exits, so swapping the checks left
-    the whole offline suite green. All four quadrants of direction x trigger are
+    Nothing held this before #298: double-breach bars existed in the suite, but no test
+    asserted anything that *distinguishes* the two exits, so swapping the checks left the
+    whole offline suite green. All four quadrants of direction x trigger are
     covered because each is invisible to the other three: a reorder scoped to one of
     them passes every test the others pin.
     """

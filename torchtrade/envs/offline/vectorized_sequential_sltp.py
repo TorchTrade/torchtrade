@@ -273,10 +273,10 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         """Lanes whose triggered stop is crossed before liquidation (#300).
 
         Tensor twin of SequentialTradingEnvSLTP._stop_is_reached_first; that method
-        carries the reasoning. Kept as its own tensor expression rather than a shared
-        helper for the same reason as stop_fill_price: this is a hot path and the scalar
-        form would force per-lane tensor construction. The equivalence harness is what
-        holds the two together.
+        carries the reasoning. Kept as its own tensor expression rather than routed
+        through the scalar form, which would force per-lane tensor construction on a path
+        that runs millions of times -- the same shape as the tensorised stop_fill_price
+        below. The equivalence harness is what holds the two together.
         """
         if self.config.leverage <= 1:
             return torch.zeros_like(self._position_sizes, dtype=torch.bool)

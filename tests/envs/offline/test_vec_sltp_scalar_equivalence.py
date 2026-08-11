@@ -584,34 +584,43 @@ class TestSLTPScalarVecEquivalencePriority:
     _apply_bar_exits, the vectorized as an exemption mask handed to _apply_liquidation --
     so one could change without the other.
 
-    Both cells matter because the rule is conditional. A stop between entry and the
-    liquidation price is crossed first, so it fills; a take-profit is on the other side
-    of entry, so the ordering is unresolvable and the liquidation stands. An engine that
-    reverted either half in isolation diverges here.
+    Every cell matters because the rule is conditional on three things at once, each of
+    which one engine could get wrong alone: whether the stop lies between entry and the
+    liquidation price, whether the bar merely GAPPED past both, and which side the
+    position is on. The take-profit cell is here because a take-profit sits on the OTHER
+    side of entry, so its ordering is unresolvable and the liquidation must still stand --
+    an engine that exempted take-profits too would pass every stop cell.
 
     The vec side has no action_types record, so its exit is pinned by numeric parity with
     the scalar rather than by a label of its own.
     """
 
-    @pytest.mark.parametrize("sl_levels,tp_levels,gap_open,expect", [
-        # 10x long at 100: liquidation 90.4, bar low 88 breaches both.
-        ([-0.05], [0.50], None, "sltp_sl"),      # stop 95 -- between entry and liquidation
-        ([-0.50], [0.50], None, "liquidation"),  # stop 50 -- beyond it, liquidation first
-        # Same nearer stop, but the bar OPENS at 85: nothing was crossed on the way, so
-        # the continuity argument does not apply and the liquidation stands.
-        ([-0.05], [0.50], 85.0, "liquidation"),
-    ], ids=["stop-inside-liquidation", "stop-beyond-liquidation", "gapped-past-liquidation"])
+    @pytest.mark.parametrize(
+        "side,sl_levels,tp_levels,low,high,gap_open,expect", [
+            # 10x LONG at 100, liquidation 90.4.
+            ("long", [-0.05], [0.50], 88.0, None, None, "sltp_sl"),        # stop 95, inside
+            ("long", [-0.15], [0.50], 84.0, None, None, "liquidation"),    # stop 85, beyond
+            ("long", [-0.05], [0.50], 85.0, None, 85.0, "liquidation"),    # gapped past it
+            ("long", [-0.50], [0.10], 88.0, 112.0, None, "liquidation"),   # take-profit loses
+            # 10x SHORT at 100, liquidation 109.6. Every short branch is separate code,
+            # and a vec-only short regression is what this file exists to catch.
+            ("short", [-0.50], [0.05], None, 112.0, None, "sltp_sl"),      # stop 105, inside
+            ("short", [-0.50], [0.15], None, 116.0, None, "liquidation"),  # stop 115, beyond
+            ("short", [-0.50], [0.05], None, 115.0, 115.0, "liquidation"), # gapped past it
+        ],
+        ids=["long-stop-inside", "long-stop-beyond", "long-gapped", "long-take-profit",
+             "short-stop-inside", "short-stop-beyond", "short-gapped"],
+    )
     def test_both_envs_agree_which_exit_price_reaches_first(
-        self, sl_levels, tp_levels, gap_open, expect
+        self, side, sl_levels, tp_levels, low, high, gap_open, expect
     ):
-        df = _flat_df(bar=20, low=88.0 if gap_open is None else gap_open, open_=gap_open)
-        long_action = 1
-        actions = [0] * 5 + [long_action] + [0] * 4
+        df = _flat_df(bar=20, low=low, high=high, open_=gap_open)
+        actions = [0] * 5 + [1 if side == "long" else 2] + [0] * 4
 
         mismatches = _run_sltp_sequence(
             df, actions, leverage=10,
             sl_levels=sl_levels, tp_levels=tp_levels,
-            label=f"sltp-priority-{expect}",
+            label=f"sltp-priority-{side}-{expect}-sl{sl_levels[0]}",
             expect_action_type=expect,
         )
         assert not mismatches, "\n".join(mismatches)
