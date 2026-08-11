@@ -615,7 +615,17 @@ class TestSLTPScalarVecEquivalenceTradeModesAndLock:
     @pytest.mark.parametrize("trade_mode", ["fractional", "notional", "quantity"])
     @pytest.mark.parametrize("lock", [False, True], ids=["unlocked", "locked"])
     @pytest.mark.parametrize("leverage", [1, 25], ids=["spot", "lev25"])
-    def test_random_actions_match(self, sample_ohlcv_df, trade_mode, lock, leverage):
+    @pytest.mark.parametrize("fixture", ["sample_ohlcv_df", "gappy_ohlcv_df"],
+                             ids=["continuous", "gappy"])
+    def test_random_actions_match(self, request, fixture, trade_mode, lock, leverage):
+        """The gappy arm exists because this harness was structurally blind to #280.
+
+        Every fixture it used built open == previous close, so no bar could open beyond a
+        bracket -- reverting the gapped-stop rule in BOTH engines left all of these cells
+        green. The harness only detects divergence between the engines, so a shared wrong
+        answer needs a fixture that can produce the input at all (#315).
+        """
+        df = request.getfixturevalue(fixture)
         if lock and leverage == 1:
             pytest.skip(
                 "lock is inert in spot: with no shorts and no close action the agent can "
@@ -624,18 +634,19 @@ class TestSLTPScalarVecEquivalenceTradeModesAndLock:
                 "(same action histogram, balance and position), so this cell is a copy."
             )
         mismatches = _run_sltp_sequence(
-            sample_ohlcv_df,
+            df,
             leverage=leverage,
             fee=0.001,
             max_traj=120,
             random_steps=100,
             trade_mode=trade_mode,
             lock=lock,
-            # The fixture only spans +5.9%/-1.7%, so the default +/-5% brackets can never
-            # trigger: as shipped this grid fired zero stops across all twelve cells.
+            # The continuous fixture only spans +5.9%/-1.7%, so the default +/-5% brackets
+            # can never trigger: as shipped this grid fired zero stops across all twelve
+            # cells. The gappy fixture's 6% jumps clear these levels outright.
             sl_levels=[-0.005],
             tp_levels=[0.005],
-            label=f"sltp-{trade_mode}-{'locked' if lock else 'unlocked'}-lev{leverage}",
+            label=f"sltp-{fixture}-{trade_mode}-{'locked' if lock else 'unlocked'}-lev{leverage}",
         )
         assert not mismatches, "\n".join(mismatches)
 
