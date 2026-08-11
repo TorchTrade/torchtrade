@@ -267,6 +267,32 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
         return obs_td
 
+    def _stop_reached_first_mask(
+        self, new_open: torch.Tensor, new_high: torch.Tensor, new_low: torch.Tensor
+    ) -> torch.Tensor:
+        """Lanes whose triggered stop is crossed before liquidation (#300).
+
+        Tensor twin of SequentialTradingEnvSLTP._stop_is_reached_first; that method
+        carries the reasoning. Kept as its own tensor expression rather than a shared
+        helper for the same reason as stop_fill_price: this is a hot path and the scalar
+        form would force per-lane tensor construction. The equivalence harness is what
+        holds the two together.
+        """
+        if self.config.leverage <= 1:
+            return torch.zeros_like(self._position_sizes, dtype=torch.bool)
+
+        liq = self._compute_liq_prices()
+        is_long = self._position_sizes > 0
+        is_short = self._position_sizes < 0
+        has_sl = self._sl_prices > 0
+
+        sl_trigger = (is_long & has_sl & (new_low <= self._sl_prices)) | (
+            is_short & has_sl & (new_high >= self._sl_prices)
+        )
+        stop_is_nearer = torch.where(is_long, self._sl_prices > liq, self._sl_prices < liq)
+        gapped_past_liq = torch.where(is_long, new_open <= liq, new_open >= liq)
+        return sl_trigger & stop_is_nearer & ~gapped_past_liq
+
     def _apply_exit_checks(
         self,
         new_open: torch.Tensor,
@@ -281,7 +307,16 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         # scalar env. Stale values are harmless: the trigger masks below gate on
         # can_trigger (via has_position) AND is_long/is_short, and every one of those is
         # False once _apply_liquidation has zeroed the position.
-        self._apply_liquidation(new_high, new_low)
+        #
+        # Except where a triggered stop sits between entry and the liquidation price:
+        # price cannot reach the further level without crossing the nearer one, so the
+        # bracket fills first (#300). Tensor twin of the scalar
+        # SequentialTradingEnvSLTP._stop_is_reached_first -- see it for why a take-profit
+        # is NOT exempt. A bar that opened past liquidation is not exempt either: nothing
+        # was crossed on the way, the margin was gone before the bar began.
+        self._apply_liquidation(
+            new_high, new_low, exempt=self._stop_reached_first_mask(new_open, new_high, new_low)
+        )
 
         has_position = self._position_sizes != 0
         has_brackets = (self._sl_prices > 0) | (self._tp_prices > 0)
