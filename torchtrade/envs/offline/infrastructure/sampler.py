@@ -1,6 +1,7 @@
 from collections import namedtuple
 from typing import Dict, List, Optional, Tuple, Union, Callable, Sequence
 import logging
+import reprlib
 import warnings
 import numpy as np
 import pandas as pd
@@ -57,10 +58,12 @@ class MarketDataObservationSampler:
             first = int(np.argmax(bad))
             raise ValueError(
                 f"Malformed OHLC in {int(bad.sum())} of {len(df)} rows. First at position "
-                f"{first} (index {df.index[first]}): open={o[first]}, high={h[first]}, "
-                f"low={l[first]}, close={c[first]}. high must be >= max(open, close) and "
-                "low <= min(open, close) -- if you built these bars, clamp high/low around "
-                "open and close rather than drawing them off close alone."
+                f"{first} (index {reprlib.repr(df.index[first])}): "
+                f"open={reprlib.repr(o[first])}, high={reprlib.repr(h[first])}, "
+                f"low={reprlib.repr(l[first])}, close={reprlib.repr(c[first])}. "
+                "high must be >= max(open, close) and low <= min(open, close) -- if you "
+                "built these bars, clamp high/low around open and close rather than drawing "
+                "them off close alone."
             )
 
         # Canonical OHLCV-first order for self.df. The row[:5] contract itself comes from
