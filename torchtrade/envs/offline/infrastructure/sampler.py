@@ -42,6 +42,23 @@ class MarketDataObservationSampler:
                 f"Got columns: {list(df.columns)}"
             )
 
+        # A bar whose high/low do not bracket its open and close is not a bar. Every exit
+        # rule downstream reads the extreme to decide whether a level was touched and the
+        # open to price a gapped fill, so on a malformed row those two disagree (#326).
+        # Rejecting here rather than guarding in the rules is the boundary-validation
+        # invariant: a guard that absorbs the nonsense makes it silent.
+        bad = (
+            (df["high"] < df[["open", "close"]].max(axis=1))
+            | (df["low"] > df[["open", "close"]].min(axis=1))
+        )
+        if bad.any():
+            row = df.loc[df.index[bad][0]]
+            raise ValueError(
+                f"Malformed OHLC at row {df.index[bad][0]}: open={row['open']}, "
+                f"high={row['high']}, low={row['low']}, close={row['close']}. "
+                "high must be >= max(open, close) and low <= min(open, close)."
+            )
+
         # Canonical OHLCV-first order for self.df. The row[:5] contract itself comes from
         # ohlcv_agg's key order, since pandas orders .agg(dict) output by dict key.
         ohlcv_cols = ["open", "high", "low", "close", "volume"]

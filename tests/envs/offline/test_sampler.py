@@ -2209,3 +2209,39 @@ class TestObservationTimeframesShareOneInstant:
                 build()
         else:
             build()  # must not raise
+
+
+@pytest.mark.parametrize("field,value,ok", [
+    ("high", 99.0, False),    # high below the open
+    ("low", 101.0, False),    # low above the close
+    ("high", 100.0, True),    # flat bar: equality is well-formed
+    ("low", 100.0, True),
+], ids=["high-below-open", "low-above-close", "high-equals", "low-equals"])
+def test_malformed_ohlc_is_rejected_at_ingestion(field, value, ok):
+    """A bar whose high/low do not bracket open and close is refused (#326).
+
+    Every exit rule downstream reads the extreme to decide whether a level was touched
+    and the open to price a gapped fill, so on a malformed row those two disagree and the
+    engines can answer differently from one another. Validating here rather than guarding
+    in each rule is the boundary-validation invariant; a guard that absorbs the nonsense
+    makes it silent, which is what let ~100 tests build impossible candles unnoticed.
+    """
+    n = 30
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": [100.0] * n, "high": [100.5] * n,
+        "low": [99.5] * n, "close": [100.0] * n, "volume": [1000.0] * n,
+    })
+    df.loc[5, field] = value
+
+    def build():
+        MarketDataObservationSampler(
+            df, time_frames=[TimeFrame(1, TimeFrameUnit.Minute)], window_sizes=[5],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+
+    if ok:
+        build()
+    else:
+        with pytest.raises(ValueError, match="Malformed OHLC at row 5"):
+            build()

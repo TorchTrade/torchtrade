@@ -211,6 +211,11 @@ def trending_up_df():
     open_prices = np.roll(close_prices, 1)
     open_prices[0] = initial_price
 
+    # On a trend the roll puts the open outside a band drawn off close alone, so the bar
+    # would claim a high below its own open (#326).
+    high_prices = np.maximum(high_prices, np.maximum(open_prices, close_prices))
+    low_prices = np.minimum(low_prices, np.minimum(open_prices, close_prices))
+
     volume = np.random.lognormal(10, 1, n_minutes)
 
     return pd.DataFrame({
@@ -242,6 +247,11 @@ def trending_down_df():
     low_prices = close_prices * 0.998
     open_prices = np.roll(close_prices, 1)
     open_prices[0] = initial_price
+
+    # On a trend the roll puts the open outside a band drawn off close alone, so the bar
+    # would claim a high below its own open (#326).
+    high_prices = np.maximum(high_prices, np.maximum(open_prices, close_prices))
+    low_prices = np.minimum(low_prices, np.minimum(open_prices, close_prices))
 
     volume = np.random.lognormal(10, 1, n_minutes)
 

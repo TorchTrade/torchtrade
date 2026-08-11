@@ -22,12 +22,16 @@ def simple_df():
     dates = pd.date_range("2024-01-01", periods=n, freq="1min")
     close = 100 + np.cumsum(np.random.randn(n) * 0.1)
 
+    # high/low drawn off close alone can land inside a separately drawn open (#326).
+    open_ = close + np.random.randn(n) * 0.05
+    high = close + np.abs(np.random.randn(n) * 0.1)
+    low = close - np.abs(np.random.randn(n) * 0.1)
     return pd.DataFrame(
         {
             "timestamp": dates,
-            "open": close + np.random.randn(n) * 0.05,
-            "high": close + np.abs(np.random.randn(n) * 0.1),
-            "low": close - np.abs(np.random.randn(n) * 0.1),
+            "open": open_,
+            "high": np.maximum(high, np.maximum(open_, close)),
+            "low": np.minimum(low, np.minimum(open_, close)),
             "close": close,
             "volume": np.random.randint(100, 1000, n),
         }
