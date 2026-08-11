@@ -2099,7 +2099,6 @@ class TestObservationTimeframesShareOneInstant:
             if truncated:
                 break
 
-
     def test_three_timeframes_spanning_both_sides_of_execute_on(self):
         """The realistic shape from docs/guides/sampler.md, and the only config where
         the fine search key and the coarse END-shift both apply at once.
@@ -2107,6 +2106,11 @@ class TestObservationTimeframesShareOneInstant:
         Each side has a different correct answer, which is the point: fine and exec end
         at the decision instant, while coarse holds the last bar that has CLOSED -- it
         is still mid-bar at that instant, so showing it would be lookahead.
+
+        The coarse side is bounded, not pinned: an exact expectation would be brittle to
+        grid alignment, so a coarse frame that went several bars stale would pass here.
+        Its freshness is not what this test is for -- the interaction between the two
+        mechanisms is.
         """
         fine = TimeFrame(1, TimeFrameUnit.Minute)
         exec_tf = TimeFrame(15, TimeFrameUnit.Minute)
