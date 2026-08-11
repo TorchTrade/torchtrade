@@ -100,9 +100,15 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
                 )
                 return env
 
+    def test_step_emits_the_whole_done_family(self, env):
+        from tests.envs.base_exchange_tests import (
+            assert_the_step_emits_the_whole_done_family as assert_done_family,
+        )
+        assert_done_family(env)
+
     def test_check_env_specs_passes(self, env):
         """check_env_specs compares the emitted step against every declared spec;
-        catches a done spec missing the truncated key each _step writes (#272)."""
+        catches a done spec missing a key the emitted step carries (#272)."""
         with patch.object(type(env), "_wait_for_next_timestamp"):
             check_env_specs(env)
 
@@ -346,23 +352,6 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
             reward = next_td["next"]["reward"]
             assert isinstance(reward, torch.Tensor)
             assert reward.shape == (1,)
-
-    def test_done_tensor_shape(self, env):
-        """Test that done flags are tensors with correct shape."""
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-
-            action_td = TensorDict({"action": torch.tensor(0)}, batch_size=())
-            next_td = env.step(action_td)
-
-            done = next_td["next"]["done"]
-            terminated = next_td["next"]["terminated"]
-            truncated = next_td["next"]["truncated"]
-
-            assert isinstance(done, torch.Tensor)
-            assert isinstance(terminated, torch.Tensor)
-            assert isinstance(truncated, torch.Tensor)
-            assert done.shape == (1,)
 
     @pytest.mark.parametrize("done_on_bankruptcy,expected_done", [
         (True, True),    # portfolio collapses below the threshold -> episode terminates

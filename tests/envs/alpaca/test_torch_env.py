@@ -159,9 +159,16 @@ class TestAlpacaTorchTradingEnvReset:
             trader=mock_trader,
         )
 
+    def test_step_emits_the_whole_done_family(self, env):
+        from tests.envs.base_exchange_tests import (
+            assert_the_step_emits_the_whole_done_family as assert_done_family,
+        )
+        assert_done_family(env)
+
     def test_check_env_specs_passes(self, env):
         """check_env_specs compares the emitted step against every declared spec;
-        catches a done spec missing the truncated key each _step writes (#272)."""
+        the done family comes from the spec on both sides here, so a narrowed done spec
+        is NOT what this catches -- see assert_the_step_emits_the_whole_done_family."""
         with patch.object(type(env), "_wait_for_next_timestamp"):
             check_env_specs(env)
 
@@ -269,16 +276,6 @@ class TestAlpacaTorchTradingEnvStep:
         td_out = env._step(td_in)
 
         assert "reward" in td_out.keys()
-
-    def test_step_contains_done(self, env):
-        """Test that step returns done flag."""
-        env.reset()
-        td_in = TensorDict({"action": torch.tensor(1)}, batch_size=())
-        td_out = env._step(td_in)
-
-        assert "done" in td_out.keys()
-        assert "terminated" in td_out.keys()
-        assert "truncated" in td_out.keys()
 
     def test_step_buy_action(self, env):
         """Test buy action (action=2)."""

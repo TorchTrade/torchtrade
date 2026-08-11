@@ -52,9 +52,16 @@ class TestOKXFuturesTorchTradingEnv:
                 config=env_config, observer=mock_observer, trader=mock_env_trader,
             )
 
+    def test_step_emits_the_whole_done_family(self, env):
+        from tests.envs.base_exchange_tests import (
+            assert_the_step_emits_the_whole_done_family as assert_done_family,
+        )
+        assert_done_family(env)
+
     def test_check_env_specs_passes(self, env):
         """check_env_specs compares the emitted step against every declared spec;
-        catches a done spec missing the truncated key each _step writes (#272)."""
+        the done family comes from the spec on both sides here, so a narrowed done spec
+        is NOT what this catches -- see assert_the_step_emits_the_whole_done_family."""
         with patch.object(type(env), "_wait_for_next_timestamp"):
             check_env_specs(env)
 
@@ -116,15 +123,12 @@ class TestOKXFuturesTorchTradingEnv:
             env.step(TensorDict({"action": torch.tensor(action_idx)}, batch_size=()))
             mock_env_trader.trade.assert_called()
 
-    def test_reward_and_done_tensor_shapes(self, env):
-        """Test that reward and done flags have correct tensor shapes."""
+    def test_reward_tensor_shape(self, env):
+        """The done family is asserted by assert_the_step_emits_the_whole_done_family."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
             next_td = env.step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
             assert next_td["next"]["reward"].shape == (1,)
-            assert next_td["next"]["done"].shape == (1,)
-            assert next_td["next"]["terminated"].shape == (1,)
-            assert next_td["next"]["truncated"].shape == (1,)
 
     @pytest.mark.parametrize("done_on_bankruptcy,expected_done", [
         (True, True),    # portfolio collapses below the threshold -> episode terminates
