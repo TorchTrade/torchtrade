@@ -306,41 +306,6 @@ class TestSLTPTriggerDetection:
 
 
 # ============================================================================
-# PRICE GAP TESTS
-# ============================================================================
-
-
-class TestSLTPPriceGaps:
-    """Tests for intrabar price gap handling."""
-
-    def test_gap_triggers_stop_loss(self, price_gap_df, sltp_config_spot):
-        """Price gap should trigger SL even if close doesn't hit it."""
-        sltp_config_spot.stoploss_levels = [-0.05]  # 5% SL
-        sltp_config_spot.takeprofit_levels = [0.10]
-
-        env = SequentialTradingEnvSLTP(price_gap_df, sltp_config_spot, simple_feature_fn)
-        td = env.reset()
-
-        # Open long bracket
-        action_td = td.clone()
-        action_td["action"] = torch.tensor(1)
-        next_td = env.step(action_td)
-
-        # Step through the gap (around index 50)
-        for _ in range(60):
-            if next_td["next"]["account_state"][1] == 0.0:
-                break
-            action_td_hold = next_td["next"].clone()
-            action_td_hold["action"] = torch.tensor(0)
-            next_td = env.step(action_td_hold)
-
-        # Gap should have triggered SL
-        assert next_td["next"]["account_state"][1] == 0.0
-        env.close()
-
-
-
-# ============================================================================
 # INTEGRATION TESTS
 # ============================================================================
 

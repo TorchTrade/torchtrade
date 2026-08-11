@@ -27,6 +27,7 @@ from torchtrade.envs.offline.sequential_sltp import (
     SequentialTradingEnvSLTPConfig,
 )
 from torchtrade.envs.core.state import binarize_action_type
+from torchtrade.envs.utils.sltp_helpers import stop_fill_price
 
 
 @dataclass
@@ -371,25 +372,17 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
 
             close_price = ohlcv_base_values["close"]
 
-            # Save trigger prices before checks (execution resets them to 0)
-            saved_sl = self.stop_loss
-            saved_tp = self.take_profit
-            saved_liq = self.liquidation_price
-
-            # Check liquidation first (futures only, highest priority)
-            if self.leverage > 1:
-                if trigger_result := self._check_liquidation_in_rollout(ohlcv_base_values):
-                    self.rollout_returns.append(self.compute_return(saved_liq))
-                    return trigger_result, obs_dict
-
-            # Check SL/TP triggers
-            if trigger_result := self._check_sltp_triggers(ohlcv_base_values):
-                trigger_price = saved_tp if trigger_result.get("side") == "sltp_tp" else saved_sl
-                self.rollout_returns.append(self.compute_return(trigger_price))
-                return trigger_result, obs_dict
-
-            # No trigger — accumulate return at close price
+            # Liquidation outranks the brackets; the helper is a no-op at leverage 1.
+            trigger_result = (
+                self._check_liquidation_in_rollout(ohlcv_base_values)
+                or self._check_sltp_triggers(ohlcv_base_values)
+            )
+            # One append per bar, exit or not: an exit leaves the position flat, so
+            # compute_return ignores this price and reads the balance, which already
+            # holds the realised fill.
             self.rollout_returns.append(self.compute_return(close_price))
+            if trigger_result:
+                return trigger_result, obs_dict
 
         # If loop never executed (truncated from start), reuse the last
         # cached observation via timestamp lookup — does not advance the
@@ -455,7 +448,9 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
                 if (open_price <= self.stop_loss or
                     low_price <= self.stop_loss or
                     close_price <= self.stop_loss):
-                    return self._execute_sltp_close(self.stop_loss, "sl")
+                    return self._execute_sltp_close(
+                        stop_fill_price(self.stop_loss, open_price, is_long=True), "sl"
+                    )
 
             # TP triggers when price rises above TP level
             if self.take_profit > 0:
@@ -470,7 +465,9 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
                 if (open_price >= self.stop_loss or
                     high_price >= self.stop_loss or
                     close_price >= self.stop_loss):
-                    return self._execute_sltp_close(self.stop_loss, "sl")
+                    return self._execute_sltp_close(
+                        stop_fill_price(self.stop_loss, open_price, is_long=False), "sl"
+                    )
 
             # TP triggers when price drops below TP level
             if self.take_profit > 0:

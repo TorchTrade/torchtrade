@@ -9,7 +9,8 @@ Key differences from base vectorized env:
     - trade_mode-aware position sizing (fractional, notional, quantity)
     - SL/TP bracket orders with intrabar trigger detection
     - SL checked before TP (pessimistic bias)
-    - Triggered positions close at bracket price, not market price
+    - Triggered positions close at bracket price, except a stop the bar gapped past,
+      which fills at the open
 """
 
 from dataclasses import dataclass
@@ -220,6 +221,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         self._step_indices.clamp_(max=self._total_exec_times - 1)
 
         # 4. Get bar N+1 OHLCV for trigger checks
+        new_open = self._base_tensor[self._step_indices, 0]
         new_high = self._base_tensor[self._step_indices, 1]
         new_low = self._base_tensor[self._step_indices, 2]
         new_close = self._base_tensor[self._step_indices, 3]
@@ -229,7 +231,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
         # 6. Bar N+1, against whatever each env holds after the action. Must precede the
         # portfolio values below, or reward and termination read balances that ignore it.
-        self._apply_exit_checks(new_high, new_low)
+        self._apply_exit_checks(new_open, new_high, new_low)
 
         # Age straight after the last thing that can move _position_sizes -- the same
         # invariant the base env keeps by calling this after _apply_liquidation, its own
@@ -267,6 +269,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
     def _apply_exit_checks(
         self,
+        new_open: torch.Tensor,
         new_high: torch.Tensor,
         new_low: torch.Tensor,
     ) -> None:
@@ -309,10 +312,13 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
             sltp_trigger = sl_trigger | tp_trigger
             if sltp_trigger.any():
-                # Close at bracket price (not market price)
-                exec_price = torch.where(
-                    sl_trigger, self._sl_prices, self._tp_prices
+                # Tensorised stop_fill_price -- the scalar twin lives in sltp_helpers (#280).
+                stop_fill = torch.where(
+                    is_long,
+                    torch.minimum(new_open, self._sl_prices),
+                    torch.maximum(new_open, self._sl_prices),
                 )
+                exec_price = torch.where(sl_trigger, stop_fill, self._tp_prices)
 
                 pnl = (exec_price - self._entry_prices) * self._position_sizes
                 close_notional = (self._position_sizes * exec_price).abs()

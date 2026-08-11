@@ -4,6 +4,8 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, Optional
 
+from torchtrade.envs.utils.sltp_helpers import stop_fill_price
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,6 +78,7 @@ class ReplayOrderExecutor:
 
         high = float(ohlc["high"])
         low = float(ohlc["low"])
+        open_price = float(ohlc["open"])
 
         # Check SL first (pessimistic -- matching offline env)
         sl_triggered = False
@@ -95,7 +98,9 @@ class ReplayOrderExecutor:
 
         # SL wins over TP (pessimistic)
         if sl_triggered:
-            self._close_at_price(self.sl_price)
+            self._close_at_price(
+                stop_fill_price(self.sl_price, open_price, is_long=self.position_qty > 0)
+            )
         elif tp_triggered:
             self._close_at_price(self.tp_price)
 
