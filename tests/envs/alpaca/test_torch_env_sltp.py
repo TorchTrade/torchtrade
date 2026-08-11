@@ -19,66 +19,6 @@ from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map as c
 from .mocks import MockObserver, MockTrader
 
 
-class MockSLTPTrader(MockTrader):
-    """Extended MockTrader that handles bracket orders with SL/TP."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.active_stop_loss = None
-        self.active_take_profit = None
-        self.bracket_order_active = False
-
-    def trade(
-        self,
-        side: str,
-        amount: float,
-        order_type: str = "market",
-        take_profit: float = None,
-        stop_loss: float = None,
-        **kwargs
-    ) -> bool:
-        result = super().trade(side, amount, order_type, **kwargs)
-
-        if result and side.lower() == "buy" and take_profit and stop_loss:
-            self.active_take_profit = take_profit
-            self.active_stop_loss = stop_loss
-            self.bracket_order_active = True
-
-        return result
-
-    def simulate_price_movement(self, new_price: float):
-        """Simulate price movement and check SL/TP triggers."""
-        old_price = self.current_price
-        self.current_price = new_price
-
-        if self.position_qty > 0:
-            self.position_value = self.position_qty * new_price
-
-            # Check if SL or TP triggered
-            if self.bracket_order_active:
-                if self.active_stop_loss and new_price <= self.active_stop_loss:
-                    # Stop loss triggered
-                    self._close_position_at_price(self.active_stop_loss)
-                    return "stop_loss"
-                elif self.active_take_profit and new_price >= self.active_take_profit:
-                    # Take profit triggered
-                    self._close_position_at_price(self.active_take_profit)
-                    return "take_profit"
-
-        return None
-
-    def _close_position_at_price(self, price: float):
-        """Close position at specified price (for SL/TP)."""
-        sell_value = self.position_qty * price
-        self.cash += sell_value
-        self.position_qty = 0.0
-        self.position_value = 0.0
-        self.avg_entry_price = 0.0
-        self.bracket_order_active = False
-        self.active_stop_loss = None
-        self.active_take_profit = None
-
-
 class TestCombinatorActionMap:
     """Tests for action map generation."""
 
@@ -130,7 +70,7 @@ class TestAlpacaSLTPTradingEnvInitialization:
         )
 
         mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader(initial_cash=10000.0)
+        mock_trader = MockTrader(initial_cash=10000.0)
 
         env = AlpacaSLTPTorchTradingEnv(
             config=config,
@@ -152,7 +92,7 @@ class TestAlpacaSLTPTradingEnvInitialization:
         )
 
         mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader()
+        mock_trader = MockTrader()
 
         env = AlpacaSLTPTorchTradingEnv(
             config=config,
@@ -173,7 +113,7 @@ class TestAlpacaSLTPTradingEnvInitialization:
         )
 
         mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader()
+        mock_trader = MockTrader()
 
         env = AlpacaSLTPTorchTradingEnv(
             config=config,
@@ -197,7 +137,7 @@ class TestAlpacaSLTPTradingEnvReset:
             window_sizes=[10],
         )
         mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader(initial_cash=10000.0)
+        mock_trader = MockTrader(initial_cash=10000.0)
 
         return AlpacaSLTPTorchTradingEnv(
             config=config,
@@ -239,7 +179,7 @@ class TestAlpacaSLTPTradingEnvStep:
             takeprofit_levels=(0.03, 0.06),
         )
         mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader(initial_cash=10000.0)
+        mock_trader = MockTrader(initial_cash=10000.0)
 
         env = AlpacaSLTPTorchTradingEnv(
             config=config,
@@ -338,7 +278,7 @@ class TestAlpacaSLTPTradingEnvTermination:
         env = AlpacaSLTPTorchTradingEnv(
             config=config,
             observer=MockObserver(window_sizes=[10]),
-            trader=MockSLTPTrader(initial_cash=500.0),
+            trader=MockTrader(initial_cash=500.0),
         )
         env.initial_portfolio_value = 10000.0  # the 500 cash is below 10% of this
         env._wait_for_next_timestamp = lambda: None
@@ -358,7 +298,7 @@ class TestAlpacaSLTPTradingEnvClose:
             window_sizes=[10],
         )
         mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader(initial_cash=10000.0)
+        mock_trader = MockTrader(initial_cash=10000.0)
 
         env = AlpacaSLTPTorchTradingEnv(
             config=config,
@@ -389,7 +329,7 @@ class TestAlpacaSLTPTradingEnvMultipleEpisodes:
             window_sizes=[10],
         )
         mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockSLTPTrader(initial_cash=10000.0)
+        mock_trader = MockTrader(initial_cash=10000.0)
 
         env = AlpacaSLTPTorchTradingEnv(
             config=config,
