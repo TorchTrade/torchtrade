@@ -320,6 +320,12 @@ def test_a_collector_batch_carries_truncated(sample_ohlcv_df):
     declared spec -- so an undeclared key is simply absent from every batch it yields, and
     nothing raises. check_env_specs catches the same defect, but only because a test calls
     it; a training run gets no signal at all, which is why this went unnoticed.
+
+    The env here is offline, which never had the bug -- its spec already declared
+    truncated. The mechanism is env-agnostic and a collector is cheap on this side, where
+    the live envs would need broker mocks and a patched clock. So this pins the shared
+    declaration going forward; the ten check_env_specs tests are what cover the live
+    regression itself.
     """
     from torchrl.collectors import Collector
 
