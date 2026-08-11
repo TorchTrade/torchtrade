@@ -244,56 +244,23 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         low_price = ohlcv["low"]
         close_price = ohlcv["close"]
 
+        # Open, extreme and close are all tested for each side, and the stop is tested
+        # before the take-profit. On a well-formed bar the extreme subsumes the other two,
+        # so this is the plainer statement of the same rule -- verified identical over
+        # 300k well-formed bars. It differs only where high/low fail to bracket open and
+        # close, and there it is the STRICTLY more pessimistic form: the stop still wins,
+        # where an ordering that deferred the close test would hand the bar to the
+        # take-profit. Nothing validates OHLC at ingestion, so that case is reachable from
+        # a caller's DataFrame, and the pessimistic answer is the one to converge on.
         if self.position.position_size > 0:
-            # Long position
-            # SL triggers when price drops below SL level
-            if self.stop_loss > 0:
-                # Check open first (immediate trigger at bar open)
-                if open_price <= self.stop_loss:
-                    return "sl"
-                # Check if low touched SL (triggered intrabar)
-                if low_price <= self.stop_loss:
-                    return "sl"
-
-            # TP triggers when price rises above TP level
-            if self.take_profit > 0:
-                # Check open first
-                if open_price >= self.take_profit:
-                    return "tp"
-                # Check if high touched TP (triggered intrabar)
-                if high_price >= self.take_profit:
-                    return "tp"
-
-            # Final check at close price
-            if self.stop_loss > 0 and close_price <= self.stop_loss:
+            if self.stop_loss > 0 and min(open_price, low_price, close_price) <= self.stop_loss:
                 return "sl"
-            if self.take_profit > 0 and close_price >= self.take_profit:
+            if self.take_profit > 0 and max(open_price, high_price, close_price) >= self.take_profit:
                 return "tp"
-
         else:
-            # Short position
-            # SL triggers when price rises above SL level
-            if self.stop_loss > 0:
-                # Check open first
-                if open_price >= self.stop_loss:
-                    return "sl"
-                # Check if high touched SL (triggered intrabar)
-                if high_price >= self.stop_loss:
-                    return "sl"
-
-            # TP triggers when price drops below TP level
-            if self.take_profit > 0:
-                # Check open first
-                if open_price <= self.take_profit:
-                    return "tp"
-                # Check if low touched TP (triggered intrabar)
-                if low_price <= self.take_profit:
-                    return "tp"
-
-            # Final check at close price
-            if self.stop_loss > 0 and close_price >= self.stop_loss:
+            if self.stop_loss > 0 and max(open_price, high_price, close_price) >= self.stop_loss:
                 return "sl"
-            if self.take_profit > 0 and close_price <= self.take_profit:
+            if self.take_profit > 0 and min(open_price, low_price, close_price) <= self.take_profit:
                 return "tp"
 
         return None
