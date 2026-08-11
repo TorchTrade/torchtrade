@@ -107,10 +107,16 @@ Execute at:              ↑         ↑         ↑
                         t=5      t=10      t=15
 ```
 
-At t=10 (executing on 5-minute bar B):
-- **1-minute data**: Last 12 bars (from recent history)
-- **5-minute data**: Bar A (completed at t=5)
-- **15-minute data**: Bar X (completed at t=0)
+Each execution step is labelled by its bin's **start**, but the trade fills at that
+bin's **close**. So the step labelled t=10 spans [10, 15) and executes at minute 14 —
+verified by intercepting the executed price, and pinned by
+`tests/envs/offline/test_sequential.py::TestExecutionPriceConvention`.
+
+Every observation window is therefore as-of minute 14, the instant money changes hands:
+
+- **1-minute data**: last 12 bars, ending at minute 14
+- **5-minute data**: bar C [10, 15), whose close *is* the execution price
+- **15-minute data**: bar X [0, 15) only once it has closed; until then, the previous one
 
 ### Lookahead Bias Prevention
 
@@ -128,26 +134,36 @@ At t=10 (executing on 5-minute bar B):
 # At t=10, agent can only see bars that closed BEFORE t=10 ✅
 ```
 
-**Detailed Example at t=10**:
-
-When your agent executes at minute 10, here's what data is available:
+**Detailed Example at the step labelled t=10** (`execute_on=5Minute`, so it fills at
+minute 14):
 
 ```
-✅ CAN use (completed bars only):
-  - 1-min bars: [1, 2, 3, ..., 9] (bar 10 is still forming)
-  - 5-min bar A [0-5]: Closed at t=5, fully complete
-  - 15-min bar covering previous period: Only if it ended before t=10
+✅ CAN use (everything known by minute 14):
+  - 1-min bars: [..., 12, 13, 14] — up to the fill instant
+  - 5-min bar C [10-15]: its close IS the execution price
+  - 15-min bar covering a period that ended at or before t=10
 
-❌ CANNOT use (incomplete bars):
-  - 5-min bar B [5-10]: Still forming, closes at t=10
-  - 15-min bar X [0-15]: Still forming, closes at t=15
+❌ CANNOT use:
+  - any 1-min bar from minute 15 onwards — that is the next step
+  - 5-min bar D [15-20]: has not started
+  - 15-min bar X [0-15]: not yet closed at t=10
 ```
 
-**Why This Matters**: Without this protection, your agent would train on future information (looking into bars that haven't closed yet), leading to unrealistic backtest results that won't work in live trading.
+**Why This Matters**: the boundary is the instant the trade fills, not the bar's label.
+Bounding on the label looks safer but is not — it withholds data the agent demonstrably
+already has, because the `execute_on` window's own close is the execution price. Before
+#282, timeframes finer than `execute_on` were bounded on the label and so lagged the rest
+of the observation by up to a full execution bar.
 
-**Implementation Detail** (from `sampler.py:71-77`):
+**Implementation Detail**:
 
-Higher timeframes (coarser than `execute_on`) are shifted forward by their period during resampling. This ensures bars are indexed by their END time. When the agent queries data at execution time, `searchsorted` automatically excludes any bars that haven't closed yet.
+- Timeframes **coarser** than `execute_on` are shifted forward by their period during
+  resampling, so they are indexed by their END time and only completed bars are visible.
+- Timeframes **finer** than `execute_on` keep their own labels but are looked up with the
+  last instant inside the current execution bin, so they end where the fill happens.
+- A coarse bar that completes *inside* the current bin is not shown until the next step.
+  That only arises when the coarse grid does not align with `execute_on` (e.g. 90-minute
+  bars under hourly execution); it is conservative, never leaky.
 
 ---
 
