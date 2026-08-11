@@ -372,20 +372,17 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
 
             close_price = ohlcv_base_values["close"]
 
-            # Liquidation first (futures only, highest priority). Both exits leave the
-            # position flat, so compute_return's price argument is ignored -- portfolio
-            # value is then just the balance, which already holds the realised fill.
-            if self.leverage > 1:
-                if trigger_result := self._check_liquidation_in_rollout(ohlcv_base_values):
-                    self.rollout_returns.append(self.compute_return(close_price))
-                    return trigger_result, obs_dict
-
-            if trigger_result := self._check_sltp_triggers(ohlcv_base_values):
-                self.rollout_returns.append(self.compute_return(close_price))
-                return trigger_result, obs_dict
-
-            # No trigger — accumulate return at close price
+            # Liquidation outranks the brackets; the helper is a no-op at leverage 1.
+            trigger_result = (
+                self._check_liquidation_in_rollout(ohlcv_base_values)
+                or self._check_sltp_triggers(ohlcv_base_values)
+            )
+            # One append per bar, exit or not: an exit leaves the position flat, so
+            # compute_return ignores this price and reads the balance, which already
+            # holds the realised fill.
             self.rollout_returns.append(self.compute_return(close_price))
+            if trigger_result:
+                return trigger_result, obs_dict
 
         # If loop never executed (truncated from start), reuse the last
         # cached observation via timestamp lookup — does not advance the

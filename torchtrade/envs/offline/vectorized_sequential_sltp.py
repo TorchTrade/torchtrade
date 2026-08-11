@@ -231,7 +231,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
         # 6. Bar N+1, against whatever each env holds after the action. Must precede the
         # portfolio values below, or reward and termination read balances that ignore it.
-        self._apply_exit_checks(new_high, new_low, new_open)
+        self._apply_exit_checks(new_open, new_high, new_low)
 
         # Age straight after the last thing that can move _position_sizes -- the same
         # invariant the base env keeps by calling this after _apply_liquidation, its own
@@ -269,9 +269,9 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
     def _apply_exit_checks(
         self,
+        new_open: torch.Tensor,
         new_high: torch.Tensor,
         new_low: torch.Tensor,
-        new_open: torch.Tensor,
     ) -> None:
         """Close positions whose bar range hit liquidation or a bracket."""
         leverage = float(self.config.leverage)
@@ -312,8 +312,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
             sltp_trigger = sl_trigger | tp_trigger
             if sltp_trigger.any():
-                # Tensorised stop_fill_price: a gapped stop fills at the open, and a
-                # take-profit deliberately does not chase a gap (#280).
+                # Tensorised stop_fill_price -- the scalar twin lives in sltp_helpers (#280).
                 stop_fill = torch.where(
                     is_long,
                     torch.minimum(new_open, self._sl_prices),

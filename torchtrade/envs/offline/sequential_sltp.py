@@ -397,7 +397,9 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
             if trigger is not None:
                 if trigger == "sl":
                     execution_price = stop_fill_price(
-                        self.stop_loss, base_features["open"], self.position.position_size > 0
+                        self.stop_loss,
+                        base_features["open"],
+                        is_long=self.position.position_size > 0,
                     )
                 else:
                     execution_price = self.take_profit

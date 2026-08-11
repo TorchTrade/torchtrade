@@ -106,6 +106,7 @@ def stop_fill_price(stop_price: float, open_price: float, is_long: bool) -> floa
     outperform the backtest").
 
     The min/max self-selects, so there is no separate is-this-a-gap branch: a bar that
-    merely wicks through has open beyond the stop and returns the stop unchanged.
+    merely wicks through opens on the untriggered side of the stop -- above it for a
+    long -- so min returns the stop unchanged.
     """
     return min(open_price, stop_price) if is_long else max(open_price, stop_price)

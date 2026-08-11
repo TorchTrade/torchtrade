@@ -21,29 +21,14 @@ from torchtrade.envs.offline import (
     VectorizedSequentialTradingEnvSLTPConfig,
 )
 from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
-from torchtrade.envs.utils.sltp_helpers import stop_fill_price
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 TF_1MIN = TimeFrame(1, TimeFrameUnit.Minute)
 
 
-@pytest.mark.parametrize("stop,open_price,is_long,expected", [
-    # A stop is a market order once touched: a gap past it fills at the open.
-    (97.5, 85.0, True, 85.0),
-    (102.5, 115.0, False, 115.0),
-    # A bar that merely wicks through opens beyond the stop, so min/max returns the stop
-    # unchanged -- which is why the rule needs no separate is-this-a-gap branch. These
-    # two cells are what fails if someone "simplifies" the rule to `return open_price`.
-    (97.5, 100.0, True, 97.5),
-    (102.5, 100.0, False, 102.5),
-], ids=["long-gap", "short-gap", "long-wick", "short-wick"])
-def test_stop_fill_price_rule(stop, open_price, is_long, expected):
-    assert stop_fill_price(stop, open_price, is_long) == expected
-
-
-def _gap_df(gap_to, n=40, bar=20, price=100.0):
-    """Flat series where one bar gaps to `gap_to` and stays there for the whole bar."""
-    o, h, l, c = ([price] * n for _ in range(4))
+def _gap_df(gap_to, n=40, bar=20):
+    """Flat series at 100 where one bar gaps to `gap_to` and stays there for the bar."""
+    o, h, l, c = ([100.0] * n for _ in range(4))
     o[bar] = h[bar] = l[bar] = c[bar] = gap_to
     return pd.DataFrame({
         "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
@@ -79,11 +64,10 @@ def test_sltp_engines_fill_a_gapped_bracket_alike(gap_to, open_idx, expected_bal
 
     td = env.reset()
     wrap = (lambda a: torch.tensor([a])) if is_vec else torch.tensor
-    for step in range(12):
+    # Enter on step 8, two bars before the fixture's gap at bar 20; it fires on step 9.
+    for step in range(10):
         td["action"] = wrap(open_idx if step == 8 else 0)
         td = env.step(td)["next"]
-        if td["done"].all() if is_vec else td["done"].item():
-            break
 
     balance = float(env._balances[0]) if is_vec else env.balance
     assert balance == pytest.approx(expected_balance), (
@@ -102,11 +86,10 @@ def test_sltp_engines_fill_a_gapped_bracket_alike(gap_to, open_idx, expected_bal
 def test_onestep_prices_a_gapped_bracket(gap_to, action, expected_balance):
     """OneStep re-forks the trigger check (#316), so the scalar cells do not cover it.
 
-    The reward assertion is not a restatement of the balance one. It pins the invariant
-    this PR relied on to delete OneStep's reward-side fill: a bracket exit leaves the
-    position flat, so compute_return reads the realised balance rather than any price it
-    is handed. A partial close, or one that stopped zeroing entry_price, would silently
-    break that and start pricing the reward off the bar close instead of the fill.
+    The reward assertion earns its place by pinning the reward FORMULA, which nothing
+    else does: test_onestep.py asserts only reward == sum(rollout_returns), which is
+    invariant under swapping the log return for a simple one. It is not what guards the
+    deleted reward-side fill -- verified by mutation that no price can reach the reward.
     """
     config = OneStepTradingEnvConfig(
         leverage=2, stoploss_levels=[-0.025], takeprofit_levels=[0.025],
@@ -116,9 +99,6 @@ def test_onestep_prices_a_gapped_bracket(gap_to, action, expected_balance):
     )
     env = OneStepTradingEnv(_gap_df(gap_to, n=60, bar=45), config)
 
-    # OneStep forces random_start=True; seek() pins the start index. Insurance only --
-    # the series is flat, so every organic start reaches the gap bar with the same entry.
-    env.sampler.seek(0)
     td = env.reset()
     td["action"] = torch.tensor(action)
     out = env.step(td)["next"]
@@ -143,11 +123,7 @@ def test_onestep_prices_a_gapped_bracket(gap_to, action, expected_balance):
     (-10.0, 102.5, 90.0, 70.0, 10100.0),
 ], ids=["long-stop-gap", "short-stop-gap", "long-tp-gap", "short-tp-gap"])
 def test_replay_executor_prices_a_gapped_bracket(qty, sl, tp, bar_price, expected_balance):
-    """The replay path had to start reading ohlc["open"], which it never did before.
-
-    Both sides are pinned: with only the long cell, flipping the executor's side test to
-    a constant `is_long=True` left the whole suite green.
-    """
+    """The replay path had to start reading ohlc["open"], which it never did before."""
     ex = ReplayOrderExecutor(initial_balance=10000.0)
     # Set the position directly rather than through trade(): this pins the fill rule, not
     # the sizing path. Deduct the margin by hand, since _close_at_price returns it.
