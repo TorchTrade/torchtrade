@@ -419,6 +419,10 @@ class TestHistoryRecording:
             stoploss_levels=[-0.05],  # 5% SL
             takeprofit_levels=[0.05],  # 5% TP
             include_hold_action=True,
+            # Without this the start bar is random, and most starts land ON the 106 bar,
+            # where entry is 106 and the take-profit at 111.3 is never reached. The test
+            # passed only because the default seed happens to start at index 1.
+            random_start=False,
         )
 
         # Create data that will trigger TP
@@ -441,7 +445,6 @@ class TestHistoryRecording:
         td["action"] = 1
         env.step(td)
 
-        # Check if TP was recorded
         has_sltp_exit = any(at in ["sltp_sl", "sltp_tp"] for at in env.history.action_types)
         assert has_sltp_exit, \
             f"SL/TP trigger should be recorded, got {env.history.action_types}"
