@@ -2212,11 +2212,11 @@ class TestObservationTimeframesShareOneInstant:
 
 
 @pytest.mark.parametrize("field,value,ok", [
-    ("high", 99.0, False),    # high below the open
-    ("low", 101.0, False),    # low above the close
-    ("high", 100.0, True),    # flat bar: equality is well-formed
-    ("low", 100.0, True),
-], ids=["high-below-open", "low-above-close", "high-equals", "low-equals"])
+    ("high", 100.1, False),   # below close (100.2) but above open -- pins max, not min
+    ("low", 100.1, False),    # above open (100.0) but below close -- pins min, not max
+    ("high", 100.2, True),    # touching the higher of the two is well-formed
+    ("low", 100.0, True),     # touching the lower of the two is well-formed
+], ids=["high-below-close", "low-above-open", "high-equals-close", "low-equals-open"])
 def test_malformed_ohlc_is_rejected_at_ingestion(field, value, ok):
     """A bar whose high/low do not bracket open and close is refused (#326).
 
@@ -2226,11 +2226,14 @@ def test_malformed_ohlc_is_rejected_at_ingestion(field, value, ok):
     in each rule is the boundary-validation invariant; a guard that absorbs the nonsense
     makes it silent, which is what let ~100 tests build impossible candles unnoticed.
     """
+    # open != close deliberately: with them equal, max(open, close) == min(open, close)
+    # and the cells cannot tell the right operand from the wrong one -- comparing high
+    # against min instead of max would pass every case.
     n = 30
     df = pd.DataFrame({
         "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
         "open": [100.0] * n, "high": [100.5] * n,
-        "low": [99.5] * n, "close": [100.0] * n, "volume": [1000.0] * n,
+        "low": [99.5] * n, "close": [100.2] * n, "volume": [1000.0] * n,
     })
     df.loc[5, field] = value
 
@@ -2243,5 +2246,5 @@ def test_malformed_ohlc_is_rejected_at_ingestion(field, value, ok):
     if ok:
         build()
     else:
-        with pytest.raises(ValueError, match="Malformed OHLC at row 5"):
+        with pytest.raises(ValueError, match="position 5"):
             build()
