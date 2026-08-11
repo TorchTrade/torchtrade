@@ -551,3 +551,21 @@ class TestSLTPCanAfford:
             torch.full_like(env._balances, 100.0)
         ), "a refused open must cost nothing"
         env.close()
+
+
+def test_vec_sltp_env_keeps_its_configured_action_levels(sample_ohlcv_df):
+    """__init__ hands the parent a dummy and must restore the real levels (#290).
+
+    Twin of the scalar leak: restored on the CONFIG only, while the parent copies onto
+    self during its own __init__. This class has no allows_short, so the blast radius is
+    anything reading the levels off the env -- BaseLLMActor(action_levels=env.action_levels)
+    would build its action descriptions from [0.0, 1.0].
+    """
+    config = VectorizedSequentialTradingEnvSLTPConfig(
+        num_envs=2, leverage=10, initial_cash=10000, action_levels=[-1, 0, 1],
+        execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        time_frames=[TimeFrame(1, TimeFrameUnit.Minute)], window_sizes=[10], seed=42,
+    )
+    env = VectorizedSequentialTradingEnvSLTP(sample_ohlcv_df, config)
+    assert env.action_levels == [-1, 0, 1]
+    env.close()

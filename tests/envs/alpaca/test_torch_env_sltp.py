@@ -301,11 +301,6 @@ class TestAlpacaSLTPTradingEnvClose:
         assert env.trader.position_qty == 0.0
 
 
-class TestAlpacaSLTPTradingEnvMultipleEpisodes:
-    """Tests for running multiple episodes."""
-
-
-
 def test_sltp_history_records_price_and_position_on_a_flat_bar():
     """The SLTP env read the price inline and never recorded the position (#290).
 
@@ -324,7 +319,10 @@ def test_sltp_history_records_price_and_position_on_a_flat_bar():
 
     env.reset()
     env._step(TensorDict({"action": torch.tensor(0)}, batch_size=()))  # hold, stays flat
-    assert env.position.position_size == 0, "this cell must exercise the FLAT path"
+    # Asserted on the EXCHANGE, not on env.position.position_size: that field is never
+    # assigned on any alpaca env, so it reads 0.0 while the exchange holds a position and
+    # the guard would pass either way.
+    assert trader.get_status()["position_status"] is None, "this cell must be FLAT"
     assert env.history.base_prices[-1] > 0, (
         f"flat bar recorded price {env.history.base_prices[-1]} -- the fallback chain "
         "should have supplied one"

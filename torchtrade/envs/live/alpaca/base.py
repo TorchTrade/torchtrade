@@ -370,16 +370,19 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             Current price, or 0.0 if unavailable
 
         Raises:
-            PositionUnknownError: the exchange did not report the position. This is
-                where AlpacaTorchTradingEnv._step stops on an outage, before any trade is
-                sized; the SLTP env stops on its own inline read instead.
+            PositionUnknownError: the exchange did not report the position. Both alpaca
+                envs stop here, before any trade is sized -- POSITION_UNKNOWN is truthy
+                and raises on attribute access.
 
         Lives on the base rather than on AlpacaTorchTradingEnv because the SLTP env is a
-        sibling, not a subclass, and read `position_status.current_price if
+        sibling, not a subclass, and used to read `position_status.current_price if
         position_status else 0.0` inline -- so every flat bar recorded a price of 0 in its
         history (#290).
         """
-        # Try position status first
+        # Note: a caller that already resolved the status to None still pays a second
+        # get_status() here, because None cannot be told from "not supplied". Both alpaca
+        # envs do that on a flat bar. Negligible against alpaca's rate limit and matched
+        # by the non-SLTP env before this change, so left as-is rather than widening #290.
         if position_status is None:
             position_status = self.trader.get_status().get("position_status", None)
 

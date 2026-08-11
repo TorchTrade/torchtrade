@@ -146,7 +146,12 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
 
         super().__init__(df, config, feature_preprocessing_fn)
 
+        # Restored on the CONFIG and on the instance: the parent copies the dummy onto
+        # self during its own __init__, so restoring only the config leaves
+        # self.action_levels at the dummy forever -- anything reading it off the env, such
+        # as BaseLLMActor(action_levels=env.action_levels), gets [0.0, 1.0] (#290).
         config.action_levels = original_action_levels
+        self.action_levels = original_action_levels
 
         # Override action spec with SLTP action count
         num_actions = len(self.action_map)
