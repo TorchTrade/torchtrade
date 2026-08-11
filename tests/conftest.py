@@ -68,6 +68,52 @@ def sample_ohlcv_df():
 
 
 @pytest.fixture
+def gappy_ohlcv_df():
+    """Random walk whose bars periodically GAP: open[i] != close[i-1].
+
+    Every other OHLCV fixture in this file has `open[i] == close[i-1]` exactly, so a bar
+    can never open beyond a bracket set off the previous close. That is a structural blind
+    spot, not an oversight in any one test: it is why the gapped-stop mispricing in #280
+    survived the whole suite in four separate engines (#315).
+
+    Gap size is bounded on both sides. It must be large against the walk's own volatility
+    (0.1% per bar) so a gap clears a bracket outright rather than grazing it, and small
+    against the liquidation band at the highest leverage under test -- at 25x that band is
+    1/25 - 0.004 maintenance = 3.6%, and a gap wider than it liquidates the position
+    before a bracket can fire, degenerating the cell into a liquidation test.
+
+    2% sits between measured cliffs: gaps stop clearing the bracket below ~0.3% (0.2%
+    yields zero gapped fills, 0.5% already degrades to 30 of 51), and the first
+    liquidations appear at ~3%. Direction alternates so long and short brackets are each
+    exercised.
+    """
+    rng = np.random.default_rng(20260811)
+    n = 1440
+    gap_every, gap_size = 7, 0.02
+
+    close_prices = 100.0 * np.exp(np.cumsum(rng.normal(0, 0.001, n)))
+
+    # open[i] gaps off close[i-1]; every gap_every-th bar jumps, alternating direction.
+    prev_close = np.concatenate(([100.0], close_prices[:-1]))
+    idx = np.arange(n)
+    jump = np.where(idx % gap_every == 0, gap_size, 0.0)
+    jump[idx % (2 * gap_every) == 0] *= -1.0
+    open_prices = prev_close * (1.0 + jump)
+
+    high_prices = np.maximum(open_prices, close_prices) * (1 + np.abs(rng.normal(0, 0.002, n)))
+    low_prices = np.minimum(open_prices, close_prices) * (1 - np.abs(rng.normal(0, 0.002, n)))
+
+    return pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": open_prices,
+        "high": high_prices,
+        "low": low_prices,
+        "close": close_prices,
+        "volume": rng.lognormal(10, 1, n),
+    })
+
+
+@pytest.fixture
 def large_ohlcv_df():
     """
     Create a larger synthetic OHLCV DataFrame for stress testing.

@@ -639,6 +639,38 @@ class TestSLTPScalarVecEquivalenceTradeModesAndLock:
         )
         assert not mismatches, "\n".join(mismatches)
 
+    @pytest.mark.parametrize("lock", [False, True], ids=["unlocked", "locked"])
+    def test_random_actions_match_across_a_gap(self, gappy_ohlcv_df, lock):
+        """The same comparison on bars that GAP, which no other fixture can produce (#315).
+
+        Not here to catch a one-engine revert of the gap rule itself -- test_gap_fills.py
+        pins that directly. What only this reaches is the DOWNSTREAM consumers of a gapped
+        fill price: fee, margin and PnL are all computed off exec_price, and a mutant that
+        charges the exit fee against the bracket while leaving the PnL fix intact kills
+        these two cells and nothing else in the offline or replay suites. test_gap_fills.py
+        runs at zero fee, so nothing there observes those consumers; the grid above has
+        fees but never gaps, so exec_price equals the bracket and the mutation is a no-op.
+
+        Two cells, not a fixture axis over the grid above: measured across 11 gap
+        mutations, trade_mode and leverage are pure duplication on gappy data, and only
+        the lock axis and the presence of shorts change what is reached.
+        """
+        mismatches = _run_sltp_sequence(
+            gappy_ohlcv_df,
+            leverage=25,
+            fee=0.001,
+            max_traj=120,
+            random_steps=100,
+            trade_mode="notional",
+            lock=lock,
+            # 2% gaps never reach the default +/-5% brackets, so the grid's overrides are
+            # needed here too.
+            sl_levels=[-0.005],
+            tp_levels=[0.005],
+            label=f"sltp-gappy-{'locked' if lock else 'unlocked'}",
+        )
+        assert not mismatches, "\n".join(mismatches)
+
 
 class TestAffordabilitySlackIsShared:
     """Both engines must make the same accept/reject call on a marginal open (#293).
