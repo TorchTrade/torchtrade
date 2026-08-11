@@ -298,6 +298,18 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         return None
 
+    def _sltp_execution_price(self, trigger: str, open_price: float) -> float:
+        """Price a fired bracket. Shared so a fill rule cannot be fixed in only one place.
+
+        #280 had to be applied twice in scalar code because OneStep re-forked the trigger
+        check and its own price selection alongside it.
+        """
+        if trigger == "sl":
+            return stop_fill_price(
+                self.stop_loss, open_price, is_long=self.position.position_size > 0
+            )
+        return self.take_profit
+
     def _execute_sltp_close(self, execution_price: float, trigger_type: str) -> Dict:
         """Execute SL/TP triggered close.
 
@@ -396,15 +408,9 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         else:
             trigger = self._check_sltp_trigger(base_features)
             if trigger is not None:
-                if trigger == "sl":
-                    execution_price = stop_fill_price(
-                        self.stop_loss,
-                        base_features["open"],
-                        is_long=self.position.position_size > 0,
-                    )
-                else:
-                    execution_price = self.take_profit
-                trade_info = self._execute_sltp_close(execution_price, trigger)
+                trade_info = self._execute_sltp_close(
+                    self._sltp_execution_price(trigger, base_features["open"]), trigger
+                )
 
         # Same canonical aging as SequentialTradingEnv (#275): one call per step off the
         # post-trade size, so no exit path can be added later without ageing correctly.

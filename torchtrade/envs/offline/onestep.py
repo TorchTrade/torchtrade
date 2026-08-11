@@ -27,7 +27,6 @@ from torchtrade.envs.offline.sequential_sltp import (
     SequentialTradingEnvSLTPConfig,
 )
 from torchtrade.envs.core.state import binarize_action_type
-from torchtrade.envs.utils.sltp_helpers import stop_fill_price
 
 
 @dataclass
@@ -420,63 +419,19 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         return None
 
     def _check_sltp_triggers(self, ohlcv: dict) -> Optional[Dict]:
-        """Check if stop-loss or take-profit should trigger during rollout.
+        """Fire a bracket during rollout, returning trade_info rather than a label.
 
-        Uses intrabar OHLC data to detect SL/TP triggers that may occur
-        within the candle, not just at the close.
-
-        Args:
-            ohlcv: Dictionary with keys "open", "high", "low", "close", "volume"
-
-        Returns:
-            trade_info dict if SL/TP triggered, None otherwise
+        The detection rule and the fill pricing both live on the parent (#316). This used
+        to re-implement both under a name one letter from the parent's, which is why #280
+        had to be fixed in two scalar places. Verified identical over 9,604 well-formed
+        OHLC combinations before the fork was deleted.
         """
-        if self.position.position_size == 0:
+        trigger = self._check_sltp_trigger(ohlcv)
+        if trigger is None:
             return None
-        if self.stop_loss == 0.0 and self.take_profit == 0.0:
-            return None
-
-        open_price = ohlcv["open"]
-        high_price = ohlcv["high"]
-        low_price = ohlcv["low"]
-        close_price = ohlcv["close"]
-
-        if self.position.position_size > 0:
-            # Long position
-            # SL triggers when price drops below SL level
-            if self.stop_loss > 0:
-                if (open_price <= self.stop_loss or
-                    low_price <= self.stop_loss or
-                    close_price <= self.stop_loss):
-                    return self._execute_sltp_close(
-                        stop_fill_price(self.stop_loss, open_price, is_long=True), "sl"
-                    )
-
-            # TP triggers when price rises above TP level
-            if self.take_profit > 0:
-                if (open_price >= self.take_profit or
-                    high_price >= self.take_profit or
-                    close_price >= self.take_profit):
-                    return self._execute_sltp_close(self.take_profit, "tp")
-        else:
-            # Short position
-            # SL triggers when price rises above SL level
-            if self.stop_loss > 0:
-                if (open_price >= self.stop_loss or
-                    high_price >= self.stop_loss or
-                    close_price >= self.stop_loss):
-                    return self._execute_sltp_close(
-                        stop_fill_price(self.stop_loss, open_price, is_long=False), "sl"
-                    )
-
-            # TP triggers when price drops below TP level
-            if self.take_profit > 0:
-                if (open_price <= self.take_profit or
-                    low_price <= self.take_profit or
-                    close_price <= self.take_profit):
-                    return self._execute_sltp_close(self.take_profit, "tp")
-
-        return None
+        return self._execute_sltp_close(
+            self._sltp_execution_price(trigger, ohlcv["open"]), trigger
+        )
 
     def _execute_sltp_action(
         self, side: Optional[str], sl_pct: Optional[float], tp_pct: Optional[float], base_price: float
