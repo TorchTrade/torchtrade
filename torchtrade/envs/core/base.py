@@ -56,11 +56,15 @@ class TorchTradeBaseEnv(EnvBase):
 
         # TorchRL's default done spec carries only done and terminated, so anything
         # pre-allocating from the spec (collectors, ParallelEnv) drops truncated silently
-        # (#272). This declaration is now the SOLE source of the key: since #313 the live
-        # _step methods no longer write it by hand, and EnvBase._complete_done fills it
-        # from here. That also means check_env_specs can no longer catch a narrowed spec
-        # -- real and fake would both lack the key -- so the guard is
-        # assert_the_step_emits_the_whole_done_family, run against all ten live envs.
+        # (#272).
+        #
+        # For the LIVE envs this declaration is the only source of the key: since #313
+        # their _step methods no longer write it and EnvBase._complete_done fills it from
+        # here. One consequence -- their check_env_specs can no longer catch a narrowed
+        # done spec, since real and fake rollouts would both lack the key. The live guard
+        # is assert_the_step_emits_the_whole_done_family, run against all ten. The offline
+        # envs still write truncated themselves, and meaningfully (they do truncate), so
+        # their check_env_specs does still catch it.
         self.full_done_spec = Composite(
             done=Categorical(2, dtype=torch.bool, shape=(1,)),
             terminated=Categorical(2, dtype=torch.bool, shape=(1,)),

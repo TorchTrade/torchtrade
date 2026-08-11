@@ -325,7 +325,7 @@ def assert_a_direct_flip_does_not_age_the_new_position(
     )
 
 
-def assert_the_step_emits_the_whole_done_family(env, action=0):
+def assert_the_step_emits_the_whole_done_family(env):
     """A stepped live env emits done, terminated AND truncated (#272).
 
     Deliberate coverage, replacing a tripwire that #313 disarmed. While every live _step
@@ -340,7 +340,7 @@ def assert_the_step_emits_the_whole_done_family(env, action=0):
     """
     with patch.object(type(env), "_wait_for_next_timestamp"):
         td = env.reset()
-        td["action"] = torch.tensor(action)
+        td["action"] = torch.tensor(0)
         nxt = env.step(td)["next"]
 
     for key in ("done", "terminated", "truncated"):
@@ -349,5 +349,6 @@ def assert_the_step_emits_the_whole_done_family(env, action=0):
             "family by hand (#313), so a key absent here means the shared full_done_spec "
             "stopped declaring it."
         )
-    assert nxt["truncated"].dtype is torch.bool
+        assert nxt[key].dtype is torch.bool, f"{key} is {nxt[key].dtype}, not bool"
+        assert nxt[key].shape == (1,), f"{key} has shape {tuple(nxt[key].shape)}, not (1,)"
     assert not nxt["truncated"].any(), "a live env never truncates itself"

@@ -13,12 +13,14 @@ with no error at all. `TorchTradeBaseEnv` declares all three for live and offlin
 the tests at the end of this file guard that one declaration against both drift and
 silent loss.
 
-Since #313 the live `_step` methods no longer write `truncated` by hand, so that
-declaration is its only source. One consequence is worth knowing: `check_env_specs` can
-no longer catch a *narrowed* done spec, because it compares a real rollout against a fake
-one and both would lack the key. The ten
-`assert_the_step_emits_the_whole_done_family` cells are what catch it now -- verified by
-dropping `truncated` from the spec, which fails all ten.
+Since #313 the LIVE `_step` methods no longer write `truncated` by hand, so for them the
+declaration is its only source. One consequence is worth knowing: their `check_env_specs`
+can no longer catch a *narrowed* done spec, because it compares a real rollout against a
+fake one and both would lack the key. `assert_the_step_emits_the_whole_done_family`, run
+against all ten live envs, is what catches it there. The offline envs still write
+`truncated` themselves -- they genuinely truncate -- so their `check_env_specs` does still
+catch it, and so does `test_a_collector_batch_carries_truncated` below. Dropping
+`truncated` from the shared spec fails 23 tests across all three of those guards.
 """
 
 import ast
@@ -295,8 +297,9 @@ def test_no_env_declares_its_own_done_spec(env_cls):
     write, `setattr(self, "full_done_spec", ...)`, or a helper outside the MRO -- passes.
 
     What happens to those next turns on the payload, not the form. Any of them that
-    removes or narrows truncated is still caught by the ten check_env_specs tests and by
-    test_a_collector_batch_carries_truncated, which name the missing key. Any of them
+    removes or narrows truncated is still caught by the ten
+    assert_the_step_emits_the_whole_done_family cells on the live side, by the offline
+    check_env_specs tests, and by test_a_collector_batch_carries_truncated. Any of them
     that installs an IDENTICAL copy is caught by neither -- and that is the same blind
     spot this test exists to close for plain assignment: a copy nothing can see until the
     day it drifts, which is the failure mode that left this repo with three diverging
@@ -331,8 +334,9 @@ def test_a_collector_batch_carries_truncated(sample_ohlcv_df):
     The env here is offline, which never had the bug -- its spec already declared
     truncated. The mechanism is env-agnostic and a collector is cheap on this side, where
     the live envs would need broker mocks and a patched clock. So this pins the shared
-    declaration going forward; the ten check_env_specs tests are what cover the live
-    regression itself.
+    declaration going forward; the ten assert_the_step_emits_the_whole_done_family cells
+    are what cover the live regression itself, since #313 left the live check_env_specs
+    tests unable to see a narrowed done spec.
     """
     from torchrl.collectors import Collector
 

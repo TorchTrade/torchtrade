@@ -216,23 +216,6 @@ class TestBitgetFuturesTorchTradingEnv:
             assert isinstance(reward, torch.Tensor)
             assert reward.shape == (1,)
 
-    def test_done_tensor_shape(self, env):
-        """Test that done flags are tensors with correct shape."""
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
-            next_td = env.step(action_td)
-
-            done = next_td["next"]["done"]
-            terminated = next_td["next"]["terminated"]
-            truncated = next_td["next"]["truncated"]
-
-            assert isinstance(done, torch.Tensor)
-            assert isinstance(terminated, torch.Tensor)
-            assert isinstance(truncated, torch.Tensor)
-            assert done.shape == (1,)
-
     @pytest.mark.parametrize("done_on_bankruptcy,expected_done", [
         (True, True),    # portfolio collapses below the threshold -> episode terminates
         (False, False),  # same collapse, check disabled -> keep trading

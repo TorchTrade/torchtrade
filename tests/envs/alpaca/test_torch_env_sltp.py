@@ -136,7 +136,8 @@ class TestAlpacaSLTPTradingEnvReset:
 
     def test_check_env_specs_passes(self, env):
         """check_env_specs compares the emitted step against every declared spec;
-        catches a done spec missing a key the emitted step carries (#272)."""
+        the done family comes from the spec on both sides here, so a narrowed done spec
+        is NOT what this catches -- see assert_the_step_emits_the_whole_done_family."""
         with patch.object(type(env), "_wait_for_next_timestamp"):
             check_env_specs(env)
 

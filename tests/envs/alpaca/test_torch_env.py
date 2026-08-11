@@ -167,7 +167,8 @@ class TestAlpacaTorchTradingEnvReset:
 
     def test_check_env_specs_passes(self, env):
         """check_env_specs compares the emitted step against every declared spec;
-        catches a done spec missing a key the emitted step carries (#272)."""
+        the done family comes from the spec on both sides here, so a narrowed done spec
+        is NOT what this catches -- see assert_the_step_emits_the_whole_done_family."""
         with patch.object(type(env), "_wait_for_next_timestamp"):
             check_env_specs(env)
 
@@ -275,21 +276,6 @@ class TestAlpacaTorchTradingEnvStep:
         td_out = env._step(td_in)
 
         assert "reward" in td_out.keys()
-
-    def test_step_contains_done(self, env):
-        """A stepped env emits the whole done family (#272).
-
-        Goes through step(), not _step(): truncated is filled by EnvBase from the done
-        spec, so asserting it on _step's raw output would pin a hardcoded write rather
-        than the spec that makes the collector work (#313).
-        """
-        td = env.reset()
-        td["action"] = torch.tensor(1)
-        nxt = env.step(td)["next"]
-
-        for key in ("done", "terminated", "truncated"):
-            assert key in nxt.keys(), f"{key} missing from the emitted step"
-        assert nxt["truncated"].dtype is torch.bool
 
     def test_step_buy_action(self, env):
         """Test buy action (action=2)."""
