@@ -11,8 +11,11 @@ Similar to TorchRL's sota-tests approach.
 
 import os
 import shlex
+import signal
 import subprocess
 import sys
+import time
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -466,7 +469,7 @@ EXAMPLE_COMMANDS = {
 
 def run_command(command: str, timeout: int = 300) -> int:
     """
-    Run a shell command and return the exit code.
+    Run an example command (deliberately with no shell) and return its exit code.
 
     Args:
         command: The command to run
@@ -478,18 +481,25 @@ def run_command(command: str, timeout: int = 300) -> int:
     env = os.environ.copy()
     env["WANDB_MODE"] = "disabled"  # Disable wandb logging
 
+    argv = shlex.split(command)
     # Use the interpreter running the tests; a stale `python` on PATH would smoke-test
     # the examples against a different torchrl than the one under test.
-    if command.startswith("python "):
-        command = shlex.quote(sys.executable) + command[len("python"):]
+    if argv and argv[0] == "python":
+        argv[0] = sys.executable
 
+    # No shell: with shell=True the child of Popen is /bin/sh, so killing it on timeout
+    # leaves the training run itself alive -- the actual bug in #312. start_new_session
+    # puts the example in its own group so the killpg below reaches whatever it spawned
+    # in turn, whether or not that thing cleans up after its own parent. It is also what
+    # makes the killpg SAFE: without it, getpgid returns pytest's own group and the kill
+    # takes down the whole test session.
     process = subprocess.Popen(
-        command,
-        shell=True,
+        argv,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         cwd=str(REPO_ROOT),
         env=env,
+        start_new_session=True,
     )
 
     try:
@@ -498,8 +508,24 @@ def run_command(command: str, timeout: int = 300) -> int:
             print(f"Command failed with exit code {process.returncode}")
             print(stdout.decode() if stdout else "")
         return process.returncode
-    except subprocess.TimeoutExpired:
-        process.kill()
+    except BaseException:
+        # BaseException, not TimeoutExpired: start_new_session took the example out of
+        # pytest's process group, so a terminal Ctrl-C no longer reaches it. An interrupted
+        # run must not leak the example either.
+        #
+        # Not `finally`: on the success path communicate() has already reaped the child,
+        # and getpgid on a reaped pid raises ProcessLookupError, which would then crash
+        # every passing test.
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except ProcessLookupError:  # already gone; never mask the original exception
+            pass
+        # wait(), not communicate(): communicate reads stdout to EOF, and any descendant
+        # that escaped the group kill still holds that pipe open -- measured at 25s on a
+        # 3s timeout, and unbounded against a long-lived escapee. There is no
+        # pytest-timeout here, so that is a silent CI hang. CPython's own subprocess.run
+        # does kill()+wait() for the same reason.
+        process.wait()
         raise
 
 
@@ -549,3 +575,60 @@ class TestExampleImports:
         )
         assert TimeFrame is not None
         assert TimeFrameUnit is not None
+
+
+def _assert_dead(pid: int, what: str, deadline: float = 5.0):
+    """Poll until `pid` is gone; kill it and fail if it outlives `what`."""
+    for _ in range(int(deadline / 0.1)):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.1)
+    os.kill(pid, signal.SIGKILL)  # do not leak it just because the assertion failed
+    pytest.fail(f"process {pid} survived {what}")
+
+
+def test_run_command_kills_what_the_example_spawned(tmp_path):
+    """A timed-out example must not leave a training process behind (#312).
+
+    The original bug: shell=True made Popen's child /bin/sh, so process.kill() killed the
+    shell and the run survived -- burning CPU for the rest of the session under exactly
+    the load that timed it out. This is the only test in the file that fails if shell=True
+    returns.
+    """
+    pidfile = tmp_path / "grandchild.pid"
+    src = ("import subprocess,sys,time;"
+           "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);"
+           f"open({str(pidfile)!r},'w').write(str(p.pid));"
+           "time.sleep(60)")
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_command(f'python -c "{src}"', timeout=3)
+
+    _assert_dead(int(pidfile.read_text()), "the timeout")
+
+
+def test_run_command_kills_the_example_when_the_run_is_interrupted(tmp_path):
+    """Ctrl-C must not leak the example either.
+
+    start_new_session takes the example out of pytest's own process group, so a terminal
+    SIGINT no longer reaches it. Handling only TimeoutExpired would close the timeout door
+    and open this one; narrowing the handler back passes every other test in the file.
+    """
+    pidfile = tmp_path / "child.pid"
+    src = (f"open({str(pidfile)!r},'w').write(str(__import__('os').getpid()));"
+           "import time;time.sleep(60)")
+
+    def interrupt(self, *args, **kwargs):
+        # Deliberately does NOT delegate to the real communicate: calling it with a
+        # timeout would raise TimeoutExpired first, and this test would then be exercising
+        # the timeout arm it is supposed to be distinct from.
+        time.sleep(1)  # let the child start and write its pid
+        raise KeyboardInterrupt
+
+    with mock.patch.object(subprocess.Popen, "communicate", interrupt):
+        with pytest.raises(KeyboardInterrupt):
+            run_command(f'python -c "{src}"', timeout=30)
+
+    _assert_dead(int(pidfile.read_text()), "the interrupt")
