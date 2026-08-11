@@ -20,7 +20,9 @@ fake one and both would lack the key. `assert_the_step_emits_the_whole_done_fami
 against all ten live envs, is what catches it there. The offline envs still write
 `truncated` themselves -- they genuinely truncate -- so their `check_env_specs` does still
 catch it, and so does `test_a_collector_batch_carries_truncated` below. Dropping
-`truncated` from the shared spec fails 23 tests across all three of those guards.
+`truncated` from the shared spec fails 21 tests: 17 across those three guards -- 10 live
+done-family cells, 6 offline `check_env_specs` cases and the collector test -- plus 4
+offline `test_action_types_recorded` cells that witness it incidentally.
 """
 
 import ast

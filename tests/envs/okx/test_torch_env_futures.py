@@ -123,15 +123,12 @@ class TestOKXFuturesTorchTradingEnv:
             env.step(TensorDict({"action": torch.tensor(action_idx)}, batch_size=()))
             mock_env_trader.trade.assert_called()
 
-    def test_reward_and_done_tensor_shapes(self, env):
-        """Test that reward and done flags have correct tensor shapes."""
+    def test_reward_tensor_shape(self, env):
+        """The done family is asserted by assert_the_step_emits_the_whole_done_family."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
             next_td = env.step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
             assert next_td["next"]["reward"].shape == (1,)
-            assert next_td["next"]["done"].shape == (1,)
-            assert next_td["next"]["terminated"].shape == (1,)
-            assert next_td["next"]["truncated"].shape == (1,)
 
     @pytest.mark.parametrize("done_on_bankruptcy,expected_done", [
         (True, True),    # portfolio collapses below the threshold -> episode terminates

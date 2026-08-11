@@ -224,9 +224,6 @@ class TestBybitFuturesSLTPTorchTradingEnv:
             next_td = env.step(action_td)
 
             assert next_td["next"]["reward"].shape == (1,)
-            assert next_td["next"]["done"].shape == (1,)
-            assert next_td["next"]["terminated"].shape == (1,)
-            assert next_td["next"]["truncated"].shape == (1,)
 
     @pytest.mark.parametrize("done_on_bankruptcy,expected_done", [
         (True, True),    # portfolio collapses below the threshold -> episode terminates
