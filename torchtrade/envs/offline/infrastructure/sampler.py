@@ -235,6 +235,21 @@ class MarketDataObservationSampler:
         # Using .as_unit('ns') ensures searchsorted comparisons are consistent.
         exec_ts_int64 = self.exec_times.as_unit('ns').asi8  # int64 nanoseconds
 
+        # Timeframes FINER than execute_on need a later search key. The resample loop
+        # shifts only coarser ones to END labels, so a finer frame is still labelled by
+        # its bar's START -- and searching it with the exec bin's start label returns the
+        # bar that starts there, leaving the fine window up to a full exec bar behind the
+        # close the trade actually fills at (#282). The execute_on frame lands right with
+        # the plain label only because its bin is already aggregated through the bin's
+        # end; a finer index has real per-bar granularity and does not.
+        #
+        # Exclusive upper bound, by one nanosecond: the window must reach the last bar
+        # inside the current bin and never the first bar of the next one, which has not
+        # happened at decision time.
+        exec_period_ns = tf_to_timedelta(execute_on).value
+        fine_keys = {tf.obs_key_freq() for tf in time_frames if tf < execute_on}
+        fine_ts_int64 = exec_ts_int64 + exec_period_ns - 1
+
         # Convert resampled dfs to torch tensors for fast slicing.
         # Also convert timestamp indices to int64 (ns) and store as torch.long for searchsorted.
         self.torch_tensors: Dict[str, torch.FloatTensor] = {}
@@ -250,7 +265,8 @@ class MarketDataObservationSampler:
             self.torch_idx[key] = torch.from_numpy(ts_int64).to(torch.long)  # sorted 1D long tensor
 
             # Use numpy searchsorted once at init instead of torch searchsorted per step
-            obs_idx = np.searchsorted(ts_int64, exec_ts_int64, side='right') - 1
+            search_ts = fine_ts_int64 if key in fine_keys else exec_ts_int64
+            obs_idx = np.searchsorted(ts_int64, search_ts, side='right') - 1
             self._obs_indices[key] = obs_idx
 
         # Execute-on base features tensor + index

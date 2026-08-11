@@ -940,8 +940,16 @@ class TestSamplerNoFutureLeakage:
 
         Tests: 1min, 5min, 15min, 30min, 1hour, 4hour execution intervals.
 
-        For each execution timeframe, the observation at time T must not
-        contain any data from time > T.
+        The boundary is the DECISION INSTANT, not the bar's label. `timestamp` is the
+        execution bin's start label, but the env hands money over at that bin's close --
+        pinned by TestExecutionPriceConvention, verified by intercepting the executed
+        price. So an observation labelled T may legitimately contain anything up to the
+        end of bin T, and nothing beyond it.
+
+        This previously bounded on the label, which made the finer window stop a full
+        execution bar short of the price it was about to trade at (#282). That was not
+        preventing lookahead -- the coarse window already carried that close -- it was
+        withholding data the observation already contained one row up.
         """
         execute_on = TimeFrame(exec_value, exec_unit)
         window_size = 10
@@ -956,19 +964,23 @@ class TestSamplerNoFutureLeakage:
 
         start_time = pd.Timestamp("2024-01-01 00:00:00")
         prev_last_close = None
+        # Last minute bar inside the bin labelled `timestamp`; the next bin is the future.
+        last_minute_in_bin = int(execute_on.to_minutes()) - 1
 
         # Test at least 20 steps
         for step in range(20):
             obs, timestamp, truncated = sampler.get_sequential_observation()
             current_minute_idx = int((timestamp - start_time).total_seconds() / 60)
+            decision_instant = current_minute_idx + last_minute_in_bin
 
-            # All close prices must be <= current_minute_idx (no future data)
+            # No close may come from after the instant the trade fills at
             close_values = obs["1Minute"][:, 3].numpy()
 
             for close_val in close_values:
-                assert close_val <= current_minute_idx, (
+                assert close_val <= decision_instant, (
                     f"Future leakage detected with {exec_value}{exec_unit.name} execution! "
-                    f"At minute {current_minute_idx}, observation contains close={close_val}"
+                    f"Bin labelled minute {current_minute_idx} closes at minute "
+                    f"{decision_instant}, but observation contains close={close_val}"
                 )
 
             # Verify execution advances by expected amount
@@ -997,9 +1009,14 @@ class TestSamplerNoFutureLeakage:
         self, large_sequential_ohlcv_df, exec_value, exec_unit
     ):
         """
-        The last bar in observation should be at or before query timestamp.
+        The last bar in the observation should be the one the trade fills at.
 
         Tests across: 1min, 5min, 15min, 30min, 1hour, 4hour execution.
+
+        "Current time" is the execution bin's CLOSE, not its label. `timestamp` is the
+        label; the env executes at the bin's close (TestExecutionPriceConvention). For
+        execute_on=1Minute the two coincide, which is why this read as correct for years
+        while every coarser execute_on left the minute window a full bar behind (#282).
         """
         execute_on = TimeFrame(exec_value, exec_unit)
         window_size = 10
@@ -1013,17 +1030,19 @@ class TestSamplerNoFutureLeakage:
         sampler.reset(random_start=False)
 
         start_time = pd.Timestamp("2024-01-01 00:00:00")
+        last_minute_in_bin = int(execute_on.to_minutes()) - 1
 
         for step in range(15):
             obs, timestamp, truncated = sampler.get_sequential_observation()
             current_minute_idx = int((timestamp - start_time).total_seconds() / 60)
+            decision_instant = current_minute_idx + last_minute_in_bin
 
-            # Last close should equal current minute (since close = minute_index)
+            # Last close should be the bin's closing minute (since close = minute_index)
             last_close = obs["1Minute"][-1, 3].item()
-            assert last_close == current_minute_idx, (
-                f"With {exec_value}{exec_unit.name} execution: "
-                f"Last observation should be at current time. "
-                f"Expected close={current_minute_idx}, got {last_close}"
+            assert last_close == decision_instant, (
+                f"With {exec_value}{exec_unit.name} execution: last observation should be "
+                f"the bar the trade fills at. Expected close={decision_instant}, "
+                f"got {last_close}"
             )
 
             if truncated:
@@ -1047,8 +1066,17 @@ class TestSamplerNoFutureLeakage:
         timeframe itself must not contain future information.
 
         Tests across: 1min, 5min, 15min, 30min, 1hour, 4hour execution.
+
+        Bounded on the execution bin's CLOSE, which is where the trade fills, not on its
+        label (TestExecutionPriceConvention, #282).
+
+        This also asserts the execute_on-keyed column, which it never did -- it checked
+        only obs["1Minute"] and passed trivially, so the column the agent actually trades
+        off was unguarded. Asserting both is what pins the real invariant: every
+        timeframe up to execute_on ends at the same instant.
         """
         execute_on = TimeFrame(exec_value, exec_unit)
+        exec_key = execute_on.obs_key_freq()
 
         # Use execution timeframe as one of the observation timeframes
         sampler = MarketDataObservationSampler(
@@ -1063,18 +1091,27 @@ class TestSamplerNoFutureLeakage:
         sampler.reset(random_start=False)
 
         start_time = pd.Timestamp("2024-01-01 00:00:00")
+        last_minute_in_bin = int(execute_on.to_minutes()) - 1
 
         for step in range(15):
             obs, timestamp, truncated = sampler.get_sequential_observation()
             current_minute_idx = int((timestamp - start_time).total_seconds() / 60)
+            decision_instant = current_minute_idx + last_minute_in_bin
 
-            # 1-minute timeframe must have no leakage
-            close_1min = obs["1Minute"][:, 3].numpy()
-            for close_val in close_1min:
-                assert close_val <= current_minute_idx, (
-                    f"1Minute leakage with {exec_value}{exec_unit.name} execution! "
-                    f"Close={close_val} > current_minute={current_minute_idx}"
-                )
+            # Neither timeframe may reach past the instant the trade fills at
+            for key in ("1Minute", exec_key):
+                for close_val in obs[key][:, 3].numpy():
+                    assert close_val <= decision_instant, (
+                        f"{key} leakage with {exec_value}{exec_unit.name} execution! "
+                        f"Close={close_val} > decision instant {decision_instant}"
+                    )
+
+            # ...and they must agree about where "now" is
+            assert obs["1Minute"][-1, 3].item() == obs[exec_key][-1, 3].item(), (
+                f"With {exec_value}{exec_unit.name} execution the 1Minute window ends at "
+                f"{obs['1Minute'][-1, 3].item()} but {exec_key} ends at "
+                f"{obs[exec_key][-1, 3].item()} -- one observation, two 'now's"
+            )
 
             if truncated:
                 break
@@ -1920,3 +1957,81 @@ class TestTimeframeSpellingIsNotObservable:
             f"1Hour saw {as_hours}, 60Minute saw {as_minutes} -- same duration, "
             "same execute_on, so the spelling must not change the data"
         )
+
+
+class TestObservationTimeframesShareOneInstant:
+    """Every timeframe up to execute_on must end at the same instant (#282 defect 1).
+
+    The env executes at the last close in obs[execute_on] -- pinned by
+    tests/envs/offline/test_sequential.py::TestExecutionPriceConvention, verified by
+    intercepting the executed price. So that instant is what the whole observation
+    should be as-of.
+
+    Timeframes FINER than execute_on were not: the resample loop shifts only
+    tf > execute_on to END labels, and _obs_indices searches every timeframe with the
+    same key -- the exec bin's START label. For the execute_on frame that lands right by
+    accident, because its bin is already aggregated through the bin's end. For a finer
+    frame the index has real per-bar granularity, so the same key returns the bar
+    STARTING at the label: a 1Minute window sat 59 minutes behind the 1Hour window it
+    was sampled beside, and behind the price the trade filled at.
+    """
+
+    @staticmethod
+    def _counter_df(n=60 * 40):
+        ts = pd.date_range("2024-01-01", periods=n, freq="1min")
+        close = np.arange(n, dtype=float) + 1000.0  # close identifies its own minute
+        return pd.DataFrame({
+            "timestamp": ts, "open": close, "high": close + 0.5,
+            "low": close - 0.5, "close": close, "volume": 1000.0,
+        })
+
+    @pytest.mark.parametrize("fine,exec_tf", [
+        (TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(1, TimeFrameUnit.Hour)),
+        (TimeFrame(5, TimeFrameUnit.Minute), TimeFrame(1, TimeFrameUnit.Hour)),
+        (TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(15, TimeFrameUnit.Minute)),
+    ], ids=["1min_under_1h", "5min_under_1h", "1min_under_15min"])
+    def test_finer_window_ends_where_the_execute_on_window_ends(self, fine, exec_tf):
+        sampler = MarketDataObservationSampler(
+            df=self._counter_df(), time_frames=[fine, exec_tf], window_sizes=[4, 4],
+            execute_on=exec_tf, max_traj_length=8, seed=0,
+        )
+        sampler.reset(random_start=False)
+
+        for _ in range(5):
+            obs, timestamp, truncated = sampler.get_sequential_observation()
+            fine_close = obs[fine.obs_key_freq()][-1, 3].item()
+            exec_close = obs[exec_tf.obs_key_freq()][-1, 3].item()
+            assert fine_close == exec_close, (
+                f"at {timestamp}: {fine.obs_key_freq()} ends at close {fine_close} while "
+                f"{exec_tf.obs_key_freq()} ends at {exec_close} -- the same observation "
+                f"disagrees with itself about now by {exec_close - fine_close:.0f} minutes"
+            )
+            if truncated:
+                break
+
+    def test_finer_window_never_reaches_into_the_next_bin(self):
+        """The bound must stay strictly inside the current execute_on bin.
+
+        Extending the fine window to the decision instant recovers granularity the agent
+        already has via obs[execute_on]. Overshooting by one tick would hand it the next
+        bin, which has not happened yet.
+        """
+        exec_tf = TimeFrame(1, TimeFrameUnit.Hour)
+        fine = TimeFrame(1, TimeFrameUnit.Minute)
+        sampler = MarketDataObservationSampler(
+            df=self._counter_df(), time_frames=[fine, exec_tf], window_sizes=[4, 4],
+            execute_on=exec_tf, max_traj_length=8, seed=0,
+        )
+        sampler.reset(random_start=False)
+        start = pd.Timestamp("2024-01-01 00:00:00")
+
+        for _ in range(5):
+            obs, timestamp, truncated = sampler.get_sequential_observation()
+            bin_end_minute = (timestamp - start).total_seconds() / 60 + 60  # exclusive
+            for value in obs[fine.obs_key_freq()][:, 3].tolist():
+                assert value - 1000.0 < bin_end_minute, (
+                    f"at {timestamp}: fine window contains minute {value - 1000.0:.0f}, "
+                    f"which is in the NEXT bin (starts {bin_end_minute:.0f})"
+                )
+            if truncated:
+                break
