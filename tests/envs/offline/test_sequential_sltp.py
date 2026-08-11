@@ -1374,3 +1374,27 @@ class TestLiquidationVsBracketOnADoubleBreachBar:
             f"expected {expected_balance}; a stop row landing on 400 means liquidation "
             "won, and a take-profit row leaving 400 means it did not"
         )
+
+
+def test_sltp_env_keeps_its_configured_action_levels(sample_ohlcv_df):
+    """__init__ hands the parent a dummy [0.0] and must restore the real levels (#290).
+
+    It restored them on the CONFIG only. The parent copies onto self during its own
+    __init__, so self.action_levels stayed [0.0] forever -- allows_short read False on
+    every SLTP env including 125x futures, and render_history drew those episodes as spot.
+    Asserting the config alone cannot see it; the instance is where the leak was.
+
+    Futures only: on a spot env `allows_short` reads False under the bug too (the dummy
+    [0.0] has no negatives), so that cell died on the levels assertion alone -- a byte
+    identical failure, and no unique coverage.
+    """
+    config = SequentialTradingEnvSLTPConfig(
+        leverage=10, initial_cash=10000, action_levels=[-1, 0, 1],
+        execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        time_frames=[TimeFrame(1, TimeFrameUnit.Minute)], window_sizes=[10], seed=42,
+    )
+    env = SequentialTradingEnvSLTP(sample_ohlcv_df, config, simple_feature_fn)
+
+    assert env.action_levels == [-1, 0, 1]
+    assert env.allows_short is True
+    env.close()

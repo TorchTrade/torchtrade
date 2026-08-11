@@ -1,5 +1,6 @@
 """Base class for Alpaca live trading environments."""
 
+import logging
 from abc import abstractmethod
 from typing import Callable, List, Optional
 
@@ -17,6 +18,9 @@ from torchtrade.envs.core.state import (
     advance_hold_counter,
     position_direction_from_status,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
@@ -350,3 +354,50 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         """Clean up resources."""
         self.trader.cancel_open_orders()
         self.trader.close_all_positions()
+
+    def _get_current_price(self, position_status=None) -> float:
+        """Get current market price with fallback chain.
+
+        Tries multiple sources in order:
+        1. Position status (if provided or fetched)
+        2. Trader's current_price attribute (for mocks)
+        3. Observer's get_current_price() (fetches from market data)
+
+        Args:
+            position_status: Optional position status to avoid redundant queries
+
+        Returns:
+            Current price, or 0.0 if unavailable
+
+        Raises:
+            PositionUnknownError: the exchange did not report the position. Both alpaca
+                envs stop here, before any trade is sized -- POSITION_UNKNOWN is truthy
+                and raises on attribute access.
+
+        Lives on the base rather than on AlpacaTorchTradingEnv because the SLTP env is a
+        sibling, not a subclass, and used to read `position_status.current_price if
+        position_status else 0.0` inline -- so every flat bar recorded a price of 0 in its
+        history (#290).
+        """
+        # Note: a caller that already resolved the status to None still pays a second
+        # get_status() here, because None cannot be told from "not supplied". Both alpaca
+        # envs do that on a flat bar. Negligible against alpaca's rate limit and matched
+        # by the non-SLTP env before this change, so left as-is rather than widening #290.
+        if position_status is None:
+            position_status = self.trader.get_status().get("position_status", None)
+
+        current_price = position_status.current_price if position_status else 0.0
+
+        # Fallback 1: trader's current_price attribute (for mocks)
+        if current_price <= 0 and hasattr(self.trader, 'current_price'):
+            current_price = self.trader.current_price
+
+        # Fallback 2: fetch from market data
+        if current_price <= 0:
+            try:
+                current_price = self.observer.get_current_price()
+                logger.info(f"Fetched current price from market data: {current_price}")
+            except Exception as e:
+                logger.warning(f"Could not fetch current price: {e}")
+
+        return current_price

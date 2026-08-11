@@ -376,3 +376,15 @@ class TestEnvironmentSeeding:
 
         # At least some initial conditions should differ due to different seeds
         assert balances1 != balances2, "Different seeds should produce different trajectories"
+
+
+def test_initial_cash_randomisation_can_draw_its_configured_maximum():
+    """np_rng.integers is half-open, so the configured max was unreachable (#290).
+
+    A user asking for [1000, 2000] got [1000, 1999]. Invisible at wide ranges, and the
+    whole point of the parameter at narrow ones.
+    """
+    drawn = {int(InitialBalanceSampler([1000, 1005], seed=s).sample()) for s in range(200)}
+    assert drawn == {1000, 1001, 1002, 1003, 1004, 1005}, (
+        f"drew {sorted(drawn)} -- the configured bounds must both be reachable"
+    )
