@@ -6,6 +6,8 @@ one of them, and a fix that reached only some would look done at the PR level wh
 staying live in the rest.
 """
 
+import math
+
 import pandas as pd
 import pytest
 import torch
@@ -91,15 +93,20 @@ def test_sltp_engines_fill_a_gapped_bracket_alike(gap_to, open_idx, expected_bal
     env.close()
 
 
-@pytest.mark.parametrize("gap_to,action", [
-    (85.0, 1),    # long, entry 100, stop 97.5, bar opens at 85
-    (115.0, 2),   # short, entry 100, stop 102.5, bar opens at 115
-], ids=["long-stop-gap", "short-stop-gap"])
-def test_onestep_fills_a_gapped_stop_at_the_open(gap_to, action):
-    """OneStep re-forks the trigger check, so the scalar cells above do not cover it.
+@pytest.mark.parametrize("gap_to,action,expected_balance", [
+    (85.0, 1, 7000.0),      # long, entry 100, stop 97.5, bar opens at 85
+    (115.0, 2, 7000.0),     # short, entry 100, stop 102.5, bar opens at 115
+    (130.0, 1, 10500.0),    # take-profit is not chased: 2.5% at 2x, whatever the gap
+    (70.0, 2, 10500.0),
+], ids=["long-stop-gap", "short-stop-gap", "long-tp-gap", "short-tp-gap"])
+def test_onestep_prices_a_gapped_bracket(gap_to, action, expected_balance):
+    """OneStep re-forks the trigger check (#316), so the scalar cells do not cover it.
 
-    Asserting the balance is enough: the reward is the telescoping sum of per-step log
-    returns, hence a pure function of the balance path. Booking the stop would give 9500.
+    The reward assertion is not a restatement of the balance one. It pins the invariant
+    this PR relied on to delete OneStep's reward-side fill: a bracket exit leaves the
+    position flat, so compute_return reads the realised balance rather than any price it
+    is handed. A partial close, or one that stopped zeroing entry_price, would silently
+    break that and start pricing the reward off the bar close instead of the fill.
     """
     config = OneStepTradingEnvConfig(
         leverage=2, stoploss_levels=[-0.025], takeprofit_levels=[0.025],
@@ -109,35 +116,49 @@ def test_onestep_fills_a_gapped_stop_at_the_open(gap_to, action):
     )
     env = OneStepTradingEnv(_gap_df(gap_to, n=60, bar=45), config)
 
-    # OneStep forces random_start=True; seek() is the one-shot deterministic override.
+    # OneStep forces random_start=True; seek() pins the start index. Insurance only --
+    # the series is flat, so every organic start reaches the gap bar with the same entry.
     env.sampler.seek(0)
     td = env.reset()
     td["action"] = torch.tensor(action)
-    env.step(td)
+    out = env.step(td)["next"]
 
-    assert env.position.position_size == 0, "the stop should have closed the position"
-    assert env.balance == pytest.approx(7000.0), (
-        f"balance {env.balance:.2f} -- a 15% adverse gap at 2x is 30% of equity; "
-        f"filling at the stop instead of the open ({gap_to}) would leave 9500"
+    assert env.position.position_size == 0, "the bracket should have closed the position"
+    assert env.balance == pytest.approx(expected_balance), (
+        f"balance {env.balance:.2f}, expected {expected_balance} -- a stop the bar "
+        f"gapped past must fill at the open ({gap_to}), and a take-profit must not chase"
     )
+    # abs=1e-6: reward is stored float32. Pre-fix the two disagree by ~0.3.
+    assert out["reward"].item() == pytest.approx(math.log(expected_balance / 10000), abs=1e-6)
     env.close()
 
 
-def test_replay_executor_fills_a_gapped_stop_at_the_open():
-    """The replay path had to start reading ohlc["open"], which it never did before."""
+@pytest.mark.parametrize("qty,sl,tp,bar_price,expected_balance", [
+    # Filled at the open: 10 * (85 - 100) = -150 against the returned 1000 of margin.
+    # Booking the stop at 97.5 would give 9975, understating the loss by five sixths.
+    (10.0, 97.5, 110.0, 85.0, 9850.0),
+    (-10.0, 102.5, 90.0, 115.0, 9850.0),
+    # Take-profit stays at its bracket: 10 * 10 = +100, not the 300 the open would give.
+    (10.0, 97.5, 110.0, 130.0, 10100.0),
+    (-10.0, 102.5, 90.0, 70.0, 10100.0),
+], ids=["long-stop-gap", "short-stop-gap", "long-tp-gap", "short-tp-gap"])
+def test_replay_executor_prices_a_gapped_bracket(qty, sl, tp, bar_price, expected_balance):
+    """The replay path had to start reading ohlc["open"], which it never did before.
+
+    Both sides are pinned: with only the long cell, flipping the executor's side test to
+    a constant `is_long=True` left the whole suite green.
+    """
     ex = ReplayOrderExecutor(initial_balance=10000.0)
     # Set the position directly rather than through trade(): this pins the fill rule, not
     # the sizing path. Deduct the margin by hand, since _close_at_price returns it.
-    qty, entry = 10.0, 100.0
+    entry = 100.0
     ex.position_qty, ex.entry_price = qty, entry
-    ex.balance -= qty * entry / ex.leverage
-    ex.sl_price, ex.tp_price = 97.5, 110.0
+    ex.balance -= abs(qty) * entry / ex.leverage
+    ex.sl_price, ex.tp_price = sl, tp
 
-    ex.advance_bar({"open": 85.0, "high": 85.0, "low": 85.0, "close": 85.0})
+    ex.advance_bar({k: bar_price for k in ("open", "high", "low", "close")})
 
-    assert ex.position_qty == 0, "the stop should have triggered"
-    # Filled at the open: 10 * (85 - 100) = -150 against the returned 1000 of margin.
-    assert ex.balance == pytest.approx(9850.0), (
-        f"balance {ex.balance:.2f} -- booking the stop at 97.5 would give 9975 and "
-        "understate the loss by five sixths"
+    assert ex.position_qty == 0, "the bracket should have triggered"
+    assert ex.balance == pytest.approx(expected_balance), (
+        f"balance {ex.balance:.2f}, expected {expected_balance}"
     )
