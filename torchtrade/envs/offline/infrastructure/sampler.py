@@ -126,22 +126,62 @@ class MarketDataObservationSampler:
         self.resampled_dfs: Dict[str, pd.DataFrame] = {}
         first_time_stamps = []
         for tf, proc_fn in zip(time_frames, processing_fns):
-            resampled = (
-                self.df.resample(tf.to_pandas_freq())
-                .agg(full_agg)
-                .dropna(subset=list(ohlcv_agg.keys()))
-            )
+            binned = self.df.resample(tf.to_pandas_freq()).agg(full_agg)
+            # The complete bin grid, before empty bins are dropped. A bin's real END is
+            # where the NEXT bin starts, so the END labels below are read off this grid
+            # rather than computed from a bar's own label (#320).
+            bin_starts = binned.index
+            resampled = binned.dropna(subset=list(ohlcv_agg.keys()))
             # Forward-fill auxiliary NaN (sparse aux data persists last known value)
             if aux_cols:
                 resampled[aux_cols] = resampled[aux_cols].ffill().fillna(0)
+
+            # Before the relabel: it reads bin_starts[0], which IndexErrors on an empty
+            # frame and would mask this message when a coarse frame is listed first.
+            if len(resampled) == 0:
+                raise ValueError(f"Resampled dataframe for timeframe {tf.obs_key_freq()} is empty")
 
             # Fix lookahead bias: shift higher timeframe bars forward by their period
             # This ensures bars are indexed by their END time, not START time
             # Only completed bars will be visible to the agent at any execution time
             # Only shift timeframes that are HIGHER (coarser) than the execution timeframe
             if tf > execute_on:
-                offset = pd.Timedelta(tf.to_pandas_freq())
-                resampled.index = resampled.index + offset
+                # Relabel each bar to where its bin actually ends: the start of the next
+                # bin on the full grid. Arithmetic on the label instead -- whether a fixed
+                # +period or DatetimeIndex.shift -- is wrong on a tz-aware Day-or-longer
+                # frame, because those bins follow LOCAL midnight and are 23h or 25h wide
+                # across a DST transition. A fixed +1D labels a 25h bin an hour before it
+                # closed, i.e. shows it early: lookahead, not staleness (#320).
+                #
+                # Reading the grid rather than shifting also survives the two cases that
+                # make .shift unusable here: it regenerates from `bin_starts[0] + period`,
+                # so a window STARTING on a transition day is off for every bar, and it
+                # silently degrades to fixed arithmetic once dropna clears index.freq --
+                # which any gap (a weekend, a halt) does.
+                n_edges = len(bin_starts) + 1
+                freq = tf.to_pandas_freq()
+                if bin_starts.tz is None or tf < TimeFrame(1, TimeFrameUnit.Day):
+                    edges = pd.date_range(
+                        bin_starts[0], periods=n_edges, freq=freq, tz=bin_starts.tz
+                    )
+                else:
+                    # Day-or-longer tz-aware bins follow LOCAL midnight, and in zones whose
+                    # DST step lands ON midnight (Havana, Beirut, Santiago, ...) that
+                    # midnight is nonexistent or ambiguous -- tz-aware date_range raises
+                    # there while resample resolves it. Walk the wall clock and re-localize
+                    # the way resample's own binner does, so those zones keep working.
+                    # Sub-day bins must NOT take this path: they walk absolute time, and a
+                    # wall-clock walk would skip an hour at spring-forward.
+                    edges = pd.date_range(
+                        bin_starts[0].tz_localize(None), periods=n_edges, freq=freq
+                    ).tz_localize(
+                        bin_starts.tz, nonexistent="shift_forward", ambiguous=True
+                    )
+                # rename: the END labels must keep the index's name, which the
+                # feature-processing path below reset_index()es on.
+                resampled.index = edges[1:][
+                    bin_starts.get_indexer(resampled.index)
+                ].rename(bin_starts.name)
 
             if proc_fn is not None:
                 resampled = proc_fn(resampled)
@@ -158,9 +198,6 @@ class MarketDataObservationSampler:
                 if "index" in resampled.columns:
                     resampled = resampled.drop(columns=["index"])
 
-            # ensure not empty
-            if len(resampled) == 0:
-                raise ValueError(f"Resampled dataframe for timeframe {tf.obs_key_freq()} is empty")
 
             self.resampled_dfs[tf.obs_key_freq()] = resampled
             first_time_stamps.append(resampled.index.min())
