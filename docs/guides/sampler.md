@@ -196,7 +196,7 @@ After reorder:      [open, high, low, close, volume, funding_rate, basis]
                      positions 0-4 (guaranteed)   positions 5+
 ```
 
-1. **Validation**: The sampler checks that OHLCV + timestamp columns are present. Extra columns are accepted. It also raises `ValueError` on any bar where `high < max(open, close)` or `low > min(open, close)` — a bar whose extremes do not bracket its own open and close is rejected rather than carried, because the exit rules read the extreme to decide whether a level was touched and the open to price a gapped fill, and on such a bar those two disagree.
+1. **Validation**: The sampler checks that OHLCV + timestamp columns are present. Extra columns are accepted. It also raises `ValueError` on any bar where `high < max(open, close)` or `low > min(open, close)` — a bar whose extremes do not bracket its own open and close is rejected rather than carried, because the exit rules read the extreme to decide whether a level was touched, and the scalar stop-loss additionally reads the open to price a gapped fill — on such a bar those two disagree.
 2. **Column reordering**: OHLCV is always placed at positions 0-4, auxiliary columns follow after. This preserves internal positional contracts.
 3. **Resampling**: When resampling to higher timeframes, auxiliary columns use `"last"` aggregation (the value at bar close), while OHLCV uses canonical rules (open=first, high=max, low=min, close=last, volume=sum).
 4. **Sparse data handling**: Auxiliary NaN values are forward-filled after resampling (see below).

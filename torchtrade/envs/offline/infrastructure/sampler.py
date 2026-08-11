@@ -43,8 +43,9 @@ class MarketDataObservationSampler:
             )
 
         # A bar whose high/low do not bracket its open and close is not a bar. Every exit
-        # rule downstream reads the extreme to decide whether a level was touched and the
-        # open to price a gapped fill, so on a malformed row those two disagree (#326).
+        # rule reads the extreme to decide whether a level was touched, and the scalar
+        # stop-loss additionally reads the open to price a gapped fill (#280) -- so on a
+        # malformed row those two disagree, and the engines can answer differently (#326).
         # Rejecting here rather than guarding in the rules is the boundary-validation
         # invariant: a guard that absorbs the nonsense makes it silent.
         # On numpy arrays rather than DataFrame.max(axis=1), which materialises a

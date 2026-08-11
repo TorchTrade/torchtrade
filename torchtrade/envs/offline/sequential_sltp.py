@@ -246,11 +246,16 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         # Stop before take-profit, deliberately (see the docstring's pessimism note).
         #
-        # The extreme alone would do: since #326 the sampler rejects any bar whose high
-        # and low fail to bracket its open and close, so min(open, low, close) IS low on
-        # every bar that can reach here. The triple is kept because it states the rule
-        # without depending on that invariant holding -- these three lines were, until
-        # #316, forked across two engines that disagreed on exactly the malformed case.
+        # The extreme alone would do. #326 rejects malformed bars at ingestion, and
+        # resampling preserves that -- open/high/low/close aggregate as first/max/min/last,
+        # all selections from rows inside the bar, and `last` skips NaN, so the surviving
+        # close always comes from a row whose own high the max already covers (checked
+        # over 60 NaN-scattered frames: zero malformed resampled bars). So
+        # min(open, low, close) IS low here.
+        #
+        # The triple stays because it states the rule without depending on that chain:
+        # until #316 these three lines were forked across two engines whose only
+        # disagreement was on exactly the malformed case.
         if self.position.position_size > 0:
             if self.stop_loss > 0 and min(open_price, low_price, close_price) <= self.stop_loss:
                 return "sl"

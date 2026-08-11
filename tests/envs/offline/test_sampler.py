@@ -2220,9 +2220,9 @@ class TestObservationTimeframesShareOneInstant:
 def test_malformed_ohlc_is_rejected_at_ingestion(field, value, ok):
     """A bar whose high/low do not bracket open and close is refused (#326).
 
-    Every exit rule downstream reads the extreme to decide whether a level was touched
-    and the open to price a gapped fill, so on a malformed row those two disagree and the
-    engines can answer differently from one another. Validating here rather than guarding
+    Every exit rule reads the extreme to decide whether a level was touched, and the
+    scalar stop-loss additionally reads the open to price a gapped fill, so on a malformed
+    row those two disagree and the engines can answer differently from one another. Validating here rather than guarding
     in each rule is the boundary-validation invariant; a guard that absorbs the nonsense
     makes it silent, which is what let ~100 tests build impossible candles unnoticed.
     """
