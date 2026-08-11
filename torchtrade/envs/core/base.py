@@ -54,9 +54,13 @@ class TorchTradeBaseEnv(EnvBase):
         # Create reward spec (common across all environments)
         self.reward_spec = Unbounded(shape=(1,), dtype=torch.float)
 
-        # Every _step writes a truncated key, but TorchRL's default done spec carries only
-        # done and terminated -- anything pre-allocating from the spec (collectors,
-        # ParallelEnv) then drops it silently (#272).
+        # TorchRL's default done spec carries only done and terminated, so anything
+        # pre-allocating from the spec (collectors, ParallelEnv) drops truncated silently
+        # (#272). This declaration is now the SOLE source of the key: since #313 the live
+        # _step methods no longer write it by hand, and EnvBase._complete_done fills it
+        # from here. That also means check_env_specs can no longer catch a narrowed spec
+        # -- real and fake would both lack the key -- so the guard is
+        # assert_the_step_emits_the_whole_done_family, run against all ten live envs.
         self.full_done_spec = Composite(
             done=Categorical(2, dtype=torch.bool, shape=(1,)),
             terminated=Categorical(2, dtype=torch.bool, shape=(1,)),

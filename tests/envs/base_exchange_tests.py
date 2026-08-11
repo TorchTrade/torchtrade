@@ -323,3 +323,31 @@ def assert_a_direct_flip_does_not_age_the_new_position(
         f"a one-step-old short reports {holding_time} bars (the long aged to {aged}): the flip "
         f"never passed through flat, so the counter was never reset"
     )
+
+
+def assert_the_step_emits_the_whole_done_family(env, action=0):
+    """A stepped live env emits done, terminated AND truncated (#272).
+
+    Deliberate coverage, replacing a tripwire that #313 disarmed. While every live _step
+    wrote truncated by hand, a done spec missing the key showed up in check_env_specs as
+    keys_in_real_not_in_fake. Once the hardcoded writes went, both the real and the fake
+    rollout lack it, so check_env_specs cannot see a narrowed spec at all -- verified: the
+    same spec mutation fails on the pre-#313 code and passes after it.
+
+    So the spec is now the sole source of truncated, and this is what pins it. Goes
+    through step(), not _step(): filling the family from the spec is EnvBase's job, and
+    asserting it on _step's raw output would pin an implementation detail instead.
+    """
+    with patch.object(type(env), "_wait_for_next_timestamp"):
+        td = env.reset()
+        td["action"] = torch.tensor(action)
+        nxt = env.step(td)["next"]
+
+    for key in ("done", "terminated", "truncated"):
+        assert key in nxt.keys(), (
+            f"{key} missing from the emitted step. The live envs no longer write the done "
+            "family by hand (#313), so a key absent here means the shared full_done_spec "
+            "stopped declaring it."
+        )
+    assert nxt["truncated"].dtype is torch.bool
+    assert not nxt["truncated"].any(), "a live env never truncates itself"

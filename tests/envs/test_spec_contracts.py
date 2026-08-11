@@ -7,11 +7,18 @@ as thoroughly. `check_env_specs()` catches neither: it builds its dummy batch fr
 `spec.zero()` and a real rollout, never `.rand()`. Use `Unbounded(shape=..., dtype=...)`,
 or finite numbers where a bound is real.
 
-**The done spec is declared exactly once** (#272). Every `_step` writes a `truncated`
-key, but TorchRL's default done spec carries only `done` and `terminated`, so anything
-pre-allocating from the spec drops it with no error at all. `TorchTradeBaseEnv` now
-declares all three for live and offline alike; the tests at the end of this file guard
-that one declaration against both drift and silent loss.
+**The done spec is declared exactly once** (#272). TorchRL's default done spec carries
+only `done` and `terminated`, so anything pre-allocating from the spec drops `truncated`
+with no error at all. `TorchTradeBaseEnv` declares all three for live and offline alike;
+the tests at the end of this file guard that one declaration against both drift and
+silent loss.
+
+Since #313 the live `_step` methods no longer write `truncated` by hand, so that
+declaration is its only source. One consequence is worth knowing: `check_env_specs` can
+no longer catch a *narrowed* done spec, because it compares a real rollout against a fake
+one and both would lack the key. The ten
+`assert_the_step_emits_the_whole_done_family` cells are what catch it now -- verified by
+dropping `truncated` from the spec, which fails all ten.
 """
 
 import ast
