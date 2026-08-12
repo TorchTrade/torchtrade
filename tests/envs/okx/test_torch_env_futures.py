@@ -303,6 +303,42 @@ class TestOKXFuturesTorchTradingEnv:
             f"a position opened after a liquidation inherited the dead position's age ({aged})"
         )
 
+    @pytest.mark.parametrize("mark_price,harm", [
+        (float("nan"), "a NaN quantity goes to the venue unlogged (caught at reset)"),
+        (-50000.0, "the sign flips: a max-LONG action places a SHORT"),
+        (0.0, "ZeroDivisionError out of _step"),
+    ], ids=["nan", "negative", "zero"])
+    def test_an_open_position_cannot_size_from_an_unvalidated_mark_price(
+        self, env, mock_env_trader, mark_price, harm
+    ):
+        """#347: the sweep guarded the flat half of okx's ternary and stopped.
+
+        The other half runs on every RESIZE, and okx is the only exchange that threads the
+        price down from _step rather than re-fetching inside _execute_fractional_action.
+        Both okx fields feeding mark_price fall back to 0.0 when empty, so this arrives
+        from two blank venue fields, not only a wire fault -- and {harm}.
+        """
+        from torchtrade.envs.live.okx.order_executor import PositionStatus
+
+        def status(price):
+            return {"position_status": PositionStatus(
+                qty=0.1, notional_value=5000.0, entry_price=50000.0, unrealized_pnl=0.0,
+                unrealized_pnl_pct=0.0, mark_price=price, leverage=5,
+                margin_mode="isolated", liquidation_price=40000.0,
+            )}
+
+        # Reset on a healthy price, then poison: the venue tick that goes bad mid-episode
+        # is the one that reaches sizing, and it isolates _step from the reset-time guard.
+        mock_env_trader.get_status = MagicMock(return_value=status(50000.0))
+        with patch.object(env, "_wait_for_next_timestamp"):
+            env.reset()
+            mock_env_trader.get_status = MagicMock(return_value=status(mark_price))
+            td = TensorDict({"action": torch.tensor(len(env.action_levels) - 1)}, [])
+            with pytest.raises(ValueError, match="mark.?price"):
+                env.step(td)
+
+        mock_env_trader.trade.assert_not_called()
+
 
 class TestOKXActionIndexClamping:
     """Tests for action index out-of-range clamping."""

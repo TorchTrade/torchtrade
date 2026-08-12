@@ -8,6 +8,7 @@ pricing is not covered here -- that belongs to the order executor and the offlin
 from unittest.mock import patch
 
 import pytest
+import numpy as np
 import torch
 from torchrl.envs.utils import check_env_specs
 from tensordict import TensorDict
@@ -140,6 +141,31 @@ class TestAlpacaSLTPTradingEnvReset:
         is NOT what this catches -- see assert_the_step_emits_the_whole_done_family."""
         with patch.object(type(env), "_wait_for_next_timestamp"):
             check_env_specs(env)
+
+    @pytest.mark.parametrize("close,harm", [
+        (float("nan"), "both bracket legs go to the venue as NaN, unlogged"),
+        (0.0, "both legs price at zero"),
+        (-50000.0, "the stop lands ABOVE the take-profit -- an inverted bracket"),
+    ], ids=["nan", "zero", "negative"])
+    def test_a_bracket_is_never_priced_off_an_unusable_close(self, env, close, harm):
+        """#347 swept alpaca/env.py and never reached alpaca/env_sltp.py.
+
+        The entry is a full-balance market BUY in every case; if the venue takes it and
+        rejects the legs, bracket_status zeroes active_stop_loss/active_take_profit and the
+        position sits unprotected in an env whose ONLY exit is SL/TP. And {harm}.
+        """
+        env._wait_for_next_timestamp = lambda: None
+        env.reset()
+        env.observer.get_observations = lambda return_base_ohlc=False: {
+            "1Minute_10": np.zeros((10, 4), dtype=np.float32),
+            **({"base_features": np.full((10, 4), close, dtype=np.float32),
+                "base_timestamps": np.arange(10)} if return_base_ohlc else {}),
+        }
+
+        with pytest.raises(ValueError, match="unusable close price"):
+            env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+
+        assert env.trader.position_qty == 0, "no entry may be opened on an unusable close"
 
     def test_reset_clears_a_live_bracket(self, env):
         """Reset must clear SL/TP levels that an episode actually set.

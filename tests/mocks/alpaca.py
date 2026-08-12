@@ -314,7 +314,12 @@ class MockObserver:
             observations[key] = np.random.randn(ws, self.num_features).astype(np.float32)
 
         if return_base_ohlc:
-            observations["base_features"] = np.random.randn(self.window_sizes[0], 4).astype(np.float32)
+            # Prices, not noise: raw randn puts half the closes below zero, and the env
+            # reads column 3 to size trades and price SL/TP brackets. A fixture that
+            # hands out negative prices cannot tell an inverted bracket from normal data.
+            observations["base_features"] = (
+                50000.0 + np.random.randn(self.window_sizes[0], 4) * 100.0
+            ).astype(np.float32)
             observations["base_timestamps"] = np.array([
                 datetime.now(ZoneInfo("America/New_York")) - timedelta(minutes=i)
                 for i in range(self.window_sizes[0] - 1, -1, -1)

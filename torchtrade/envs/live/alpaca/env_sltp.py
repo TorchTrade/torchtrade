@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
 import logging
@@ -227,7 +228,15 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
             status = self.trader.get_status()
             # Use market data to get current price
             obs = self.observer.get_observations(return_base_ohlc=True)
-            current_price = obs["base_features"][-1, 3]  # Close price
+            current_price = float(obs["base_features"][-1, 3])  # Close price
+            # This prices BOTH brackets: a NaN close sends NaN legs, and a negative one
+            # puts the stop above the take-profit. The entry is a full-balance market buy
+            # either way, and if the venue takes it while rejecting the legs the position
+            # sits unprotected in an env whose only exit is SL/TP (#347).
+            if not math.isfinite(current_price) or current_price <= 0:
+                raise ValueError(
+                    f"unusable close price ({current_price}) for {self.config.symbol}"
+                )
 
             stop_loss_price = current_price * (1 + stop_loss_pct)
             take_profit_price = current_price * (1 + take_profit_pct)

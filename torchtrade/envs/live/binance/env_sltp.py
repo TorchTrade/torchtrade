@@ -309,10 +309,6 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
                 return trade_info
             quantity = balance * self.config.position_fraction * self.config.leverage / current_price
         elif self.config.trade_mode == "notional":
-            if current_price <= 0:
-                logger.error(f"Invalid current_price={current_price} for {self.config.symbol}")
-                trade_info["success"] = False
-                return trade_info
             quantity = float(self.config.quantity_per_trade) / current_price
         elif self.config.trade_mode == "quantity":
             quantity = float(self.config.quantity_per_trade)
