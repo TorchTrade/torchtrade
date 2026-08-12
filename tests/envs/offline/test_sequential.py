@@ -1126,3 +1126,25 @@ class TestExecutionPriceConvention:
                 "about which bar the decision belongs to"
             )
         env.close()
+
+
+def test_liquidation_price_refuses_a_zero_entry_price():
+    """The offline route of the #277 guard: 0.0 back would read as "no position".
+
+    `_calculate_liquidation_price` returns 0.0 for the two legitimate no-liquidation
+    cases (spot, and no position), so a third 0.0 meaning "the entry price was garbage"
+    is indistinguishable from them downstream. Re-inlining the arithmetic here without
+    the guard is what this catches.
+    """
+    from types import SimpleNamespace
+    from torchtrade.envs.offline.sequential import (
+        SequentialTradingEnv, SequentialTradingEnvConfig,
+    )
+
+    env = SimpleNamespace(
+        has_liquidation=True,
+        leverage=10,
+        maintenance_margin_rate=SequentialTradingEnvConfig().maintenance_margin_rate,
+    )
+    with pytest.raises(ValueError, match="entry_price must be positive"):
+        SequentialTradingEnv._calculate_liquidation_price(env, 0.0, 1.0)

@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union, Callable
 import logging
@@ -347,9 +348,15 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # available_balance only shows free margin, which shrinks as positions grow,
         # causing repeated buys when the agent keeps requesting action=1.0.
         balance_info = self.trader.get_account_balance()
-        total_balance = balance_info.get('total_margin_balance', 0.0)
+        # Indexed, and `not (x > 0)`: defaulting to 0.0 turned a broken adapter into a
+        # permanent silent refusal to trade, and `<= 0` lets a NaN balance through to
+        # size a NaN position (#277).
+        total_balance = balance_info['total_margin_balance']
 
-        if total_balance <= 0:
+        # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
+        # balance sizes an inf target -- bitget's amount rounding then yields NaN and
+        # hands it to create_order. Same defect this PR fixed on the baselines (#277).
+        if not math.isfinite(total_balance) or total_balance <= 0:
             logger.warning("No balance for fractional position sizing")
             return 0.0, 0.0, "flat"
 

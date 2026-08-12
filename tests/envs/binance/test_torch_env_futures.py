@@ -408,15 +408,17 @@ class TestBinanceFuturesTorchTradingEnv:
 
     @pytest.mark.parametrize("qty,liq_price,expected_dtl", [
         (0.001, 45000.0, pytest.approx(0.1018, rel=1e-2)),   # long normal: (50100-45000)/50100
-        (0.001, 0.0, 1.0),                                   # long zero-liq -> unknown -> 1.0
+        (0.001, 0.0, pytest.approx(0.0978, rel=1e-3)),   # long, venue omits liq: 50000*(1-1/10+0.004)=45200
         (-0.001, 55000.0, pytest.approx(0.0978, rel=1e-2)),  # short normal: (55000-50100)/50100
-        (-0.001, 0.0, 1.0),                                  # short zero-liq -> unknown -> 1.0 (the fix)
+        (-0.001, 0.0, pytest.approx(0.0938, rel=1e-3)),  # short, venue omits liq: 50000*(1+1/10-0.004)=54800
     ], ids=["long-normal", "long-zero-liq", "short-normal", "short-zero-liq"])
     def test_distance_to_liquidation(self, env, mock_trader, qty, liq_price, expected_dtl):
         """distance_to_liquidation (account_state[5]) across long/short x normal/zero-liq.
 
-        A zero/absent liq price (cross-margin, or .get(..., 0)) must read 1.0 -- for a short the
-        unguarded (0 - price)/price = 0.0 would falsely signal AT liquidation. Matches bybit/okx.
+        A zero/absent liq price (cross-margin) is estimated from leverage rather than read
+        as 1.0, which reported a levered position as being as safe as a flat account (#277).
+        The estimate also has to land before the subtraction: an unguarded (0 - price)/price
+        clamps to 0.0, the opposite lie, falsely signalling a short is AT liquidation.
         """
         from torchtrade.envs.live.binance.order_executor import PositionStatus
 

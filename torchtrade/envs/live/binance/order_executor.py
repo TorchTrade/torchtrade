@@ -54,7 +54,8 @@ class PositionStatus:
     unrealized_pnl: float
     unrealized_pnl_pct: float
     mark_price: float
-    leverage: int
+    leverage: float  # float, not int: int() truncated 1.5x to 1x, which then took
+    # the no-liquidation branch and reported a levered position as safe (#277).
     margin_type: str
     liquidation_price: float
 
@@ -427,12 +428,21 @@ class BinanceFuturesOrderClass:
 
                     status["position_status"] = PositionStatus(
                         qty=qty,
-                        notional_value=float(pos.get("notional", 0)),
+                        # `float(...) or` and not `get(...) or`: binance sends notional as a
+                        # STRING, and "0" is truthy, so the outer test has to be on the
+                        # parsed number. qty != 0 is guaranteed above, so the fallback is a
+                        # real notional rather than another 0 (#277).
+                        notional_value=float(pos.get("notional") or 0.0) or abs(qty * mark_price),
                         entry_price=entry_price,
                         unrealized_pnl=unrealized_pnl,
                         unrealized_pnl_pct=unrealized_pnl_pct,
                         mark_price=mark_price,
-                        leverage=int(pos.get("leverage", self.leverage)),
+                        # `in (None, "")` and not `or`: a venue-reported leverage of numeric 0 is
+                        # falsy, and `or` would swap it for the config value -- inventing a
+                        # liquidation distance from a leverage the venue never confirmed (#277).
+                        leverage=float(
+                            self.leverage if pos.get("leverage") in (None, "") else pos.get("leverage")
+                        ),
                         margin_type=pos.get("marginType", self.margin_type.value),
                         liquidation_price=float(pos.get("liquidationPrice", 0)),
                     )

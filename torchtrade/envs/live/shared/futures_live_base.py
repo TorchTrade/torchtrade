@@ -9,6 +9,8 @@ Alpaca (spot) is NOT a futures env: it hardcodes leverage=1 and distance_to_liqu
 and reads cash rather than total_wallet_balance. It keeps its own `_get_observation` and
 inherits `TorchTradeLiveEnv` directly.
 """
+import math
+
 import torch
 from tensordict import TensorDict, TensorDictBase
 
@@ -18,6 +20,7 @@ from torchtrade.envs.core.state import (
     position_direction_from_status,
     position_qty_from_status,
 )
+from torchtrade.envs.utils.liquidation import nearest_liquidation_price
 
 
 class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
@@ -68,7 +71,19 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         # exposure_pct read differently for the same position. total_margin_balance is uniformly
         # equity across all four, so exposure_pct is comparable cross-exchange (and matches the
         # portfolio value _get_portfolio_value returns).
-        total_balance = balance.get("total_margin_balance", 0)
+        # Indexed, not .get(..., 0): all four adapters build this key unconditionally, so a
+        # missing one means the adapter broke. The default turned that into a silent
+        # exposure_pct of 0.0 -- every position reading as flat, forever (#277).
+        total_balance = balance["total_margin_balance"]
+        # A NaN equity passes the held-position guard below only because that one is
+        # keyed on direction; on a FLAT account nothing catches it, and the same value
+        # reaches is_bankrupt(), where `nan < threshold * initial` is False -- bankruptcy
+        # silently disabled for the rest of the episode (#277).
+        if not math.isfinite(total_balance):
+            raise ValueError(
+                f"venue reported a non-finite equity ({total_balance}); refusing to "
+                f"derive an account state or a bankruptcy check from it"
+            )
         position_status = status.get("position_status", None)
 
         # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
@@ -90,6 +105,29 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             leverage = float(self.config.leverage)
             liquidation_price = 0.0
         else:
+            # Every guard below is a comparison, and NaN compares False to all of them --
+            # a NaN liquidation price would skip the fallback, reach the arithmetic, and
+            # clamp to a distance of 0.0, telling the policy a healthy position is AT
+            # liquidation on one garbage tick. Checked once, here, rather than at each
+            # comparison (#277).
+            # Every venue number this branch reads, not just the ones feeding
+            # distance_to_liquidation: a NaN notional_value is worse than a NaN
+            # liquidation price, because exposure_pct = nan/equity puts NaN straight into
+            # the observation tensor and from there into the policy network.
+            for _name, _value in (
+                ("qty", position_status.qty),
+                ("mark_price", position_status.mark_price),
+                ("leverage", position_status.leverage),
+                ("liquidation_price", position_status.liquidation_price),
+                ("notional_value", position_status.notional_value),
+                ("unrealized_pnl_pct", position_status.unrealized_pnl_pct),
+                ("entry_price", position_status.entry_price),
+            ):
+                if not math.isfinite(_value):
+                    raise ValueError(
+                        f"venue reported a non-finite {_name} ({_value}) for an open "
+                        f"position; refusing to derive an account state from it"
+                    )
             position_size = position_status.qty
             position_value = abs(position_status.notional_value)
             current_price = position_status.mark_price
@@ -98,11 +136,73 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             liquidation_price = position_status.liquidation_price
 
         # Build 6-element account state
+        # Equity gone with the position still on: there is no exposure_pct to report, the
+        # ratio being unbounded, and the old `else 0.0` reported the one value that is
+        # certainly wrong -- a flat-looking account that is actually holding an underwater
+        # position (invariant #3). Fail closed, like the unknown-status path above. An
+        # account that is merely empty still reports 0.0 exposure, which is true.
+        # `not (x > 0)` rather than `x <= 0`: NaN compares False to everything, so `<= 0`
+        # skips the raise and the ternary below then hands back 0.0 -- a held position
+        # reading flat, the exact bug this raise exists to prevent.
+        # Keyed on position_direction (which goes through the dust rule), NOT on
+        # position_value: a venue that omits the notional would zero the second
+        # conjunct and skip the raise on a position that is very much held.
+        if not (total_balance > 0) and position_direction != 0:
+            raise ValueError(
+                f"Position worth {position_value} held against non-positive equity "
+                f"({total_balance}). The venue is mid-liquidation or reporting "
+                f"inconsistently; refusing to report this account as flat."
+            )
         exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
 
-        if position_size == 0 or current_price == 0 or liquidation_price <= 0:
+        if position_size == 0 or current_price == 0:
+            distance_to_liquidation = 1.0
+        elif liquidation_price <= 0 and leverage == 1:
+            # No leverage, nothing to be liquidated by, and the offline env says the same
+            # via its has_liquidation gate -- so this must NOT fall through to the
+            # arithmetic below, where a short would compute (0 - price)/price = -1 and
+            # clamp to 0.0, reporting an unlevered position as AT liquidation.
+            #
+            # `== 1`, not `<= 1`: leverage of 0, negative or fractional is venue nonsense,
+            # and letting it take this branch hands a held position the maximally-safe
+            # answer -- #277 one field over. Those fall through to the helper, which
+            # raises. Offline refuses the same inputs in __post_init__.
             distance_to_liquidation = 1.0
         else:
+            if liquidation_price <= 0:
+                # Cross-margin venues omit the liquidation price (OKX sends liqPx="" for
+                # cross) because the whole account backs the position, so there is no
+                # per-position price to publish. bybit blanks liqPrice for unified/cross
+                # too; it blanks `leverage` with it, which used to make float("") raise
+                # into POSITION_UNKNOWN, but the adapters now fall back to the configured
+                # leverage there, so bybit reaches this path as well.
+                #
+                # That fallback is a real limitation: the leverage feeding the estimate is
+                # the one this env asked for, not one the venue confirmed, and #277's
+                # unfixed half is precisely that set_leverage failures are swallowed. It
+                # is kept because refusing would make OKX and bybit cross accounts unable
+                # to produce an observation at all.
+                # Defaulting to 1.0 reported a 20x long one move away from liquidation as
+                # exactly as safe as a flat spot account (#277).
+                #
+                # Estimated from BOTH the isolated geometry and the account's equity,
+                # taking whichever is nearer. Isolated alone is not the conservative
+                # choice it looks like: it only sees this position, so once losses
+                # elsewhere have eaten the collateral, cross liquidates earlier than
+                # isolated says and the estimate would overstate the distance -- the same
+                # fail-open, reintroduced with extra steps.
+                #
+                # Still not a guaranteed bound: a second cross position's maintenance
+                # requirement is invisible to both estimates and would move liquidation
+                # nearer again (#344). That assumption -- this env owns the account -- is
+                # the same one exposure_pct and the bankruptcy baseline already make.
+                liquidation_price = nearest_liquidation_price(
+                    position_size=position_size,
+                    entry_price=position_status.entry_price,
+                    mark_price=current_price,
+                    equity=total_balance,
+                    leverage=leverage,
+                )
             if position_size > 0:
                 distance_to_liquidation = (current_price - liquidation_price) / current_price
             else:
@@ -133,7 +233,19 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value (includes unrealized PnL)."""
         balance = self.trader.get_account_balance()
-        return balance.get("total_margin_balance", 0)
+        # Indexed, for the same reason as _get_observation above: this is the `current`
+        # side of is_bankrupt(), where a default of 0 is instant false bankruptcy.
+        equity = balance["total_margin_balance"]
+        # Guarded here too, not only in _get_observation: this is a SECOND, independent
+        # fetch, and it is the literal argument to _check_termination. The two reads can
+        # disagree -- a NaN in this one alone would reach is_bankrupt(), where
+        # `nan < threshold * initial` is False, while the observation's read passed.
+        if not math.isfinite(equity):
+            raise ValueError(
+                f"venue reported a non-finite equity ({equity}); refusing to run a "
+                f"bankruptcy check against it"
+            )
+        return equity
 
     def _get_current_position_quantity(self) -> float:
         """The signed size the exchange holds, dust read as flat.

@@ -30,6 +30,7 @@ from torchtrade.envs.utils.fractional_sizing import (
 )
 
 from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.utils.liquidation import DEFAULT_MAINTENANCE_MARGIN_RATE
 
 # Money, prices and position sizes are tracked in float64 to match the scalar envs' Python
 # floats. In float32 the accumulated relative epsilon, scaled up by leverage, lands on a
@@ -70,7 +71,7 @@ class VectorizedSequentialTradingEnvConfig:
     # Trading parameters
     leverage: int = 1
     margin_type: MarginType = MarginType.ISOLATED
-    maintenance_margin_rate: float = 0.004
+    maintenance_margin_rate: float = DEFAULT_MAINTENANCE_MARGIN_RATE
 
     def __post_init__(self):
         self.execute_on, self.time_frames, self.window_sizes = (

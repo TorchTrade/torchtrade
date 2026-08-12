@@ -60,7 +60,8 @@ class PositionStatus:
     unrealized_pnl: float
     unrealized_pnl_pct: float
     mark_price: float
-    leverage: int
+    leverage: float  # float, not int: int() truncated 1.5x to 1x, which then took
+    # the no-liquidation branch and reported a levered position as safe (#277).
     margin_mode: str
     liquidation_price: float
 
@@ -575,7 +576,12 @@ class BitgetFuturesOrderClass:
                         unrealized_pnl=unrealized_pnl,
                         unrealized_pnl_pct=unrealized_pnl_pct,
                         mark_price=mark_price,
-                        leverage=int(pos.get('leverage', self.leverage)),
+                        # `in (None, "")` and not `or`: a venue-reported leverage of numeric 0 is
+                        # falsy, and `or` would swap it for the config value -- inventing a
+                        # liquidation distance from a leverage the venue never confirmed (#277).
+                        leverage=float(
+                            self.leverage if pos.get('leverage') in (None, "") else pos.get('leverage')
+                        ),
                         margin_mode=pos.get('marginMode', self.margin_mode.value),
                         liquidation_price=float(pos.get('liquidationPrice', 0)),
                     )
@@ -613,7 +619,16 @@ class BitgetFuturesOrderClass:
             logger.debug(f"USDT balance: {usdt_balance}")
 
             # Get total equity (includes unrealized PnL)
-            total = float(usdt_balance.get('total', 0))
+            # Not `.get('total', 0)`: fabricating 0 equity here is what made every
+            # downstream guard useless -- the bankruptcy baseline becomes 0 (so
+            # `current < threshold * 0` never fires), sizing refuses to trade, and
+            # exposure_pct reads flat. Fail at the boundary instead (#277).
+            raw_total = usdt_balance.get('total')
+            if raw_total is None or raw_total == '':
+                raise ValueError(
+                    f"bitget returned no USDT total equity (got {raw_total!r}); refusing "
+                    f"to report an equity of 0")
+            total = float(raw_total)
             free = float(usdt_balance.get('free', 0))
 
             # Unrealized PnL can be calculated from positions

@@ -41,6 +41,10 @@ from torchtrade.envs.utils.fractional_sizing import (
     POSITION_TOLERANCE_ABS,
 )
 from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.utils.liquidation import (
+    DEFAULT_MAINTENANCE_MARGIN_RATE,
+    isolated_liquidation_price,
+)
 
 
 @dataclass
@@ -76,7 +80,7 @@ class SequentialTradingEnvConfig:
     # leverage == 1: Spot mode (no liquidation)
     leverage: int = 1
     margin_type: MarginType = MarginType.ISOLATED
-    maintenance_margin_rate: float = 0.004
+    maintenance_margin_rate: float = DEFAULT_MAINTENANCE_MARGIN_RATE
 
     def __post_init__(self):
         """Validate configuration and normalize timeframes."""
@@ -257,12 +261,13 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
     def _calculate_liquidation_price(self, entry_price: float, position_size: float) -> float:
         """Calculate liquidation price for a position.
 
-        No liquidation (leverage=1): Always returns 0.0
-        With liquidation (leverage>1): Calculates based on leverage and margin type
+        This is the gating -- no liquidation at leverage 1, none without a position. The
+        arithmetic itself lives in `isolated_liquidation_price`, shared with the live
+        envs' fallback so the two cannot price the same position differently; restating
+        the formula here is how that starts drifting again.
 
-        For ISOLATED margin:
-        - Long: liquidation_price = entry_price * (1 - 1/leverage + maintenance_margin_rate)
-        - Short: liquidation_price = entry_price * (1 + 1/leverage - maintenance_margin_rate)
+        Note it now raises, rather than returning 0.0, on an entry price of 0: a zero
+        liquidation price is indistinguishable downstream from having no position.
         """
         if not self.has_liquidation:
             return 0.0
@@ -270,16 +275,12 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         if position_size == 0:
             return 0.0
 
-        margin_fraction = 1.0 / self.leverage
-
-        if position_size > 0:
-            # Long position - liquidated if price drops
-            liquidation_price = entry_price * (1 - margin_fraction + self.maintenance_margin_rate)
-        else:
-            # Short position - liquidated if price rises
-            liquidation_price = entry_price * (1 + margin_fraction - self.maintenance_margin_rate)
-
-        return max(0, liquidation_price)
+        return isolated_liquidation_price(
+            entry_price,
+            is_long=position_size > 0,
+            leverage=self.leverage,
+            maintenance_margin_rate=self.maintenance_margin_rate,
+        )
 
     def _check_liquidation(self, ohlcv: dict) -> bool:
         """Check if current position should be liquidated using intrabar OHLCV data.

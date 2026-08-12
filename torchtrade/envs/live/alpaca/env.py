@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union, Callable
 import logging
+import math
 
 import torch
 
@@ -12,6 +13,7 @@ from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass, TradeMo
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
+from torchtrade.envs.core.state import position_qty_from_status
 
 @dataclass
 class AlpacaTradingEnvConfig:
@@ -210,8 +212,19 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         # Total portfolio value
         total_portfolio = cash + current_position_value
 
+        # These two reads size a real order. A NaN makes delta_qty NaN, `nan > 0` is False
+        # so the caller always takes the SELL branch, and in notional mode a sell is
+        # intercepted as close_position() -- one garbage tick liquidates the whole
+        # position (#277). `<= 0` below cannot see that; isfinite can.
+        for _name, _value in (("cash", cash), ("position market_value", current_position_value)):
+            if not math.isfinite(_value):
+                raise ValueError(
+                    f"venue reported a non-finite {_name} ({_value}); refusing to size a "
+                    f"trade against it"
+                )
+
         # Validate portfolio value
-        if total_portfolio <= 0:
+        if not (total_portfolio > 0):
             logger.warning("No portfolio value available for fractional position sizing")
             return 0.0, 0.0
 
@@ -236,10 +249,13 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
 
         # Get current position and price from exchange
         position_status = self.trader.get_status().get("position_status", None)
-        current_qty = float(position_status.qty) if position_status else 0.0
+        # Through the dust rule, not a hand-rolled float(): this is the one qty->size
+        # conversion in the live tree that bypassed it, so it saw neither the dust epsilon
+        # nor the non-finite guard (#277, #283).
+        current_qty = position_qty_from_status(position_status)
         current_price = self._get_current_price(position_status)
 
-        if current_price <= 0:
+        if not (current_price > 0) or not math.isfinite(current_price):
             logger.error(
                 f"Cannot execute trade: invalid or missing price data. "
                 f"price={current_price}, has_position={position_status is not None}, "

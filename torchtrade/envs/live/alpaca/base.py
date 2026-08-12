@@ -1,6 +1,7 @@
 """Base class for Alpaca live trading environments."""
 
 import logging
+import math
 from abc import abstractmethod
 from typing import Callable, List, Optional
 
@@ -114,6 +115,14 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # position value -- so the two cannot drift apart. The futures bases already read
         # an equity figure for this reason.
         self.initial_portfolio_value = self._get_portfolio_value()
+        if not math.isfinite(self.initial_portfolio_value) or self.initial_portfolio_value <= 0:
+            raise ValueError(
+                f"cannot start an episode on a portfolio value of "
+                f"{self.initial_portfolio_value}: the bankruptcy baseline would be 0, "
+                f"and `current < threshold * 0` reduces to `current < 0`, so it never "
+                f"fires above zero equity -- an unfunded paper account would trade on "
+                f"with the check disabled"
+            )
 
         # Build observation specs
         self._build_observation_specs()
@@ -210,6 +219,16 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         status = self.trader.get_status()
         account = self.trader.client.get_account()
         cash = float(account.cash)
+        # cash IS alpaca's equity: it is the whole of portfolio_value when flat, and the
+        # bankruptcy baseline and every reward derive from it. A NaN passes the
+        # held-position guard below (which is keyed on direction) and reaches
+        # is_bankrupt(), where `nan < threshold * initial` is False -- termination off
+        # for the episode. `not isfinite` and not `<= 0`, since +inf passes that too.
+        if not math.isfinite(cash):
+            raise ValueError(
+                f"venue reported a non-finite cash balance ({cash}); refusing to derive "
+                f"an account state or a bankruptcy check from it"
+            )
         position_status = status.get("position_status", None)
 
         # Calculate portfolio value
@@ -231,6 +250,26 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             except Exception:
                 current_price = 0.0
         else:
+            # Same finiteness contract as the futures envs (#277). market_value and
+            # unrealized_plpc reach account_state directly; avg_entry_price and
+            # current_price are read but unused here, and are checked anyway so the
+            # contract does not depend on which locals happen to be dead. NaN passes
+            # every comparison below
+            # -- a NaN market_value reads as a flat account holding a position, a NaN
+            # unrealized_plpc goes into the tensor and on into the policy network. Spot is
+            # not exempt from invariant #3.
+            for _name, _value in (
+                ("qty", position_status.qty),
+                ("market_value", position_status.market_value),
+                ("avg_entry_price", position_status.avg_entry_price),
+                ("current_price", position_status.current_price),
+                ("unrealized_plpc", position_status.unrealized_plpc),
+            ):
+                if not math.isfinite(float(_value)):
+                    raise ValueError(
+                        f"venue reported a non-finite {_name} ({_value}) for an open "
+                        f"position; refusing to derive an account state from it"
+                    )
             position_value = position_status.market_value
             entry_price = position_status.avg_entry_price
             current_price = position_status.current_price
@@ -239,6 +278,15 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         # Calculate new 6-element account state
         # Element 0: exposure_pct (position_value / portfolio_value)
+        # A position held against a non-positive portfolio value has no exposure_pct to
+        # report -- the ratio is unbounded -- and `else 0.0` reports the one value that is
+        # certainly wrong: a flat-looking account that is holding a position (#277).
+        # `not (x > 0)` because NaN compares False to everything.
+        if not (portfolio_value > 0) and position_direction != 0:
+            raise ValueError(
+                f"Position worth {position_value} held against a non-positive portfolio "
+                f"value ({portfolio_value}); refusing to report this account as flat."
+            )
         exposure_pct = position_value / portfolio_value if portfolio_value > 0 else 0.0
 
         # Element 2: unrealized_pnl_pct (inherited from Alpaca)
@@ -283,11 +331,23 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.balance = float(account.cash)
 
         if position_status is None:
-            return self.balance
-        # An unknown status raises on the .market_value read rather than taking the flat
-        # branch above: cash alone feeds _check_termination, and for a held position that
-        # is most of the portfolio missing -- an outage would read as a near-total loss.
-        return self.balance + position_status.market_value
+            portfolio_value = self.balance
+        else:
+            # An unknown status raises on the .market_value read rather than taking the flat
+            # branch above: cash alone feeds _check_termination, and for a held position that
+            # is most of the portfolio missing -- an outage would read as a near-total loss.
+            portfolio_value = self.balance + position_status.market_value
+
+        # Guarded here as well as in _get_observation, because this is a SEPARATE fetch and
+        # it is the value that reaches _check_termination and the reward. alpaca's _step
+        # calls it BEFORE building an observation, so a NaN here is recorded and rewarded
+        # against before the observation guard could ever fire (#277).
+        if not math.isfinite(portfolio_value):
+            raise ValueError(
+                f"venue reported a non-finite portfolio value ({portfolio_value}); "
+                f"refusing to run a bankruptcy check or compute a reward against it"
+            )
+        return portfolio_value
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -22,6 +23,44 @@ GAMMA_API_BASE = "https://gamma-api.polymarket.com"
 # well under the market cadence so retries never push us past the next resolution.
 _RETRY_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = 1.0
+
+
+def _finite(raw_value, field, slug) -> float:
+    """Three of these four are the market half of the observation tensor.
+
+    `_filter_markets` compares them with `<`/`>`, which NaN passes, so a garbage volume or
+    liquidity survives filtering and lands in `_market_state` -- straight into the policy
+    network. Not a probability like the prices, so only finiteness and sign are checked.
+    """
+    value = float(raw_value)
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(
+            f"market {slug!r} reported a {field} of {raw_value!r}, which is not a "
+            f"finite non-negative number; refusing to trade against it"
+        )
+    return value
+
+
+def _valid_price(raw_price, field, slug) -> float:
+    """A market price must be a real probability, or the whole episode goes NaN.
+
+    `_compute_payoff` guards `fill_price <= 0`, which NaN and +inf both compare False to,
+    so a garbage price flows into `self.cash` -- polymarket's equity and its only
+    bankruptcy input. Once cash is NaN it stays NaN, `is_bankrupt` is False forever, and
+    every reward is NaN. The config is already validated in __post_init__; this is the
+    venue side of the same rule (#277).
+    """
+    price = float(raw_price)
+    # [0, 1] inclusive: a near-resolved market legitimately prices an outcome at 0 or 1,
+    # and _compute_payoff already guards fill_price <= 0. What is rejected is the garbage
+    # that guard cannot see -- NaN and +inf compare False to `<= 0` and flow straight into
+    # cash.
+    if not math.isfinite(price) or not (0 <= price <= 1):
+        raise ValueError(
+            f"market {slug!r} reported a {field} of {raw_price!r}, which is not a "
+            f"probability in [0, 1]; refusing to trade against it"
+        )
+    return price
 
 
 def _fetch_json_with_retry(
@@ -136,12 +175,12 @@ class MarketScanner:
             slug=raw["slug"],
             yes_token_id=clob_token_ids[0],
             no_token_id=clob_token_ids[1],
-            yes_price=float(outcome_prices[0]),
-            no_price=float(outcome_prices[1]),
-            volume_24h=float(raw.get("volume24hr", 0)),
-            total_volume=float(raw.get("volume", 0)),
-            liquidity=float(raw.get("liquidity", 0)),
-            spread=float(raw.get("spread", 0)),
+            yes_price=_valid_price(outcome_prices[0], "yes_price", raw.get("slug")),
+            no_price=_valid_price(outcome_prices[1], "no_price", raw.get("slug")),
+            volume_24h=_finite(raw.get("volume24hr", 0), "volume_24h", raw.get("slug")),
+            total_volume=_finite(raw.get("volume", 0), "total_volume", raw.get("slug")),
+            liquidity=_finite(raw.get("liquidity", 0), "liquidity", raw.get("slug")),
+            spread=_finite(raw.get("spread", 0), "spread", raw.get("slug")),
             end_date=raw.get("endDate", ""),
             tags=raw.get("tags", []),
             neg_risk=raw.get("negRisk", False),
@@ -277,8 +316,15 @@ class MarketScanner:
                 continue
             try:
                 markets.append(self._parse_market(raw))
-            except (KeyError, json.JSONDecodeError, IndexError):
-                logger.warning("Failed to parse market: %s", raw.get("id", "unknown"))
+            except (KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
+                # ValueError included so a single market with an unusable price is skipped
+                # rather than aborting the whole scan -- which is what a bare float() on a
+                # garbage price would have done here too, once it stopped being silent.
+                # The reason, not just the id: adding ValueError above made this the sink
+                # for every diagnostic the price/finiteness guards emit, and without it a
+                # systematic API change silently empties the scan -- indistinguishable
+                # from "no markets matched the filter".
+                logger.warning("Failed to parse market %s: %s", raw.get("id", "unknown"), exc)
                 continue
 
         return self._filter_markets(markets)
@@ -321,7 +367,14 @@ class MarketScanner:
                 continue
             try:
                 return self._parse_market(raw)
-            except (KeyError, json.JSONDecodeError, IndexError):
-                logger.warning("Failed to parse market: %s", raw.get("id", "unknown"))
+            except (KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
+                # ValueError included so a single market with an unusable price is skipped
+                # rather than aborting the whole scan -- which is what a bare float() on a
+                # garbage price would have done here too, once it stopped being silent.
+                # The reason, not just the id: adding ValueError above made this the sink
+                # for every diagnostic the price/finiteness guards emit, and without it a
+                # systematic API change silently empties the scan -- indistinguishable
+                # from "no markets matched the filter".
+                logger.warning("Failed to parse market %s: %s", raw.get("id", "unknown"), exc)
                 continue
         return None

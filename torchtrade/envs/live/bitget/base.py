@@ -1,5 +1,6 @@
 """Base class for Bitget live trading environments."""
 
+import math
 from abc import abstractmethod
 from typing import Callable, List, Optional
 
@@ -111,7 +112,19 @@ class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         # portfolio_value and the current side of the check. Binance's total_wallet_balance
         # excludes unrealized PnL (a real skew here); bitget/bybit/okx map both keys to equity.
         balance = self.trader.get_account_balance()
-        self.initial_portfolio_value = balance.get("total_margin_balance", 0)
+        # Indexed: a default of 0 makes the bankruptcy baseline 0, and
+        # `current < threshold * 0` reduces to `current < 0` -- so it never fires
+        # above zero equity and the account could be wiped out with the episode
+        # running on (#277).
+        self.initial_portfolio_value = balance["total_margin_balance"]
+        if not math.isfinite(self.initial_portfolio_value) or self.initial_portfolio_value <= 0:
+            raise ValueError(
+                f"cannot start an episode on equity of "
+                f"{self.initial_portfolio_value}: the bankruptcy baseline would be 0, "
+                f"and `current < threshold * 0` reduces to `current < 0`, so it never "
+                f"fires above zero equity -- the account could be wiped out with "
+                f"the episode trading on"
+            )
 
         # Build observation specs
         self._build_observation_specs()
