@@ -565,10 +565,12 @@ class BitgetFuturesOrderClass:
                     # sees, and the trade path. A direction is never guessed (#341).
                     side = pos.get('side')
                     if side not in ('long', 'short'):
-                        raise ValueError(
-                            f"bitget reported an unusable position side ({side!r}); "
-                            f"refusing to infer a direction"
+                        logger.error(
+                            "bitget reported an unusable position side (%r); refusing to "
+                            "infer a direction", side
                         )
+                        status["position_status"] = POSITION_UNKNOWN
+                        return status
                     qty = contracts if side == 'long' else -contracts
 
                     # `or 0` on every nullable CCXT field: a cross position returns

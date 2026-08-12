@@ -168,7 +168,10 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         if position_direction == 0:
             position_size = 0.0
             position_value = 0.0
-            current_price = self.trader.get_mark_price()
+            # No venue call: distance_to_liquidation short-circuits to 1.0 when flat,
+            # so this price is never read. Fetching it cost a round-trip per bar and
+            # -- once validated -- would raise on a flat account over an unused value.
+            current_price = 0.0
             unrealized_pnl_pct = 0.0
             leverage = float(self.config.leverage)
             liquidation_price = 0.0

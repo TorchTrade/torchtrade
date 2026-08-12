@@ -579,16 +579,21 @@ class TestBybitSLTPNotionalTradeMode:
             # $500 / $50000 = 0.01 BTC
             assert call_kwargs["quantity"] == pytest.approx(0.01, rel=1e-6)
 
-    def test_notional_zero_price_aborts_trade(self, notional_env, mock_env_trader):
-        """Zero mark price must abort trade without calling trader.trade()."""
+    def test_notional_zero_price_refuses_to_trade(self, notional_env, mock_env_trader):
+        """A venue price of 0 is unusable data, not a graceful abort condition (#347).
+
+        It used to return `success: False` -- indistinguishable from a legitimate refusal
+        -- while the same value silently divided in the sizing path. It now raises, and
+        the thing that matters is unchanged: no order is submitted.
+        """
         mock_env_trader.get_mark_price = MagicMock(return_value=0.0)
 
         with patch.object(notional_env, "_wait_for_next_timestamp"):
             notional_env.reset()
-            trade_info = notional_env._execute_trade_if_needed(("long", -0.02, 0.03))
+            with pytest.raises(ValueError, match="unusable mark price"):
+                notional_env._execute_trade_if_needed(("long", -0.02, 0.03))
 
             mock_env_trader.trade.assert_not_called()
-            assert trade_info["success"] is False
 
     def test_quantity_mode_passes_raw_value(self, mock_env_observer, mock_env_trader):
         """Quantity mode must pass quantity_per_trade directly without conversion."""

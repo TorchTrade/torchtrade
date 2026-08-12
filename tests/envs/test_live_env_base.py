@@ -18,6 +18,7 @@ import math
 from types import SimpleNamespace
 
 import pytest
+from unittest.mock import MagicMock
 
 import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
@@ -1504,8 +1505,8 @@ def test_a_bankruptcy_baseline_that_would_never_fire_is_refused(equity, reason):
             get_account_balance=lambda: {"total_margin_balance": equity}
         )
     )
-    # The real validator, bound to the stand-in -- stubbing it would test nothing.
-    env._require_finite = lambda v, n: TorchTradeFuturesLiveEnv._require_finite(env, v, n)
+    # The real reader, bound to the stand-in -- stubbing it would test nothing.
+    env._get_portfolio_value = lambda: TorchTradeFuturesLiveEnv._get_portfolio_value(env)
 
     with pytest.raises(ValueError):
         TorchTradeFuturesLiveEnv._capture_bankruptcy_baseline(env)
@@ -1831,9 +1832,8 @@ def test_a_non_finite_mark_price_cannot_size_a_trade(price):
     rejection names the pre-rounding size, so the error points away from the cause.
     """
     env = SimpleNamespace(trader=SimpleNamespace(get_mark_price=lambda: price))
-    env._require_finite = lambda v, n: TorchTradeFuturesLiveEnv._require_finite(env, v, n)
 
-    with pytest.raises(ValueError, match="non-finite mark price"):
+    with pytest.raises(ValueError, match="unusable mark price"):
         TorchTradeFuturesLiveEnv._current_mark_price(env)
 
 
@@ -1850,48 +1850,126 @@ def test_no_futures_env_reads_the_mark_price_unvalidated(exchange, module):
     )
 
 
-@pytest.mark.parametrize("exchange", ["alpaca", "binance", "bitget", "bybit", "okx"])
-def test_no_env_returns_a_zero_target_it_cannot_size(exchange):
+@pytest.mark.parametrize("equity", [0.0, -50.0, float("nan")],
+                         ids=["empty", "negative", "non-finite"])
+def test_alpaca_refuses_to_size_rather_than_returning_a_flat_target(equity):
     """#348: "I cannot size this" returned the same tuple as "go flat".
 
-    On alpaca that is a liquidation: it has no `target_qty == 0` guard, so a zero target
-    against an open position becomes `delta = 0 - current` and sells -- from an action
-    that meant maximum long. The four futures envs DO guard it, so there it was a silent
-    no-op: the agent's action dropped every bar with only a warning. Both are wrong for
-    the same reason -- "I cannot size this" must not be the same value as "go flat".
+    Alpaca has no `target_qty == 0` guard, so a zero target against an open position
+    becomes `delta = 0 - current` and SELLS -- from an action that meant maximum long.
+    """
+    from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv
+
+    env = SimpleNamespace(trader=SimpleNamespace(
+        client=SimpleNamespace(get_account=lambda: SimpleNamespace(cash=str(equity))),
+        get_status=lambda: {"position_status": None},
+    ))
+    with pytest.raises(ValueError):
+        AlpacaTorchTradingEnv._calculate_fractional_position(env, 1.0, 100.0)
+
+
+def _bitget_status(**pos_overrides):
+    """Real bitget adapter over a stubbed ccxt client."""
+    from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
+
+    pos = {"symbol": "BTC/USDT:USDT", "contracts": 1.0, "side": "long",
+           "entryPrice": 100.0, "markPrice": 101.0}
+    pos.update(pos_overrides)
+    client = MagicMock()
+    client.fetch_positions = MagicMock(return_value=[pos])
+    client.load_markets = MagicMock(return_value={})
+    client.markets = {}
+    ex = BitgetFuturesOrderClass(symbol="BTC/USDT:USDT", trade_mode="quantity",
+                                 demo=True, leverage=10, client=client)
+    return ex.get_status().get("position_status")
+
+
+@pytest.mark.parametrize("field", ["liquidationPrice", "entryPrice", "markPrice",
+                                   "unrealizedPnl", "notional"])
+def test_a_null_venue_field_does_not_turn_a_healthy_position_into_an_outage(field):
+    """#341: bare `float(None)` raised TypeError into bitget's broad except, so a cross
+    position with `liquidationPrice: None` reported POSITION_UNKNOWN.
+
+    That is the worst shape available: POSITION_UNKNOWN is deliberately fail-closed, so a
+    perfectly healthy position froze the env every bar -- on a lie.
+    """
+    status = _bitget_status(**{field: None})
+
+    assert status is not POSITION_UNKNOWN, f"a null {field} read as an outage"
+    assert status.qty == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("side", [None, "", "unexpected", "SHORT"])
+def test_an_unusable_side_reads_as_unknown_not_as_a_direction(side):
+    """`contracts if side == 'long' else -contracts` signed a long as a SHORT for any
+    unexpected value, and every consumer reads that sign."""
+    assert _bitget_status(side=side) is POSITION_UNKNOWN
+
+
+@pytest.mark.parametrize("pos_side", [None, "", "SHORT", "unexpected"])
+def test_okx_refuses_an_unusable_posside_instead_of_signing_it_long(pos_side):
+    """OKX was the worst of the three and my first pass missed it.
+
+    It reports hedge-mode size as a POSITIVE `pos` with direction only in `posSide`, and
+    any unrecognised value fell through to the net-mode branch keeping that positive sign
+    -- so a short read as a long, with no error, straight into the trade path. bitget and
+    bybit at least degraded to POSITION_UNKNOWN.
+    """
+    from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
+
+    # account_client, not client: okx splits Trade/Account/PublicData, and injecting only
+    # `client` left get_positions hitting the real API -- so the test passed on the API
+    # error rather than on the guard, with or without the fix.
+    account = MagicMock()
+    account.get_positions = MagicMock(return_value={"code": "0", "data": [
+        {"instId": "BTC-USDT-SWAP", "pos": "1.0", "posSide": pos_side,
+         "avgPx": "100", "markPx": "101", "lever": "10", "mgnMode": "cross"}
+    ]})
+    account.set_position_mode = MagicMock(return_value={"code": "0"})
+    account.set_leverage = MagicMock(return_value={"code": "0"})
+    public = MagicMock()
+    public.get_instruments = MagicMock(return_value={"data": []})
+
+    ex = OKXFuturesOrderClass(
+        symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True, leverage=10,
+        api_key="k", api_secret="s", passphrase="p",
+        client=MagicMock(), account_client=account, public_client=public,
+    )
+    assert ex.get_status().get("position_status") is POSITION_UNKNOWN
+
+
+def test_okx_still_signs_a_recognised_short_negative():
+    """The guard must reject the unrecognised, not the legitimate."""
+    from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
+
+    account = MagicMock()
+    account.get_positions = MagicMock(return_value={"code": "0", "data": [
+        {"instId": "BTC-USDT-SWAP", "pos": "1.0", "posSide": "short",
+         "avgPx": "100", "markPx": "101", "lever": "10", "mgnMode": "cross"}
+    ]})
+    account.set_position_mode = MagicMock(return_value={"code": "0"})
+    account.set_leverage = MagicMock(return_value={"code": "0"})
+    public = MagicMock()
+    public.get_instruments = MagicMock(return_value={"data": []})
+
+    ex = OKXFuturesOrderClass(
+        symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True, leverage=10,
+        api_key="k", api_secret="s", passphrase="p",
+        client=MagicMock(), account_client=account, public_client=public,
+    )
+    assert ex.get_status()["position_status"].qty == pytest.approx(-1.0)
+
+
+@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
+def test_sltp_sizing_rejects_a_non_finite_price_or_balance(exchange):
+    """#347 stopped at env.py: all four SLTP envs still divided by an unguarded value.
+
+    `nan <= 0` is False, so the guard was transparent to exactly the input the issue is
+    about -- and binance/bitget size from a candle close, so the validated mark-price
+    accessor never entered their path at all.
     """
     src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
-           / "live" / exchange / "env.py").read_text()
-    assert "refusing, because returning a zero target" in src, (
-        f"{exchange} still returns a zero target when it cannot read the balance"
-    )
-
-
-@pytest.mark.parametrize("exchange,field", [
-    ("bitget", "liquidationPrice"),
-    ("bitget", "entryPrice"),
-    ("bitget", "markPrice"),
-    ("bitget", "unrealizedPnl"),
-])
-def test_nullable_venue_fields_do_not_read_as_an_outage(exchange, field):
-    """#341: a cross position returns `liquidationPrice: None`, and bare `float(None)`
-    raises TypeError into the broad except -- reporting a HEALTHY position as
-    POSITION_UNKNOWN, which is fail-closed and freezes the env every bar."""
-    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
-           / "live" / exchange / "order_executor.py").read_text()
-    assert f"pos.get('{field}', " not in src, (
-        f"{exchange} reads {field} with a two-arg get; a null value raises rather than "
-        f"defaulting, and the broad except turns that into POSITION_UNKNOWN"
-    )
-
-
-@pytest.mark.parametrize("exchange", ["bitget", "bybit"])
-def test_an_unusable_position_side_is_refused_not_signed_short(exchange):
-    """#341: `contracts if side == 'long' else -contracts` signs a long as a SHORT for
-    any unexpected value. Every consumer reads that sign -- the account_state the policy
-    sees and the trade path -- so a flipped sign is a wrong-direction trade."""
-    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
-           / "live" / exchange / "order_executor.py").read_text()
-    assert "refusing to infer a direction" in src, (
-        f"{exchange} still defaults an unknown side to a direction"
+           / "live" / exchange / "env_sltp.py").read_text()
+    assert "math.isfinite(current_price)" in src and "math.isfinite(balance)" in src, (
+        f"{exchange} SLTP sizing still lets a non-finite price or balance through"
     )

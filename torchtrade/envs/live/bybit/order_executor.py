@@ -338,22 +338,24 @@ class BybitFuturesOrderClass:
                 # SHORT, and every consumer reads that sign (#341).
                 side = pos.get("side")
                 if side not in ("Buy", "Sell"):
-                    raise ValueError(
-                        f"bybit reported an unusable position side ({side!r}); "
-                        f"refusing to infer a direction"
+                    logger.error(
+                        "bybit reported an unusable position side (%r); refusing to "
+                        "infer a direction", side
                     )
+                    status["position_status"] = POSITION_UNKNOWN
+                    return status
                 qty = size if side == "Buy" else -size
 
-                entry_price = float(pos.get("avgPrice", 0))
-                mark_price = float(pos.get("markPrice", entry_price))
-                unrealized_pnl = float(pos.get("unrealisedPnl", 0))
+                entry_price = float(pos.get("avgPrice") or 0)
+                mark_price = float(pos.get("markPrice") or entry_price)
+                unrealized_pnl = float(pos.get("unrealisedPnl") or 0)
                 unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(qty, entry_price, mark_price)
 
                 liq_price = float(pos.get("liqPrice") or "0")
 
                 status["position_status"] = PositionStatus(
                     qty=qty,
-                    notional_value=float(pos.get("positionValue", abs(size * mark_price))),
+                    notional_value=float(pos.get("positionValue") or abs(size * mark_price)),
                     entry_price=entry_price,
                     unrealized_pnl=unrealized_pnl,
                     unrealized_pnl_pct=unrealized_pnl_pct,

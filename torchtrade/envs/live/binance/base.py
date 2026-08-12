@@ -1,6 +1,5 @@
 """Base class for Binance live trading environments."""
 
-import math
 from abc import abstractmethod
 from typing import Callable, List, Optional
 
@@ -98,10 +97,6 @@ class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         if config.close_position_on_init:
             self.trader.close_position()
 
-        # Bankruptcy baseline on total_margin_balance (equity), matching offline's
-        # portfolio_value and the current side of the check. Binance's total_wallet_balance
-        # excludes unrealized PnL (a real skew here); bitget/bybit/okx map both keys to equity.
-        balance = self.trader.get_account_balance()
         self._capture_bankruptcy_baseline()
 
         # Build observation specs

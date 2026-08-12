@@ -753,6 +753,7 @@ class TestBitgetSLTPNotionalTradeMode:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
+        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)
         mock_trader.get_account_balance = MagicMock(return_value={
@@ -807,6 +808,7 @@ class TestBitgetSLTPNotionalTradeMode:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
+        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)
         mock_trader.get_account_balance = MagicMock(return_value={
@@ -868,6 +870,7 @@ class TestBitgetSLTPLockPosition:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
+        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)
         mock_trader.get_account_balance = MagicMock(return_value={

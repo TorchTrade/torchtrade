@@ -242,9 +242,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         # hands it to create_order. Same defect this PR fixed on the baselines (#277).
         if not math.isfinite(total_balance) or total_balance <= 0:
             raise ValueError(
-                f"cannot size a trade against a portfolio value of {total_balance}: "
-                f"refusing, because returning a zero target is indistinguishable "
-                f"from a deliberate flat and the caller executes it as a full close"
+                f"cannot size a trade against a portfolio value of {total_balance}"
             )
 
         effective_balance = total_balance * 0.98
