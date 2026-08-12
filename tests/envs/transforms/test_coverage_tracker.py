@@ -274,42 +274,7 @@ class TestCoverageTrackerStats:
         # Should return disabled message before initialization
         assert stats["enabled"] is False
 
-    def test_get_distribution(self, env_random_start):
-        """Test getting raw coverage distribution."""
-        tracker = get_coverage_tracker(env_random_start)
 
-        env_random_start.reset()
-
-        dist = tracker.get_coverage_distribution()
-        assert dist is not None
-        assert isinstance(dist, dict)
-        assert "reset_counts" in dist
-        assert "state_counts" in dist
-        assert isinstance(dist["reset_counts"], np.ndarray)
-        assert isinstance(dist["state_counts"], np.ndarray)
-        assert len(dist["reset_counts"]) == tracker._num_positions
-        assert len(dist["state_counts"]) == tracker._num_positions
-        assert np.sum(dist["reset_counts"]) == tracker._total_resets
-        assert np.sum(dist["state_counts"]) == tracker._total_states
-
-    def test_get_distribution_returns_copy(self, env_random_start):
-        """Test that get_distribution returns a copy, not reference."""
-        tracker = get_coverage_tracker(env_random_start)
-
-        env_random_start.reset()
-
-        dist1 = tracker.get_coverage_distribution()
-        dist2 = tracker.get_coverage_distribution()
-
-        # Modify dist1 reset_counts
-        dist1["reset_counts"][0] = 9999
-
-        # dist2 should be unchanged
-        assert dist2["reset_counts"][0] != 9999
-
-        # Also test state_counts
-        dist1["state_counts"][0] = 8888
-        assert dist2["state_counts"][0] != 8888
 
     def test_reset_coverage(self, env_random_start):
         """Test resetting coverage statistics."""
@@ -529,133 +494,15 @@ class TestMathematicalValidation:
         expected_mean = num_resets / stats["total_positions"]
         assert abs(stats["reset_mean_visits"] - expected_mean) < 0.01
 
-    def test_distribution_sum_equals_total_resets(self, env_random_start):
-        """Test that sum of coverage distribution equals total resets."""
-        tracker = get_coverage_tracker(env_random_start)
 
-        num_resets = 75
-        for _ in range(num_resets):
-            env_random_start.reset()
 
-        stats = tracker.get_coverage_stats()
-        distribution = tracker.get_coverage_distribution()
 
-        # Sum of all visit counts should equal total resets
-        assert np.sum(distribution["reset_counts"]) == stats["total_resets"]
-        assert np.sum(distribution["reset_counts"]) == num_resets
 
-    def test_distribution_non_negative(self, env_random_start):
-        """Test that all distribution values are non-negative."""
-        tracker = get_coverage_tracker(env_random_start)
-
-        for _ in range(50):
-            env_random_start.reset()
-
-        distribution = tracker.get_coverage_distribution()
-
-        # All counts should be >= 0
-        assert np.all(distribution["reset_counts"] >= 0)
-
-    def test_visited_positions_matches_nonzero_counts(self, env_random_start):
-        """Test that visited_positions equals number of non-zero entries in distribution."""
-        tracker = get_coverage_tracker(env_random_start)
-
-        for _ in range(50):
-            env_random_start.reset()
-
-        stats = tracker.get_coverage_stats()
-        distribution = tracker.get_coverage_distribution()
-
-        # Count of non-zero entries
-        nonzero_count = np.sum(distribution["reset_counts"] > 0)
-        assert stats["reset_visited"] == nonzero_count
-
-    def test_max_visits_equals_distribution_max(self, env_random_start):
-        """Test that max_visits matches the maximum in distribution."""
-        tracker = get_coverage_tracker(env_random_start)
-
-        for _ in range(50):
-            env_random_start.reset()
-
-        stats = tracker.get_coverage_stats()
-        distribution = tracker.get_coverage_distribution()
-
-        assert stats["reset_max_visits"] == np.max(distribution["reset_counts"])
-
-    def test_min_visits_equals_distribution_min(self, env_random_start):
-        """Test that min_visits matches the minimum in distribution."""
-        tracker = get_coverage_tracker(env_random_start)
-
-        for _ in range(50):
-            env_random_start.reset()
-
-        stats = tracker.get_coverage_stats()
-        distribution = tracker.get_coverage_distribution()
-
-        assert stats["reset_min_visits"] == np.min(distribution["reset_counts"])
-
-    def test_std_visits_matches_numpy_std(self, env_random_start):
-        """Test that std_visits matches numpy's std calculation."""
-        tracker = get_coverage_tracker(env_random_start)
-
-        for _ in range(50):
-            env_random_start.reset()
-
-        stats = tracker.get_coverage_stats()
-        distribution = tracker.get_coverage_distribution()
-
-        expected_std = np.std(distribution["reset_counts"])
-        assert abs(stats["reset_std_visits"] - expected_std) < 0.01
 
 
 class TestDeterministicCoverage:
     """Test coverage tracking with deterministic, controlled resets."""
 
-    def test_single_position_repeated_resets(self, simple_df):
-        """Test that resetting to same position increments count correctly."""
-        # Create env with fixed seed
-        config = SeqLongOnlyEnvConfig(
-            symbol="TEST/USD",
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(5, TimeFrameUnit.Minute),
-            include_base_features=False,
-            initial_cash=10000,
-            random_start=True,
-            max_traj_length=50,
-            seed=12345,  # Fixed seed for determinism
-        )
-
-        env = SeqLongOnlyEnv(simple_df, config)
-        transformed_env = TransformedEnv(
-            env,
-            Compose(CoverageTracker(), InitTracker()),
-        )
-
-        tracker = get_coverage_tracker(transformed_env)
-
-        # Record which position is selected on first reset
-        transformed_env.reset()
-        first_reset_idx = env.sampler._sequential_idx
-        distribution_after_first = tracker.get_coverage_distribution().copy()
-
-        # Reset environment again with same seed - should get same or different position
-        # But we can verify counts are consistent
-        num_additional_resets = 10
-        for _ in range(num_additional_resets):
-            transformed_env.reset()
-
-        stats = tracker.get_coverage_stats()
-        distribution = tracker.get_coverage_distribution()
-
-        # Total resets should be 1 + num_additional_resets
-        assert stats["total_resets"] == 1 + num_additional_resets
-
-        # Sum of distribution should equal total resets
-        assert np.sum(distribution["reset_counts"]) == stats["total_resets"]
-
-        # At least the first position should have been visited
-        assert distribution["reset_counts"][first_reset_idx] >= distribution_after_first["reset_counts"][first_reset_idx]
 
     def test_coverage_increments_monotonically(self, env_random_start):
         """Test that coverage metrics increase or stay same, never decrease."""
@@ -685,44 +532,6 @@ class TestDeterministicCoverage:
         for i in range(1, len(total_resets_history)):
             assert total_resets_history[i] == total_resets_history[i-1] + 1
 
-    def test_exact_coverage_pattern(self, simple_df):
-        """Test exact coverage pattern with very controlled environment."""
-        # Create env with very limited positions and fixed seed
-        config = SeqLongOnlyEnvConfig(
-            symbol="TEST/USD",
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(5, TimeFrameUnit.Minute),
-            include_base_features=False,
-            initial_cash=10000,
-            random_start=True,
-            max_traj_length=10,  # Very short to limit positions
-            seed=99999,  # Fixed seed
-        )
-
-        env = SeqLongOnlyEnv(simple_df, config)
-        transformed_env = TransformedEnv(
-            env,
-            Compose(CoverageTracker(), InitTracker()),
-        )
-
-        tracker = get_coverage_tracker(transformed_env)
-
-        # Do a specific number of resets
-        num_resets = 20
-        for _ in range(num_resets):
-            transformed_env.reset()
-
-        stats = tracker.get_coverage_stats()
-        distribution = tracker.get_coverage_distribution()
-
-        # Verify exact consistency
-        assert stats["total_resets"] == num_resets
-        assert np.sum(distribution["reset_counts"]) == num_resets
-        assert stats["reset_visited"] == np.sum(distribution["reset_counts"] > 0)
-        unvisited = np.sum(distribution["reset_counts"] == 0)
-        assert stats["total_positions"] - stats["reset_visited"] == unvisited
-        assert stats["total_positions"] == len(distribution["reset_counts"])
 
     def test_zero_coverage_initially(self, env_random_start):
         """Test that coverage starts at zero before any resets."""
@@ -731,25 +540,6 @@ class TestDeterministicCoverage:
         # Before first reset, tracker is uninitialized
         stats = tracker.get_coverage_stats()
         assert stats["enabled"] is False
-
-    def test_first_reset_creates_one_visit(self, env_random_start):
-        """Test that first reset creates exactly one visited position."""
-        tracker = get_coverage_tracker(env_random_start)
-
-        env_random_start.reset()
-
-        stats = tracker.get_coverage_stats()
-        distribution = tracker.get_coverage_distribution()
-
-        # Exactly 1 reset
-        assert stats["total_resets"] == 1
-
-        # Exactly 1 position visited
-        assert stats["reset_visited"] == 1
-
-        # Exactly one entry in distribution should be 1, rest should be 0
-        assert np.sum(distribution["reset_counts"] == 1) == 1
-        assert np.sum(distribution["reset_counts"] == 0) == stats["total_positions"] - 1
 
 
 class TestParallelEnvironmentCoverage:
@@ -942,142 +732,7 @@ class TestCollectorPostproc:
         except TypeError:
             pass  # Some TorchRL versions don't support raise_if_closed parameter
 
-    def test_forward_batch_aggregation(self, simple_df):
-        """Test forward() correctly aggregates coverage from batched tensordict."""
-        from tensordict import TensorDict
 
-        # Create environment to initialize tracker
-        config = SeqLongOnlyEnvConfig(
-            symbol="TEST/USD",
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(5, TimeFrameUnit.Minute),
-            include_base_features=False,
-            initial_cash=10000,
-            random_start=True,
-            max_traj_length=50,
-            seed=42,
-        )
-
-        env = SeqLongOnlyEnv(simple_df, config)
-        transformed_env = TransformedEnv(
-            env,
-            Compose(
-                CoverageTracker(),
-                InitTracker(),
-            ),
-        )
-
-        tracker = get_coverage_tracker(transformed_env)
-
-        # Initialize tracker by resetting once
-        transformed_env.reset()
-        initial_stats = tracker.get_coverage_stats()
-        initial_resets = initial_stats["total_resets"]
-
-        # Create a fake batched tensordict with reset indices
-        # Simulate 5 resets: positions [0, 1, 2, 0, 1] (0 appears twice, 1 appears twice, 2 once)
-        reset_indices = torch.tensor([0, 1, 2, 0, 1], dtype=torch.long)
-        fake_batch = TensorDict(
-            {"reset_index": reset_indices},
-            batch_size=[5],
-        )
-
-        # Call forward() directly
-        tracker.forward(fake_batch)
-
-        # Verify aggregation
-        stats = tracker.get_coverage_stats()
-        distribution = tracker.get_coverage_distribution()
-
-        # Should have added 5 resets total
-        assert stats["total_resets"] == initial_resets + 5
-
-        # Position 0 should have 2 additional visits
-        # Position 1 should have 2 additional visits
-        # Position 2 should have 1 additional visit
-        # (Plus whatever the initial reset added)
-        total_visits_to_0_1_2 = distribution["reset_counts"][0] + distribution["reset_counts"][1] + distribution["reset_counts"][2]
-        # We know we added exactly 5 visits to these positions
-        # But the initial reset might have also used one of these positions
-        # So we can only assert that at least 5 visits were added
-        assert total_visits_to_0_1_2 >= 5
-
-        # Cleanup
-        try:
-            transformed_env.close()
-        except TypeError:
-            pass  # Some TorchRL versions don't support raise_if_closed parameter
-
-    def test_parallel_env_with_collector_postproc(self, simple_df):
-        """Test ParallelEnv coverage tracking via collector postproc (recommended pattern).
-
-        This test validates that CoverageTracker can track coverage from ParallelEnv
-        when used as a collector postproc by simulating batched reset_index data.
-        """
-        from tensordict import TensorDict
-
-        # Create a single environment to initialize the tracker
-        config = SeqLongOnlyEnvConfig(
-            symbol="TEST/USD",
-            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-            window_sizes=[10],
-            execute_on=TimeFrame(5, TimeFrameUnit.Minute),
-            include_base_features=False,
-            initial_cash=10000,
-            random_start=True,
-            max_traj_length=50,
-            seed=42,
-        )
-
-        env = SeqLongOnlyEnv(simple_df, config)
-        transformed_env = TransformedEnv(
-            env,
-            Compose(
-                CoverageTracker(),
-                InitTracker(),
-            ),
-        )
-
-        tracker = get_coverage_tracker(transformed_env)
-
-        # Initialize tracker
-        transformed_env.reset()
-
-        # Simulate what a ParallelEnv collector would produce:
-        # Multiple workers, each with their own reset_index in the batch
-        # Batch shape: [num_workers, trajectory_length] but reset_index appears when episodes reset
-
-        # Simulate batch from 3 workers where 2 workers had resets
-        # (In real collection, reset_index appears in timesteps where done=True and env resets)
-        simulated_batch = TensorDict(
-            {
-                "reset_index": torch.tensor([5, 12, 5, 23, 12], dtype=torch.long),  # 5 resets total
-                "done": torch.tensor([True, True, True, True, True]),
-            },
-            batch_size=[5],
-        )
-
-        # Call forward() as collector would
-        tracker.forward(simulated_batch)
-
-        # Verify coverage was tracked from the simulated ParallelEnv batch
-        stats = tracker.get_coverage_stats()
-        assert stats["enabled"] is True
-        assert stats["total_resets"] >= 5, "Should track all resets from batch"
-        assert stats["reset_visited"] > 0
-
-        # Verify specific positions were visited
-        distribution = tracker.get_coverage_distribution()
-        assert distribution["reset_counts"][5] >= 2, "Position 5 appeared twice in batch"
-        assert distribution["reset_counts"][12] >= 2, "Position 12 appeared twice in batch"
-        assert distribution["reset_counts"][23] >= 1, "Position 23 appeared once in batch"
-
-        # Cleanup
-        try:
-            transformed_env.close()
-        except TypeError:
-            pass
 
     def test_forward_handles_edge_cases(self, simple_df):
         """Test forward() handles missing reset_index and disabled tracking."""

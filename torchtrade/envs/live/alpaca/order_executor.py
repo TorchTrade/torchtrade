@@ -303,12 +303,10 @@ class AlpacaOrderClass:
                 order = self.client.get_order_by_id(self.last_order_id)
                 status["order_status"] = OrderStatus(
                     is_open=order.status not in ["filled", "canceled", "expired"],
-                    order_id=order.id,
                     filled_qty=order.filled_qty,
                     filled_avg_price=order.filled_avg_price,
                     status=order.status,
                     side=order.side.value,
-                    order_type=order.type.value,
                 )
 
             # Get position status

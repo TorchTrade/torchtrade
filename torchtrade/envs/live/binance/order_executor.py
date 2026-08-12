@@ -395,12 +395,10 @@ class BinanceFuturesOrderClass:
                 )
                 status["order_status"] = OrderStatus(
                     is_open=order["status"] not in ["FILLED", "CANCELED", "EXPIRED", "REJECTED"],
-                    order_id=str(order["orderId"]),
                     filled_qty=float(order.get("executedQty", 0)),
                     filled_avg_price=float(order.get("avgPrice", 0)),
                     status=order["status"],
                     side=order["side"],
-                    order_type=order["type"],
                 )
 
             # Get position status

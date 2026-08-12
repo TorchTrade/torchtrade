@@ -438,19 +438,6 @@ class CoverageTracker(Transform):
             "state_std_visits": float(self._state_coverage_counts.std()),
         }
 
-    def get_coverage_distribution(self) -> Dict[str, Optional[np.ndarray]]:
-        """Get the raw coverage counts arrays for both reset and state tracking.
-
-        Returns:
-            Dictionary with:
-            - reset_counts: Copy of reset coverage array, or None if tracking disabled
-            - state_counts: Copy of state coverage array, or None if tracking disabled
-            Shape: (num_positions,) with counts[i] = number of visits to position i
-        """
-        return {
-            "reset_counts": self._reset_coverage_counts.copy() if self._reset_coverage_counts is not None else None,
-            "state_counts": self._state_coverage_counts.copy() if self._state_coverage_counts is not None else None,
-        }
 
     def reset_coverage(self):
         """Reset all coverage statistics.

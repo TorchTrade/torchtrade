@@ -433,29 +433,6 @@ class MarketDataObservationSampler:
 
         return obs
 
-    def get_sequential_observation_with_ohlcv(self) -> Tuple[Dict[str, torch.Tensor], pd.Timestamp, bool, OHLCV]:
-        """
-        Get observation AND base OHLCV in one call using index-based tracking.
-
-        Returns:
-            (observation_dict, timestamp, truncated, ohlcv_namedtuple)
-        """
-        if self._sequential_idx >= self._end_idx:
-            raise ValueError("No more timestamps available. Call reset() before continuing.")
-
-        timestamp = pd.Timestamp(self._exec_times_arr[self._sequential_idx])
-
-        # Check if this is the last step
-        truncated = (self._sequential_idx + 1) >= self._end_idx
-
-        obs = self._get_observation_sequential(self._sequential_idx)
-
-        row = self.execute_base_tensor[self._sequential_idx]
-        vals = row[:5].tolist()
-        ohlcv = OHLCV(vals[0], vals[1], vals[2], vals[3], vals[4])
-        self._sequential_idx += 1
-
-        return obs, timestamp, truncated, ohlcv
 
     def _search_ts(self, key: str, exec_ts_ns):
         """Where to look `key` up, given an execution bin's start label.
@@ -524,8 +501,6 @@ class MarketDataObservationSampler:
 
         return obs
 
-    def get_max_steps(self) -> int:
-        return self.max_steps
 
     def get_observation_keys(self) -> List[str]:
         return list(self.resampled_dfs.keys())
