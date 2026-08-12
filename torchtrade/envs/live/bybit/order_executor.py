@@ -7,7 +7,11 @@ from typing import Dict, List, Optional
 from torchtrade.envs.live.bybit.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.state import POSITION_UNKNOWN
-from torchtrade.envs.utils.leverage import is_already_applied
+from torchtrade.envs.utils.leverage import (
+    leverage_already_set,
+    require_dict_response,
+    require_leverage_applied,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -197,27 +201,24 @@ class BybitFuturesOrderClass:
         except Exception as e:
             logger.warning(f"Could not set position mode (may already be configured): {e}")
 
-        # NOT `except Exception: warning`, unlike the position/margin modes around it.
-        # Those two are preferences; leverage is an input to every position size this
-        # env will compute and to account_state[4]. A swallowed rejection left the env
-        # sizing 20x against an account the venue still had at 5x (#277).
+        # Not tolerated like the modes above: leverage sizes every position (#277).
+        # bybit's response carries no leverage, so refusal is all that can be checked
+        # here -- an accepted-but-clamped leverage goes undetected on this venue.
         try:
             response = self.client.set_leverage(
                 category="linear", symbol=self.symbol,
                 buyLeverage=leverage_str, sellLeverage=leverage_str,
             )
         except Exception as e:
-            if not is_already_applied(e):
+            if not leverage_already_set(e):
                 raise
-            response = None
-
-        # pybit raises on a non-zero retCode, so this reads the code for adapters that
-        # return it instead -- and costs nothing when the exception path already fired.
-        if isinstance(response, dict):
-            ret_code = response.get("retCode")
+        else:
+            ret_code = require_dict_response(
+                self.symbol, self.leverage, response
+            ).get("retCode")
             if ret_code is not None and int(ret_code) != 0:
                 ret_msg = response.get("retMsg", "unknown error")
-                if not is_already_applied(f"{ret_code} {ret_msg}"):
+                if not leverage_already_set(ret_msg):
                     raise ValueError(
                         f"bybit refused {self.leverage}x leverage for {self.symbol} "
                         f"(retCode={ret_code}): {ret_msg}"
@@ -677,35 +678,6 @@ class BybitFuturesOrderClass:
             except Exception:
                 pass
             logger.error(f"Error closing position: {e}")
-            return False
-
-    def set_leverage(self, leverage: int) -> bool:
-        """
-        Change leverage for the symbol.
-
-        Args:
-            leverage: New leverage value (1-100)
-
-        Returns:
-            bool: True if successful
-        """
-        try:
-            response = self.client.set_leverage(
-                category="linear",
-                symbol=self.symbol,
-                buyLeverage=str(leverage),
-                sellLeverage=str(leverage),
-            )
-            ret_code = response.get("retCode") if isinstance(response, dict) else None
-            if ret_code is not None and int(ret_code) != 0:
-                ret_msg = response.get("retMsg", "unknown error")
-                logger.error(f"set_leverage rejected (retCode={ret_code}): {ret_msg}")
-                return False
-            self.leverage = leverage
-            logger.debug(f"Leverage set to {leverage}x for {self.symbol}")
-            return True
-        except Exception as e:
-            logger.error(f"Error setting leverage: {str(e)}")
             return False
 
     def set_margin_mode(self, mode: MarginMode) -> bool:

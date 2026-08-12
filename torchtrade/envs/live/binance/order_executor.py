@@ -10,7 +10,11 @@ from dotenv import load_dotenv
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.common_types import MarginType, OrderStatus
 from torchtrade.envs.core.state import POSITION_UNKNOWN
-from torchtrade.envs.utils.leverage import is_already_applied, require_leverage_applied
+from torchtrade.envs.utils.leverage import (
+    leverage_already_set,
+    require_dict_response,
+    require_leverage_applied,
+)
 
 load_dotenv()
 
@@ -131,24 +135,26 @@ class BinanceFuturesOrderClass:
 
     def _setup_futures_account(self):
         """Configure futures account settings."""
-        # Leverage is outside the tolerant block below: it feeds every position size and
-        # account_state[4], and a swallowed rejection left the env sizing against a
-        # leverage the account never had (#277). Binance caps leverage per notional
-        # bracket, so the echoed value is checked too, not just the call.
+        # Not tolerated like the margin type below: leverage sizes every position (#277).
+        # Binance caps leverage per notional bracket, so the echo is checked too --
+        # accepting the call is not applying the request.
         try:
             response = self.client.futures_change_leverage(
                 symbol=self.symbol,
                 leverage=self.leverage
             )
         except Exception as e:
-            if not is_already_applied(e):
+            if not leverage_already_set(e):
                 raise
-            response = {}
+        else:
+            require_leverage_applied(
+                self.symbol,
+                self.leverage,
+                require_dict_response(self.symbol, self.leverage, response).get("leverage"),
+            )
 
-        if isinstance(response, dict):
-            require_leverage_applied(self.symbol, self.leverage, response.get("leverage"))
-
-        # Margin type stays a preference: it does not size anything.
+        # Margin type stays a preference for SIZING; note it does affect liquidation
+        # risk, so a construction that succeeds guarantees leverage only.
         try:
             self.client.futures_change_margin_type(
                 symbol=self.symbol,
@@ -592,29 +598,6 @@ class BinanceFuturesOrderClass:
         except Exception as e:
             logger.error(f"Error getting positions: {str(e)}")
             return {}
-
-    def set_leverage(self, leverage: int) -> bool:
-        """
-        Change leverage for the symbol.
-
-        Args:
-            leverage: New leverage value (1-125)
-
-        Returns:
-            bool: True if successful
-        """
-        try:
-            self.client.futures_change_leverage(
-                symbol=self.symbol,
-                leverage=leverage
-            )
-            self.leverage = leverage
-            logger.info(f"Leverage set to {leverage}x for {self.symbol}")
-            return True
-        except Exception as e:
-            logger.error(f"Error setting leverage: {str(e)}")
-            return False
-
 
 # Example usage
 if __name__ == "__main__":

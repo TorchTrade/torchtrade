@@ -10,11 +10,15 @@ def mock_ccxt_client():
     client = MagicMock()
 
     # Mock account configuration methods
-    # Echoes the requested leverage, as the venue does. A constant 10 made every
-    # executor built at another leverage look like a venue that had refused (#277).
-    client.set_leverage = MagicMock(
-        side_effect=lambda leverage, *a, **k: {"leverage": leverage}
-    )
+    # Echoes the requested leverage in bitget's real body shape (#277). A constant 10
+    # made every executor built at another leverage look like a refusal, and a
+    # top-level "leverage" key -- which ccxt never returns -- made the check inert.
+    client.set_leverage = MagicMock(side_effect=lambda leverage, *a, **k: {
+        "code": "00000", "msg": "success",
+        "data": {"symbol": "BTCUSDT", "marginCoin": "USDT",
+                 "longLeverage": str(leverage), "shortLeverage": str(leverage),
+                 "crossMarginLeverage": str(leverage), "marginMode": "isolated"},
+    })
     client.set_margin_mode = MagicMock(return_value={"marginMode": "isolated"})
     client.set_position_mode = MagicMock(return_value={"posMode": "one_way_mode"})
 

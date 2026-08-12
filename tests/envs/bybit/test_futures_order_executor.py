@@ -284,22 +284,8 @@ class TestBybitFuturesOrderClass:
         assert call_kwargs["category"] == "linear"
         assert call_kwargs["symbol"] == "BTCUSDT"
 
-    @pytest.mark.parametrize("ret_code,expected_success,expected_leverage", [
-        (0, True, 20),       # Success: leverage updated
-        (110043, False, 10), # Rejected: leverage stays at original (10)
-    ], ids=["success", "rejected"])
-    def test_set_leverage_validates_retcode(self, order_executor, mock_pybit_client, ret_code, expected_success, expected_leverage):
-        """set_leverage must validate retCode and only update local state on success."""
-        mock_pybit_client.set_leverage = MagicMock(return_value={
-            "retCode": ret_code,
-            "retMsg": "OK" if ret_code == 0 else "Leverage not modified",
-        })
-        result = order_executor.set_leverage(20)
-        assert result is expected_success
-        assert order_executor.leverage == expected_leverage
-
     @pytest.mark.parametrize("ret_code,expected_success,expect_mode_changed", [
-        (0, True, True),       # Success: mode updated
+        (0, True, True),        # Success: mode updated
         (110026, False, False), # Rejected: mode stays at original
     ], ids=["success", "rejected"])
     def test_set_margin_mode_validates_retcode(self, order_executor, mock_pybit_client, ret_code, expected_success, expect_mode_changed):

@@ -78,7 +78,17 @@ EXCHANGES = ["binance", "bitget", "bybit", "okx"]
 # which is what makes the refusal path below the one that has to hold on all four.
 _ECHO = {
     "binance": lambda applied: {"leverage": applied},
-    "bitget": lambda applied: {"leverage": applied},
+    # ccxt returns bitget's raw body: the applied leverage lives per side under `data`,
+    # and there is no top-level `leverage` key. Shaping this to the code instead of the
+    # venue is what made an inert check look verified.
+    "bitget": lambda applied: {
+        "code": "00000", "msg": "success", "requestTime": 1700864711517,
+        "data": {
+            "symbol": "BTCUSDT", "marginCoin": "USDT",
+            "longLeverage": str(applied), "shortLeverage": str(applied),
+            "crossMarginLeverage": str(applied), "marginMode": "isolated",
+        },
+    },
     "okx": lambda applied: {"code": "0", "data": [{"lever": str(applied)}]},
 }
 
@@ -140,3 +150,14 @@ def test_a_venue_that_confirms_the_request_constructs(exchange):
     """The other half of the check: a matching echo must not be read as a mismatch."""
     echo = _ECHO[exchange]
     assert _build(exchange, 20, lambda *a, **k: echo(20)).leverage == 20
+
+
+@pytest.mark.parametrize("exchange", EXCHANGES)
+def test_a_response_the_echo_cannot_be_read_from_stops_construction(exchange):
+    """These executors advertise `client=` injection, so the shape is not guaranteed.
+
+    A shim returning None on a 200 used to erase the whole verification with no
+    diagnostic -- the check silently skipped and construction reported success.
+    """
+    with pytest.raises(TypeError, match="not a dict"):
+        _build(exchange, 20, lambda *a, **k: None)

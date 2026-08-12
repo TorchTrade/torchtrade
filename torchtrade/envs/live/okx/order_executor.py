@@ -8,7 +8,11 @@ from typing import Dict, List, Optional
 from torchtrade.envs.live.okx.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.state import POSITION_UNKNOWN
-from torchtrade.envs.utils.leverage import is_already_applied, require_leverage_applied
+from torchtrade.envs.utils.leverage import (
+    leverage_already_set,
+    require_dict_response,
+    require_leverage_applied,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -218,9 +222,7 @@ class OKXFuturesOrderClass:
         except Exception as e:
             logger.warning(f"Could not set position mode (may already be configured): {e}")
 
-        # Set leverage. Unlike the position mode above, a failure here is not tolerable:
-        # leverage feeds every position size and account_state[4], so a warning left the
-        # env trading at a leverage the account did not have (#277).
+        # Not tolerated like the position mode above: leverage sizes every position (#277).
         try:
             res = self.account_client.set_leverage(
                 instId=self.symbol,
@@ -228,23 +230,29 @@ class OKXFuturesOrderClass:
                 mgnMode=self.margin_mode.value,
             )
         except Exception as e:
-            if not is_already_applied(e):
+            if not leverage_already_set(e):
                 raise
-            res = {}
-
-        code = str(res.get("code", "0"))
-        if code != "0":
-            msg = res.get("msg", "unknown error")
-            if not is_already_applied(f"{code} {msg}"):
+        else:
+            require_dict_response(self.symbol, self.leverage, res)
+            # "-1" default, matching every other code check in this file: a response
+            # with no code is an adapter surprise, not a confirmation.
+            code = str(res.get("code", "-1"))
+            if code != "0":
+                # sMsg carries the real reason; top-level msg is often "All operations
+                # failed" or empty, which points the operator at nothing.
+                entries = res.get("data") or []
+                msg = (entries[0].get("sMsg") if entries else None) or res.get(
+                    "msg", "unknown error"
+                )
                 raise ValueError(
                     f"okx refused {self.leverage}x leverage for {self.symbol} "
                     f"(code={code}): {msg}"
                 )
 
-        # OKX echoes the applied leverage, which is the only way to catch a venue that
-        # accepts the call and applies something else.
-        data = res.get("data") or [{}]
-        require_leverage_applied(self.symbol, self.leverage, data[0].get("lever"))
+            # Every entry: long_short_mode returns one per posSide, and checking only
+            # the first leaves the short side unverified.
+            for entry in res.get("data") or []:
+                require_leverage_applied(self.symbol, self.leverage, entry.get("lever"))
 
     def trade(
         self,
@@ -670,34 +678,6 @@ class OKXFuturesOrderClass:
             except Exception:
                 pass
             logger.error(f"Error closing position: {e}")
-            return False
-
-    def set_leverage(self, leverage: int) -> bool:
-        """
-        Change leverage for the symbol.
-
-        Args:
-            leverage: New leverage value (1-125)
-
-        Returns:
-            bool: True if successful
-        """
-        try:
-            response = self.account_client.set_leverage(
-                instId=self.symbol,
-                lever=str(leverage),
-                mgnMode=self.margin_mode.value,
-            )
-            code = response.get("code", "-1")
-            if str(code) != "0":
-                msg = response.get("msg", "unknown error")
-                logger.error(f"set_leverage rejected (code={code}): {msg}")
-                return False
-            self.leverage = leverage
-            logger.debug(f"Leverage set to {leverage}x for {self.symbol}")
-            return True
-        except Exception as e:
-            logger.error(f"Error setting leverage: {str(e)}")
             return False
 
     def set_margin_mode(self, mode: MarginMode) -> bool:

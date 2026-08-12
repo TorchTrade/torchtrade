@@ -347,13 +347,6 @@ class TestBinanceFuturesOrderClass:
         assert success is True
         mock_client.futures_cancel_all_open_orders.assert_called_once()
 
-    def test_set_leverage(self, order_executor, mock_client):
-        """Test changing leverage."""
-        success = order_executor.set_leverage(20)
-
-        assert success is True
-        assert order_executor.leverage == 20
-
     def test_reduce_only_order(self, order_executor, mock_client):
         """Test reduce only order."""
         success = order_executor.trade(

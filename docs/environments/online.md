@@ -43,14 +43,15 @@ Non-SLTP environments use `action_levels` for fractional position sizing — sam
 Live environments use a **query-first pattern**: they query the actual exchange position (source of truth), calculate the target based on the action, round to exchange constraints (lot size, min notional), and trade only the delta.
 
 !!! warning "Leverage is verified against the exchange at construction"
-    Futures environments refuse to start if the exchange will not apply the configured
-    `leverage` — a rejected request, or an applied value that differs from the one asked
-    for. Both would otherwise size every position against leverage the account does not
-    have, and make `account_state[4]` report the configured value while flat but the
-    exchange's value once a position is open.
+    Futures environments refuse to start if the exchange rejects the configured
+    `leverage`, or reports applying a different one. Either would otherwise size every
+    position against leverage the account does not have, and make `account_state[4]`
+    report the configured value while flat but the exchange's value once a position is
+    open.
 
-    An exchange that is *already* at the requested leverage reports that as an error;
-    that case is recognised and is not a failure.
+    A successful construction guarantees **leverage only**. Margin mode is still
+    best-effort, and Bybit's set-leverage response carries no leverage, so on Bybit an
+    accepted-but-clamped value is not detected.
 
 !!! warning "Timeframe Format - Critical for Model Compatibility"
     Always use canonical timeframe forms:

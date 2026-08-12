@@ -9,7 +9,11 @@ from torchtrade.envs.live.bitget.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.common_types import OrderStatus
 from torchtrade.envs.core.state import POSITION_UNKNOWN
-from torchtrade.envs.utils.leverage import is_already_applied, require_leverage_applied
+from torchtrade.envs.utils.leverage import (
+    leverage_already_set,
+    require_dict_response,
+    require_leverage_applied,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -339,11 +343,7 @@ class BitgetFuturesOrderClass:
             # May fail if already set or not supported
             logger.warning(f"Could not set position mode (may already be configured): {e}")
 
-        # Set leverage using CCXT unified API. This one is not tolerated on failure:
-        # position and margin mode are preferences, but leverage feeds every position
-        # size and account_state[4]. The blanket handler this block used to sit in
-        # reported "may already be configured" for an outright rejection, and the env
-        # went on sizing against leverage the account did not have (#277).
+        # Not tolerated like the modes around it: leverage sizes every position (#277).
         try:
             response = self.client.set_leverage(
                 leverage=self.leverage,
@@ -351,12 +351,27 @@ class BitgetFuturesOrderClass:
                 params=params
             )
         except Exception as e:
-            if not is_already_applied(e):
+            if not leverage_already_set(e):
                 raise
-            response = {}
-
-        if isinstance(response, dict):
-            require_leverage_applied(self.symbol, self.leverage, response.get("leverage"))
+        else:
+            # ccxt returns bitget's raw body, which reports the applied leverage per
+            # side under `data` and has no top-level `leverage` key. Reading one did
+            # not raise -- it silently confirmed nothing, on every account.
+            # The unified-account route answers `"data": "success"` with no leverage
+            # at all, hence the isinstance rather than a bare index.
+            data = require_dict_response(
+                self.symbol, self.leverage, response
+            ).get("data")
+            if isinstance(data, dict):
+                # Under crossed margin the effective leverage is the cross field; under
+                # isolated the two sides can differ and both size real positions.
+                fields = (
+                    ("crossMarginLeverage",)
+                    if data.get("marginMode") == "crossed"
+                    else ("longLeverage", "shortLeverage")
+                )
+                for field in fields:
+                    require_leverage_applied(self.symbol, self.leverage, data.get(field))
 
         # Set margin mode using CCXT. Read before the try: it was assigned inside it and
         # referenced from the handler, so a failure in to_ccxt() raised NameError from
@@ -773,28 +788,6 @@ class BitgetFuturesOrderClass:
             else:
                 logger.error(f"Error closing position: {str(e)}")
                 return False
-
-    def set_leverage(self, leverage: int) -> bool:
-        """
-        Change leverage for the symbol using CCXT.
-
-        Args:
-            leverage: New leverage value (1-125)
-
-        Returns:
-            bool: True if successful
-        """
-        try:
-            params = {
-                'marginCoin': self.margin_coin,
-            }
-            self.client.set_leverage(leverage, self.symbol, params=params)
-            self.leverage = leverage
-            logger.debug(f"Leverage set to {leverage}x for {self.symbol}")
-            return True
-        except Exception as e:
-            logger.error(f"Error setting leverage: {str(e)}")
-            return False
 
     def set_margin_mode(self, mode: MarginMode) -> bool:
         """
