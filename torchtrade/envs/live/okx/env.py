@@ -70,7 +70,6 @@ class OKXFuturesTradingEnvConfig:
         if self.action_levels is None:
             self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]
 
-        validate_action_levels(self.action_levels)
 
 
 class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
@@ -148,7 +147,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         )
 
         if trade_info["executed"] and trade_info.get("success") is not False:
-            self._record_position_after_trade(desired_action, trade_info.get("target_qty"))
+            self._record_position_after_trade(desired_action, trade_info)
 
         self._wait_for_next_timestamp()
 

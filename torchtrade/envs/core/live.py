@@ -295,21 +295,22 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 f"cannot start an episode on equity of {self.initial_portfolio_value}"
             )
 
-    def _record_position_after_trade(
-        self, desired_action: float, target_qty=None, target_tol: float = 0.0
-    ) -> None:
+    def _record_position_after_trade(self, desired_action: float, trade_info=None) -> None:
         """Record the position the trade RESULTED in, not the side that was sent (#276).
 
         Under fractional sizing a SELL that only trims a long leaves a long; recording it
         as a short makes the next bar's sync see a mismatch the env inflicted on itself.
 
-        `target_qty` is what the action asked for and `target_tol` the smallest divergence
-        worth acting on, so the next bar can tell a partial fill from a complete one.
+        Takes the whole `trade_info` rather than the two size values separately: passed
+        separately, all five call sites forwarded the target and dropped the tolerance,
+        leaving it 0.0 so the next bar called every COMPLETE fill a divergence. One
+        argument cannot be half-passed.
         """
+        trade_info = trade_info or {}
         self.position.current_position = (desired_action > 0) - (desired_action < 0)
         self.position.current_action_level = desired_action
-        self.position.target_qty = target_qty
-        self.position.target_tol = target_tol
+        self.position.target_qty = trade_info.get("target_qty")
+        self.position.target_tol = trade_info.get("target_tol") or 0.0
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""

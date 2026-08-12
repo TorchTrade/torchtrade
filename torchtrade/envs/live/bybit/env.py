@@ -141,7 +141,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         trade_info = self._execute_trade_if_needed(desired_action)
 
         if trade_info["executed"] and trade_info.get("success") is not False:
-            self._record_position_after_trade(desired_action, trade_info.get("target_qty"))
+            self._record_position_after_trade(desired_action, trade_info)
 
         self._wait_for_next_timestamp()
 

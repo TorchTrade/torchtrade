@@ -2049,7 +2049,7 @@ def test_direction_comes_from_the_target_not_the_order_side(desired_action, expe
     the `partial-long` row is the one that was wrong, and it recorded -1.
     """
     env = SimpleNamespace(position=PositionState())
-    TorchTradeLiveEnv._record_position_after_trade(env, desired_action)
+    TorchTradeLiveEnv._record_position_after_trade(env, desired_action, {})
 
     assert env.position.current_position == expected
     assert env.position.current_action_level == desired_action
@@ -2242,3 +2242,38 @@ def test_every_live_env_reports_the_size_it_asked_for(exchange):
 
     assert 'target_qty"] = ' in src, f"{exchange} never reports what its action asked for"
     assert 'target_tol"] = ' in src, f"{exchange} reports no tolerance, so any lot-step"
+
+
+@pytest.mark.parametrize("exchange", ["alpaca", "binance", "bitget", "bybit", "okx"])
+def test_the_size_an_env_reports_actually_reaches_the_position(exchange):
+    """The tolerance was computed in all five envs and DROPPED at every call site.
+
+    `test_every_live_env_reports_the_size_it_asked_for` proved the assignments exist; it
+    could not prove anything read them. Passed as separate arguments, all five forwarded
+    target_qty and forgot target_tol, so the tolerance fell back to POSITION_DUST_EPS
+    (1e-9) -- and lot quantization moves the filled quantity by far more than that, so
+    every COMPLETE fill would have read as a partial one. Exactly the defect the previous
+    round fixed, one layer up.
+    """
+    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+           / "live" / exchange / "env.py").read_text()
+
+    assert "_record_position_after_trade(desired_action, trade_info)" in src, (
+        f"{exchange} does not hand the whole trade_info to the recorder, so a size value "
+        f"it computes can be silently dropped on the way"
+    )
+
+
+def test_the_recorder_takes_one_argument_that_cannot_be_half_passed():
+    """Structural, and deliberately so: the bug was a SIGNATURE that let a caller pass
+    one of two paired values. A test on behaviour cannot see that -- only the shape can."""
+    import inspect as _inspect
+
+    params = list(_inspect.signature(
+        TorchTradeLiveEnv._record_position_after_trade
+    ).parameters)
+
+    assert params == ["self", "desired_action", "trade_info"], (
+        f"the recorder takes {params}; separate size arguments are what let five call "
+        f"sites forward one and drop the other"
+    )
