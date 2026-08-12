@@ -1,6 +1,8 @@
 """#339: the flat-enough threshold was denominated in base-asset units."""
 
 import pandas as pd
+import torch
+from tensordict import TensorDict
 import pytest
 
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
@@ -72,24 +74,47 @@ def test_an_unusable_price_is_refused_where_it_enters(price):
 
 
 
-@pytest.mark.parametrize("price", [100_000.0, 100.0])
-def test_both_engines_agree_across_the_price_regime_the_floor_binds_in(price):
-    """The equivalence harness anchors every fixture at ~$100, and the floor only binds
-    above $1,000 -- so the branch #339 changed was never exercised by it.
+@pytest.mark.parametrize("price", [100_000.0, 0.35], ids=["btc-like", "doge-like"])
+def test_both_engines_close_a_position_worth_less_than_the_floor(price):
+    """Drives BOTH engines, because the previous version of this test named both and
+    imported neither -- the same self-verifying shape as its first draft.
 
-    Measured: at $100k the old base-unit floor skipped 670 of 670 trades and the new one
-    executes all 670. A change that large, in the engines that train policies, had no
-    test crossing the boundary at all.
+    That mattered: the CLOSE exemption was added to the scalar engine only, so a sub-$1
+    position stayed unclosable in the vectorized one and the two disagreed. The
+    equivalence harness anchors every fixture at ~$100 with large positions, so it never
+    reaches this regime.
     """
-    from torchtrade.envs.utils.fractional_sizing import (
-        PositionCalculationParams, calculate_fractional_position,
+    import torch
+
+    from torchtrade.envs.offline import (
+        VectorizedSequentialTradingEnv,
+        VectorizedSequentialTradingEnvConfig,
     )
 
-    qty, notional, side = calculate_fractional_position(PositionCalculationParams(
-        balance=10_000.0, action_value=0.5, current_price=price, leverage=1,
+    idx = pd.date_range("2024-01-01", periods=600, freq="1min")
+    df = pd.DataFrame({"timestamp": idx, "open": price, "high": price * 1.001,
+                       "low": price * 0.999, "close": price, "volume": 10.0})
+
+    scalar = _env_at(price)
+    scalar.position.position_size = 0.50 / price
+    scalar_closed = scalar._execute_fractional_action(0.0, price)["executed"]
+    assert scalar_closed is True, "scalar: a sub-floor position was unclosable"
+
+    vec = VectorizedSequentialTradingEnv(df, VectorizedSequentialTradingEnvConfig(
+        symbol="X", time_frames=["1Minute"], window_sizes=[10], execute_on="1Minute",
+        initial_cash=10_000.0, num_envs=1, action_levels=[0.0, 1.0],
     ))
-    assert notional == pytest.approx(5_000.0)
-    assert qty == pytest.approx(5_000.0 / price)
+    vec.reset()
+    # Fifty cents of position, then command FLAT through the REAL step. Computing the
+    # tolerance in the test instead lets the production line be deleted with the test
+    # green -- which is exactly what happened on the previous draft.
+    vec._position_sizes = torch.full_like(vec._position_sizes, 0.50 / price)
+    td = TensorDict({"action": torch.zeros(1, dtype=torch.long)}, batch_size=[1])
+    vec.step(td)
+
+    assert vec._position_sizes.abs().max().item() == pytest.approx(0.0, abs=1e-12), (
+        "vectorized: a sub-floor position was unclosable"
+    )
 
 
 @pytest.mark.parametrize("price", [100_000.0, 0.35], ids=["btc-like", "doge-like"])

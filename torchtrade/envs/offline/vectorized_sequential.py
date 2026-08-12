@@ -688,6 +688,12 @@ class VectorizedSequentialTradingEnv(EnvBase):
             target_sizes.abs() * POSITION_TOLERANCE_PCT,
             POSITION_TOLERANCE_NOTIONAL / execution_prices.clamp(min=1e-12),
         )
+        # A CLOSE is exempt, exactly as in the scalar engine. The floor answers "is this
+        # resize worth the fee", and going flat is not a resize -- applied to it, a lane
+        # whose position falls under $1 can never close, and account_state keeps reporting
+        # a direction the policy asked to leave. Fixing only the scalar side would put the
+        # two engines in disagreement, which is what the equivalence harness exists to stop.
+        tolerance = torch.where(target_sizes == 0, self._zeros, tolerance)
         within_tol = (target_sizes - self._position_sizes).abs() < tolerance
         hold_tol = need_trade & within_tol & has_position
         need_trade = need_trade & ~hold_tol
