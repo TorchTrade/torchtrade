@@ -160,6 +160,12 @@ def stop_precedes_liquidation(
     # forms found 90 divergences, every one NaN-driven. Unreachable in practice (the
     # sampler guarantees a finite open), and which answer a NaN should get is a real
     # question -- but not one a refactor gets to decide by accident.
+    # No stop set is not a stop that was crossed first. Without this, a short with
+    # stop_loss == 0 satisfies `0 < liq and open < liq` and is exempted from liquidation
+    # entirely -- so the rule carries it, rather than each caller's own guard.
+    if not stop_price > 0:
+        return False
+
     if is_long:
         gapped_past_liquidation = open_price <= liquidation_price
         stop_is_nearer = stop_price > liquidation_price
