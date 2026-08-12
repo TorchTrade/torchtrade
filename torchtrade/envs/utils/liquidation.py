@@ -154,6 +154,16 @@ def stop_precedes_liquidation(
     the divergence this module was created to prevent -- and replay did answer it
     differently, citing the rule #300 replaced.
     """
+    # Spelled as `not (open <= liq)` rather than `open > liq` because the two differ on a
+    # NaN open: the first says "did not gap", the second says "gapped". This is a pure
+    # extraction of the offline rule, so it keeps the offline answer -- a grid over both
+    # forms found 90 divergences, every one NaN-driven. Unreachable in practice (the
+    # sampler guarantees a finite open), and which answer a NaN should get is a real
+    # question -- but not one a refactor gets to decide by accident.
     if is_long:
-        return stop_price > liquidation_price and open_price > liquidation_price
-    return stop_price < liquidation_price and open_price < liquidation_price
+        gapped_past_liquidation = open_price <= liquidation_price
+        stop_is_nearer = stop_price > liquidation_price
+    else:
+        gapped_past_liquidation = open_price >= liquidation_price
+        stop_is_nearer = stop_price < liquidation_price
+    return stop_is_nearer and not gapped_past_liquidation
