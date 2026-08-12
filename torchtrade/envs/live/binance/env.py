@@ -484,8 +484,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         else:
             return self._create_trade_info(executed=False)
 
-        # One exit, so a fourth branch cannot silently skip the target and disable the
-        # partial-fill check: three of these four used to (#276 follow-up).
+        # One exit, so a new branch cannot skip the target and disable the check.
         info = self._execute_market_order(side, amount)
         info["target_qty"] = target_qty
         info["target_tol"] = min_notional / current_price

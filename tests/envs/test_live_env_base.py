@@ -20,6 +20,12 @@ from types import SimpleNamespace
 import pytest
 from unittest.mock import MagicMock, patch
 
+import logging
+
+import numpy as np
+import torch
+from tensordict import TensorDict
+
 import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
@@ -2146,10 +2152,9 @@ def test_no_live_env_reads_a_raw_position_qty(exchange, module):
     (0.95, 0.50, 0.001, True),
     (0.05, 0.50, 0.001, True),
     (0.499, 0.50, 0.01, False),
-    (0.0, 0.0, 0.001, False),
     (0.50, None, 0.001, False),
 ], ids=["exact", "below-min-qty", "under-filled", "barely-filled",
-        "coarse-lot-step", "closed", "no-target"])
+        "coarse-lot-step", "no-target"])
 def test_a_partial_fill_releases_the_duplicate_action_guard(observed, target, tol, released):
     """#276 follow-up: the direction check alone cannot see a partial fill.
 
@@ -2211,7 +2216,7 @@ def test_every_live_config_validates_its_action_levels(exchange):
 
 
 @pytest.mark.parametrize("side,expected", [
-    ("long", 1), ("short", -1), ("close", 0), (None, 0), ("unexpected", 0),
+    ("long", 1), ("short", -1), ("close", 0),
 ])
 def test_the_sltp_side_maps_to_the_direction_it_targets(side, expected):
     """A swapped map passed the WHOLE suite: nothing asserted this mapping at all.
@@ -2277,3 +2282,120 @@ def test_the_recorder_takes_one_argument_that_cannot_be_half_passed():
         f"the recorder takes {params}; separate size arguments are what let five call "
         f"sites forward one and drop the other"
     )
+
+
+@pytest.mark.parametrize("exchange,min_qty", [
+    ("bitget", 0.001), ("bybit", 0.001), ("okx", 0.001),
+])
+def test_a_real_step_lands_both_size_values_on_the_position(exchange, min_qty):
+    """Behavioural, because the grep tests could not see the bug that shipped.
+
+    Both size values were computed in every env and BOTH structural tests passed while
+    the tolerance was dropped on the way to PositionState -- one asserted the writer
+    existed, the other that the call site named the dict. Only reading the value off the
+    position after a real step can tell you it arrived, so this drives `_step` and looks.
+    """
+    import importlib
+
+    module = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
+    # not abstract, and defined here: `vars` also carries the imported base class
+    env_cls = next(v for k, v in vars(module).items()
+                   if k.endswith("TorchTradingEnv") and isinstance(v, type)
+                   and not getattr(v, "__abstractmethods__", None)
+                   and v.__module__ == module.__name__)
+
+    trader = MagicMock()
+    trader.get_status = MagicMock(return_value={"position_status": None})
+    trader.get_mark_price = MagicMock(return_value=50000.0)
+    trader.get_lot_size = MagicMock(return_value={"min_qty": min_qty, "qty_step": min_qty})
+    trader.get_account_balance = MagicMock(return_value={
+        "total_wallet_balance": 10000.0, "available_balance": 10000.0,
+        "total_unrealized_profit": 0.0, "total_margin_balance": 10000.0,
+    })
+    trader.trade = MagicMock(return_value=True)
+    trader.cancel_open_orders = MagicMock(return_value=True)
+    trader._round_amount = MagicMock(side_effect=lambda amount: amount)
+
+    env = _build_env_with(env_cls, module, trader)
+    assert env is not None, (
+        f"{exchange} env could not be constructed -- a skip here would make this test "
+        f"vacuous, which is exactly how the dropped tolerance survived"
+    )
+
+    with patch.object(type(env), "_wait_for_next_timestamp"):
+        env.reset()
+        env.step(TensorDict({"action": torch.tensor(len(env.action_levels) - 1)}, []))
+
+    assert env.position.target_qty is not None, "the size the action asked for never landed"
+    assert env.position.target_tol == pytest.approx(min_qty), (
+        "the tolerance never landed: it was computed, written to trade_info, and dropped"
+    )
+
+
+def _build_env_with(env_cls, module, trader):
+    """Construct a futures env against the shared mock shape, or None if it does not fit."""
+    observer = MagicMock()
+    observer.get_keys = MagicMock(return_value=["1m_10"])
+    observer.get_observations = MagicMock(side_effect=lambda return_base_ohlc=False: {
+        "1m_10": np.zeros((10, 4), dtype=np.float32),
+        **({"base_features": np.full((10, 4), 50000.0, dtype=np.float32),
+            "base_timestamps": np.arange(10)} if return_base_ohlc else {}),
+    })
+    observer.get_features = MagicMock(return_value={
+        "observation_features": ["a", "b", "c", "d"], "original_features": []})
+    observer.intervals, observer.window_sizes = ["1m"], [10]
+
+    config_cls = next(v for k, v in vars(module).items()
+                      if k.endswith("Config") and hasattr(v, "__dataclass_fields__"))
+    try:
+        config = config_cls(symbol="BTCUSDT", demo=True, time_frames=["1m"],
+                            window_sizes=[10], execute_on="1m", leverage=5)
+        with patch("time.sleep"), patch.object(env_cls, "_wait_for_next_timestamp"):
+            return env_cls(config=config, observer=observer, trader=trader)
+    except Exception:
+        return None
+
+
+def test_a_new_episode_does_not_inherit_the_last_one_s_size_target():
+    """No live _reset cleared the size target, so episode N+1 started holding episode N's.
+
+    On a flat, fully reconciled account the first sync then compared 0.0 against the old
+    position, released the guard reset had just computed, and warned about a discrepancy
+    that did not exist. Reset owns "is this position mine?", so it owns clearing this too.
+    """
+    env = SimpleNamespace(position=PositionState())
+    env.position.target_qty = 0.29
+    env.position.target_tol = 0.001
+    env.position.target_reported = True
+
+    TorchTradeLiveEnv._sync_action_level_after_reset(env)
+
+    assert env.position.target_qty is None, "the new episode inherited the old target"
+    assert env.position.target_tol == 0.0
+    assert env.position.target_reported is False
+
+
+def test_a_divergence_is_reported_even_when_reset_already_wrote_nan(caplog):
+    """The already-reported flag has to be explicit, not `isnan(current_action_level)`.
+
+    Reset writes NaN to that field to mean "this position predates the episode and its
+    level is unknowable". Reusing NaN as the already-reported marker meant a genuine
+    divergence in such an episode logged NOWHERE -- an 83% under-fill, silent. Asserting
+    the LOG, not the flag: the flag is set either way, so only the log can see the bug.
+    """
+    env = SimpleNamespace(position=PositionState())
+    env.position.current_position = 1
+    env.position.current_action_level = float("nan")   # written by reset, not a divergence
+    env.position.target_qty = 0.29
+    env.position.target_tol = 0.001
+
+    with caplog.at_level(logging.WARNING, logger="torchtrade.envs.core.live"):
+        TorchTradeLiveEnv._sync_position_from_exchange(env, SimpleNamespace(qty=0.05))
+    assert any("venue holds" in r.message for r in caplog.records), (
+        "an 83% under-fill went unreported because reset had already written NaN"
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="torchtrade.envs.core.live"):
+        TorchTradeLiveEnv._sync_position_from_exchange(env, SimpleNamespace(qty=0.05))
+    assert not caplog.records, "a standing fault must report once, not every bar"

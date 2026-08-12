@@ -177,6 +177,9 @@ class PositionState:
     # cannot be corrected by placing an order. None when the env has not traded.
     target_qty: Optional[float] = None
     target_tol: float = 0.0
+    # Whether the current divergence has been logged, so a standing fault reports once
+    # without borrowing NaN, which already means something else on current_action_level.
+    target_reported: bool = False
 
     def reset(self):
         """Reset all position state to initial values."""

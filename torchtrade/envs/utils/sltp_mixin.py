@@ -25,11 +25,7 @@ class SLTPMixin:
     SIDE_DIRECTION = {"long": 1, "short": -1}
 
     def _record_sltp_position(self, side) -> None:
-        """The position the ACTION targets, never the order side (#276).
-
-        binance and bitget had their close branch behind an elif that always matched
-        first, so an SLTP close could never be recorded at all.
-        """
+        """The position the ACTION targets, never the order side (#276)."""
         self.position.current_position = self.SIDE_DIRECTION.get(side, 0)
 
     def _sync_position_from_exchange(self, position_status) -> bool:

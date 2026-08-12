@@ -299,8 +299,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         # Execute trade
         try:
             success = self.trader.trade(side=side, amount=amount, order_type="market")
-            # Set here, not per-branch: alpaca reported no target at all, so the
-            # partial-fill check was dead on this env.
+            # Set once here rather than per-branch, so no branch can skip it.
             trade_info["target_qty"] = target_qty
             trade_info["target_tol"] = min_trade_value / current_price
             trade_info.update({

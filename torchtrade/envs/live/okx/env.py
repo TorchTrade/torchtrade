@@ -70,6 +70,7 @@ class OKXFuturesTradingEnvConfig:
         if self.action_levels is None:
             self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]
 
+        validate_action_levels(self.action_levels)
 
 
 class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
