@@ -19,7 +19,11 @@ class PositionCalculationParams:
 # Tolerance needs to be large enough to avoid churn from normal price fluctuations
 # When using portfolio_value for position sizing, small price changes cause target to drift
 POSITION_TOLERANCE_PCT = 0.02  # 2% - relative tolerance as fraction of target position
-POSITION_TOLERANCE_ABS = 0.001  # Absolute minimum tolerance for very small positions
+# The floor, in QUOTE currency. Denominated in notional rather than base units because
+# the same base-unit constant meant wildly different things per asset: 0.001 was $100 of
+# unclosed position on BTC at $100k -- 1% of a $10k account treated as flat -- and
+# $0.0000 on an asset priced in cents (#339). One dollar means one dollar everywhere.
+POSITION_TOLERANCE_NOTIONAL = 1.0
 
 # Affordability slack for "can I open this position?": notional = PV / fee_multiplier *
 # leverage, then margin = notional / leverage and fee = notional * fee_rate -- a round-trip
@@ -60,9 +64,13 @@ def calculate_fractional_position(params: PositionCalculationParams) -> Tuple[fl
         >>> assert abs(pos_size - 0.5) < 0.01
         >>> assert side == "long"
     """
+
     # Handle neutral case
     if params.action_value == 0.0:
         return 0.0, 0.0, "flat"
+
+    if not 0 < params.current_price < float("inf"):
+        raise ValueError(f"cannot size a position at a price of {params.current_price}")
 
     # Calculate fraction and direction
     fraction = abs(params.action_value)
@@ -147,24 +155,3 @@ def validate_action_levels(action_levels: list[float]) -> None:
         raise ValueError(
             f"action_levels must contain at least 2 actions, got {len(action_levels)}"
         )
-
-
-def round_to_step_size(quantity: float, step_size: float) -> float:
-    """Round quantity to exchange step size.
-
-    Args:
-        quantity: Quantity to round
-        step_size: Exchange step size (e.g., 0.001 for BTC)
-
-    Returns:
-        Rounded quantity
-
-    Examples:
-        >>> round_to_step_size(0.1234, 0.001)
-        0.123
-        >>> round_to_step_size(1.9999, 0.01)
-        2.0
-    """
-    if step_size == 0:
-        return quantity
-    return round(quantity / step_size) * step_size

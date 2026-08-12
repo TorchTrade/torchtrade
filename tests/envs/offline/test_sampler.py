@@ -199,26 +199,6 @@ class TestAuxiliaryColumns:
         obs, _, _ = sampler.get_sequential_observation()
         assert obs["5Minute"].shape == (window_size, 7)
 
-    def test_ohlcv_positional_contract_with_shuffled_input(self, ohlcv_with_aux_df):
-        """OHLCV must be first 5 columns and row[:5] slicing must return prices, not aux data."""
-        # Shuffle column order — OHLCV should still come first
-        shuffled = ohlcv_with_aux_df[["timestamp", "basis", "volume", "close", "funding_rate", "open", "high", "low"]]
-        sampler = MarketDataObservationSampler(
-            df=shuffled,
-            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
-            window_sizes=10,
-            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-        )
-        assert list(sampler.df.columns[:5]) == ["open", "high", "low", "close", "volume"]
-        # Verify row[:5] slicing returns OHLCV, not aux data
-        sampler.reset()
-        _, _, _, ohlcv = sampler.get_sequential_observation_with_ohlcv()
-        assert ohlcv.open > 50  # Prices start at ~100, not funding_rate ~0.001
-        assert ohlcv.close > 50
-        assert ohlcv.volume == 1000
-        # Positions 1 and 2 specifically: the vectorized envs read high/low by hardcoded
-        # column index, so swapping them in ohlcv_agg would invert every SL/TP check.
-        assert ohlcv.high >= ohlcv.close >= ohlcv.low
 
     def test_auxiliary_resampling_uses_last(self, ohlcv_with_aux_df):
         """Auxiliary columns should use 'last' aggregation when resampled."""
@@ -484,54 +464,6 @@ class TestSamplerBaseFeatures:
         bar = sampler.get_base_features(bar_start)
         assert bar["low"] == pytest.approx(42.0)
         assert bar["high"] > bar["low"], "a bar that traded must not be flattened"
-
-
-class TestSamplerHelperMethods:
-    """Tests for helper methods."""
-
-    def test_get_observation_keys(
-        self, sample_ohlcv_df, default_timeframes, default_window_sizes, execute_timeframe
-    ):
-        """get_observation_keys should return correct timeframe keys."""
-        sampler = MarketDataObservationSampler(
-            df=sample_ohlcv_df,
-            time_frames=default_timeframes,
-            window_sizes=default_window_sizes,
-            execute_on=execute_timeframe,
-        )
-
-        keys = sampler.get_observation_keys()
-        assert len(keys) == len(default_timeframes)
-        assert "1Minute" in keys
-        assert "5Minute" in keys
-
-    def test_get_max_steps(
-        self, sample_ohlcv_df, default_timeframes, default_window_sizes, execute_timeframe
-    ):
-        """get_max_steps should return a positive integer."""
-        sampler = MarketDataObservationSampler(
-            df=sample_ohlcv_df,
-            time_frames=default_timeframes,
-            window_sizes=default_window_sizes,
-            execute_on=execute_timeframe,
-        )
-
-        max_steps = sampler.get_max_steps()
-        assert isinstance(max_steps, int)
-        assert max_steps > 0
-
-    def test_get_max_steps_respects_max_traj_length(self, sample_ohlcv_df, execute_timeframe):
-        """get_max_steps should not exceed max_traj_length."""
-        max_traj = 50
-        sampler = MarketDataObservationSampler(
-            df=sample_ohlcv_df,
-            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
-            window_sizes=10,
-            execute_on=execute_timeframe,
-            max_traj_length=max_traj,
-        )
-
-        assert sampler.get_max_steps() <= max_traj
 
 
 class TestSamplerExactValues:

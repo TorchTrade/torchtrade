@@ -26,7 +26,7 @@ from torchtrade.envs.utils.fractional_sizing import (
     validate_action_levels,
     AFFORDABILITY_REL_TOL,
     POSITION_TOLERANCE_PCT,
-    POSITION_TOLERANCE_ABS,
+    POSITION_TOLERANCE_NOTIONAL,
 )
 
 from torchtrade.envs.core.common_types import MarginType
@@ -87,7 +87,7 @@ class VectorizedSequentialTradingEnvConfig:
             raise ValueError(
                 f"Transaction fee must be between 0 and 1, got {self.transaction_fee}"
             )
-        if not (0 <= self.slippage <= 1):
+        if not (0 <= self.slippage < 1):
             raise ValueError(
                 f"Slippage must be between 0 and 1, got {self.slippage}"
             )
@@ -684,9 +684,12 @@ class VectorizedSequentialTradingEnv(EnvBase):
         target_sizes = torch.where(action_values == 0, self._zeros, target_sizes)
 
         # Tolerance check: avoid churn from small position changes
-        tolerance = (target_sizes.abs() * POSITION_TOLERANCE_PCT).clamp(
-            min=POSITION_TOLERANCE_ABS
+        tolerance = torch.maximum(
+            target_sizes.abs() * POSITION_TOLERANCE_PCT,
+            POSITION_TOLERANCE_NOTIONAL / execution_prices,
         )
+        # A CLOSE is exempt, as in the scalar engine (#339).
+        tolerance = torch.where(target_sizes == 0, self._zeros, tolerance)
         within_tol = (target_sizes - self._position_sizes).abs() < tolerance
         hold_tol = need_trade & within_tol & has_position
         need_trade = need_trade & ~hold_tol

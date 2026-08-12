@@ -19,9 +19,7 @@ class MarginType(Enum):
 class OrderStatus:
     """Standard order status structure across exchanges."""
     is_open: bool
-    order_id: Optional[str]
     filled_qty: Optional[float]
     filled_avg_price: Optional[float]
     status: str
     side: str
-    order_type: str

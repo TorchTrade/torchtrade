@@ -1,4 +1,3 @@
-from collections import namedtuple
 from typing import Dict, List, Optional, Tuple, Union, Callable, Sequence
 import logging
 import warnings
@@ -12,10 +11,6 @@ from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, tf_to_time
 FeatureProcessingFn = Optional[Union[Callable, Sequence[Callable]]]
 
 logger = logging.getLogger(__name__)
-
-# PERF: NamedTuple is faster than dict for attribute access
-OHLCV = namedtuple('OHLCV', ['open', 'high', 'low', 'close', 'volume'])
-
 
 def _bounded(value, limit: int = 60) -> str:
     """Bound the index, the one field of the malformed-OHLC message with no natural size.
@@ -433,29 +428,6 @@ class MarketDataObservationSampler:
 
         return obs
 
-    def get_sequential_observation_with_ohlcv(self) -> Tuple[Dict[str, torch.Tensor], pd.Timestamp, bool, OHLCV]:
-        """
-        Get observation AND base OHLCV in one call using index-based tracking.
-
-        Returns:
-            (observation_dict, timestamp, truncated, ohlcv_namedtuple)
-        """
-        if self._sequential_idx >= self._end_idx:
-            raise ValueError("No more timestamps available. Call reset() before continuing.")
-
-        timestamp = pd.Timestamp(self._exec_times_arr[self._sequential_idx])
-
-        # Check if this is the last step
-        truncated = (self._sequential_idx + 1) >= self._end_idx
-
-        obs = self._get_observation_sequential(self._sequential_idx)
-
-        row = self.execute_base_tensor[self._sequential_idx]
-        vals = row[:5].tolist()
-        ohlcv = OHLCV(vals[0], vals[1], vals[2], vals[3], vals[4])
-        self._sequential_idx += 1
-
-        return obs, timestamp, truncated, ohlcv
 
     def _search_ts(self, key: str, exec_ts_ns):
         """Where to look `key` up, given an execution bin's start label.
@@ -524,8 +496,6 @@ class MarketDataObservationSampler:
 
         return obs
 
-    def get_max_steps(self) -> int:
-        return self.max_steps
 
     def get_observation_keys(self) -> List[str]:
         return list(self.resampled_dfs.keys())

@@ -427,26 +427,6 @@ class TestPositionStatusDataclass:
         assert pos.leverage == 10
 
 
-class TestOrderStatusDataclass:
-    """Tests for OrderStatus dataclass."""
-
-    def test_order_status_creation(self):
-        """Test creating OrderStatus."""
-        from torchtrade.envs.live.binance.order_executor import OrderStatus
-
-        order = OrderStatus(
-            is_open=False,
-            order_id="12345",
-            filled_qty=0.001,
-            filled_avg_price=50000.0,
-            status="FILLED",
-            side="BUY",
-            order_type="MARKET",
-        )
-
-        assert order.is_open is False
-        assert order.filled_qty == 0.001
-
 
 class TestBinanceLotSizeRounding:
     """#271: binance parsed only PRICE_FILTER, so every quantity went out as

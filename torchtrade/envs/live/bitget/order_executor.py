@@ -504,12 +504,10 @@ class BitgetFuturesOrderClass:
                 if order:
                     status["order_status"] = OrderStatus(
                         is_open=order['status'] not in ['closed', 'canceled', 'expired'],
-                        order_id=str(order.get('id', '')),
                         filled_qty=float(order.get('filled', 0)),
                         filled_avg_price=float(order.get('average', 0)),
                         status=order.get('status', 'unknown'),
                         side=order.get('side', 'unknown'),
-                        order_type=order.get('type', 'unknown'),
                     )
 
             # Get position status using CCXT

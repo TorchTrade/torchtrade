@@ -37,7 +37,7 @@ from torchtrade.envs.utils.fractional_sizing import (
     validate_action_levels,
     AFFORDABILITY_REL_TOL,
     POSITION_TOLERANCE_PCT,
-    POSITION_TOLERANCE_ABS,
+    POSITION_TOLERANCE_NOTIONAL,
 )
 from torchtrade.envs.core.common_types import MarginType
 from torchtrade.envs.utils.liquidation import (
@@ -687,11 +687,24 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             self._calculate_fractional_position(action_value, execution_price)
         )
 
-        # Tolerance for position comparison
-        tolerance = max(abs(target_position_size) * POSITION_TOLERANCE_PCT, POSITION_TOLERANCE_ABS)
+        # A CLOSE is exempt: going flat is not a resize, and a sub-$1 position must
+        # stay closable (#339).
+        tolerance = (
+            0.0 if target_position_size == 0.0
+            else max(
+                abs(target_position_size) * POSITION_TOLERANCE_PCT,
+                POSITION_TOLERANCE_NOTIONAL / execution_price,
+            )
+        )
 
         # Check if already at target position (implicit hold)
-        if abs(target_position_size - self.position.position_size) < tolerance:
+        # `position_size != 0` mirrors the vectorized engine's `has_position` term. The
+        # floor asks whether a RESIZE is worth the fee; an open from flat is not a resize
+        # any more than a close is. Without it the two engines disagreed on every open
+        # worth under $1 -- and the scalar could never re-enter, an absorbing dead state.
+        if self.position.position_size != 0 and (
+            abs(target_position_size - self.position.position_size) < tolerance
+        ):
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Execute appropriate position change
@@ -781,10 +794,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         """Adjust existing position size (same direction)."""
         delta_position = target_position_size - self.position.position_size
         delta_notional = abs(delta_position * execution_price)
-
-        # Check if delta is negligible
-        if abs(delta_position) < POSITION_TOLERANCE_ABS:
-            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Determine if increasing or decreasing
         is_increasing = abs(target_position_size) > abs(self.position.position_size)
