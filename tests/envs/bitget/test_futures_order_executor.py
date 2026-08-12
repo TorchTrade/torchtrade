@@ -242,9 +242,32 @@ class TestBitgetFuturesOrderClass:
         assert "available_balance" in balance
         assert "total_unrealized_profit" in balance
         assert "total_margin_balance" in balance
+        assert balance["total_maintenance_margin"] is None
 
         assert balance["total_wallet_balance"] == 1000.0
         assert balance["available_balance"] == 900.0
+
+    @pytest.mark.parametrize("info,expected", [
+        ([
+            {"marginCoin": "USDC", "assetMode": "union", "unionMm": "99"},
+            {"marginCoin": "USDT", "assetMode": "union", "unionMm": "4.4"},
+        ], 4.4),
+        ([{"marginCoin": "USDT", "assetMode": "union", "unionMm": "0"}], 0.0),
+        ([{
+            "marginCoin": "USDT",
+            "assetMode": "single",
+            "crossedRiskRate": "0.25",
+        }], None),
+        ({"marginCoin": "USDT", "assetMode": "union", "unionMm": "2.5"}, 2.5),
+    ], ids=["list-union", "explicit-zero", "single-unavailable", "mapping-compat"])
+    def test_get_account_balance_parses_union_maintenance(
+        self, order_executor, mock_ccxt_client, info, expected
+    ):
+        raw_balance = mock_ccxt_client.fetch_balance.return_value.copy()
+        raw_balance["info"] = info
+        mock_ccxt_client.fetch_balance.return_value = raw_balance
+
+        assert order_executor.get_account_balance()["total_maintenance_margin"] == expected
 
     def test_get_mark_price(self, order_executor, mock_ccxt_client):
         """Test getting mark price."""

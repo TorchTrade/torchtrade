@@ -14,6 +14,10 @@ def mock_pybit_client():
     client.set_leverage = MagicMock(return_value={"retCode": 0})
     client.switch_margin_mode = MagicMock(return_value={"retCode": 0})
     client.switch_position_mode = MagicMock(return_value={"retCode": 0})
+    client.get_account_info = MagicMock(return_value={
+        "retCode": 0,
+        "result": {"marginMode": "ISOLATED_MARGIN", "unifiedMarginStatus": 5},
+    })
 
     # Mock order placement
     client.place_order = MagicMock(return_value={

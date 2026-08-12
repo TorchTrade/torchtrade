@@ -933,7 +933,7 @@ def _futures_env_stub(position_status, balance, leverage=5):
 
 
 def _open_position(qty, *, entry_price=100.0, mark_price=100.0, leverage=20,
-                   liquidation_price=0.0):
+                   liquidation_price=0.0, margin_mode="isolated"):
     return SimpleNamespace(
         qty=qty,
         notional_value=qty * mark_price,
@@ -942,6 +942,7 @@ def _open_position(qty, *, entry_price=100.0, mark_price=100.0, leverage=20,
         unrealized_pnl_pct=0.0,
         leverage=leverage,
         liquidation_price=liquidation_price,
+        margin_mode=margin_mode,
     )
 
 
@@ -954,10 +955,13 @@ def test_cross_margin_position_without_liq_price_does_not_read_as_flat(qty, expe
 
     `liquidation_price <= 0` then took the same branch as "no position at all" and
     reported 1.0 -- a 20x position four percent from liquidation reading exactly as safe
-    as a flat spot account. Asserts the isolated-margin estimate, not merely "< 1.0", so
-    a fallback that returns any arbitrary smaller number still fails.
+    as a flat spot account. The aggregate equals the focal maintenance here, so the
+    account-aware and single-position cross formulas reduce to the same expected value.
     """
-    env = _futures_env_stub(_open_position(qty), {"total_margin_balance": 1000.0})
+    env = _futures_env_stub(
+        _open_position(qty, margin_mode="cross"),
+        {"total_margin_balance": 1000.0, "total_maintenance_margin": 0.4},
+    )
     obs = TorchTradeFuturesLiveEnv._get_observation(env)
     distance = obs["account_state"][5].item()
 
@@ -1182,7 +1186,8 @@ def test_depleted_collateral_prices_liquidation_nearer_than_isolated(qty, expect
     reintroduced one level down.
     """
     env = _futures_env_stub(
-        _open_position(qty, leverage=20), {"total_margin_balance": 2.0}
+        _open_position(qty, leverage=20, margin_mode="cross"),
+        {"total_margin_balance": 2.0, "total_maintenance_margin": 0.4},
     )
     obs = TorchTradeFuturesLiveEnv._get_observation(env)
     distance = obs["account_state"][5].item()
@@ -1202,7 +1207,8 @@ def test_amply_funded_account_falls_back_to_the_isolated_estimate(qty):
     the isolated bound in exactly that case.
     """
     env = _futures_env_stub(
-        _open_position(qty, leverage=20), {"total_margin_balance": 1_000_000.0}
+        _open_position(qty, leverage=20, margin_mode="cross"),
+        {"total_margin_balance": 1_000_000.0, "total_maintenance_margin": 0.4},
     )
     obs = TorchTradeFuturesLiveEnv._get_observation(env)
 
@@ -1213,13 +1219,149 @@ def test_amply_funded_account_falls_back_to_the_isolated_estimate(qty):
     ({"mark_price": 0.0}, "mark_price must be positive"),
     ({"mark_price": float("nan")}, "mark_price must be positive"),
     ({"position_size": 0.0}, "flat position has no liquidation price"),
-], ids=["zero-mark", "nan-mark", "flat"])
+    ({"equity": 0.0}, "equity must be positive"),
+    ({"total_account_maintenance": float("inf")}, "finite non-negative"),
+    ({"maintenance_margin_rate": 1.0}, "degenerate denominator"),
+], ids=["zero-mark", "nan-mark", "flat", "zero-equity", "infinite-maintenance", "degenerate"])
 def test_cross_estimate_refuses_inputs_it_cannot_price(kwargs, match):
     """Same contract as the isolated helper: never hand back a number that reads as safe."""
-    args = {"position_size": 1.0, "mark_price": 100.0, "equity": 5.0}
+    args = {
+        "position_size": 1.0,
+        "mark_price": 100.0,
+        "equity": 5.0,
+        "total_account_maintenance": 0.4,
+    }
     args.update(kwargs)
     with pytest.raises(ValueError, match=match):
         cross_liquidation_price(**args)
+
+
+@pytest.mark.parametrize("qty,expected_price", [
+    (1.0, 99.0 / 0.996),
+    (-1.0, 101.0 / 1.004),
+], ids=["long", "short"])
+def test_cross_estimate_includes_other_account_maintenance(qty, expected_price):
+    """#344: other obligations move both long and short liquidation nearer the mark."""
+    env = _futures_env_stub(
+        _open_position(qty, margin_mode="cross"),
+        {"total_margin_balance": 5.0, "total_maintenance_margin": 4.4},
+    )
+
+    distance = TorchTradeFuturesLiveEnv._get_observation(env)["account_state"][5].item()
+
+    assert distance == pytest.approx(abs(expected_price - 100.0) / 100.0, rel=1e-5)
+
+
+@pytest.mark.parametrize("qty", [1.0, -1.0], ids=["long", "short"])
+def test_no_other_obligation_matches_single_position_cross_formula(qty):
+    """When aggregate maintenance equals the focal term, #344 reduces to #342."""
+    expected_price = (qty * 100.0 - 5.0) / (qty - 0.004 * abs(qty))
+    actual = cross_liquidation_price(
+        position_size=qty,
+        mark_price=100.0,
+        equity=5.0,
+        total_account_maintenance=0.4,
+    )
+    assert actual == pytest.approx(expected_price)
+
+
+@pytest.mark.parametrize("maintenance", [None, float("nan")], ids=["missing", "nan"])
+def test_cross_position_without_usable_aggregate_maintenance_fails_closed(maintenance):
+    env = _futures_env_stub(
+        _open_position(1.0, margin_mode="cross"),
+        {"total_margin_balance": 5.0, "total_maintenance_margin": maintenance},
+    )
+
+    with pytest.raises(ValueError, match="maintenance"):
+        TorchTradeFuturesLiveEnv._get_observation(env)
+
+
+def test_cross_position_without_aggregate_maintenance_key_fails_closed():
+    env = _futures_env_stub(
+        _open_position(1.0, margin_mode="cross"),
+        {"total_margin_balance": 5.0},
+    )
+
+    with pytest.raises(KeyError, match="total_maintenance_margin"):
+        TorchTradeFuturesLiveEnv._get_observation(env)
+
+
+def test_isolated_missing_liquidation_price_does_not_require_account_maintenance():
+    env = _futures_env_stub(
+        _open_position(1.0, margin_mode="isolated"),
+        {"total_margin_balance": 5.0},
+    )
+    distance = TorchTradeFuturesLiveEnv._get_observation(env)["account_state"][5].item()
+    assert distance == pytest.approx(0.046, rel=1e-5)
+
+
+@pytest.mark.parametrize("field,label", [
+    ("margin_type", "CROSSED"),  # Binance
+    ("margin_mode", "cross"),    # OKX
+    ("margin_mode", "crossed"),  # Bitget
+], ids=["binance", "okx", "bitget"])
+def test_concrete_adapter_cross_labels_route_to_account_aware_estimate(field, label):
+    position = _open_position(1.0)
+    delattr(position, "margin_mode")
+    setattr(position, field, label)
+    env = _futures_env_stub(
+        position,
+        {"total_margin_balance": 5.0, "total_maintenance_margin": 4.4},
+    )
+
+    distance = TorchTradeFuturesLiveEnv._get_observation(env)["account_state"][5].item()
+
+    assert distance == pytest.approx(abs(99.0 / 0.996 - 100.0) / 100.0, rel=1e-5)
+
+
+@pytest.mark.parametrize("account_mode,expected", [
+    ("isolated", 0.046),
+    ("cross", abs(99.0 / 0.996 - 100.0) / 100.0),
+], ids=["uta-isolated", "uta-regular"])
+def test_bybit_v5_trade_mode_zero_routes_by_normalized_account_mode(account_mode, expected):
+    """Modern Bybit UTA tradeMode=0 must not decide isolated-vs-cross routing."""
+    from torchtrade.envs.live.bybit.order_executor import PositionStatus
+
+    position = PositionStatus(
+        qty=1.0,
+        notional_value=100.0,
+        entry_price=100.0,
+        unrealized_pnl=0.0,
+        unrealized_pnl_pct=0.0,
+        mark_price=100.0,
+        leverage=20,
+        margin_mode=account_mode,
+        liquidation_price=0.0,
+    )
+    balance = {"total_margin_balance": 5.0}
+    if account_mode == "cross":
+        balance["total_maintenance_margin"] = 4.4
+
+    distance = TorchTradeFuturesLiveEnv._get_observation(
+        _futures_env_stub(position, balance)
+    )["account_state"][5].item()
+
+    assert distance == pytest.approx(expected, rel=1e-5)
+
+
+@pytest.mark.parametrize("margin_mode", [None, "portfolio", "NEW_MODE"])
+def test_blank_liquidation_price_with_unknown_margin_mode_fails_closed(margin_mode):
+    env = _futures_env_stub(
+        _open_position(1.0, margin_mode=margin_mode),
+        {"total_margin_balance": 5.0, "total_maintenance_margin": 4.4},
+    )
+
+    with pytest.raises(ValueError, match="margin mode"):
+        TorchTradeFuturesLiveEnv._get_observation(env)
+
+
+def test_native_liquidation_price_remains_authoritative_for_cross_positions():
+    env = _futures_env_stub(
+        _open_position(1.0, liquidation_price=98.0, margin_mode="cross"),
+        {"total_margin_balance": 5.0, "total_maintenance_margin": None},
+    )
+    distance = TorchTradeFuturesLiveEnv._get_observation(env)["account_state"][5].item()
+    assert distance == pytest.approx(0.02)
 
 
 @pytest.mark.parametrize("leverage,match", [

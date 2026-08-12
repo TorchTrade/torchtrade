@@ -374,11 +374,15 @@ class BinanceFuturesOrderClass:
         """
         try:
             account = self.client.futures_account()
+            maintenance = account.get("totalMaintMargin")
             return {
                 "total_wallet_balance": float(account["totalWalletBalance"]),
                 "available_balance": float(account["availableBalance"]),
                 "total_unrealized_profit": float(account["totalUnrealizedProfit"]),
                 "total_margin_balance": float(account["totalMarginBalance"]),
+                "total_maintenance_margin": (
+                    float(maintenance) if maintenance not in (None, "") else None
+                ),
             }
         except Exception as e:
             logger.error(f"Error getting account balance: {str(e)}")
