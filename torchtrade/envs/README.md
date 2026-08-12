@@ -43,7 +43,7 @@ env = SequentialTradingEnv(df=your_dataframe, config=config)
 ### Live Trading
 
 ```python
-from torchtrade.envs import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 
 # Create an Alpaca live trading environment
 config = AlpacaTradingEnvConfig(
@@ -126,8 +126,8 @@ Import directly from submodules when needed:
 ```python
 # Also good - direct imports
 from torchtrade.envs.offline import SequentialTradingEnv
-from torchtrade.envs.live.binance import BinanceFuturesTorchTradingEnv
-from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv
+from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv
+from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv
 ```
 
 ## Environment Types

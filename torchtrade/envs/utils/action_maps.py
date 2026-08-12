@@ -120,7 +120,3 @@ def create_alpaca_sltp_action_map(
         alpaca_map[idx] = (sl, tp)
 
     return alpaca_map
-
-
-# Backward compatibility aliases
-combinatory_action_map = create_alpaca_sltp_action_map

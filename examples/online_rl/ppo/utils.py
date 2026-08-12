@@ -27,7 +27,12 @@ from torchrl.modules import (
 from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 from torchtrade.models import BatchNormMLP
 
-from torchtrade.envs import SequentialTradingEnv, SequentialTradingEnvConfig, SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
+from torchtrade.envs import (
+    SequentialTradingEnv,
+    SequentialTradingEnvConfig,
+    SequentialTradingEnvSLTP,
+    SequentialTradingEnvSLTPConfig,
+)
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS
@@ -102,26 +107,6 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
             random_start=random_start
         )
         return SequentialTradingEnvSLTP(df, config, feature_preprocessing_fn=custom_preprocessing)
-    elif cfg.env.name == "OneStepTradingEnv":
-        config = OneStepTradingEnvConfig(
-            symbol=cfg.env.symbol,
-            time_frames=cfg.env.time_frames,
-            window_sizes=cfg.env.window_sizes,
-            execute_on=cfg.env.execute_on,
-            include_base_features=False,
-            initial_cash=cfg.env.initial_cash,
-            slippage=cfg.env.slippage,
-            transaction_fee=cfg.env.transaction_fee,
-            bankrupt_threshold=cfg.env.bankrupt_threshold,
-            seed=cfg.env.seed,
-            leverage=cfg.env.leverage,
-            stoploss_levels=cfg.env.stoploss_levels,
-            takeprofit_levels=cfg.env.takeprofit_levels,
-            include_hold_action=cfg.env.include_hold_action,
-            quantity_per_trade=cfg.env.quantity_per_trade,
-            trade_mode=cfg.env.trade_mode,
-        )
-        return OneStepTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
     else:
         raise ValueError(f"Unknown environment: {cfg.env.name}")
 

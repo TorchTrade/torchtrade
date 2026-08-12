@@ -350,50 +350,6 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
 
         return obs
 
-    def _get_portfolio_value(self, current_price: Optional[float] = None) -> float:
-        """
-        Calculate total portfolio value for offline environments.
-
-        Formula: balance + position_size * current_price
-
-        Args:
-            current_price: Current asset price. If None, fetches from sampler.
-
-        Returns:
-            Total portfolio value
-
-        Raises:
-            RuntimeError: If current_timestamp not set (must call _get_observation first)
-            ValueError: If current_price is invalid (NaN, inf, or negative)
-        """
-        if current_price is None:
-            if self.current_timestamp is None:
-                raise RuntimeError(
-                    "current_timestamp is not set. _get_portfolio_value() must be called "
-                    "after _get_observation() which sets the current timestamp. "
-                    "This indicates an environment implementation error."
-                )
-            current_price = self.sampler.get_base_features(self.current_timestamp)["close"]
-
-        # Validate price is a valid number
-        if not isinstance(current_price, (int, float, np.integer, np.floating)):
-            raise TypeError(
-                f"current_price must be a number, got {type(current_price).__name__}"
-            )
-
-        if np.isnan(current_price) or np.isinf(current_price):
-            raise ValueError(
-                f"Invalid price: {current_price} at timestamp {self.current_timestamp}. "
-                f"This indicates corrupted data in the dataset (NaN or infinity values)."
-            )
-
-        if current_price < 0:
-            raise ValueError(
-                f"Negative price: {current_price} at timestamp {self.current_timestamp}. "
-                f"This indicates invalid data in the dataset."
-            )
-
-        return self.balance + self.position.position_size * current_price
 
     def _get_observation_scaffold(self):
         """

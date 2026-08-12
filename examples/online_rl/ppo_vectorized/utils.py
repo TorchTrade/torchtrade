@@ -11,7 +11,6 @@ from torchrl.envs import (
     StepCounter,
 )
 from torchrl.collectors import Collector
-import torchrl
 import torch
 from torchrl.modules import (
     ActorValueOperator,
@@ -189,8 +188,8 @@ def make_discrete_ppo_model(cfg, env, device):
     assert "account_state" in list(env.observation_spec.keys()), "Account state key not in observation spec"
     account_state_key = "account_state"
     # Define Actor Network
-    time_frames = cfg.time_frames
-    window_sizes = cfg.window_sizes
+    time_frames = cfg.env.time_frames
+    window_sizes = cfg.env.window_sizes
 
     encoders = []
     num_features = env.observation_spec[market_data_keys[0]].shape[-1]

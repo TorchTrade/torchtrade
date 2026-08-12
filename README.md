@@ -356,7 +356,7 @@ env = SequentialTradingEnv(df, config)
 ### Live Trading with Alpaca
 
 ```python
-from torchtrade.envs.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 config = AlpacaTradingEnvConfig(

@@ -23,7 +23,6 @@ class AlpacaTradingEnvConfig:
     time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Hour"
     window_sizes: Union[List[int], int] = 10
     execute_on: Union[str, TimeFrame] = "1Hour"  # On which timeframe to execute trades
-    position_penalty: float = 0.0001  # Penalty for holding positions
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
     paper: bool = True

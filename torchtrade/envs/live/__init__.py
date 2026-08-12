@@ -18,7 +18,6 @@ from torchtrade.envs.live.binance import (
     BinanceFuturesTradingEnvConfig,
     TradeMode,
     MarginType,
-    PositionSide,
 )
 
 # Bitget
@@ -77,7 +76,6 @@ __all__ = [
     "BinanceFuturesTradingEnvConfig",
     "TradeMode",
     "MarginType",
-    "PositionSide",
     # Bitget
     "BitgetObservationClass",
     "BitgetFuturesOrderClass",

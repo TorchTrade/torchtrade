@@ -26,7 +26,6 @@ from torchrl.data import Categorical
 
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.core.state import (
-    HistoryTracker,
     advance_hold_counter_from_size,
     binarize_action_type,
 )
@@ -253,10 +252,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         has_negative_actions = any(a < 0 for a in self.action_levels)
         return has_negative_actions and self.leverage > 1
 
-    def _reset_history(self):
-        """Reset history tracking."""
-        # Use HistoryTracker for both modes (it has position tracking)
-        self.history = HistoryTracker()
 
     def _calculate_liquidation_price(self, entry_price: float, position_size: float) -> float:
         """Calculate liquidation price for a position.

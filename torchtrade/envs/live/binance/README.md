@@ -14,7 +14,7 @@ Live trading integration with Binance for crypto futures markets (USDT-margined)
 ## Quick Start
 
 ```python
-from torchtrade.envs import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
+from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = BinanceFuturesTradingEnvConfig(
@@ -170,7 +170,7 @@ Environments simulate funding fees automatically.
 ## Example: Basic Futures Trading
 
 ```python
-from torchtrade.envs import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
+from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 
 config = BinanceFuturesTradingEnvConfig(
     api_key=os.environ["BINANCE_TESTNET_KEY"],
@@ -196,7 +196,7 @@ print(f"Unrealized PnL: ${info['unrealized_pnl']:.2f}")
 ## Example: With Risk Management
 
 ```python
-from torchtrade.envs import BinanceFuturesSLTPTorchTradingEnv
+from torchtrade.envs.live.binance.env_sltp import BinanceFuturesSLTPTorchTradingEnv
 
 config = BinanceFuturesSLTPTradingEnvConfig(
     api_key=os.environ["BINANCE_TESTNET_KEY"],

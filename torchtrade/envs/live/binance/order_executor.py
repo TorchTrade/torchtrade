@@ -1,6 +1,5 @@
 import logging
 from dataclasses import dataclass
-from enum import Enum
 import math
 from decimal import Decimal
 from typing import Dict, List, Optional, Union
@@ -33,17 +32,6 @@ def _step_and_decimals(step_str: str):
     return float(d), max(0, -d.as_tuple().exponent)
 
 
-class PositionSide(Enum):
-    """
-    Position side for Binance Futures.
-
-    Binance Futures supports two position modes:
-    - One-way mode: Single position per symbol. Use BOTH.
-    - Hedge mode: Separate long/short positions simultaneously. Use LONG/SHORT.
-    """
-    LONG = "LONG"    # Hedge mode: explicit long position
-    SHORT = "SHORT"  # Hedge mode: explicit short position
-    BOTH = "BOTH"    # One-way mode: single net position (default)
 
 
 @dataclass
