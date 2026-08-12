@@ -115,7 +115,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # position value -- so the two cannot drift apart. The futures bases already read
         # an equity figure for this reason.
         self.initial_portfolio_value = self._get_portfolio_value()
-        if not (self.initial_portfolio_value > 0):
+        if not math.isfinite(self.initial_portfolio_value) or self.initial_portfolio_value <= 0:
             raise ValueError(
                 f"cannot start an episode on a portfolio value of "
                 f"{self.initial_portfolio_value}: the bankruptcy baseline would be 0, "
@@ -331,11 +331,23 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.balance = float(account.cash)
 
         if position_status is None:
-            return self.balance
-        # An unknown status raises on the .market_value read rather than taking the flat
-        # branch above: cash alone feeds _check_termination, and for a held position that
-        # is most of the portfolio missing -- an outage would read as a near-total loss.
-        return self.balance + position_status.market_value
+            portfolio_value = self.balance
+        else:
+            # An unknown status raises on the .market_value read rather than taking the flat
+            # branch above: cash alone feeds _check_termination, and for a held position that
+            # is most of the portfolio missing -- an outage would read as a near-total loss.
+            portfolio_value = self.balance + position_status.market_value
+
+        # Guarded here as well as in _get_observation, because this is a SEPARATE fetch and
+        # it is the value that reaches _check_termination and the reward. alpaca's _step
+        # calls it BEFORE building an observation, so a NaN here is recorded and rewarded
+        # against before the observation guard could ever fire (#277).
+        if not math.isfinite(portfolio_value):
+            raise ValueError(
+                f"venue reported a non-finite portfolio value ({portfolio_value}); "
+                f"refusing to run a bankruptcy check or compute a reward against it"
+            )
+        return portfolio_value
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""

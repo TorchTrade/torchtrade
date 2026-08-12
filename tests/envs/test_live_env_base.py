@@ -1351,6 +1351,10 @@ def test_every_live_env_validates_its_bankruptcy_baseline():
     terminates. Indexing the key stops an adapter fabricating the 0, and this stops a
     genuinely empty account starting an episode that can never terminate.
 
+    Checks for the finiteness test specifically, not just a positivity one: `not (x > 0)`
+    catches NaN but passes `+inf`, and `is_bankrupt(current=1e9, initial=inf)` is True --
+    every step of every episode would read bankrupt.
+
     Structural because the assignment sits inside per-exchange `_reset` scaffolding that
     needs a live client to reach. Four copies of one line is itself the drift risk the
     shared base exists to remove -- hoisting it is follow-up work (#345).
@@ -1365,7 +1369,7 @@ def test_every_live_env_validates_its_bankruptcy_baseline():
 
     unguarded = [
         p.parent.name for p in bases
-        if "if not (self.initial_portfolio_value > 0):" not in p.read_text()
+        if "math.isfinite(self.initial_portfolio_value)" not in p.read_text()
     ]
     assert unguarded == [], (
         f"{unguarded} assign initial_portfolio_value without rejecting a non-positive "
@@ -1571,3 +1575,57 @@ def test_polymarket_accepts_the_endpoints_of_the_probability_range(price):
     from torchtrade.envs.live.polymarket.market_scanner import _valid_price
 
     assert _valid_price(price, "yes_price", "some-market") == float(price)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("cash", float("nan")),
+    ("cash", float("inf")),
+    ("market_value", float("nan")),
+], ids=["nan-cash", "inf-cash", "nan-market-value"])
+def test_alpaca_refuses_to_size_a_trade_from_a_non_finite_read(field, value):
+    """The worst path in this PR: these reads size a REAL order.
+
+    A NaN makes delta_qty NaN; `nan > 0` is False so the caller always takes the SELL
+    branch; and in trade_mode="notional" a sell is intercepted as close_position(). One
+    garbage tick would liquidate the entire position. `total_portfolio <= 0` cannot see
+    that, which is why the check is on finiteness.
+    """
+    from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv
+
+    cash = value if field == "cash" else 10000.0
+    market_value = value if field == "market_value" else 1000.0
+    env = SimpleNamespace(
+        trader=SimpleNamespace(
+            client=SimpleNamespace(get_account=lambda: SimpleNamespace(cash=str(cash))),
+            get_status=lambda: {"position_status": SimpleNamespace(
+                qty=10.0, market_value=market_value)},
+        ),
+    )
+    with pytest.raises(ValueError, match="refusing to size a trade against it"):
+        AlpacaTorchTradingEnv._calculate_fractional_position(env, 1.0, 100.0)
+
+
+def test_alpaca_portfolio_value_refuses_a_non_finite_read():
+    """alpaca's _step calls this BEFORE building an observation, and its value feeds the
+    reward and _check_termination -- so the observation guard can never catch it."""
+    from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
+
+    env = SimpleNamespace(
+        trader=SimpleNamespace(
+            get_status=lambda: {"position_status": None},
+            client=SimpleNamespace(get_account=lambda: SimpleNamespace(cash="nan")),
+        ),
+    )
+    with pytest.raises(ValueError, match="non-finite portfolio value"):
+        AlpacaBaseTorchTradingEnv._get_portfolio_value(env)
+
+
+@pytest.mark.parametrize("field", ["volume24hr", "volume", "liquidity", "spread"])
+def test_polymarket_refuses_non_finite_market_numbers(field):
+    """Three of these four are the market half of the observation tensor, and
+    `_filter_markets` compares them with `<`/`>`, which NaN passes -- so garbage survives
+    filtering and reaches the policy network."""
+    from torchtrade.envs.live.polymarket.market_scanner import _finite
+
+    with pytest.raises(ValueError, match="not a finite non-negative number"):
+        _finite("nan", field, "some-market")

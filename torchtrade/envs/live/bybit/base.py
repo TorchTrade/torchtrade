@@ -1,5 +1,6 @@
 """Base class for Bybit live trading environments."""
 import logging
+import math
 
 from abc import abstractmethod
 from typing import Callable, List, Optional
@@ -95,7 +96,7 @@ class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         # above zero equity and the account could be wiped out with the episode
         # running on (#277).
         self.initial_portfolio_value = balance["total_margin_balance"]
-        if not (self.initial_portfolio_value > 0):
+        if not math.isfinite(self.initial_portfolio_value) or self.initial_portfolio_value <= 0:
             raise ValueError(
                 f"cannot start an episode on equity of "
                 f"{self.initial_portfolio_value}: the bankruptcy baseline would be 0, "

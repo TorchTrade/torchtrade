@@ -25,6 +25,21 @@ _RETRY_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = 1.0
 
 
+def _finite(raw_value, field, slug) -> float:
+    """Three of these four are the market half of the observation tensor.
+
+    `_filter_markets` compares them with `<`/`>`, which NaN passes, so a garbage volume or
+    liquidity survives filtering and lands in `_market_state` -- straight into the policy
+    network. Not a probability like the prices, so only finiteness and sign are checked.
+    """
+    value = float(raw_value)
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(
+            f"market {slug!r} reported a {field} of {raw_value!r}, which is not a "
+            f"finite non-negative number; refusing to trade against it"
+        )
+    return value
+
 def _valid_price(raw_price, field, slug) -> float:
     """A market price must be a real probability, or the whole episode goes NaN.
 
@@ -161,10 +176,10 @@ class MarketScanner:
             no_token_id=clob_token_ids[1],
             yes_price=_valid_price(outcome_prices[0], "yes_price", raw.get("slug")),
             no_price=_valid_price(outcome_prices[1], "no_price", raw.get("slug")),
-            volume_24h=float(raw.get("volume24hr", 0)),
-            total_volume=float(raw.get("volume", 0)),
-            liquidity=float(raw.get("liquidity", 0)),
-            spread=float(raw.get("spread", 0)),
+            volume_24h=_finite(raw.get("volume24hr", 0), "volume_24h", raw.get("slug")),
+            total_volume=_finite(raw.get("volume", 0), "total_volume", raw.get("slug")),
+            liquidity=_finite(raw.get("liquidity", 0), "liquidity", raw.get("slug")),
+            spread=_finite(raw.get("spread", 0), "spread", raw.get("slug")),
             end_date=raw.get("endDate", ""),
             tags=raw.get("tags", []),
             neg_risk=raw.get("negRisk", False),
