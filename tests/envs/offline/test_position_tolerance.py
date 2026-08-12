@@ -133,3 +133,39 @@ def test_a_position_worth_less_than_the_floor_can_still_be_closed(price):
     info = env._execute_fractional_action(action_value=0.0, execution_price=price)
 
     assert info["executed"] is True, "a sub-floor position was unclosable"
+
+
+@pytest.mark.parametrize("gap_usd,expect_hold", [(0.50, True), (5.0, False)],
+                         ids=["under-the-floor", "over-the-floor"])
+def test_the_vectorized_floor_holds_a_sub_dollar_resize(gap_usd, expect_hold):
+    """The vectorized floor had ZERO coverage: gutting it left all 2865 tests green.
+
+    The sibling close test does not reach it -- a close sets target 0, which the exemption
+    gives a tolerance of 0, so the floor is never consulted. Only a RESIZE consults it, and
+    only at a target small enough ($10 here) that the $1 floor beats the 2% term.
+    """
+    from torchtrade.envs.offline import (
+        VectorizedSequentialTradingEnv,
+        VectorizedSequentialTradingEnvConfig,
+    )
+
+    price = 100_000.0
+    idx = pd.date_range("2024-01-01", periods=600, freq="1min")
+    df = pd.DataFrame({"timestamp": idx, "open": price, "high": price * 1.001,
+                       "low": price * 0.999, "close": price, "volume": 10.0})
+
+    vec = VectorizedSequentialTradingEnv(df, VectorizedSequentialTradingEnvConfig(
+        symbol="X", time_frames=["1Minute"], window_sizes=[10], execute_on="1Minute",
+        initial_cash=10_000.0, num_envs=1, action_levels=[0.0, 0.001],
+    ))
+    vec.reset()
+    target = 10.0 / price                       # action 0.001 of $10k -> a $10 position
+    before = target + gap_usd / price
+    vec._position_sizes = torch.full_like(vec._position_sizes, before)
+
+    vec.step(TensorDict({"action": torch.ones(1, dtype=torch.long)}, batch_size=[1]))
+
+    held = vec._position_sizes.item() == pytest.approx(before, rel=1e-9)
+    assert held is expect_hold, (
+        f"a ${gap_usd} gap was {'not ' if expect_hold else ''}held by the floor"
+    )
