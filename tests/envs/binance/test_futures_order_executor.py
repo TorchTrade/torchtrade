@@ -68,7 +68,7 @@ class TestBinanceFuturesOrderClass:
                 "symbol": "BTCUSDT",
                 "filters": [
                     {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
-                    {"filterType": "LOT_SIZE", "stepSize": "0.001"},
+                    {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
                 ],
             }]
         })
@@ -430,3 +430,159 @@ class TestOrderStatusDataclass:
 
         assert order.is_open is False
         assert order.filled_qty == 0.001
+
+
+class TestBinanceLotSizeRounding:
+    """#271: binance parsed only PRICE_FILTER, so every quantity went out as
+    `round(quantity, 3)` and any symbol whose step is not three decimals got a silently
+    wrong size. The LOT_SIZE mock in this file predates any code that read it.
+    """
+
+    @staticmethod
+    def _executor(step="0.01", min_qty=None, symbol="BTCUSDT", extra_symbols=(),
+                  with_lot_size=True, filters=None, exchange_info=None):
+        from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+
+        if filters is None:
+            filters = [{"filterType": "PRICE_FILTER", "tickSize": "0.10"}]
+            if with_lot_size:
+                filters.append({"filterType": "LOT_SIZE", "stepSize": step,
+                                "minQty": min_qty or step})
+        symbols = [{"symbol": symbol, "filters": filters}]
+        for other_symbol, other_step in extra_symbols:
+            symbols.append({"symbol": other_symbol, "filters": [
+                {"filterType": "LOT_SIZE", "stepSize": other_step, "minQty": other_step}]})
+
+        client = MagicMock()
+        client.futures_exchange_info = MagicMock(
+            return_value=exchange_info if exchange_info is not None else {"symbols": symbols}
+        )
+        client.futures_change_leverage = MagicMock(return_value={})
+        client.futures_change_margin_type = MagicMock(return_value={})
+        return BinanceFuturesOrderClass(
+            symbol=symbol, trade_mode="quantity", demo=True, leverage=10, client=client
+        )
+
+    @pytest.mark.parametrize("step,quantity,expected", [
+        # round(q, 3) gives a different, venue-invalid answer for each of these.
+        ("0.01", 0.12345, 0.12),
+        ("1", 7.123, 7.0),
+        ("0.0001", 0.12345, 0.1234),
+        ("0.01", 0.199, 0.19),          # floor, not nearest: rounding up can exceed margin
+        # Exact multiples: 0.29/0.01 is 28.999999999999996, so a bare floor shaves a step.
+        ("0.01", 0.29, 0.29),
+        ("0.01", 0.57, 0.57),
+        # Above a ratio of ~1e7 a FIXED tolerance stops covering the binary error, and this
+        # value is rounded two or three times on its way to an order.
+        ("0.001", 19000.01, 19000.01),
+        ("0.001", 19000.028, 19000.028),
+        # Toward zero, not down: math.floor sends a negative AWAY from zero, i.e. to MORE
+        # than the caller sized.
+        ("1", -7.5, -7.0),
+        ("0.01", -0.295, -0.29),
+    ])
+    def test_quantity_is_floored_toward_zero_to_the_venue_step(self, step, quantity, expected):
+        ex = self._executor(step=step)
+        # abs=, not the default rel=1e-6, which at 19000 is 0.019 -- nineteen times the
+        # step these cells exist to detect.
+        assert ex.round_quantity(quantity) == pytest.approx(expected, abs=1e-9)
+        # Idempotent: the value is rounded again downstream.
+        assert ex.round_quantity(ex.round_quantity(quantity)) == pytest.approx(expected, abs=1e-9)
+
+    @pytest.mark.parametrize("step,quantity,expected", [
+        ("1", 7.123, "7"),              # not "7.0": one decimal more than the venue defines
+        ("0.01", 0.12345, "0.12"),
+        ("0.0001", 0.12345, "0.1234"),
+    ])
+    def test_quantity_is_formatted_to_the_venue_precision(self, step, quantity, expected):
+        """A string: `str(7.0)` carries a decimal a quantityPrecision-0 symbol does not
+        define, which binance rejects with -1111."""
+        assert self._executor(step=step)._format_quantity(quantity) == expected
+
+    @pytest.mark.parametrize("step,min_qty,quantity,closable", [
+        ("1", None, 0.002, "1"),          # step coarser than the size
+        ("0.01", None, 0.004, "0.01"),
+        ("0.001", "0.01", 0.005, "0.010"),  # minQty above the step; precision follows the step
+        ("0.001", None, 0.0009, "0.001"), # sub-step residual
+        ("0.001", None, 0.0006, "0.001"),
+    ])
+    def test_a_size_below_the_minimum_is_refused_to_open_but_closable(
+        self, step, min_qty, quantity, closable
+    ):
+        """Floored to zero, the old code submitted `quantity: 0.0` on all three legs.
+
+        A reduceOnly order is clamped by the venue to the actual position, so one at the
+        minimum DOES fill -- refusing there stranded sub-step residuals (partial fill of a
+        close, ADL, liquidation remnant), and base.py discards close_position()'s return
+        on reset, so the episode starts against a position the env believes it closed.
+        """
+        ex = self._executor(step=step, min_qty=min_qty)
+        with pytest.raises(ValueError, match="below the minimum"):
+            ex._format_quantity(quantity)
+        assert ex._format_quantity(quantity, reduce_only=True) == closable
+
+    @pytest.mark.parametrize("step_str,expected", [
+        ("0.001", (0.001, 3)), ("1", (1.0, 0)), ("0.00100000", (0.001, 3)),
+        ("1E-8", (1e-8, 8)), ("1e-05", (1e-5, 5)),
+    ])
+    def test_step_parsing_survives_scientific_notation(self, step_str, expected):
+        """`"1E-8".split('.')` has no fractional part, so string surgery reported 0
+        decimals and the final rounding annihilated the quantity."""
+        from torchtrade.envs.live.binance.order_executor import _step_and_decimals
+
+        assert _step_and_decimals(step_str) == pytest.approx(expected)
+
+    def test_each_symbol_rounds_to_its_own_step(self):
+        """close_all_positions closes whatever the account holds, so the cache is keyed by
+        symbol rather than holding one step."""
+        ex = self._executor(step="0.001", extra_symbols=[("ETHUSDT", "0.01")])
+
+        assert ex.round_quantity(1.2345) == pytest.approx(1.234)
+        assert ex.round_quantity(1.2345, "ETHUSDT") == pytest.approx(1.23)
+
+    @pytest.mark.parametrize("take_profit,stop_loss", [(None, None), (60000.0, 40000.0)],
+                             ids=["plain", "with-brackets"])
+    def test_submitted_orders_carry_the_step_rounded_quantity(self, take_profit, stop_loss):
+        """The wiring, not the helper: reverting all five call sites to `round(quantity, 3)`
+        left every helper-level cell green -- the same shape as the LOT_SIZE mock this file
+        carried unread. The bracket legs are separately-rounded call sites.
+        """
+        ex = self._executor(step="0.01")
+        ex.client.futures_create_order = MagicMock(return_value={"orderId": 1, "status": "NEW"})
+
+        assert ex.trade(side="buy", quantity=0.12345, order_type="market",
+                        take_profit=take_profit, stop_loss=stop_loss)
+
+        quantities = [c.kwargs["quantity"] for c in ex.client.futures_create_order.call_args_list
+                      if "quantity" in c.kwargs]
+        assert quantities and all(q == "0.12" for q in quantities), quantities
+
+    def test_a_symbol_the_venue_does_not_list_refuses_to_construct(self):
+        """Falling back is bit-identical to the bug being fixed, and binance has no minQty
+        check downstream to catch the result."""
+        with pytest.raises(ValueError, match="no LOT_SIZE"):
+            self._executor(with_lot_size=False)
+
+    @pytest.mark.parametrize("symbols", [
+        # A malformed SIBLING must not discard the cache...
+        [{"symbol": "JUNKUSDT", "filters": [{"filterType": "LOT_SIZE"}]},
+         {"symbol": "BTCUSDT", "filters": [
+             {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
+             {"filterType": "LOT_SIZE", "stepSize": "0.01", "minQty": "0.01"}]}],
+        # ...nor may a malformed LOT_SIZE cost the TRADED symbol its PRICE_FILTER, which
+        # would send SLTP stop prices out unrounded (-1111, swallowed: no stop loss).
+        [{"symbol": "BTCUSDT", "filters": [
+            {"filterType": "LOT_SIZE", "stepSize": "0.01"},
+            {"filterType": "PRICE_FILTER", "tickSize": "0.10"}]}],
+    ], ids=["malformed-sibling", "malformed-own-lot-size"])
+    def test_one_bad_filter_does_not_discard_the_rest(self, symbols):
+        ex = self._executor(exchange_info={"symbols": symbols})
+
+        assert ex._tick_size == pytest.approx(0.10)
+        assert ex.round_quantity(0.12345) == pytest.approx(0.12)
+
+    def test_a_malformed_payload_body_falls_back_rather_than_crashing(self):
+        """A truncated or error-shaped body is a FAILED FETCH, not a config error -- reading
+        ['symbols'] outside the try took down __init__ with a bare KeyError."""
+        ex = self._executor(exchange_info={"code": -1121, "msg": "Invalid symbol"})
+        assert ex.round_quantity(0.12345) == pytest.approx(0.123)

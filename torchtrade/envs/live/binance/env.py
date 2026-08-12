@@ -309,14 +309,6 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
                 ]
             }
 
-    def _get_step_size(self) -> float:
-        """Get the step size (lot size) for the trading symbol."""
-        symbol_info = self._get_symbol_info()
-        for filter_item in symbol_info.get('filters', []):
-            if filter_item['filterType'] == 'LOT_SIZE':
-                return float(filter_item['stepSize'])
-        return 0.001  # Default fallback
-
     def _get_min_notional(self) -> float:
         """Get the minimum notional value for orders."""
         symbol_info = self._get_symbol_info()
@@ -396,11 +388,11 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             )
             return 0.0, 0.0, "flat"
 
-        # Floor to exchange step size (never exceed available margin)
-        position_qty = abs(position_size)
-        step_size = self._get_step_size()
-        if step_size > 0:
-            position_qty = int(position_qty / step_size) * step_size
+        # Floor through the executor, which caches the venue's step and carries the
+        # epsilon. This used to re-query futures_exchange_info() per sizing decision and
+        # floor with a bare int(), which shaves a whole step off exact multiples --
+        # 0.29 -> 0.28 (#271). One owner of lot-size knowledge, not two.
+        position_qty = self.trader.round_quantity(abs(position_size))
 
         # Apply direction
         direction = 1 if position_size > 0 else -1
@@ -447,13 +439,10 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         delta = target_qty - current_qty
 
         # 6. Check if delta is significant enough to trade
-        step_size = self._get_step_size()
-        if abs(delta) < step_size:
-            return self._create_trade_info(executed=False)  # Already close enough
-
-        # 7. Floor delta to step size (never exceed available margin)
         sign = 1 if delta > 0 else -1
-        delta = int(abs(delta) / step_size) * step_size * sign
+        delta = self.trader.round_quantity(abs(delta)) * sign
+        if delta == 0:
+            return self._create_trade_info(executed=False)  # Already close enough
 
         # 8. Check delta notional meets exchange minimum
         delta_notional = abs(delta) * current_price

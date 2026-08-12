@@ -4,6 +4,7 @@ import pytest
 import torch
 from torchrl.envs.utils import check_env_specs
 import numpy as np
+import math
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
@@ -42,6 +43,12 @@ class TestBinanceFuturesTorchTradingEnv:
         trader = MagicMock()
 
         # Mock methods
+        # Models the executor's lot-size rounding, which the env now delegates to rather
+        # than re-querying futures_exchange_info() per sizing decision (#271). A bare
+        # MagicMock returns a MagicMock and every comparison downstream raises.
+        trader.round_quantity = MagicMock(
+            side_effect=lambda q, symbol=None: math.floor(q / 0.001 + 1e-9) * 0.001
+        )
         trader.cancel_open_orders = MagicMock(return_value=True)
         trader.close_position = MagicMock(return_value=True)
         trader.close_all_positions = MagicMock(return_value={})
@@ -208,6 +215,24 @@ class TestBinanceFuturesTorchTradingEnv:
             assert "reward" in next_td["next"].keys()
             assert "done" in next_td["next"].keys()
             assert "account_state" in next_td["next"].keys()
+
+    def test_sizing_delegates_rounding_to_the_executor(self, env, mock_trader):
+        """#271: the env carried a SECOND LOT_SIZE parser with the bug this PR fixes.
+
+        It re-queried futures_exchange_info() per sizing decision and floored with a bare
+        `int(qty / step) * step` -- no epsilon, so 0.29 became 0.28, exactly what
+        test_an_exact_multiple_is_not_shaved_by_a_whole_step exists to prevent. Fixing the
+        executor could not reach it: the env discarded the step before calling trade().
+
+        Asserts the delegation rather than the arithmetic. With two owners of lot-size
+        knowledge the arithmetic can be right in one and wrong in the other, which is
+        exactly how this survived a PR that fixed the other one.
+        """
+        mock_trader.round_quantity.reset_mock()
+        env._calculate_fractional_position(1.0, 50000.0)
+        assert mock_trader.round_quantity.called, (
+            "env sized without going through the executor's lot-size rounding"
+        )
 
     def test_step_long_action(self, env, mock_trader):
         """Test step with long action."""
@@ -544,6 +569,12 @@ class TestBinanceFractionalPositionResizing:
     @pytest.fixture
     def mock_trader(self):
         trader = MagicMock()
+        # Models the executor's lot-size rounding, which the env now delegates to rather
+        # than re-querying futures_exchange_info() per sizing decision (#271). A bare
+        # MagicMock returns a MagicMock and every comparison downstream raises.
+        trader.round_quantity = MagicMock(
+            side_effect=lambda q, symbol=None: math.floor(q / 0.001 + 1e-9) * 0.001
+        )
         trader.cancel_open_orders = MagicMock(return_value=True)
         trader.close_position = MagicMock(return_value=True)
         trader.close_all_positions = MagicMock(return_value={})
@@ -619,6 +650,11 @@ class TestMultipleSteps:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
+        # Models the executor's lot-size rounding (#271); a bare MagicMock
+        # returns a MagicMock and comparisons downstream raise.
+        mock_trader.round_quantity = MagicMock(
+            side_effect=lambda q, symbol=None: math.floor(q / 0.001 + 1e-9) * 0.001
+        )
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)
         mock_trader.get_account_balance = MagicMock(return_value={
@@ -689,6 +725,12 @@ class TestBinanceInitCleanup:
     @pytest.fixture
     def mock_trader(self):
         trader = MagicMock()
+        # Models the executor's lot-size rounding, which the env now delegates to rather
+        # than re-querying futures_exchange_info() per sizing decision (#271). A bare
+        # MagicMock returns a MagicMock and every comparison downstream raises.
+        trader.round_quantity = MagicMock(
+            side_effect=lambda q, symbol=None: math.floor(q / 0.001 + 1e-9) * 0.001
+        )
         trader.cancel_open_orders = MagicMock(return_value=True)
         trader.close_position = MagicMock(return_value=True)
         trader.get_account_balance = MagicMock(return_value={
@@ -808,3 +850,4 @@ class TestWithReplayData:
                     break
 
             assert executor.current_price > 0
+

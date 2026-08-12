@@ -1,6 +1,7 @@
 """Replay order executor for simulated trading with historical data."""
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Dict, Optional
 
@@ -21,6 +22,10 @@ class PositionStatus:
     margin_type: str    # Binance-compatible
     margin_mode: str    # Bybit-compatible
     liquidation_price: float
+
+
+# The grid replay has effectively used all along -- see round_quantity (#271).
+REPLAY_QTY_STEP = 0.001
 
 
 class ReplayOrderExecutor:
@@ -246,6 +251,28 @@ class ReplayOrderExecutor:
             "total_unrealized_profit": unrealized_pnl,
             "total_margin_balance": total,
         }
+
+    def round_quantity(self, quantity: float, symbol: Optional[str] = None) -> float:
+        """Part of the trader interface the live envs size through (#271).
+
+        Replay has no venue to query, so it floors to a fixed default grid. Returning the
+        quantity untouched looked cleaner and was wrong twice over: it silently moved
+        every existing backtest's numbers, and it put replay on NO grid while the same
+        change put live on the venue's real one -- widening the live/replay divergence
+        that #278 tracks, in a PR whose point is to narrow it.
+
+        The grid is the one replay already used. Before this, binance's env reached
+        `futures_exchange_info()` through a trader that has no `client`, and the resulting
+        AttributeError fell through to a default filter set whose stepSize is 0.001. That
+        was an accident of the error path, but it is what every recorded backtest was run
+        against, so it is preserved deliberately rather than changed silently.
+        """
+        step = REPLAY_QTY_STEP
+        # Same tolerance reasoning as the live executor: a bare floor shaves a whole step
+        # off exact multiples that land just under an integer in binary.
+        ratio = abs(quantity) / step
+        sign = -1.0 if quantity < 0 else 1.0
+        return sign * round(math.floor(ratio + max(1e-9, ratio * 1e-12)) * step, 3)
 
     def get_mark_price(self) -> float:
         """Get current mark price (latest close)."""
