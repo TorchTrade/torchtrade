@@ -20,7 +20,31 @@ from torchtrade.envs.core.state import (
     position_direction_from_status,
     position_qty_from_status,
 )
-from torchtrade.envs.utils.liquidation import nearest_liquidation_price
+from torchtrade.envs.utils.liquidation import (
+    isolated_liquidation_price,
+    nearest_liquidation_price,
+)
+
+
+def _normalized_margin_mode(position_status):
+    """Normalize concrete adapter labels to ``cross``/``isolated`` or unknown.
+
+    Binance exposes ``margin_type`` while the other adapters expose ``margin_mode``.
+    Unknown labels deliberately remain unknown: when the venue also omits a native
+    liquidation price, guessing either route can report a dangerously safe distance.
+    """
+    margin_mode = getattr(
+        position_status,
+        "margin_mode",
+        getattr(position_status, "margin_type", None),
+    )
+    value = getattr(margin_mode, "value", margin_mode)
+    value = str(value).lower()
+    if value in {"0", "cross", "crossed"}:
+        return "cross"
+    if value in {"1", "isolated"}:
+        return "isolated"
+    return None
 
 
 class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
@@ -170,39 +194,48 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             distance_to_liquidation = 1.0
         else:
             if liquidation_price <= 0:
-                # Cross-margin venues omit the liquidation price (OKX sends liqPx="" for
-                # cross) because the whole account backs the position, so there is no
-                # per-position price to publish. bybit blanks liqPrice for unified/cross
-                # too; it blanks `leverage` with it, which used to make float("") raise
-                # into POSITION_UNKNOWN, but the adapters now fall back to the configured
-                # leverage there, so bybit reaches this path as well.
-                #
-                # That fallback is a real limitation: the leverage feeding the estimate is
-                # the one this env asked for, not one the venue confirmed, and #277's
-                # unfixed half is precisely that set_leverage failures are swallowed. It
-                # is kept because refusing would make OKX and bybit cross accounts unable
-                # to produce an observation at all.
+                # Venues can omit liquidation prices even for real positions: OKX sends
+                # liqPx="" for some cross positions, while Bybit can blank liqPrice when
+                # the estimate falls outside instrument bounds (and always does so in
+                # portfolio margin). Routing therefore depends on the adapter's normalized
+                # actual margin mode, never on the mere absence of the price.
                 # Defaulting to 1.0 reported a 20x long one move away from liquidation as
                 # exactly as safe as a flat spot account (#277).
                 #
-                # Estimated from BOTH the isolated geometry and the account's equity,
-                # taking whichever is nearer. Isolated alone is not the conservative
-                # choice it looks like: it only sees this position, so once losses
-                # elsewhere have eaten the collateral, cross liquidates earlier than
-                # isolated says and the estimate would overstate the distance -- the same
-                # fail-open, reintroduced with extra steps.
-                #
-                # Still not a guaranteed bound: a second cross position's maintenance
-                # requirement is invisible to both estimates and would move liquidation
-                # nearer again (#344). That assumption -- this env owns the account -- is
-                # the same one exposure_pct and the bankruptcy baseline already make.
-                liquidation_price = nearest_liquidation_price(
-                    position_size=position_size,
-                    entry_price=position_status.entry_price,
-                    mark_price=current_price,
-                    equity=total_balance,
-                    leverage=leverage,
-                )
+                margin_mode = _normalized_margin_mode(position_status)
+                if margin_mode == "cross":
+                    # The aggregate is measured at the current mark. The helper subtracts
+                    # the focal position's current maintenance, keeps that focal term
+                    # price-sensitive, and treats the remainder as locally constant.
+                    # Missing aggregate maintenance must fail closed rather than silently
+                    # recreate the single-position assumption from #344.
+                    total_account_maintenance = balance["total_maintenance_margin"]
+                    if total_account_maintenance is None:
+                        raise ValueError(
+                            "Cross-margin liquidation price is unavailable because the "
+                            "venue did not report total account maintenance"
+                        )
+                    liquidation_price = nearest_liquidation_price(
+                        position_size=position_size,
+                        entry_price=position_status.entry_price,
+                        mark_price=current_price,
+                        equity=total_balance,
+                        leverage=leverage,
+                        total_account_maintenance=total_account_maintenance,
+                    )
+                elif margin_mode == "isolated":
+                    # Isolated positions retain their position-only fallback; account-wide
+                    # maintenance does not determine their liquidation threshold.
+                    liquidation_price = isolated_liquidation_price(
+                        position_status.entry_price,
+                        is_long=position_size > 0,
+                        leverage=leverage,
+                    )
+                else:
+                    raise ValueError(
+                        "Liquidation price is unavailable because the venue's actual "
+                        "margin mode is missing or unsupported"
+                    )
             if position_size > 0:
                 distance_to_liquidation = (current_price - liquidation_price) / current_price
             else:

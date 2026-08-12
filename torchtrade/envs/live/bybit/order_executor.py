@@ -53,7 +53,7 @@ class PositionStatus:
     mark_price: float
     leverage: float  # float, not int: int() truncated 1.5x to 1x, which then took
     # the no-liquidation branch and reported a levered position as safe (#277).
-    margin_mode: str
+    margin_mode: Optional[str]
     liquidation_price: float
 
 
@@ -332,6 +332,7 @@ class BybitFuturesOrderClass:
             pos = non_zero[0] if non_zero else None
 
             if pos is not None:
+                margin_mode = self._get_actual_margin_mode(pos)
                 size = float(pos.get("size", 0))
                 side = pos.get("side", "Buy")
                 qty = size if side == "Buy" else -size
@@ -356,7 +357,7 @@ class BybitFuturesOrderClass:
                     leverage=float(
                         self.leverage if pos.get("leverage") in (None, "") else pos.get("leverage")
                     ),
-                    margin_mode=pos.get("tradeMode", str(self.margin_mode.to_pybit())),
+                    margin_mode=margin_mode,
                     liquidation_price=liq_price,
                 )
             else:
@@ -368,7 +369,50 @@ class BybitFuturesOrderClass:
 
         return status
 
-    def get_account_balance(self) -> Dict[str, float]:
+    def _get_actual_margin_mode(self, position: Dict[str, object]) -> Optional[str]:
+        """Return the account's effective margin mode for liquidation routing.
+
+        Bybit V5 deprecates ``tradeMode`` on position responses and always returns 0,
+        including for isolated UTA accounts. Current pybit clients expose
+        ``get_account_info()``, whose ``marginMode`` is authoritative. A legacy client
+        without that endpoint may still be paired with an older/classic response where
+        position ``tradeMode`` was meaningful, so only that missing-method case retains
+        the old 0/1 fallback.
+
+        A supported account-info endpoint that errors or returns an unknown value is not
+        evidence of either mode. Returning ``None`` lets the shared observation fail
+        closed when Bybit also omits the native liquidation price.
+        """
+        get_account_info = getattr(self.client, "get_account_info", None)
+        if not callable(get_account_info):
+            return {"0": "cross", "1": "isolated"}.get(str(position.get("tradeMode")))
+
+        try:
+            response = get_account_info()
+        except Exception as exc:
+            logger.warning(f"Could not query Bybit account margin mode: {exc}")
+            return None
+
+        ret_code = response.get("retCode")
+        if ret_code is not None and int(ret_code) != 0:
+            logger.warning(
+                "get_account_info failed (retCode=%s): %s",
+                ret_code,
+                response.get("retMsg", "unknown error"),
+            )
+            return None
+
+        raw_mode = response.get("result", {}).get("marginMode")
+        normalized = {
+            "ISOLATED_MARGIN": "isolated",
+            "REGULAR_MARGIN": "cross",
+            "PORTFOLIO_MARGIN": "portfolio",
+        }.get(str(raw_mode).upper())
+        if normalized is None:
+            logger.warning("Bybit returned an unknown account margin mode: %r", raw_mode)
+        return normalized
+
+    def get_account_balance(self) -> Dict[str, Optional[float]]:
         """
         Get futures account balance using pybit.
 
@@ -398,12 +442,16 @@ class BybitFuturesOrderClass:
             available = float(account.get("totalAvailableBalance", 0))
             total_pnl = float(account.get("totalPerpUPL", 0))
             margin_balance = float(account.get("totalMarginBalance", total_equity))
+            maintenance = account.get("totalMaintenanceMargin")
 
             result = {
                 "total_wallet_balance": total_equity,
                 "available_balance": available,
                 "total_unrealized_profit": total_pnl,
                 "total_margin_balance": margin_balance,
+                "total_maintenance_margin": (
+                    float(maintenance) if maintenance not in (None, "") else None
+                ),
             }
 
             logger.debug(f"Account balance: total={total_equity:.2f}, available={available:.2f}, pnl={total_pnl:.4f}")

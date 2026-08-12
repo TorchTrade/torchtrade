@@ -287,6 +287,22 @@ class TestBinanceFuturesOrderClass:
 
         assert balance["total_wallet_balance"] == 1000.0
         assert balance["available_balance"] == 900.0
+        assert balance["total_maintenance_margin"] is None
+
+    @pytest.mark.parametrize("raw,expected", [
+        ("4.4", 4.4),
+        ("0", 0.0),
+        ("", None),
+        (None, None),
+    ])
+    def test_get_account_balance_parses_total_maintenance(
+        self, order_executor, mock_client, raw, expected
+    ):
+        account = mock_client.futures_account.return_value.copy()
+        account["totalMaintMargin"] = raw
+        mock_client.futures_account.return_value = account
+
+        assert order_executor.get_account_balance()["total_maintenance_margin"] == expected
 
     def test_get_mark_price(self, order_executor, mock_client):
         """Test getting mark price."""
