@@ -219,6 +219,16 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         status = self.trader.get_status()
         account = self.trader.client.get_account()
         cash = float(account.cash)
+        # cash IS alpaca's equity: it is the whole of portfolio_value when flat, and the
+        # bankruptcy baseline and every reward derive from it. A NaN passes the
+        # held-position guard below (which is keyed on direction) and reaches
+        # is_bankrupt(), where `nan < threshold * initial` is False -- termination off
+        # for the episode. `not isfinite` and not `<= 0`, since +inf passes that too.
+        if not math.isfinite(cash):
+            raise ValueError(
+                f"venue reported a non-finite cash balance ({cash}); refusing to derive "
+                f"an account state or a bankruptcy check from it"
+            )
         position_status = status.get("position_status", None)
 
         # Calculate portfolio value
@@ -240,8 +250,11 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             except Exception:
                 current_price = 0.0
         else:
-            # Same finiteness contract as the futures envs (#277): every venue number this
-            # branch reads goes into account_state, and NaN passes every comparison below
+            # Same finiteness contract as the futures envs (#277). market_value and
+            # unrealized_plpc reach account_state directly; avg_entry_price and
+            # current_price are read but unused here, and are checked anyway so the
+            # contract does not depend on which locals happen to be dead. NaN passes
+            # every comparison below
             # -- a NaN market_value reads as a flat account holding a position, a NaN
             # unrealized_plpc goes into the tensor and on into the policy network. Spot is
             # not exempt from invariant #3.

@@ -76,6 +76,15 @@ def position_direction_from_status(position_status) -> int:
             "treating it as a direction"
         )
     qty = 0.0 if position_status is None else float(position_status.qty)
+    # A NaN qty fails `abs(qty) <= eps` and then `qty > 0`, so it fell through to -1 and
+    # read as a SHORT. This rule runs before any finiteness check the envs apply, and
+    # alpaca's _step syncs and trades on the result before building an observation -- so a
+    # fabricated -1 drives a trade on a long-only account (#277).
+    if not math.isfinite(qty):
+        raise ValueError(
+            f"exchange reported a non-finite position quantity ({qty}); refusing to "
+            f"read a direction from it"
+        )
     if abs(qty) <= POSITION_DUST_EPS:
         return 0
     return 1 if qty > 0 else -1
@@ -103,6 +112,11 @@ def position_qty_from_status(position_status) -> float:
             "treating it as a size"
         )
     qty = 0.0 if position_status is None else float(position_status.qty)
+    if not math.isfinite(qty):
+        raise ValueError(
+            f"exchange reported a non-finite position quantity ({qty}); refusing to "
+            f"read a size from it"
+        )
     return 0.0 if abs(qty) <= POSITION_DUST_EPS else qty
 
 

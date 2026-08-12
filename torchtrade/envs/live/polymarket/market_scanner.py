@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -22,6 +23,24 @@ GAMMA_API_BASE = "https://gamma-api.polymarket.com"
 # well under the market cadence so retries never push us past the next resolution.
 _RETRY_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = 1.0
+
+
+def _valid_price(raw_price, field, slug) -> float:
+    """A market price must be a real probability, or the whole episode goes NaN.
+
+    `_compute_payoff` guards `fill_price <= 0`, which NaN and +inf both compare False to,
+    so a garbage price flows into `self.cash` -- polymarket's equity and its only
+    bankruptcy input. Once cash is NaN it stays NaN, `is_bankrupt` is False forever, and
+    every reward is NaN. The config is already validated in __post_init__; this is the
+    venue side of the same rule (#277).
+    """
+    price = float(raw_price)
+    if not math.isfinite(price) or not (0 < price <= 1):
+        raise ValueError(
+            f"market {slug!r} reported a {field} of {raw_price!r}, which is not a "
+            f"probability in (0, 1]; refusing to trade against it"
+        )
+    return price
 
 
 def _fetch_json_with_retry(
@@ -136,8 +155,8 @@ class MarketScanner:
             slug=raw["slug"],
             yes_token_id=clob_token_ids[0],
             no_token_id=clob_token_ids[1],
-            yes_price=float(outcome_prices[0]),
-            no_price=float(outcome_prices[1]),
+            yes_price=_valid_price(outcome_prices[0], "yes_price", raw.get("slug")),
+            no_price=_valid_price(outcome_prices[1], "no_price", raw.get("slug")),
             volume_24h=float(raw.get("volume24hr", 0)),
             total_volume=float(raw.get("volume", 0)),
             liquidity=float(raw.get("liquidity", 0)),

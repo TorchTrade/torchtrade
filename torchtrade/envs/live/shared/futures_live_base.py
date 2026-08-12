@@ -235,7 +235,17 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         balance = self.trader.get_account_balance()
         # Indexed, for the same reason as _get_observation above: this is the `current`
         # side of is_bankrupt(), where a default of 0 is instant false bankruptcy.
-        return balance["total_margin_balance"]
+        equity = balance["total_margin_balance"]
+        # Guarded here too, not only in _get_observation: this is a SECOND, independent
+        # fetch, and it is the literal argument to _check_termination. The two reads can
+        # disagree -- a NaN in this one alone would reach is_bankrupt(), where
+        # `nan < threshold * initial` is False, while the observation's read passed.
+        if not math.isfinite(equity):
+            raise ValueError(
+                f"venue reported a non-finite equity ({equity}); refusing to run a "
+                f"bankruptcy check against it"
+            )
+        return equity
 
     def _get_current_position_quantity(self) -> float:
         """The signed size the exchange holds, dust read as flat.

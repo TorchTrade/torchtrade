@@ -1298,7 +1298,9 @@ def test_non_finite_venue_numbers_refuse_to_build_an_account_state(field):
     setattr(position, field, float("nan"))
     env = _futures_env_stub(position, {"total_margin_balance": 1000.0})
 
-    with pytest.raises(ValueError, match=f"non-finite {field}"):
+    # qty is caught upstream, by the dust rule, before this loop runs -- it has to be,
+    # because the live _steps sync and trade on the direction it returns.
+    with pytest.raises(ValueError, match=f"non-finite ({field}|position quantity)"):
         TorchTradeFuturesLiveEnv._get_observation(env)
 
 
@@ -1488,7 +1490,9 @@ def test_alpaca_non_finite_venue_numbers_refuse_to_build_an_account_state(field)
     setattr(position, field, float("nan"))
     env = _alpaca_env_stub(position, cash=10000.0)
 
-    with pytest.raises(ValueError, match=f"non-finite {field}"):
+    # qty is caught upstream, by the dust rule, before this loop runs -- it has to be,
+    # because the live _steps sync and trade on the direction it returns.
+    with pytest.raises(ValueError, match=f"non-finite ({field}|position quantity)"):
         AlpacaBaseTorchTradingEnv._get_observation(env)
 
 
@@ -1501,3 +1505,59 @@ def test_alpaca_position_held_against_wiped_portfolio_refuses_to_report_flat():
 
     with pytest.raises(ValueError, match="refusing to report this account as flat"):
         AlpacaBaseTorchTradingEnv._get_observation(env)
+
+
+@pytest.mark.parametrize("qty", [float("nan"), float("inf"), float("-inf")],
+                         ids=["nan", "inf", "-inf"])
+def test_dust_rule_refuses_a_non_finite_quantity(qty):
+    """A NaN qty read as a SHORT, upstream of every finiteness check in the envs.
+
+    `abs(nan) <= eps` is False and `nan > 0` is False, so it fell through to -1. That
+    matters more than a bad observation: alpaca's _step syncs the position and executes a
+    trade on this direction BEFORE building an observation, so a fabricated short drove a
+    trade decision on a long-only spot account.
+    """
+    with pytest.raises(ValueError, match="non-finite position quantity"):
+        position_direction_from_status(SimpleNamespace(qty=qty))
+    with pytest.raises(ValueError, match="non-finite position quantity"):
+        position_qty_from_status(SimpleNamespace(qty=qty))
+
+
+def test_portfolio_value_refuses_non_finite_equity():
+    """`_get_portfolio_value` is a SECOND fetch and the literal argument to
+    _check_termination, so guarding only the observation's read leaves the two able to
+    disagree -- a NaN here alone reaches is_bankrupt(), where it is silently False."""
+    env = SimpleNamespace(
+        trader=SimpleNamespace(
+            get_account_balance=lambda: {"total_margin_balance": float("nan")}
+        )
+    )
+    with pytest.raises(ValueError, match="non-finite equity"):
+        TorchTradeFuturesLiveEnv._get_portfolio_value(env)
+
+
+@pytest.mark.parametrize("cash", [float("nan"), float("inf")], ids=["nan", "inf"])
+def test_alpaca_non_finite_cash_refuses_to_build_an_account_state(cash):
+    """cash IS alpaca's equity -- the whole of portfolio_value when flat, and the
+    bankruptcy baseline. Guarded on a FLAT account, where the held-position raise (keyed
+    on direction) cannot see it. `+inf` is included because `not (x > 0)` passes it."""
+    from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
+
+    env = _alpaca_env_stub(None, cash=cash)
+    with pytest.raises(ValueError, match="non-finite cash balance"):
+        AlpacaBaseTorchTradingEnv._get_observation(env)
+
+
+@pytest.mark.parametrize("price", ["nan", "inf", "0", "-0.5", "1.5"],
+                         ids=["nan", "inf", "zero", "negative", "above-one"])
+def test_polymarket_refuses_a_price_that_is_not_a_probability(price):
+    """`_compute_payoff` guards `fill_price <= 0`, which NaN and +inf compare False to.
+
+    A garbage price then flows into self.cash -- polymarket's equity and its only
+    bankruptcy input. Once cash is NaN it stays NaN, is_bankrupt is False for the rest of
+    the episode, and every reward is NaN.
+    """
+    from torchtrade.envs.live.polymarket.market_scanner import _valid_price
+
+    with pytest.raises(ValueError, match="not a probability"):
+        _valid_price(price, "yes_price", "some-market")
