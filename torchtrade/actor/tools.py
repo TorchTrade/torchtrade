@@ -27,7 +27,11 @@ _MAX_TEXT_CHARS = 140
 # _one_line, so a tool can emit one.
 # The trailing `>` is optional: the consumer is an LLM, and `</tool_results` at a line
 # end reads as a close to it.
-_TAG = r"<[\s/]*(?:%s)\b[^>\n]*>?"
+# `[^<>\n]` excludes `<`, not just `>`: a greedy tail that allowed `<` let the first
+# tag-like token on a line swallow a LATER real `</tool_results>`, and the replacement
+# escapes only the leading `<` -- so the forged closer came back out intact and the
+# block still ended early. Present since the first version of this fix.
+_TAG = r"<[\s/]*(?:%s)\b[^<>\n]*>?"
 
 # Tool output: every tag the protocol gives meaning to. A hostile RSS headline has no
 # legitimate reason to carry any of them.
