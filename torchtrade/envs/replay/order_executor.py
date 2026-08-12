@@ -5,6 +5,7 @@ import math
 from dataclasses import dataclass
 from typing import Dict, Optional
 
+from torchtrade.envs.utils.liquidation import isolated_liquidation_price
 from torchtrade.envs.utils.sltp_helpers import stop_fill_price
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,20 @@ class ReplayOrderExecutor:
         self.last_order_id = None
         self._order_counter = 0
 
+    @property
+    def liquidation_price(self) -> float:
+        """Where an isolated-margin position loses its margin, 0.0 when flat or unlevered.
+
+        Hardcoded 0.0 before (#269), which made futures_live_base fail open and report
+        account_state[5] as 1.0 for EVERY position -- a 5x levered position presented to
+        the policy as maximally far from liquidation. CLAUDE.md invariant 3 verbatim.
+        """
+        if self.position_qty == 0 or self.leverage <= 1 or self.entry_price <= 0:
+            return 0.0
+        return isolated_liquidation_price(
+            self.entry_price, is_long=self.position_qty > 0, leverage=self.leverage
+        )
+
     def advance_bar(self, ohlc: Dict[str, float]):
         """Advance to new bar and check SL/TP triggers.
 
@@ -78,12 +93,30 @@ class ReplayOrderExecutor:
         """
         self.current_price = float(ohlc["close"])
 
-        if self.position_qty == 0 or (self.sl_price == 0 and self.tp_price == 0):
+        # Liquidation is checked even with no bracket set: the old guard returned early
+        # when sl and tp were both 0, so a leveraged replay position could run to negative
+        # equity and then fully recover when price came back (#269).
+        if self.position_qty == 0:
             return
 
         high = float(ohlc["high"])
         low = float(ohlc["low"])
         open_price = float(ohlc["open"])
+
+        # BEFORE SL/TP, matching the offline env's priority (#299): the venue closes the
+        # position whatever the agent's bracket says.
+        liq = self.liquidation_price
+        if liq > 0 and (
+            (self.position_qty > 0 and low <= liq) or (self.position_qty < 0 and high >= liq)
+        ):
+            self._close_at_price(stop_fill_price(liq, open_price, is_long=self.position_qty > 0))
+            # Isolated margin: the loss is capped at the posted margin, so a gap through
+            # the liquidation price cannot take the account below zero.
+            self.balance = max(self.balance, 0.0)
+            return
+
+        if self.sl_price == 0 and self.tp_price == 0:
+            return
 
         # Check SL first (pessimistic -- matching offline env)
         sl_triggered = False
@@ -229,7 +262,7 @@ class ReplayOrderExecutor:
                 leverage=self.leverage,
                 margin_type="ISOLATED",
                 margin_mode="isolated",
-                liquidation_price=0.0,
+                liquidation_price=self.liquidation_price,
             )
         }
 

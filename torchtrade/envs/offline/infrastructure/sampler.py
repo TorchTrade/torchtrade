@@ -236,8 +236,10 @@ class MarketDataObservationSampler:
         # row[:5] positional contract exact rather than merely conventional.
         execute_base_raw = self.df.resample(execute_on.to_pandas_freq()).agg(ohlcv_agg)
 
-        # Detect and warn about data gaps
-        nan_mask = execute_base_raw["close"].isna()
+        # Detect and warn about data gaps. ANY price field, not close alone (#353): a bar
+        # with a good close and a missing open was never warned about, then forward-filled
+        # -- and open is what stop_fill_price uses to price a gapped stop.
+        nan_mask = execute_base_raw[["open", "high", "low", "close"]].isna().any(axis=1)
         if nan_mask.any():
             nan_count = nan_mask.sum()
             total_count = len(execute_base_raw)
@@ -288,6 +290,17 @@ class MarketDataObservationSampler:
         # too-narrow range this aggregation exists to fix.
         empty_bars = self.df.resample(execute_on.to_pandas_freq()).size() == 0
         execute_base_filled.loc[empty_bars, ["open", "high", "low"]] = execute_base_filled.loc[empty_bars, "close"]
+
+        # An INCOMPLETE bar -- one that has trades but is missing a price field -- gets the
+        # same treatment (#353). Forward-filling volume is defensible; forward-filling a
+        # price that fills orders is not, because the result is a fill at a price the
+        # market never traded, and a high/low that answers "was this level touched?" with
+        # the previous bar's range. Its own close is the one price we actually know.
+        incomplete = execute_base_raw[["open", "high", "low"]].isna().any(axis=1) & ~empty_bars
+        if incomplete.any():
+            execute_base_filled.loc[incomplete, ["open", "high", "low"]] = (
+                execute_base_filled.loc[incomplete, "close"].values[:, None]
+            )
         self.execute_base_features_df = execute_base_filled[self.min_start_time:]
         if len(self.execute_base_features_df) == 0:
             raise ValueError("No execute_on base features available after min_start_time")
