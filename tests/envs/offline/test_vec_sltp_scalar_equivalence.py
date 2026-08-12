@@ -752,11 +752,12 @@ class TestSLTPScalarVecEquivalenceLiquidation:
         assert not mismatches, "\n".join(mismatches)
 
 
+@pytest.mark.parametrize("fee", [0.0, 0.001], ids=["no-fee", "fee"])
 @pytest.mark.parametrize("side,low,high,gap_open", [
     ("long", 85.0, None, 85.0),
     ("short", None, 115.0, 115.0),
 ], ids=["long", "short"])
-def test_a_gapped_liquidation_costs_the_margin_on_both_engines(side, low, high, gap_open):
+def test_a_gapped_liquidation_costs_the_margin_on_both_engines(side, low, high, gap_open, fee):
     """Pins the bankruptcy clamp on the VECTORIZED engine, and pins its value (#314).
 
     Three gaps this suite could not see, all found in review:
@@ -775,7 +776,7 @@ def test_a_gapped_liquidation_costs_the_margin_on_both_engines(side, low, high, 
     actions = [0] * 5 + [1 if side == "long" else 2] + [0] * 4
     pair_kwargs = dict(
         leverage=10, sl_levels=[-0.05], tp_levels=[0.50],
-        position_fraction=0.30, initial_cash=1000,
+        position_fraction=0.30, initial_cash=1000, fee=fee,
     )
 
     mismatches = _run_sltp_sequence(
@@ -791,7 +792,12 @@ def test_a_gapped_liquidation_costs_the_margin_on_both_engines(side, low, high, 
         action_td["action"] = torch.tensor(action)
         td = scalar.step(action_td)
     # Isolated margin: a liquidated position costs exactly the margin it posted, and in
-    # fractional mode that margin is position_fraction * portfolio.
+    # fractional mode that margin is position_fraction * portfolio -- so 700 holds at
+    # EVERY fee. That invariance is the point of the fee cell: the venue takes the
+    # liquidation fee out of the margin, so the bankruptcy price is net of it. Drop that
+    # and the fee cell alone drifts. Both offline engines were unpinned for it -- every
+    # gapped test in tests/envs/offline ran at fee=0, where the two conventions are
+    # indistinguishable, and only replay had a fee>0 case.
     assert scalar.balance == pytest.approx(700.0, abs=1e-6), (
         "0.30 of a 1000 portfolio is 300 of margin, so 700 must remain -- got "
         f"{scalar.balance}"
