@@ -41,9 +41,7 @@ Discrete action space mappings for different trading strategies.
 
 **Functions:**
 - `create_alpaca_sltp_action_map()`: 3-action map (BUY, SELL, HOLD)
-- `discrete_action_map_long_short()`: 5-action map (LONG, SHORT, CLOSE, HOLD, etc.)
 - `create_sltp_action_map()`: Simplified 3-action map
-- `discrete_action_map_futures_positions()`: Futures-specific position actions
 
 **Example:**
 ```python
@@ -63,7 +61,6 @@ Stop-loss and take-profit calculation utilities.
 
 **Functions:**
 - `calculate_bracket_prices()`: SL/TP price levels for a bracket order
-- `update_sltp_prices()`: Update SL/TP levels (e.g., trailing stop)
 
 **Example:**
 ```python
@@ -142,42 +139,30 @@ qty, notional, side = calculate_fractional_position(
 
 ### `metrics.py`
 
-Performance metric calculations for trading strategies.
+Performance metrics.
 
 **Functions:**
+- `compute_sharpe_torch()`: annualised Sharpe from a returns tensor
 
-**Example:**
-
-
-## Common Use Cases
 
 ### Setting Up an Environment with Utilities
 
 ```python
-from torchtrade.envs.utils import (
-    TimeFrame,
-    TimeFrameUnit,
-    discrete_action_map_long_only,
-    calculate_metrics
+from torchtrade.envs.offline import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
+from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map
+
+action_map = create_alpaca_sltp_action_map([-0.02, -0.05], [0.05, 0.10])
+print(f"{len(action_map)} bracket actions, e.g. {action_map[1]}")
+
+config = SequentialTradingEnvSLTPConfig(
+    symbol="BTCUSD",
+    time_frames=["1Minute"],
+    window_sizes=[50],
+    execute_on="1Minute",
+    stoploss_levels=[-0.02, -0.05],
+    takeprofit_levels=[0.05, 0.10],
 )
-
-# Configure environment
-    timeframe=TimeFrame(1, TimeFrameUnit.DAY),
-    window_size=50,
-)
-
-# Create environment
-
-# Get action mapping
-action_map = create_alpaca_sltp_action_map()
-print(f"Available actions: {action_map}")
-
-# After training, calculate metrics
-metrics = calculate_metrics(
-    returns=env.get_returns(),
-    trades=env.get_trades(),
-    portfolio_values=env.get_portfolio_values()
-)
+env = SequentialTradingEnvSLTP(df, config)
 ```
 
 ### Converting Timeframes for Different Providers

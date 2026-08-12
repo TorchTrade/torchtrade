@@ -26,7 +26,6 @@ from torchrl.data import Categorical
 
 from torchtrade.envs.core.offline_base import TorchTradeOfflineEnv
 from torchtrade.envs.core.state import (
-    HistoryTracker,
     advance_hold_counter_from_size,
     binarize_action_type,
 )

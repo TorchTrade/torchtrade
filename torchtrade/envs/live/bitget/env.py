@@ -48,8 +48,6 @@ class BitgetFuturesTradingEnvConfig:
     # Action space configuration
     action_levels: List[float] = None  # Custom action levels, or None for defaults
 
-    # Reward settings
-
     # Termination settings
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance

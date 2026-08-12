@@ -125,8 +125,6 @@ def env_maker(df, cfg, device="cpu", max_traj_length=1, random_start=False):
             stoploss_levels=cfg.env.stoploss_levels,
             takeprofit_levels=cfg.env.takeprofit_levels,
             include_hold_action=cfg.env.include_hold_action,
-            quantity_per_trade=cfg.env.quantity_per_trade,
-            trade_mode=cfg.env.trade_mode,
         )
         return OneStepTradingEnv(df, config, feature_preprocessing_fn=custom_preprocessing)
     else:

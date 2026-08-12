@@ -133,11 +133,17 @@ unrealized_pnl = position.unrealized_pnl()
 ### Creating Custom Rewards
 
 ```python
-# A reward function is a plain callable, not a subclass.
-def custom_reward(env) -> float:
-    return float(env.portfolio_value - env.previous_portfolio_value)
+import math
 
-env = SequentialTradingEnv(df, config, reward_function=custom_reward)
+# A reward function is a plain callable taking the HistoryTracker -- not a subclass, and
+# not the env. See torchtrade/envs/core/default_rewards.py.
+def drawdown_penalised_return(history) -> float:
+    values = history.portfolio_values
+    if len(values) < 2:
+        return 0.0
+    step_return = math.log(values[-1] / values[-2])
+    drawdown = 1.0 - values[-1] / max(values)
+    return step_return - 0.1 * drawdown
 ```
 
 ## Design Patterns

@@ -324,14 +324,6 @@ print(f"Open Positions: {metrics['num_positions']}")
 
 Environments can integrate with monitoring:
 
-```python
-from wandb import init as wandb_init
-
-wandb_init(project="live-trading")
-
-env = AlpacaTorchTradingEnv(config=config, logger=logger)
-# Automatically logs metrics to Weights & Biases
-```
 
 ## Best Practices
 

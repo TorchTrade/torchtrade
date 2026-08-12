@@ -46,8 +46,6 @@ class BinanceFuturesTradingEnvConfig:
     # Action space configuration (fractional mode only)
     action_levels: List[float] = None  # Custom action levels, or None for defaults
 
-    # Reward settings
-
     # Termination settings
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
@@ -256,7 +254,6 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             success=success,
             closed_position=True,
         )
-
 
 
     def _get_symbol_info(self) -> Dict:
