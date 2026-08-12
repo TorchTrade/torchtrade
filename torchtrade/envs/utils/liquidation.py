@@ -89,11 +89,23 @@ def nearest_liquidation_price(
 ) -> float:
     """The more urgent of the isolated and cross estimates, for a venue that publishes none.
 
-    Neither estimate dominates the other. Isolated ignores the rest of the account, so it
-    is wrong whenever collateral elsewhere has been consumed; cross ignores other
-    positions' own maintenance requirements and the venue's risk tiers. Taking whichever
-    sits nearer the mark on the losing side is the only combination that cannot overstate
-    the distance -- and overstating it is the fail-open this whole change removes.
+    Neither estimate dominates. Isolated ignores the rest of the account, so it is wrong
+    once collateral elsewhere has been consumed; cross reflects equity but assumes this
+    position is the account's only maintenance obligation. Taking whichever sits nearer
+    the mark is the best available answer from the fields the adapters currently expose.
+
+    It is NOT a guaranteed bound, and must not be described as one. If the account holds
+    another cross position, its maintenance requirement is missing from both estimates and
+    both overstate the room left: a 1-unit long at mark 100 on equity 5 returns ~95.4
+    (4.6% room) where a second position needing 4 of maintenance puts real liquidation at
+    ~99.4 (0.6%). Closing that needs an account-level maintenance figure from
+    `get_account_balance()`, which no adapter parses today -- see #344.
+
+    The same single-position assumption is already baked into `exposure_pct`, the
+    bankruptcy baseline and `_get_portfolio_value`, all of which divide this position by
+    account-wide equity. What this function must not do is claim more certainty than they
+    do. Against the `1.0` it replaces -- maximally wrong for every cross position,
+    always -- it is a strict improvement in every case, which is why it ships.
     """
     isolated = isolated_liquidation_price(
         entry_price, is_long=position_size > 0, leverage=leverage,

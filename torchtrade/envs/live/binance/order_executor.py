@@ -333,7 +333,11 @@ class BinanceFuturesOrderClass:
 
                     status["position_status"] = PositionStatus(
                         qty=qty,
-                        notional_value=float(pos.get("notional") or abs(qty * mark_price)),
+                        # `float(...) or` and not `get(...) or`: binance sends notional as a
+                        # STRING, and "0" is truthy, so the outer test has to be on the
+                        # parsed number. qty != 0 is guaranteed above, so the fallback is a
+                        # real notional rather than another 0 (#277).
+                        notional_value=float(pos.get("notional") or 0.0) or abs(qty * mark_price),
                         entry_price=entry_price,
                         unrealized_pnl=unrealized_pnl,
                         unrealized_pnl_pct=unrealized_pnl_pct,

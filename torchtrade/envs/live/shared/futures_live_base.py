@@ -151,6 +151,11 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                 # elsewhere have eaten the collateral, cross liquidates earlier than
                 # isolated says and the estimate would overstate the distance -- the same
                 # fail-open, reintroduced with extra steps.
+                #
+                # Still not a guaranteed bound: a second cross position's maintenance
+                # requirement is invisible to both estimates and would move liquidation
+                # nearer again (#344). That assumption -- this env owns the account -- is
+                # the same one exposure_pct and the bankruptcy baseline already make.
                 liquidation_price = nearest_liquidation_price(
                     position_size=position_size,
                     entry_price=position_status.entry_price,
