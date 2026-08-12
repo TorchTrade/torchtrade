@@ -514,14 +514,14 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         if side == "close":
             if self.position.position_size != 0:
                 # Apply slippage
-                price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage).item()
+                price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage, generator=self._rng).item()
                 execution_price = base_price * price_noise
                 return self._close_position(execution_price)
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Opening new position (long or short)
         # Apply slippage
-        price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage).item()
+        price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage, generator=self._rng).item()
         execution_price = base_price * price_noise
 
         # Check if already in same direction - if so, hold (ignore duplicate action)

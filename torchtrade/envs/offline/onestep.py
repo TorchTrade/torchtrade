@@ -412,7 +412,7 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         if side == "close":
             if self.position.position_size != 0:
                 # Apply slippage
-                price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage).item()
+                price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage, generator=self._rng).item()
                 execution_price = base_price * price_noise
                 return self._close_position(execution_price)
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
@@ -426,14 +426,14 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
 
         # If switching direction, close existing position first
         if self.position.position_size != 0:
-            price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage).item()
+            price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage, generator=self._rng).item()
             execution_price = base_price * price_noise
             self._close_position(execution_price)
             # Recalculate base_price after closing (balance may have changed)
             base_price = self._cached_base_features["close"]
 
         # Apply slippage for opening
-        price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage).item()
+        price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage, generator=self._rng).item()
         execution_price = base_price * price_noise
 
         # Initialize previous portfolio value for rollout returns

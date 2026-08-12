@@ -658,7 +658,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         off the wrong bar. Better to fail loudly than to reintroduce it silently.
         """
         # Apply slippage
-        price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage).item()
+        price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage, generator=self._rng).item()
         execution_price = base_price * price_noise
 
         # Execute fractional action

@@ -388,3 +388,122 @@ def test_initial_cash_randomisation_can_draw_its_configured_maximum():
     assert drawn == {1000, 1001, 1002, 1003, 1004, 1005}, (
         f"drew {sorted(drawn)} -- the configured bounds must both be reachable"
     )
+
+
+class TestSetSeedReachesTheEpisodeRNGs:
+    """#273: set_seed() reseeded the global streams, which decide nothing about an episode.
+
+    The two RNGs that determine what an episode IS -- the sampler's start index and the
+    initial cash -- are built once from `config.seed` and were never touched again. The
+    consequence was not "set_seed is a no-op": SerialEnv/ParallelEnv seed their workers
+    `seed, seed+1, ...` precisely to decorrelate them, so every worker replayed the same
+    start indices and the same starting cash. A batch of N workers had a diversity of 1.
+    """
+
+    @staticmethod
+    def _episodes(df, seed, k=6):
+        config = SequentialTradingEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=(5000, 15000),
+            max_traj_length=20,
+            slippage=0.01,
+        )
+        env = SequentialTradingEnv(df.copy(), config, feature_preprocessing_fn=simple_feature_fn)
+        env.set_seed(seed)
+        out = []
+        for _ in range(k):
+            env.reset()
+            out.append((int(env.sampler._sequential_idx), float(env.balance)))
+        return out
+
+    def test_different_seeds_give_different_episodes(self, large_ohlcv_df):
+        """The measurement from the issue: these two were byte-identical."""
+        assert self._episodes(large_ohlcv_df, 1) != self._episodes(large_ohlcv_df, 999)
+
+    def test_adjacent_seeds_give_different_episodes(self, large_ohlcv_df):
+        """Adjacent, because that is what ParallelEnv hands its workers.
+
+        A fix that only decorrelates distant seeds would leave the actual failure -- N
+        workers collecting the same trajectories -- exactly as broken.
+        """
+        assert self._episodes(large_ohlcv_df, 1) != self._episodes(large_ohlcv_df, 2)
+
+    def test_same_seed_still_reproduces(self, large_ohlcv_df):
+        """The point of the fix is reproducibility, not merely difference."""
+        assert self._episodes(large_ohlcv_df, 7) == self._episodes(large_ohlcv_df, 7)
+
+    def _rng_states(self, df, seed):
+        config = SequentialTradingEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=(5000, 15000),
+        )
+        env = SequentialTradingEnv(df.copy(), config, feature_preprocessing_fn=simple_feature_fn)
+        env.set_seed(seed)
+        return (
+            env.sampler.np_rng.bit_generator.state,
+            env.initial_cash_sampler.np_rng.bit_generator.state,
+        )
+
+    def test_the_two_episode_streams_are_independent(self, large_ohlcv_df):
+        """Asserted on the bit-generator state, because the drawn VALUES hide this.
+
+        Point both RNGs at one seed and the start index and the cash still look unrelated
+        -- they draw different ranges off the same bits -- so a test comparing episodes
+        passes while the two quantities are locked together. Comparing the streams
+        themselves is the only way to see it.
+        """
+        sampler_state, cash_state = self._rng_states(large_ohlcv_df, 5)
+        assert sampler_state != cash_state
+
+    def test_streams_do_not_collide_across_adjacent_workers(self, large_ohlcv_df):
+        """ParallelEnv hands worker N `seed + N`, so a fixed per-stream offset re-couples
+        them: with `seed` / `seed + 1`, worker 1's cash stream IS worker 2's start-index
+        stream. SeedSequence.spawn is what avoids that."""
+        w1_sampler, w1_cash = self._rng_states(large_ohlcv_df, 1)
+        w2_sampler, w2_cash = self._rng_states(large_ohlcv_df, 2)
+
+        assert w1_cash != w2_sampler
+        assert w1_sampler != w2_cash
+        assert w1_sampler != w2_sampler
+
+    def test_slippage_does_not_consume_the_global_torch_stream(self, large_ohlcv_df):
+        """Slippage shared the global stream with the policy's own exploration sampling.
+
+        So what a saved seed reproduced depended on how many times the policy had sampled
+        in between. The control is drawn from the same seed WITHOUT an env step in the
+        way: if stepping consumes global entropy, the second draw diverges from it.
+        """
+        config = SequentialTradingEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000,
+            slippage=0.01,
+            leverage=2,
+            action_levels=[-1, 0, 1],
+        )
+
+        torch.manual_seed(1234)
+        control = torch.rand(3)
+
+        env = SequentialTradingEnv(
+            large_ohlcv_df.copy(), config, feature_preprocessing_fn=simple_feature_fn
+        )
+        env.set_seed(3)
+        torch.manual_seed(1234)
+        td = env.reset()
+        td["action"] = torch.tensor(2)
+        env.step(td)
+        after = torch.rand(3)
+
+        assert torch.equal(control, after), (
+            "stepping the env moved the global torch stream, so slippage still shares it "
+            "with the policy's exploration"
+        )
