@@ -507,3 +507,39 @@ class TestSetSeedReachesTheEpisodeRNGs:
             "stepping the env moved the global torch stream, so slippage still shares it "
             "with the policy's exploration"
         )
+
+    def test_seedless_call_falls_back_to_the_configured_seed(self, large_ohlcv_df):
+        """`set_seed()` with no argument is documented to fall back to `config.seed`.
+
+        The first version of this override returned early on None and silently dropped
+        that contract -- making the no-argument form a true no-op, which is the bug the
+        override exists to fix, reintroduced for one call shape.
+        """
+        config = SequentialTradingEnvConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=(5000, 15000),
+            seed=4242,
+        )
+
+        def episodes():
+            env = SequentialTradingEnv(
+                large_ohlcv_df.copy(), config, feature_preprocessing_fn=simple_feature_fn
+            )
+            env.set_seed()
+            out = []
+            for _ in range(4):
+                env.reset()
+                out.append((int(env.sampler._sequential_idx), float(env.balance)))
+            return out
+
+        # Reproducible, and reaching the episode RNGs rather than only the globals.
+        assert episodes() == episodes()
+        explicit = SequentialTradingEnv(
+            large_ohlcv_df.copy(), config, feature_preprocessing_fn=simple_feature_fn
+        )
+        explicit.set_seed(4242)
+        explicit.reset()
+        assert int(explicit.sampler._sequential_idx) == episodes()[0][0]

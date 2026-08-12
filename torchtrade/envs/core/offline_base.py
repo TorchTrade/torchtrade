@@ -234,6 +234,12 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         start index and the cash would lock the two together, so a given start index would
         always be paired with the same balance.
         """
+        # `seed=None` falls back to config.seed, which is what the base implementation
+        # documents and what this override would otherwise have silently dropped. It is
+        # also the more useful behaviour: the fallback now reaches the episode RNGs too,
+        # where before it only re-seeded globals that decide nothing.
+        if seed is None:
+            seed = getattr(self.config, "seed", None)
         if seed is None:
             return
 
