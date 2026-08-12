@@ -28,6 +28,7 @@ from torchtrade.envs.core.state import (
     PositionUnknownError,
     advance_hold_counter,
     position_direction_from_status,
+    position_qty_from_status,
 )
 
 
@@ -457,10 +458,13 @@ def test_unknown_status_refuses_to_build_account_state():
         TorchTradeFuturesLiveEnv._get_observation(env)
 
 
-# A rename would empty this and pytest would SKIP rather than fail -- the hazard this
-# file guards against elsewhere with its own len() assertions.
-_SIZING_ENVS = [c for c in NON_SLTP_ENVS if "_get_current_position_quantity" in vars(c)]
-assert len(_SIZING_ENVS) == 3, f"expected 3 envs that size from a live query, got {_SIZING_ENVS}"
+# Envs that RESOLVE the shared accessor, which replaced three byte-identical copies
+# (#283). Note okx resolves it but sizes in _step instead, so these cells prove wiring
+# rather than okx's own path. A rename would empty this and pytest would SKIP rather
+# than fail -- the hazard this file guards against elsewhere with its own len()
+# assertions.
+_SIZING_ENVS = [c for c in NON_SLTP_ENVS if hasattr(c, "_get_current_position_quantity")]
+assert len(_SIZING_ENVS) == 4, f"expected 4 envs that size from a live query, got {_SIZING_ENVS}"
 
 _FAILING_FETCH_EXCHANGES = ["binance", "bitget", "bybit", "okx", "alpaca"]
 
@@ -547,13 +551,15 @@ def test_reading_a_field_off_an_unknown_status_says_why():
 def test_position_sizing_refuses_an_unknown_status(env_cls):
     """_get_current_position_quantity must not size an order off a phantom flat account.
 
-    Its `position.qty if position is not None else 0.0` reads an outage as 0 quantity,
-    so the delta is computed against a position the exchange never said was gone. _step
-    normally raises earlier, on its own status read -- this is the path when the outage
-    begins between the two get_status() calls inside a single step.
+    The hand-rolled `position.qty if position is not None else 0.0` read an outage as 0
+    quantity, so the delta was computed against a position the exchange never said was
+    gone. _step normally raises earlier, on its own status read -- this is the path when
+    the outage begins between the two get_status() calls inside a single step.
 
-    3 of 5: okx takes current_qty from _step, and alpaca spells the same second query
-    inline, so both are covered through _step by the composite test instead.
+    All four resolve the accessor since it was shared (#283), though okx sizes in _step
+    and never calls it -- these cells prove the MRO wiring, and okx's real path is covered
+    by test_okx_sizes_through_the_dust_rule_in_step. Alpaca spells the same second query
+    inline and is covered through _step by the composite test.
     """
     env = SimpleNamespace(
         trader=SimpleNamespace(get_status=lambda: {"position_status": POSITION_UNKNOWN})
@@ -785,3 +791,111 @@ def test_position_unknown_identity_survives_a_round_trip():
     # __getattr__ that probe raises a trading error from inside a copy.
     assert copy.deepcopy(POSITION_UNKNOWN) is POSITION_UNKNOWN
     assert copy.deepcopy({"position_status": POSITION_UNKNOWN})["position_status"] is POSITION_UNKNOWN
+
+
+@pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
+def test_no_live_env_reforks_the_position_quantity_accessor(env_cls):
+    """The size accessor lives on the shared base, and must stay there (#283).
+
+    Three envs carried a byte-identical `position.qty if position is not None else 0.0`,
+    which returned a dust residual rather than 0 -- so `abs(current_qty) > 0` fired on a
+    flat account, closed nothing, and still advanced current_action_level from a trade
+    that never happened.
+
+    Structural, not behavioural: a re-forked copy that has not drifted yet passes every
+    behavioural test, which is exactly how three of them survived. Over FUTURES_ENVS, not
+    just the non-SLTP ones: the SLTP variants inherit the accessor without calling it
+    today, so a fork there would be dead code -- and dead-but-wrong is the state the three
+    originals were in.
+    """
+    assert "_get_current_position_quantity" not in vars(env_cls), (
+        f"{env_cls.__name__} redefines _get_current_position_quantity. The dust rule "
+        "lives in position_qty_from_status -- inherit it rather than re-deriving qty."
+    )
+
+
+@pytest.mark.parametrize("env_cls", _SIZING_ENVS, ids=lambda c: c.__name__)
+def test_a_dust_residual_does_not_look_like_a_position_to_the_trade_path(env_cls):
+    """The concrete failure from #283, at the seam every sizing path reads.
+
+    An exchange can leave a float residual after a full close. Read as a live position it
+    makes `abs(current_qty) > 0` true on a flat account, so action 0.0 calls
+    close_position() on nothing -- and still advances current_action_level from a trade
+    that never happened, which freezes the duplicate-action guard (invariant 2).
+
+    The account_state paths already honoured the dust rule; only the TRADE paths
+    hand-rolled it, which is why nothing caught this.
+    """
+    env = SimpleNamespace(
+        trader=SimpleNamespace(
+            get_status=lambda: {"position_status": SimpleNamespace(qty=1e-12)}
+        )
+    )
+    assert env_cls._get_current_position_quantity(env) == 0.0, (
+        "a 1e-12 residual must read as flat, not as a position to close"
+    )
+
+
+@pytest.mark.parametrize("qty,expected", [
+    (None, 0.0),        # no position at all
+    (0.0, 0.0),
+    (1e-12, 0.0),       # dust left by a full close
+    (-1e-12, 0.0),
+    (1e-9, 0.0),        # exactly at the epsilon, which is inclusive
+    (1.1e-9, 1.1e-9),   # just past it: a real, if tiny, position
+    (-2.5, -2.5),      # a real SHORT: nothing else here holds a negative
+    ("2.5", 2.5),       # exchanges return strings; the old form passed one through
+], ids=["none", "zero", "dust-long", "dust-short", "at-eps", "past-eps", "short", "string"])
+def test_position_qty_from_status_is_the_one_size_rule(qty, expected):
+    """Direct cover for the helper (#283), which okx reaches without the accessor.
+
+    The string cell is not hypothetical: binance, bybit and okx all read qty off the wire
+    as a string. They coerce at construction today, but the deleted hand-rolled form
+    returned whatever it was given, so an uncoerced path would have made the downstream
+    `abs(current_qty) > 0` raise TypeError rather than size an order.
+    """
+    status = None if qty is None else SimpleNamespace(qty=qty)
+    assert position_qty_from_status(status) == expected
+
+
+def test_position_qty_from_status_refuses_an_unknown_status():
+    """An outage is not flat -- the same rule position_direction_from_status enforces."""
+    # match=: without it this passes whether or not the helper has its own guard, because
+    # _PositionUnknown.__getattr__("qty") raises the same type anyway.
+    with pytest.raises(PositionUnknownError, match="treating it as a size"):
+        position_qty_from_status(POSITION_UNKNOWN)
+
+
+def test_okx_sizes_through_the_dust_rule_in_step():
+    """okx sizes in _step, not through the inherited accessor -- drive the real path.
+
+    The accessor cells above resolve on okx but okx never calls it, so reverting okx's own
+    read to `position_status.qty if position_status else 0.0` left the whole suite green.
+    This is the only cell that fails on that.
+    """
+    from torchtrade.envs.live.okx.env import OKXFuturesTorchTradingEnv
+
+    seen = {}
+
+    def _capture(desired_action, *, current_qty, current_price):
+        seen["current_qty"] = current_qty
+        raise RuntimeError("stop here; the stand-in cannot finish a step")
+
+    env = SimpleNamespace(
+        position=PositionState(),
+        trader=SimpleNamespace(
+            get_status=lambda: {
+                "position_status": SimpleNamespace(qty=1e-12, mark_price=100.0)
+            },
+            get_mark_price=lambda: 100.0,
+        ),
+        action_levels=[-1.0, 0.0, 1.0],
+        _sync_position_from_exchange=lambda ps: None,
+        _execute_trade_if_needed=_capture,
+    )
+    with pytest.raises(RuntimeError):
+        OKXFuturesTorchTradingEnv._step(env, {"action": 1})
+
+    assert seen["current_qty"] == 0.0, (
+        "a 1e-12 residual reached okx's sizing path as a live position"
+    )

@@ -14,6 +14,7 @@ from torchtrade.envs.live.okx.order_executor import (
     MarginMode,
     PositionMode,
 )
+from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.okx.base import OKXBaseTorchTradingEnv
 from torchtrade.envs.utils.fractional_sizing import (
     calculate_fractional_position,
@@ -108,12 +109,13 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         """Execute one environment step."""
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        if position_status:
-            current_price = position_status.mark_price
-            position_size = position_status.qty
-        else:
-            current_price = self.trader.get_mark_price()
-            position_size = 0.0
+        # Size through the canonical rule, not `position_status.qty` raw: a dust residual
+        # read as a live position makes abs(current_qty) > 0 true on a flat account, so
+        # action 0.0 closes nothing and still advances current_action_level (#283).
+        position_size = position_qty_from_status(position_status)
+        current_price = (
+            position_status.mark_price if position_status else self.trader.get_mark_price()
+        )
 
         # No-op today (this env's _execute_trade_if_needed recomputes qty live and never reads
         # current_action_level), but keeps the field consistent so adding a duplicate-action

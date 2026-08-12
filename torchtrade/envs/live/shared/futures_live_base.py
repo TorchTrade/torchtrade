@@ -13,7 +13,11 @@ import torch
 from tensordict import TensorDict, TensorDictBase
 
 from torchtrade.envs.core.live import TorchTradeLiveEnv
-from torchtrade.envs.core.state import advance_hold_counter, position_direction_from_status
+from torchtrade.envs.core.state import (
+    advance_hold_counter,
+    position_direction_from_status,
+    position_qty_from_status,
+)
 
 
 class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
@@ -130,3 +134,12 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         """Calculate total portfolio value (includes unrealized PnL)."""
         balance = self.trader.get_account_balance()
         return balance.get("total_margin_balance", 0)
+
+    def _get_current_position_quantity(self) -> float:
+        """The signed size the exchange holds, dust read as flat.
+
+        One copy: binance, bitget and bybit each carried a byte-identical
+        `position.qty if position is not None else 0.0`, which returned the residual
+        rather than 0 and let `abs(current_qty) > 0` fire on a flat account (#283).
+        """
+        return position_qty_from_status(self.trader.get_status().get("position_status"))
