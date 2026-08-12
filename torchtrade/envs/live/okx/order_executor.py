@@ -222,13 +222,31 @@ class OKXFuturesOrderClass:
         except Exception as e:
             logger.warning(f"Could not set position mode (may already be configured): {e}")
 
+        # OKX requires posSide on set-leverage under isolated + long_short, and rejects
+        # the call without it (code 1, sMsg "Parameter posSide error"). Isolated leverage
+        # is stored per side there, so it takes one call each -- omitting them left the
+        # env sizing against leverage the account never had, which is #277 on this one
+        # config, and became a hard construction failure once #277 stopped swallowing
+        # rejections (#363).
+        per_side = (
+            self.margin_mode is MarginMode.ISOLATED
+            and self.position_mode is PositionMode.LONG_SHORT
+        )
+        for pos_side in (("long", "short") if per_side else (None,)):
+            self._apply_leverage(pos_side)
+
+    def _apply_leverage(self, pos_side=None):
+        """Set and verify the leverage for one side, or for the net position."""
         # Not tolerated like the position mode above: leverage sizes every position (#277).
+        request = dict(
+            instId=self.symbol,
+            lever=str(self.leverage),
+            mgnMode=self.margin_mode.value,
+        )
+        if pos_side is not None:
+            request["posSide"] = pos_side
         try:
-            res = self.account_client.set_leverage(
-                instId=self.symbol,
-                lever=str(self.leverage),
-                mgnMode=self.margin_mode.value,
-            )
+            res = self.account_client.set_leverage(**request)
         except Exception as e:
             if not leverage_already_set(e):
                 raise
