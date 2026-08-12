@@ -334,7 +334,14 @@ class BybitFuturesOrderClass:
             if pos is not None:
                 margin_mode = self._get_actual_margin_mode(pos)
                 size = float(pos.get("size", 0))
-                side = pos.get("side", "Buy")
+                # Explicit, not defaulted: an unexpected side signed a long as a
+                # SHORT, and every consumer reads that sign (#341).
+                side = pos.get("side")
+                if side not in ("Buy", "Sell"):
+                    raise ValueError(
+                        f"bybit reported an unusable position side ({side!r}); "
+                        f"refusing to infer a direction"
+                    )
                 qty = size if side == "Buy" else -size
 
                 entry_price = float(pos.get("avgPrice", 0))

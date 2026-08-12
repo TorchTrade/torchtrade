@@ -559,19 +559,30 @@ class BitgetFuturesOrderClass:
                 if pos and float(pos.get('contracts', 0)) != 0:
                     # CCXT returns contracts as the position size
                     contracts = float(pos.get('contracts', 0))
-                    side = pos.get('side', 'long')  # 'long' or 'short'
-
-                    # Convert to signed quantity (positive for long, negative for short)
+                    # Explicit: `contracts if side == 'long' else -contracts` signs a
+                    # long as a SHORT whenever the field is missing or unexpected, and
+                    # every consumer reads that sign -- the account_state the policy
+                    # sees, and the trade path. A direction is never guessed (#341).
+                    side = pos.get('side')
+                    if side not in ('long', 'short'):
+                        raise ValueError(
+                            f"bitget reported an unusable position side ({side!r}); "
+                            f"refusing to infer a direction"
+                        )
                     qty = contracts if side == 'long' else -contracts
 
-                    entry_price = float(pos.get('entryPrice', 0))
-                    mark_price = float(pos.get('markPrice', entry_price))
-                    unrealized_pnl = float(pos.get('unrealizedPnl', 0))
+                    # `or 0` on every nullable CCXT field: a cross position returns
+                    # liquidationPrice=None, and bare float(None) raises TypeError into
+                    # the broad except below -- reporting a healthy position as
+                    # POSITION_UNKNOWN, which freezes the env every bar (#341).
+                    entry_price = float(pos.get('entryPrice') or 0)
+                    mark_price = float(pos.get('markPrice') or entry_price)
+                    unrealized_pnl = float(pos.get('unrealizedPnl') or 0)
                     unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(qty, entry_price, mark_price)
 
                     status["position_status"] = PositionStatus(
                         qty=qty,
-                        notional_value=float(pos.get('notional', abs(contracts * mark_price))),
+                        notional_value=float(pos.get('notional') or abs(contracts * mark_price)),
                         entry_price=entry_price,
                         unrealized_pnl=unrealized_pnl,
                         unrealized_pnl_pct=unrealized_pnl_pct,
@@ -583,7 +594,7 @@ class BitgetFuturesOrderClass:
                             self.leverage if pos.get('leverage') in (None, "") else pos.get('leverage')
                         ),
                         margin_mode=pos.get('marginMode', self.margin_mode.value),
-                        liquidation_price=float(pos.get('liquidationPrice', 0)),
+                        liquidation_price=float(pos.get('liquidationPrice') or 0),
                     )
                 else:
                     status["position_status"] = None
@@ -655,7 +666,7 @@ class BitgetFuturesOrderClass:
                 positions = self.client.fetch_positions([self.symbol])
                 for pos in positions:
                     if pos['symbol'] == self.symbol:
-                        unrealized_pnl += float(pos.get('unrealizedPnl', 0))
+                        unrealized_pnl += float(pos.get('unrealizedPnl') or 0)
             except:
                 pass
 

@@ -225,8 +225,11 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
 
         # Validate portfolio value
         if not (total_portfolio > 0):
-            logger.warning("No portfolio value available for fractional position sizing")
-            return 0.0, 0.0
+            raise ValueError(
+                f"cannot size a trade against a portfolio value of {total_portfolio}: "
+                f"refusing, because returning a zero target is indistinguishable "
+                f"from a deliberate flat and the caller executes it as a full close"
+            )
 
         # Target position value based on action
         target_position_value = total_portfolio * action_value

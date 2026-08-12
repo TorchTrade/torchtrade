@@ -1848,3 +1848,50 @@ def test_no_futures_env_reads_the_mark_price_unvalidated(exchange, module):
     assert "self.trader.get_mark_price()" not in path.read_text(), (
         f"{exchange}/{module} sizes from an unvalidated mark price"
     )
+
+
+@pytest.mark.parametrize("exchange", ["alpaca", "binance", "bitget", "bybit", "okx"])
+def test_no_env_returns_a_zero_target_it_cannot_size(exchange):
+    """#348: "I cannot size this" returned the same tuple as "go flat".
+
+    On alpaca that is a liquidation: it has no `target_qty == 0` guard, so a zero target
+    against an open position becomes `delta = 0 - current` and sells -- from an action
+    that meant maximum long. The four futures envs DO guard it, so there it was a silent
+    no-op: the agent's action dropped every bar with only a warning. Both are wrong for
+    the same reason -- "I cannot size this" must not be the same value as "go flat".
+    """
+    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+           / "live" / exchange / "env.py").read_text()
+    assert "refusing, because returning a zero target" in src, (
+        f"{exchange} still returns a zero target when it cannot read the balance"
+    )
+
+
+@pytest.mark.parametrize("exchange,field", [
+    ("bitget", "liquidationPrice"),
+    ("bitget", "entryPrice"),
+    ("bitget", "markPrice"),
+    ("bitget", "unrealizedPnl"),
+])
+def test_nullable_venue_fields_do_not_read_as_an_outage(exchange, field):
+    """#341: a cross position returns `liquidationPrice: None`, and bare `float(None)`
+    raises TypeError into the broad except -- reporting a HEALTHY position as
+    POSITION_UNKNOWN, which is fail-closed and freezes the env every bar."""
+    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+           / "live" / exchange / "order_executor.py").read_text()
+    assert f"pos.get('{field}', " not in src, (
+        f"{exchange} reads {field} with a two-arg get; a null value raises rather than "
+        f"defaulting, and the broad except turns that into POSITION_UNKNOWN"
+    )
+
+
+@pytest.mark.parametrize("exchange", ["bitget", "bybit"])
+def test_an_unusable_position_side_is_refused_not_signed_short(exchange):
+    """#341: `contracts if side == 'long' else -contracts` signs a long as a SHORT for
+    any unexpected value. Every consumer reads that sign -- the account_state the policy
+    sees and the trade path -- so a flipped sign is a wrong-direction trade."""
+    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+           / "live" / exchange / "order_executor.py").read_text()
+    assert "refusing to infer a direction" in src, (
+        f"{exchange} still defaults an unknown side to a direction"
+    )

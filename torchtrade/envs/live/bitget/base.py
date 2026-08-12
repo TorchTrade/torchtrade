@@ -268,7 +268,7 @@ class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         # Warn if closing with open position
         try:
             status = self.trader.get_status()
-            if status.get("position_status") and status["position_status"].qty != 0:
+            if position_direction_from_status(status.get("position_status")) != 0:
                 logging.getLogger(__name__).warning(
                     "Closing environment with open position! "
                     "Call env.trader.close_position() before env.close() if needed."
