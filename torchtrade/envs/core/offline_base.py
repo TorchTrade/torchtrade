@@ -225,10 +225,10 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
         start index from `sampler.np_rng` and the initial cash comes from
         `initial_cash_sampler.np_rng`, both built once from `config.seed` (#273).
 
-        The consequence was not merely "set_seed does nothing". SerialEnv/ParallelEnv seed
-        workers `seed, seed+1, ...` to decorrelate them, so every worker replayed the same
-        start indices and the same starting cash -- a batch of N identical trajectories,
-        with an effective diversity of 1.
+        The consequence was not merely "set_seed does nothing". SerialEnv/ParallelEnv give
+        each worker a DIFFERENT seed in order to decorrelate them, so every worker replayed
+        the same start indices and the same starting cash regardless -- a batch of N
+        identical trajectories, with an effective diversity of 1.
 
         Distinct streams per RNG, not one seed shared three ways: reusing `seed` for the
         start index and the cash would lock the two together, so a given start index would
@@ -244,10 +244,12 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             return
 
         seed = int(seed)
-        # SeedSequence.spawn, not seed / seed+1 / seed+2: workers are seeded seed, seed+1,
-        # ..., so a fixed offset would hand worker 1's cash stream the same bits as worker
-        # 2's start-index stream. spawn() is what numpy provides to decorrelate exactly
-        # this, and it keeps the three streams independent of each other as well.
+        # SeedSequence.spawn, not seed / seed+1 / seed+2. A fixed offset re-couples runs
+        # whose seeds differ by that offset -- with `seed`/`seed+1`, the cash stream of a
+        # run seeded 1 is bit-for-bit the start-index stream of a run seeded 2, and seeds
+        # 1..N is exactly how sweeps are launched. (torchrl itself derives worker seeds
+        # through seed_generator(), a PCG64 hash, so adjacency comes from the caller, not
+        # from it.) spawn() also keeps the three streams independent of each other.
         sampler_seed, cash_seed, torch_seed = np.random.SeedSequence(seed).spawn(3)
         self.sampler.np_rng = np.random.default_rng(sampler_seed)
         self.initial_cash_sampler.np_rng = np.random.default_rng(cash_seed)

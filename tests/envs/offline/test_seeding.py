@@ -18,6 +18,10 @@ from torchtrade.envs.offline.infrastructure.utils import InitialBalanceSampler
 from torchtrade.envs.offline.sequential import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchtrade.envs.offline.sequential_sltp import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
 from torchtrade.envs.offline.onestep import OneStepTradingEnv, OneStepTradingEnvConfig
+from torchtrade.envs.offline.vectorized_sequential import (
+    VectorizedSequentialTradingEnv,
+    VectorizedSequentialTradingEnvConfig,
+)
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
@@ -410,6 +414,8 @@ class TestSetSeedReachesTheEpisodeRNGs:
             initial_cash=(5000, 15000),
             max_traj_length=20,
             slippage=0.01,
+            seed=42,  # explicit: these cells fail on a deleted override only because a
+                      # config seed exists to be overridden
         )
         env = SequentialTradingEnv(df.copy(), config, feature_preprocessing_fn=simple_feature_fn)
         env.set_seed(seed)
@@ -424,10 +430,12 @@ class TestSetSeedReachesTheEpisodeRNGs:
         assert self._episodes(large_ohlcv_df, 1) != self._episodes(large_ohlcv_df, 999)
 
     def test_adjacent_seeds_give_different_episodes(self, large_ohlcv_df):
-        """Adjacent, because that is what ParallelEnv hands its workers.
+        """Adjacent, because `--seed $i` over 1..N is how sweeps and multi-process launches
+        are actually started.
 
-        A fix that only decorrelates distant seeds would leave the actual failure -- N
-        workers collecting the same trajectories -- exactly as broken.
+        (Not because torchrl hands workers `seed+1` -- it derives them through
+        seed_generator(), a PCG64 hash. Adjacency comes from the caller.) A fix that only
+        decorrelates distant seeds would leave the common case broken.
         """
         assert self._episodes(large_ohlcv_df, 1) != self._episodes(large_ohlcv_df, 2)
 
@@ -442,6 +450,7 @@ class TestSetSeedReachesTheEpisodeRNGs:
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
             initial_cash=(5000, 15000),
+            seed=42,  # explicit, as above
         )
         env = SequentialTradingEnv(df.copy(), config, feature_preprocessing_fn=simple_feature_fn)
         env.set_seed(seed)
@@ -462,23 +471,19 @@ class TestSetSeedReachesTheEpisodeRNGs:
         assert sampler_state != cash_state
 
     def test_streams_do_not_collide_across_adjacent_workers(self, large_ohlcv_df):
-        """ParallelEnv hands worker N `seed + N`, so a fixed per-stream offset re-couples
-        them: with `seed` / `seed + 1`, worker 1's cash stream IS worker 2's start-index
-        stream. SeedSequence.spawn is what avoids that."""
+        """A fixed per-stream offset re-couples runs whose seeds differ by that offset:
+        with `seed` / `seed + 1`, the cash stream of run 1 IS the start-index stream of
+        run 2 -- and seeds 1..N is exactly how a sweep is launched. SeedSequence.spawn
+        avoids it."""
         w1_sampler, w1_cash = self._rng_states(large_ohlcv_df, 1)
         w2_sampler, w2_cash = self._rng_states(large_ohlcv_df, 2)
 
         assert w1_cash != w2_sampler
         assert w1_sampler != w2_cash
-        assert w1_sampler != w2_sampler
 
-    def test_slippage_does_not_consume_the_global_torch_stream(self, large_ohlcv_df):
-        """Slippage shared the global stream with the policy's own exploration sampling.
-
-        So what a saved seed reproduced depended on how many times the policy had sampled
-        in between. The control is drawn from the same seed WITHOUT an env step in the
-        way: if stepping consumes global entropy, the second draw diverges from it.
-        """
+    @staticmethod
+    def _first_entry_price(df, seed):
+        """Entry price after one buy, i.e. the slippage draw made visible."""
         config = SequentialTradingEnvConfig(
             symbol="TEST/USD",
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
@@ -488,18 +493,69 @@ class TestSetSeedReachesTheEpisodeRNGs:
             slippage=0.01,
             leverage=2,
             action_levels=[-1, 0, 1],
+            random_start=False,
+            seed=42,
+        )
+        env = SequentialTradingEnv(df.copy(), config, feature_preprocessing_fn=simple_feature_fn)
+        env.set_seed(seed)
+        td = env.reset()
+        td["action"] = torch.tensor(2)
+        env.step(td)
+        return float(env.position.entry_price)
+
+    def test_set_seed_reaches_the_slippage_generator(self, large_ohlcv_df):
+        """The third stream, and the one every other cell in this class is blind to.
+
+        `_episodes` records state after `reset()` and never steps, so slippage never
+        happens in it -- deleting the `self._rng.manual_seed(...)` line passed the whole
+        suite while every worker drew identical noise. And the global-stream test proves
+        the draw LEFT the global stream, not that set_seed REACHES the private one.
+        """
+        assert (self._first_entry_price(large_ohlcv_df, 1)
+                != self._first_entry_price(large_ohlcv_df, 2))
+        assert (self._first_entry_price(large_ohlcv_df, 7)
+                == self._first_entry_price(large_ohlcv_df, 7))
+
+    @pytest.mark.parametrize("env_class,config_class,extra,action", [
+        (SequentialTradingEnv, SequentialTradingEnvConfig, {}, 2),
+        (SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig, LONGONLY_SLTP_CONFIG, 1),
+        (OneStepTradingEnv, OneStepTradingEnvConfig, {}, 1),
+    ], ids=["sequential", "sltp", "onestep"])
+    def test_slippage_does_not_consume_the_global_torch_stream(
+        self, large_ohlcv_df, env_class, config_class, extra, action
+    ):
+        """Slippage shared the global stream with the policy's own exploration sampling.
+
+        So what a saved seed reproduced depended on how many times the policy had sampled
+        in between. The control is drawn from the same seed WITHOUT an env step in the
+        way: if stepping consumes global entropy, the second draw diverges from it.
+
+        Over all three envs because `generator=self._rng` is six separately hand-written
+        call sites, not one shared thing -- reverting the two in sequential_sltp.py or the
+        three in onestep.py failed nothing when only SequentialTradingEnv was covered.
+        """
+        config = config_class(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000,
+            slippage=0.01,
+            leverage=2,
+            random_start=False,
+            **extra,
         )
 
         torch.manual_seed(1234)
         control = torch.rand(3)
 
-        env = SequentialTradingEnv(
+        env = env_class(
             large_ohlcv_df.copy(), config, feature_preprocessing_fn=simple_feature_fn
         )
         env.set_seed(3)
         torch.manual_seed(1234)
         td = env.reset()
-        td["action"] = torch.tensor(2)
+        td["action"] = torch.tensor(action)
         env.step(td)
         after = torch.rand(3)
 
@@ -508,38 +564,31 @@ class TestSetSeedReachesTheEpisodeRNGs:
             "with the policy's exploration"
         )
 
-    def test_seedless_call_falls_back_to_the_configured_seed(self, large_ohlcv_df):
-        """`set_seed()` with no argument is documented to fall back to `config.seed`.
 
-        The first version of this override returned early on None and silently dropped
-        that contract -- making the no-argument form a true no-op, which is the bug the
-        override exists to fix, reintroduced for one call shape.
-        """
-        config = SequentialTradingEnvConfig(
+def test_unseeded_vectorized_envs_are_not_identical(large_ohlcv_df):
+    """`torch.Generator()`'s default seed is a CONSTANT, in the vectorized env too.
+
+    Two independent unseeded instances produced byte-identical initial balances -- the
+    same defect fixed on the scalar side, and exactly the universality rule CLAUDE.md
+    states: a fix to one environment must be checked against all of them. Caught only
+    because reverting the scalar fix failed 3 tests while reverting the vectorized one
+    failed none.
+    """
+    def balances():
+        config = VectorizedSequentialTradingEnvConfig(
+            num_envs=4,
             symbol="TEST/USD",
+            initial_cash=(5000, 15000),
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
             window_sizes=[10],
             execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-            initial_cash=(5000, 15000),
-            seed=4242,
+            seed=None,
+            max_traj_length=20,
         )
+        env = VectorizedSequentialTradingEnv(large_ohlcv_df.copy(), config, simple_feature_fn)
+        env.reset()
+        out = env._balances.tolist()
+        env.close()
+        return out
 
-        def episodes():
-            env = SequentialTradingEnv(
-                large_ohlcv_df.copy(), config, feature_preprocessing_fn=simple_feature_fn
-            )
-            env.set_seed()
-            out = []
-            for _ in range(4):
-                env.reset()
-                out.append((int(env.sampler._sequential_idx), float(env.balance)))
-            return out
-
-        # Reproducible, and reaching the episode RNGs rather than only the globals.
-        assert episodes() == episodes()
-        explicit = SequentialTradingEnv(
-            large_ohlcv_df.copy(), config, feature_preprocessing_fn=simple_feature_fn
-        )
-        explicit.set_seed(4242)
-        explicit.reset()
-        assert int(explicit.sampler._sequential_idx) == episodes()[0][0]
+    assert balances() != balances()
