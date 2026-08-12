@@ -452,7 +452,11 @@ class PolymarketBetEnv(EnvBase):
 
     @staticmethod
     def _fetch_clob_midpoint(token_id: str) -> Optional[float]:
-        """One-shot CLOB midpoint query for a single outcome token."""
+        """One-shot CLOB midpoint query for a single outcome token.
+
+        Rejects a midpoint outside [0, 1] (#349): the caller reads RESOLVED off this and
+        pays into `self.cash`, and `+inf >= 0.99` is True.
+        """
         resp = requests.get(
             f"{CLOB_API_BASE}/midpoint",
             params={"token_id": token_id},
@@ -461,7 +465,15 @@ class PolymarketBetEnv(EnvBase):
         resp.raise_for_status()
         body = resp.json()
         mid = body.get("mid")
-        return float(mid) if mid is not None else None
+        if mid is None:
+            return None
+        mid = float(mid)
+        if not 0.0 <= mid <= 1.0:
+            # Named, because the caller maps None to "unresolved" and then blames a
+            # TIMEOUT in its warning -- pointing at the wrong subsystem entirely.
+            logger.error(f"CLOB midpoint for {token_id} outside [0, 1]: {mid!r}")
+            return None
+        return mid
 
     @staticmethod
     def _compute_payoff(

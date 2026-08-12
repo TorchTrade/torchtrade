@@ -456,16 +456,29 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         current_price = position_status.current_price if position_status else 0.0
 
-        # Fallback 1: trader's current_price attribute (for mocks)
-        if current_price <= 0 and hasattr(self.trader, 'current_price'):
+        # Advance on USABLE, not `<= 0` (#349): NaN compares False to every operator, so
+        # `nan <= 0` skipped both fallbacks and returned the NaN as the price.
+        def usable(price):
+            return math.isfinite(price) and price > 0
+
+        if not usable(current_price) and hasattr(self.trader, 'current_price'):
             current_price = self.trader.current_price
 
-        # Fallback 2: fetch from market data
-        if current_price <= 0:
+        if not usable(current_price):
             try:
-                current_price = self.observer.get_current_price()
-                logger.info(f"Fetched current price from market data: {current_price}")
+                fetched = self.observer.get_current_price()
+                if usable(fetched):
+                    # Logged AFTER validating: this said "Fetched current price: nan" and
+                    # then threw it away, so the only trace claimed the fetch worked.
+                    logger.info(f"Fetched current price from market data: {fetched}")
+                current_price = fetched
             except Exception as e:
                 logger.warning(f"Could not fetch current price: {e}")
 
+        if not usable(current_price):
+            logger.error(
+                f"No usable price: every source in the chain failed "
+                f"(last value {current_price}); reporting unavailable"
+            )
+            return 0.0
         return current_price

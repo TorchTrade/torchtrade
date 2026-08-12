@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
+from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import (
     BitgetFuturesOrderClass,
@@ -183,12 +184,8 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
         # Get current price and position from trader status (avoids redundant observation call)
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        if position_status:
-            current_price = self._current_mark_price(position_status)
-            position_size = position_status.qty
-        else:
-            current_price = self._current_mark_price()
-            position_size = 0.0
+        current_price = self._current_mark_price(position_status)
+        position_size = position_qty_from_status(position_status)
 
         # Sync position state from exchange — this is the source of truth.
         # Detects SL/TP closures AND fixes state drift from failed bracket orders.
@@ -207,12 +204,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
         # Eagerly update position from trade result so the rest of this step
         # sees the new state without waiting for the next sync cycle.
         if trade_info["executed"] and trade_info.get("success") is not False:
-            if trade_info["side"] == "buy":
-                self.position.current_position = 1  # Long
-            elif trade_info["side"] == "sell":
-                self.position.current_position = -1  # Short
-            elif trade_info.get("closed_position"):
-                self.position.current_position = 0  # Closed
+            self._record_sltp_position(action_tuple[0])
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -285,8 +277,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
             return trade_info
 
         # Check if already in same position (ignore duplicate actions)
-        position_map = {"long": 1, "short": -1}
-        if side in position_map and self.position.current_position == position_map[side]:
+        if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
             return trade_info  # Already in this position, ignore duplicate action
 
         # Get current price for calculating absolute SL/TP levels

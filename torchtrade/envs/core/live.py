@@ -1,5 +1,6 @@
 """Base class for live trading environments."""
 
+import logging
 import math
 import time
 from abc import abstractmethod
@@ -12,8 +13,16 @@ from tensordict import TensorDictBase
 from torchrl.data import Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
-from torchtrade.envs.core.state import PositionState, position_direction_from_status
+from torchtrade.envs.core.state import (
+    PositionState,
+    position_direction_from_status,
+    POSITION_DUST_EPS,
+    position_qty_from_status,
+)
 from torchtrade.envs.utils.termination import is_bankrupt
+
+
+logger = logging.getLogger(__name__)
 
 
 class ObservationFailurePolicy(str, Enum):
@@ -206,6 +215,13 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         self.position.current_action_level = (
             0.0 if self.position.current_position == 0 else float("nan")
         )
+        # And the size target, which no live _reset cleared: a fresh episode inherited the
+        # previous one's, so the first sync compared a flat account against last episode's
+        # position and released the guard it had just computed -- warning about a
+        # discrepancy that did not exist.
+        self.position.target_qty = None
+        self.position.target_tol = 0.0
+        self.position.target_reported = False
 
     def _sync_position_from_exchange(self, position_status) -> None:
         """Overwrite the cached position with what the exchange actually holds.
@@ -226,8 +242,12 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         THIS same step, the new position must start from zero rather than inherit the dead
         one's age.
 
-        Only the direction is reconciled, not the size: a PARTIAL external close leaves the
-        direction intact and is still invisible to the guard. Pre-existing, not fixed here.
+        Size is reconciled as well as direction. A partial fill leaves the DIRECTION
+        intact, so the check above cannot see it -- the env would believe it holds the
+        level it asked for while holding something else, and the guard would suppress
+        every corrective retry, permanently and silently. The tolerance is the venue's own
+        minimum tradeable size, carried on the trade: below that there is no order that
+        could correct the difference, so firing on it would never converge.
 
         An unknown status raises rather than syncing to the 0 an unreachable exchange
         would produce. In practice _step raises earlier, on its own status read.
@@ -237,6 +257,24 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         if observed != self.position.current_position:
             self.position.current_action_level = 0.0 if observed == 0 else float("nan")
             self.position.hold_counter = 0
+            self.position.target_qty = None
+            self.position.target_tol = 0.0
+            self.position.target_reported = False
+        elif self.position.target_qty is not None and (
+            abs(position_qty_from_status(position_status) - self.position.target_qty)
+            >= max(self.position.target_tol, POSITION_DUST_EPS)
+        ):
+            # An explicit flag, not `isnan(level)`: reset writes NaN to mean "this position
+            # predates the episode and its level is unknowable", so reusing NaN as the
+            # already-reported marker silenced every divergence in such an episode.
+            if not self.position.target_reported:
+                logger.warning(
+                    "venue holds %s but the last action asked for %s; releasing the "
+                    "duplicate-action guard so the agent can correct it",
+                    position_qty_from_status(position_status), self.position.target_qty,
+                )
+            self.position.target_reported = True
+            self.position.current_action_level = float("nan")
 
         self.position.current_position = observed
 
@@ -267,6 +305,40 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
             raise ValueError(
                 f"cannot start an episode on equity of {self.initial_portfolio_value}"
             )
+
+    def _record_position_after_trade(self, desired_action: float, trade_info: dict) -> None:
+        """Record the position the trade RESULTED in, not the side that was sent (#276).
+
+        Under fractional sizing a SELL that only trims a long leaves a long; recording it
+        as a short makes the next bar's sync see a mismatch the env inflicted on itself.
+
+        Takes the whole `trade_info` rather than the two size values separately: passed
+        separately, all five call sites forwarded the target and dropped the tolerance,
+        leaving it 0.0 so the next bar called every COMPLETE fill a divergence. One
+        argument cannot be half-passed.
+        """
+        if not trade_info.get("executed") or trade_info.get("success") is False:
+            # A refusal that means "we are already there" must RE-ARM the guard. Without
+            # it, a release latches: the release compares against the snapshot target, the
+            # refusal against one recomputed from drifting equity, so the two disagree and
+            # nothing ever restores a finite level -- the env then re-sizes every bar and
+            # trades whenever drift clears the venue minimum, unrequested and unlogged.
+            if trade_info.get("at_target"):
+                self.position.current_action_level = desired_action
+                self.position.target_qty = None
+                self.position.target_tol = 0.0
+                self.position.target_reported = False
+            return
+
+        tol = trade_info.get("target_tol") or 0.0
+        self.position.current_position = (desired_action > 0) - (desired_action < 0)
+        self.position.current_action_level = desired_action
+        self.position.target_qty = trade_info.get("target_qty")
+        # A venue reporting min_qty as NaN would make max(nan, eps) NaN, and `x >= nan` is
+        # False -- the check would be off with nothing to show for it. CCXT reports 0 here
+        # routinely, which is why this falls back rather than raising.
+        self.position.target_tol = tol if math.isfinite(tol) and tol > 0 else 0.0
+        self.position.target_reported = False
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""

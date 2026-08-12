@@ -20,6 +20,14 @@ class SLTPMixin:
         - self.active_take_profit: float (current TP price)
     """
 
+    # The direction each SLTP side targets. Also used by the duplicate-action check
+    # further down each env, which is why it lives in one place.
+    SIDE_DIRECTION = {"long": 1, "short": -1}
+
+    def _record_sltp_position(self, side) -> None:
+        """The position the ACTION targets, never the order side (#276)."""
+        self.position.current_position = self.SIDE_DIRECTION.get(side, 0)
+
     def _sync_position_from_exchange(self, position_status) -> bool:
         """Sync internal position state from exchange and detect SL/TP closures.
 

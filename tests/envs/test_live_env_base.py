@@ -18,7 +18,13 @@ import math
 from types import SimpleNamespace
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+import logging
+
+import numpy as np
+import torch
+from tensordict import TensorDict
 
 import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
@@ -2038,3 +2044,394 @@ def test_a_non_positive_mark_on_an_open_position_is_refused(mark_price):
     )
     with pytest.raises(ValueError, match="non-positive mark price"):
         TorchTradeFuturesLiveEnv._get_observation(env)
+
+@pytest.mark.parametrize("desired_action,expected", [
+    (1.0, 1), (0.5, 1), (0.0, 0), (-0.5, -1), (-1.0, -1),
+], ids=["full-long", "partial-long", "flat", "partial-short", "full-short"])
+def test_direction_comes_from_the_target_not_the_order_side(desired_action, expected):
+    """#276: five envs inferred direction from the ORDER SIDE.
+
+    Under fractional sizing a SELL that trims a long from 1.0 to 0.5 is still a long --
+    the `partial-long` row is the one that was wrong, and it recorded -1.
+    """
+    env = SimpleNamespace(position=PositionState())
+    TorchTradeLiveEnv._record_position_after_trade(env, desired_action, {"executed": True})
+
+    assert env.position.current_position == expected
+    assert env.position.current_action_level == desired_action
+
+
+@pytest.mark.parametrize("exchange", ["alpaca", "binance", "bitget", "bybit", "okx"])
+@pytest.mark.parametrize("module", ["env", "env_sltp"])
+def test_no_live_env_infers_direction_from_the_order_side(exchange, module):
+    """Five copies drifted into four different spellings of the same wrong idea.
+
+    binance's read `side == "BUY"` (uppercase) with its `closed_position` branch LAST,
+    behind an `elif` that already matched -- so binance could never record a close at all.
+    """
+    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+           / "live" / exchange / f"{module}.py").read_text()
+    assert 'trade_info["side"] ==' not in src, (
+        f"{exchange}/{module} still infers position direction from the order side"
+    )
+
+
+@pytest.mark.parametrize("position_price,fallback,expected", [
+    (float("nan"), 100.0, 100.0),
+    (float("inf"), 100.0, 100.0),
+    (0.0, 100.0, 100.0),
+    (float("nan"), float("nan"), 0.0),
+    (50.0, 100.0, 50.0),
+], ids=["nan-falls-back", "inf-falls-back", "zero-falls-back", "chain-exhausted", "healthy"])
+def test_alpaca_price_fallback_is_not_transparent_to_nan(position_price, fallback, expected):
+    """#349: `current_price <= 0` is False for NaN, so a NaN skipped BOTH fallbacks.
+
+    The function whose entire purpose is producing a usable price handed back the exact
+    value it exists to avoid, and the last row pins the other half: once the chain is
+    exhausted it must return the documented 0.0 rather than the garbage it collected.
+    """
+    from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
+
+    env = SimpleNamespace(
+        trader=SimpleNamespace(
+            get_status=lambda: {
+                "position_status": SimpleNamespace(current_price=position_price)
+            },
+            current_price=fallback,
+        ),
+        observer=SimpleNamespace(get_current_price=lambda: fallback),
+    )
+    assert AlpacaBaseTorchTradingEnv._get_current_price(env) == expected
+
+
+@pytest.mark.parametrize("mid,usable", [
+    (float("inf"), False), (float("nan"), False), (1.5, False), (-0.2, False),
+    (0.995, True), (0.0, True), (1.0, True),
+], ids=["inf", "nan", "above-one", "negative", "resolved", "zero", "one"])
+def test_polymarket_midpoint_outside_probability_range_is_unavailable(mid, usable):
+    """#349: the caller decides an outcome RESOLVED from this and pays into self.cash.
+
+    `inf >= 0.99` is True, so one garbage midpoint declares a win and books a real payoff.
+    A number outside [0, 1] is not a probability, so it reads as unavailable.
+    """
+    from torchtrade.envs.live.polymarket.env import PolymarketBetEnv
+
+    with patch("torchtrade.envs.live.polymarket.env.requests.get") as get:
+        get.return_value = SimpleNamespace(
+            raise_for_status=lambda: None, json=lambda: {"mid": mid}
+        )
+        result = PolymarketBetEnv._fetch_clob_midpoint("tok")
+
+    assert (result is not None) is usable
+
+
+@pytest.mark.parametrize("exchange", ["alpaca", "binance", "bitget", "bybit", "okx"])
+@pytest.mark.parametrize("module", ["env", "env_sltp"])
+def test_no_live_env_reads_a_raw_position_qty(exchange, module):
+    """CLAUDE.md invariant 1: every qty read goes through the dust rule, no exceptions.
+
+    A venue can leave a 1e-12 residual after a full close. #283 removed the hand-rolled
+    comparisons from the trading paths and these survived in the observation/history
+    paths -- latent only because the shipped log_return_reward reads portfolio values
+    rather than quantities, so a reward function that used size would inherit the hole.
+    A structural guard because the behaviour is currently unobservable: nothing downstream
+    reads it yet, which is exactly when a re-fork goes unnoticed.
+    """
+    path = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+            / "live" / exchange / f"{module}.py")
+    if not path.exists():
+        pytest.skip(f"{exchange} has no {module}")
+    assert "position_status.qty" not in path.read_text(), (
+        f"{exchange}/{module} reads a raw qty instead of position_qty_from_status()"
+    )
+
+
+@pytest.mark.parametrize("observed,target,tol,released", [
+    (0.50, 0.50, 0.001, False),
+    (0.5005, 0.50, 0.001, False),
+    (0.95, 0.50, 0.001, True),
+    (0.05, 0.50, 0.001, True),
+    (0.499, 0.50, 0.01, False),
+    (0.50, None, 0.001, False),
+], ids=["exact", "below-min-qty", "under-filled", "barely-filled",
+        "coarse-lot-step", "no-target"])
+def test_a_partial_fill_releases_the_duplicate_action_guard(observed, target, tol, released):
+    """#276 follow-up: the direction check alone cannot see a partial fill.
+
+    Fixing #276 made the cached level correct for a COMPLETE fill -- and thereby removed
+    the accidental recovery the old bug provided, because a wrong direction used to force
+    a mismatch every bar. An under-fill leaves the direction intact, so without this the
+    env believes it holds the level it asked for while holding something else, and the
+    guard suppresses every corrective retry, permanently and with no log.
+
+    The tolerance is the VENUE's own minimum tradeable size, not an invented percentage:
+    a divergence smaller than that cannot be corrected by placing an order, so firing on
+    it would release the guard every bar and never converge. `coarse-lot-step` is that
+    case -- a complete fill that a flat 1% band would have called a partial one.
+    """
+    env = SimpleNamespace(position=PositionState())
+    # Direction matches by construction, so only the SIZE branch can fire -- otherwise the
+    # `closed` row would trip the direction check and prove nothing about this rule.
+    env.position.current_position = (observed > 0) - (observed < 0)
+    env.position.current_action_level = 0.5
+    env.position.target_qty = target
+    env.position.target_tol = tol
+
+    TorchTradeLiveEnv._sync_position_from_exchange(
+        env, SimpleNamespace(qty=observed)
+    )
+
+    assert math.isnan(env.position.current_action_level) is released
+    assert env.position.current_position == (observed > 0) - (observed < 0)
+
+
+@pytest.mark.parametrize("levels", [
+    [0.0, float("nan"), 1.0], [0.0, float("inf")], [0.0, float("-inf")],
+    [0.0, 5.0], [0.5, 0.5], [],
+], ids=["nan", "inf", "-inf", "out-of-range", "duplicate", "empty"])
+def test_unusable_action_levels_are_refused(levels):
+    """The RULE, once. A NaN level reaches sizing as `target_qty = nan`; `nan > 0` is
+    False, so it takes the SELL branch and `trade(side="sell", amount=nan)` goes to the
+    venue -- an order the agent never asked for, in the wrong direction."""
+    from torchtrade.envs.utils.fractional_sizing import validate_action_levels
+
+    with pytest.raises(ValueError):
+        validate_action_levels(levels)
+
+
+@pytest.mark.parametrize("exchange", ["alpaca", "binance", "bitget", "bybit", "okx"])
+def test_every_live_config_validates_its_action_levels(exchange):
+    """The WIRING, per exchange. Crossing the two dimensions proved the same thing five
+    times over: a missing call kills every value row for that exchange together, so the
+    values never distinguish anything the rule test above does not already cover."""
+    import importlib
+
+    module = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
+    config_cls = next(
+        v for k, v in vars(module).items()
+        if k.endswith("Config") and hasattr(v, "__dataclass_fields__")
+    )
+    with pytest.raises(ValueError):
+        config_cls(symbol="BTC/USD", action_levels=[0.0, float("nan"), 1.0])
+
+
+@pytest.mark.parametrize("side,expected", [
+    ("long", 1), ("short", -1), ("close", 0),
+])
+def test_the_sltp_side_maps_to_the_direction_it_targets(side, expected):
+    """A swapped map passed the WHOLE suite: nothing asserted this mapping at all.
+
+    The four futures SLTP envs each carried their own copy, so an inverted one reported a
+    short as long to every account_state read and every reward. One rule on the mixin now,
+    and this is the test it was missing.
+    """
+    from torchtrade.envs.utils.sltp_mixin import SLTPMixin
+
+    env = SimpleNamespace(position=PositionState(), SIDE_DIRECTION=SLTPMixin.SIDE_DIRECTION)
+    SLTPMixin._record_sltp_position(env, side)
+
+    assert env.position.current_position == expected
+
+
+@pytest.mark.parametrize("exchange", ["alpaca", "binance", "bitget", "bybit", "okx"])
+def test_every_live_env_reports_the_size_it_asked_for(exchange):
+    """The rule was right and the callers disagreed about feeding it (#276 follow-up).
+
+    Round 2 found the reconciliation dead on alpaca (never set a target at all) and off
+    for four of binance's six paths -- and no test noticed, because the only coverage
+    drove the shared method directly with a hand-built target. A `.get()` that silently
+    yields None is exactly the shape that hides this, so assert the writers exist.
+    """
+    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+           / "live" / exchange / "env.py").read_text()
+
+    assert 'target_qty"] = ' in src, f"{exchange} never reports what its action asked for"
+    assert 'target_tol"] = ' in src, f"{exchange} reports no tolerance, so any lot-step"
+
+
+@pytest.mark.parametrize("exchange", ["alpaca", "binance", "bitget", "bybit", "okx"])
+def test_the_size_an_env_reports_actually_reaches_the_position(exchange):
+    """The tolerance was computed in all five envs and DROPPED at every call site.
+
+    `test_every_live_env_reports_the_size_it_asked_for` proved the assignments exist; it
+    could not prove anything read them. Passed as separate arguments, all five forwarded
+    target_qty and forgot target_tol, so the tolerance fell back to POSITION_DUST_EPS
+    (1e-9) -- and lot quantization moves the filled quantity by far more than that, so
+    every COMPLETE fill would have read as a partial one. Exactly the defect the previous
+    round fixed, one layer up.
+    """
+    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+           / "live" / exchange / "env.py").read_text()
+
+    assert "_record_position_after_trade(desired_action, trade_info)" in src, (
+        f"{exchange} does not hand the whole trade_info to the recorder, so a size value "
+        f"it computes can be silently dropped on the way"
+    )
+
+
+def test_the_recorder_takes_one_argument_that_cannot_be_half_passed():
+    """Structural, and deliberately so: the bug was a SIGNATURE that let a caller pass
+    one of two paired values. A test on behaviour cannot see that -- only the shape can."""
+    import inspect as _inspect
+
+    params = list(_inspect.signature(
+        TorchTradeLiveEnv._record_position_after_trade
+    ).parameters)
+
+    assert params == ["self", "desired_action", "trade_info"], (
+        f"the recorder takes {params}; separate size arguments are what let five call "
+        f"sites forward one and drop the other"
+    )
+
+
+@pytest.mark.parametrize("exchange,min_qty", [
+    ("bitget", 0.001), ("bybit", 0.001), ("okx", 0.001),
+])
+def test_a_real_step_lands_both_size_values_on_the_position(exchange, min_qty):
+    """Behavioural, because the grep tests could not see the bug that shipped.
+
+    Both size values were computed in every env and BOTH structural tests passed while
+    the tolerance was dropped on the way to PositionState -- one asserted the writer
+    existed, the other that the call site named the dict. Only reading the value off the
+    position after a real step can tell you it arrived, so this drives `_step` and looks.
+    """
+    import importlib
+
+    module = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
+    # not abstract, and defined here: `vars` also carries the imported base class
+    env_cls = next(v for k, v in vars(module).items()
+                   if k.endswith("TorchTradingEnv") and isinstance(v, type)
+                   and not getattr(v, "__abstractmethods__", None)
+                   and v.__module__ == module.__name__)
+
+    trader = MagicMock()
+    trader.get_status = MagicMock(return_value={"position_status": None})
+    trader.get_mark_price = MagicMock(return_value=50000.0)
+    trader.get_lot_size = MagicMock(return_value={"min_qty": min_qty, "qty_step": min_qty})
+    trader.get_account_balance = MagicMock(return_value={
+        "total_wallet_balance": 10000.0, "available_balance": 10000.0,
+        "total_unrealized_profit": 0.0, "total_margin_balance": 10000.0,
+    })
+    trader.trade = MagicMock(return_value=True)
+    trader.cancel_open_orders = MagicMock(return_value=True)
+    trader._round_amount = MagicMock(side_effect=lambda amount: amount)
+
+    env = _build_env_with(env_cls, module, trader)
+    assert env is not None, (
+        f"{exchange} env could not be constructed -- a skip here would make this test "
+        f"vacuous, which is exactly how the dropped tolerance survived"
+    )
+
+    with patch.object(type(env), "_wait_for_next_timestamp"):
+        env.reset()
+        env.step(TensorDict({"action": torch.tensor(len(env.action_levels) - 1)}, []))
+
+    assert env.position.target_qty is not None, "the size the action asked for never landed"
+    assert env.position.target_tol == pytest.approx(min_qty), (
+        "the tolerance never landed: it was computed, written to trade_info, and dropped"
+    )
+
+
+def _build_env_with(env_cls, module, trader):
+    """Construct a futures env against the shared mock shape, or None if it does not fit."""
+    observer = MagicMock()
+    observer.get_keys = MagicMock(return_value=["1m_10"])
+    observer.get_observations = MagicMock(side_effect=lambda return_base_ohlc=False: {
+        "1m_10": np.zeros((10, 4), dtype=np.float32),
+        **({"base_features": np.full((10, 4), 50000.0, dtype=np.float32),
+            "base_timestamps": np.arange(10)} if return_base_ohlc else {}),
+    })
+    observer.get_features = MagicMock(return_value={
+        "observation_features": ["a", "b", "c", "d"], "original_features": []})
+    observer.intervals, observer.window_sizes = ["1m"], [10]
+
+    config_cls = next(v for k, v in vars(module).items()
+                      if k.endswith("Config") and hasattr(v, "__dataclass_fields__"))
+    try:
+        config = config_cls(symbol="BTCUSDT", demo=True, time_frames=["1m"],
+                            window_sizes=[10], execute_on="1m", leverage=5)
+        with patch("time.sleep"), patch.object(env_cls, "_wait_for_next_timestamp"):
+            return env_cls(config=config, observer=observer, trader=trader)
+    except Exception:
+        return None
+
+
+def test_a_new_episode_does_not_inherit_the_last_one_s_size_target():
+    """No live _reset cleared the size target, so episode N+1 started holding episode N's.
+
+    On a flat, fully reconciled account the first sync then compared 0.0 against the old
+    position, released the guard reset had just computed, and warned about a discrepancy
+    that did not exist. Reset owns "is this position mine?", so it owns clearing this too.
+    """
+    env = SimpleNamespace(position=PositionState())
+    env.position.target_qty = 0.29
+    env.position.target_tol = 0.001
+    env.position.target_reported = True
+
+    TorchTradeLiveEnv._sync_action_level_after_reset(env)
+
+    assert env.position.target_qty is None, "the new episode inherited the old target"
+    assert env.position.target_tol == 0.0
+    assert env.position.target_reported is False
+
+
+def test_a_divergence_is_reported_even_when_reset_already_wrote_nan(caplog):
+    """The already-reported flag has to be explicit, not `isnan(current_action_level)`.
+
+    Reset writes NaN to that field to mean "this position predates the episode and its
+    level is unknowable". Reusing NaN as the already-reported marker meant a genuine
+    divergence in such an episode logged NOWHERE -- an 83% under-fill, silent. Asserting
+    the LOG, not the flag: the flag is set either way, so only the log can see the bug.
+    """
+    env = SimpleNamespace(position=PositionState())
+    env.position.current_position = 1
+    env.position.current_action_level = float("nan")   # written by reset, not a divergence
+    env.position.target_qty = 0.29
+    env.position.target_tol = 0.001
+
+    with caplog.at_level(logging.WARNING, logger="torchtrade.envs.core.live"):
+        TorchTradeLiveEnv._sync_position_from_exchange(env, SimpleNamespace(qty=0.05))
+    assert any("venue holds" in r.message for r in caplog.records), (
+        "an 83% under-fill went unreported because reset had already written NaN"
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="torchtrade.envs.core.live"):
+        TorchTradeLiveEnv._sync_position_from_exchange(env, SimpleNamespace(qty=0.05))
+    assert not caplog.records, "a standing fault must report once, not every bar"
+
+
+@pytest.mark.parametrize("trade_info,expect_level,expect_target", [
+    ({"executed": True, "target_qty": 0.5, "target_tol": 0.001}, 0.5, 0.5),
+    ({"executed": False, "at_target": True}, 0.5, None),
+    ({"executed": False}, float("nan"), 0.29),
+    ({"executed": True, "success": False}, float("nan"), 0.29),
+], ids=["traded", "already-there", "refused-for-another-reason", "venue-rejected"])
+def test_a_released_guard_re_arms_only_when_the_env_is_at_target(
+    trade_info, expect_level, expect_target
+):
+    """The release had no way back (#276 follow-up, round 4).
+
+    Only an EXECUTED trade could restore a finite level -- but the release compares the
+    venue against the snapshot target while the refusal compares it against one recomputed
+    from drifting equity, so the two disagree routinely. The level then stayed NaN, the
+    duplicate-action guard stayed dead, and the env quietly became a continuous
+    rebalancer: re-sizing every bar and trading whenever drift cleared the venue minimum,
+    which the policy never asked for and never sees.
+
+    `already-there` is the row that matters: a refusal meaning "we are where we asked to
+    be" re-arms. A refusal for any other reason must NOT, or a real divergence is
+    forgotten.
+    """
+    env = SimpleNamespace(position=PositionState())
+    env.position.current_action_level = float("nan")
+    env.position.target_qty = 0.29
+    env.position.target_reported = True
+
+    TorchTradeLiveEnv._record_position_after_trade(env, 0.5, trade_info)
+
+    if math.isnan(expect_level):
+        assert math.isnan(env.position.current_action_level)
+    else:
+        assert env.position.current_action_level == expect_level
+    assert env.position.target_qty == expect_target

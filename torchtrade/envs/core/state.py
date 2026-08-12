@@ -2,7 +2,7 @@
 
 import math
 from dataclasses import asdict, dataclass, field, fields
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 
 # Quantities at or below this are dust, not a position. Exchanges can leave a float residual
@@ -172,6 +172,14 @@ class PositionState:
     hold_counter: int = 0
     hold_direction: float = 0.0
     current_action_level: float = 0.0
+    # What the last accepted action asked for, and the smallest divergence from it worth
+    # acting on -- the venue's own minimum tradeable size, because anything below that
+    # cannot be corrected by placing an order. None when the env has not traded.
+    target_qty: Optional[float] = None
+    target_tol: float = 0.0
+    # Whether the current divergence has been logged, so a standing fault reports once
+    # without borrowing NaN, which already means something else on current_action_level.
+    target_reported: bool = False
 
     def reset(self):
         """Reset all position state to initial values."""

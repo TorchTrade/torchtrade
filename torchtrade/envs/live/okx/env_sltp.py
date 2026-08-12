@@ -8,6 +8,7 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
+from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.okx.observation import OKXObservationClass
 from torchtrade.envs.live.okx.order_executor import (
     OKXFuturesOrderClass,
@@ -143,12 +144,8 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
         """Execute one environment step."""
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        if position_status:
-            current_price = self._current_mark_price(position_status)
-            position_size = position_status.qty
-        else:
-            current_price = self._current_mark_price()
-            position_size = 0.0
+        current_price = self._current_mark_price(position_status)
+        position_size = position_qty_from_status(position_status)
 
         # Sync position state from exchange — this is the source of truth.
         position_closed = self._sync_position_from_exchange(position_status)
@@ -173,12 +170,7 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
 
         # Eagerly update position from trade result
         if trade_info["executed"] and trade_info.get("success") is not False:
-            if trade_info.get("closed_position"):
-                self.position.current_position = 0
-            elif trade_info["side"] == "buy":
-                self.position.current_position = 1
-            elif trade_info["side"] == "sell":
-                self.position.current_position = -1
+            self._record_sltp_position(action_tuple[0])
 
         self._wait_for_next_timestamp()
 
@@ -254,8 +246,7 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
             return trade_info
 
         # Check if already in same position
-        position_map = {"long": 1, "short": -1}
-        if side in position_map and self.position.current_position == position_map[side]:
+        if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
             return trade_info
 
         # Get current mark price (more accurate than candle close for bracket orders)

@@ -20,6 +20,7 @@ from torchtrade.envs.core.live import (
     ObservationFailurePolicy,
 )
 from torchtrade.envs.utils.fractional_sizing import (
+    validate_action_levels,
     calculate_fractional_position,
     PositionCalculationParams,
 )
@@ -69,6 +70,8 @@ class OKXFuturesTradingEnvConfig:
         if self.action_levels is None:
             self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]
 
+        validate_action_levels(self.action_levels)
+
 
 class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
     """
@@ -114,7 +117,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         """Execute one environment step."""
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        # Size through the canonical rule, not `position_status.qty` raw: a dust residual
+        # Size through the canonical rule, not the raw venue qty: a dust residual
         # read as a live position makes abs(current_qty) > 0 true on a flat account, so
         # action 0.0 closes nothing and still advances current_action_level (#283).
         position_size = position_qty_from_status(position_status)
@@ -144,14 +147,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
             desired_action, current_qty=position_size, current_price=current_price,
         )
 
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            if trade_info.get("closed_position"):
-                self.position.current_position = 0
-            elif trade_info["side"] == "buy":
-                self.position.current_position = 1
-            elif trade_info["side"] == "sell":
-                self.position.current_position = -1
-            self.position.current_action_level = desired_action
+        self._record_position_after_trade(desired_action, trade_info)
 
         self._wait_for_next_timestamp()
 
@@ -274,11 +270,14 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
 
         lot_size = self.trader.get_lot_size()
         if abs(delta_qty) < lot_size["min_qty"]:
-            return self._create_trade_info(executed=False)
+            return self._create_trade_info(executed=False, at_target=True)
 
         side = "buy" if delta_qty > 0 else "sell"
         # _format_size() in trade() handles lot-step quantization
-        return self._execute_market_order(side, abs(delta_qty))
+        info = self._execute_market_order(side, abs(delta_qty))
+        info["target_qty"] = target_qty
+        info["target_tol"] = lot_size["min_qty"]
+        return info
 
     def _execute_trade_if_needed(
         self, desired_action: float, *, current_qty: float = 0.0, current_price: float = 0.0,

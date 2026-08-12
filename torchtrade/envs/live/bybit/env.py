@@ -8,6 +8,7 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
+from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
 from torchtrade.envs.live.bybit.order_executor import (
     BybitFuturesOrderClass,
@@ -19,6 +20,7 @@ from torchtrade.envs.core.live import (
     ObservationFailurePolicy,
 )
 from torchtrade.envs.utils.fractional_sizing import (
+    validate_action_levels,
     calculate_fractional_position,
     PositionCalculationParams,
 )
@@ -68,6 +70,8 @@ class BybitFuturesTradingEnvConfig:
         if self.action_levels is None:
             self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]
 
+        validate_action_levels(self.action_levels)
+
 
 class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
     """
@@ -112,12 +116,8 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         """Execute one environment step."""
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        if position_status:
-            current_price = self._current_mark_price(position_status)
-            position_size = position_status.qty
-        else:
-            current_price = self._current_mark_price()
-            position_size = 0.0
+        current_price = self._current_mark_price(position_status)
+        position_size = position_qty_from_status(position_status)
 
         # No-op today (this env's _execute_trade_if_needed recomputes qty live and never reads
         # current_action_level), but keeps the field consistent so adding a duplicate-action
@@ -140,14 +140,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
 
         trade_info = self._execute_trade_if_needed(desired_action)
 
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            if trade_info["side"] == "buy":
-                self.position.current_position = 1
-            elif trade_info["side"] == "sell" and trade_info.get("closed_position"):
-                self.position.current_position = 0
-            elif trade_info["side"] == "sell":
-                self.position.current_position = -1
-            self.position.current_action_level = desired_action
+        self._record_position_after_trade(desired_action, trade_info)
 
         self._wait_for_next_timestamp()
 
@@ -274,7 +267,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         qty_step = lot_size["qty_step"]
 
         if abs(delta_qty) < min_qty:
-            return self._create_trade_info(executed=False)
+            return self._create_trade_info(executed=False, at_target=True)
 
         side = "buy" if delta_qty > 0 else "sell"
         # Use round() to avoid float artifacts (e.g., 0.003000000000003)
@@ -282,9 +275,12 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         amount = round(int(abs(delta_qty) / qty_step) * qty_step, step_decimals)
 
         if amount < min_qty:
-            return self._create_trade_info(executed=False)
+            return self._create_trade_info(executed=False, at_target=True)
 
-        return self._execute_market_order(side, amount)
+        info = self._execute_market_order(side, amount)
+        info["target_qty"] = target_qty
+        info["target_tol"] = lot_size["min_qty"]
+        return info
 
     def _execute_trade_if_needed(self, desired_action: float) -> Dict:
         """Execute trade based on desired action value."""

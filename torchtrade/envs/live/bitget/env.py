@@ -7,6 +7,7 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
+from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import (
     BitgetFuturesOrderClass,
@@ -18,6 +19,7 @@ from torchtrade.envs.core.live import (
     ObservationFailurePolicy,
 )
 from torchtrade.envs.utils.fractional_sizing import (
+    validate_action_levels,
     calculate_fractional_position,
     PositionCalculationParams,
 )
@@ -72,6 +74,8 @@ class BitgetFuturesTradingEnvConfig:
         # Build default action levels for fractional mode
         if self.action_levels is None:
             self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]  # Standard fractional with long/short
+
+        validate_action_levels(self.action_levels)
 
 
 class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
@@ -158,12 +162,8 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         # Get current price and position from trader status (avoids redundant observation call)
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        if position_status:
-            current_price = self._current_mark_price(position_status)
-            position_size = position_status.qty
-        else:
-            current_price = self._current_mark_price()
-            position_size = 0.0
+        current_price = self._current_mark_price(position_status)
+        position_size = position_qty_from_status(position_status)
 
         self._sync_position_from_exchange(position_status)
 
@@ -176,14 +176,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
 
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            if trade_info["side"] == "buy":
-                self.position.current_position = 1  # Long
-            elif trade_info["side"] == "sell" and trade_info.get("closed_position"):
-                self.position.current_position = 0  # Closed
-            elif trade_info["side"] == "sell":
-                self.position.current_position = -1  # Short
-            self.position.current_action_level = desired_action
+        self._record_position_after_trade(desired_action, trade_info)
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -352,17 +345,20 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
 
         if abs(delta_qty) < min_qty:
             # Already at target (delta below the minimum tradeable size)
-            return self._create_trade_info(executed=False)
+            return self._create_trade_info(executed=False, at_target=True)
 
         side = "buy" if delta_qty > 0 else "sell"
         # Floor to the exchange lot step (CCXT truncates -> never exceeds margin)
         amount = self.trader._round_amount(abs(delta_qty))
 
         if amount < min_qty:
-            return self._create_trade_info(executed=False)
+            return self._create_trade_info(executed=False, at_target=True)
 
         # Execute market order
-        return self._execute_market_order(side, amount)
+        info = self._execute_market_order(side, amount)
+        info["target_qty"] = target_qty
+        info["target_tol"] = min_qty
+        return info
 
     def _execute_trade_if_needed(self, desired_action: float) -> Dict:
         """Execute trade based on desired action value.

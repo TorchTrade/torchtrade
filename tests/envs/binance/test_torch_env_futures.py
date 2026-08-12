@@ -303,9 +303,13 @@ class TestBinanceFuturesTorchTradingEnv:
             env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
             mock_trader.trade.assert_called()
 
-            # 2. Exchange confirms the position. Re-commanding the SAME level is redundant.
+            # 2. Exchange confirms the position AT THE SIZE THAT WAS ORDERED. Re-commanding
+            # the SAME level is then redundant. Read from the call rather than hardcoded: a
+            # fixture reporting a different size is a partial fill, which the sync now
+            # detects and deliberately releases the guard for (#276 follow-up).
+            filled = mock_trader.trade.call_args.kwargs["quantity"]
             mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
-                qty=0.01, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
+                qty=filled, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
                 unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
                 margin_type="isolated", liquidation_price=45000.0,
             )})

@@ -210,9 +210,6 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                     f"venue reported a non-positive mark price "
                     f"({position_status.mark_price}) for an open position"
                 )
-            # Finite is not enough for the mark: 0 and negative both pass the loop above and
-            # then short-circuit distance_to_liquidation to "safe". Every venue's mark read
-            # is `float(pos.get("markPrice") or entry_price)`, so two blank fields give 0.0.
 
             position_size = position_status.qty
             position_value = abs(position_status.notional_value)

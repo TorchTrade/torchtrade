@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical
 
+from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.utils.timeframe import TimeFrame
 from torchtrade.envs.core.live import (
     ObservationFailurePolicy,
@@ -20,6 +21,7 @@ from torchtrade.envs.live.binance.order_executor import (
 )
 from torchtrade.envs.live.binance.base import BinanceBaseTorchTradingEnv
 from torchtrade.envs.utils.fractional_sizing import (
+    validate_action_levels,
     build_default_action_levels,
     calculate_fractional_position,
     PositionCalculationParams,
@@ -74,6 +76,8 @@ class BinanceFuturesTradingEnvConfig:
             self.action_levels = build_default_action_levels(
                 allow_short=True  # Futures allow short positions
             )
+
+        validate_action_levels(self.action_levels)
 
 
 class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
@@ -159,12 +163,8 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # Get current price and position from trader status (avoids redundant observation call)
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        if position_status:
-            current_price = self._current_mark_price(position_status)
-            position_size = position_status.qty
-        else:
-            current_price = self._current_mark_price()
-            position_size = 0.0
+        current_price = self._current_mark_price(position_status)
+        position_size = position_qty_from_status(position_status)
 
         self._sync_position_from_exchange(position_status)
 
@@ -177,14 +177,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # Execute trade
         trade_info = self._execute_trade_if_needed(desired_action)
 
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            if trade_info["side"] == "BUY":
-                self.position.current_position = 1
-            elif trade_info["side"] == "SELL":
-                self.position.current_position = -1
-            elif trade_info["closed_position"]:
-                self.position.current_position = 0
-            self.position.current_action_level = desired_action
+        self._record_position_after_trade(desired_action, trade_info)
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -461,7 +454,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         delta_notional = abs(delta) * current_price
         min_notional = self._get_min_notional()
         if delta_notional < min_notional:
-            return self._create_trade_info(executed=False)  # Delta too small for exchange
+            return self._create_trade_info(executed=False, at_target=True)  # Delta too small for exchange
 
         # 9. Determine trade direction and execute
         if (current_qty > 0 and target_qty < 0) or (current_qty < 0 and target_qty > 0):
@@ -482,18 +475,19 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
                 return close_info
 
             # Open new position in opposite direction
-            side = "BUY" if target_qty > 0 else "SELL"
-            return self._execute_market_order(side, abs(target_qty))
-
+            side, amount = ("BUY" if target_qty > 0 else "SELL"), abs(target_qty)
         elif delta > 0:
-            # Increasing position (or opening long from flat)
-            return self._execute_market_order("BUY", abs(delta))
-
+            side, amount = "BUY", abs(delta)          # increase, or open long from flat
         elif delta < 0:
-            # Decreasing position (or opening short from flat)
-            return self._execute_market_order("SELL", abs(delta))
+            side, amount = "SELL", abs(delta)         # decrease, or open short from flat
+        else:
+            return self._create_trade_info(executed=False)
 
-        return self._create_trade_info(executed=False)
+        # One exit, so a new branch cannot skip the target and disable the check.
+        info = self._execute_market_order(side, amount)
+        info["target_qty"] = target_qty
+        info["target_tol"] = min_notional / current_price
+        return info
 
     def _execute_trade_if_needed(self, desired_action: float) -> Dict:
         """
