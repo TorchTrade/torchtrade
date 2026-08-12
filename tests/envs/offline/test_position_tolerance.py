@@ -39,3 +39,33 @@ def test_flat_enough_means_the_same_dollar_amount_on_every_asset(price, residual
         f"a ${residual_usd} residual at price {price} was "
         f"{'not ' if within else ''}treated as flat"
     )
+
+
+@pytest.mark.parametrize("price", [100_000.0, 1.0, 1e-9, 1e-12, 0.0],
+                         ids=["large", "unit", "tiny", "at-clamp", "zero"])
+@pytest.mark.parametrize("target", [0.0, 0.001, 1.0, 100.0])
+def test_the_two_engines_compute_the_same_tolerance(price, target):
+    """The equivalence harness pins scalar to vectorized, so an asymmetry here is a
+    divergence waiting for the first zero price.
+
+    The vectorized form clamped the price and the scalar did not: at price 0 the scalar
+    raised ZeroDivisionError where the vectorized returned a huge tolerance. Both clamp
+    now, and this grid is what says so.
+    """
+    import torch
+
+    from torchtrade.envs.utils.fractional_sizing import (
+        POSITION_TOLERANCE_NOTIONAL,
+        POSITION_TOLERANCE_PCT,
+    )
+
+    scalar = max(
+        abs(target) * POSITION_TOLERANCE_PCT,
+        POSITION_TOLERANCE_NOTIONAL / max(price, 1e-12),
+    )
+    vectorized = torch.maximum(
+        torch.tensor(target, dtype=torch.float64).abs() * POSITION_TOLERANCE_PCT,
+        POSITION_TOLERANCE_NOTIONAL / torch.tensor(price, dtype=torch.float64).clamp(min=1e-12),
+    ).item()
+
+    assert scalar == pytest.approx(vectorized, rel=1e-9)

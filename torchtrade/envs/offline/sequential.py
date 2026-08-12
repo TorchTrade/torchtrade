@@ -688,9 +688,13 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         )
 
         # Tolerance for position comparison
+        # max(price, 1e-12) mirrors the vectorized engine's clamp exactly. Without it the
+        # scalar raises ZeroDivisionError where the vectorized returns a huge tolerance --
+        # and the equivalence harness pins these two together, so an asymmetry here is a
+        # divergence waiting for the first zero price to surface it.
         tolerance = max(
             abs(target_position_size) * POSITION_TOLERANCE_PCT,
-            POSITION_TOLERANCE_NOTIONAL / execution_price,
+            POSITION_TOLERANCE_NOTIONAL / max(execution_price, 1e-12),
         )
 
         # Check if already at target position (implicit hold)
@@ -786,7 +790,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         delta_notional = abs(delta_position * execution_price)
 
         # Check if delta is negligible
-        if abs(delta_position) * execution_price < POSITION_TOLERANCE_NOTIONAL:
+        if abs(delta_position) * max(execution_price, 0.0) < POSITION_TOLERANCE_NOTIONAL:
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Determine if increasing or decreasing
