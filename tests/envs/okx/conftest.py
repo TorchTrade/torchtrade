@@ -33,10 +33,12 @@ def mock_okx_account_client():
 
     # Mock account configuration
     client.set_position_mode = MagicMock(return_value={"code": "0", "msg": ""})
-    # `lever` present: an entry without it no longer confirms anything (#277).
+    # Echoes `lever` AND `posSide`, as OKX documents: an entry without lever confirms
+    # nothing (#277), and one echoing the wrong side confirmed the wrong leg (#363).
     client.set_leverage = MagicMock(
-        side_effect=lambda instId=None, lever=None, **k: {
-            "code": "0", "msg": "", "data": [{"lever": lever}]})
+        side_effect=lambda instId=None, lever=None, posSide=None, **k: {
+            "code": "0", "msg": "",
+            "data": [{"lever": lever, **({} if posSide is None else {"posSide": posSide})}]})
 
     # Mock position information
     client.get_positions = MagicMock(return_value={

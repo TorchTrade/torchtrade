@@ -294,8 +294,11 @@ def test_okx_sets_leverage_per_side_only_where_okx_requires_it(
     seen = []
 
     def record(**kwargs):
-        seen.append(kwargs.get("posSide"))
-        return {"code": "0", "data": [{"lever": "20"}]}
+        pos_side = kwargs.get("posSide")
+        seen.append(pos_side)
+        # Echoes the side back, as OKX documents -- the executor checks it.
+        entry = {"lever": "20", **({} if pos_side is None else {"posSide": pos_side})}
+        return {"code": "0", "data": [entry]}
 
     OKXFuturesOrderClass(
         symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True, leverage=20,
@@ -333,7 +336,7 @@ def test_okx_refuses_to_construct_when_only_one_side_took_the_leverage():
     def one_sided(**kwargs):
         if kwargs.get("posSide") == "short":
             return {"code": "51004", "data": [{"sMsg": "leverage exceeds risk limit"}]}
-        return {"code": "0", "data": [{"lever": "20"}]}
+        return {"code": "0", "data": [{"lever": "20", "posSide": kwargs.get("posSide")}]}
 
     with pytest.raises(ValueError, match="refused"):
         OKXFuturesOrderClass(
