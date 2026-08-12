@@ -236,8 +236,10 @@ class MarketDataObservationSampler:
         # row[:5] positional contract exact rather than merely conventional.
         execute_base_raw = self.df.resample(execute_on.to_pandas_freq()).agg(ohlcv_agg)
 
-        # Detect and warn about data gaps
-        nan_mask = execute_base_raw["close"].isna()
+        # Detect and warn about data gaps. ANY price field, not close alone (#353): a bar
+        # with a good close and a missing open was never warned about, then forward-filled
+        # -- and open is what stop_fill_price uses to price a gapped stop.
+        nan_mask = execute_base_raw[["open", "high", "low", "close"]].isna().any(axis=1)
         if nan_mask.any():
             nan_count = nan_mask.sum()
             total_count = len(execute_base_raw)
@@ -281,13 +283,42 @@ class MarketDataObservationSampler:
                 warnings.warn(warning_msg, UserWarning, stacklevel=2)
 
         execute_base_filled = execute_base_raw.ffill()
-        # A bar with no source rows has no trades of its own; forward-filling its range
-        # would let SL/TP re-trigger on the excursion the position already lived through
-        # one bar earlier. Narrower than nan_mask on purpose: a bar that merely lacks a
-        # usable close still has a real high/low, and discarding that would re-create the
-        # too-narrow range this aggregation exists to fix.
-        empty_bars = self.df.resample(execute_on.to_pandas_freq()).size() == 0
-        execute_base_filled.loc[empty_bars, ["open", "high", "low"]] = execute_base_filled.loc[empty_bars, "close"]
+        # Forward-filling volume is defensible; forward-filling a price that FILLS ORDERS
+        # is not -- stop_fill_price would fill at a price the market never traded, and
+        # high/low would answer "was this level touched?" with the previous bar's range.
+        #
+        # PER FIELD, not per row: a row mask overwrites the fields that were PRESENT, so a
+        # bar missing only its open lost its real high and low and became a flat bar on
+        # which no stop can trigger -- a backtest that skips losing exits, which is worse
+        # than the forward-fill it replaced. An empty bar has all three missing and still
+        # collapses to close, which is the behaviour that was already correct (#353).
+        for field in ("open", "high", "low"):
+            execute_base_filled[field] = execute_base_filled[field].where(
+                ~execute_base_raw[field].isna(), execute_base_filled["close"]
+            )
+
+        # A stale close paired with this bar's real range can violate low <= close <= high,
+        # and close is what becomes current_price, the next entry, the mark and the reward.
+        # Clipping keeps it inside a range the market actually traded.
+        # Restore the OHLC invariant the collapse can break: a bar whose `open` is real and
+        # whose `high` is missing takes close as its high, which can land BELOW open -- the
+        # malformed shape the ingestion validator rejects on raw input, reintroduced from
+        # the inside. Widen the extremes to span the two prices that are real, then clip
+        # close, which becomes current_price, the next entry, the mark and the reward.
+        # Widened from OPEN only, never from close. A red bar missing its high takes close
+        # as its high and lands BELOW open -- the malformed shape the ingestion validator
+        # rejects, recreated where no validator runs. `open` is a real print of THIS bar,
+        # so this invents nothing; widening with a stale close would drag a real low of 110
+        # down to 100 and fire a stop at 105 on a bar that never traded there.
+        execute_base_filled["high"] = execute_base_filled[["high", "open"]].max(axis=1)
+        execute_base_filled["low"] = execute_base_filled[["low", "open"]].min(axis=1)
+
+        # A bar that merely lacks a usable close KEEPS its real range (existing contract --
+        # discarding it recreates the too-narrow range this aggregation exists to fix), so
+        # the stale close is clipped into that range rather than the range widened to it.
+        execute_base_filled["close"] = execute_base_filled["close"].clip(
+            lower=execute_base_filled["low"], upper=execute_base_filled["high"]
+        )
         self.execute_base_features_df = execute_base_filled[self.min_start_time:]
         if len(self.execute_base_features_df) == 0:
             raise ValueError("No execute_on base features available after min_start_time")

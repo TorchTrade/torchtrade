@@ -133,3 +133,43 @@ def nearest_liquidation_price(
     )
     # A long is liquidated from below, so nearer means higher; a short from above.
     return max(isolated, cross) if position_size > 0 else min(isolated, cross)
+
+
+def stop_precedes_liquidation(
+    stop_price: float, liquidation_price: float, open_price: float, is_long: bool
+) -> bool:
+    """Was a triggered stop crossed before liquidation on this bar? (#300)
+
+    A stop-loss sits on the SAME side of entry as liquidation, so price cannot reach the
+    further level without crossing the nearer one, and the bar's own extreme says which.
+    Booking a liquidation when the stop was crossed first is not pessimism, it is an
+    outcome the data contradicts -- at 10x on 10000 cash it leaves 400 where the stop
+    leaves 5000.
+
+    The exception is a bar that OPENED past liquidation: nothing was crossed on the way
+    there, the margin was already gone when the bar began, and no resting order could have
+    worked first.
+
+    Shared, because replay answering this differently from the offline env is precisely
+    the divergence this module was created to prevent -- and replay did answer it
+    differently, citing the rule #300 replaced.
+    """
+    # Spelled as `not (open <= liq)` rather than `open > liq` because the two differ on a
+    # NaN open: the first says "did not gap", the second says "gapped". This is a pure
+    # extraction of the offline rule, so it keeps the offline answer -- a grid over both
+    # forms found 90 divergences, every one NaN-driven. Unreachable in practice (the
+    # sampler guarantees a finite open), and which answer a NaN should get is a real
+    # question -- but not one a refactor gets to decide by accident.
+    # No stop set is not a stop that was crossed first. Without this, a short with
+    # stop_loss == 0 satisfies `0 < liq and open < liq` and is exempted from liquidation
+    # entirely -- so the rule carries it, rather than each caller's own guard.
+    if not stop_price > 0:
+        return False
+
+    if is_long:
+        gapped_past_liquidation = open_price <= liquidation_price
+        stop_is_nearer = stop_price > liquidation_price
+    else:
+        gapped_past_liquidation = open_price >= liquidation_price
+        stop_is_nearer = stop_price < liquidation_price
+    return stop_is_nearer and not gapped_past_liquidation

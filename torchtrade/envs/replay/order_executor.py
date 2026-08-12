@@ -5,6 +5,11 @@ import math
 from dataclasses import dataclass
 from typing import Dict, Optional
 
+from torchtrade.envs.utils.liquidation import (
+    DEFAULT_MAINTENANCE_MARGIN_RATE,
+    isolated_liquidation_price,
+    stop_precedes_liquidation,
+)
 from torchtrade.envs.utils.sltp_helpers import stop_fill_price
 
 logger = logging.getLogger(__name__)
@@ -46,10 +51,19 @@ class ReplayOrderExecutor:
         initial_balance: float = 10000.0,
         leverage: int = 1,
         transaction_fee: float = 0.0,
+        maintenance_margin_rate: float = DEFAULT_MAINTENANCE_MARGIN_RATE,
     ):
         self.initial_balance = initial_balance
         self.leverage = leverage
         self.transaction_fee = transaction_fee
+        # Configurable, because the offline env takes it from config: hardcoding the
+        # default here means a backtest tuned off it liquidates at a different price
+        # in replay than offline -- the divergence this module exists to prevent.
+        if not math.isfinite(maintenance_margin_rate) or not 0 <= maintenance_margin_rate < 1:
+            raise ValueError(
+                f"maintenance_margin_rate must be in [0, 1), got {maintenance_margin_rate}"
+            )
+        self.maintenance_margin_rate = maintenance_margin_rate
 
         # Position state
         self.position_qty = 0.0
@@ -68,6 +82,21 @@ class ReplayOrderExecutor:
         self.last_order_id = None
         self._order_counter = 0
 
+    @property
+    def liquidation_price(self) -> float:
+        """Where an isolated-margin position loses its margin; 0.0 when flat or unlevered.
+
+        Hardcoded 0.0 before (#269). futures_live_base already falls back to this same
+        formula when a venue omits the price, so account_state[5] was not wrong -- the
+        real bug is that advance_bar never checked liquidation at all.
+        """
+        if self.position_qty == 0 or self.leverage <= 1 or self.entry_price <= 0:
+            return 0.0
+        return isolated_liquidation_price(
+            self.entry_price, is_long=self.position_qty > 0, leverage=self.leverage,
+            maintenance_margin_rate=self.maintenance_margin_rate,
+        )
+
     def advance_bar(self, ohlc: Dict[str, float]):
         """Advance to new bar and check SL/TP triggers.
 
@@ -78,12 +107,37 @@ class ReplayOrderExecutor:
         """
         self.current_price = float(ohlc["close"])
 
-        if self.position_qty == 0 or (self.sl_price == 0 and self.tp_price == 0):
+        # Liquidation is checked even with no bracket set: the old guard returned early
+        # when sl and tp were both 0, so a leveraged replay position could run to negative
+        # equity and then fully recover when price came back (#269).
+        if self.position_qty == 0:
             return
 
         high = float(ohlc["high"])
         low = float(ohlc["low"])
         open_price = float(ohlc["open"])
+
+        # Liquidation outranks the bracket -- unless the stop sits nearer and the bar did
+        # not open past liquidation, in which case price crossed the stop on the way (#300,
+        # which superseded the #299 ordering). Shared with the offline env rather than
+        # restated, because replay answering this differently is the divergence #278 is
+        # about; an earlier version of this liquidated unconditionally and left 400 where
+        # offline leaves 5000 on the same bar.
+        is_long = self.position_qty > 0
+        liq = self.liquidation_price
+        touched = liq > 0 and ((is_long and low <= liq) or (not is_long and high >= liq))
+        stop_first = self.sl_price > 0 and (
+            (is_long and low <= self.sl_price) or (not is_long and high >= self.sl_price)
+        ) and stop_precedes_liquidation(self.sl_price, liq, open_price, is_long=is_long)
+
+        if touched and not stop_first:
+            # Booked AT the liquidation price, as the offline env does: that price is the
+            # isolated-margin cap, so filling worse would breach the cap the venue enforces.
+            self._close_at_price(liq)
+            return
+
+        if self.sl_price == 0 and self.tp_price == 0:
+            return
 
         # Check SL first (pessimistic -- matching offline env)
         sl_triggered = False
@@ -154,7 +208,7 @@ class ReplayOrderExecutor:
             raise ValueError(f"Unsupported side: {side}")
         if order_type.lower() != "market":
             raise ValueError(f"Unsupported order_type: {order_type}")
-        if quantity <= 0:
+        if not math.isfinite(quantity) or quantity <= 0:
             raise ValueError(f"quantity must be > 0, got {quantity}")
 
         price = self.current_price
@@ -229,7 +283,7 @@ class ReplayOrderExecutor:
                 leverage=self.leverage,
                 margin_type="ISOLATED",
                 margin_mode="isolated",
-                liquidation_price=0.0,
+                liquidation_price=self.liquidation_price,
             )
         }
 

@@ -21,6 +21,7 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
+from torchtrade.envs.utils.liquidation import stop_precedes_liquidation
 from torchtrade.envs.offline.sequential import (
     SequentialTradingEnv,
     SequentialTradingEnvConfig,
@@ -306,15 +307,10 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         if trigger != "sl":
             return False
 
-        is_long = self.position.position_size > 0
-        open_price = ohlcv["open"]
-        if is_long:
-            gapped_past_liquidation = open_price <= self.liquidation_price
-            stop_is_nearer = self.stop_loss > self.liquidation_price
-        else:
-            gapped_past_liquidation = open_price >= self.liquidation_price
-            stop_is_nearer = self.stop_loss < self.liquidation_price
-        return stop_is_nearer and not gapped_past_liquidation
+        return stop_precedes_liquidation(
+            self.stop_loss, self.liquidation_price, ohlcv["open"],
+            is_long=self.position.position_size > 0,
+        )
 
     def _apply_bar_exits(self, ohlcv: dict) -> Optional[Dict]:
         """Apply a bar to the held position: liquidation first, then a bracket.
