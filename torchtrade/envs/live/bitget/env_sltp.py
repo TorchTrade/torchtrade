@@ -292,6 +292,14 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
         # Get current price for calculating absolute SL/TP levels
         obs = self.observer.get_observations(return_base_ohlc=True)
         current_price = float(obs["base_features"][-1, 3])  # Close price
+        # Validated here, not per trade_mode: this price divides the notional sizing
+        # AND prices both brackets in every mode, including the "quantity" default
+        # which checked nothing. bybit/okx get this from _current_mark_price(); these
+        # two read a candle close, which dropna() does not clear of inf (#347).
+        if not math.isfinite(current_price) or current_price <= 0:
+            raise ValueError(
+                f"unusable close price ({current_price}) for {self.config.symbol}"
+            )
 
         # Resolve quantity based on trade_mode
         if self.config.trade_mode == "fractional":
@@ -299,12 +307,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
             # live path. Binance's total_wallet_balance excludes unrealized PnL and would under-size;
             # bitget/bybit/okx map both keys to equity, so the switch is a no-op there.
             balance = float(self.trader.get_account_balance()["total_margin_balance"])
-            # isfinite, not `<= 0`: NaN passes both comparisons, and the line below
-            # DIVIDES by current_price -- a NaN quantity reached trader.trade().
-            # binance and bitget size from a candle close here, not the mark price,
-            # so _current_mark_price() never guards this path (#347).
-            if not (math.isfinite(current_price) and math.isfinite(balance)) \
-                    or current_price <= 0 or balance <= 0:
+            if not math.isfinite(balance) or balance <= 0:
                 logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
                 trade_info["success"] = False
                 return trade_info

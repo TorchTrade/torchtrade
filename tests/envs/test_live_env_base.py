@@ -1497,7 +1497,7 @@ def test_a_bankruptcy_baseline_that_would_never_fire_is_refused(equity, reason):
     """`is_bankrupt` is `current < threshold * initial`, so a baseline of 0 reduces to
     `current < 0` -- it never fires above zero equity and a wiped account trades on.
 
-    Behavioural now that #345 hoisted this into the shared base; it used to be a
+    Behavioural now that #345 hoisted this into TorchTradeLiveEnv; it used to be a
     structural grep over four per-exchange copies.
     """
     env = SimpleNamespace(
@@ -1512,9 +1512,9 @@ def test_a_bankruptcy_baseline_that_would_never_fire_is_refused(equity, reason):
         TorchTradeFuturesLiveEnv._capture_bankruptcy_baseline(env)
 
 
-@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
-def test_every_futures_env_delegates_its_baseline(exchange):
-    """Four byte-identical copies is the drift shape this repo has paid for twice."""
+@pytest.mark.parametrize("exchange", ["alpaca", "binance", "bitget", "bybit", "okx"])
+def test_every_live_env_delegates_its_baseline(exchange):
+    """Alpaca included, not exempted -- excluding it is how the bug survived last time."""
     src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
            / "live" / exchange / "base.py").read_text()
     assert "_capture_bankruptcy_baseline()" in src
@@ -1970,6 +1970,12 @@ def test_sltp_sizing_rejects_a_non_finite_price_or_balance(exchange):
     """
     src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
            / "live" / exchange / "env_sltp.py").read_text()
-    assert "math.isfinite(current_price)" in src and "math.isfinite(balance)" in src, (
-        f"{exchange} SLTP sizing still lets a non-finite price or balance through"
+    assert "math.isfinite(balance)" in src, (
+        f"{exchange} SLTP sizing still lets a non-finite balance through"
     )
+    if exchange in ("binance", "bitget"):
+        # These two size from a candle close, so _current_mark_price() never guards them.
+        # bybit and okx go through it, which makes a second price check there dead code.
+        assert "math.isfinite(current_price)" in src, (
+            f"{exchange} sizes from a candle close with no finiteness check"
+        )

@@ -254,6 +254,17 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 Unbounded(shape=(base_window, 4), dtype=torch.float),
             )
 
+    def _capture_bankruptcy_baseline(self) -> None:
+        """Record the equity an episode starts from, or refuse to start (#345).
+
+        `is_bankrupt` is `current < threshold * initial`, so a baseline of 0 never fires.
+        """
+        self.initial_portfolio_value = self._get_portfolio_value()
+        if self.initial_portfolio_value <= 0:
+            raise ValueError(
+                f"cannot start an episode on equity of {self.initial_portfolio_value}"
+            )
+
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""
         return is_bankrupt(

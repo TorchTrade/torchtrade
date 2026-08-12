@@ -488,39 +488,6 @@ class BitgetFuturesOrderClass:
 
         return True
 
-    def check_both_positions_open(self) -> bool:
-        """
-        Check if both long and short positions are open (hedge mode issue).
-
-        Returns:
-            True if both positions are open, False otherwise
-        """
-        try:
-            positions = self.client.fetch_positions([self.symbol])
-            long_open = False
-            short_open = False
-
-            for pos in positions:
-                if pos['symbol'] == self.symbol:
-                    contracts = float(pos.get('contracts', 0))
-                    side = pos.get('side', 'long')
-
-                    if contracts > 0:
-                        if side == 'long':
-                            long_open = True
-                        elif side == 'short':
-                            short_open = True
-
-            if long_open and short_open:
-                logger.warning("⚠️  Both long and short positions are open! Your account is in HEDGE mode.")
-                logger.warning("    Please close all positions and switch to ONE_WAY mode.")
-                return True
-
-            return False
-        except Exception as e:
-            logger.error(f"Error checking positions: {e}")
-            return False
-
     def get_status(self) -> Dict[str, Union[OrderStatus, PositionStatus, None]]:
         """
         Get current order and position status using CCXT.

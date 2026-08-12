@@ -233,7 +233,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         target_position_value = total_portfolio * action_value
 
         # Convert to quantity
-        target_qty = target_position_value / current_price if current_price > 0 else 0.0
+        target_qty = target_position_value / current_price
 
         return target_position_value, target_qty
 

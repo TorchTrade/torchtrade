@@ -741,13 +741,13 @@ class TestCriticalEdgeCases:
 
         env.reset()
         action_tuple = ("long", -0.02, 0.03)
-        trade_info = env._execute_trade_if_needed(action_tuple)
 
-        # Should handle gracefully
-        if trade_info["executed"] and trade_info.get("stop_loss") is not None:
-            # If trade executed, prices should be valid
-            assert trade_info["stop_loss"] >= 0
-            assert trade_info["take_profit"] >= 0
+        # "Handle gracefully" used to mean a conditional assertion that ran only if the
+        # trade executed -- so it passed whether or not brackets were priced off zero.
+        # A zero close now refuses outright, which is the graceful handling (#347).
+        with pytest.raises(ValueError, match="unusable close price"):
+            env._execute_trade_if_needed(action_tuple)
+        mock_trader.trade.assert_not_called()
 
     def test_reentry_allowed_same_step_as_closure(self, env_with_mocks):
         """When SL/TP closes a position, re-entry is allowed in the same step.
@@ -1033,7 +1033,7 @@ class TestBinanceSLTPNotionalTradeMode:
         expected_qty = 500.0 / 50050.0
         assert call_kwargs["quantity"] == pytest.approx(expected_qty, rel=1e-4)
 
-    def test_notional_zero_price_aborts_trade(self, notional_env):
+    def test_notional_zero_price_refuses_to_trade(self, notional_env):
         """Zero candle close price must abort trade without calling trader.trade()."""
         env, mock_trader = notional_env
 
@@ -1047,10 +1047,12 @@ class TestBinanceSLTPNotionalTradeMode:
         env.observer.get_observations = MagicMock(side_effect=mock_obs_zero)
         env.reset()
         mock_trader.reset_mock()
-        trade_info = env._execute_trade_if_needed(("long", -0.02, 0.03))
+        # A zero candle close is unusable data, not a soft abort: it divides the notional
+        # sizing and prices both brackets, including in the "quantity" default (#347).
+        with pytest.raises(ValueError, match="unusable close price"):
+            env._execute_trade_if_needed(("long", -0.02, 0.03))
 
         mock_trader.trade.assert_not_called()
-        assert trade_info["success"] is False
 
     def test_quantity_mode_passes_raw_value(self):
         """Quantity mode must pass quantity_per_trade directly without conversion."""
