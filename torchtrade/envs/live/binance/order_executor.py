@@ -36,7 +36,8 @@ class PositionStatus:
     unrealized_pnl: float
     unrealized_pnl_pct: float
     mark_price: float
-    leverage: int
+    leverage: float  # float, not int: int() truncated 1.5x to 1x, which then took
+    # the no-liquidation branch and reported a levered position as safe (#277).
     margin_type: str
     liquidation_price: float
 
@@ -342,7 +343,7 @@ class BinanceFuturesOrderClass:
                         unrealized_pnl=unrealized_pnl,
                         unrealized_pnl_pct=unrealized_pnl_pct,
                         mark_price=mark_price,
-                        leverage=int(pos.get("leverage", self.leverage)),
+                        leverage=float(pos.get("leverage") or self.leverage),
                         margin_type=pos.get("marginType", self.margin_type.value),
                         liquidation_price=float(pos.get("liquidationPrice", 0)),
                     )

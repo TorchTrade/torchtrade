@@ -51,7 +51,8 @@ class PositionStatus:
     unrealized_pnl: float
     unrealized_pnl_pct: float
     mark_price: float
-    leverage: int
+    leverage: float  # float, not int: int() truncated 1.5x to 1x, which then took
+    # the no-liquidation branch and reported a levered position as safe (#277).
     margin_mode: str
     liquidation_price: float
 
@@ -349,7 +350,7 @@ class BybitFuturesOrderClass:
                     unrealized_pnl=unrealized_pnl,
                     unrealized_pnl_pct=unrealized_pnl_pct,
                     mark_price=mark_price,
-                    leverage=int(float(pos.get("leverage", self.leverage))),
+                    leverage=float(pos.get("leverage") or self.leverage),
                     margin_mode=pos.get("tradeMode", str(self.margin_mode.to_pybit())),
                     liquidation_price=liq_price,
                 )
@@ -382,7 +383,13 @@ class BybitFuturesOrderClass:
                 raise RuntimeError("No account data returned from UNIFIED or CONTRACT account types")
 
             account = accounts[0]
-            total_equity = float(account.get("totalEquity", 0))
+            # See bitget: a fabricated 0 equity disables every downstream guard (#277).
+            raw_equity = account.get("totalEquity")
+            if raw_equity is None or raw_equity == "":
+                raise ValueError(
+                    f"bybit returned no total equity (got {raw_equity!r}); refusing to "
+                    f"report an equity of 0")
+            total_equity = float(raw_equity)
             available = float(account.get("totalAvailableBalance", 0))
             total_pnl = float(account.get("totalPerpUPL", 0))
             margin_balance = float(account.get("totalMarginBalance", total_equity))

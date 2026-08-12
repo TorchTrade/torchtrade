@@ -94,6 +94,13 @@ class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         # `current < threshold * 0` is never true -- the account could be wiped
         # out and the episode would run on (#277).
         self.initial_portfolio_value = balance["total_margin_balance"]
+        if not (self.initial_portfolio_value > 0):
+            raise ValueError(
+                f"cannot start an episode on equity of "
+                f"{self.initial_portfolio_value}: the bankruptcy baseline would be 0, "
+                f"and `current < threshold * 0` never fires -- the account could be "
+                f"wiped out and the episode would trade on"
+            )
 
         # Build observation specs
         self._build_observation_specs()

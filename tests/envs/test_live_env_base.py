@@ -1219,9 +1219,13 @@ def test_cross_estimate_refuses_inputs_it_cannot_price(kwargs, match):
         cross_liquidation_price(**args)
 
 
-@pytest.mark.parametrize("leverage", [0, -3, 0.5, float("nan")],
-                         ids=["zero", "negative", "fractional", "nan"])
-def test_nonsense_venue_leverage_refuses_to_report_a_distance(leverage):
+@pytest.mark.parametrize("leverage,match", [
+    (0, "leverage must be at least 1"),
+    (-3, "leverage must be at least 1"),
+    (0.5, "leverage must be at least 1"),
+    (float("nan"), "non-finite leverage"),
+], ids=["zero", "negative", "fractional", "nan"])
+def test_nonsense_venue_leverage_refuses_to_report_a_distance(leverage, match):
     """Reachable, not theoretical: OKX blanks `lever` on cross positions.
 
     Its adapter then substitutes the CONFIG leverage, so an env left at the default 1x
@@ -1231,7 +1235,7 @@ def test_nonsense_venue_leverage_refuses_to_report_a_distance(leverage):
     inputs in __post_init__; live now refuses them here.
     """
     env = _futures_env_stub(_open_position(1.0, leverage=leverage), {"total_margin_balance": 1000.0})
-    with pytest.raises(ValueError, match="leverage must be at least 1"):
+    with pytest.raises(ValueError, match=match):
         TorchTradeFuturesLiveEnv._get_observation(env)
 
 
@@ -1271,3 +1275,108 @@ def test_one_x_with_a_published_liq_price_deliberately_beats_offline(is_long):
     obs = TorchTradeFuturesLiveEnv._get_observation(env)
 
     assert obs["account_state"][5].item() == pytest.approx(0.996, rel=1e-4)
+
+
+@pytest.mark.parametrize("field", ["mark_price", "liquidation_price", "qty"])
+def test_non_finite_venue_numbers_refuse_to_build_an_account_state(field):
+    """NaN defeats every comparison downstream, so it is caught once at the source.
+
+    A NaN liquidation price passes `<= 0`, skips the fallback, reaches the arithmetic and
+    clamps to a distance of 0.0 -- a healthy 20x position reported as AT liquidation on
+    one garbage tick. Fail-closed, but silently, and on the wrong side of the truth.
+    """
+    position = _open_position(1.0, leverage=20)
+    setattr(position, field, float("nan"))
+    env = _futures_env_stub(position, {"total_margin_balance": 1000.0})
+
+    with pytest.raises(ValueError, match=f"non-finite {field}"):
+        TorchTradeFuturesLiveEnv._get_observation(env)
+
+
+def test_no_adapter_fabricates_zero_equity():
+    """Indexing `total_margin_balance` only helps if the adapter doesn't invent the value.
+
+    Three of the four coerced a missing or blank venue field to 0.0 and published it under
+    the key -- `.get('total', 0)`, `.get("totalEquity", 0)`, `.get("totalEq") or "0"` --
+    so every downstream guard saw a well-formed 0 rather than an error: the bankruptcy
+    baseline became 0 (and `current < threshold * 0` never fires), sizing refused to
+    trade, exposure_pct read flat. That is #277's mechanism surviving one layer below the
+    code hardened for it.
+
+    Structural rather than behavioural: reaching these lines needs a faithful fake of
+    three different venue clients, and a wrong fake proves nothing about the adapter. The
+    guard is on the coercion itself, which is the thing that must not come back.
+    """
+    live_root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
+    equity_key = r"""["'](total|totalEquity|totalEq|totalMarginBalance)["']"""
+    pattern = re.compile(
+        rf"""\.get\(\s*{equity_key}\s*,\s*0"""       # .get("totalEquity", 0)
+        rf"""|\.get\(\s*{equity_key}\s*\)\s*or\s*["']?0"""  # .get("totalEq") or "0"
+    )
+    scanned, offenders = 0, []
+    for path in sorted(live_root.rglob("order_executor.py")):
+        scanned += 1
+        for i, line in enumerate(path.read_text().splitlines(), 1):
+            # Comment lines are skipped so a comment explaining the banned pattern (there
+            # is one, at the bitget fix) does not read as the pattern itself.
+            if not line.lstrip().startswith("#") and pattern.search(line):
+                offenders.append(f"{path.relative_to(live_root.parent)}:{i}")
+
+    assert scanned >= 4, f"guard scanned only {scanned} executors under {live_root}"
+    assert offenders == [], (
+        f"equity coerced to zero at {offenders}; raise on a missing or blank venue field "
+        f"so it fails where it is diagnosable, not as a plausible 0 three layers down"
+    )
+
+
+def test_every_futures_env_validates_its_bankruptcy_baseline():
+    """A baseline of 0 disables bankruptcy permanently: `current < threshold * 0` is never
+    true for any non-negative equity, so the account can be wiped out and the episode
+    trades on. Indexing the key stops an adapter fabricating the 0, and this stops a
+    genuinely empty account starting an episode that can never terminate.
+
+    Structural because the assignment sits inside per-exchange `_reset` scaffolding that
+    needs a live client to reach. Four copies of one line is itself the drift risk the
+    shared base exists to remove -- hoisting it is follow-up work (#345).
+    """
+    live_root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
+    bases = sorted(live_root.glob("*/base.py"))
+    futures = [p for p in bases if p.parent.name != "alpaca"]
+    assert len(futures) == 4, f"expected 4 futures bases, found {[p.parent.name for p in futures]}"
+
+    unguarded = [
+        p.parent.name for p in futures
+        if "if not (self.initial_portfolio_value > 0):" not in p.read_text()
+    ]
+    assert unguarded == [], (
+        f"{unguarded} assign initial_portfolio_value without rejecting a non-positive "
+        f"baseline, which silently disables the bankruptcy check for the whole episode"
+    )
+
+
+@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
+def test_adapters_do_not_truncate_fractional_leverage(exchange):
+    """`int(float("1.5"))` is 1, and 1 takes the no-liquidation branch.
+
+    bybit and okx coerced venue leverage with `int(float(...))`, so any leverage in
+    [1, 2) arrived as exactly 1 -- and the `== 1` gate then handed that position the
+    maximally-safe distance of 1.0, on the very cross-margin path the fallback exists
+    for. #277 surviving inside the branch written to stop it.
+    """
+    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+           / "live" / exchange / "order_executor.py").read_text()
+    assert "leverage=int(" not in src, (
+        f"{exchange} truncates venue leverage to int; 1.5x becomes 1x and reads as unlevered"
+    )
+
+
+@pytest.mark.parametrize("qty", [1.0, -1.0], ids=["long", "short"])
+def test_fractional_leverage_still_gets_a_real_distance(qty):
+    """The behavioural half of the above: 1.5x must not read as maximally safe."""
+    env = _futures_env_stub(
+        _open_position(qty, leverage=1.5), {"total_margin_balance": 1000.0}
+    )
+    distance = TorchTradeFuturesLiveEnv._get_observation(env)["account_state"][5].item()
+
+    assert distance == pytest.approx(1 / 1.5 - 0.004, rel=1e-4)
+    assert distance < 1.0

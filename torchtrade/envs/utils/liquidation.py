@@ -35,8 +35,9 @@ def isolated_liquidation_price(
     the sub-1x case that would price a liquidation below zero cannot arrive.
 
     Written `not (x >= 1)` rather than `x < 1`: NaN compares False to every operator, so
-    the natural spelling lets it through, and `max(0.0, nan)` is 0.0 -- which is exactly
-    the "reads as safe" answer these guards exist to refuse.
+    the natural spelling lets it through and returns a NaN price. The caller then divides
+    it into a NaN distance and clamps that to 0.0 -- reporting a healthy position as AT
+    liquidation. Fail-closed, but silently and wrongly, on one garbage venue tick.
     """
     if not (leverage >= 1):
         raise ValueError(f"leverage must be at least 1 to price a liquidation, got {leverage}")

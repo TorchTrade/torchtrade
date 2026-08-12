@@ -9,6 +9,8 @@ Alpaca (spot) is NOT a futures env: it hardcodes leverage=1 and distance_to_liqu
 and reads cash rather than total_wallet_balance. It keeps its own `_get_observation` and
 inherits `TorchTradeLiveEnv` directly.
 """
+import math
+
 import torch
 from tensordict import TensorDict, TensorDictBase
 
@@ -94,6 +96,22 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             leverage = float(self.config.leverage)
             liquidation_price = 0.0
         else:
+            # Every guard below is a comparison, and NaN compares False to all of them --
+            # a NaN liquidation price would skip the fallback, reach the arithmetic, and
+            # clamp to a distance of 0.0, telling the policy a healthy position is AT
+            # liquidation on one garbage tick. Checked once, here, rather than at each
+            # comparison (#277).
+            for _name, _value in (
+                ("qty", position_status.qty),
+                ("mark_price", position_status.mark_price),
+                ("leverage", position_status.leverage),
+                ("liquidation_price", position_status.liquidation_price),
+            ):
+                if not math.isfinite(_value):
+                    raise ValueError(
+                        f"venue reported a non-finite {_name} ({_value}) for an open "
+                        f"position; refusing to derive an account state from it"
+                    )
             position_size = position_status.qty
             position_value = abs(position_status.notional_value)
             current_price = position_status.mark_price

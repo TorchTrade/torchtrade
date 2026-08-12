@@ -44,7 +44,8 @@ class PositionStatus:
     unrealized_pnl: float
     unrealized_pnl_pct: float
     mark_price: float
-    leverage: int
+    leverage: float  # float, not int: int() truncated 1.5x to 1x, which then took
+    # the no-liquidation branch and reported a levered position as safe (#277).
     margin_mode: str
     liquidation_price: float
 
@@ -369,7 +370,7 @@ class OKXFuturesOrderClass:
                     unrealized_pnl=unrealized_pnl,
                     unrealized_pnl_pct=unrealized_pnl_pct,
                     mark_price=mark_price,
-                    leverage=int(float(pos.get("lever") or str(self.leverage))),
+                    leverage=float(pos.get("lever") or self.leverage),
                     margin_mode=pos.get("mgnMode", self.margin_mode.value),
                     liquidation_price=liq_price,
                 )
@@ -404,7 +405,13 @@ class OKXFuturesOrderClass:
                 raise RuntimeError("No account data returned from OKX")
 
             account = data[0]
-            total_equity = float(account.get("totalEq") or "0")
+            # See bitget: a fabricated 0 equity disables every downstream guard (#277).
+            raw_equity = account.get("totalEq")
+            if raw_equity is None or raw_equity == "":
+                raise ValueError(
+                    f"okx returned no total equity (got {raw_equity!r}); refusing to "
+                    f"report an equity of 0")
+            total_equity = float(raw_equity)
             # Available equity for trading
             details = account.get("details", [])
             available = 0.0
