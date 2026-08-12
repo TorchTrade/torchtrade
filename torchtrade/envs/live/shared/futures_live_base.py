@@ -95,6 +95,21 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                     )
             raise LiveObservationHalt(error, policy, accepted, flatten_error) from error
 
+    def _current_mark_price(self, position_status=None) -> float:
+        """The bar's mark price, validated before it can size an order (#347).
+
+        An open position's mark and a flat account's fetched mark are the same money-path
+        number, so they get the same rule: the sizing paths DIVIDE by it, and it also
+        reaches `history.record_step` and the reward. `<= 0` passes NaN and `isfinite`
+        passes a negative -- and a negative flips the sign, so a long action opens a short.
+        Every venue reads its mark as `float(pos.get("markPrice") or entry_price)`, which
+        is 0.0 when both fields are blank.
+        """
+        price = position_status.mark_price if position_status else self.trader.get_mark_price()
+        if not math.isfinite(price) or price <= 0:
+            raise ValueError(f"venue reported an unusable mark price ({price})")
+        return price
+
     def _get_observation(self, advance_hold: bool = True) -> TensorDictBase:
         """Get the current observation state.
 
@@ -156,7 +171,10 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         if position_direction == 0:
             position_size = 0.0
             position_value = 0.0
-            current_price = self.trader.get_mark_price()
+            # No venue call: distance_to_liquidation short-circuits to 1.0 when flat,
+            # so this price is never read. Fetching it cost a round-trip per bar and
+            # -- once validated -- would raise on a flat account over an unused value.
+            current_price = 0.0
             unrealized_pnl_pct = 0.0
             leverage = float(self.config.leverage)
             liquidation_price = 0.0
@@ -184,6 +202,18 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                         f"venue reported a non-finite {_name} ({_value}) for an open "
                         f"position; refusing to derive an account state from it"
                     )
+            # Finite is not enough for the mark: 0 and negative both pass the loop above and
+            # then short-circuit distance_to_liquidation to "safe". Every venue's mark read
+            # is `float(pos.get("markPrice") or entry_price)`, so two blank fields give 0.0.
+            if position_status.mark_price <= 0:
+                raise ValueError(
+                    f"venue reported a non-positive mark price "
+                    f"({position_status.mark_price}) for an open position"
+                )
+            # Finite is not enough for the mark: 0 and negative both pass the loop above and
+            # then short-circuit distance_to_liquidation to "safe". Every venue's mark read
+            # is `float(pos.get("markPrice") or entry_price)`, so two blank fields give 0.0.
+
             position_size = position_status.qty
             position_value = abs(position_status.notional_value)
             current_price = position_status.mark_price
@@ -211,7 +241,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             )
         exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
 
-        if position_size == 0 or current_price == 0:
+        if position_direction == 0:
             distance_to_liquidation = 1.0
         elif liquidation_price <= 0 and leverage == 1:
             # No leverage, nothing to be liquidated by, and the offline env says the same

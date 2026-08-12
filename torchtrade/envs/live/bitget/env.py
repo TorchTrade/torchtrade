@@ -159,10 +159,10 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
         if position_status:
-            current_price = position_status.mark_price
+            current_price = self._current_mark_price(position_status)
             position_size = position_status.qty
         else:
-            current_price = self.trader.get_mark_price()
+            current_price = self._current_mark_price()
             position_size = 0.0
 
         self._sync_position_from_exchange(position_status)
@@ -302,8 +302,9 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         # balance sizes an inf target -- bitget's amount rounding then yields NaN and
         # hands it to create_order. Same defect this PR fixed on the baselines (#277).
         if not math.isfinite(total_balance) or total_balance <= 0:
-            logger.warning("No balance for fractional position sizing")
-            return 0.0, 0.0, "flat"
+            raise ValueError(
+                f"cannot size a trade against a portfolio value of {total_balance}"
+            )
 
         # Use shared utility for core position calculation
         # Reserve 2% buffer for exchange maintenance margin requirements
@@ -331,7 +332,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         """
         # Get current position and price from exchange
         current_qty = self._get_current_position_quantity()
-        current_price = self.trader.get_mark_price()
+        current_price = self._current_mark_price()
 
         # Special case: Close to flat
         if action_value == 0.0:

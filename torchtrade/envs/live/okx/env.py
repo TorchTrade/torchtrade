@@ -118,9 +118,8 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         # read as a live position makes abs(current_qty) > 0 true on a flat account, so
         # action 0.0 closes nothing and still advances current_action_level (#283).
         position_size = position_qty_from_status(position_status)
-        current_price = (
-            position_status.mark_price if position_status else self.trader.get_mark_price()
-        )
+        # okx alone threads this into sizing rather than re-fetching, so BOTH halves matter.
+        current_price = self._current_mark_price(position_status)
 
         # No-op today (this env's _execute_trade_if_needed recomputes qty live and never reads
         # current_action_level), but keeps the field consistent so adding a duplicate-action
@@ -246,8 +245,9 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         # balance sizes an inf target -- bitget's amount rounding then yields NaN and
         # hands it to create_order. Same defect this PR fixed on the baselines (#277).
         if not math.isfinite(total_balance) or total_balance <= 0:
-            logger.warning("No balance for fractional position sizing")
-            return 0.0, 0.0, "flat"
+            raise ValueError(
+                f"cannot size a trade against a portfolio value of {total_balance}"
+            )
 
         effective_balance = total_balance * 0.98
         fee_rate = 0.0005  # OKX futures taker fee

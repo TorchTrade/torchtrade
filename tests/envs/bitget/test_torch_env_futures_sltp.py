@@ -715,7 +715,7 @@ class TestBitgetSLTPNotionalTradeMode:
         expected_qty = 500.0 / 50050.0
         assert call_kwargs["quantity"] == pytest.approx(expected_qty, rel=1e-4)
 
-    def test_notional_zero_price_aborts_trade(self, notional_env):
+    def test_notional_zero_price_refuses_to_trade(self, notional_env):
         """Zero candle close price must abort trade without calling trader.trade()."""
         env, mock_trader = notional_env
 
@@ -729,10 +729,12 @@ class TestBitgetSLTPNotionalTradeMode:
         env.observer.get_observations = MagicMock(side_effect=mock_obs_zero)
         env.reset()
         mock_trader.reset_mock()
-        trade_info = env._execute_trade_if_needed(("long", -0.02, 0.03))
+        # A zero candle close is unusable data, not a soft abort: it divides the notional
+        # sizing and prices both brackets, including in the "quantity" default (#347).
+        with pytest.raises(ValueError, match="unusable close price"):
+            env._execute_trade_if_needed(("long", -0.02, 0.03))
 
         mock_trader.trade.assert_not_called()
-        assert trade_info["success"] is False
 
     def test_quantity_mode_passes_raw_value(self):
         """Quantity mode must pass quantity_per_trade directly without conversion."""
@@ -753,6 +755,7 @@ class TestBitgetSLTPNotionalTradeMode:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
+        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)
         mock_trader.get_account_balance = MagicMock(return_value={
@@ -807,6 +810,7 @@ class TestBitgetSLTPNotionalTradeMode:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
+        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)
         mock_trader.get_account_balance = MagicMock(return_value={
@@ -868,6 +872,7 @@ class TestBitgetSLTPLockPosition:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
+        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)
         mock_trader.get_account_balance = MagicMock(return_value={

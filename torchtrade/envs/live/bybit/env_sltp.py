@@ -143,10 +143,10 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
         if position_status:
-            current_price = position_status.mark_price
+            current_price = self._current_mark_price(position_status)
             position_size = position_status.qty
         else:
-            current_price = self.trader.get_mark_price()
+            current_price = self._current_mark_price()
             position_size = 0.0
 
         # Sync position state from exchange — this is the source of truth.
@@ -260,7 +260,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
             return trade_info
 
         # Get current mark price (more accurate than candle close for bracket orders)
-        current_price = float(self.trader.get_mark_price())
+        current_price = float(self._current_mark_price())
 
         # Resolve quantity based on trade_mode
         if self.config.trade_mode == "fractional":
@@ -268,16 +268,14 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
             # live path. Binance's total_wallet_balance excludes unrealized PnL and would under-size;
             # bitget/bybit/okx map both keys to equity, so the switch is a no-op there.
             balance = float(self.trader.get_account_balance()["total_margin_balance"])
-            if current_price <= 0 or balance <= 0:
+            # current_price already raised in _current_mark_price(); balance has
+            # no such accessor, and `nan <= 0` is False (#347).
+            if not math.isfinite(balance) or balance <= 0:
                 logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
                 trade_info["success"] = False
                 return trade_info
             quantity = balance * self.config.position_fraction * self.config.leverage / current_price
         elif self.config.trade_mode == "notional":
-            if current_price <= 0:
-                logger.error(f"Invalid current_price={current_price} for {self.config.symbol}")
-                trade_info["success"] = False
-                return trade_info
             quantity = float(self.config.quantity_per_trade) / current_price
         elif self.config.trade_mode == "quantity":
             quantity = float(self.config.quantity_per_trade)

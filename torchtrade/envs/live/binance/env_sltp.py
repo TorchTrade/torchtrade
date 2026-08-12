@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
 import logging
@@ -179,10 +180,10 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
         if position_status:
-            current_price = position_status.mark_price
+            current_price = self._current_mark_price(position_status)
             position_size = position_status.qty
         else:
-            current_price = self.trader.get_mark_price()
+            current_price = self._current_mark_price()
             position_size = 0.0
 
         # Sync position state from exchange — this is the source of truth.
@@ -287,6 +288,14 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         # Get current price for calculating absolute SL/TP levels
         obs = self.observer.get_observations(return_base_ohlc=True)
         current_price = float(obs["base_features"][-1, 3])  # Close price
+        # Validated here, not per trade_mode: this price divides the notional sizing
+        # AND prices both brackets in every mode, including the "quantity" default
+        # which checked nothing. bybit/okx get this from _current_mark_price(); these
+        # two read a candle close, which dropna() does not clear of inf (#347).
+        if not math.isfinite(current_price) or current_price <= 0:
+            raise ValueError(
+                f"unusable close price ({current_price}) for {self.config.symbol}"
+            )
 
         # Resolve quantity based on trade_mode
         if self.config.trade_mode == "fractional":
@@ -294,16 +303,12 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
             # live path. Binance's total_wallet_balance excludes unrealized PnL and would under-size;
             # bitget/bybit/okx map both keys to equity, so the switch is a no-op there.
             balance = float(self.trader.get_account_balance()["total_margin_balance"])
-            if current_price <= 0 or balance <= 0:
+            if not math.isfinite(balance) or balance <= 0:
                 logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
                 trade_info["success"] = False
                 return trade_info
             quantity = balance * self.config.position_fraction * self.config.leverage / current_price
         elif self.config.trade_mode == "notional":
-            if current_price <= 0:
-                logger.error(f"Invalid current_price={current_price} for {self.config.symbol}")
-                trade_info["success"] = False
-                return trade_info
             quantity = float(self.config.quantity_per_trade) / current_price
         elif self.config.trade_mode == "quantity":
             quantity = float(self.config.quantity_per_trade)

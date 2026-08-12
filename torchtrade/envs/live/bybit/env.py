@@ -113,10 +113,10 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
         if position_status:
-            current_price = position_status.mark_price
+            current_price = self._current_mark_price(position_status)
             position_size = position_status.qty
         else:
-            current_price = self.trader.get_mark_price()
+            current_price = self._current_mark_price()
             position_size = 0.0
 
         # No-op today (this env's _execute_trade_if_needed recomputes qty live and never reads
@@ -241,8 +241,9 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         # balance sizes an inf target -- bitget's amount rounding then yields NaN and
         # hands it to create_order. Same defect this PR fixed on the baselines (#277).
         if not math.isfinite(total_balance) or total_balance <= 0:
-            logger.warning("No balance for fractional position sizing")
-            return 0.0, 0.0, "flat"
+            raise ValueError(
+                f"cannot size a trade against a portfolio value of {total_balance}"
+            )
 
         effective_balance = total_balance * 0.98
         fee_rate = 0.00055  # Bybit futures taker fee
@@ -258,7 +259,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
     def _execute_fractional_action(self, action_value: float) -> Dict:
         """Execute action using fractional position sizing."""
         current_qty = self._get_current_position_quantity()
-        current_price = self.trader.get_mark_price()
+        current_price = self._current_mark_price()
 
         if action_value == 0.0:
             if abs(current_qty) > 0:

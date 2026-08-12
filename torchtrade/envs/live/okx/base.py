@@ -1,6 +1,5 @@
 """Base class for OKX live trading environments."""
 import logging
-import math
 
 from abc import abstractmethod
 from typing import Callable, List, Optional
@@ -90,23 +89,7 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         if config.close_position_on_init:
             self.trader.close_position()
 
-        # Bankruptcy baseline on total_margin_balance (equity), matching offline's
-        # portfolio_value and the current side of the check. Binance's total_wallet_balance
-        # excludes unrealized PnL (a real skew here); bitget/bybit/okx map both keys to equity.
-        balance = self.trader.get_account_balance()
-        # Indexed: a default of 0 makes the bankruptcy baseline 0, and
-        # `current < threshold * 0` reduces to `current < 0` -- so it never fires
-        # above zero equity and the account could be wiped out with the episode
-        # running on (#277).
-        self.initial_portfolio_value = balance["total_margin_balance"]
-        if not math.isfinite(self.initial_portfolio_value) or self.initial_portfolio_value <= 0:
-            raise ValueError(
-                f"cannot start an episode on equity of "
-                f"{self.initial_portfolio_value}: the bankruptcy baseline would be 0, "
-                f"and `current < threshold * 0` reduces to `current < 0`, so it never "
-                f"fires above zero equity -- the account could be wiped out with "
-                f"the episode trading on"
-            )
+        self._capture_bankruptcy_baseline()
 
         # Build observation specs
         self._build_observation_specs()
@@ -222,7 +205,7 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         """Clean up resources."""
         try:
             status = self.trader.get_status()
-            if status.get("position_status") and status["position_status"].qty != 0:
+            if position_direction_from_status(status.get("position_status")) != 0:
                 logger.warning(
                     "Closing environment with open position! "
                     "Call env.trader.close_position() before env.close() if needed."

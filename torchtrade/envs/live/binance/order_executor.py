@@ -188,10 +188,17 @@ class BinanceFuturesOrderClass:
                         self._min_qtys[symbol] = float(f.get('minQty') or 0.0)
                     elif f['filterType'] == 'PRICE_FILTER' and symbol == self.symbol:
                         tick_str = f['tickSize']
-                        self._tick_size = float(tick_str)
-                        if '.' in tick_str:
-                            decimal_part = tick_str.rstrip('0').split('.')[1]
-                            self._tick_decimals = len(decimal_part) if decimal_part else 0
+                        tick_size = float(tick_str)
+                        # bybit and okx both gate on this; binance did not. _round_price
+                        # divides by it, and its only callers are the bracket legs, placed
+                        # in a try/except AFTER the entry filled -- so a zero tick does not
+                        # crash, it logs "position opened without SL" and leaves a live
+                        # position the policy has no way to exit under lock_position_until_sltp.
+                        if tick_size > 0:
+                            self._tick_size = tick_size
+                            if '.' in tick_str:
+                                decimal_part = tick_str.rstrip('0').split('.')[1]
+                                self._tick_decimals = len(decimal_part) if decimal_part else 0
                 except Exception as e:
                     logger.warning(
                         f"Skipping malformed {f.get('filterType', '?')} for {symbol}: {e}"

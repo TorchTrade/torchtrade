@@ -345,7 +345,19 @@ class OKXFuturesOrderClass:
 
             if pos is not None:
                 raw_pos = float(pos.get("pos", 0))
-                pos_side = pos.get("posSide", "net")
+                pos_side = pos.get("posSide")
+
+                # An unrecognised posSide used to fall through to the net-mode branch and
+                # keep raw_pos POSITIVE -- so a hedge-mode short read as a long, with no
+                # error, straight into the trade path. Worse than bitget/bybit, which at
+                # least degrade to POSITION_UNKNOWN. A direction is never guessed (#341).
+                if pos_side not in ("short", "long", "net"):
+                    logger.error(
+                        "okx reported an unusable posSide (%r); refusing to infer a "
+                        "direction", pos_side
+                    )
+                    status["position_status"] = POSITION_UNKNOWN
+                    return status
 
                 # Determine signed quantity
                 if pos_side == "short":
@@ -593,7 +605,11 @@ class OKXFuturesOrderClass:
             all_closed = True
             for pos in non_zero:
                 raw_pos = float(pos.get("pos", 0))
-                pos_side = pos.get("posSide", "net")
+                pos_side = pos.get("posSide")
+                if pos_side not in ("long", "short", "net"):
+                    logger.error(f"Refusing to close a position with posSide {pos_side!r}")
+                    all_closed = False
+                    continue
                 if pos_side in ("long", "net") and raw_pos > 0:
                     close_side = "sell"
                 else:

@@ -795,11 +795,21 @@ size, exposure and liquidation distance the env has just admitted it cannot veri
 So the env **halts**: it raises `LiveObservationHalt` and produces no transition.
 
 **Which reads this covers.** Only the post-bar state read — the portfolio value and
-observation taken after the bar closes. Two other venue reads per step are *not* routed
-through it and still raise their original exception with no latch and no emergency
-flatten: the position read at the top of `_step()` (used for the position sync and the
-duplicate-action guard) and the initial read inside `_reset()`. Catch
-`PositionUnknownError` as well if you need to cover those. Closing that gap is #355.
+observation taken after the bar closes. Every *other* venue read raises its original
+exception with no latch and no emergency flatten:
+
+| read | raises |
+|---|---|
+| position read at the top of `_step()` (position sync, duplicate-action guard) | `PositionUnknownError` |
+| the initial read inside `_reset()` | `ValueError` |
+| `_current_mark_price()`, called at the top of every futures `_step()` | `ValueError` |
+| the sizing balance / portfolio checks | `ValueError` |
+| the candle close that prices SL/TP brackets | `ValueError` |
+
+So `except LiveObservationHalt` alone does **not** give you a policy-driven emergency
+close on an unreadable price or balance — it catches the post-bar read and nothing else.
+Catch `ValueError` and `PositionUnknownError` too if you need to cover those. Alpaca and
+Polymarket do not route through this path at all. Closing the gap is #355.
 
 ```python
 from torchtrade.envs.core.live import LiveObservationHalt

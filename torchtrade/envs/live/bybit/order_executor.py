@@ -334,19 +334,28 @@ class BybitFuturesOrderClass:
             if pos is not None:
                 margin_mode = self._get_actual_margin_mode(pos)
                 size = float(pos.get("size", 0))
-                side = pos.get("side", "Buy")
+                # Explicit, not defaulted: an unexpected side signed a long as a
+                # SHORT, and every consumer reads that sign (#341).
+                side = pos.get("side")
+                if side not in ("Buy", "Sell"):
+                    logger.error(
+                        "bybit reported an unusable position side (%r); refusing to "
+                        "infer a direction", side
+                    )
+                    status["position_status"] = POSITION_UNKNOWN
+                    return status
                 qty = size if side == "Buy" else -size
 
-                entry_price = float(pos.get("avgPrice", 0))
-                mark_price = float(pos.get("markPrice", entry_price))
-                unrealized_pnl = float(pos.get("unrealisedPnl", 0))
+                entry_price = float(pos.get("avgPrice") or 0)
+                mark_price = float(pos.get("markPrice") or entry_price)
+                unrealized_pnl = float(pos.get("unrealisedPnl") or 0)
                 unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(qty, entry_price, mark_price)
 
                 liq_price = float(pos.get("liqPrice") or "0")
 
                 status["position_status"] = PositionStatus(
                     qty=qty,
-                    notional_value=float(pos.get("positionValue", abs(size * mark_price))),
+                    notional_value=float(pos.get("positionValue") or abs(size * mark_price)),
                     entry_price=entry_price,
                     unrealized_pnl=unrealized_pnl,
                     unrealized_pnl_pct=unrealized_pnl_pct,
@@ -387,22 +396,26 @@ class BybitFuturesOrderClass:
         if not callable(get_account_info):
             return {"0": "cross", "1": "isolated"}.get(str(position.get("tradeMode")))
 
+        # The PARSING is inside the try too, not just the call: this runs inside
+        # get_status's broad `except`, so an AttributeError on a non-dict response or a
+        # ValueError on a non-numeric retCode would surface as POSITION_UNKNOWN --
+        # reporting a healthy, correctly-reported position as unreadable and freezing the
+        # env every bar. That is the same defect #341 fixed one file over.
         try:
             response = get_account_info()
+            ret_code = response.get("retCode")
+            if ret_code is not None and int(ret_code) != 0:
+                logger.warning(
+                    "get_account_info failed (retCode=%s): %s",
+                    ret_code,
+                    response.get("retMsg", "unknown error"),
+                )
+                return None
+            raw_mode = response.get("result", {}).get("marginMode")
         except Exception as exc:
-            logger.warning(f"Could not query Bybit account margin mode: {exc}")
+            logger.warning(f"Could not read Bybit account margin mode: {exc}")
             return None
 
-        ret_code = response.get("retCode")
-        if ret_code is not None and int(ret_code) != 0:
-            logger.warning(
-                "get_account_info failed (retCode=%s): %s",
-                ret_code,
-                response.get("retMsg", "unknown error"),
-            )
-            return None
-
-        raw_mode = response.get("result", {}).get("marginMode")
         normalized = {
             "ISOLATED_MARGIN": "isolated",
             "REGULAR_MARGIN": "cross",
@@ -595,7 +608,17 @@ class BybitFuturesOrderClass:
             all_closed = True
             for pos in non_zero:
                 size = float(pos.get("size", 0))
-                pos_side = pos.get("side", "Buy")
+                # #341's other half. An emergency close is the last place to guess: a
+                # defaulted "Buy" sends a reduce-only SELL against a short, which the venue
+                # rejects -- a silently failed flatten at the moment FLATTEN was relied on.
+                # #341's other half. An emergency close is the last place to guess: a
+                # defaulted "Buy" sends a reduce-only SELL against a short, which the venue
+                # rejects -- a silently failed flatten at the moment FLATTEN was relied on.
+                pos_side = pos.get("side")
+                if pos_side not in ("Buy", "Sell"):
+                    logger.error(f"Refusing to close a position with side {pos_side!r}")
+                    all_closed = False
+                    continue
                 close_side = "Sell" if pos_side == "Buy" else "Buy"
 
                 params = {
