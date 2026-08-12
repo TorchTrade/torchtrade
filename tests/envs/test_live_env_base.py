@@ -1548,8 +1548,8 @@ def test_alpaca_non_finite_cash_refuses_to_build_an_account_state(cash):
         AlpacaBaseTorchTradingEnv._get_observation(env)
 
 
-@pytest.mark.parametrize("price", ["nan", "inf", "0", "-0.5", "1.5"],
-                         ids=["nan", "inf", "zero", "negative", "above-one"])
+@pytest.mark.parametrize("price", ["nan", "inf", "-inf", "-0.5", "1.5"],
+                         ids=["nan", "inf", "-inf", "negative", "above-one"])
 def test_polymarket_refuses_a_price_that_is_not_a_probability(price):
     """`_compute_payoff` guards `fill_price <= 0`, which NaN and +inf compare False to.
 
@@ -1561,3 +1561,13 @@ def test_polymarket_refuses_a_price_that_is_not_a_probability(price):
 
     with pytest.raises(ValueError, match="not a probability"):
         _valid_price(price, "yes_price", "some-market")
+
+
+@pytest.mark.parametrize("price", ["0", "0.0", "1", "1.0", "0.5"])
+def test_polymarket_accepts_the_endpoints_of_the_probability_range(price):
+    """0 and 1 are legitimate for a near-resolved market, and rejecting them would have
+    broken scanning on live data -- the per-market handler did not catch ValueError, so
+    one such market would have aborted the entire scan rather than being skipped."""
+    from torchtrade.envs.live.polymarket.market_scanner import _valid_price
+
+    assert _valid_price(price, "yes_price", "some-market") == float(price)

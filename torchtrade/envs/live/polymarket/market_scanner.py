@@ -35,10 +35,14 @@ def _valid_price(raw_price, field, slug) -> float:
     venue side of the same rule (#277).
     """
     price = float(raw_price)
-    if not math.isfinite(price) or not (0 < price <= 1):
+    # [0, 1] inclusive: a near-resolved market legitimately prices an outcome at 0 or 1,
+    # and _compute_payoff already guards fill_price <= 0. What is rejected is the garbage
+    # that guard cannot see -- NaN and +inf compare False to `<= 0` and flow straight into
+    # cash.
+    if not math.isfinite(price) or not (0 <= price <= 1):
         raise ValueError(
             f"market {slug!r} reported a {field} of {raw_price!r}, which is not a "
-            f"probability in (0, 1]; refusing to trade against it"
+            f"probability in [0, 1]; refusing to trade against it"
         )
     return price
 
@@ -296,7 +300,10 @@ class MarketScanner:
                 continue
             try:
                 markets.append(self._parse_market(raw))
-            except (KeyError, json.JSONDecodeError, IndexError):
+            except (KeyError, json.JSONDecodeError, IndexError, ValueError):
+                # ValueError included so a single market with an unusable price is skipped
+                # rather than aborting the whole scan -- which is what a bare float() on a
+                # garbage price would have done here too, once it stopped being silent.
                 logger.warning("Failed to parse market: %s", raw.get("id", "unknown"))
                 continue
 
@@ -340,7 +347,10 @@ class MarketScanner:
                 continue
             try:
                 return self._parse_market(raw)
-            except (KeyError, json.JSONDecodeError, IndexError):
+            except (KeyError, json.JSONDecodeError, IndexError, ValueError):
+                # ValueError included so a single market with an unusable price is skipped
+                # rather than aborting the whole scan -- which is what a bare float() on a
+                # garbage price would have done here too, once it stopped being silent.
                 logger.warning("Failed to parse market: %s", raw.get("id", "unknown"))
                 continue
         return None
