@@ -684,3 +684,49 @@ class TestBinanceLotSizeRounding:
         with pytest.raises(ValueError, match="below the minimum"):
             ex._format_quantity(0.005)
         assert ex._format_quantity(0.012) == "0.012"
+
+    @pytest.mark.parametrize("residual", [0.0009, 0.0006, 0.0004],
+                             ids=["just-under", "half", "quarter"])
+    def test_a_sub_step_residual_is_still_closable(self, residual):
+        """The minimum gate is an OPENS argument, and wiring it into closes removed a
+        close that main performed.
+
+        A reduceOnly order is clamped by the venue to the actual position, so one at the
+        minimum DOES fill. Sub-step residuals are real -- partial fill of a close, ADL, a
+        liquidation remnant, a venue step change -- and `binance/base.py` discards
+        `close_position()`'s return on reset, so a refusal starts the episode against a
+        position the env believes it closed.
+        """
+        ex = self._executor(step="0.001")
+        assert ex._format_quantity(residual, reduce_only=True) == "0.001"
+        with pytest.raises(ValueError, match="below the minimum"):
+            ex._format_quantity(residual)          # opening is still refused
+
+    @pytest.mark.parametrize("quantity,step,expected", [
+        (-7.5, "1", -7.0),        # math.floor gives -8.0: MORE than the caller sized
+        (-0.295, "0.01", -0.29),
+        (0.295, "0.01", 0.29),
+    ], ids=["negative-whole", "negative-fractional", "positive-control"])
+    def test_rounding_moves_toward_zero_for_either_sign(self, quantity, step, expected):
+        """`math.floor` moves a negative AWAY from zero, so the public helper returned more
+        than was asked for -- the one thing its docstring promises not to do. No live call
+        site passes a negative today; it is public API with no stated precondition."""
+        assert self._executor(step=step).round_quantity(quantity) == pytest.approx(expected)
+
+    @pytest.mark.parametrize("quantity", [19000.01, 19000.028, 19000.046])
+    def test_a_large_exact_multiple_survives_repeated_rounding(self, quantity):
+        """A fixed 1e-9 tolerance stops covering the binary error once quantity/step
+        passes ~1e7, and this PR applies the rounding two or three times to one number:
+        env sizing, then the delta, then _format_quantity.
+
+        These are exact multiples of the 0.001 step. Under a fixed tolerance 19000.01
+        becomes 19000.009 on the first application and 19000.008 on the second -- a step
+        lost per pass. main could not do this: it floored once, then rounded to NEAREST.
+        """
+        ex = self._executor(step="0.001")
+        once = ex.round_quantity(quantity)
+        # abs=, not the default relative tolerance: pytest.approx defaults to rel=1e-6,
+        # which at a quantity of 19000 is 0.019 -- nineteen times the step this is meant
+        # to detect. The first version of this assertion could not fail.
+        assert once == pytest.approx(quantity, abs=1e-9), "shaved a step off an exact multiple"
+        assert ex.round_quantity(once) == pytest.approx(quantity, abs=1e-9), "not idempotent"

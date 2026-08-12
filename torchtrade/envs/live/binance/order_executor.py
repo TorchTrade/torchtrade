@@ -249,12 +249,24 @@ class BinanceFuturesOrderClass:
         step, decimals = self._qty_steps.get(symbol or self.symbol, _FALLBACK_QTY_STEP_PAIR)
         if step <= 0:
             return quantity
-        # The epsilon is not decoration: quantity/step lands just under an integer for
-        # plenty of exact multiples in binary (0.29/0.01 is 28.999999999999996), and a bare
-        # floor would then shave a whole step off a perfectly valid size.
-        return round(math.floor(quantity / step + 1e-9) * step, decimals)
 
-    def _format_quantity(self, quantity: float, symbol: Optional[str] = None) -> str:
+        # Toward zero, not down: math.floor moves a negative AWAY from zero, so -7.5 at
+        # step 1 returned -8.0 -- more than the caller sized, the one thing the docstring
+        # promises not to do. Both env call sites pass abs(), but this is public API.
+        sign = -1.0 if quantity < 0 else 1.0
+        ratio = abs(quantity) / step
+
+        # The tolerance is not decoration: quantity/step lands just under an integer for
+        # plenty of exact multiples in binary (0.29/0.01 is 28.999999999999996), and a bare
+        # floor would shave a whole step off a valid size. Relative, because a fixed 1e-9
+        # stops covering the binary error once the ratio passes ~1e7 -- and this value is
+        # rounded two or three times on its way to an order.
+        tolerance = max(1e-9, ratio * 1e-12)
+        return sign * round(math.floor(ratio + tolerance) * step, decimals)
+
+    def _format_quantity(
+        self, quantity: float, symbol: Optional[str] = None, reduce_only: bool = False
+    ) -> str:
         """The venue-precision string for an order, or raise if the size rounds away.
 
         A string, not a float: `str(7.0)` carries a decimal a symbol with
@@ -283,11 +295,21 @@ class BinanceFuturesOrderClass:
         rounded = self.round_quantity(quantity, key)
         minimum = max(self._min_qtys.get(key, 0.0), step)
         if rounded < minimum:
-            raise ValueError(
-                f"{key}: a quantity of {quantity} floors to {rounded} at the venue step "
-                f"{step}, below the minimum {minimum}. Refusing to submit an order that "
-                f"cannot fill."
-            )
+            if reduce_only:
+                # A reduceOnly order is clamped by the venue to the actual position, so one
+                # at the minimum DOES fill and closes it. Refusing here removed a close
+                # that used to happen: a sub-step residual (partial fill, ADL, liquidation
+                # remnant, a venue step change) stayed open, and base.py discards
+                # close_position()'s return on reset -- so the episode starts against a
+                # position the env believes it closed. The minimum gate is an opens
+                # argument and belongs only on the opens path.
+                rounded = minimum
+            else:
+                raise ValueError(
+                    f"{key}: a quantity of {quantity} floors to {rounded} at the venue "
+                    f"step {step}, below the minimum {minimum}. Refusing to submit an "
+                    f"order that cannot fill."
+                )
         return f"{rounded:.{decimals}f}"
 
     def trade(
@@ -558,7 +580,7 @@ class BinanceFuturesOrderClass:
                 "symbol": self.symbol,
                 "side": side,
                 "type": "MARKET",
-                "quantity": self._format_quantity(qty),
+                "quantity": self._format_quantity(qty, reduce_only=True),
                 "reduceOnly": "true",
             }
 
@@ -592,7 +614,7 @@ class BinanceFuturesOrderClass:
                             symbol=symbol,
                             side=side,
                             type="MARKET",
-                            quantity=self._format_quantity(abs(qty), symbol),
+                            quantity=self._format_quantity(abs(qty), symbol, reduce_only=True),
                             reduceOnly="true",
                         )
                         results[symbol] = True
