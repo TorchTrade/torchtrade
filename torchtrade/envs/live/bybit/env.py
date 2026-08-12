@@ -8,6 +8,7 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
+from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
 from torchtrade.envs.live.bybit.order_executor import (
     BybitFuturesOrderClass,
@@ -114,7 +115,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         position_status = status.get("position_status", None)
         if position_status:
             current_price = self._current_mark_price(position_status)
-            position_size = position_status.qty
+            position_size = position_qty_from_status(position_status)
         else:
             current_price = self._current_mark_price()
             position_size = 0.0
@@ -141,13 +142,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         trade_info = self._execute_trade_if_needed(desired_action)
 
         if trade_info["executed"] and trade_info.get("success") is not False:
-            if trade_info["side"] == "buy":
-                self.position.current_position = 1
-            elif trade_info["side"] == "sell" and trade_info.get("closed_position"):
-                self.position.current_position = 0
-            elif trade_info["side"] == "sell":
-                self.position.current_position = -1
-            self.position.current_action_level = desired_action
+            self._record_position_after_trade(desired_action)
 
         self._wait_for_next_timestamp()
 

@@ -456,16 +456,23 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         current_price = position_status.current_price if position_status else 0.0
 
-        # Fallback 1: trader's current_price attribute (for mocks)
-        if current_price <= 0 and hasattr(self.trader, 'current_price'):
+        # The chain advances on USABLE, not on `<= 0` (#349). NaN compares False to every
+        # operator, so `nan <= 0` skipped both fallbacks and returned the NaN as the
+        # answer; `inf > 0` skipped them and then had nothing left. Either way the
+        # function whose whole job is producing a usable price returned one that is not.
+        def usable(price):
+            return math.isfinite(price) and price > 0
+
+        if not usable(current_price) and hasattr(self.trader, 'current_price'):
             current_price = self.trader.current_price
 
-        # Fallback 2: fetch from market data
-        if current_price <= 0:
+        if not usable(current_price):
             try:
                 current_price = self.observer.get_current_price()
                 logger.info(f"Fetched current price from market data: {current_price}")
             except Exception as e:
                 logger.warning(f"Could not fetch current price: {e}")
 
-        return current_price
+        # Chain exhausted: 0.0 is this function's documented "unavailable", and every
+        # caller already guards it. Handing back the garbage would defeat the point.
+        return current_price if usable(current_price) else 0.0

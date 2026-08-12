@@ -268,6 +268,19 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 f"cannot start an episode on equity of {self.initial_portfolio_value}"
             )
 
+    def _record_position_after_trade(self, desired_action: float) -> None:
+        """Direction comes from the RESULTING position, never from the order side (#276).
+
+        Under fractional sizing a SELL that merely trims a long leaves a long. Recording
+        it as a short makes the NEXT bar's sync detect a mismatch the env inflicted on
+        itself, which discards hold_counter and NaNs current_action_level -- so
+        account_state reports holding_time=1 for a 22-bar-old position and the
+        duplicate-action guard never fires again. The target level's sign is the
+        resulting direction.
+        """
+        self.position.current_position = (desired_action > 0) - (desired_action < 0)
+        self.position.current_action_level = desired_action
+
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""
         return is_bankrupt(

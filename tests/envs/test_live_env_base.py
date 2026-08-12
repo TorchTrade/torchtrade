@@ -18,7 +18,7 @@ import math
 from types import SimpleNamespace
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
@@ -2038,3 +2038,102 @@ def test_a_non_positive_mark_on_an_open_position_is_refused(mark_price):
     )
     with pytest.raises(ValueError, match="non-positive mark price"):
         TorchTradeFuturesLiveEnv._get_observation(env)
+
+@pytest.mark.parametrize("desired_action,expected", [
+    (1.0, 1), (0.5, 1), (0.0, 0), (-0.5, -1), (-1.0, -1),
+], ids=["full-long", "partial-long", "flat", "partial-short", "full-short"])
+def test_direction_comes_from_the_target_not_the_order_side(desired_action, expected):
+    """#276: five envs inferred direction from the ORDER SIDE.
+
+    Under fractional sizing a SELL that trims a long from 1.0 to 0.5 is still a long --
+    the `partial-long` row is the one that was wrong, and it recorded -1.
+    """
+    env = SimpleNamespace(position=PositionState())
+    TorchTradeLiveEnv._record_position_after_trade(env, desired_action)
+
+    assert env.position.current_position == expected
+    assert env.position.current_action_level == desired_action
+
+
+@pytest.mark.parametrize("exchange", ["alpaca", "binance", "bitget", "bybit", "okx"])
+def test_no_live_env_infers_direction_from_the_order_side(exchange):
+    """Five copies drifted into four different spellings of the same wrong idea.
+
+    binance's read `side == "BUY"` (uppercase) with its `closed_position` branch LAST,
+    behind an `elif` that already matched -- so binance could never record a close at all.
+    """
+    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+           / "live" / exchange / "env.py").read_text()
+    assert 'trade_info["side"] ==' not in src, (
+        f"{exchange} still infers position direction from the order side"
+    )
+
+
+@pytest.mark.parametrize("position_price,fallback,expected", [
+    (float("nan"), 100.0, 100.0),
+    (float("inf"), 100.0, 100.0),
+    (0.0, 100.0, 100.0),
+    (float("nan"), float("nan"), 0.0),
+    (50.0, 100.0, 50.0),
+], ids=["nan-falls-back", "inf-falls-back", "zero-falls-back", "chain-exhausted", "healthy"])
+def test_alpaca_price_fallback_is_not_transparent_to_nan(position_price, fallback, expected):
+    """#349: `current_price <= 0` is False for NaN, so a NaN skipped BOTH fallbacks.
+
+    The function whose entire purpose is producing a usable price handed back the exact
+    value it exists to avoid, and the last row pins the other half: once the chain is
+    exhausted it must return the documented 0.0 rather than the garbage it collected.
+    """
+    from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
+
+    env = SimpleNamespace(
+        trader=SimpleNamespace(
+            get_status=lambda: {
+                "position_status": SimpleNamespace(current_price=position_price)
+            },
+            current_price=fallback,
+        ),
+        observer=SimpleNamespace(get_current_price=lambda: fallback),
+    )
+    assert AlpacaBaseTorchTradingEnv._get_current_price(env) == expected
+
+
+@pytest.mark.parametrize("mid,usable", [
+    (float("inf"), False), (float("nan"), False), (1.5, False), (-0.2, False),
+    (0.995, True), (0.0, True), (1.0, True),
+], ids=["inf", "nan", "above-one", "negative", "resolved", "zero", "one"])
+def test_polymarket_midpoint_outside_probability_range_is_unavailable(mid, usable):
+    """#349: the caller decides an outcome RESOLVED from this and pays into self.cash.
+
+    `inf >= 0.99` is True, so one garbage midpoint declares a win and books a real payoff.
+    A number outside [0, 1] is not a probability, so it reads as unavailable.
+    """
+    from torchtrade.envs.live.polymarket.env import PolymarketBetEnv
+
+    with patch("torchtrade.envs.live.polymarket.env.requests.get") as get:
+        get.return_value = SimpleNamespace(
+            raise_for_status=lambda: None, json=lambda: {"mid": mid}
+        )
+        result = PolymarketBetEnv._fetch_clob_midpoint("tok")
+
+    assert (result is not None) is usable
+
+
+@pytest.mark.parametrize("exchange", ["alpaca", "binance", "bitget", "bybit", "okx"])
+@pytest.mark.parametrize("module", ["env", "env_sltp"])
+def test_no_live_env_reads_a_raw_position_qty(exchange, module):
+    """CLAUDE.md invariant 1: every qty read goes through the dust rule, no exceptions.
+
+    A venue can leave a 1e-12 residual after a full close. #283 removed the hand-rolled
+    comparisons from the trading paths and these survived in the observation/history
+    paths -- latent only because the shipped log_return_reward reads portfolio values
+    rather than quantities, so a reward function that used size would inherit the hole.
+    A structural guard because the behaviour is currently unobservable: nothing downstream
+    reads it yet, which is exactly when a re-fork goes unnoticed.
+    """
+    path = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+            / "live" / exchange / f"{module}.py")
+    if not path.exists():
+        pytest.skip(f"{exchange} has no {module}")
+    assert "position_status.qty" not in path.read_text(), (
+        f"{exchange}/{module} reads a raw qty instead of position_qty_from_status()"
+    )

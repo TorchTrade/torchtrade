@@ -121,14 +121,13 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         self._sync_position_from_exchange(position_status)
         # From the exchange, as every other live env does: self.position.position_size is
         # never populated on the alpaca envs (#290). Size held ENTERING the bar.
-        position_size = position_status.qty if position_status else 0.0
+        position_size = position_qty_from_status(position_status)
 
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
 
         if trade_info["executed"] and trade_info.get("success") is not False:
-            self.position.current_position = 1 if trade_info["side"] == "buy" else 0
-            self.position.current_action_level = desired_action
+            self._record_position_after_trade(desired_action)
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -328,7 +327,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
             "portfolio_value": portfolio_value,
             "portfolio_return": portfolio_return,
             "cash": cash,
-            "position_qty": position_status.qty if position_status else 0,
+            "position_qty": position_qty_from_status(position_status),
             "position_market_value": position_status.market_value if position_status else 0,
             "trade_executed": trade_info["executed"],
             "trade_amount": trade_info["amount"],

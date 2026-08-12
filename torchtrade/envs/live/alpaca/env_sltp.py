@@ -6,6 +6,7 @@ import logging
 import torch
 
 logger = logging.getLogger(__name__)
+from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.live.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
@@ -144,7 +145,7 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         # From the exchange, as every other live env does: the alpaca envs never populate
         # self.position.position_size, so reading it recorded a flat history forever
         # (#290). This is the size held ENTERING the bar, matching bybit.
-        position_size = position_status.qty if position_status else 0.0
+        position_size = position_qty_from_status(position_status)
 
         # Sync position state from exchange — this is the source of truth.
         # Detects SL/TP closures AND fixes state drift from failed bracket orders.

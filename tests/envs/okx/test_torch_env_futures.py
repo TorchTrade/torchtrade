@@ -303,6 +303,50 @@ class TestOKXFuturesTorchTradingEnv:
             f"a position opened after a liquidation inherited the dead position's age ({aged})"
         )
 
+    def test_a_partial_reduction_does_not_age_or_flip_the_position(self, env, mock_env_trader):
+        """#276 end to end: the harm was never the direction field, it was the chain.
+
+        Trimming a long 1.0 -> 0.5 sends a SELL, which was recorded as current_position
+        = -1 while the venue still held a half-size long. The NEXT bar's sync then found
+        a mismatch the env had inflicted on itself, discarded hold_counter and NaN'd
+        current_action_level -- so a 20-bar-old position reported holding_time=1 and the
+        duplicate-action guard never fired again.
+        """
+        from torchtrade.envs.live.okx.order_executor import PositionStatus
+
+        def status(qty):
+            return {"position_status": PositionStatus(
+                qty=qty, notional_value=qty * 50000.0, entry_price=50000.0,
+                unrealized_pnl=0.0, unrealized_pnl_pct=0.0, mark_price=50000.0,
+                leverage=5, margin_mode="isolated", liquidation_price=40000.0,
+            )}
+
+        long_idx = len(env.action_levels) - 1
+        half_idx = env.action_levels.index(0.5)
+
+        with patch.object(env, "_wait_for_next_timestamp"):
+            mock_env_trader.get_status = MagicMock(return_value=status(1.0))
+            env.reset()
+            env.step(TensorDict({"action": torch.tensor(long_idx)}, []))
+            aged = 20
+            env.position.hold_counter = aged
+
+            # the venue reports the RESULTING half-size long, as it would after the trim
+            mock_env_trader.get_status = MagicMock(return_value=status(0.5))
+            env.step(TensorDict({"action": torch.tensor(half_idx)}, []))
+
+            assert env.position.current_position == 1, "a trimmed long is still a long"
+
+            # the bar AFTER is where the self-inflicted mismatch used to bite
+            td = env.step(TensorDict({"action": torch.tensor(half_idx)}, []))
+
+        assert env.position.hold_counter > aged, (
+            "the position was aged from zero by a mismatch the env inflicted on itself"
+        )
+        assert td["next", "account_state"][3].item() > aged, (
+            "account_state reported a fresh position to the policy"
+        )
+
     @pytest.mark.parametrize("mark_price,harm", [
         (float("nan"), "a NaN quantity goes to the venue unlogged (caught at reset)"),
         (-50000.0, "the sign flips: a max-LONG action places a SHORT"),

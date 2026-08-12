@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
+from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import (
     BitgetFuturesOrderClass,
@@ -185,7 +186,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
         position_status = status.get("position_status", None)
         if position_status:
             current_price = self._current_mark_price(position_status)
-            position_size = position_status.qty
+            position_size = position_qty_from_status(position_status)
         else:
             current_price = self._current_mark_price()
             position_size = 0.0

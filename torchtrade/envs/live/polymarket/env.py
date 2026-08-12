@@ -452,7 +452,12 @@ class PolymarketBetEnv(EnvBase):
 
     @staticmethod
     def _fetch_clob_midpoint(token_id: str) -> Optional[float]:
-        """One-shot CLOB midpoint query for a single outcome token."""
+        """One-shot CLOB midpoint query for a single outcome token.
+
+        Validated at the read (#349): the caller decides an outcome is RESOLVED from this
+        and pays out into `self.cash`, and `+inf >= 0.99` is True. A probability outside
+        [0, 1] is not a midpoint, so it reads as "unavailable" rather than as a result.
+        """
         resp = requests.get(
             f"{CLOB_API_BASE}/midpoint",
             params={"token_id": token_id},
@@ -461,7 +466,10 @@ class PolymarketBetEnv(EnvBase):
         resp.raise_for_status()
         body = resp.json()
         mid = body.get("mid")
-        return float(mid) if mid is not None else None
+        if mid is None:
+            return None
+        mid = float(mid)
+        return mid if 0.0 <= mid <= 1.0 else None
 
     @staticmethod
     def _compute_payoff(

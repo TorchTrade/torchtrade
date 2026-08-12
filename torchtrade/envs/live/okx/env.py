@@ -114,7 +114,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         """Execute one environment step."""
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        # Size through the canonical rule, not `position_status.qty` raw: a dust residual
+        # Size through the canonical rule, not the raw venue qty: a dust residual
         # read as a live position makes abs(current_qty) > 0 true on a flat account, so
         # action 0.0 closes nothing and still advances current_action_level (#283).
         position_size = position_qty_from_status(position_status)
@@ -145,13 +145,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         )
 
         if trade_info["executed"] and trade_info.get("success") is not False:
-            if trade_info.get("closed_position"):
-                self.position.current_position = 0
-            elif trade_info["side"] == "buy":
-                self.position.current_position = 1
-            elif trade_info["side"] == "sell":
-                self.position.current_position = -1
-            self.position.current_action_level = desired_action
+            self._record_position_after_trade(desired_action)
 
         self._wait_for_next_timestamp()
 
