@@ -102,25 +102,29 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             liquidation_price = position_status.liquidation_price
 
         # Build 6-element account state
-        if total_balance > 0:
-            exposure_pct = position_value / total_balance
-        elif position_value == 0:
-            # An empty account is genuinely 0% exposed; this branch only exists so the
-            # division does not raise on it.
-            exposure_pct = 0.0
-        else:
-            # Equity gone with the position still on. There is no exposure_pct to report
-            # -- the ratio is unbounded -- and the old `else 0.0` reported the one value
-            # that is certainly wrong, handing the policy a flat-looking account that is
-            # actually holding an underwater position (invariant #3). Fail closed, like
-            # the unknown-status and get_account_balance() paths above.
+        # Equity gone with the position still on: there is no exposure_pct to report, the
+        # ratio being unbounded, and the old `else 0.0` reported the one value that is
+        # certainly wrong -- a flat-looking account that is actually holding an underwater
+        # position (invariant #3). Fail closed, like the unknown-status path above. An
+        # account that is merely empty still reports 0.0 exposure, which is true.
+        # `not (x > 0)` rather than `x <= 0`: NaN compares False to everything, so `<= 0`
+        # skips the raise and the ternary below then hands back 0.0 -- a held position
+        # reading flat, the exact bug this raise exists to prevent.
+        if not (total_balance > 0) and position_value > 0:
             raise ValueError(
                 f"Position worth {position_value} held against non-positive equity "
                 f"({total_balance}). The venue is mid-liquidation or reporting "
                 f"inconsistently; refusing to report this account as flat."
             )
+        exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
 
         if position_size == 0 or current_price == 0:
+            distance_to_liquidation = 1.0
+        elif liquidation_price <= 0 and leverage <= 1:
+            # No leverage, nothing to be liquidated by, and the offline env says the same
+            # via its has_liquidation gate -- so this must NOT fall through to the
+            # arithmetic below, where a short would compute (0 - price)/price = -1 and
+            # clamp to 0.0, reporting an unlevered position as AT liquidation.
             distance_to_liquidation = 1.0
         else:
             if liquidation_price <= 0:
@@ -167,7 +171,9 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     def _get_portfolio_value(self) -> float:
         """Calculate total portfolio value (includes unrealized PnL)."""
         balance = self.trader.get_account_balance()
-        return balance.get("total_margin_balance", 0)
+        # Indexed, for the same reason as _get_observation above: this is the `current`
+        # side of is_bankrupt(), where a default of 0 is instant false bankruptcy.
+        return balance["total_margin_balance"]
 
     def _get_current_position_quantity(self) -> float:
         """The signed size the exchange holds, dust read as flat.

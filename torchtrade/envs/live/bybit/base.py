@@ -90,7 +90,10 @@ class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         # portfolio_value and the current side of the check. Binance's total_wallet_balance
         # excludes unrealized PnL (a real skew here); bitget/bybit/okx map both keys to equity.
         balance = self.trader.get_account_balance()
-        self.initial_portfolio_value = balance.get("total_margin_balance", 0)
+        # Indexed: a default of 0 makes the bankruptcy baseline 0, and
+        # `current < threshold * 0` is never true -- the account could be wiped
+        # out and the episode would run on (#277).
+        self.initial_portfolio_value = balance["total_margin_balance"]
 
         # Build observation specs
         self._build_observation_specs()
