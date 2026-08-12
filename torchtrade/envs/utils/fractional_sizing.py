@@ -19,7 +19,11 @@ class PositionCalculationParams:
 # Tolerance needs to be large enough to avoid churn from normal price fluctuations
 # When using portfolio_value for position sizing, small price changes cause target to drift
 POSITION_TOLERANCE_PCT = 0.02  # 2% - relative tolerance as fraction of target position
-POSITION_TOLERANCE_ABS = 0.001  # Absolute minimum tolerance for very small positions
+# The floor, in QUOTE currency. Denominated in notional rather than base units because
+# the same base-unit constant meant wildly different things per asset: 0.001 was $100 of
+# unclosed position on BTC at $100k -- 1% of a $10k account treated as flat -- and
+# $0.0000 on an asset priced in cents (#339). One dollar means one dollar everywhere.
+POSITION_TOLERANCE_NOTIONAL = 1.0
 
 # Affordability slack for "can I open this position?": notional = PV / fee_multiplier *
 # leverage, then margin = notional / leverage and fee = notional * fee_rate -- a round-trip

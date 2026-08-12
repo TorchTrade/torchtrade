@@ -37,7 +37,7 @@ from torchtrade.envs.utils.fractional_sizing import (
     validate_action_levels,
     AFFORDABILITY_REL_TOL,
     POSITION_TOLERANCE_PCT,
-    POSITION_TOLERANCE_ABS,
+    POSITION_TOLERANCE_NOTIONAL,
 )
 from torchtrade.envs.core.common_types import MarginType
 from torchtrade.envs.utils.liquidation import (
@@ -688,7 +688,10 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         )
 
         # Tolerance for position comparison
-        tolerance = max(abs(target_position_size) * POSITION_TOLERANCE_PCT, POSITION_TOLERANCE_ABS)
+        tolerance = max(
+            abs(target_position_size) * POSITION_TOLERANCE_PCT,
+            POSITION_TOLERANCE_NOTIONAL / execution_price,
+        )
 
         # Check if already at target position (implicit hold)
         if abs(target_position_size - self.position.position_size) < tolerance:
@@ -783,7 +786,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         delta_notional = abs(delta_position * execution_price)
 
         # Check if delta is negligible
-        if abs(delta_position) < POSITION_TOLERANCE_ABS:
+        if abs(delta_position) * execution_price < POSITION_TOLERANCE_NOTIONAL:
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Determine if increasing or decreasing

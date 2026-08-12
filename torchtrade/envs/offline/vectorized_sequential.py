@@ -26,7 +26,7 @@ from torchtrade.envs.utils.fractional_sizing import (
     validate_action_levels,
     AFFORDABILITY_REL_TOL,
     POSITION_TOLERANCE_PCT,
-    POSITION_TOLERANCE_ABS,
+    POSITION_TOLERANCE_NOTIONAL,
 )
 
 from torchtrade.envs.core.common_types import MarginType
@@ -684,8 +684,9 @@ class VectorizedSequentialTradingEnv(EnvBase):
         target_sizes = torch.where(action_values == 0, self._zeros, target_sizes)
 
         # Tolerance check: avoid churn from small position changes
-        tolerance = (target_sizes.abs() * POSITION_TOLERANCE_PCT).clamp(
-            min=POSITION_TOLERANCE_ABS
+        tolerance = torch.maximum(
+            target_sizes.abs() * POSITION_TOLERANCE_PCT,
+            POSITION_TOLERANCE_NOTIONAL / execution_prices.clamp(min=1e-12),
         )
         within_tol = (target_sizes - self._position_sizes).abs() < tolerance
         hold_tol = need_trade & within_tol & has_position
