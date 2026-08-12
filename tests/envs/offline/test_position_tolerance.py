@@ -204,3 +204,31 @@ def test_a_flat_command_survives_a_zero_price_bar():
     assert calculate_fractional_position(PositionCalculationParams(
         balance=10_000.0, action_value=0.0, current_price=0.0, leverage=1,
     )) == (0.0, 0.0, "flat")
+
+
+@pytest.mark.parametrize("gap_pct,within", [(0.01, True), (0.05, False)],
+                         ids=["inside-2pct", "outside-2pct"])
+def test_the_relative_term_binds_on_a_large_position(gap_pct, within):
+    """The 2% term never dominated in any other test, so deleting it survived 812 tests.
+
+    Every other case here anchors at a $10 target so the $1 floor wins -- which is right
+    for testing the floor, and means the relative term was never the binding one anywhere.
+    It exists to stop fee-eating churn from small price moves on LARGE positions, exactly
+    the regime none of those tests reach. A $5,000 target makes 2% = $100, well past the
+    floor.
+    """
+    price = 100.0
+    env = _env_at(price)
+    # Seeded CONSISTENTLY: adding a position without deducting its cash inflates portfolio
+    # value, which moves the target the test is measuring the gap against.
+    target = 5_000.0 / price                       # action 0.5 of $10k -> a $5,000 position
+    env.position.position_size = target * (1 + gap_pct)
+    env.balance -= env.position.position_size * price
+    env.position.entry_price = price
+
+    info = env._execute_fractional_action(action_value=0.5, execution_price=price)
+
+    assert (info["executed"] is False) is within, (
+        f"a {gap_pct:.0%} gap on a $5,000 position was "
+        f"{'not ' if within else ''}treated as close enough"
+    )
