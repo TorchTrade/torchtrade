@@ -1033,12 +1033,15 @@ def test_unusable_inputs_raise_instead_of_pricing_a_liquidation(kwargs, match):
         isolated_liquidation_price(**args)
 
 
-@pytest.mark.parametrize("position_value,equity", [
-    (100.0, 0.0),
-    (100.0, -50.0),
-    (100.0, float("nan")),
+@pytest.mark.parametrize("position_value,equity,match", [
+    (100.0, 0.0, "refusing to report this account as flat"),
+    (100.0, -50.0, "refusing to report this account as flat"),
+    # NaN is caught earlier and more specifically, by the equity finiteness check: on a
+    # FLAT account the held-position guard cannot see it, and the same value reaches
+    # is_bankrupt(), where `nan < threshold * initial` is False -- termination disabled.
+    (100.0, float("nan"), "non-finite equity"),
 ], ids=["zero-equity", "negative-equity", "nan-equity"])
-def test_position_held_against_unusable_equity_refuses_to_report_flat(position_value, equity):
+def test_position_held_against_unusable_equity_refuses_to_report_flat(position_value, equity, match):
     """A held position must never divide out to 0.0% exposure.
 
     The NaN cell is not hypothetical pedantry: written `total_balance <= 0`, the raise is
@@ -1049,7 +1052,7 @@ def test_position_held_against_unusable_equity_refuses_to_report_flat(position_v
     env = _futures_env_stub(
         _open_position(position_value / 100.0), {"total_margin_balance": equity}
     )
-    with pytest.raises(ValueError, match="refusing to report this account as flat"):
+    with pytest.raises(ValueError, match=match):
         TorchTradeFuturesLiveEnv._get_observation(env)
 
 
@@ -1396,7 +1399,7 @@ def test_fractional_leverage_still_gets_a_real_distance(qty):
     assert distance < 1.0
 
 
-def test_no_adapter_falls_back_to_config_leverage_with_or():
+def test_no_adapter_swaps_a_venue_reported_zero_leverage_for_the_config():
     """`float(pos.get("leverage") or self.leverage)` swaps a venue-reported 0 for the config.
 
     A numeric 0 is falsy, so `or` silently substitutes a leverage the venue never
@@ -1407,6 +1410,13 @@ def test_no_adapter_falls_back_to_config_leverage_with_or():
     Structural because the behavioural cells construct PositionStatus directly and so
     cannot see the adapter's parsing at all -- which is why this regression survived a
     mutation run that killed everything else.
+
+    Scope, stated so this is not mistaken for more than it is: a MISSING or BLANK venue
+    leverage still falls back to the config value, deliberately, because refusing would
+    leave OKX and bybit cross accounts unable to produce an observation at all. That
+    fallback is only as good as set_leverage having worked, which #277's unfixed half is
+    about. What this forbids is the silent case -- a leverage the venue did report, as 0,
+    being swapped for a different number.
     """
     live_root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
     offenders = [
@@ -1419,3 +1429,75 @@ def test_no_adapter_falls_back_to_config_leverage_with_or():
         f"venue leverage falls back to the config value via `or` at {offenders}; test "
         f"`in (None, \"\")` so a genuine 0 stays 0 and fails loudly downstream"
     )
+
+
+def test_flat_account_with_non_finite_equity_still_raises():
+    """The held-position guard is keyed on direction, so a flat account bypasses it.
+
+    That matters because the same equity reaches is_bankrupt(), where
+    `nan < threshold * initial` is False -- bankruptcy silently disabled for the rest of
+    the episode, on an account whose equity the venue could not report.
+    """
+    env = _futures_env_stub(None, {"total_margin_balance": float("nan")})
+    with pytest.raises(ValueError, match="non-finite equity"):
+        TorchTradeFuturesLiveEnv._get_observation(env)
+
+
+def _alpaca_env_stub(position_status, cash):
+    """Stand-in for AlpacaBaseTorchTradingEnv._get_observation. Spot, so no leverage."""
+    from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv  # noqa: F401
+
+    return SimpleNamespace(
+        observer=SimpleNamespace(
+            get_observations=lambda **k: {}, get_keys=lambda: [],
+            get_current_price=lambda: 100.0,
+        ),
+        trader=SimpleNamespace(
+            get_status=lambda: {"position_status": position_status},
+            client=SimpleNamespace(get_account=lambda: SimpleNamespace(cash=str(cash))),
+        ),
+        config=SimpleNamespace(include_base_features=False),
+        position=PositionState(),
+        account_state_key="account_state",
+        market_data_keys=[],
+    )
+
+
+def _alpaca_position(qty=1.0, market_value=1000.0, avg_entry_price=100.0,
+                     current_price=102.0, unrealized_plpc=0.02):
+    return SimpleNamespace(
+        qty=qty, market_value=market_value, avg_entry_price=avg_entry_price,
+        current_price=current_price, unrealized_plpc=unrealized_plpc,
+    )
+
+
+@pytest.mark.parametrize("field", [
+    "qty", "market_value", "avg_entry_price", "current_price", "unrealized_plpc",
+])
+def test_alpaca_non_finite_venue_numbers_refuse_to_build_an_account_state(field):
+    """Spot is not exempt from any of this (#277).
+
+    Alpaca was the one live env left without the guards after the futures four got them --
+    the same shape as the bankruptcy baseline, where the guard excluded alpaca by name and
+    so skipped the one env still carrying the bug. A NaN unrealized_plpc here goes
+    straight into the observation tensor and on into the policy network.
+    """
+    from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
+
+    position = _alpaca_position()
+    setattr(position, field, float("nan"))
+    env = _alpaca_env_stub(position, cash=10000.0)
+
+    with pytest.raises(ValueError, match=f"non-finite {field}"):
+        AlpacaBaseTorchTradingEnv._get_observation(env)
+
+
+def test_alpaca_position_held_against_wiped_portfolio_refuses_to_report_flat():
+    """Invariant #3 on the spot env: `portfolio_value > 0 else 0.0` read a held position
+    as flat whenever margin debt exceeded the position's market value."""
+    from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
+
+    env = _alpaca_env_stub(_alpaca_position(market_value=1000.0), cash=-1000.0)
+
+    with pytest.raises(ValueError, match="refusing to report this account as flat"):
+        AlpacaBaseTorchTradingEnv._get_observation(env)

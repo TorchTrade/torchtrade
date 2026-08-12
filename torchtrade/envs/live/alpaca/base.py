@@ -1,6 +1,7 @@
 """Base class for Alpaca live trading environments."""
 
 import logging
+import math
 from abc import abstractmethod
 from typing import Callable, List, Optional
 
@@ -239,6 +240,23 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             except Exception:
                 current_price = 0.0
         else:
+            # Same finiteness contract as the futures envs (#277): every venue number this
+            # branch reads goes into account_state, and NaN passes every comparison below
+            # -- a NaN market_value reads as a flat account holding a position, a NaN
+            # unrealized_plpc goes into the tensor and on into the policy network. Spot is
+            # not exempt from invariant #3.
+            for _name, _value in (
+                ("qty", position_status.qty),
+                ("market_value", position_status.market_value),
+                ("avg_entry_price", position_status.avg_entry_price),
+                ("current_price", position_status.current_price),
+                ("unrealized_plpc", position_status.unrealized_plpc),
+            ):
+                if not math.isfinite(float(_value)):
+                    raise ValueError(
+                        f"venue reported a non-finite {_name} ({_value}) for an open "
+                        f"position; refusing to derive an account state from it"
+                    )
             position_value = position_status.market_value
             entry_price = position_status.avg_entry_price
             current_price = position_status.current_price
@@ -247,6 +265,15 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         # Calculate new 6-element account state
         # Element 0: exposure_pct (position_value / portfolio_value)
+        # A position held against a non-positive portfolio value has no exposure_pct to
+        # report -- the ratio is unbounded -- and `else 0.0` reports the one value that is
+        # certainly wrong: a flat-looking account that is holding a position (#277).
+        # `not (x > 0)` because NaN compares False to everything.
+        if not (portfolio_value > 0) and position_direction != 0:
+            raise ValueError(
+                f"Position worth {position_value} held against a non-positive portfolio "
+                f"value ({portfolio_value}); refusing to report this account as flat."
+            )
         exposure_pct = position_value / portfolio_value if portfolio_value > 0 else 0.0
 
         # Element 2: unrealized_pnl_pct (inherited from Alpaca)

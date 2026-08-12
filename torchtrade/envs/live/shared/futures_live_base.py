@@ -75,6 +75,15 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         # missing one means the adapter broke. The default turned that into a silent
         # exposure_pct of 0.0 -- every position reading as flat, forever (#277).
         total_balance = balance["total_margin_balance"]
+        # A NaN equity passes the held-position guard below only because that one is
+        # keyed on direction; on a FLAT account nothing catches it, and the same value
+        # reaches is_bankrupt(), where `nan < threshold * initial` is False -- bankruptcy
+        # silently disabled for the rest of the episode (#277).
+        if not math.isfinite(total_balance):
+            raise ValueError(
+                f"venue reported a non-finite equity ({total_balance}); refusing to "
+                f"derive an account state or a bankruptcy check from it"
+            )
         position_status = status.get("position_status", None)
 
         # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
@@ -164,9 +173,15 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                 # Cross-margin venues omit the liquidation price (OKX sends liqPx="" for
                 # cross) because the whole account backs the position, so there is no
                 # per-position price to publish. bybit blanks liqPrice for unified/cross
-                # too, but blanks `leverage` with it, so its adapter yields
-                # POSITION_UNKNOWN and raises before reaching here -- OKX is the venue
-                # that actually exercises this path.
+                # too; it blanks `leverage` with it, which used to make float("") raise
+                # into POSITION_UNKNOWN, but the adapters now fall back to the configured
+                # leverage there, so bybit reaches this path as well.
+                #
+                # That fallback is a real limitation: the leverage feeding the estimate is
+                # the one this env asked for, not one the venue confirmed, and #277's
+                # unfixed half is precisely that set_leverage failures are swallowed. It
+                # is kept because refusing would make OKX and bybit cross accounts unable
+                # to produce an observation at all.
                 # Defaulting to 1.0 reported a 20x long one move away from liquidation as
                 # exactly as safe as a flat spot account (#277).
                 #
