@@ -1170,6 +1170,45 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#when-the-venue-cannot-be-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the venue cannot be read
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="When the venue cannot be read">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#observation_failure_policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        observation_failure_policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-does-not-halt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What does not halt
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2017,6 +2056,45 @@
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-the-venue-cannot-be-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the venue cannot be read
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="When the venue cannot be read">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#observation_failure_policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        observation_failure_policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-does-not-halt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What does not halt
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -3031,6 +3109,58 @@
 <hr />
 <h2 id="requesting-new-exchanges">Requesting New Exchanges<a class="headerlink" href="#requesting-new-exchanges" title="Permanent link">&para;</a></h2>
 <p>Need support for another exchange (Interactive Brokers, Kraken, etc.)? <a href="https://github.com/TorchTrade/torchtrade/issues/new">Create an issue</a> or email us at torchtradecontact@gmail.com.</p>
+<h2 id="when-the-venue-cannot-be-read">When the venue cannot be read<a class="headerlink" href="#when-the-venue-cannot-be-read" title="Permanent link">&para;</a></h2>
+<p>A live env builds <code>account_state</code> from the venue's own answers. If those answers are
+missing or impossible — an unreachable exchange, a position status the adapter cannot
+classify, a non-finite price or equity — there is no truthful observation to emit, and
+emitting a plausible one is worse than emitting none: the policy would act on a position
+size, exposure and liquidation distance the env has just admitted it cannot verify.</p>
+<p>So the env <strong>halts</strong>: it raises <code>LiveObservationHalt</code> and produces no transition.</p>
+<p><strong>Which reads this covers.</strong> Only the post-bar state read — the portfolio value and
+observation taken after the bar closes. Two other venue reads per step are <em>not</em> routed
+through it and still raise their original exception with no latch and no emergency
+flatten: the position read at the top of <code>_step()</code> (used for the position sync and the
+duplicate-action guard) and the initial read inside <code>_reset()</code>. Catch
+<code>PositionUnknownError</code> as well if you need to cover those. Closing that gap is #355.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.core.live</span><span class="w"> </span><span class="kn">import</span> <span class="n">LiveObservationHalt</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="k">try</span><span class="p">:</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>    <span class="k">for</span> <span class="n">tensordict</span> <span class="ow">in</span> <span class="n">collector</span><span class="p">:</span>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>        <span class="o">...</span>
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="k">except</span> <span class="n">LiveObservationHalt</span> <span class="k">as</span> <span class="n">halt</span><span class="p">:</span>
+</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">halt</span><span class="p">)</span>                                    <span class="c1"># names the original exception</span>
+</span><span id="__span-23-8"><a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;emergency close accepted:&quot;</span><span class="p">,</span> <span class="n">halt</span><span class="o">.</span><span class="n">flatten_accepted</span><span class="p">)</span>
+</span></code></pre></div>
+<h3 id="observation_failure_policy"><code>observation_failure_policy</code><a class="headerlink" href="#observation_failure_policy" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>value</th>
+<th>behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"halt"</code> (default)</td>
+<td>Raise. Any open position is left as it is.</td>
+</tr>
+<tr>
+<td><code>"flatten"</code></td>
+<td>Request a symbol-scoped <code>close_position()</code> first, record whether the venue accepted it, then raise.</td>
+</tr>
+</tbody>
+</table>
+<p><code>halt.flatten_accepted</code> records that the close was <strong>requested and accepted</strong>, not that
+the position is gone — confirming that would need the read that just failed. Treat a halt
+as requiring an operator to check the account.</p>
+<h3 id="what-does-not-halt">What does not halt<a class="headerlink" href="#what-does-not-halt" title="Permanent link">&para;</a></h3>
+<p>Only failures that mean <em>the venue told us something impossible about our own money</em> are
+terminal. A transient error is not: every adapter wraps arbitrary failures in
+<code>RuntimeError("Failed to get account balance: ...")</code>, so treating that as terminal would
+end an episode — and under <code>flatten</code>, close a live position — on a read timeout. Those
+propagate unchanged, as do configuration errors such as a missing feature key. Retry and
+staleness handling are tracked in #295.</p>
+<p>Alpaca and Polymarket do not route through this path at all (#355).</p>
 
 
 
