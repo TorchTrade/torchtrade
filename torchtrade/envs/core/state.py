@@ -2,7 +2,7 @@
 
 import math
 from dataclasses import asdict, dataclass, field, fields
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 
 # Quantities at or below this are dust, not a position. Exchanges can leave a float residual
@@ -172,6 +172,9 @@ class PositionState:
     hold_counter: int = 0
     hold_direction: float = 0.0
     current_action_level: float = 0.0
+    # The quantity the last accepted action asked for, so a partial fill can be told from
+    # a complete one. None when the env has not traded, or the path cannot report a target.
+    target_qty: Optional[float] = None
 
     def reset(self):
         """Reset all position state to initial values."""

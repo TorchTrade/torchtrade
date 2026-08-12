@@ -144,12 +144,10 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
         """Execute one environment step."""
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        if position_status:
-            current_price = self._current_mark_price(position_status)
-            position_size = position_qty_from_status(position_status)
-        else:
-            current_price = self._current_mark_price()
-            position_size = 0.0
+        # Both callees already handle None, and the mark read stays FIRST so an unknown
+        # status still raises PositionUnknownError with the price message it always did.
+        current_price = self._current_mark_price(position_status)
+        position_size = position_qty_from_status(position_status)
 
         # Sync position state from exchange — this is the source of truth.
         position_closed = self._sync_position_from_exchange(position_status)
@@ -174,12 +172,11 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
 
         # Eagerly update position from trade result
         if trade_info["executed"] and trade_info.get("success") is not False:
-            if trade_info.get("closed_position"):
-                self.position.current_position = 0
-            elif trade_info["side"] == "buy":
-                self.position.current_position = 1
-            elif trade_info["side"] == "sell":
-                self.position.current_position = -1
+            # The TARGET side from the action, never the order side (#276): the same
+            # self-inflicted-mismatch chain applies here. binance and bitget also had
+            # their closed branch behind an elif that always matched first, so an SLTP
+            # close could never be recorded at all.
+            self.position.current_position = {"long": 1, "short": -1}.get(action_tuple[0], 0)
 
         self._wait_for_next_timestamp()
 

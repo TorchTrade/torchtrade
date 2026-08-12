@@ -1,5 +1,6 @@
 """Base class for live trading environments."""
 
+import logging
 import math
 import time
 from abc import abstractmethod
@@ -12,8 +13,31 @@ from tensordict import TensorDictBase
 from torchrl.data import Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
-from torchtrade.envs.core.state import PositionState, position_direction_from_status
+from torchtrade.envs.core.state import (
+    PositionState,
+    position_direction_from_status,
+    position_qty_from_status,
+)
 from torchtrade.envs.utils.termination import is_bankrupt
+
+
+logger = logging.getLogger(__name__)
+
+# A fill within this fraction of the requested size counts as the size that was asked for.
+# Relative, so it means the same thing on an asset priced in cents and one at $100k --
+# unlike a base-unit constant (#339).
+FILL_REL_TOL = 0.01
+
+
+def validate_action_levels(action_levels) -> None:
+    """Refuse a config whose levels cannot size an order (invariant 4: at the boundary).
+
+    A NaN level reaches sizing as `target_qty = nan`; `nan > 0` is False, so it takes the
+    SELL branch and puts `amount=nan` on the venue. Guarding it downstream would only make
+    the nonsense quieter -- the config is where it is wrong.
+    """
+    if not all(math.isfinite(level) for level in action_levels):
+        raise ValueError(f"action_levels must all be finite, got {action_levels}")
 
 
 class ObservationFailurePolicy(str, Enum):
@@ -226,8 +250,11 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         THIS same step, the new position must start from zero rather than inherit the dead
         one's age.
 
-        Only the direction is reconciled, not the size: a PARTIAL external close leaves the
-        direction intact and is still invisible to the guard. Pre-existing, not fixed here.
+        Size is reconciled as well as direction. A partial fill leaves the DIRECTION
+        intact, so the check above cannot see it -- the env would believe it holds the
+        level it asked for while holding something else, and the guard would suppress
+        every corrective retry, permanently and silently. Compared RELATIVELY, so the rule
+        means the same thing on an asset priced in cents and one priced at $100k.
 
         An unknown status raises rather than syncing to the 0 an unreachable exchange
         would produce. In practice _step raises earlier, on its own status read.
@@ -237,6 +264,19 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         if observed != self.position.current_position:
             self.position.current_action_level = 0.0 if observed == 0 else float("nan")
             self.position.hold_counter = 0
+            self.position.target_qty = None
+        elif self.position.target_qty is not None and not math.isclose(
+            position_qty_from_status(position_status),
+            self.position.target_qty,
+            rel_tol=FILL_REL_TOL,
+        ):
+            logger.warning(
+                "venue holds %s but the last action asked for %s; releasing the "
+                "duplicate-action guard so the agent can correct it",
+                position_qty_from_status(position_status), self.position.target_qty,
+            )
+            self.position.current_action_level = float("nan")
+            self.position.target_qty = None
 
         self.position.current_position = observed
 
@@ -268,18 +308,18 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 f"cannot start an episode on equity of {self.initial_portfolio_value}"
             )
 
-    def _record_position_after_trade(self, desired_action: float) -> None:
-        """Direction comes from the RESULTING position, never from the order side (#276).
+    def _record_position_after_trade(self, desired_action: float, target_qty=None) -> None:
+        """Record the position the trade RESULTED in, not the side that was sent (#276).
 
-        Under fractional sizing a SELL that merely trims a long leaves a long. Recording
-        it as a short makes the NEXT bar's sync detect a mismatch the env inflicted on
-        itself, which discards hold_counter and NaNs current_action_level -- so
-        account_state reports holding_time=1 for a 22-bar-old position and the
-        duplicate-action guard never fires again. The target level's sign is the
-        resulting direction.
+        Under fractional sizing a SELL that only trims a long leaves a long; recording it
+        as a short makes the next bar's sync see a mismatch the env inflicted on itself.
+
+        `target_qty` is what the action asked for, so the next bar can tell a partial fill
+        from a complete one -- see `_sync_position_from_exchange`.
         """
         self.position.current_position = (desired_action > 0) - (desired_action < 0)
         self.position.current_action_level = desired_action
+        self.position.target_qty = target_qty
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""

@@ -456,10 +456,8 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         current_price = position_status.current_price if position_status else 0.0
 
-        # The chain advances on USABLE, not on `<= 0` (#349). NaN compares False to every
-        # operator, so `nan <= 0` skipped both fallbacks and returned the NaN as the
-        # answer; `inf > 0` skipped them and then had nothing left. Either way the
-        # function whose whole job is producing a usable price returned one that is not.
+        # Advance on USABLE, not `<= 0` (#349): NaN compares False to every operator, so
+        # `nan <= 0` skipped both fallbacks and returned the NaN as the price.
         def usable(price):
             return math.isfinite(price) and price > 0
 
@@ -468,11 +466,19 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         if not usable(current_price):
             try:
-                current_price = self.observer.get_current_price()
-                logger.info(f"Fetched current price from market data: {current_price}")
+                fetched = self.observer.get_current_price()
+                if usable(fetched):
+                    # Logged AFTER validating: this said "Fetched current price: nan" and
+                    # then threw it away, so the only trace claimed the fetch worked.
+                    logger.info(f"Fetched current price from market data: {fetched}")
+                current_price = fetched
             except Exception as e:
                 logger.warning(f"Could not fetch current price: {e}")
 
-        # Chain exhausted: 0.0 is this function's documented "unavailable", and every
-        # caller already guards it. Handing back the garbage would defeat the point.
-        return current_price if usable(current_price) else 0.0
+        if not usable(current_price):
+            logger.error(
+                f"No usable price: every source in the chain failed "
+                f"(last value {current_price}); reporting unavailable"
+            )
+            return 0.0
+        return current_price

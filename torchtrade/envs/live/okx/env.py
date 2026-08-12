@@ -8,6 +8,7 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
+from torchtrade.envs.core.live import validate_action_levels
 from torchtrade.envs.live.okx.observation import OKXObservationClass
 from torchtrade.envs.live.okx.order_executor import (
     OKXFuturesOrderClass,
@@ -68,6 +69,8 @@ class OKXFuturesTradingEnvConfig:
 
         if self.action_levels is None:
             self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]
+
+        validate_action_levels(self.action_levels)
 
 
 class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
@@ -145,7 +148,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         )
 
         if trade_info["executed"] and trade_info.get("success") is not False:
-            self._record_position_after_trade(desired_action)
+            self._record_position_after_trade(desired_action, trade_info.get("target_qty"))
 
         self._wait_for_next_timestamp()
 
@@ -217,6 +220,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
             self.position.current_position = 0
 
         return self._create_trade_info(
+            target_qty=0.0,
             executed=True,
             quantity=abs(current_qty),
             side=side,
@@ -272,7 +276,9 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
 
         side = "buy" if delta_qty > 0 else "sell"
         # _format_size() in trade() handles lot-step quantization
-        return self._execute_market_order(side, abs(delta_qty))
+        info = self._execute_market_order(side, abs(delta_qty))
+        info["target_qty"] = target_qty
+        return info
 
     def _execute_trade_if_needed(
         self, desired_action: float, *, current_qty: float = 0.0, current_price: float = 0.0,

@@ -6,6 +6,7 @@ import math
 import torch
 
 logger = logging.getLogger(__name__)
+from torchtrade.envs.core.live import validate_action_levels
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.live.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
@@ -38,6 +39,9 @@ class AlpacaTradingEnvConfig:
         # Build default action levels for fractional mode
         if self.action_levels is None:
             self.action_levels = [0.0, 0.5, 1.0]  # Long-only fractional
+
+        validate_action_levels(self.action_levels)
+
 
 class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
     """
@@ -127,7 +131,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         trade_info = self._execute_trade_if_needed(desired_action)
 
         if trade_info["executed"] and trade_info.get("success") is not False:
-            self._record_position_after_trade(desired_action)
+            self._record_position_after_trade(desired_action, trade_info.get("target_qty"))
 
         # Wait for next time step
         self._wait_for_next_timestamp()

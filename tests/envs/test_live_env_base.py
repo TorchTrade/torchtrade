@@ -2056,16 +2056,17 @@ def test_direction_comes_from_the_target_not_the_order_side(desired_action, expe
 
 
 @pytest.mark.parametrize("exchange", ["alpaca", "binance", "bitget", "bybit", "okx"])
-def test_no_live_env_infers_direction_from_the_order_side(exchange):
+@pytest.mark.parametrize("module", ["env", "env_sltp"])
+def test_no_live_env_infers_direction_from_the_order_side(exchange, module):
     """Five copies drifted into four different spellings of the same wrong idea.
 
     binance's read `side == "BUY"` (uppercase) with its `closed_position` branch LAST,
     behind an `elif` that already matched -- so binance could never record a close at all.
     """
     src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
-           / "live" / exchange / "env.py").read_text()
+           / "live" / exchange / f"{module}.py").read_text()
     assert 'trade_info["side"] ==' not in src, (
-        f"{exchange} still infers position direction from the order side"
+        f"{exchange}/{module} still infers position direction from the order side"
     )
 
 
@@ -2137,3 +2138,57 @@ def test_no_live_env_reads_a_raw_position_qty(exchange, module):
     assert "position_status.qty" not in path.read_text(), (
         f"{exchange}/{module} reads a raw qty instead of position_qty_from_status()"
     )
+
+
+@pytest.mark.parametrize("observed,target,released", [
+    (0.50, 0.50, False),
+    (0.505, 0.50, False),
+    (0.95, 0.50, True),
+    (0.05, 0.50, True),
+    (0.50, None, False),
+], ids=["exact", "within-tolerance", "under-filled", "barely-filled", "no-target"])
+def test_a_partial_fill_releases_the_duplicate_action_guard(observed, target, released):
+    """#276 follow-up: the direction check alone cannot see a partial fill.
+
+    Fixing #276 made the cached level correct for a COMPLETE fill -- and thereby removed
+    the accidental recovery the old bug provided, because a wrong direction used to force
+    a mismatch every bar. An under-fill leaves the direction intact, so without this the
+    env believes it holds the level it asked for while holding something else, and the
+    guard suppresses every corrective retry, permanently and with no log.
+
+    Compared RELATIVELY, so the rule means the same on an asset priced in cents and one
+    at $100k -- the denomination problem #339 is about.
+    """
+    env = SimpleNamespace(position=PositionState())
+    env.position.current_position = 1
+    env.position.current_action_level = 0.5
+    env.position.target_qty = target
+
+    TorchTradeLiveEnv._sync_position_from_exchange(
+        env, SimpleNamespace(qty=observed)
+    )
+
+    assert math.isnan(env.position.current_action_level) is released
+    assert env.position.current_position == 1, "direction was never in question here"
+
+
+@pytest.mark.parametrize("exchange", ["alpaca", "binance", "bitget", "bybit", "okx"])
+@pytest.mark.parametrize("levels", [
+    [0.0, float("nan"), 1.0], [0.0, float("inf"), 1.0], [0.0, float("-inf"), 1.0],
+], ids=["nan", "inf", "-inf"])
+def test_a_live_config_refuses_unusable_action_levels(exchange, levels):
+    """Invariant 4: validate at the boundary rather than guarding in the rule.
+
+    A NaN level reaches sizing as `target_qty = nan`. `nan > 0` is False, so it takes the
+    SELL branch and `trade(side="sell", amount=nan)` goes to the venue -- an order the
+    agent never asked for, in the wrong direction, at a size no one can read.
+    """
+    import importlib
+
+    module = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
+    config_cls = next(
+        v for k, v in vars(module).items()
+        if k.endswith("Config") and hasattr(v, "__dataclass_fields__")
+    )
+    with pytest.raises(ValueError, match="action_levels must all be finite"):
+        config_cls(symbol="BTC/USD", action_levels=levels)
