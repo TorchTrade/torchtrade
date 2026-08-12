@@ -688,13 +688,17 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         )
 
         # Tolerance for position comparison
-        # max(price, 1e-12) mirrors the vectorized engine's clamp exactly. Without it the
-        # scalar raises ZeroDivisionError where the vectorized returns a huge tolerance --
-        # and the equivalence harness pins these two together, so an asymmetry here is a
-        # divergence waiting for the first zero price to surface it.
-        tolerance = max(
-            abs(target_position_size) * POSITION_TOLERANCE_PCT,
-            POSITION_TOLERANCE_NOTIONAL / max(execution_price, 1e-12),
+        # A CLOSE is exempt from the floor. The floor answers "is this resize worth the
+        # fee", and going flat is not a resize -- with it applied, a position whose value
+        # falls under $1 can never be closed at all: every flat command sits inside the
+        # band, and account_state keeps reporting a direction the policy did not ask for.
+        # That is invariant 3, and this fix introduced it.
+        tolerance = (
+            0.0 if target_position_size == 0.0
+            else max(
+                abs(target_position_size) * POSITION_TOLERANCE_PCT,
+                POSITION_TOLERANCE_NOTIONAL / execution_price,
+            )
         )
 
         # Check if already at target position (implicit hold)
@@ -790,7 +794,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         delta_notional = abs(delta_position * execution_price)
 
         # Check if delta is negligible
-        if abs(delta_position) * max(execution_price, 0.0) < POSITION_TOLERANCE_NOTIONAL:
+        if abs(delta_position) * execution_price < POSITION_TOLERANCE_NOTIONAL:
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Determine if increasing or decreasing

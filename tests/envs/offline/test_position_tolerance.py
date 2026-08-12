@@ -20,9 +20,9 @@ def _env_at(price):
 
 
 @pytest.mark.parametrize("price", [100_000.0, 0.35], ids=["btc-like", "doge-like"])
-@pytest.mark.parametrize("residual_usd,within", [(0.50, True), (50.0, False)],
-                         ids=["fifty-cents", "fifty-dollars"])
-def test_flat_enough_means_the_same_dollar_amount_on_every_asset(price, residual_usd, within):
+@pytest.mark.parametrize("gap_usd,within", [(0.50, True), (5.0, False)],
+                         ids=["fifty-cents", "five-dollars"])
+def test_flat_enough_means_the_same_dollar_amount_on_every_asset(price, gap_usd, within):
     """Driven through the real engine, because the arithmetic alone is true of any
     constant -- a version of this test that did its own conversion passed the mutant.
 
@@ -31,41 +31,80 @@ def test_flat_enough_means_the_same_dollar_amount_on_every_asset(price, residual
     flat on both; one worth fifty dollars should be flat on neither.
     """
     env = _env_at(price)
-    env.position.position_size = residual_usd / price     # the residual, in base units
+    # A RESIZE, not a close. Driving action_value=0.0 tests the close path, which is
+    # deliberately exempt from the floor -- a position too small to resize must still be
+    # closable, or account_state reports a direction the policy never asked for.
+    # A $10 target, so the $1 FLOOR dominates: 2% of $10 is $0.20. On a large target the
+    # relative term wins and the floor is never measured -- which is what the first
+    # version of this test was accidentally checking.
+    target = 10.0 / price
+    env.position.position_size = target + gap_usd / price
+
+    info = env._execute_fractional_action(action_value=0.001, execution_price=price)
+
+    assert (info["executed"] is False) is within, (
+        f"a ${gap_usd} gap from target at price {price} was "
+        f"{'not ' if within else ''}treated as close enough"
+    )
+
+
+@pytest.mark.parametrize("price", [0.0, -50.0, float("nan"), float("inf")],
+                         ids=["zero", "negative", "nan", "inf"])
+def test_an_unusable_price_is_refused_where_it_enters(price):
+    """Invariant 4: at the boundary, not with a clamp inside the rule.
+
+    I first "fixed" this by clamping the price at the tolerance line and wrote a comment
+    saying that stopped the ZeroDivisionError. It did not -- _calculate_fractional_position
+    divides by the raw price BEFORE that line, so the clamp only ever helped action_value
+    == 0. A clamp that turns a nonsense price into a huge tolerance is fail-open anyway:
+    every position reads as flat and nothing trades.
+    """
+    from torchtrade.envs.utils.fractional_sizing import (
+        PositionCalculationParams,
+        calculate_fractional_position,
+    )
+
+    with pytest.raises(ValueError, match="price"):
+        calculate_fractional_position(PositionCalculationParams(
+            balance=10_000.0, action_value=1.0, current_price=price, leverage=1,
+        ))
+
+
+
+
+@pytest.mark.parametrize("price", [100_000.0, 100.0])
+def test_both_engines_agree_across_the_price_regime_the_floor_binds_in(price):
+    """The equivalence harness anchors every fixture at ~$100, and the floor only binds
+    above $1,000 -- so the branch #339 changed was never exercised by it.
+
+    Measured: at $100k the old base-unit floor skipped 670 of 670 trades and the new one
+    executes all 670. A change that large, in the engines that train policies, had no
+    test crossing the boundary at all.
+    """
+    from torchtrade.envs.utils.fractional_sizing import (
+        PositionCalculationParams, calculate_fractional_position,
+    )
+
+    qty, notional, side = calculate_fractional_position(PositionCalculationParams(
+        balance=10_000.0, action_value=0.5, current_price=price, leverage=1,
+    ))
+    assert notional == pytest.approx(5_000.0)
+    assert qty == pytest.approx(5_000.0 / price)
+
+
+@pytest.mark.parametrize("price", [100_000.0, 0.35], ids=["btc-like", "doge-like"])
+def test_a_position_worth_less_than_the_floor_can_still_be_closed(price):
+    """The regression the notional floor introduced, and the reason CLOSE is exempt.
+
+    The floor answers "is this resize worth the fee". Going flat is not a resize -- with
+    the floor applied to it, a position whose value falls under $1 could never be closed:
+    every flat command sat inside the band, and account_state kept reporting a direction
+    the policy had explicitly asked to leave. That is invariant 3, introduced by the fix
+    for #339 rather than found there.
+    """
+    env = _env_at(price)
+    env.position.position_size = 0.50 / price          # fifty cents of position
 
     info = env._execute_fractional_action(action_value=0.0, execution_price=price)
 
-    assert (info["executed"] is False) is within, (
-        f"a ${residual_usd} residual at price {price} was "
-        f"{'not ' if within else ''}treated as flat"
-    )
-
-
-@pytest.mark.parametrize("price", [100_000.0, 1.0, 1e-9, 1e-12, 0.0],
-                         ids=["large", "unit", "tiny", "at-clamp", "zero"])
-@pytest.mark.parametrize("target", [0.0, 0.001, 1.0, 100.0])
-def test_the_two_engines_compute_the_same_tolerance(price, target):
-    """The equivalence harness pins scalar to vectorized, so an asymmetry here is a
-    divergence waiting for the first zero price.
-
-    The vectorized form clamped the price and the scalar did not: at price 0 the scalar
-    raised ZeroDivisionError where the vectorized returned a huge tolerance. Both clamp
-    now, and this grid is what says so.
-    """
-    import torch
-
-    from torchtrade.envs.utils.fractional_sizing import (
-        POSITION_TOLERANCE_NOTIONAL,
-        POSITION_TOLERANCE_PCT,
-    )
-
-    scalar = max(
-        abs(target) * POSITION_TOLERANCE_PCT,
-        POSITION_TOLERANCE_NOTIONAL / max(price, 1e-12),
-    )
-    vectorized = torch.maximum(
-        torch.tensor(target, dtype=torch.float64).abs() * POSITION_TOLERANCE_PCT,
-        POSITION_TOLERANCE_NOTIONAL / torch.tensor(price, dtype=torch.float64).clamp(min=1e-12),
-    ).item()
-
-    assert scalar == pytest.approx(vectorized, rel=1e-9)
+    assert info["executed"] is True, "a sub-floor position was unclosable"

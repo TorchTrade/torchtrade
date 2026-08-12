@@ -1,4 +1,3 @@
-from collections import namedtuple
 from typing import Dict, List, Optional, Tuple, Union, Callable, Sequence
 import logging
 import warnings
@@ -14,7 +13,6 @@ FeatureProcessingFn = Optional[Union[Callable, Sequence[Callable]]]
 logger = logging.getLogger(__name__)
 
 # PERF: NamedTuple is faster than dict for attribute access
-OHLCV = namedtuple('OHLCV', ['open', 'high', 'low', 'close', 'volume'])
 
 
 def _bounded(value, limit: int = 60) -> str:

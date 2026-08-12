@@ -466,10 +466,6 @@ class TestSamplerBaseFeatures:
         assert bar["high"] > bar["low"], "a bar that traded must not be flattened"
 
 
-class TestSamplerHelperMethods:
-    """Tests for helper methods."""
-
-    
 class TestSamplerExactValues:
     """Tests for exact value verification - ensures observations match raw data."""
 

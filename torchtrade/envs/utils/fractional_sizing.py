@@ -1,3 +1,4 @@
+import math
 """Shared utilities for fractional position sizing across environments."""
 
 from typing import Tuple
@@ -64,6 +65,11 @@ def calculate_fractional_position(params: PositionCalculationParams) -> Tuple[fl
         >>> assert abs(pos_size - 0.5) < 0.01
         >>> assert side == "long"
     """
+    if not math.isfinite(params.current_price) or params.current_price <= 0:
+        raise ValueError(
+            f"cannot size a position at a price of {params.current_price}"
+        )
+
     # Handle neutral case
     if params.action_value == 0.0:
         return 0.0, 0.0, "flat"
@@ -153,22 +159,3 @@ def validate_action_levels(action_levels: list[float]) -> None:
         )
 
 
-def round_to_step_size(quantity: float, step_size: float) -> float:
-    """Round quantity to exchange step size.
-
-    Args:
-        quantity: Quantity to round
-        step_size: Exchange step size (e.g., 0.001 for BTC)
-
-    Returns:
-        Rounded quantity
-
-    Examples:
-        >>> round_to_step_size(0.1234, 0.001)
-        0.123
-        >>> round_to_step_size(1.9999, 0.01)
-        2.0
-    """
-    if step_size == 0:
-        return quantity
-    return round(quantity / step_size) * step_size
