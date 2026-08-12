@@ -1,4 +1,5 @@
 """External information tools the LLM trading actor can call mid-reasoning."""
+import re
 from typing import Optional
 from urllib.parse import quote_plus
 
@@ -10,8 +11,12 @@ SYMBOL_QUERY_MAP = {
 # Longest free-text field rendered into the model's context, per field.
 _MAX_TEXT_CHARS = 140
 
-# The delimiters of the trusted region in the prompt.
-_BLOCK_MARKERS = ("<tool_results>", "</tool_results>")
+# The delimiters of the trusted region, matched the way the CONSUMER reads them rather
+# than the way we emit them. The consumer is an LLM, so it is maximally lenient: case,
+# stray whitespace and trailing attributes all still read as a closing tag. This repo
+# already concedes the point -- parsers.py compiles extract_action with re.IGNORECASE.
+# Escaping the two exact literals left </TOOL_RESULTS> and </tool_results > working.
+_BLOCK_MARKER_RE = re.compile(r"<\s*/?\s*tool_results\b[^>]*>", re.IGNORECASE)
 
 
 def neutralise_block_markers(text: str) -> str:
@@ -25,9 +30,7 @@ def neutralise_block_markers(text: str) -> str:
     helper deliberately does not see `result` -- and GoogleNewsTool renders titles
     straight from an RSS feed authored by whoever gets a headline indexed.
     """
-    for marker in _BLOCK_MARKERS:
-        text = text.replace(marker, marker.replace("<", "&lt;"))
-    return text
+    return _BLOCK_MARKER_RE.sub(lambda m: "&lt;" + m.group(0)[1:], text)
 
 
 def _one_line(text: str) -> str:
