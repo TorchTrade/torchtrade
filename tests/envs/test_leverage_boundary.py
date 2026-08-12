@@ -307,6 +307,41 @@ def test_okx_sets_leverage_per_side_only_where_okx_requires_it(
                                        get_positions=_boom),
         public_client=SimpleNamespace(get_instruments=_boom),
     )
-    assert seen == expected_sides, (
+    # Order-insensitive: the two calls are independent and nothing in OKX's contract
+    # makes long precede short, so pinning the sequence would break a harmless refactor.
+    assert sorted(seen, key=str) == sorted(expected_sides, key=str), (
         f"{margin_mode}/{position_mode} should set leverage for {expected_sides}, got {seen}"
     )
+
+
+def test_okx_refuses_to_construct_when_only_one_side_took_the_leverage():
+    """Two calls create a partial-failure state one call could not (#363).
+
+    Long accepted at 20x and short refused leaves the account genuinely half-configured,
+    while the env sizes BOTH sides from a single config.leverage. Swallowing the second
+    leg's rejection passed all 31 tests in this file, so the behaviour was correct and
+    unpinned.
+
+    What this proves is that the Python object refuses to exist. It cannot prove the
+    venue rolls back the long leg that already applied -- that is outside the executor's
+    control, and an operator hitting this has one side set and must fix it by hand.
+    """
+    from torchtrade.envs.live.okx.order_executor import (
+        OKXFuturesOrderClass, MarginMode, PositionMode,
+    )
+
+    def one_sided(**kwargs):
+        if kwargs.get("posSide") == "short":
+            return {"code": "51004", "data": [{"sMsg": "leverage exceeds risk limit"}]}
+        return {"code": "0", "data": [{"lever": "20"}]}
+
+    with pytest.raises(ValueError, match="refused"):
+        OKXFuturesOrderClass(
+            symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True, leverage=20,
+            margin_mode=MarginMode.ISOLATED, position_mode=PositionMode.LONG_SHORT,
+            api_key="k", api_secret="s", passphrase="p",
+            client=SimpleNamespace(),
+            account_client=SimpleNamespace(set_leverage=one_sided,
+                                           set_position_mode=_boom, get_positions=_boom),
+            public_client=SimpleNamespace(get_instruments=_boom),
+        )
