@@ -247,6 +247,17 @@ class ReplayOrderExecutor:
             "total_margin_balance": total,
         }
 
+    def round_quantity(self, quantity: float, symbol: Optional[str] = None) -> float:
+        """Part of the trader interface the live envs size through (#271).
+
+        Replay has no venue to query for a LOT_SIZE step, and inventing one would make a
+        backtest disagree with the exchange it is standing in for in a second, invisible
+        way. So it imposes no lot-size constraint and says so here, rather than the live
+        env discovering the method is missing mid-episode. That divergence from live is
+        part of what #278 tracks.
+        """
+        return quantity
+
     def get_mark_price(self) -> float:
         """Get current mark price (latest close)."""
         return self.current_price

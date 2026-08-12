@@ -9,6 +9,7 @@ permanent local state desynchronization from the exchange.
 """
 
 from __future__ import annotations
+import math
 
 from unittest.mock import patch
 
@@ -49,6 +50,14 @@ class MockTrader:
         self.close_should_fail = False
         self.close_should_raise = False
         self.trades_executed = []
+
+    def round_quantity(self, quantity, symbol=None):
+        """Part of the trader interface the live envs size through (#271).
+
+        A 0.001 step, which is what binance uses for BTCUSDT -- the point here is that the
+        env delegates rather than carrying its own LOT_SIZE parser, not the step itself.
+        """
+        return math.floor(quantity / 0.001 + 1e-9) * 0.001
 
     def get_status(self):
         if self.position_qty != 0:

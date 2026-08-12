@@ -473,7 +473,7 @@ class TestBinanceLotSizeRounding:
     ], ids=["coarser-than-3dp", "whole-units", "finer-than-3dp"])
     def test_quantity_is_floored_to_the_venue_step(self, step, quantity, expected):
         """Each cell is chosen so `round(quantity, 3)` gives a different, invalid answer."""
-        assert self._executor(step=step)._round_quantity(quantity) == pytest.approx(expected)
+        assert self._executor(step=step).round_quantity(quantity) == pytest.approx(expected)
         assert round(quantity, 3) != pytest.approx(expected)
 
     @pytest.mark.parametrize("quantity,step", [(0.29, "0.01"), (0.57, "0.01"), (0.58, "0.01")])
@@ -483,12 +483,12 @@ class TestBinanceLotSizeRounding:
         207 of the first 400 exact multiples of the four common steps land just under an
         integer in binary. Without the epsilon this silently under-sizes a third of them.
         """
-        assert self._executor(step=step)._round_quantity(quantity) == pytest.approx(quantity)
+        assert self._executor(step=step).round_quantity(quantity) == pytest.approx(quantity)
 
     def test_floor_not_nearest(self):
         """Rounding UP can ask for more than the margin covers, and the venue rejects the
         whole order. bybit floors for the same reason."""
-        assert self._executor(step="0.01")._round_quantity(0.199) == pytest.approx(0.19)
+        assert self._executor(step="0.01").round_quantity(0.199) == pytest.approx(0.19)
 
     def test_other_symbols_round_to_their_own_step(self):
         """close_all_positions closes whatever the account holds, not just this symbol.
@@ -498,8 +498,8 @@ class TestBinanceLotSizeRounding:
         """
         ex = self._executor(step="0.001", extra_symbols=[("ETHUSDT", "0.01")])
 
-        assert ex._round_quantity(1.2345) == pytest.approx(1.234)
-        assert ex._round_quantity(1.2345, "ETHUSDT") == pytest.approx(1.23)
+        assert ex.round_quantity(1.2345) == pytest.approx(1.234)
+        assert ex.round_quantity(1.2345, "ETHUSDT") == pytest.approx(1.23)
 
     def test_a_symbol_the_venue_does_not_list_refuses_to_construct(self):
         """Falling back is bit-identical to the bug being fixed.
@@ -532,7 +532,7 @@ class TestBinanceLotSizeRounding:
             symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10, client=client
         )
         assert ex._tick_size == pytest.approx(0.10)
-        assert ex._round_quantity(0.12345) == pytest.approx(0.12)
+        assert ex.round_quantity(0.12345) == pytest.approx(0.12)
 
     @pytest.mark.parametrize("step_str,expected", [
         ("0.001", (0.001, 3)),
@@ -608,3 +608,79 @@ class TestBinanceLotSizeRounding:
         assert quantities, "no order carried a quantity"
         for q in quantities:
             assert q == "0.12", f"order went out at {q!r}, not the 0.01 step"
+
+    def test_a_malformed_lot_size_does_not_take_the_tick_size_with_it(self):
+        """Scoping the try to the SYMBOL made one bad filter abort that symbol's others.
+
+        For the traded symbol that left `_tick_size` None, so SLTP stop prices go out at
+        full float precision, draw binance -1111, and are swallowed by the non-fatal
+        bracket handler -- a position open with no stop loss. LOT_SIZE is listed first
+        here deliberately; the ordering is what decided whether the tick survived.
+        """
+        from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+
+        client = MagicMock()
+        client.futures_exchange_info = MagicMock(return_value={"symbols": [{
+            "symbol": "BTCUSDT",
+            "filters": [
+                {"filterType": "LOT_SIZE", "stepSize": "0.01"},   # minQty absent
+                {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
+            ],
+        }]})
+        client.futures_change_leverage = MagicMock(return_value={})
+        client.futures_change_margin_type = MagicMock(return_value={})
+
+        ex = BinanceFuturesOrderClass(
+            symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10, client=client
+        )
+        assert ex._tick_size == pytest.approx(0.10)
+        assert ex._round_price(100.16) == pytest.approx(100.2)
+        assert ex.round_quantity(0.12345) == pytest.approx(0.12)
+
+    def test_a_malformed_payload_body_falls_back_rather_than_crashing(self):
+        """A truncated or error-shaped body is a FAILED FETCH, not a config error.
+
+        Reading `['symbols']` outside the try took down __init__ with a bare KeyError --
+        neither the deliberate ValueError nor the fallback, and the ValueError's message
+        even advertises "the payload changed shape" for a case that never reached it.
+        """
+        from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+
+        client = MagicMock()
+        client.futures_exchange_info = MagicMock(return_value={"code": -1121, "msg": "Invalid symbol"})
+        client.futures_change_leverage = MagicMock(return_value={})
+        client.futures_change_margin_type = MagicMock(return_value={})
+
+        ex = BinanceFuturesOrderClass(
+            symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10, client=client
+        )
+        assert ex.round_quantity(0.12345) == pytest.approx(0.123)
+
+    def test_a_minimum_larger_than_the_step_is_still_enforced(self):
+        """`f['minQty']` raising skips the rest of the LOT_SIZE branch, silently.
+
+        The step is cached on the line above, so construction succeeds and the only
+        casualty is `_min_qtys` -- which leaves `minimum` degrading to `step`. A venue
+        whose minQty exceeds its step (0.01 against 0.001 here) would then accept a 0.005
+        order the venue rejects. Reading the field defensively keeps both.
+        """
+        from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+
+        client = MagicMock()
+        client.futures_exchange_info = MagicMock(return_value={"symbols": [{
+            "symbol": "BTCUSDT",
+            "filters": [
+                {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
+                {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.01"},
+            ],
+        }]})
+        client.futures_change_leverage = MagicMock(return_value={})
+        client.futures_change_margin_type = MagicMock(return_value={})
+
+        ex = BinanceFuturesOrderClass(
+            symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10, client=client
+        )
+        assert ex._min_qtys["BTCUSDT"] == pytest.approx(0.01)
+        with pytest.raises(ValueError, match="below the minimum"):
+            ex._format_quantity(0.005)
+        assert ex._format_quantity(0.012) == "0.012"

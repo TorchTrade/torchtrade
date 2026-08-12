@@ -177,34 +177,42 @@ class BinanceFuturesOrderClass:
         symbol's step would be its own bug.
         """
         try:
-            info = self.client.futures_exchange_info()
+            symbols = self.client.futures_exchange_info()['symbols']
         except Exception as e:
-            # Transient: fall back and warn. A symbol the venue does not list is a config
-            # error and raises below; a fetch that did not happen is not.
+            # Transient, and a truncated or error-shaped body counts: a fetch that did not
+            # produce a payload is not a config error. A symbol the venue DID answer about
+            # and does not list is, and raises below. Reading ['symbols'] inside this try
+            # is deliberate -- outside it, a malformed body took down __init__ with a bare
+            # KeyError instead of either branch.
             logger.warning(f"Could not fetch symbol filters for {self.symbol}: {e}")
             return
 
-        for s in info['symbols']:
-            # Per symbol, so one malformed entry costs one step rather than the whole
-            # cache. Sweeping every symbol inside a single try meant an unrelated delisted
-            # entry could discard the tick size too -- and whether it did depended on
-            # whether it appeared before or after this symbol in the payload.
-            try:
-                for f in s['filters']:
+        for s in symbols:
+            symbol = s.get('symbol', '?')
+            # Per FILTER, not per symbol: scoped to the symbol, a LOT_SIZE short of a
+            # field aborted that symbol's remaining filters -- including its PRICE_FILTER.
+            # For the traded symbol that left _tick_size None, which sends SLTP stop prices
+            # out at full float precision, draws -1111, and is swallowed by the non-fatal
+            # bracket handler: a position open with no stop loss.
+            for f in s.get('filters', []):
+                try:
                     if f['filterType'] == 'LOT_SIZE':
-                        self._qty_steps[s['symbol']] = _step_and_decimals(f['stepSize'])
-                        self._min_qtys[s['symbol']] = float(f['minQty'])
-                    elif f['filterType'] == 'PRICE_FILTER' and s['symbol'] == self.symbol:
+                        self._qty_steps[symbol] = _step_and_decimals(f['stepSize'])
+                        # Optional: absent means "no explicit minimum", not "unusable".
+                        self._min_qtys[symbol] = float(f.get('minQty') or 0.0)
+                    elif f['filterType'] == 'PRICE_FILTER' and symbol == self.symbol:
                         tick_str = f['tickSize']
                         self._tick_size = float(tick_str)
                         # Derive decimal places from tick string for clean formatting
                         if '.' in tick_str:
                             decimal_part = tick_str.rstrip('0').split('.')[1]
                             self._tick_decimals = len(decimal_part) if decimal_part else 0
-            except Exception as e:
-                # Names the offending symbol: the first version logged only self.symbol,
-                # which is never the one at fault and sends the reader the wrong way.
-                logger.warning(f"Skipping malformed filters for {s.get('symbol', '?')}: {e}")
+                except Exception as e:
+                    # Names the offending symbol AND filter: the first version logged only
+                    # self.symbol, which is never the one at fault.
+                    logger.warning(
+                        f"Skipping malformed {f.get('filterType', '?')} for {symbol}: {e}"
+                    )
 
         if self._tick_size is None:
             logger.warning(f"No PRICE_FILTER found for {self.symbol}, prices will not be rounded")
@@ -230,7 +238,7 @@ class BinanceFuturesOrderClass:
             return round(rounded, self._tick_decimals)
         return price
 
-    def _round_quantity(self, quantity: float, symbol: Optional[str] = None) -> float:
+    def round_quantity(self, quantity: float, symbol: Optional[str] = None) -> float:
         """Floor a quantity to the symbol's LOT_SIZE step.
 
         Floor rather than round to nearest: rounding up asks for more than the caller
@@ -262,8 +270,17 @@ class BinanceFuturesOrderClass:
         the venue reject an order whose own error message points at the pre-rounding size.
         """
         key = symbol or self.symbol
+        if key not in self._qty_steps:
+            # Only reachable for a foreign symbol via close_all_positions -- self.symbol
+            # is guaranteed present or construction raised. Said out loud, because this is
+            # the same fallback precision the PR calls bit-identical to the bug, and
+            # without a line here the only diagnosis is binance's own -1111.
+            logger.warning(
+                f"No LOT_SIZE cached for {key}; sizing on fallback precision "
+                f"{_FALLBACK_QTY_STEP_PAIR}, which the venue may reject"
+            )
         step, decimals = self._qty_steps.get(key, _FALLBACK_QTY_STEP_PAIR)
-        rounded = self._round_quantity(quantity, key)
+        rounded = self.round_quantity(quantity, key)
         minimum = max(self._min_qtys.get(key, 0.0), step)
         if rounded < minimum:
             raise ValueError(
@@ -549,7 +566,10 @@ class BinanceFuturesOrderClass:
                 order_params["positionSide"] = position_side
 
             self.client.futures_create_order(**order_params)
-            logger.info(f"Position closed: {qty} {side}")
+            # The submitted size, not the requested one: this PR exists because the
+            # two differ, so a log naming the request is a log naming a number that
+            # was never sent.
+            logger.info(f"Position closed: {order_params['quantity']} {side}")
             return True
 
         except Exception as e:
