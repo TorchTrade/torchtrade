@@ -305,8 +305,17 @@ class MarketDataObservationSampler:
         # malformed shape the ingestion validator rejects on raw input, reintroduced from
         # the inside. Widen the extremes to span the two prices that are real, then clip
         # close, which becomes current_price, the next entry, the mark and the reward.
-        execute_base_filled["high"] = execute_base_filled[["high", "open", "close"]].max(axis=1)
-        execute_base_filled["low"] = execute_base_filled[["low", "open", "close"]].min(axis=1)
+        # Widened from OPEN only, never from close. A red bar missing its high takes close
+        # as its high and lands BELOW open -- the malformed shape the ingestion validator
+        # rejects, recreated where no validator runs. `open` is a real print of THIS bar,
+        # so this invents nothing; widening with a stale close would drag a real low of 110
+        # down to 100 and fire a stop at 105 on a bar that never traded there.
+        execute_base_filled["high"] = execute_base_filled[["high", "open"]].max(axis=1)
+        execute_base_filled["low"] = execute_base_filled[["low", "open"]].min(axis=1)
+
+        # A bar that merely lacks a usable close KEEPS its real range (existing contract --
+        # discarding it recreates the too-narrow range this aggregation exists to fix), so
+        # the stale close is clipped into that range rather than the range widened to it.
         execute_base_filled["close"] = execute_base_filled["close"].clip(
             lower=execute_base_filled["low"], upper=execute_base_filled["high"]
         )
