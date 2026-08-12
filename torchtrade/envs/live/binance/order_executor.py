@@ -163,72 +163,48 @@ class BinanceFuturesOrderClass:
             logger.warning(f"Could not setup futures account: {e}")
 
     def _fetch_symbol_filters(self):
-        """Cache tick size and LOT_SIZE step from Binance exchange info.
+        """Cache the tick size and every symbol's LOT_SIZE step and minQty (#271).
 
-        Only PRICE_FILTER was read before, so every order quantity went out as
-        `round(quantity, 3)` and any symbol whose step is not exactly three decimals got a
-        silently wrong size -- a rejected order, or a mis-sized position (#271). Bitget,
-        bybit and okx all fetch a real step from the venue; binance was the one that did
-        not. This is not full parity with them: they also cache minQty, and until this
-        change binance had neither.
-
-        Steps are kept for EVERY symbol, not just this one, because close_all_positions
-        closes whatever the account holds -- rounding another symbol's quantity with this
-        symbol's step would be its own bug.
+        Every symbol, not just this one: close_all_positions closes whatever the account
+        holds, and another symbol's quantity must not be rounded with this symbol's step.
         """
         try:
             symbols = self.client.futures_exchange_info()['symbols']
         except Exception as e:
-            # Transient, and a truncated or error-shaped body counts: a fetch that did not
-            # produce a payload is not a config error. A symbol the venue DID answer about
-            # and does not list is, and raises below. Reading ['symbols'] inside this try
-            # is deliberate -- outside it, a malformed body took down __init__ with a bare
-            # KeyError instead of either branch.
+            # No payload is a transient failure; a payload that omits this symbol is a
+            # config error and raises below.
             logger.warning(f"Could not fetch symbol filters for {self.symbol}: {e}")
             return
 
         for s in symbols:
             symbol = s.get('symbol', '?')
-            # Per FILTER, not per symbol: scoped to the symbol, a LOT_SIZE short of a
-            # field aborted that symbol's remaining filters -- including its PRICE_FILTER.
-            # For the traded symbol that left _tick_size None, which sends SLTP stop prices
-            # out at full float precision, draws -1111, and is swallowed by the non-fatal
-            # bracket handler: a position open with no stop loss.
+            # Scoped per FILTER: a malformed LOT_SIZE must not cost this symbol its
+            # PRICE_FILTER, which would send SLTP stop prices out unrounded.
             for f in s.get('filters', []):
                 try:
                     if f['filterType'] == 'LOT_SIZE':
                         self._qty_steps[symbol] = _step_and_decimals(f['stepSize'])
-                        # Optional: absent means "no explicit minimum", not "unusable".
                         self._min_qtys[symbol] = float(f.get('minQty') or 0.0)
                     elif f['filterType'] == 'PRICE_FILTER' and symbol == self.symbol:
                         tick_str = f['tickSize']
                         self._tick_size = float(tick_str)
-                        # Derive decimal places from tick string for clean formatting
                         if '.' in tick_str:
                             decimal_part = tick_str.rstrip('0').split('.')[1]
                             self._tick_decimals = len(decimal_part) if decimal_part else 0
                 except Exception as e:
-                    # Names the offending symbol AND filter: the first version logged only
-                    # self.symbol, which is never the one at fault.
                     logger.warning(
                         f"Skipping malformed {f.get('filterType', '?')} for {symbol}: {e}"
                     )
 
         if self._tick_size is None:
             logger.warning(f"No PRICE_FILTER found for {self.symbol}, prices will not be rounded")
-        else:
-            logger.info(f"Tick size for {self.symbol}: {self._tick_size} ({self._tick_decimals} decimals)")
 
-        # Fail closed: the venue answered and does not list this symbol, so every order
-        # would go out on the fallback precision -- which is bit-identical to the bug this
-        # fixes, and binance is the one exchange with no min_qty net downstream to catch
-        # the result. A futures executor pointed at a spot-only symbol used to log two
-        # warnings and then trade happily against a symbol that does not exist.
+        # Fail closed: the fallback precision is the bug this fixes, and binance has no
+        # minQty check downstream to catch the result.
         if self.symbol not in self._qty_steps:
             raise ValueError(
-                f"binance returned no LOT_SIZE for {self.symbol}: it is not a futures "
-                f"symbol on this venue, or the payload changed shape. Refusing to size "
-                f"orders on fallback precision."
+                f"binance returned no LOT_SIZE for {self.symbol}: not a futures symbol on "
+                f"this venue, or the payload changed shape."
             )
 
     def _round_price(self, price: float) -> float:
@@ -239,77 +215,50 @@ class BinanceFuturesOrderClass:
         return price
 
     def round_quantity(self, quantity: float, symbol: Optional[str] = None) -> float:
-        """Floor a quantity to the symbol's LOT_SIZE step.
+        """Floor a quantity toward zero to the symbol's LOT_SIZE step.
 
-        Floor rather than round to nearest: rounding up asks for more than the caller
-        sized, which can exceed the margin available and get the whole order rejected.
-        (bybit floors too, but in `bybit/env.py`'s sizing rather than in its executor --
-        so this is the same reasoning, not the same code.)
+        Floor, not round-to-nearest: rounding up asks for more than the caller sized and
+        can exceed the available margin. Toward zero rather than down, so a negative is
+        not floored to MORE than was asked.
+
+        The tolerance is relative because quantity/step lands just under an integer for
+        many exact multiples (0.29/0.01 is 28.999999999999996), and a fixed one stops
+        covering that above a ratio of ~1e7 -- where repeated rounding would shave a step.
         """
         step, decimals = self._qty_steps.get(symbol or self.symbol, _FALLBACK_QTY_STEP_PAIR)
         if step <= 0:
             return quantity
-
-        # Toward zero, not down: math.floor moves a negative AWAY from zero, so -7.5 at
-        # step 1 returned -8.0 -- more than the caller sized, the one thing the docstring
-        # promises not to do. Both env call sites pass abs(), but this is public API.
         sign = -1.0 if quantity < 0 else 1.0
         ratio = abs(quantity) / step
-
-        # The tolerance is not decoration: quantity/step lands just under an integer for
-        # plenty of exact multiples in binary (0.29/0.01 is 28.999999999999996), and a bare
-        # floor would shave a whole step off a valid size. Relative, because a fixed 1e-9
-        # stops covering the binary error once the ratio passes ~1e7 -- and this value is
-        # rounded two or three times on its way to an order.
-        tolerance = max(1e-9, ratio * 1e-12)
-        return sign * round(math.floor(ratio + tolerance) * step, decimals)
+        return sign * round(math.floor(ratio + max(1e-9, ratio * 1e-12)) * step, decimals)
 
     def _format_quantity(
         self, quantity: float, symbol: Optional[str] = None, reduce_only: bool = False
     ) -> str:
-        """The venue-precision string for an order, or raise if the size rounds away.
+        """The venue-precision string for an order.
 
-        A string, not a float: `str(7.0)` carries a decimal a symbol with
-        quantityPrecision 0 does not define, which is the documented shape of binance's
-        `-1111 Precision is over the maximum defined for this asset`. okx formats the same
-        way for the same reason.
+        A string because `str(7.0)` carries a decimal a quantityPrecision-0 symbol does
+        not define, which binance rejects with -1111.
 
-        Raises below the venue minimum rather than submitting the floored value. That
-        value is 0 whenever the request is under one step -- reachable on any symbol whose
-        step is coarser than the configured size, and routinely in the fractional and
-        notional modes when a small balance meets a six-figure price. The old
-        `round(q, 3)` did it too; the difference is that this says so instead of letting
-        the venue reject an order whose own error message points at the pre-rounding size.
+        Below the venue minimum, an opening order raises rather than submitting the
+        floored value -- which is 0 whenever the request is under one step. A reduceOnly
+        order clamps up instead: the venue caps it at the actual position, so it fills and
+        closes a sub-step residual that would otherwise be stranded.
         """
         key = symbol or self.symbol
         if key not in self._qty_steps:
-            # Only reachable for a foreign symbol via close_all_positions -- self.symbol
-            # is guaranteed present or construction raised. Said out loud, because this is
-            # the same fallback precision the PR calls bit-identical to the bug, and
-            # without a line here the only diagnosis is binance's own -1111.
-            logger.warning(
-                f"No LOT_SIZE cached for {key}; sizing on fallback precision "
-                f"{_FALLBACK_QTY_STEP_PAIR}, which the venue may reject"
-            )
+            logger.warning(f"No LOT_SIZE cached for {key}; using fallback precision")
         step, decimals = self._qty_steps.get(key, _FALLBACK_QTY_STEP_PAIR)
         rounded = self.round_quantity(quantity, key)
         minimum = max(self._min_qtys.get(key, 0.0), step)
+
         if rounded < minimum:
-            if reduce_only:
-                # A reduceOnly order is clamped by the venue to the actual position, so one
-                # at the minimum DOES fill and closes it. Refusing here removed a close
-                # that used to happen: a sub-step residual (partial fill, ADL, liquidation
-                # remnant, a venue step change) stayed open, and base.py discards
-                # close_position()'s return on reset -- so the episode starts against a
-                # position the env believes it closed. The minimum gate is an opens
-                # argument and belongs only on the opens path.
-                rounded = minimum
-            else:
+            if not reduce_only:
                 raise ValueError(
-                    f"{key}: a quantity of {quantity} floors to {rounded} at the venue "
-                    f"step {step}, below the minimum {minimum}. Refusing to submit an "
-                    f"order that cannot fill."
+                    f"{key}: {quantity} floors to {rounded} at step {step}, below the "
+                    f"minimum {minimum}. Refusing to submit an order that cannot fill."
                 )
+            rounded = minimum
         return f"{rounded:.{decimals}f}"
 
     def trade(
