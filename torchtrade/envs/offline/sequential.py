@@ -31,6 +31,7 @@ from torchtrade.envs.core.state import (
 )
 from torchtrade.envs.core.default_rewards import log_return_reward
 from torchtrade.envs.utils.timeframe import TimeFrame, normalize_timeframe_config
+from torchtrade.envs.utils.sltp_helpers import stop_fill_price
 from torchtrade.envs.utils.fractional_sizing import (
     calculate_fractional_position,
     PositionCalculationParams,
@@ -541,7 +542,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         # Bar N+1, against whatever the action above left open. Must precede the portfolio
         # value and the history record below, or both read a state that ignores this exit.
         if self._check_liquidation(base_features):
-            trade_info = self._execute_liquidation()
+            trade_info = self._execute_liquidation(base_features["open"])
 
         # Age the position once per step through the canonical rule, whatever happened
         # above (#275). Five hand-rolled sites used to do this -- hold, tolerance-hold,
@@ -908,8 +909,20 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         return {"executed": True, "side": "close", "fee_paid": fee, "liquidated": False}
 
-    def _execute_liquidation(self) -> Dict:
-        """Execute forced liquidation of position (futures only)."""
+    def _execute_liquidation(self, open_price: float) -> Dict:
+        """Execute forced liquidation of position (futures only).
+
+        Books at the price the bar actually offered, not at the liquidation price a bar
+        gapping straight through it never traded at (#314) -- the same rule #311 gave
+        stop-losses, via the same helper.
+
+        The loss is then capped at the margin posted for this position, because that is
+        what isolated margin means: the venue closes at the bankruptcy price and the
+        insurance fund absorbs whatever the gap costs beyond the margin. Without the cap
+        the gap rule would overshoot in the other direction and lose more than the
+        account ever committed. The cap binds ONLY on a gap -- at the liquidation price
+        itself the loss is the margin less the maintenance buffer, by construction.
+        """
         trade_info = {
             "executed": True,
             "side": "liquidation",
@@ -917,19 +930,22 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             "liquidated": True,
         }
 
-        # Realize the loss at liquidation price
-        if self.position.position_size > 0:
-            # Long position liquidated
-            loss = (self.liquidation_price - self.position.entry_price) * self.position.position_size
+        is_long = self.position.position_size > 0
+        fill_price = stop_fill_price(self.liquidation_price, open_price, is_long)
+
+        if is_long:
+            loss = (fill_price - self.position.entry_price) * self.position.position_size
         else:
-            # Short position liquidated
-            loss = (self.position.entry_price - self.liquidation_price) * abs(self.position.position_size)
+            loss = (self.position.entry_price - fill_price) * abs(self.position.position_size)
 
         # Return locked margin before applying loss and fees
         margin_to_return = abs(self.position.position_size * self.position.entry_price) / self.leverage
 
+        # Isolated margin: the position cannot lose more than it posted.
+        loss = max(loss, -margin_to_return)
+
         # Apply loss, fees, and return margin
-        liquidation_fee = abs(self.position.position_size * self.liquidation_price) * self.transaction_fee
+        liquidation_fee = abs(self.position.position_size * fill_price) * self.transaction_fee
         self.balance += loss - liquidation_fee + margin_to_return
         self._clamp_balance()
         trade_info["fee_paid"] = liquidation_fee

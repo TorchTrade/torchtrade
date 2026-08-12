@@ -522,6 +522,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
         self._step_indices.clamp_(max=self._total_exec_times - 1)
 
         # Bar N+1
+        # open, for pricing a liquidation on a bar that gapped through it (#314)
+        new_open = self._base_tensor[self._step_indices, 0]
         new_high = self._base_tensor[self._step_indices, 1]
         new_low = self._base_tensor[self._step_indices, 2]
         new_prices = self._base_tensor[self._step_indices, 3]
@@ -530,7 +532,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
         self._execute_trades(action_values, trade_prices)
 
         # Bar N+1's wick, against whatever the trade left open
-        self._apply_liquidation(new_high, new_low)
+        self._apply_liquidation(new_open, new_high, new_low)
         self._advance_hold_counters()
 
 
@@ -569,6 +571,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
     def _apply_liquidation(
         self,
+        open_prices: torch.Tensor,
         high_prices: torch.Tensor,
         low_prices: torch.Tensor,
         exempt_fn: Optional[Callable[[], torch.Tensor]] = None,
@@ -603,12 +606,23 @@ class VectorizedSequentialTradingEnv(EnvBase):
             if not liq_mask.any():
                 return
 
-        # PnL at the liquidation price (both directions, via signed sizes)
-        pnl = (liq_price - self._entry_prices) * self._position_sizes
+        # Booked where the bar actually traded, not at a liquidation price a bar that
+        # gapped straight through it never offered (#314). The scalar engine reaches the
+        # same number through stop_fill_price; torch.where is the batched spelling of
+        # that min/max, and it self-selects for wicks the same way.
+        fill_price = torch.where(
+            self._position_sizes > 0,
+            torch.minimum(open_prices, liq_price),
+            torch.maximum(open_prices, liq_price),
+        )
+        pnl = (fill_price - self._entry_prices) * self._position_sizes
         margin_return = (
             self._position_sizes.abs() * self._entry_prices
         ) / float(self.config.leverage)
-        fee = (self._position_sizes.abs() * liq_price) * self.transaction_fee
+        # Isolated margin: the position cannot lose more than it posted. Binds only on a
+        # gap -- at the liquidation price the loss is the margin less maintenance.
+        pnl = torch.maximum(pnl, -margin_return)
+        fee = (self._position_sizes.abs() * fill_price) * self.transaction_fee
         self._balances = torch.where(
             liq_mask, self._balances + pnl - fee + margin_return, self._balances
         )

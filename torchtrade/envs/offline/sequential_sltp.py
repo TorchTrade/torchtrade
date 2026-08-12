@@ -324,7 +324,7 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         trigger = self._check_sltp_trigger(ohlcv)
 
         if self._check_liquidation(ohlcv) and not self._stop_is_reached_first(trigger, ohlcv):
-            return self._execute_liquidation()
+            return self._execute_liquidation(ohlcv["open"])
 
         if trigger is None:
             return None

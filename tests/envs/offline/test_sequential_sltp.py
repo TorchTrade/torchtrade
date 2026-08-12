@@ -1298,9 +1298,11 @@ class TestLiquidationVsBracketOnADoubleBreachBar:
             f"a gapped-open bar must liquidate, not fill the stop -- got "
             f"{env.history.action_types}"
         )
-        # 400 is an #314 number: the liquidation books at liq_price even though the bar
-        # opened below it. When that is fixed this expectation moves with it.
-        assert env.balance == pytest.approx(400.0)
+        # Wiped, not 400. The bar opened 15% below a 10x entry -- 1.5x the posted
+        # margin -- so isolated margin caps the loss at the whole margin and the account
+        # is gone (#314). Booking at liq_price handed back 400 and told the agent it had
+        # survived, and the understatement grew with leverage.
+        assert env.balance == pytest.approx(0.0)
 
     # The action tuple is spelled out rather than derived: create_sltp_action_map
     # stores a short as ("short", tp, sl) -- the pair swapped, not negated -- so a
