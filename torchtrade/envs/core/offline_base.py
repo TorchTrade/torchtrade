@@ -70,6 +70,20 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             config.seed
         )
 
+        # Slippage draws go through this rather than the global torch stream, which the
+        # policy's exploration also consumes -- so the noise a saved seed reproduces
+        # depended on how many times the policy had sampled (#273). The vectorized env
+        # already had this; the scalar ones did not.
+        self._rng = torch.Generator()
+        if config.seed is not None:
+            self._rng.manual_seed(int(config.seed))
+        else:
+            # torch.Generator()'s default seed is a CONSTANT, so an unseeded config would
+            # have made every env in a process draw the identical slippage sequence -- the
+            # opposite of what seed=None asks for. The global stream this replaces was
+            # nondeterministic by accident of being shared; be nondeterministic on purpose.
+            self._rng.seed()
+
         # Store reset settings
         self.random_start = config.random_start
         self.max_traj_length = config.max_traj_length
@@ -202,6 +216,46 @@ class TorchTradeOfflineEnv(TorchTradeBaseEnv):
             List of market data keys (e.g., ["market_data_1Minute_10", ...])
         """
         return self.market_data_keys
+
+    def _set_seed(self, seed: Optional[int] = None):
+        """Reseed the RNGs that actually drive an episode.
+
+        The base implementation seeds the global numpy and torch streams, which neither
+        of the two RNGs that decide what an episode IS ever reads: the sampler draws its
+        start index from `sampler.np_rng` and the initial cash comes from
+        `initial_cash_sampler.np_rng`, both built once from `config.seed` (#273).
+
+        The consequence was not merely "set_seed does nothing". SerialEnv/ParallelEnv give
+        each worker a DIFFERENT seed in order to decorrelate them, so every worker replayed
+        the same start indices and the same starting cash regardless -- a batch of N
+        identical trajectories, with an effective diversity of 1.
+
+        Distinct streams per RNG, not one seed shared three ways: reusing `seed` for the
+        start index and the cash would lock the two together, so a given start index would
+        always be paired with the same balance.
+        """
+        # `seed=None` falls back to config.seed, which is what the base implementation
+        # documents and what this override would otherwise have silently dropped. It is
+        # also the more useful behaviour: the fallback now reaches the episode RNGs too,
+        # where before it only re-seeded globals that decide nothing.
+        if seed is None:
+            seed = getattr(self.config, "seed", None)
+        if seed is None:
+            return
+
+        seed = int(seed)
+        # SeedSequence.spawn, not seed / seed+1 / seed+2. A fixed offset re-couples runs
+        # whose seeds differ by that offset -- with `seed`/`seed+1`, the cash stream of a
+        # run seeded 1 is bit-for-bit the start-index stream of a run seeded 2, and seeds
+        # 1..N is exactly how sweeps are launched. (torchrl itself derives worker seeds
+        # through seed_generator(), a PCG64 hash, so adjacency comes from the caller, not
+        # from it.) spawn() also keeps the three streams independent of each other.
+        sampler_seed, cash_seed, torch_seed = np.random.SeedSequence(seed).spawn(3)
+        self.sampler.np_rng = np.random.default_rng(sampler_seed)
+        self.initial_cash_sampler.np_rng = np.random.default_rng(cash_seed)
+        self._rng.manual_seed(int(torch_seed.generate_state(1, dtype=np.uint64)[0]))
+        # The globals too, for anything downstream that still reads them.
+        super()._set_seed(seed)
 
     def _reset_history(self):
         """Reset all history tracking to a new HistoryTracker instance.

@@ -244,6 +244,11 @@ class VectorizedSequentialTradingEnv(EnvBase):
         self._rng = torch.Generator()
         if config.seed is not None:
             self._rng.manual_seed(config.seed)
+        else:
+            # torch.Generator()'s default seed is a CONSTANT, so without this every
+            # unseeded instance in a process draws the identical stream -- two independent
+            # envs produced byte-identical initial balances (#273).
+            self._rng.seed()
 
         # Allocate state tensors
         self._balances = torch.zeros(N, dtype=MONEY_DTYPE)
