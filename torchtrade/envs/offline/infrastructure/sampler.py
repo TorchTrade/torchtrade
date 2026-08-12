@@ -1,7 +1,6 @@
 from collections import namedtuple
 from typing import Dict, List, Optional, Tuple, Union, Callable, Sequence
 import logging
-import reprlib
 import warnings
 import numpy as np
 import pandas as pd
@@ -16,6 +15,17 @@ logger = logging.getLogger(__name__)
 
 # PERF: NamedTuple is faster than dict for attribute access
 OHLCV = namedtuple('OHLCV', ['open', 'high', 'low', 'close', 'volume'])
+
+
+def _bounded(value, limit: int = 60) -> str:
+    """Bound the index, the one field of the malformed-OHLC message with no natural size.
+
+    The OHLC values are floats, whose str() is bounded by construction, so they are
+    interpolated directly -- putting them through a truncating repr mangles ordinary
+    prices, which is worse than the unbounded index it would be guarding against.
+    """
+    text = str(value)
+    return text if len(text) <= limit else f"{text[:limit]}... ({len(text)} chars)"
 
 
 class MarketDataObservationSampler:
@@ -58,12 +68,11 @@ class MarketDataObservationSampler:
             first = int(np.argmax(bad))
             raise ValueError(
                 f"Malformed OHLC in {int(bad.sum())} of {len(df)} rows. First at position "
-                f"{first} (index {reprlib.repr(df.index[first])}): "
-                f"open={reprlib.repr(o[first])}, high={reprlib.repr(h[first])}, "
-                f"low={reprlib.repr(l[first])}, close={reprlib.repr(c[first])}. "
-                "high must be >= max(open, close) and low <= min(open, close) -- if you "
-                "built these bars, clamp high/low around open and close rather than drawing "
-                "them off close alone."
+                f"{first} (index {_bounded(df.index[first])}): open={o[first]}, "
+                f"high={h[first]}, low={l[first]}, close={c[first]}. high must be >= "
+                "max(open, close) and low <= min(open, close) -- if you built these bars, "
+                "clamp high/low around open and close rather than drawing them off close "
+                "alone."
             )
 
         # Canonical OHLCV-first order for self.df. The row[:5] contract itself comes from

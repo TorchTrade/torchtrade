@@ -2316,3 +2316,38 @@ def test_a_coarse_bar_is_labelled_exactly_when_its_bin_closes(start, days, gappy
     assert list(got) == list(want), (
         f"labelled {list(got)[:3]}... but the bins close at {list(want)[:3]}..."
     )
+
+
+@pytest.mark.parametrize("index_value,expected_in_message", [
+    (5, "index 5"),                                   # ordinary index, verbatim
+    ("idx-" + "x" * 100_000, "(100004 chars)"),       # hostile index, bounded and labelled
+])
+def test_malformed_ohlc_message_is_bounded_without_mangling_prices(
+    index_value, expected_in_message
+):
+    """The message must survive a hostile index without corrupting an ordinary price.
+
+    A truncating repr bounds both, and numpy scalars render as `np.float64(...)` under it
+    -- the 11-character prefix pushes a small-tick price like 1.2345678901234568e-05 past
+    the budget and drops its mantissa. Only the index has no natural size.
+    """
+    n = 30
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": [43250.75] * n, "high": [43251.0] * n,
+        "low": [43250.0] * n, "close": [43250.5] * n, "volume": [1.0] * n,
+    })
+    df.index = [*range(5), index_value, *range(6, n)]
+    df.iloc[5, df.columns.get_loc("high")] = 0.0
+
+    with pytest.raises(ValueError) as exc:
+        MarketDataObservationSampler(
+            df, time_frames=[TimeFrame(1, TimeFrameUnit.Minute)], window_sizes=[5],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+
+    message = str(exc.value)
+    assert len(message) < 1_000
+    assert expected_in_message in message
+    assert "open=43250.75" in message, "an ordinary price was mangled by the bound"
+    assert "1 of 30 rows" in message and "position 5" in message
