@@ -31,7 +31,6 @@ from torchtrade.envs.core.state import (
     POSITION_UNKNOWN,
     PositionState,
     PositionUnknownError,
-    advance_hold_counter,
     position_direction_from_status,
     position_qty_from_status,
 )

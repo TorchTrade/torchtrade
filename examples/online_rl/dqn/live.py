@@ -15,6 +15,7 @@ Requirements:
     - .env file with BINANCE_API_KEY and BINANCE_SECRET_KEY
     - Binance testnet account (demo=True by default)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,6 +37,7 @@ from torchrl.envs import (
 )
 from torchrl.envs.transforms import InitTracker, RewardSum, StepCounter
 
+from torchtrade.envs.core.live import LiveObservationHalt
 from torchtrade.envs.live.binance.env import (
     BinanceFuturesTorchTradingEnv,
     BinanceFuturesTradingEnvConfig,
@@ -47,6 +49,7 @@ load_dotenv(dotenv_path=".env")
 # ------------------------------------------------------------------
 # Preprocessing (must match training preprocessing exactly)
 # ------------------------------------------------------------------
+
 
 def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """Normalise OHLCV features with StandardScaler (matches training)."""
@@ -68,6 +71,7 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 # ------------------------------------------------------------------
 # Environment
 # ------------------------------------------------------------------
+
 
 def make_live_env(
     symbol: str = "BTCUSDT",
@@ -129,6 +133,7 @@ def make_live_env(
 # ------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------
+
 
 def main():
     parser = argparse.ArgumentParser(description="DQN live trading on Binance")
@@ -206,36 +211,40 @@ def main():
         total_frames=args.total_steps,
         device=device,
         init_random_frames=0,
-    )
+        )
 
     collected_frames = 0
     pbar = tqdm.tqdm(total=args.total_steps)
 
-    for tensordict in collector:
-        current_frames = tensordict.numel()
-        collected_frames += current_frames
-        pbar.update(current_frames)
+    try:
+        # A live env that cannot read its account state raises rather than emitting a
+        # transition, so the run stops here instead of training on fabricated data.
+        for tensordict in collector:
+            current_frames = tensordict.numel()
+            collected_frames += current_frames
+            pbar.update(current_frames)
 
-        replay_buffer.extend(tensordict.reshape(-1))
+            replay_buffer.extend(tensordict.reshape(-1))
 
-        if collected_frames % args.save_every == 0:
-            replay_buffer.dumps(args.save_buffer)
+            if collected_frames % args.save_every == 0:
+                replay_buffer.dumps(args.save_buffer)
+            # Log episode metrics
+            episode_end = tensordict["next", "done"] | tensordict["next", "truncated"]
+            episode_rewards = tensordict["next", "episode_reward"][episode_end]
+            if len(episode_rewards) > 0:
+                episode_length = tensordict["next", "step_count"][episode_end]
+                print(
+                    f"Episode reward: {episode_rewards.mean().item():.4f}, "
+                    f"length: {episode_length.float().mean().item():.0f}"
+                )
+    except LiveObservationHalt as halt:
+        print(f"Live run halted: {halt} (flatten accepted={halt.flatten_accepted})")
+    finally:
+        pbar.close()
+        collector.shutdown()
+        replay_buffer.dumps(args.save_buffer)
 
-        # Log episode metrics
-        episode_end = tensordict["next", "done"] | tensordict["next", "truncated"]
-        episode_rewards = tensordict["next", "episode_reward"][episode_end]
-        if len(episode_rewards) > 0:
-            episode_length = tensordict["next", "step_count"][episode_end]
-            print(
-                f"Episode reward: {episode_rewards.mean().item():.4f}, "
-                f"length: {episode_length.float().mean().item():.0f}"
-            )
-
-    pbar.close()
-    collector.shutdown()
-
-    replay_buffer.dumps(args.save_buffer)
-    print(f"Live run complete. Total frames: {collected_frames}")
+    print(f"Live run finished. Total frames: {collected_frames}")
     print(f"Replay buffer saved to {args.save_buffer}")
 
 

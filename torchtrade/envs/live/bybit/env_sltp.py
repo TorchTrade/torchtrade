@@ -17,6 +17,9 @@ from torchtrade.envs.live.bybit.order_executor import (
 from torchtrade.envs.live.bybit.base import BybitBaseTorchTradingEnv
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
+from torchtrade.envs.core.live import (
+    ObservationFailurePolicy,
+)
 from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
 from torchtrade.envs.core.common import TradeMode
 
@@ -67,10 +70,13 @@ class BybitFuturesSLTPTradingEnvConfig:
     include_base_features: bool = False
     close_position_on_init: bool = True
     close_position_on_reset: bool = False
+    observation_failure_policy: ObservationFailurePolicy | str = ObservationFailurePolicy.HALT
 
     def __post_init__(self):
         from torchtrade.envs.live.bybit.utils import normalize_bybit_timeframe_config
         from torchtrade.envs.core.common import validate_trade_mode
+
+        self.observation_failure_policy = ObservationFailurePolicy(self.observation_failure_policy)
 
         self.trade_mode = validate_trade_mode(self.trade_mode)
         if self.trade_mode == "fractional":
@@ -177,8 +183,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
 
         self._wait_for_next_timestamp()
 
-        new_portfolio_value = self._get_portfolio_value()
-        next_tensordict = self._get_observation()
+        new_portfolio_value, next_tensordict = self._acquire_post_bar_state()
 
         side, _, _ = action_tuple
         if side == "long":

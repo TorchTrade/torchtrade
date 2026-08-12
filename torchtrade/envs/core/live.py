@@ -3,6 +3,7 @@
 import time
 from abc import abstractmethod
 from datetime import datetime, timedelta
+from enum import Enum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import torch
@@ -12,6 +13,30 @@ from torchrl.data import Unbounded
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import PositionState, position_direction_from_status
 from torchtrade.envs.utils.termination import is_bankrupt
+
+
+class ObservationFailurePolicy(str, Enum):
+    """What a live env does with an open position when it can no longer read the venue."""
+
+    HALT = "halt"
+    FLATTEN = "flatten"
+
+
+class LiveObservationHalt(RuntimeError):
+    """Raised when a live env cannot read its own account state.
+
+    `flatten_accepted` records that the venue accepted a close REQUEST, not that the
+    position is gone. See docs/environments/online.md.
+    """
+
+    def __init__(self, error, policy, flatten_accepted=None, flatten_error=None):
+        self.original_exception = error
+        self.policy = policy
+        self.flatten_accepted = flatten_accepted
+        self.flatten_error = flatten_error
+        super().__init__(
+            f"live state acquisition failed with {type(error).__name__}: {error}"
+        )
 
 
 class TorchTradeLiveEnv(TorchTradeBaseEnv):
@@ -38,7 +63,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         api_secret: str = "",
         observer=None,
         trader=None,
-        timezone: str = "America/New_York"
+        timezone: str = "America/New_York",
     ):
         """
         Initialize live trading environment.
@@ -81,13 +106,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         self.position = PositionState()
 
     @abstractmethod
-    def _init_trading_clients(
-        self,
-        api_key: str,
-        api_secret: str,
-        observer,
-        trader
-    ):
+    def _init_trading_clients(self, api_key: str, api_secret: str, observer, trader):
         """
         Initialize observer and trader clients.
 
@@ -105,9 +124,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
             observer: Optional pre-configured observer
             trader: Optional pre-configured trader
         """
-        raise NotImplementedError(
-            "Subclasses must implement _init_trading_clients()"
-        )
+        raise NotImplementedError("Subclasses must implement _init_trading_clients()")
 
     def _wait_for_next_timestamp(self):
         """
