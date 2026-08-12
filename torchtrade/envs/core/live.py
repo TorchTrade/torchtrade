@@ -4,7 +4,6 @@ import time
 from abc import abstractmethod
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import torch
@@ -26,10 +25,8 @@ class ObservationFailurePolicy(str, Enum):
 class LiveObservationHalt(RuntimeError):
     """Raised when a live env cannot read its own account state.
 
-    It propagates rather than becoming a transition: there is no truthful observation to
-    emit, and a plausible one is the fail-open this exists to prevent. `flatten_accepted`
-    records that the venue accepted a close REQUEST, not that the position is gone --
-    confirming that needs the read that just failed.
+    `flatten_accepted` records that the venue accepted a close REQUEST, not that the
+    position is gone. See docs/environments/online.md.
     """
 
     def __init__(self, error, policy, flatten_accepted=None, flatten_error=None):

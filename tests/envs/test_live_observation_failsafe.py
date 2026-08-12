@@ -1,11 +1,4 @@
-"""#343: a live env that cannot read its own account state must halt, not improvise.
-
-The failure mode being prevented is not "an exception escapes" -- it is an env that keeps
-producing transitions after it has lost contact with the venue. Serving the last cached
-observation hands the policy a confident account state the env has just admitted it cannot
-read, and the accompanying `done=True` is auto-reset past by every collector, so a halted
-env becomes a synthetic-data faucet running at CPU speed.
-"""
+"""#343: a live env that cannot read its own account state must halt, not improvise."""
 
 import pytest
 from types import SimpleNamespace

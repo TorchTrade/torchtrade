@@ -30,14 +30,6 @@ from torchtrade.envs.utils.liquidation import nearest_liquidation_price
 
 logger = logging.getLogger(__name__)
 
-# Terminal: the venue told us something impossible about our own money, so there is no
-# safe observation to build. Deliberately NOT RuntimeError -- every adapter wraps any
-# exception in one ("Failed to get account balance: ..."), so catching it would classify
-# a read timeout as terminal and, under FLATTEN, close a live position on a blip. Those
-# keep propagating until #295 separates transient from terminal. KeyError is excluded for
-# the opposite reason: it is a config/programmer error and should crash.
-_TERMINAL_STATE_ERRORS = (PositionUnknownError, ValueError)
-
 
 class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     """Base class for live futures trading environments (Binance, Bitget, Bybit, OKX).
@@ -64,7 +56,9 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         """
         try:
             return self._get_portfolio_value(), self._get_observation()
-        except _TERMINAL_STATE_ERRORS as error:
+        # NOT RuntimeError: adapters wrap timeouts in it, and KeyError is a config
+        # error. See docs/environments/online.md.
+        except (PositionUnknownError, ValueError) as error:
             policy = self.config.observation_failure_policy
             accepted = flatten_error = None
             if policy is ObservationFailurePolicy.FLATTEN:
@@ -75,10 +69,6 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                     logger.exception(
                         "Emergency close_position failed for %s", self.config.symbol
                     )
-            logger.error(
-                "Live environment halted after %s: %s (policy=%s, flatten_accepted=%s)",
-                type(error).__name__, error, policy.value, accepted,
-            )
             raise LiveObservationHalt(error, policy, accepted, flatten_error) from error
 
     def _get_observation(self, advance_hold: bool = True) -> TensorDictBase:
