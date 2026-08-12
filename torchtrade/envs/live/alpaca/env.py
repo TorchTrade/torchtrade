@@ -130,8 +130,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
 
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            self._record_position_after_trade(desired_action, trade_info)
+        self._record_position_after_trade(desired_action, trade_info)
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -278,7 +277,8 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         delta_value = abs(delta_qty * current_price)
 
         if delta_value < min_trade_value:
-            # Already at target position (within tolerance)
+            # Already at target: say so, so the guard can re-arm (#276 follow-up)
+            trade_info["at_target"] = True
             return trade_info
 
         # Determine trade side and amount

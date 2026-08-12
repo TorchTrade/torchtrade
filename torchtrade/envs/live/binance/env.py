@@ -177,8 +177,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # Execute trade
         trade_info = self._execute_trade_if_needed(desired_action)
 
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            self._record_position_after_trade(desired_action, trade_info)
+        self._record_position_after_trade(desired_action, trade_info)
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -455,7 +454,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         delta_notional = abs(delta) * current_price
         min_notional = self._get_min_notional()
         if delta_notional < min_notional:
-            return self._create_trade_info(executed=False)  # Delta too small for exchange
+            return self._create_trade_info(executed=False, at_target=True)  # Delta too small for exchange
 
         # 9. Determine trade direction and execute
         if (current_qty > 0 and target_qty < 0) or (current_qty < 0 and target_qty > 0):

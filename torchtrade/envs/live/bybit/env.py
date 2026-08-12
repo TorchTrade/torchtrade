@@ -140,8 +140,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
 
         trade_info = self._execute_trade_if_needed(desired_action)
 
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            self._record_position_after_trade(desired_action, trade_info)
+        self._record_position_after_trade(desired_action, trade_info)
 
         self._wait_for_next_timestamp()
 
@@ -268,7 +267,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         qty_step = lot_size["qty_step"]
 
         if abs(delta_qty) < min_qty:
-            return self._create_trade_info(executed=False)
+            return self._create_trade_info(executed=False, at_target=True)
 
         side = "buy" if delta_qty > 0 else "sell"
         # Use round() to avoid float artifacts (e.g., 0.003000000000003)
@@ -276,7 +275,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         amount = round(int(abs(delta_qty) / qty_step) * qty_step, step_decimals)
 
         if amount < min_qty:
-            return self._create_trade_info(executed=False)
+            return self._create_trade_info(executed=False, at_target=True)
 
         info = self._execute_market_order(side, amount)
         info["target_qty"] = target_qty

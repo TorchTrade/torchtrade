@@ -176,8 +176,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)
 
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            self._record_position_after_trade(desired_action, trade_info)
+        self._record_position_after_trade(desired_action, trade_info)
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -346,14 +345,14 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
 
         if abs(delta_qty) < min_qty:
             # Already at target (delta below the minimum tradeable size)
-            return self._create_trade_info(executed=False)
+            return self._create_trade_info(executed=False, at_target=True)
 
         side = "buy" if delta_qty > 0 else "sell"
         # Floor to the exchange lot step (CCXT truncates -> never exceeds margin)
         amount = self.trader._round_amount(abs(delta_qty))
 
         if amount < min_qty:
-            return self._create_trade_info(executed=False)
+            return self._create_trade_info(executed=False, at_target=True)
 
         # Execute market order
         info = self._execute_market_order(side, amount)

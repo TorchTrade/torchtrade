@@ -147,8 +147,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
             desired_action, current_qty=position_size, current_price=current_price,
         )
 
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            self._record_position_after_trade(desired_action, trade_info)
+        self._record_position_after_trade(desired_action, trade_info)
 
         self._wait_for_next_timestamp()
 
@@ -271,7 +270,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
 
         lot_size = self.trader.get_lot_size()
         if abs(delta_qty) < lot_size["min_qty"]:
-            return self._create_trade_info(executed=False)
+            return self._create_trade_info(executed=False, at_target=True)
 
         side = "buy" if delta_qty > 0 else "sell"
         # _format_size() in trade() handles lot-step quantization

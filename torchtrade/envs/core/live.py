@@ -317,6 +317,19 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         leaving it 0.0 so the next bar called every COMPLETE fill a divergence. One
         argument cannot be half-passed.
         """
+        if not trade_info.get("executed") or trade_info.get("success") is False:
+            # A refusal that means "we are already there" must RE-ARM the guard. Without
+            # it, a release latches: the release compares against the snapshot target, the
+            # refusal against one recomputed from drifting equity, so the two disagree and
+            # nothing ever restores a finite level -- the env then re-sizes every bar and
+            # trades whenever drift clears the venue minimum, unrequested and unlogged.
+            if trade_info.get("at_target"):
+                self.position.current_action_level = desired_action
+                self.position.target_qty = None
+                self.position.target_tol = 0.0
+                self.position.target_reported = False
+            return
+
         tol = trade_info.get("target_tol") or 0.0
         self.position.current_position = (desired_action > 0) - (desired_action < 0)
         self.position.current_action_level = desired_action

@@ -2055,7 +2055,7 @@ def test_direction_comes_from_the_target_not_the_order_side(desired_action, expe
     the `partial-long` row is the one that was wrong, and it recorded -1.
     """
     env = SimpleNamespace(position=PositionState())
-    TorchTradeLiveEnv._record_position_after_trade(env, desired_action, {})
+    TorchTradeLiveEnv._record_position_after_trade(env, desired_action, {"executed": True})
 
     assert env.position.current_position == expected
     assert env.position.current_action_level == desired_action
@@ -2399,3 +2399,39 @@ def test_a_divergence_is_reported_even_when_reset_already_wrote_nan(caplog):
     with caplog.at_level(logging.WARNING, logger="torchtrade.envs.core.live"):
         TorchTradeLiveEnv._sync_position_from_exchange(env, SimpleNamespace(qty=0.05))
     assert not caplog.records, "a standing fault must report once, not every bar"
+
+
+@pytest.mark.parametrize("trade_info,expect_level,expect_target", [
+    ({"executed": True, "target_qty": 0.5, "target_tol": 0.001}, 0.5, 0.5),
+    ({"executed": False, "at_target": True}, 0.5, None),
+    ({"executed": False}, float("nan"), 0.29),
+    ({"executed": True, "success": False}, float("nan"), 0.29),
+], ids=["traded", "already-there", "refused-for-another-reason", "venue-rejected"])
+def test_a_released_guard_re_arms_only_when_the_env_is_at_target(
+    trade_info, expect_level, expect_target
+):
+    """The release had no way back (#276 follow-up, round 4).
+
+    Only an EXECUTED trade could restore a finite level -- but the release compares the
+    venue against the snapshot target while the refusal compares it against one recomputed
+    from drifting equity, so the two disagree routinely. The level then stayed NaN, the
+    duplicate-action guard stayed dead, and the env quietly became a continuous
+    rebalancer: re-sizing every bar and trading whenever drift cleared the venue minimum,
+    which the policy never asked for and never sees.
+
+    `already-there` is the row that matters: a refusal meaning "we are where we asked to
+    be" re-arms. A refusal for any other reason must NOT, or a real divergence is
+    forgotten.
+    """
+    env = SimpleNamespace(position=PositionState())
+    env.position.current_action_level = float("nan")
+    env.position.target_qty = 0.29
+    env.position.target_reported = True
+
+    TorchTradeLiveEnv._record_position_after_trade(env, 0.5, trade_info)
+
+    if math.isnan(expect_level):
+        assert math.isnan(env.position.current_action_level)
+    else:
+        assert env.position.current_action_level == expect_level
+    assert env.position.target_qty == expect_target
