@@ -1436,3 +1436,39 @@ def test_a_deeper_gap_never_leaves_the_account_richer(side, gaps):
     assert balances == sorted(balances, reverse=True), (
         f"a deeper gap left the account richer: {list(zip(gaps, balances))}"
     )
+
+
+@pytest.mark.parametrize("side,wick,deep_gaps", [
+    ("long", 89.0, [85.0, 60.0, 20.0]),
+    ("short", 111.0, [115.0, 140.0, 180.0]),
+], ids=["long", "short"])
+def test_every_gap_past_bankruptcy_costs_exactly_the_posted_margin(side, wick, deep_gaps):
+    """With free cash left over, the clamp is observable; all-in, it is not (#314).
+
+    Every gapped-liquidation test in this suite ran at position_fraction=1.0, where
+    _clamp_balance() floors the balance at 0 whether the loss was clamped or ran far
+    past the margin -- so deleting the clamp entirely left all 796 offline tests green.
+    Leaving cash outside the margin is what makes the two distinguishable.
+
+    Asserted as an identity rather than a hardcoded balance: once price is past the
+    bankruptcy price the account has lost exactly its margin, so every deeper gap must
+    cost the SAME. An unclamped loss makes them differ; a fill that ignored the gap
+    makes them equal the wick case instead.
+    """
+    def run(open_price, low_or_high):
+        return _run_sltp(
+            [HOLD] * 5 + [(side, -0.05, 0.50) if side == "long" else (side, 0.50, -0.05)] + [HOLD] * 4,
+            leverage=10, sl_levels=[-0.05], tp_levels=[0.50],
+            wick_low=low_or_high if side == "long" else None,
+            wick_high=low_or_high if side == "short" else None,
+            wick_open=open_price, position_fraction=0.30,
+        ).balance
+
+    deep = [run(g, g) for g in deep_gaps]
+    assert deep[0] == pytest.approx(deep[1]) == pytest.approx(deep[2]), (
+        f"past the bankruptcy price the loss is the margin, so these must agree: "
+        f"{list(zip(deep_gaps, deep))}"
+    )
+    # Strictly worse than a bar that only wicked to liquidation: that one fills at the
+    # liquidation price, which is nearer than bankruptcy.
+    assert deep[0] < run(100.0, wick), "a gap must cost more than a wick to the same level"
