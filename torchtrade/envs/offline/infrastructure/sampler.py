@@ -300,6 +300,13 @@ class MarketDataObservationSampler:
         # A stale close paired with this bar's real range can violate low <= close <= high,
         # and close is what becomes current_price, the next entry, the mark and the reward.
         # Clipping keeps it inside a range the market actually traded.
+        # Restore the OHLC invariant the collapse can break: a bar whose `open` is real and
+        # whose `high` is missing takes close as its high, which can land BELOW open -- the
+        # malformed shape the ingestion validator rejects on raw input, reintroduced from
+        # the inside. Widen the extremes to span the two prices that are real, then clip
+        # close, which becomes current_price, the next entry, the mark and the reward.
+        execute_base_filled["high"] = execute_base_filled[["high", "open", "close"]].max(axis=1)
+        execute_base_filled["low"] = execute_base_filled[["low", "open", "close"]].min(axis=1)
         execute_base_filled["close"] = execute_base_filled["close"].clip(
             lower=execute_base_filled["low"], upper=execute_base_filled["high"]
         )

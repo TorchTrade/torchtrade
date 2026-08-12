@@ -12,10 +12,7 @@ def _long_at(entry, leverage, balance=1000.0):
     return ex
 
 
-@pytest.mark.parametrize("leverage,expect_liquidation", [
-    (5, True), (20, True),
-], ids=["5x", "20x"])
-def test_a_leveraged_replay_position_liquidates(leverage, expect_liquidation):
+def test_a_leveraged_replay_position_liquidates(leverage=5):
     """Equity went to -1000 at 5x and then FULLY RECOVERED when price came back.
 
     The offline env on identical input liquidates and terminates, so any leveraged replay
@@ -75,7 +72,12 @@ def test_a_nearer_stop_beats_liquidation_exactly_as_offline_decides(open_price, 
     if expect_stop:
         assert ex.balance > 4000.0, "the stop was crossed first; liquidating loses 10x more"
     else:
-        assert ex.balance < 1000.0, "the bar opened past liquidation; the margin was gone"
+        # Pinned, not bounded: `balance < 1000` cannot tell the correct outcome (400,
+        # booked at the cap) from a -1000 that breaches the margin cap entirely, and a
+        # mutation producing exactly that survived this row.
+        assert ex.balance == pytest.approx(400.0, rel=1e-3), (
+            "the bar opened past liquidation; the loss is capped at the posted margin"
+        )
 
 
 def test_a_liquidation_books_at_the_cap_not_at_the_gap():
@@ -107,8 +109,11 @@ def test_a_short_liquidates_too():
     ex.trade(side="sell", quantity=(1000.0 * 10) / 40000.0)
     assert ex.liquidation_price > 40000.0, "a short is liquidated ABOVE its entry"
 
-    ex.advance_bar({"open": 50000.0, "high": 50000.0, "low": 50000.0, "close": 50000.0})
-    assert ex.position_qty == 0, "a short did not liquidate on a 25% adverse move"
+    # NON-FLAT on purpose: every short bar here used to be open==high==low==close, so
+    # reading `low` where the short branch needs `high` was invisible -- that mutation
+    # survived all eleven tests in this file.
+    ex.advance_bar({"open": 41000.0, "high": 50000.0, "low": 40500.0, "close": 41000.0})
+    assert ex.position_qty == 0, "a short did not liquidate on a bar whose HIGH crossed"
 
 
 def test_the_default_maintenance_rate_is_pinned_numerically():

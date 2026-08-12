@@ -81,3 +81,28 @@ def test_a_stale_close_cannot_land_outside_its_own_bar():
     assert bar["low"] <= bar["close"] <= bar["high"], (
         f"close {bar['close']} sits outside its own bar [{bar['low']}, {bar['high']}]"
     )
+
+
+@pytest.mark.parametrize("missing,other", [("high", "low"), ("low", "high")])
+def test_the_collapse_cannot_reintroduce_a_malformed_bar(missing, other):
+    """The fix broke the invariant it was protecting.
+
+    A bar whose `open` is real and whose `high` is missing takes close as its high, which
+    can land BELOW open -- exactly the malformed shape the ingestion validator rejects on
+    raw input, recreated from the inside where no validator runs.
+    """
+    df = _frame()
+    df.loc[201, ["open", "high", "low", "close"]] = [210.0, 220.0, 195.0, 200.0]
+    df.loc[201, missing] = np.nan
+    when = df.loc[201, "timestamp"]
+
+    with pytest.warns(UserWarning, match="DATA GAPS"):
+        sampler = MarketDataObservationSampler(
+            df, time_frames=[TimeFrame(1, TimeFrameUnit.Minute)], window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+        )
+
+    bar = sampler.execute_base_features_df.loc[when]
+    assert bar["high"] >= max(bar["open"], bar["close"]), "high below a real price"
+    assert bar["low"] <= min(bar["open"], bar["close"]), "low above a real price"
+    assert bar[other] == df.loc[201, other], "the extreme that WAS present was discarded"
