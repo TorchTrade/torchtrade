@@ -378,7 +378,10 @@ class TestOKXFuturesTorchTradingEnv:
             env.reset()
             mock_env_trader.get_status = MagicMock(return_value=status(mark_price))
             td = TensorDict({"action": torch.tensor(len(env.action_levels) - 1)}, [])
-            with pytest.raises(ValueError, match="mark.?price"):
+            # LiveObservationHalt now, not a bare ValueError: the pre-trade read runs
+            # under the halt policy (#355), so an unusable mark surfaces the same way an
+            # unreadable position does. Both are RuntimeError subclasses.
+            with pytest.raises(RuntimeError, match="mark.?price"):
                 env.step(td)
 
         mock_env_trader.trade.assert_not_called()

@@ -21,6 +21,7 @@ from torchtrade.envs.core.live import (
     TorchTradeLiveEnv,
 )
 from torchtrade.envs.core.state import (
+    position_qty_from_status,
     PositionUnknownError,
     advance_hold_counter,
     position_direction_from_status,
@@ -99,6 +100,28 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                         "Emergency close_position failed for %s", self.config.symbol
                     )
             raise LiveObservationHalt(error, policy, accepted, flatten_error) from error
+
+    def _acquire_pre_trade_state(self):
+        """The venue read at the TOP of _step, under the halt policy (#355).
+
+        Wrapping `get_status` alone catches nothing: it RETURNS the POSITION_UNKNOWN
+        sentinel rather than raising, and PositionUnknownError comes later, when something
+        touches the sentinel's attributes. So the wrapper has to span the reads that touch
+        it -- the direction, the size and the mark -- not just the call that fetched it.
+
+        Returns (status, position_status, current_price, position_size).
+        """
+        def read():
+            status = self.trader.get_status()
+            position_status = status.get("position_status", None)
+            return (
+                status,
+                position_status,
+                self._current_mark_price(position_status),
+                position_qty_from_status(position_status),
+            )
+
+        return self._halting(read)
 
     def _acquire_post_bar_state(self) -> tuple[float, TensorDictBase]:
         """Post-bar portfolio value and observation, or halt.

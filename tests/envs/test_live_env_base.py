@@ -648,6 +648,9 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
         observation_failure_policy=ObservationFailurePolicy.HALT, symbol="TEST"
     )
     env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    env._acquire_pre_trade_state = (
+        lambda: TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
+    )
 
     try:
         env_cls._step(env, {"action": 2})
@@ -926,6 +929,9 @@ def test_okx_sizes_through_the_dust_rule_in_step():
         observation_failure_policy=ObservationFailurePolicy.HALT, symbol="TEST"
     )
     env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    env._acquire_pre_trade_state = (
+        lambda: TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
+    )
     with pytest.raises(RuntimeError):
         OKXFuturesTorchTradingEnv._step(env, {"action": 1})
 
@@ -2464,7 +2470,10 @@ def test_the_pre_trade_read_halts_like_the_post_bar_one(exchange, module):
     """
     path = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
             / "live" / exchange / f"{module}.py")
-    assert "self._halting(self.trader.get_status)" in path.read_text(), (
+    # Names the helper, not `_halting(get_status)`: wrapping the fetch alone caught
+    # NOTHING, because get_status RETURNS the POSITION_UNKNOWN sentinel and the error
+    # comes later, when the reads that follow touch its attributes.
+    assert "self._acquire_pre_trade_state()" in path.read_text(), (
         f"{exchange}/{module} reads the venue before trading without the halt policy"
     )
 

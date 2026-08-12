@@ -221,7 +221,7 @@ class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         # above; a reset must never itself count a bar (see advance_hold docstring).
         # Resume against a position the env did not open is the case invariants 2
         # and 3 care about most, and it bypassed the halt entirely (#355).
-        return self._halting(lambda: self._get_observation(advance_hold=False))
+        return self._get_observation(advance_hold=False)
 
     @abstractmethod
     def _execute_trade_if_needed(self, action) -> dict:

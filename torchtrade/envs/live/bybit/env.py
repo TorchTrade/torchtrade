@@ -114,10 +114,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
-        status = self._halting(self.trader.get_status)
-        position_status = status.get("position_status", None)
-        current_price = self._current_mark_price(position_status)
-        position_size = position_qty_from_status(position_status)
+        status, position_status, current_price, position_size = self._acquire_pre_trade_state()
 
         # No-op today (this env's _execute_trade_if_needed recomputes qty live and never reads
         # current_action_level), but keeps the field consistent so adding a duplicate-action
