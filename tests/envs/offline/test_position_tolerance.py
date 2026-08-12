@@ -5,7 +5,12 @@ import torch
 from tensordict import TensorDict
 import pytest
 
-from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
+from torchtrade.envs.offline import (
+    SequentialTradingEnv,
+    SequentialTradingEnvConfig,
+    VectorizedSequentialTradingEnv,
+    VectorizedSequentialTradingEnvConfig,
+)
 
 
 def _env_at(price):
@@ -72,8 +77,6 @@ def test_an_unusable_price_is_refused_where_it_enters(price):
         ))
 
 
-
-
 @pytest.mark.parametrize("price", [100_000.0, 0.35], ids=["btc-like", "doge-like"])
 def test_both_engines_close_a_position_worth_less_than_the_floor(price):
     """Drives BOTH engines, because the previous version of this test named both and
@@ -84,12 +87,6 @@ def test_both_engines_close_a_position_worth_less_than_the_floor(price):
     equivalence harness anchors every fixture at ~$100 with large positions, so it never
     reaches this regime.
     """
-    import torch
-
-    from torchtrade.envs.offline import (
-        VectorizedSequentialTradingEnv,
-        VectorizedSequentialTradingEnvConfig,
-    )
 
     idx = pd.date_range("2024-01-01", periods=600, freq="1min")
     df = pd.DataFrame({"timestamp": idx, "open": price, "high": price * 1.001,
@@ -117,24 +114,6 @@ def test_both_engines_close_a_position_worth_less_than_the_floor(price):
     )
 
 
-@pytest.mark.parametrize("price", [100_000.0, 0.35], ids=["btc-like", "doge-like"])
-def test_a_position_worth_less_than_the_floor_can_still_be_closed(price):
-    """The regression the notional floor introduced, and the reason CLOSE is exempt.
-
-    The floor answers "is this resize worth the fee". Going flat is not a resize -- with
-    the floor applied to it, a position whose value falls under $1 could never be closed:
-    every flat command sat inside the band, and account_state kept reporting a direction
-    the policy had explicitly asked to leave. That is invariant 3, introduced by the fix
-    for #339 rather than found there.
-    """
-    env = _env_at(price)
-    env.position.position_size = 0.50 / price          # fifty cents of position
-
-    info = env._execute_fractional_action(action_value=0.0, execution_price=price)
-
-    assert info["executed"] is True, "a sub-floor position was unclosable"
-
-
 @pytest.mark.parametrize("gap_usd,expect_hold", [(0.50, True), (5.0, False)],
                          ids=["under-the-floor", "over-the-floor"])
 def test_the_vectorized_floor_holds_a_sub_dollar_resize(gap_usd, expect_hold):
@@ -144,11 +123,6 @@ def test_the_vectorized_floor_holds_a_sub_dollar_resize(gap_usd, expect_hold):
     gives a tolerance of 0, so the floor is never consulted. Only a RESIZE consults it, and
     only at a target small enough ($10 here) that the $1 floor beats the 2% term.
     """
-    from torchtrade.envs.offline import (
-        VectorizedSequentialTradingEnv,
-        VectorizedSequentialTradingEnvConfig,
-    )
-
     price = 100_000.0
     idx = pd.date_range("2024-01-01", periods=600, freq="1min")
     df = pd.DataFrame({"timestamp": idx, "open": price, "high": price * 1.001,

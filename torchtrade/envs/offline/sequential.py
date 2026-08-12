@@ -687,12 +687,8 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             self._calculate_fractional_position(action_value, execution_price)
         )
 
-        # Tolerance for position comparison
-        # A CLOSE is exempt from the floor. The floor answers "is this resize worth the
-        # fee", and going flat is not a resize -- with it applied, a position whose value
-        # falls under $1 can never be closed at all: every flat command sits inside the
-        # band, and account_state keeps reporting a direction the policy did not ask for.
-        # That is invariant 3, and this fix introduced it.
+        # A CLOSE is exempt: going flat is not a resize, and a sub-$1 position must
+        # stay closable (#339).
         tolerance = (
             0.0 if target_position_size == 0.0
             else max(

@@ -12,8 +12,6 @@ FeatureProcessingFn = Optional[Union[Callable, Sequence[Callable]]]
 
 logger = logging.getLogger(__name__)
 
-
-
 def _bounded(value, limit: int = 60) -> str:
     """Bound the index, the one field of the malformed-OHLC message with no natural size.
 
