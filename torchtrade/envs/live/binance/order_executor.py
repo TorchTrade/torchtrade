@@ -2,6 +2,7 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 import math
+from decimal import Decimal
 from typing import Dict, List, Optional, Union
 import warnings
 import os
@@ -21,13 +22,15 @@ _FALLBACK_QTY_STEP_PAIR = (_FALLBACK_QTY_STEP, 3)
 
 
 def _step_and_decimals(step_str: str):
-    """(step, decimals) from a LOT_SIZE stepSize string such as "0.001" or "1"."""
-    step = float(step_str)
-    decimals = 0
-    if '.' in step_str:
-        fractional = step_str.rstrip('0').split('.')[1]
-        decimals = len(fractional)
-    return step, decimals
+    """(step, decimals) from a LOT_SIZE stepSize string such as "0.001" or "1".
+
+    Through Decimal rather than string surgery: `"1E-8".split('.')` yields no fractional
+    part, so the naive version reported 0 decimals and the final rounding then annihilated
+    the quantity. Binance sends fixed-point today, but okx's _format_size carries a comment
+    about being bitten by exactly this, so it is not a hypothetical.
+    """
+    d = Decimal(step_str).normalize()
+    return float(d), max(0, -d.as_tuple().exponent)
 
 
 class PositionSide(Enum):
@@ -115,6 +118,7 @@ class BinanceFuturesOrderClass:
         # symbol -> (step, decimals). Every symbol, not just this one: see
         # _fetch_symbol_filters -- close_all_positions closes whatever the account holds.
         self._qty_steps: Dict[str, tuple] = {}
+        self._min_qtys: Dict[str, float] = {}
         self._tick_decimals: int = 0
 
         # Initialize client
@@ -164,7 +168,9 @@ class BinanceFuturesOrderClass:
         Only PRICE_FILTER was read before, so every order quantity went out as
         `round(quantity, 3)` and any symbol whose step is not exactly three decimals got a
         silently wrong size -- a rejected order, or a mis-sized position (#271). Bitget,
-        bybit and okx all fetch the real per-symbol step; binance was the one that did not.
+        bybit and okx all fetch a real step from the venue; binance was the one that did
+        not. This is not full parity with them: they also cache minQty, and until this
+        change binance had neither.
 
         Steps are kept for EVERY symbol, not just this one, because close_all_positions
         closes whatever the account holds -- rounding another symbol's quantity with this
@@ -172,10 +178,22 @@ class BinanceFuturesOrderClass:
         """
         try:
             info = self.client.futures_exchange_info()
-            for s in info['symbols']:
+        except Exception as e:
+            # Transient: fall back and warn. A symbol the venue does not list is a config
+            # error and raises below; a fetch that did not happen is not.
+            logger.warning(f"Could not fetch symbol filters for {self.symbol}: {e}")
+            return
+
+        for s in info['symbols']:
+            # Per symbol, so one malformed entry costs one step rather than the whole
+            # cache. Sweeping every symbol inside a single try meant an unrelated delisted
+            # entry could discard the tick size too -- and whether it did depended on
+            # whether it appeared before or after this symbol in the payload.
+            try:
                 for f in s['filters']:
                     if f['filterType'] == 'LOT_SIZE':
                         self._qty_steps[s['symbol']] = _step_and_decimals(f['stepSize'])
+                        self._min_qtys[s['symbol']] = float(f['minQty'])
                     elif f['filterType'] == 'PRICE_FILTER' and s['symbol'] == self.symbol:
                         tick_str = f['tickSize']
                         self._tick_size = float(tick_str)
@@ -183,17 +201,27 @@ class BinanceFuturesOrderClass:
                         if '.' in tick_str:
                             decimal_part = tick_str.rstrip('0').split('.')[1]
                             self._tick_decimals = len(decimal_part) if decimal_part else 0
-            if self._tick_size is None:
-                logger.warning(f"No PRICE_FILTER found for {self.symbol}, prices will not be rounded")
-            else:
-                logger.info(f"Tick size for {self.symbol}: {self._tick_size} ({self._tick_decimals} decimals)")
-            if self.symbol not in self._qty_steps:
-                logger.warning(
-                    f"No LOT_SIZE found for {self.symbol}, quantities fall back to "
-                    f"{_FALLBACK_QTY_STEP}"
-                )
-        except Exception as e:
-            logger.warning(f"Could not fetch symbol filters for {self.symbol}: {e}")
+            except Exception as e:
+                # Names the offending symbol: the first version logged only self.symbol,
+                # which is never the one at fault and sends the reader the wrong way.
+                logger.warning(f"Skipping malformed filters for {s.get('symbol', '?')}: {e}")
+
+        if self._tick_size is None:
+            logger.warning(f"No PRICE_FILTER found for {self.symbol}, prices will not be rounded")
+        else:
+            logger.info(f"Tick size for {self.symbol}: {self._tick_size} ({self._tick_decimals} decimals)")
+
+        # Fail closed: the venue answered and does not list this symbol, so every order
+        # would go out on the fallback precision -- which is bit-identical to the bug this
+        # fixes, and binance is the one exchange with no min_qty net downstream to catch
+        # the result. A futures executor pointed at a spot-only symbol used to log two
+        # warnings and then trade happily against a symbol that does not exist.
+        if self.symbol not in self._qty_steps:
+            raise ValueError(
+                f"binance returned no LOT_SIZE for {self.symbol}: it is not a futures "
+                f"symbol on this venue, or the payload changed shape. Refusing to size "
+                f"orders on fallback precision."
+            )
 
     def _round_price(self, price: float) -> float:
         """Round a price to the nearest tick size."""
@@ -205,8 +233,10 @@ class BinanceFuturesOrderClass:
     def _round_quantity(self, quantity: float, symbol: Optional[str] = None) -> float:
         """Floor a quantity to the symbol's LOT_SIZE step.
 
-        Floor rather than round-to-nearest, matching bybit: rounding up can ask for more
-        than the available margin covers, and the exchange rejects the whole order.
+        Floor rather than round to nearest: rounding up asks for more than the caller
+        sized, which can exceed the margin available and get the whole order rejected.
+        (bybit floors too, but in `bybit/env.py`'s sizing rather than in its executor --
+        so this is the same reasoning, not the same code.)
         """
         step, decimals = self._qty_steps.get(symbol or self.symbol, _FALLBACK_QTY_STEP_PAIR)
         if step <= 0:
@@ -215,6 +245,33 @@ class BinanceFuturesOrderClass:
         # plenty of exact multiples in binary (0.29/0.01 is 28.999999999999996), and a bare
         # floor would then shave a whole step off a perfectly valid size.
         return round(math.floor(quantity / step + 1e-9) * step, decimals)
+
+    def _format_quantity(self, quantity: float, symbol: Optional[str] = None) -> str:
+        """The venue-precision string for an order, or raise if the size rounds away.
+
+        A string, not a float: `str(7.0)` carries a decimal a symbol with
+        quantityPrecision 0 does not define, which is the documented shape of binance's
+        `-1111 Precision is over the maximum defined for this asset`. okx formats the same
+        way for the same reason.
+
+        Raises below the venue minimum rather than submitting the floored value. That
+        value is 0 whenever the request is under one step -- reachable on any symbol whose
+        step is coarser than the configured size, and routinely in the fractional and
+        notional modes when a small balance meets a six-figure price. The old
+        `round(q, 3)` did it too; the difference is that this says so instead of letting
+        the venue reject an order whose own error message points at the pre-rounding size.
+        """
+        key = symbol or self.symbol
+        step, decimals = self._qty_steps.get(key, _FALLBACK_QTY_STEP_PAIR)
+        rounded = self._round_quantity(quantity, key)
+        minimum = max(self._min_qtys.get(key, 0.0), step)
+        if rounded < minimum:
+            raise ValueError(
+                f"{key}: a quantity of {quantity} floors to {rounded} at the venue step "
+                f"{step}, below the minimum {minimum}. Refusing to submit an order that "
+                f"cannot fill."
+            )
+        return f"{rounded:.{decimals}f}"
 
     def trade(
         self,
@@ -262,7 +319,7 @@ class BinanceFuturesOrderClass:
                 "symbol": self.symbol,
                 "side": side,
                 "type": binance_order_type,
-                "quantity": self._round_quantity(quantity),
+                "quantity": self._format_quantity(quantity),
             }
 
             # Add position side for hedge mode
@@ -307,7 +364,7 @@ class BinanceFuturesOrderClass:
                     "side": "SELL" if side == "BUY" else "BUY",
                     "type": "TAKE_PROFIT_MARKET",
                     "stopPrice": self._round_price(take_profit),
-                    "quantity": self._round_quantity(quantity),
+                    "quantity": self._format_quantity(quantity),
                     "reduceOnly": "true",
                 }
                 if position_side != "BOTH":
@@ -324,7 +381,7 @@ class BinanceFuturesOrderClass:
                     "side": "SELL" if side == "BUY" else "BUY",
                     "type": "STOP_MARKET",
                     "stopPrice": self._round_price(stop_loss),
-                    "quantity": self._round_quantity(quantity),
+                    "quantity": self._format_quantity(quantity),
                     "reduceOnly": "true",
                 }
                 if position_side != "BOTH":
@@ -484,7 +541,7 @@ class BinanceFuturesOrderClass:
                 "symbol": self.symbol,
                 "side": side,
                 "type": "MARKET",
-                "quantity": self._round_quantity(qty),
+                "quantity": self._format_quantity(qty),
                 "reduceOnly": "true",
             }
 
@@ -515,7 +572,7 @@ class BinanceFuturesOrderClass:
                             symbol=symbol,
                             side=side,
                             type="MARKET",
-                            quantity=self._round_quantity(abs(qty), symbol),
+                            quantity=self._format_quantity(abs(qty), symbol),
                             reduceOnly="true",
                         )
                         results[symbol] = True

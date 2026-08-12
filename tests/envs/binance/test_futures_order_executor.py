@@ -68,7 +68,7 @@ class TestBinanceFuturesOrderClass:
                 "symbol": "BTCUSDT",
                 "filters": [
                     {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
-                    {"filterType": "LOT_SIZE", "stepSize": "0.001"},
+                    {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
                 ],
             }]
         })
@@ -447,12 +447,12 @@ class TestBinanceLotSizeRounding:
 
         filters = [{"filterType": "PRICE_FILTER", "tickSize": "0.10"}]
         if with_lot_size:
-            filters.append({"filterType": "LOT_SIZE", "stepSize": step})
+            filters.append({"filterType": "LOT_SIZE", "stepSize": step, "minQty": step})
         symbols = [{"symbol": symbol, "filters": filters}]
         for other_symbol, other_step in extra_symbols:
             symbols.append({
                 "symbol": other_symbol,
-                "filters": [{"filterType": "LOT_SIZE", "stepSize": other_step}],
+                "filters": [{"filterType": "LOT_SIZE", "stepSize": other_step, "minQty": other_step}],
             })
 
         client = MagicMock()
@@ -501,10 +501,81 @@ class TestBinanceLotSizeRounding:
         assert ex._round_quantity(1.2345) == pytest.approx(1.234)
         assert ex._round_quantity(1.2345, "ETHUSDT") == pytest.approx(1.23)
 
-    def test_missing_lot_size_falls_back_rather_than_crashing(self):
-        """A venue response without LOT_SIZE must not take down the executor; it warns and
-        uses the previous hardcoded precision."""
-        assert self._executor(with_lot_size=False)._round_quantity(0.12345) == pytest.approx(0.123)
+    def test_a_symbol_the_venue_does_not_list_refuses_to_construct(self):
+        """Falling back is bit-identical to the bug being fixed.
+
+        The venue answered and does not list this symbol, so every order would go out on
+        the fallback precision -- and binance, unlike the other three, has no minQty check
+        downstream to catch the result. A futures executor pointed at a spot-only symbol
+        used to log two warnings and then trade against a symbol that does not exist.
+        """
+        with pytest.raises(ValueError, match="no LOT_SIZE"):
+            self._executor(with_lot_size=False)
+
+    def test_a_malformed_sibling_symbol_does_not_discard_the_cache(self):
+        """One bad entry cost the whole parse, including the tick size, and whether it did
+        depended on whether it sat before or after this symbol in the payload."""
+        from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+
+        client = MagicMock()
+        client.futures_exchange_info = MagicMock(return_value={"symbols": [
+            {"symbol": "JUNKUSDT", "filters": [{"filterType": "LOT_SIZE"}]},  # no stepSize
+            {"symbol": "BTCUSDT", "filters": [
+                {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
+                {"filterType": "LOT_SIZE", "stepSize": "0.01", "minQty": "0.01"},
+            ]},
+        ]})
+        client.futures_change_leverage = MagicMock(return_value={})
+        client.futures_change_margin_type = MagicMock(return_value={})
+
+        ex = BinanceFuturesOrderClass(
+            symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10, client=client
+        )
+        assert ex._tick_size == pytest.approx(0.10)
+        assert ex._round_quantity(0.12345) == pytest.approx(0.12)
+
+    @pytest.mark.parametrize("step_str,expected", [
+        ("0.001", (0.001, 3)),
+        ("1", (1.0, 0)),
+        ("0.00100000", (0.001, 3)),
+        ("1E-8", (1e-8, 8)),
+        ("1e-05", (1e-5, 5)),
+    ], ids=["plain", "whole", "trailing-zeros", "sci-upper", "sci-lower"])
+    def test_step_parsing_survives_scientific_notation(self, step_str, expected):
+        """`"1E-8".split('.')` has no fractional part, so string surgery reported 0
+        decimals and the final rounding then annihilated the quantity. okx carries a
+        comment about being bitten by exactly this."""
+        from torchtrade.envs.live.binance.order_executor import _step_and_decimals
+
+        step, decimals = _step_and_decimals(step_str)
+        assert step == pytest.approx(expected[0])
+        assert decimals == expected[1]
+
+    @pytest.mark.parametrize("step,quantity", [("1", 0.002), ("0.01", 0.004)],
+                             ids=["whole-units", "hundredths"])
+    def test_a_size_that_floors_away_is_refused_not_submitted(self, step, quantity):
+        """Floored to zero, the old code submitted `quantity: 0.0` on all three legs.
+
+        Reachable in every trade_mode -- `quantity` on any symbol whose step is coarser
+        than the configured size, and `fractional`/`notional` whenever a small balance
+        meets a six-figure price. The venue rejects it, but its error names the
+        pre-rounding size, so both log lines point away from the cause.
+        """
+        ex = self._executor(step=step)
+        with pytest.raises(ValueError, match="below the minimum"):
+            ex._format_quantity(quantity)
+
+    @pytest.mark.parametrize("step,quantity,expected", [
+        ("1", 7.123, "7"),          # not "7.0" -- one decimal more than the venue defines
+        ("0.01", 0.12345, "0.12"),
+        ("0.0001", 0.12345, "0.1234"),
+    ], ids=["whole-units", "hundredths", "ten-thousandths"])
+    def test_quantity_is_formatted_to_the_venue_precision(self, step, quantity, expected):
+        """A string, not a float. `str(7.0)` carries a decimal a symbol with
+        quantityPrecision 0 does not define -- the documented shape of binance's -1111
+        `Precision is over the maximum defined for this asset`. okx formats the same way
+        for the same reason."""
+        assert self._executor(step=step)._format_quantity(quantity) == expected
 
     @pytest.mark.parametrize("take_profit,stop_loss", [
         (None, None),
@@ -536,4 +607,4 @@ class TestBinanceLotSizeRounding:
         ]
         assert quantities, "no order carried a quantity"
         for q in quantities:
-            assert q == pytest.approx(0.12), f"order went out at {q}, not the 0.01 step"
+            assert q == "0.12", f"order went out at {q!r}, not the 0.01 step"
