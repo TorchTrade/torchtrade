@@ -131,9 +131,17 @@ class ReplayOrderExecutor:
         ) and stop_precedes_liquidation(self.sl_price, liq, open_price, is_long=is_long)
 
         if touched and not stop_first:
-            # Booked AT the liquidation price, as the offline env does: that price is the
-            # isolated-margin cap, so filling worse would breach the cap the venue enforces.
-            self._close_at_price(liq)
+            # Where the bar traded, clamped to the bankruptcy price -- the offline env's
+            # rule, restated here only because this branch is the one place replay
+            # priced an exit differently (#314). It used to book AT liq on the claim
+            # that liq was the isolated-margin cap; the cap is the bankruptcy price, and
+            # a bar that gapped through liq never offered it.
+            bankruptcy = self.entry_price * (
+                (1 - 1 / self.leverage) if is_long else (1 + 1 / self.leverage)
+            )
+            fill = stop_fill_price(liq, open_price, is_long=is_long)
+            fill = max(fill, bankruptcy) if is_long else min(fill, bankruptcy)
+            self._close_at_price(fill)
             return
 
         if self.sl_price == 0 and self.tp_price == 0:

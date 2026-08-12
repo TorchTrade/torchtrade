@@ -72,10 +72,12 @@ def test_a_nearer_stop_beats_liquidation_exactly_as_offline_decides(open_price, 
     if expect_stop:
         assert ex.balance > 4000.0, "the stop was crossed first; liquidating loses 10x more"
     else:
-        # Pinned, not bounded: `balance < 1000` cannot tell the correct outcome (400,
-        # booked at the cap) from a -1000 that breaches the margin cap entirely, and a
-        # mutation producing exactly that survived this row.
-        assert ex.balance == pytest.approx(400.0, rel=1e-3), (
+        # Pinned, not bounded: `balance < 1000` cannot tell the correct outcome from a
+        # -1000 that breaches the margin cap entirely, and a mutation producing exactly
+        # that survived this row. The number is 0 rather than the old 400 because the
+        # bar GAPPED past liquidation: 400 was the value of booking at a liquidation
+        # price this bar never offered, and offline stopped doing that in #314.
+        assert ex.balance == pytest.approx(0.0, abs=1e-6), (
             "the bar opened past liquidation; the loss is capped at the posted margin"
         )
 
