@@ -47,3 +47,60 @@ def isolated_liquidation_price(
     if is_long:
         return entry_price * (1 - margin_fraction + maintenance_margin_rate)
     return entry_price * (1 + margin_fraction - maintenance_margin_rate)
+
+
+def cross_liquidation_price(
+    position_size: float,
+    mark_price: float,
+    equity: float,
+    maintenance_margin_rate: float = DEFAULT_MAINTENANCE_MARGIN_RATE,
+) -> float:
+    """Price at which the whole account's equity stops covering maintenance margin.
+
+    Under cross margin the position is not backed by its own isolated margin but by the
+    entire account, so the threshold moves with equity. Solving
+    `equity + size*(P - mark) = mmr * |size| * P` for P gives the expression below.
+
+    This is what makes the estimate honest in the case the isolated formula gets wrong:
+    when losses elsewhere have eaten the collateral, equity is already lower and this
+    prices liquidation NEARER than isolated would. When the account is amply funded it
+    prices it further away -- correctly, because it genuinely is.
+
+    Still an approximation: it cannot see other positions' own maintenance requirements or
+    the venue's tiered margin schedule, which is why the caller pairs it with the isolated
+    price and takes whichever is nearer rather than trusting this alone.
+    """
+    if not (mark_price > 0):
+        raise ValueError(f"mark_price must be positive to price a liquidation, got {mark_price}")
+    if not position_size:
+        raise ValueError("a flat position has no liquidation price")
+
+    sign = 1.0 if position_size > 0 else -1.0
+    return (position_size * mark_price - equity) / (position_size * (1 - sign * maintenance_margin_rate))
+
+
+def nearest_liquidation_price(
+    position_size: float,
+    entry_price: float,
+    mark_price: float,
+    equity: float,
+    leverage: float,
+    maintenance_margin_rate: float = DEFAULT_MAINTENANCE_MARGIN_RATE,
+) -> float:
+    """The more urgent of the isolated and cross estimates, for a venue that publishes none.
+
+    Neither estimate dominates the other. Isolated ignores the rest of the account, so it
+    is wrong whenever collateral elsewhere has been consumed; cross ignores other
+    positions' own maintenance requirements and the venue's risk tiers. Taking whichever
+    sits nearer the mark on the losing side is the only combination that cannot overstate
+    the distance -- and overstating it is the fail-open this whole change removes.
+    """
+    isolated = isolated_liquidation_price(
+        entry_price, is_long=position_size > 0, leverage=leverage,
+        maintenance_margin_rate=maintenance_margin_rate,
+    )
+    cross = cross_liquidation_price(
+        position_size, mark_price, equity, maintenance_margin_rate=maintenance_margin_rate,
+    )
+    # A long is liquidated from below, so nearer means higher; a short from above.
+    return max(isolated, cross) if position_size > 0 else min(isolated, cross)

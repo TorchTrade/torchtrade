@@ -18,7 +18,7 @@ from torchtrade.envs.core.state import (
     position_direction_from_status,
     position_qty_from_status,
 )
-from torchtrade.envs.utils.liquidation import isolated_liquidation_price
+from torchtrade.envs.utils.liquidation import nearest_liquidation_price
 
 
 class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
@@ -110,7 +110,10 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         # `not (x > 0)` rather than `x <= 0`: NaN compares False to everything, so `<= 0`
         # skips the raise and the ternary below then hands back 0.0 -- a held position
         # reading flat, the exact bug this raise exists to prevent.
-        if not (total_balance > 0) and position_value > 0:
+        # Keyed on position_direction (which goes through the dust rule), NOT on
+        # position_value: a venue that omits the notional would zero the second
+        # conjunct and skip the raise on a position that is very much held.
+        if not (total_balance > 0) and position_direction != 0:
             raise ValueError(
                 f"Position worth {position_value} held against non-positive equity "
                 f"({total_balance}). The venue is mid-liquidation or reporting "
@@ -120,25 +123,39 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         if position_size == 0 or current_price == 0:
             distance_to_liquidation = 1.0
-        elif liquidation_price <= 0 and leverage <= 1:
+        elif liquidation_price <= 0 and leverage == 1:
             # No leverage, nothing to be liquidated by, and the offline env says the same
             # via its has_liquidation gate -- so this must NOT fall through to the
             # arithmetic below, where a short would compute (0 - price)/price = -1 and
             # clamp to 0.0, reporting an unlevered position as AT liquidation.
+            #
+            # `== 1`, not `<= 1`: leverage of 0, negative or fractional is venue nonsense,
+            # and letting it take this branch hands a held position the maximally-safe
+            # answer -- #277 one field over. Those fall through to the helper, which
+            # raises. Offline refuses the same inputs in __post_init__.
             distance_to_liquidation = 1.0
         else:
             if liquidation_price <= 0:
-                # Cross-margin venues omit the liquidation price (bybit sends liqPrice=""
-                # for unified/cross, OKX liqPx="" for cross) because the whole account
-                # backs the position, so there is no per-position price to publish.
+                # Cross-margin venues omit the liquidation price (OKX sends liqPx="" for
+                # cross) because the whole account backs the position, so there is no
+                # per-position price to publish. bybit blanks liqPrice for unified/cross
+                # too, but blanks `leverage` with it, so its adapter yields
+                # POSITION_UNKNOWN and raises before reaching here -- OKX is the venue
+                # that actually exercises this path.
                 # Defaulting to 1.0 reported a 20x long one move away from liquidation as
-                # exactly as safe as a flat spot account (#277). Fall back to the
-                # isolated-margin geometry the offline envs train against. Cross margin
-                # liquidates later than isolated, so this understates the distance -- it
-                # errs toward showing the policy more risk than it has, not less.
-                liquidation_price = isolated_liquidation_price(
-                    position_status.entry_price,
-                    is_long=position_size > 0,
+                # exactly as safe as a flat spot account (#277).
+                #
+                # Estimated from BOTH the isolated geometry and the account's equity,
+                # taking whichever is nearer. Isolated alone is not the conservative
+                # choice it looks like: it only sees this position, so once losses
+                # elsewhere have eaten the collateral, cross liquidates earlier than
+                # isolated says and the estimate would overstate the distance -- the same
+                # fail-open, reintroduced with extra steps.
+                liquidation_price = nearest_liquidation_price(
+                    position_size=position_size,
+                    entry_price=position_status.entry_price,
+                    mark_price=current_price,
+                    equity=total_balance,
                     leverage=leverage,
                 )
             if position_size > 0:

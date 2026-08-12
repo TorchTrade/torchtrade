@@ -333,7 +333,7 @@ class BinanceFuturesOrderClass:
 
                     status["position_status"] = PositionStatus(
                         qty=qty,
-                        notional_value=float(pos.get("notional", 0)),
+                        notional_value=float(pos.get("notional") or abs(qty * mark_price)),
                         entry_price=entry_price,
                         unrealized_pnl=unrealized_pnl,
                         unrealized_pnl_pct=unrealized_pnl_pct,

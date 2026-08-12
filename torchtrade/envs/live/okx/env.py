@@ -233,9 +233,12 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
             return 0.0, 0.0, "flat"
 
         balance_info = self.trader.get_account_balance()
-        total_balance = balance_info.get('total_margin_balance', 0.0)
+        # Indexed, and `not (x > 0)`: defaulting to 0.0 turned a broken adapter into a
+        # permanent silent refusal to trade, and `<= 0` lets a NaN balance through to
+        # size a NaN position (#277).
+        total_balance = balance_info['total_margin_balance']
 
-        if total_balance <= 0:
+        if not (total_balance > 0):
             logger.warning("No balance for fractional position sizing")
             return 0.0, 0.0, "flat"
 
