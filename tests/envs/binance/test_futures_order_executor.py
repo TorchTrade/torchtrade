@@ -430,3 +430,110 @@ class TestOrderStatusDataclass:
 
         assert order.is_open is False
         assert order.filled_qty == 0.001
+
+
+class TestBinanceLotSizeRounding:
+    """#271: binance never parsed LOT_SIZE, so every quantity went out as round(q, 3).
+
+    Bitget, bybit and okx all fetch the real per-symbol step. Binance was the exception,
+    and any symbol whose step is not exactly three decimals got a silently wrong size --
+    a rejected order, or a mis-sized position. The mock in this file has carried a
+    LOT_SIZE filter since before the wiring existed, and nothing read it.
+    """
+
+    @staticmethod
+    def _executor(step="0.01", symbol="BTCUSDT", extra_symbols=(), with_lot_size=True):
+        from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+
+        filters = [{"filterType": "PRICE_FILTER", "tickSize": "0.10"}]
+        if with_lot_size:
+            filters.append({"filterType": "LOT_SIZE", "stepSize": step})
+        symbols = [{"symbol": symbol, "filters": filters}]
+        for other_symbol, other_step in extra_symbols:
+            symbols.append({
+                "symbol": other_symbol,
+                "filters": [{"filterType": "LOT_SIZE", "stepSize": other_step}],
+            })
+
+        client = MagicMock()
+        client.futures_exchange_info = MagicMock(return_value={"symbols": symbols})
+        client.futures_change_leverage = MagicMock(return_value={})
+        client.futures_change_margin_type = MagicMock(return_value={})
+        return BinanceFuturesOrderClass(
+            symbol=symbol, trade_mode="quantity", demo=True, leverage=10, client=client
+        )
+
+    @pytest.mark.parametrize("step,quantity,expected", [
+        # round(q, 3) would give 0.123 -- a size the venue rejects outright.
+        ("0.01", 0.12345, 0.12),
+        # A whole-unit step. round(q, 3) gives 7.123, which is not a multiple of anything.
+        ("1", 7.123, 7.0),
+        # Finer than three decimals: round(q, 3) silently discards the tail.
+        ("0.0001", 0.12345, 0.1234),
+    ], ids=["coarser-than-3dp", "whole-units", "finer-than-3dp"])
+    def test_quantity_is_floored_to_the_venue_step(self, step, quantity, expected):
+        """Each cell is chosen so `round(quantity, 3)` gives a different, invalid answer."""
+        assert self._executor(step=step)._round_quantity(quantity) == pytest.approx(expected)
+        assert round(quantity, 3) != pytest.approx(expected)
+
+    @pytest.mark.parametrize("quantity,step", [(0.29, "0.01"), (0.57, "0.01"), (0.58, "0.01")])
+    def test_an_exact_multiple_is_not_shaved_by_a_whole_step(self, quantity, step):
+        """`0.29 / 0.01` is 28.999999999999996, so a bare floor returns 0.28.
+
+        207 of the first 400 exact multiples of the four common steps land just under an
+        integer in binary. Without the epsilon this silently under-sizes a third of them.
+        """
+        assert self._executor(step=step)._round_quantity(quantity) == pytest.approx(quantity)
+
+    def test_floor_not_nearest(self):
+        """Rounding UP can ask for more than the margin covers, and the venue rejects the
+        whole order. bybit floors for the same reason."""
+        assert self._executor(step="0.01")._round_quantity(0.199) == pytest.approx(0.19)
+
+    def test_other_symbols_round_to_their_own_step(self):
+        """close_all_positions closes whatever the account holds, not just this symbol.
+
+        Rounding ETHUSDT's quantity with BTCUSDT's step is the same class of bug this
+        fixes, so the cache is keyed by symbol rather than holding one step.
+        """
+        ex = self._executor(step="0.001", extra_symbols=[("ETHUSDT", "0.01")])
+
+        assert ex._round_quantity(1.2345) == pytest.approx(1.234)
+        assert ex._round_quantity(1.2345, "ETHUSDT") == pytest.approx(1.23)
+
+    def test_missing_lot_size_falls_back_rather_than_crashing(self):
+        """A venue response without LOT_SIZE must not take down the executor; it warns and
+        uses the previous hardcoded precision."""
+        assert self._executor(with_lot_size=False)._round_quantity(0.12345) == pytest.approx(0.123)
+
+    @pytest.mark.parametrize("take_profit,stop_loss", [
+        (None, None),
+        (60000.0, 40000.0),
+    ], ids=["plain", "with-brackets"])
+    def test_submitted_orders_carry_the_step_rounded_quantity(self, take_profit, stop_loss):
+        """The wiring, not the helper.
+
+        Reverting all five call sites to `round(quantity, 3)` left every other cell in this
+        class green -- they exercise `_round_quantity` directly and say nothing about
+        whether an order ever reaches it. That is the same shape as the LOT_SIZE mock this
+        file carried for a year without a reader.
+
+        The bracket variant is here because the TP/SL legs are separate call sites from the
+        main order and were rounded separately.
+        """
+        ex = self._executor(step="0.01")
+        ex.client.futures_create_order = MagicMock(return_value={"orderId": 1, "status": "NEW"})
+
+        assert ex.trade(
+            side="buy", quantity=0.12345, order_type="market",
+            take_profit=take_profit, stop_loss=stop_loss,
+        )
+
+        quantities = [
+            call.kwargs["quantity"]
+            for call in ex.client.futures_create_order.call_args_list
+            if "quantity" in call.kwargs
+        ]
+        assert quantities, "no order carried a quantity"
+        for q in quantities:
+            assert q == pytest.approx(0.12), f"order went out at {q}, not the 0.01 step"

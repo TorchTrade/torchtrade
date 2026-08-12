@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass
 from enum import Enum
+import math
 from typing import Dict, List, Optional, Union
 import warnings
 import os
@@ -13,6 +14,20 @@ from torchtrade.envs.core.state import POSITION_UNKNOWN
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+
+_FALLBACK_QTY_STEP = 0.001
+_FALLBACK_QTY_STEP_PAIR = (_FALLBACK_QTY_STEP, 3)
+
+
+def _step_and_decimals(step_str: str):
+    """(step, decimals) from a LOT_SIZE stepSize string such as "0.001" or "1"."""
+    step = float(step_str)
+    decimals = 0
+    if '.' in step_str:
+        fractional = step_str.rstrip('0').split('.')[1]
+        decimals = len(fractional)
+    return step, decimals
 
 
 class PositionSide(Enum):
@@ -97,6 +112,9 @@ class BinanceFuturesOrderClass:
         self.last_order_id = None
 
         self._tick_size: Optional[float] = None
+        # symbol -> (step, decimals). Every symbol, not just this one: see
+        # _fetch_symbol_filters -- close_all_positions closes whatever the account holds.
+        self._qty_steps: Dict[str, tuple] = {}
         self._tick_decimals: int = 0
 
         # Initialize client
@@ -115,7 +133,7 @@ class BinanceFuturesOrderClass:
 
         # Setup futures account and fetch price precision
         self._setup_futures_account()
-        self._fetch_price_precision()
+        self._fetch_symbol_filters()
 
     def _setup_futures_account(self):
         """Configure futures account settings."""
@@ -140,25 +158,42 @@ class BinanceFuturesOrderClass:
         except Exception as e:
             logger.warning(f"Could not setup futures account: {e}")
 
-    def _fetch_price_precision(self):
-        """Fetch and cache tick size from Binance exchange info."""
+    def _fetch_symbol_filters(self):
+        """Cache tick size and LOT_SIZE step from Binance exchange info.
+
+        Only PRICE_FILTER was read before, so every order quantity went out as
+        `round(quantity, 3)` and any symbol whose step is not exactly three decimals got a
+        silently wrong size -- a rejected order, or a mis-sized position (#271). Bitget,
+        bybit and okx all fetch the real per-symbol step; binance was the one that did not.
+
+        Steps are kept for EVERY symbol, not just this one, because close_all_positions
+        closes whatever the account holds -- rounding another symbol's quantity with this
+        symbol's step would be its own bug.
+        """
         try:
             info = self.client.futures_exchange_info()
             for s in info['symbols']:
-                if s['symbol'] == self.symbol:
-                    for f in s['filters']:
-                        if f['filterType'] == 'PRICE_FILTER':
-                            tick_str = f['tickSize']
-                            self._tick_size = float(tick_str)
-                            # Derive decimal places from tick string for clean formatting
-                            if '.' in tick_str:
-                                decimal_part = tick_str.rstrip('0').split('.')[1]
-                                self._tick_decimals = len(decimal_part) if decimal_part else 0
-                            logger.info(f"Tick size for {self.symbol}: {self._tick_size} ({self._tick_decimals} decimals)")
-                            return
-            logger.warning(f"No PRICE_FILTER found for {self.symbol}, prices will not be rounded")
+                for f in s['filters']:
+                    if f['filterType'] == 'LOT_SIZE':
+                        self._qty_steps[s['symbol']] = _step_and_decimals(f['stepSize'])
+                    elif f['filterType'] == 'PRICE_FILTER' and s['symbol'] == self.symbol:
+                        tick_str = f['tickSize']
+                        self._tick_size = float(tick_str)
+                        # Derive decimal places from tick string for clean formatting
+                        if '.' in tick_str:
+                            decimal_part = tick_str.rstrip('0').split('.')[1]
+                            self._tick_decimals = len(decimal_part) if decimal_part else 0
+            if self._tick_size is None:
+                logger.warning(f"No PRICE_FILTER found for {self.symbol}, prices will not be rounded")
+            else:
+                logger.info(f"Tick size for {self.symbol}: {self._tick_size} ({self._tick_decimals} decimals)")
+            if self.symbol not in self._qty_steps:
+                logger.warning(
+                    f"No LOT_SIZE found for {self.symbol}, quantities fall back to "
+                    f"{_FALLBACK_QTY_STEP}"
+                )
         except Exception as e:
-            logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
+            logger.warning(f"Could not fetch symbol filters for {self.symbol}: {e}")
 
     def _round_price(self, price: float) -> float:
         """Round a price to the nearest tick size."""
@@ -166,6 +201,20 @@ class BinanceFuturesOrderClass:
             rounded = round(price / self._tick_size) * self._tick_size
             return round(rounded, self._tick_decimals)
         return price
+
+    def _round_quantity(self, quantity: float, symbol: Optional[str] = None) -> float:
+        """Floor a quantity to the symbol's LOT_SIZE step.
+
+        Floor rather than round-to-nearest, matching bybit: rounding up can ask for more
+        than the available margin covers, and the exchange rejects the whole order.
+        """
+        step, decimals = self._qty_steps.get(symbol or self.symbol, _FALLBACK_QTY_STEP_PAIR)
+        if step <= 0:
+            return quantity
+        # The epsilon is not decoration: quantity/step lands just under an integer for
+        # plenty of exact multiples in binary (0.29/0.01 is 28.999999999999996), and a bare
+        # floor would then shave a whole step off a perfectly valid size.
+        return round(math.floor(quantity / step + 1e-9) * step, decimals)
 
     def trade(
         self,
@@ -213,7 +262,7 @@ class BinanceFuturesOrderClass:
                 "symbol": self.symbol,
                 "side": side,
                 "type": binance_order_type,
-                "quantity": round(quantity, 3),
+                "quantity": self._round_quantity(quantity),
             }
 
             # Add position side for hedge mode
@@ -258,7 +307,7 @@ class BinanceFuturesOrderClass:
                     "side": "SELL" if side == "BUY" else "BUY",
                     "type": "TAKE_PROFIT_MARKET",
                     "stopPrice": self._round_price(take_profit),
-                    "quantity": round(quantity, 3),
+                    "quantity": self._round_quantity(quantity),
                     "reduceOnly": "true",
                 }
                 if position_side != "BOTH":
@@ -275,7 +324,7 @@ class BinanceFuturesOrderClass:
                     "side": "SELL" if side == "BUY" else "BUY",
                     "type": "STOP_MARKET",
                     "stopPrice": self._round_price(stop_loss),
-                    "quantity": round(quantity, 3),
+                    "quantity": self._round_quantity(quantity),
                     "reduceOnly": "true",
                 }
                 if position_side != "BOTH":
@@ -435,7 +484,7 @@ class BinanceFuturesOrderClass:
                 "symbol": self.symbol,
                 "side": side,
                 "type": "MARKET",
-                "quantity": round(qty, 3),
+                "quantity": self._round_quantity(qty),
                 "reduceOnly": "true",
             }
 
@@ -466,7 +515,7 @@ class BinanceFuturesOrderClass:
                             symbol=symbol,
                             side=side,
                             type="MARKET",
-                            quantity=round(abs(qty), 3),
+                            quantity=self._round_quantity(abs(qty), symbol),
                             reduceOnly="true",
                         )
                         results[symbol] = True
