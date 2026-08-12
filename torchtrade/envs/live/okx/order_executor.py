@@ -222,13 +222,33 @@ class OKXFuturesOrderClass:
         except Exception as e:
             logger.warning(f"Could not set position mode (may already be configured): {e}")
 
+        # OKX's docs: "posSide is only required when margin mode is isolated in
+        # long/short position mode". Its leverage-scope table gives the reason -- that
+        # combination is the ONLY one stored per side; every other is per instrument
+        # family, so one call covers it. Omitting the per-side calls left the env sizing
+        # against leverage the account never had, which is #277 on this one config, and
+        # became a hard construction failure once #277 stopped swallowing rejections
+        # (#363). Narrow because posSide is not APPLICABLE elsewhere -- not because
+        # sending it there is refused, which is undocumented either way.
+        per_side = (
+            self.margin_mode is MarginMode.ISOLATED
+            and self.position_mode is PositionMode.LONG_SHORT
+        )
+        for pos_side in (("long", "short") if per_side else (None,)):
+            self._apply_leverage(pos_side)
+
+    def _apply_leverage(self, pos_side: Optional[str] = None):
+        """Set and verify the leverage for one side, or for the net position."""
         # Not tolerated like the position mode above: leverage sizes every position (#277).
+        request = dict(
+            instId=self.symbol,
+            lever=str(self.leverage),
+            mgnMode=self.margin_mode.value,
+        )
+        if pos_side is not None:
+            request["posSide"] = pos_side
         try:
-            res = self.account_client.set_leverage(
-                instId=self.symbol,
-                lever=str(self.leverage),
-                mgnMode=self.margin_mode.value,
-            )
+            res = self.account_client.set_leverage(**request)
         except Exception as e:
             if not leverage_already_set(e):
                 raise
@@ -249,10 +269,10 @@ class OKXFuturesOrderClass:
                     f"(code={code}): {msg}"
                 )
 
-            # Every entry: long_short_mode returns one per posSide, and checking only
-            # the first leaves the short side unverified. An empty list is not a pass --
-            # okx does not legitimately return one on success, and treating it as
-            # "nothing to check" is how this check goes inert.
+            # An empty list is not a pass -- okx does not legitimately return one on
+            # success, and treating it as "nothing to check" is how this check goes
+            # inert. With posSide sent the response is a single entry echoing it; the
+            # loop predates the per-side calls and costs nothing.
             entries = res.get("data") or []
             if not entries:
                 raise ValueError(
@@ -260,6 +280,13 @@ class OKXFuturesOrderClass:
                     f"response carried no data to check {self.leverage}x against."
                 )
             for entry in entries:
+                # The echoed side too: a response carrying posSide="long" for the short
+                # call passed verification, because only `lever` was ever compared.
+                if pos_side is not None and entry.get("posSide") != pos_side:
+                    raise ValueError(
+                        f"okx confirmed leverage for posSide={entry.get('posSide')!r} "
+                        f"when {pos_side!r} was requested for {self.symbol}"
+                    )
                 require_leverage_applied(self.symbol, self.leverage, entry, "lever")
 
     def trade(
