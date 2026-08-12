@@ -40,7 +40,14 @@ from torchrl.objectives import DiscreteIQLLoss, HardUpdate
 from torchrl.trainers.helpers.models import ACTIVATIONS
 from torchtrade.models.simple_encoders import SimpleCNNEncoder
 import copy
-from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
+from torchtrade.envs.offline import (
+    OneStepTradingEnv,
+    OneStepTradingEnvConfig,
+    SequentialTradingEnv,
+    SequentialTradingEnvConfig,
+    SequentialTradingEnvSLTP,
+    SequentialTradingEnvSLTPConfig,
+)
 import pandas as pd
 
 # ====================================================================

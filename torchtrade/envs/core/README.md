@@ -9,7 +9,6 @@ Root base class for all environments.
 
 **Key Classes:**
 - `TorchTradeBaseEnv`: Abstract base class defining the core environment interface
-- `TorchTradeEnvConfig`: Configuration dataclass for base environment settings
 
 **Core Responsibilities:**
 - Environment lifecycle management (reset, step, close)
@@ -57,14 +56,14 @@ Position state management.
 Reward function abstractions.
 
 **Key Classes:**
-- `RewardFunction`: Abstract base for reward calculations
+- `default_rewards`: the shipped reward functions (e.g. `log_return_reward`)
 - `LogReturnReward`: Log return-based rewards
 - `PercentReturnReward`: Percentage return rewards
 - `RealizedPnLReward`: Realized profit/loss rewards
 - `SharpeRatioReward`: Risk-adjusted return rewards
 
 **Extensibility:**
-Create custom reward functions by extending `RewardFunction` and implementing the `calculate()` method.
+A reward function is a plain callable passed to the env constructor; see `torchtrade/envs/core/default_rewards.py`.
 
 ### `common.py`
 Common types and enums.
@@ -92,7 +91,7 @@ TorchTradeBaseEnv (base.py)
 ### Extending the Base Environment
 
 ```python
-from torchtrade.envs.core import TorchTradeOfflineEnv, TorchTradeEnvConfig
+from torchtrade.envs.core import TorchTradeOfflineEnv
 from dataclasses import dataclass
 
 @dataclass
@@ -134,18 +133,11 @@ unrealized_pnl = position.unrealized_pnl()
 ### Creating Custom Rewards
 
 ```python
-from torchtrade.envs.core import RewardFunction
+# A reward function is a plain callable, not a subclass.
+def custom_reward(env) -> float:
+    return float(env.portfolio_value - env.previous_portfolio_value)
 
-class CustomReward(RewardFunction):
-    def calculate(self, state, action, next_state):
-        # Custom reward logic
-        pnl = next_state.portfolio_value - state.portfolio_value
-        risk_penalty = self._calculate_risk(state)
-        return pnl - risk_penalty
-
-    def _calculate_risk(self, state):
-        # Risk calculation logic
-        return state.position_size * 0.01
+env = SequentialTradingEnv(df, config, reward_function=custom_reward)
 ```
 
 ## Design Patterns

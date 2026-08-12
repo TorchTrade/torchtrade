@@ -14,7 +14,7 @@ Live trading integration with Bitget for crypto futures markets (USDT-margined).
 ## Quick Start
 
 ```python
-from torchtrade.envs import BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig
+from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = BitgetFuturesTradingEnvConfig(
@@ -104,7 +104,7 @@ config = BitgetFuturesTradingEnvConfig(
 ## Example: Basic Trading
 
 ```python
-from torchtrade.envs import BitgetFuturesTorchTradingEnv
+from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv
 
 config = BitgetFuturesTradingEnvConfig(
     api_key=os.environ["BITGET_TESTNET_KEY"],
@@ -127,7 +127,7 @@ obs, reward, done, info = env.step(action)
 ## Example: With SL/TP
 
 ```python
-from torchtrade.envs import BitgetFuturesSLTPTorchTradingEnv
+from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTorchTradingEnv
 
 config = BitgetFuturesSLTPTradingEnvConfig(
     api_key=os.environ["BITGET_TESTNET_KEY"],

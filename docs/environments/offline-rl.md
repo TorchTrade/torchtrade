@@ -74,7 +74,7 @@ for batch in collector:
 ### From Real Online Environments
 
 ```python
-from torchtrade.envs.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 
 # Collect real trading data (paper trading recommended)
 env = AlpacaTorchTradingEnv(config)

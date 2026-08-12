@@ -40,16 +40,16 @@ binance_tf = timeframe_to_binance(tf)  # "1d"
 Discrete action space mappings for different trading strategies.
 
 **Functions:**
-- `discrete_action_map_long_only()`: 3-action map (BUY, SELL, HOLD)
+- `create_alpaca_sltp_action_map()`: 3-action map (BUY, SELL, HOLD)
 - `discrete_action_map_long_short()`: 5-action map (LONG, SHORT, CLOSE, HOLD, etc.)
-- `discrete_action_map_long_only_ternary()`: Simplified 3-action map
+- `create_sltp_action_map()`: Simplified 3-action map
 - `discrete_action_map_futures_positions()`: Futures-specific position actions
 
 **Example:**
 ```python
-from torchtrade.envs.utils import discrete_action_map_long_only
+from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map
 
-action_map = discrete_action_map_long_only()
+action_map = create_alpaca_sltp_action_map()
 # Returns: {0: "BUY", 1: "SELL", 2: "HOLD"}
 
 # Use in environment
@@ -62,13 +62,12 @@ action_name = action_map[action]
 Stop-loss and take-profit calculation utilities.
 
 **Functions:**
-- `calculate_sltp_prices()`: Calculate SL/TP price levels
-- `check_sltp_hit()`: Check if SL or TP was triggered
+- `calculate_bracket_prices()`: SL/TP price levels for a bracket order
 - `update_sltp_prices()`: Update SL/TP levels (e.g., trailing stop)
 
 **Example:**
 ```python
-from torchtrade.envs.utils import calculate_sltp_prices, check_sltp_hit
+from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
 
 # Calculate SL/TP levels
 entry_price = 100.0
@@ -125,23 +124,20 @@ class MyEnvWithSLTP(SLTPMixin, TorchTradeOfflineEnv):
 Position sizing utilities for fractional share/contract trading.
 
 **Key Classes:**
-- `FractionalPositionSizing`: Calculate position sizes based on portfolio percentage
+- `calculate_fractional_position()`: position size from a fractional action value
 
 **Example:**
 ```python
-from torchtrade.envs.utils import FractionalPositionSizing
-
-sizer = FractionalPositionSizing(
-    portfolio_value=10000.0,
-    max_position_fraction=0.1  # Max 10% per position
+from torchtrade.envs.utils.fractional_sizing import (
+    PositionCalculationParams,
+    calculate_fractional_position,
 )
 
-# Calculate position size
-position_size = sizer.calculate(
-    action_size=0.5,  # Use 50% of available
-    current_price=100.0
+qty, notional, side = calculate_fractional_position(
+    PositionCalculationParams(
+        balance=10000.0, action_value=0.5, current_price=50000.0, leverage=5
+    )
 )
-# position_size = 5.0 shares (50% of 10% = 5% of portfolio)
 ```
 
 ### `metrics.py`
@@ -149,35 +145,15 @@ position_size = sizer.calculate(
 Performance metric calculations for trading strategies.
 
 **Functions:**
-- `calculate_metrics()`: Comprehensive metric calculation
-  - Total return
-  - Sharpe ratio
-  - Maximum drawdown
-  - Win rate
-  - Profit factor
-  - And more...
 
 **Example:**
-```python
-from torchtrade.envs.utils import calculate_metrics
 
-metrics = calculate_metrics(
-    returns=daily_returns,
-    trades=trade_history,
-    portfolio_values=portfolio_values
-)
-
-print(f"Sharpe Ratio: {metrics['sharpe_ratio']:.2f}")
-print(f"Max Drawdown: {metrics['max_drawdown']:.2%}")
-print(f"Win Rate: {metrics['win_rate']:.2%}")
-```
 
 ## Common Use Cases
 
 ### Setting Up an Environment with Utilities
 
 ```python
-from torchtrade.envs import SeqLongOnlyEnv, SeqLongOnlyEnvConfig
 from torchtrade.envs.utils import (
     TimeFrame,
     TimeFrameUnit,
@@ -186,16 +162,14 @@ from torchtrade.envs.utils import (
 )
 
 # Configure environment
-config = SeqLongOnlyEnvConfig(
     timeframe=TimeFrame(1, TimeFrameUnit.DAY),
     window_size=50,
 )
 
 # Create environment
-env = SeqLongOnlyEnv(df=data, config=config)
 
 # Get action mapping
-action_map = discrete_action_map_long_only()
+action_map = create_alpaca_sltp_action_map()
 print(f"Available actions: {action_map}")
 
 # After training, calculate metrics

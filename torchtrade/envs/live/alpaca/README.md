@@ -14,7 +14,7 @@ Live trading integration with Alpaca for US equities and crypto spot markets.
 ## Quick Start
 
 ```python
-from torchtrade.envs import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = AlpacaTradingEnvConfig(
@@ -87,7 +87,7 @@ action = 0  # BUY at current market price
 
 ```python
 import os
-from torchtrade.envs import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 
 # Load keys from environment
 config = AlpacaTradingEnvConfig(
@@ -115,7 +115,7 @@ print(f"Final value: ${env.portfolio_value:.2f}")
 ## Example: With Stop-Loss/Take-Profit
 
 ```python
-from torchtrade.envs import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
+from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
 
 config = AlpacaSLTPTradingEnvConfig(
     api_key=os.environ["ALPACA_KEY"],

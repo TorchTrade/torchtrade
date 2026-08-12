@@ -58,7 +58,7 @@ Live environments use a **query-first pattern**: they query the actual exchange 
 ### AlpacaTorchTradingEnv
 
 ```python
-from torchtrade.envs.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 
 config = AlpacaTradingEnvConfig(
     symbol="BTC/USD",
@@ -74,7 +74,7 @@ env = AlpacaTorchTradingEnv(config)
 ### AlpacaSLTPTorchTradingEnv
 
 ```python
-from torchtrade.envs.alpaca import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
+from torchtrade.envs.live.alpaca import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
 
 config = AlpacaSLTPTradingEnvConfig(
     symbol="BTC/USD",
@@ -99,7 +99,7 @@ env = AlpacaSLTPTorchTradingEnv(config)
 ### BinanceFuturesTorchTradingEnv
 
 ```python
-from torchtrade.envs.binance import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
+from torchtrade.envs.live.binance import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 
 config = BinanceFuturesTradingEnvConfig(
     symbol="BTCUSDT",
@@ -117,7 +117,7 @@ env = BinanceFuturesTorchTradingEnv(config)
 ### BinanceFuturesSLTPTorchTradingEnv
 
 ```python
-from torchtrade.envs.binance import BinanceFuturesSLTPTorchTradingEnv, BinanceFuturesSLTPTradingEnvConfig
+from torchtrade.envs.live.binance import BinanceFuturesSLTPTorchTradingEnv, BinanceFuturesSLTPTradingEnvConfig
 
 config = BinanceFuturesSLTPTradingEnvConfig(
     symbol="BTCUSDT",
@@ -162,8 +162,8 @@ env = BinanceFuturesSLTPTorchTradingEnv(config)
 ### BitgetFuturesTorchTradingEnv
 
 ```python
-from torchtrade.envs.bitget import BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig
-from torchtrade.envs.bitget.futures_order_executor import MarginMode, PositionMode
+from torchtrade.envs.live.bitget import BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig
+from torchtrade.envs.live.bitget.order_executor import MarginMode, PositionMode
 import os
 from dotenv import load_dotenv
 
@@ -193,8 +193,8 @@ env = BitgetFuturesTorchTradingEnv(
 ### BitgetFuturesSLTPTorchTradingEnv
 
 ```python
-from torchtrade.envs.bitget import BitgetFuturesSLTPTorchTradingEnv, BitgetFuturesSLTPTradingEnvConfig
-from torchtrade.envs.bitget.futures_order_executor import MarginMode, PositionMode
+from torchtrade.envs.live.bitget import BitgetFuturesSLTPTorchTradingEnv, BitgetFuturesSLTPTradingEnvConfig
+from torchtrade.envs.live.bitget.order_executor import MarginMode, PositionMode
 import os
 from dotenv import load_dotenv
 
@@ -238,8 +238,8 @@ env = BitgetFuturesSLTPTorchTradingEnv(
 ### BybitFuturesTorchTradingEnv
 
 ```python
-from torchtrade.envs.bybit import BybitFuturesTorchTradingEnv, BybitFuturesTradingEnvConfig
-from torchtrade.envs.bybit import MarginMode, PositionMode
+from torchtrade.envs.live.bybit import BybitFuturesTorchTradingEnv, BybitFuturesTradingEnvConfig
+from torchtrade.envs.live.bybit import MarginMode, PositionMode
 import os
 from dotenv import load_dotenv
 
@@ -266,8 +266,8 @@ env = BybitFuturesTorchTradingEnv(
 ### BybitFuturesSLTPTorchTradingEnv
 
 ```python
-from torchtrade.envs.bybit import BybitFuturesSLTPTorchTradingEnv, BybitFuturesSLTPTradingEnvConfig
-from torchtrade.envs.bybit import MarginMode, PositionMode
+from torchtrade.envs.live.bybit import BybitFuturesSLTPTorchTradingEnv, BybitFuturesSLTPTradingEnvConfig
+from torchtrade.envs.live.bybit import MarginMode, PositionMode
 import os
 from dotenv import load_dotenv
 

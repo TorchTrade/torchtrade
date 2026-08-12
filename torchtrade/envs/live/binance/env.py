@@ -47,7 +47,6 @@ class BinanceFuturesTradingEnvConfig:
     action_levels: List[float] = None  # Custom action levels, or None for defaults
 
     # Reward settings
-    position_penalty: float = 0.0001
 
     # Termination settings
     done_on_bankruptcy: bool = True
@@ -258,34 +257,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             closed_position=True,
         )
 
-    def _handle_long_action(self, current_qty: float) -> Dict:
-        """Handle go long action."""
-        # Close short position if necessary
-        if current_qty < 0:
-            self.trader.close_position()
 
-        # Only execute if not already long
-        if current_qty > 0:
-            return self._create_trade_info(executed=False)
-
-        return self._execute_market_order("BUY", self.config.quantity_per_trade)
-
-    def _handle_short_action(self, current_qty: float) -> Dict:
-        """Handle go short action."""
-        # Close long position if necessary
-        if current_qty > 0:
-            self.trader.close_position()
-
-        # Only execute if not already short
-        if current_qty < 0:
-            return self._create_trade_info(executed=False)
-
-        return self._execute_market_order("SELL", self.config.quantity_per_trade)
-
-    # Exchange metadata helpers
-    # Note: These methods are Binance-specific (query Binance API structures and parse Binance filter formats).
-    # Other exchanges would need similar methods but with different implementations for their API structures.
-    # Not extracted to base class due to exchange-specific implementation details.
 
     def _get_symbol_info(self) -> Dict:
         """Get exchange symbol information for precision and lot size.

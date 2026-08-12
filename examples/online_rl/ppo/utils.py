@@ -27,7 +27,14 @@ from torchrl.modules import (
 from torchtrade.models.simple_encoders import SimpleCNNEncoder, SimpleMLPEncoder
 from torchtrade.models import BatchNormMLP
 
-from torchtrade.envs import SequentialTradingEnv, SequentialTradingEnvConfig, SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
+from torchtrade.envs import (
+    OneStepTradingEnv,
+    OneStepTradingEnvConfig,
+    SequentialTradingEnv,
+    SequentialTradingEnvConfig,
+    SequentialTradingEnvSLTP,
+    SequentialTradingEnvSLTPConfig,
+)
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS

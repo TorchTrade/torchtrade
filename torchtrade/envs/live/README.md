@@ -34,7 +34,7 @@ live/
 ### Alpaca Live Trading
 
 ```python
-from torchtrade.envs import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = AlpacaTradingEnvConfig(
@@ -61,7 +61,7 @@ while True:
 ### Binance Futures Trading
 
 ```python
-from torchtrade.envs import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
+from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = BinanceFuturesTradingEnvConfig(
@@ -167,7 +167,7 @@ config = AlpacaTradingEnvConfig(
 Use SL/TP environments for automatic risk management:
 
 ```python
-from torchtrade.envs import AlpacaSLTPTorchTradingEnv
+from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv
 
 config = AlpacaSLTPTradingEnvConfig(
     # ...
@@ -325,9 +325,9 @@ print(f"Open Positions: {metrics['num_positions']}")
 Environments can integrate with monitoring:
 
 ```python
-from torchtrade.integrations import WandbLogger
+from wandb import init as wandb_init
 
-logger = WandbLogger(project="live-trading")
+wandb_init(project="live-trading")
 
 env = AlpacaTorchTradingEnv(config=config, logger=logger)
 # Automatically logs metrics to Weights & Biases
@@ -385,7 +385,7 @@ config = AlpacaTradingEnvConfig(
 
 ```python
 import pytest
-from torchtrade.envs import AlpacaTorchTradingEnv
+from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv
 
 @pytest.mark.live
 def test_alpaca_connection():

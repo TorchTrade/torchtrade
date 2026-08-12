@@ -26,7 +26,14 @@ from torchrl.modules import (
     SafeModule,
 )
 
-from torchtrade.envs import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
+from torchtrade.envs import (
+    OneStepTradingEnv,
+    OneStepTradingEnvConfig,
+    SequentialTradingEnv,
+    SequentialTradingEnvConfig,
+    SequentialTradingEnvSLTP,
+    SequentialTradingEnvSLTPConfig,
+)
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torchrl.trainers.helpers.models import ACTIVATIONS

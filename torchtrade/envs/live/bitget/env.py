@@ -49,7 +49,6 @@ class BitgetFuturesTradingEnvConfig:
     action_levels: List[float] = None  # Custom action levels, or None for defaults
 
     # Reward settings
-    position_penalty: float = 0.0001  # Penalty for holding positions
 
     # Termination settings
     done_on_bankruptcy: bool = True

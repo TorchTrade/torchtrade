@@ -193,7 +193,7 @@ EOF
 ```
 
 ```python
-from torchtrade.envs.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 
 config = AlpacaTradingEnvConfig(
     symbol="BTC/USD",
@@ -217,7 +217,7 @@ BINANCE_SECRET_KEY=your_binance_secret_key
 ```
 
 ```python
-from torchtrade.envs.binance import (
+from torchtrade.envs.live.binance import (
     BinanceFuturesTorchTradingEnv,
     BinanceFuturesTradingEnvConfig
 )

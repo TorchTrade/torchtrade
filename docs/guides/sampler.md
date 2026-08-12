@@ -28,8 +28,8 @@ The sampler takes your 1-minute OHLCV data, resamples it to multiple timeframes,
 
 ```python
 import pandas as pd
-from torchtrade.envs.offline.sampler import MarketDataObservationSampler
-from torchtrade.envs.offline.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservationSampler
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 # Load your OHLCV data
 df = pd.read_csv("btcusdt_1m.csv")
