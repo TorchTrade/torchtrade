@@ -1,5 +1,7 @@
 """Live trading environments for TorchTrade."""
 
+from torchtrade.envs.core.live import ObservationFailurePolicy
+
 # Alpaca
 from torchtrade.envs.live.alpaca import (
     AlpacaObservationClass,
@@ -62,6 +64,7 @@ from torchtrade.envs.live.polymarket import (
 )
 
 __all__ = [
+    "ObservationFailurePolicy",
     # Alpaca
     "AlpacaObservationClass",
     "AlpacaOrderClass",

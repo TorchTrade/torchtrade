@@ -9,18 +9,34 @@ Alpaca (spot) is NOT a futures env: it hardcodes leverage=1 and distance_to_liqu
 and reads cash rather than total_wallet_balance. It keeps its own `_get_observation` and
 inherits `TorchTradeLiveEnv` directly.
 """
+import logging
 import math
 
 import torch
 from tensordict import TensorDict, TensorDictBase
 
-from torchtrade.envs.core.live import TorchTradeLiveEnv
+from torchtrade.envs.core.live import (
+    LiveObservationHalt,
+    ObservationFailurePolicy,
+    TorchTradeLiveEnv,
+)
 from torchtrade.envs.core.state import (
+    PositionUnknownError,
     advance_hold_counter,
     position_direction_from_status,
     position_qty_from_status,
 )
 from torchtrade.envs.utils.liquidation import nearest_liquidation_price
+
+logger = logging.getLogger(__name__)
+
+# Terminal: the venue told us something impossible about our own money, so there is no
+# safe observation to build. Deliberately NOT RuntimeError -- every adapter wraps any
+# exception in one ("Failed to get account balance: ..."), so catching it would classify
+# a read timeout as terminal and, under FLATTEN, close a live position on a blip. Those
+# keep propagating until #295 separates transient from terminal. KeyError is excluded for
+# the opposite reason: it is a config/programmer error and should crash.
+_TERMINAL_STATE_ERRORS = (PositionUnknownError, ValueError)
 
 
 class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
@@ -41,6 +57,30 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     - _reset(): Provider-specific reset scaffolding
     """
 
+    def _acquire_post_bar_state(self) -> tuple[float, TensorDictBase]:
+        """Post-bar portfolio value and observation, or halt.
+
+        Raises rather than returning a cached observation: see docs/environments/online.md.
+        """
+        try:
+            return self._get_portfolio_value(), self._get_observation()
+        except _TERMINAL_STATE_ERRORS as error:
+            policy = self.config.observation_failure_policy
+            accepted = flatten_error = None
+            if policy is ObservationFailurePolicy.FLATTEN:
+                try:
+                    accepted = bool(self.trader.close_position())
+                except Exception as exc:
+                    flatten_error = exc
+                    logger.exception(
+                        "Emergency close_position failed for %s", self.config.symbol
+                    )
+            logger.error(
+                "Live environment halted after %s: %s (policy=%s, flatten_accepted=%s)",
+                type(error).__name__, error, policy.value, accepted,
+            )
+            raise LiveObservationHalt(error, policy, accepted, flatten_error) from error
+
     def _get_observation(self, advance_hold: bool = True) -> TensorDictBase:
         """Get the current observation state.
 
@@ -58,7 +98,9 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         if self.config.include_base_features:
             base_features = obs_dict.get("base_features")
 
-        market_data = [obs_dict[features_name] for features_name in self.observer.get_keys()]
+        market_data = [
+            obs_dict[features_name] for features_name in self.observer.get_keys()
+        ]
 
         # Get account state from trader (single fetch: holding_time and
         # position_direction below MUST come from this same snapshot)
@@ -204,9 +246,13 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                     leverage=leverage,
                 )
             if position_size > 0:
-                distance_to_liquidation = (current_price - liquidation_price) / current_price
+                distance_to_liquidation = (
+                    current_price - liquidation_price
+                ) / current_price
             else:
-                distance_to_liquidation = (liquidation_price - current_price) / current_price
+                distance_to_liquidation = (
+                    liquidation_price - current_price
+                ) / current_price
             distance_to_liquidation = max(0.0, distance_to_liquidation)
 
         account_state = torch.tensor(

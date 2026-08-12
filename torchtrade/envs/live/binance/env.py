@@ -10,6 +10,9 @@ from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical
 
 from torchtrade.envs.utils.timeframe import TimeFrame
+from torchtrade.envs.core.live import (
+    ObservationFailurePolicy,
+)
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
     BinanceFuturesOrderClass,
@@ -54,10 +57,13 @@ class BinanceFuturesTradingEnvConfig:
     include_base_features: bool = False
     close_position_on_init: bool = True
     close_position_on_reset: bool = False
+    observation_failure_policy: ObservationFailurePolicy | str = ObservationFailurePolicy.HALT
 
     def __post_init__(self):
         """Normalize timeframe configuration and build action levels."""
         from torchtrade.envs.live.binance.utils import normalize_binance_timeframe_config
+
+        self.observation_failure_policy = ObservationFailurePolicy(self.observation_failure_policy)
 
         self.execute_on, self.time_frames, self.window_sizes = normalize_binance_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
@@ -184,8 +190,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         self._wait_for_next_timestamp()
 
         # Get updated state
-        new_portfolio_value = self._get_portfolio_value()
-        next_tensordict = self._get_observation()
+        new_portfolio_value, next_tensordict = self._acquire_post_bar_state()
 
         # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(

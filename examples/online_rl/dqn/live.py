@@ -15,6 +15,7 @@ Requirements:
     - .env file with BINANCE_API_KEY and BINANCE_SECRET_KEY
     - Binance testnet account (demo=True by default)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,6 +37,7 @@ from torchrl.envs import (
 )
 from torchrl.envs.transforms import InitTracker, RewardSum, StepCounter
 
+from torchtrade.envs.core.live import LiveObservationHalt
 from torchtrade.envs.live.binance.env import (
     BinanceFuturesTorchTradingEnv,
     BinanceFuturesTradingEnvConfig,
@@ -44,9 +46,11 @@ from torchtrade.envs.live.binance.env import (
 load_dotenv(dotenv_path=".env")
 
 
+
 # ------------------------------------------------------------------
 # Preprocessing (must match training preprocessing exactly)
 # ------------------------------------------------------------------
+
 
 def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     """Normalise OHLCV features with StandardScaler (matches training)."""
@@ -68,6 +72,7 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 # ------------------------------------------------------------------
 # Environment
 # ------------------------------------------------------------------
+
 
 def make_live_env(
     symbol: str = "BTCUSDT",
@@ -109,8 +114,7 @@ def make_live_env(
     obs_keys = list(env.observation_spec.keys())
     market_keys = [k for k in obs_keys if k.startswith("market_")]
     flatten_transforms = [
-        FlattenObservation(in_keys=[k], first_dim=-2, last_dim=-1)
-        for k in market_keys
+        FlattenObservation(in_keys=[k], first_dim=-2, last_dim=-1) for k in market_keys
     ]
 
     env = TransformedEnv(
@@ -130,15 +134,20 @@ def make_live_env(
 # Main
 # ------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(description="DQN live trading on Binance")
-    parser.add_argument("--weights", type=str, default=None, help="Path to .pth weights file")
+    parser.add_argument(
+        "--weights", type=str, default=None, help="Path to .pth weights file"
+    )
     parser.add_argument("--symbol", type=str, default="BTCUSDT")
     parser.add_argument("--time_frames", nargs="+", default=["1Min"])
     parser.add_argument("--window_sizes", nargs="+", type=int, default=[24])
     parser.add_argument("--execute_on", type=str, default="1Min")
     parser.add_argument("--leverage", type=int, default=2)
-    parser.add_argument("--action_levels", nargs="+", type=float, default=[-1.0, 0.0, 1.0])
+    parser.add_argument(
+        "--action_levels", nargs="+", type=float, default=[-1.0, 0.0, 1.0]
+    )
     parser.add_argument("--demo", action="store_true", default=True)
     parser.add_argument("--no_demo", action="store_false", dest="demo")
     parser.add_argument("--total_steps", type=int, default=10000)
@@ -147,7 +156,9 @@ def main():
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--buffer_size", type=int, default=100000)
     parser.add_argument("--save_buffer", type=str, default="live_replay_buffer_dqn")
-    parser.add_argument("--save_every", type=int, default=10, help="Save replay buffer every N frames")
+    parser.add_argument(
+        "--save_every", type=int, default=10, help="Save replay buffer every N frames"
+    )
     args = parser.parse_args()
 
     torch.manual_seed(42)
@@ -199,42 +210,50 @@ def main():
     )
 
     # Run live
+    frames_per_batch = 1
     collector = Collector(
         env,
         policy,
-        frames_per_batch=1,
+        frames_per_batch=frames_per_batch,
         total_frames=args.total_steps,
         device=device,
         init_random_frames=0,
-    )
+        )
 
     collected_frames = 0
     pbar = tqdm.tqdm(total=args.total_steps)
 
-    for tensordict in collector:
-        current_frames = tensordict.numel()
-        collected_frames += current_frames
-        pbar.update(current_frames)
+    try:
+        # A live env that cannot read its account state raises rather than emitting a
+        # transition, so the run stops here instead of training on fabricated data.
+        try:
+            for tensordict in collector:
+                current_frames = tensordict.numel()
+                collected_frames += current_frames
+                pbar.update(current_frames)
 
-        replay_buffer.extend(tensordict.reshape(-1))
+                replay_buffer.extend(tensordict.reshape(-1))
 
-        if collected_frames % args.save_every == 0:
-            replay_buffer.dumps(args.save_buffer)
+                if collected_frames % args.save_every == 0:
+                    replay_buffer.dumps(args.save_buffer)
 
-        # Log episode metrics
-        episode_end = tensordict["next", "done"] | tensordict["next", "truncated"]
-        episode_rewards = tensordict["next", "episode_reward"][episode_end]
-        if len(episode_rewards) > 0:
-            episode_length = tensordict["next", "step_count"][episode_end]
-            print(
-                f"Episode reward: {episode_rewards.mean().item():.4f}, "
-                f"length: {episode_length.float().mean().item():.0f}"
-            )
 
-    pbar.close()
-    collector.shutdown()
+                # Log episode metrics
+                episode_end = tensordict["next", "done"] | tensordict["next", "truncated"]
+                episode_rewards = tensordict["next", "episode_reward"][episode_end]
+                if len(episode_rewards) > 0:
+                    episode_length = tensordict["next", "step_count"][episode_end]
+                    print(
+                        f"Episode reward: {episode_rewards.mean().item():.4f}, "
+                        f"length: {episode_length.float().mean().item():.0f}"
+                    )
+        except LiveObservationHalt as halt:
+            print(f"Live run halted: {halt} (flatten accepted={halt.flatten_accepted})")
+    finally:
+        pbar.close()
+        collector.shutdown()
+        replay_buffer.dumps(args.save_buffer)
 
-    replay_buffer.dumps(args.save_buffer)
     print(f"Live run complete. Total frames: {collected_frames}")
     print(f"Replay buffer saved to {args.save_buffer}")
 

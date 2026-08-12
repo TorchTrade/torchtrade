@@ -783,3 +783,53 @@ OKX_PASSPHRASE=your_okx_passphrase
 ## Requesting New Exchanges
 
 Need support for another exchange (Interactive Brokers, Kraken, etc.)? [Create an issue](https://github.com/TorchTrade/torchtrade/issues/new) or email us at torchtradecontact@gmail.com.
+
+## When the venue cannot be read
+
+A live env builds `account_state` from the venue's own answers. If those answers are
+missing or impossible — an unreachable exchange, a position status the adapter cannot
+classify, a non-finite price or equity — there is no truthful observation to emit, and
+emitting a plausible one is worse than emitting none: the policy would act on a position
+size, exposure and liquidation distance the env has just admitted it cannot verify.
+
+So the env **halts**: it raises `LiveObservationHalt` and produces no transition.
+
+**Which reads this covers.** Only the post-bar state read — the portfolio value and
+observation taken after the bar closes. Two other venue reads per step are *not* routed
+through it and still raise their original exception with no latch and no emergency
+flatten: the position read at the top of `_step()` (used for the position sync and the
+duplicate-action guard) and the initial read inside `_reset()`. Catch
+`PositionUnknownError` as well if you need to cover those. Closing that gap is #355.
+
+```python
+from torchtrade.envs.core.live import LiveObservationHalt
+
+try:
+    for tensordict in collector:
+        ...
+except LiveObservationHalt as halt:
+    print(halt)                                    # names the original exception
+    print("emergency close accepted:", halt.flatten_accepted)
+```
+
+### `observation_failure_policy`
+
+| value | behaviour |
+|---|---|
+| `"halt"` (default) | Raise. Any open position is left as it is. |
+| `"flatten"` | Request a symbol-scoped `close_position()` first, record whether the venue accepted it, then raise. |
+
+`halt.flatten_accepted` records that the close was **requested and accepted**, not that
+the position is gone — confirming that would need the read that just failed. Treat a halt
+as requiring an operator to check the account.
+
+### What does not halt
+
+Only failures that mean *the venue told us something impossible about our own money* are
+terminal. A transient error is not: every adapter wraps arbitrary failures in
+`RuntimeError("Failed to get account balance: ...")`, so treating that as terminal would
+end an episode — and under `flatten`, close a live position — on a read timeout. Those
+propagate unchanged, as do configuration errors such as a missing feature key. Retry and
+staleness handling are tracked in #295.
+
+Alpaca and Polymarket do not route through this path at all (#355).

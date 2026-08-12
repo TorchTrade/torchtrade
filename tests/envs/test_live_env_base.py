@@ -31,7 +31,6 @@ from torchtrade.envs.core.state import (
     POSITION_UNKNOWN,
     PositionState,
     PositionUnknownError,
-    advance_hold_counter,
     position_direction_from_status,
     position_qty_from_status,
 )
@@ -602,6 +601,7 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
         return {"executed": True}
 
     env = SimpleNamespace(
+        safety_halted=False,
         position=PositionState(),
         trader=SimpleNamespace(
             get_status=lambda: {"position_status": POSITION_UNKNOWN},
@@ -887,6 +887,7 @@ def test_okx_sizes_through_the_dust_rule_in_step():
         raise RuntimeError("stop here; the stand-in cannot finish a step")
 
     env = SimpleNamespace(
+        safety_halted=False,
         position=PositionState(),
         trader=SimpleNamespace(
             get_status=lambda: {

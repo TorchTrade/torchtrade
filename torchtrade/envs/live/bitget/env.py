@@ -14,6 +14,9 @@ from torchtrade.envs.live.bitget.order_executor import (
     PositionMode,
 )
 from torchtrade.envs.live.bitget.base import BitgetBaseTorchTradingEnv
+from torchtrade.envs.core.live import (
+    ObservationFailurePolicy,
+)
 from torchtrade.envs.utils.fractional_sizing import (
     calculate_fractional_position,
     PositionCalculationParams,
@@ -56,8 +59,10 @@ class BitgetFuturesTradingEnvConfig:
     include_base_features: bool = False
     close_position_on_init: bool = True
     close_position_on_reset: bool = False
+    observation_failure_policy: ObservationFailurePolicy | str = ObservationFailurePolicy.HALT
 
     def __post_init__(self):
+        self.observation_failure_policy = ObservationFailurePolicy(self.observation_failure_policy)
         # Normalize timeframes using utility function
         from torchtrade.envs.live.bitget.utils import normalize_bitget_timeframe_config
         self.execute_on, self.time_frames, self.window_sizes = normalize_bitget_timeframe_config(
@@ -184,8 +189,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         self._wait_for_next_timestamp()
 
         # Get updated state
-        new_portfolio_value = self._get_portfolio_value()
-        next_tensordict = self._get_observation()
+        new_portfolio_value, next_tensordict = self._acquire_post_bar_state()
 
         # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(
