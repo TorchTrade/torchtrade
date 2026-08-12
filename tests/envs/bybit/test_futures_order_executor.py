@@ -142,6 +142,51 @@ class TestBybitFuturesOrderClass:
         status = order_executor.get_status()
         assert status["position_status"].qty < 0
 
+    @pytest.mark.parametrize("account_mode,expected", [
+        ("ISOLATED_MARGIN", "isolated"),
+        ("REGULAR_MARGIN", "cross"),
+        ("PORTFOLIO_MARGIN", "portfolio"),
+    ])
+    def test_v5_uta_uses_account_info_not_deprecated_trade_mode(
+        self, order_executor, mock_pybit_client, account_mode, expected
+    ):
+        """V5 position tradeMode is always 0; UTA marginMode is authoritative."""
+        position = mock_pybit_client.get_positions.return_value["result"]["list"][0]
+        position["tradeMode"] = "0"
+        position["liqPrice"] = ""
+        mock_pybit_client.get_account_info.return_value = {
+            "retCode": 0,
+            "result": {"marginMode": account_mode, "unifiedMarginStatus": 5},
+        }
+
+        status = order_executor.get_status()["position_status"]
+
+        assert status.margin_mode == expected
+        assert status.liquidation_price == 0.0
+        mock_pybit_client.get_account_info.assert_called_once_with()
+
+    @pytest.mark.parametrize("account_response", [
+        {"retCode": 10001, "retMsg": "unsupported", "result": {}},
+        {"retCode": 0, "result": {"marginMode": ""}},
+        {"retCode": 0, "result": {"marginMode": "NEW_MODE"}},
+    ])
+    def test_supported_account_info_never_falls_back_to_v5_trade_mode_zero(
+        self, order_executor, mock_pybit_client, account_response
+    ):
+        position = mock_pybit_client.get_positions.return_value["result"]["list"][0]
+        position["tradeMode"] = "0"
+        position["liqPrice"] = ""
+        mock_pybit_client.get_account_info.return_value = account_response
+
+        assert order_executor.get_status()["position_status"].margin_mode is None
+
+    def test_legacy_client_without_account_info_uses_position_trade_mode(self, order_executor):
+        """Compatibility is limited to clients that genuinely lack the V5 endpoint."""
+        position = {"tradeMode": "1"}
+        del order_executor.client.get_account_info
+
+        assert order_executor._get_actual_margin_mode(position) == "isolated"
+
     def test_get_account_balance(self, order_executor):
         """Test getting account balance."""
         balance = order_executor.get_account_balance()
@@ -150,6 +195,25 @@ class TestBybitFuturesOrderClass:
         assert balance["available_balance"] == 900.0
         assert "total_unrealized_profit" in balance
         assert "total_margin_balance" in balance
+        assert balance["total_maintenance_margin"] is None
+
+    @pytest.mark.parametrize("raw,expected", [
+        ("4.4", 4.4),
+        ("0", 0.0),
+        ("", None),
+        (None, None),
+    ])
+    def test_get_account_balance_parses_unified_maintenance(
+        self, order_executor, mock_pybit_client, raw, expected
+    ):
+        account = mock_pybit_client.get_wallet_balance.return_value["result"]["list"][0].copy()
+        account["totalMaintenanceMargin"] = raw
+        mock_pybit_client.get_wallet_balance.return_value = {
+            "retCode": 0,
+            "result": {"list": [account]},
+        }
+
+        assert order_executor.get_account_balance()["total_maintenance_margin"] == expected
 
     @pytest.mark.parametrize("position_fixture,expected_side", [
         ("mock_pybit_client", "Sell"),      # Long position -> close with Sell
@@ -426,6 +490,7 @@ class TestBybitFuturesOrderClass:
         mock_pybit_client.get_wallet_balance = MagicMock(side_effect=mock_wallet_balance)
         balance = order_executor.get_account_balance()
         assert balance["total_wallet_balance"] == 500.0
+        assert balance["total_maintenance_margin"] is None
         assert call_count == 2  # Called UNIFIED then CONTRACT
 
     def test_account_balance_both_empty_raises(self, order_executor, mock_pybit_client):

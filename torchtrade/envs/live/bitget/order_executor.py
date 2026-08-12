@@ -631,6 +631,24 @@ class BitgetFuturesOrderClass:
             total = float(raw_total)
             free = float(usdt_balance.get('free', 0))
 
+            # Classic futures normally returns one raw account entry per margin coin.
+            # Only union asset mode exposes an account-wide maintenance total. A mapping
+            # is accepted for older fixtures/CCXT response shapes; crossedRiskRate is not
+            # a maintenance amount and must not be relabeled as one.
+            raw_info = balance.get('info')
+            raw_accounts = raw_info if isinstance(raw_info, list) else [raw_info]
+            maintenance = None
+            for raw_account in raw_accounts:
+                if not isinstance(raw_account, dict):
+                    continue
+                margin_coin = str(raw_account.get('marginCoin', 'USDT')).upper()
+                if margin_coin != 'USDT':
+                    continue
+                if raw_account.get('assetMode') == 'union':
+                    union_mm = raw_account.get('unionMm')
+                    maintenance = float(union_mm) if union_mm not in (None, '') else None
+                break
+
             # Unrealized PnL can be calculated from positions
             unrealized_pnl = 0.0
             try:
@@ -646,6 +664,7 @@ class BitgetFuturesOrderClass:
                 "available_balance": free,
                 "total_unrealized_profit": unrealized_pnl,
                 "total_margin_balance": total,
+                "total_maintenance_margin": maintenance,
             }
 
             logger.debug(f"Account balance: total={total:.2f}, available={free:.2f}, pnl={unrealized_pnl:.4f}")

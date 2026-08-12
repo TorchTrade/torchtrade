@@ -106,6 +106,24 @@ class TestOKXFuturesOrderClass:
         balance = order_executor.get_account_balance()
         assert balance["total_wallet_balance"] == 1000.0
         assert balance["available_balance"] == 900.0
+        assert balance["total_maintenance_margin"] is None
+
+    @pytest.mark.parametrize("raw,expected", [
+        ("4.4", 4.4),
+        ("0", 0.0),
+        ("", None),
+        (None, None),
+    ])
+    def test_get_account_balance_parses_mmr(
+        self, order_executor, mock_okx_account_client, raw, expected
+    ):
+        account = mock_okx_account_client.get_account_balance.return_value["data"][0].copy()
+        account["mmr"] = raw
+        mock_okx_account_client.get_account_balance.return_value = {
+            "code": "0", "msg": "", "data": [account],
+        }
+
+        assert order_executor.get_account_balance()["total_maintenance_margin"] == expected
 
     @pytest.mark.parametrize("pos_data,expected_side", [
         ({"pos": "0.001", "posSide": "net", "avgPx": "50000.0", "markPx": "50100.0",

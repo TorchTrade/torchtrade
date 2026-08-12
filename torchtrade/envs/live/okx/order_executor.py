@@ -426,12 +426,16 @@ class OKXFuturesOrderClass:
                     break
 
             total_pnl = float(account.get("upl") or "0")
+            maintenance = account.get("mmr")
 
             result = {
                 "total_wallet_balance": total_equity,
                 "available_balance": available,
                 "total_unrealized_profit": total_pnl,
                 "total_margin_balance": total_equity,
+                "total_maintenance_margin": (
+                    float(maintenance) if maintenance not in (None, "") else None
+                ),
             }
 
             logger.debug(f"Account balance: total={total_equity:.2f}, available={available:.2f}, pnl={total_pnl:.4f}")

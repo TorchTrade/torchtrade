@@ -10,6 +10,8 @@ tests pin it to the scalar env, so it cannot drift unnoticed. The live path had 
 pin, which is why it shares this.
 """
 
+import math
+
 # Both offline configs default their maintenance_margin_rate to this, so a policy meets
 # the same liquidation geometry offline and live. The live side has no config knob, so an
 # offline env configured off the default has no matching live fallback.
@@ -54,30 +56,55 @@ def cross_liquidation_price(
     position_size: float,
     mark_price: float,
     equity: float,
+    total_account_maintenance: float,
     maintenance_margin_rate: float = DEFAULT_MAINTENANCE_MARGIN_RATE,
 ) -> float:
     """Price at which the whole account's equity stops covering maintenance margin.
 
-    Under cross margin the position is not backed by its own isolated margin but by the
-    entire account, so the threshold moves with equity. Solving
-    `equity + size*(P - mark) = mmr * |size| * P` for P gives the expression below.
+    The venue's aggregate maintenance is measured at the current mark. Split it into the
+    focal position's current maintenance and everything else, then keep the focal term
+    price-sensitive while treating the remainder as locally constant:
+
+    `other = max(total_maintenance - rate * abs(size) * mark, 0)`
+    `equity + size*(P - mark) = other + rate * abs(size) * P`
 
     This is what makes the estimate honest in the case the isolated formula gets wrong:
     when losses elsewhere have eaten the collateral, equity is already lower and this
     prices liquidation NEARER than isolated would. When the account is amply funded it
     prices it further away -- correctly, because it genuinely is.
 
-    Still an approximation: it cannot see other positions' own maintenance requirements or
-    the venue's tiered margin schedule, which is why the caller pairs it with the isolated
-    price and takes whichever is nearer rather than trusting this alone.
+    This remains a local estimate: other positions also move, risk tiers can change, and
+    portfolio margin is not represented by this linear model.
     """
-    if not (mark_price > 0):
+    if not math.isfinite(mark_price) or not (mark_price > 0):
         raise ValueError(f"mark_price must be positive to price a liquidation, got {mark_price}")
-    if not position_size:
+    if not math.isfinite(position_size) or not position_size:
         raise ValueError("a flat position has no liquidation price")
+    if not math.isfinite(equity) or not (equity > 0):
+        raise ValueError(f"equity must be positive to price a liquidation, got {equity}")
+    if not math.isfinite(total_account_maintenance) or total_account_maintenance < 0:
+        raise ValueError(
+            "total_account_maintenance must be a finite non-negative number, "
+            f"got {total_account_maintenance}"
+        )
+    if not math.isfinite(maintenance_margin_rate) or maintenance_margin_rate < 0:
+        raise ValueError(
+            "maintenance_margin_rate must be a finite non-negative number, "
+            f"got {maintenance_margin_rate}"
+        )
 
-    sign = 1.0 if position_size > 0 else -1.0
-    return (position_size * mark_price - equity) / (position_size * (1 - sign * maintenance_margin_rate))
+    focal_at_mark = maintenance_margin_rate * abs(position_size) * mark_price
+    other_maintenance = max(total_account_maintenance - focal_at_mark, 0.0)
+    denominator = position_size - maintenance_margin_rate * abs(position_size)
+    if not math.isfinite(denominator) or denominator == 0:
+        raise ValueError("cross-margin liquidation equation has a degenerate denominator")
+
+    price = (
+        position_size * mark_price + other_maintenance - equity
+    ) / denominator
+    if not math.isfinite(price):
+        raise ValueError(f"cross-margin liquidation price is non-finite: {price}")
+    return price
 
 
 def nearest_liquidation_price(
@@ -86,34 +113,23 @@ def nearest_liquidation_price(
     mark_price: float,
     equity: float,
     leverage: float,
+    total_account_maintenance: float,
     maintenance_margin_rate: float = DEFAULT_MAINTENANCE_MARGIN_RATE,
 ) -> float:
     """The more urgent of the isolated and cross estimates, for a venue that publishes none.
 
-    Neither estimate dominates. Isolated ignores the rest of the account, so it is wrong
-    once collateral elsewhere has been consumed; cross reflects equity but assumes this
-    position is the account's only maintenance obligation. Taking whichever sits nearer
-    the mark is the best available answer from the fields the adapters currently expose.
-
-    It is NOT a guaranteed bound, and must not be described as one. If the account holds
-    another cross position, its maintenance requirement is missing from both estimates and
-    both overstate the room left: a 1-unit long at mark 100 on equity 5 returns ~95.4
-    (4.6% room) where a second position needing 4 of maintenance puts real liquidation at
-    ~99.4 (0.6%). Closing that needs an account-level maintenance figure from
-    `get_account_balance()`, which no adapter parses today -- see #344.
-
-    The same single-position assumption is already baked into `exposure_pct`, the
-    bankruptcy baseline and `_get_portfolio_value`, all of which divide this position by
-    account-wide equity. What this function must not do is claim more certainty than they
-    do. Against the `1.0` it replaces -- maximally wrong for every cross position,
-    always -- it is a strict improvement in every case, which is why it ships.
+    Neither estimate dominates. The isolated price preserves the venue-independent
+    position geometry, while the cross price incorporates the account's current aggregate
+    maintenance. Taking whichever sits nearer the mark avoids trusting an implausibly far
+    local cross estimate when the account is amply funded.
     """
     isolated = isolated_liquidation_price(
         entry_price, is_long=position_size > 0, leverage=leverage,
         maintenance_margin_rate=maintenance_margin_rate,
     )
     cross = cross_liquidation_price(
-        position_size, mark_price, equity, maintenance_margin_rate=maintenance_margin_rate,
+        position_size, mark_price, equity, total_account_maintenance,
+        maintenance_margin_rate=maintenance_margin_rate,
     )
     # A long is liquidated from below, so nearer means higher; a short from above.
     return max(isolated, cross) if position_size > 0 else min(isolated, cross)
