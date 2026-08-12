@@ -10,11 +10,7 @@ from dotenv import load_dotenv
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.common_types import MarginType, OrderStatus
 from torchtrade.envs.core.state import POSITION_UNKNOWN
-from torchtrade.envs.utils.leverage import (
-    leverage_already_set,
-    require_dict_response,
-    require_leverage_applied,
-)
+from torchtrade.envs.utils.leverage import leverage_already_set, require_leverage_applied
 
 load_dotenv()
 

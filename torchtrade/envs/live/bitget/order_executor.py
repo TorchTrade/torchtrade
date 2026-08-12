@@ -345,9 +345,7 @@ class BitgetFuturesOrderClass:
 
         # Margin mode BEFORE leverage: bitget stores leverage per mode, so verifying
         # it first confirmed a number that stopped being the account's leverage two
-        # statements later (#277). Read outside the try because it was assigned
-        # inside it and referenced from the handler -- a failure in to_ccxt() raised
-        # NameError from the error path, hidden by an outer blanket except.
+        # statements later (#277). Read outside the try: the handler interpolates it.
         margin_mode_ccxt = self.margin_mode.to_ccxt()
         try:
             logger.info(f"Setting margin mode to: {margin_mode_ccxt}")
@@ -370,17 +368,12 @@ class BitgetFuturesOrderClass:
             if not leverage_already_set(e):
                 raise
         else:
-            # ccxt returns bitget's raw body, which reports the applied leverage per
-            # side under `data` and has no top-level `leverage` key. Reading one did
-            # not raise -- it silently confirmed nothing, on every account.
-            # The unified-account route answers `"data": "success"` with no leverage
-            # at all, hence the isinstance rather than a bare index.
+            # ccxt returns bitget's raw body: the applied leverage sits per side under
+            # `data`, with no top-level `leverage` key (reading one confirmed nothing).
             require_dict_response(self.symbol, self.leverage, response)
             data = response.get("data")
-            # Under crossed margin the effective leverage is the cross field; under
-            # isolated the two sides can differ and both size real positions. A `data`
-            # that is not a dict (the unified-account route answers the string
-            # "success") confirms nothing, and passing over it is the inert check again.
+            # A non-dict `data` (the unified-account route answers "success") confirms
+            # nothing, and passing over it is the inert check again.
             if not isinstance(data, dict):
                 raise ValueError(
                     f"bitget confirmed no leverage for {self.symbol}: set-leverage "

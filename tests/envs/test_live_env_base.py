@@ -497,12 +497,6 @@ _LEVERAGE_BODIES = {
 }
 
 
-def _leverage_echo(client, exchange):
-    """Make an injected mock answer the leverage handshake as its venue does (#277)."""
-    setter = "futures_change_leverage" if exchange == "binance" else "set_leverage"
-    setattr(client, setter, MagicMock(return_value=_LEVERAGE_BODIES[exchange]))
-    return client
-
 def _executor_with_failing_position_fetch(exchange):
     """Build a real order executor whose position fetch raises, as in an outage."""
     def boom(*a, **k):
@@ -1928,7 +1922,8 @@ def _bitget_status(**pos_overrides):
     pos = {"symbol": "BTC/USDT:USDT", "contracts": 1.0, "side": "long",
            "entryPrice": 100.0, "markPrice": 101.0}
     pos.update(pos_overrides)
-    client = _leverage_echo(MagicMock(), "bitget")
+    client = MagicMock()
+    client.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["bitget"])
     client.fetch_positions = MagicMock(return_value=[pos])
     client.load_markets = MagicMock(return_value={})
     client.markets = {}
@@ -2048,7 +2043,8 @@ def test_an_emergency_close_refuses_an_unusable_side_instead_of_guessing(
     direction, which the venue rejects. The operator sees flatten_accepted=False having
     believed the position was closed, so the refusal must be explicit, not a rejection.
     """
-    client = _leverage_echo(MagicMock(), exchange)
+    client = MagicMock()
+    client.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES[exchange])
     if exchange == "bybit":
         from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass as cls
         client.get_positions = MagicMock(return_value={"retCode": 0, "result": {"list": [

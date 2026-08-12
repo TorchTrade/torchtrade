@@ -214,3 +214,57 @@ def test_bitget_confirms_nothing_on_the_unified_account_route():
     """The unified route answers `"data": "success"` -- a string, carrying no leverage."""
     with pytest.raises(ValueError, match="confirmed no leverage"):
         _build("bitget", 20, lambda *a, **k: {"code": "00000", "data": "success"})
+
+
+@pytest.mark.parametrize("exchange", ["bitget", "bybit"])
+def test_the_margin_mode_is_applied_before_the_leverage_it_can_overwrite(exchange):
+    """Verifying leverage first confirms a number that stops being true one call later.
+
+    bitget stores leverage per margin mode, so a leverage verified under isolated says
+    nothing about the account once it switches to crossed. bybit is worse: its
+    switch_margin_mode carries buyLeverage and sellLeverage, and it is tolerated with a
+    warning, so it can silently undo the verified set.
+
+    Order is asserted directly because neither effect is observable from construction --
+    both leave a *successful* build holding a leverage nobody checked.
+    """
+    calls = []
+
+    def record(name, result):
+        def call(*a, **k):
+            calls.append(name)
+            return result
+        return call
+
+    if exchange == "bitget":
+        from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
+        BitgetFuturesOrderClass(
+            symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=20,
+            client=SimpleNamespace(
+                set_leverage=record("leverage", {"code": "00000", "data": {
+                    "longLeverage": "20", "shortLeverage": "20",
+                    "crossMarginLeverage": "20", "marginMode": "isolated"}}),
+                set_margin_mode=record("margin_mode", {}),
+                set_position_mode=_boom, load_markets=_boom, markets={},
+                fetch_positions=_boom,
+            ),
+        )
+    else:
+        from torchtrade.envs.live.bybit.order_executor import (
+            BybitFuturesOrderClass, MarginMode, PositionMode,
+        )
+        BybitFuturesOrderClass(
+            symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=20,
+            margin_mode=MarginMode.ISOLATED, position_mode=PositionMode.ONE_WAY,
+            api_key="k", api_secret="s",
+            client=SimpleNamespace(
+                set_leverage=record("leverage", {"retCode": 0}),
+                switch_margin_mode=record("margin_mode", {"retCode": 0}),
+                switch_position_mode=_boom, get_instruments_info=_boom, get_positions=_boom,
+            ),
+        )
+
+    assert calls.index("margin_mode") < calls.index("leverage"), (
+        f"{exchange} verified leverage before setting the margin mode that can change "
+        f"it; call order was {calls}"
+    )
