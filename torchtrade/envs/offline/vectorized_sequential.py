@@ -619,10 +619,16 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # has consumed its margin and the insurance fund absorbs the rest. Clamping the
         # fill keeps fee and PnL on one price.
         is_long = self._position_sizes > 0
-        bankruptcy = self._entry_prices * torch.where(
+        # Each branch built as a tensor expression, the house pattern that
+        # _compute_liq_prices already follows. Two bare Python floats give torch.where
+        # no float tensor operand, so it falls back to the default dtype -- float32 --
+        # while every money tensor here is float64. That silently broke the
+        # scalar/vectorized contract at the repo's own 1e-9 tolerance, worst case 9.5e-3.
+        margin_fraction = 1.0 / float(self.config.leverage)
+        bankruptcy = torch.where(
             is_long,
-            1 - 1 / float(self.config.leverage),
-            1 + 1 / float(self.config.leverage),
+            self._entry_prices * (1 - margin_fraction),
+            self._entry_prices * (1 + margin_fraction),
         )
         fill_price = torch.where(
             is_long,

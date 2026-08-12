@@ -39,6 +39,7 @@ def _make_sltp_pair(
     trade_mode="fractional",
     lock=False,
     initial_cash=1000,
+    position_fraction=None,
 ):
     """Create matched scalar and N=1 vectorized SLTP envs."""
     if sl_levels is None:
@@ -63,6 +64,7 @@ def _make_sltp_pair(
         random_start=False,
         trade_mode=trade_mode,
         lock_position_until_sltp=lock,
+        **({} if position_fraction is None else {"position_fraction": position_fraction}),
     )
     # Ignored by the fractional path. 100.0 is $100 of notional; in quantity mode it is
     # 100 *units*, ~$10,000 at these fixtures' ~$100 prices, which no leverage-1 balance can
@@ -748,3 +750,49 @@ class TestSLTPScalarVecEquivalenceLiquidation:
             label=f"sltp-liquidation-{direction}"
         )
         assert not mismatches, "\n".join(mismatches)
+
+
+@pytest.mark.parametrize("side,low,high,gap_open", [
+    ("long", 85.0, None, 85.0),
+    ("short", None, 115.0, 115.0),
+], ids=["long", "short"])
+def test_a_gapped_liquidation_costs_the_margin_on_both_engines(side, low, high, gap_open):
+    """Pins the bankruptcy clamp on the VECTORIZED engine, and pins its value (#314).
+
+    Three gaps this suite could not see, all found in review:
+
+    - Every gap row here runs at the default position_fraction=1.0, where the balance
+      floors at 0 whether the fill was clamped correctly or ran far past the margin, so
+      deleting the vectorized clamp left the whole suite green. Free cash separates them.
+    - Asserting only that the engines AGREE cannot catch a constant wrong on both: a
+      bankruptcy price of entry*(1 - 1.5/L) survived every test in the repo. Hence the
+      absolute number, derived from the account rather than from the formula under test.
+    - No equivalence row exercised a GAPPED liquidation at all -- the existing ones
+      descend smoothly, so the clamp never binds and a float32 bankruptcy price went
+      unnoticed at 9.5e-3, four orders of magnitude past this suite's own tolerance.
+    """
+    df = _flat_df(bar=20, low=low, high=high, open_=gap_open)
+    actions = [0] * 5 + [1 if side == "long" else 2] + [0] * 4
+    pair_kwargs = dict(
+        leverage=10, sl_levels=[-0.05], tp_levels=[0.50],
+        position_fraction=0.30, initial_cash=1000,
+    )
+
+    mismatches = _run_sltp_sequence(
+        df, actions, label=f"gapped-liquidation-margin-{side}",
+        expect_action_type="liquidation", **pair_kwargs,
+    )
+    assert not mismatches, "\n".join(mismatches)
+
+    scalar, _ = _make_sltp_pair(df, **pair_kwargs)
+    td = scalar.reset()
+    for step, action in enumerate(actions):
+        action_td = (td if step == 0 else td["next"]).clone()
+        action_td["action"] = torch.tensor(action)
+        td = scalar.step(action_td)
+    # Isolated margin: a liquidated position costs exactly the margin it posted, and in
+    # fractional mode that margin is position_fraction * portfolio.
+    assert scalar.balance == pytest.approx(700.0, abs=1e-6), (
+        "0.30 of a 1000 portfolio is 300 of margin, so 700 must remain -- got "
+        f"{scalar.balance}"
+    )
