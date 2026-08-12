@@ -18,6 +18,7 @@ from torchtrade.envs.core.state import (
     position_direction_from_status,
     position_qty_from_status,
 )
+from torchtrade.envs.utils.liquidation import isolated_liquidation_price
 
 
 class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
@@ -68,7 +69,10 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         # exposure_pct read differently for the same position. total_margin_balance is uniformly
         # equity across all four, so exposure_pct is comparable cross-exchange (and matches the
         # portfolio value _get_portfolio_value returns).
-        total_balance = balance.get("total_margin_balance", 0)
+        # Indexed, not .get(..., 0): all four adapters build this key unconditionally, so a
+        # missing one means the adapter broke. The default turned that into a silent
+        # exposure_pct of 0.0 -- every position reading as flat, forever (#277).
+        total_balance = balance["total_margin_balance"]
         position_status = status.get("position_status", None)
 
         # Dust is not a position: gating on `is None` let a 1e-12 residual left behind a
@@ -98,11 +102,41 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             liquidation_price = position_status.liquidation_price
 
         # Build 6-element account state
-        exposure_pct = position_value / total_balance if total_balance > 0 else 0.0
+        if total_balance > 0:
+            exposure_pct = position_value / total_balance
+        elif position_value == 0:
+            # An empty account is genuinely 0% exposed; this branch only exists so the
+            # division does not raise on it.
+            exposure_pct = 0.0
+        else:
+            # Equity gone with the position still on. There is no exposure_pct to report
+            # -- the ratio is unbounded -- and the old `else 0.0` reported the one value
+            # that is certainly wrong, handing the policy a flat-looking account that is
+            # actually holding an underwater position (invariant #3). Fail closed, like
+            # the unknown-status and get_account_balance() paths above.
+            raise ValueError(
+                f"Position worth {position_value} held against non-positive equity "
+                f"({total_balance}). The venue is mid-liquidation or reporting "
+                f"inconsistently; refusing to report this account as flat."
+            )
 
-        if position_size == 0 or current_price == 0 or liquidation_price <= 0:
+        if position_size == 0 or current_price == 0:
             distance_to_liquidation = 1.0
         else:
+            if liquidation_price <= 0:
+                # Cross-margin venues omit the liquidation price (bybit sends liqPrice=""
+                # for unified/cross, OKX liqPx="" for cross) because the whole account
+                # backs the position, so there is no per-position price to publish.
+                # Defaulting to 1.0 reported a 20x long one move away from liquidation as
+                # exactly as safe as a flat spot account (#277). Fall back to the
+                # isolated-margin geometry the offline envs train against. Cross margin
+                # liquidates later than isolated, so this understates the distance -- it
+                # errs toward showing the policy more risk than it has, not less.
+                liquidation_price = isolated_liquidation_price(
+                    position_status.entry_price,
+                    is_long=position_size > 0,
+                    leverage=leverage,
+                )
             if position_size > 0:
                 distance_to_liquidation = (current_price - liquidation_price) / current_price
             else:

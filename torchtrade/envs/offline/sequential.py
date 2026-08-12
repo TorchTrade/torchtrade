@@ -41,6 +41,7 @@ from torchtrade.envs.utils.fractional_sizing import (
     POSITION_TOLERANCE_ABS,
 )
 from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.utils.liquidation import isolated_liquidation_price
 
 
 @dataclass
@@ -270,16 +271,12 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         if position_size == 0:
             return 0.0
 
-        margin_fraction = 1.0 / self.leverage
-
-        if position_size > 0:
-            # Long position - liquidated if price drops
-            liquidation_price = entry_price * (1 - margin_fraction + self.maintenance_margin_rate)
-        else:
-            # Short position - liquidated if price rises
-            liquidation_price = entry_price * (1 + margin_fraction - self.maintenance_margin_rate)
-
-        return max(0, liquidation_price)
+        return isolated_liquidation_price(
+            entry_price,
+            is_long=position_size > 0,
+            leverage=self.leverage,
+            maintenance_margin_rate=self.maintenance_margin_rate,
+        )
 
     def _check_liquidation(self, ohlcv: dict) -> bool:
         """Check if current position should be liquidated using intrabar OHLCV data.

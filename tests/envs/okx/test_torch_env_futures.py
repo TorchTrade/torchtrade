@@ -344,12 +344,12 @@ class TestOKXZeroLiquidationPrice:
 
     @pytest.mark.parametrize("qty,liq_price,expected_dtl", [
         (0.001, 45000.0, pytest.approx(0.1018, rel=1e-2)),
-        (0.001, 0.0, 1.0),
+        (0.001, 0.0, pytest.approx(0.0978, rel=1e-3)),   # long, venue omits liq: 50000*(1-1/10+0.004)=45200
         (-0.001, 55000.0, pytest.approx(0.0978, rel=1e-2)),
-        (-0.001, 0.0, 1.0),
+        (-0.001, 0.0, pytest.approx(0.0938, rel=1e-3)),  # short, venue omits liq: 50000*(1+1/10-0.004)=54800
     ], ids=["long-normal", "long-zero-liq", "short-normal", "short-zero-liq"])
     def test_distance_to_liquidation(self, env, mock_env_trader, qty, liq_price, expected_dtl):
-        """Zero liquidation price must return 1.0 (consistent with other exchanges)."""
+        """distance_to_liquidation, with and without a liquidation price from the venue."""
         from torchtrade.envs.live.okx.order_executor import PositionStatus
 
         mock_env_trader.get_status = MagicMock(return_value={

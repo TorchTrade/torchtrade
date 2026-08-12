@@ -22,6 +22,7 @@ import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
+from torchtrade.envs.utils.liquidation import isolated_liquidation_price
 from torchtrade.envs.core.state import (
     POSITION_UNKNOWN,
     PositionState,
@@ -899,3 +900,150 @@ def test_okx_sizes_through_the_dust_rule_in_step():
     assert seen["current_qty"] == 0.0, (
         "a 1e-12 residual reached okx's sizing path as a live position"
     )
+
+
+# --- #277: account_state must not fail open on missing venue fields ---------------
+
+
+def _futures_env_stub(position_status, balance, leverage=20):
+    """Minimal stand-in for calling TorchTradeFuturesLiveEnv._get_observation directly.
+
+    Same shape as test_unknown_status_refuses_to_build_account_state above: one call
+    site, because all 12 futures envs resolve _get_observation to this one
+    implementation and test_no_futures_env_reforks_the_shared_observation proves it.
+    """
+    return SimpleNamespace(
+        observer=SimpleNamespace(get_observations=lambda **k: {}, get_keys=lambda: []),
+        trader=SimpleNamespace(
+            get_status=lambda: {"position_status": position_status},
+            get_account_balance=lambda: balance,
+            get_mark_price=lambda: 100.0,
+        ),
+        config=SimpleNamespace(include_base_features=False, leverage=leverage),
+        position=PositionState(),
+        account_state_key="account_state",
+        market_data_keys=[],
+    )
+
+
+def _open_position(qty, *, entry_price=100.0, mark_price=100.0, leverage=20,
+                   liquidation_price=0.0):
+    return SimpleNamespace(
+        qty=qty,
+        notional_value=qty * mark_price,
+        entry_price=entry_price,
+        mark_price=mark_price,
+        unrealized_pnl_pct=0.0,
+        leverage=leverage,
+        liquidation_price=liquidation_price,
+    )
+
+
+@pytest.mark.parametrize("qty,expected", [
+    (1.0, (100.0 - 100.0 * (1 - 1 / 20 + 0.004)) / 100.0),   # long: liq below
+    (-1.0, (100.0 * (1 + 1 / 20 - 0.004) - 100.0) / 100.0),  # short: liq above
+], ids=["long", "short"])
+def test_cross_margin_position_without_liq_price_does_not_read_as_flat(qty, expected):
+    """The #277 bug: bybit/OKX send liqPrice="" for cross, which arrived here as 0.0.
+
+    `liquidation_price <= 0` then took the same branch as "no position at all" and
+    reported 1.0 -- a 20x position four percent from liquidation reading exactly as safe
+    as a flat spot account. Asserts the isolated-margin estimate, not merely "< 1.0", so
+    a fallback that returns any arbitrary smaller number still fails.
+    """
+    env = _futures_env_stub(_open_position(qty), {"total_margin_balance": 1000.0})
+    obs = TorchTradeFuturesLiveEnv._get_observation(env)
+    distance = obs["account_state"][5].item()
+
+    assert distance == pytest.approx(expected, rel=1e-5)
+    assert distance < 1.0, "an open levered position still reads as safe as flat"
+
+
+def test_venue_liq_price_is_used_verbatim_when_present():
+    """The fallback is for an absent price, not a second opinion on a published one.
+
+    Isolated-margin venues do publish liqPrice; estimating over the top of it would put
+    the live observation at odds with the exchange that will actually do the liquidating.
+    90.0 here is deliberately NOT what the isolated formula gives (95.4).
+    """
+    env = _futures_env_stub(
+        _open_position(1.0, liquidation_price=90.0), {"total_margin_balance": 1000.0}
+    )
+    obs = TorchTradeFuturesLiveEnv._get_observation(env)
+
+    assert obs["account_state"][5].item() == pytest.approx(0.1, rel=1e-6)
+
+
+def test_flat_account_still_reads_as_maximally_far_from_liquidation():
+    """The other half of invariant #3: the fallback must not make a flat account look risky.
+
+    The fallback reads entry_price off position_status, which is None when flat -- so a
+    fallback hoisted above the position check would raise here rather than report 1.0.
+    """
+    env = _futures_env_stub(None, {"total_margin_balance": 1000.0})
+    obs = TorchTradeFuturesLiveEnv._get_observation(env)
+
+    assert obs["account_state"][5].item() == 1.0
+    assert obs["account_state"][0].item() == 0.0
+
+
+def test_missing_balance_key_raises_rather_than_reporting_zero_exposure():
+    """`.get("total_margin_balance", 0)` made a broken adapter report every position flat.
+
+    All four adapters build the key unconditionally, so its absence is a bug in the
+    adapter, and 0.0 exposure is the one answer guaranteed to be wrong.
+    """
+    env = _futures_env_stub(_open_position(1.0), {"available_balance": 1000.0})
+    with pytest.raises(KeyError, match="total_margin_balance"):
+        TorchTradeFuturesLiveEnv._get_observation(env)
+
+
+def test_position_held_against_zero_equity_refuses_to_report_flat_exposure():
+    """Equity wiped with the position still on: exposure is unbounded, and it is not 0.0."""
+    env = _futures_env_stub(_open_position(1.0), {"total_margin_balance": 0.0})
+    with pytest.raises(ValueError, match="refusing to report this account as flat"):
+        TorchTradeFuturesLiveEnv._get_observation(env)
+
+
+def test_empty_flat_account_is_zero_exposure_not_an_error():
+    """The zero-equity guard must not fire on an account that is simply empty and flat."""
+    env = _futures_env_stub(None, {"total_margin_balance": 0.0})
+    obs = TorchTradeFuturesLiveEnv._get_observation(env)
+
+    assert obs["account_state"][0].item() == 0.0
+
+
+@pytest.mark.parametrize("kwargs,match", [
+    ({"leverage": 0}, "leverage must be positive"),
+    ({"entry_price": 0.0}, "entry_price must be positive"),
+], ids=["zero-leverage", "zero-entry"])
+def test_unusable_inputs_raise_instead_of_pricing_a_liquidation(kwargs, match):
+    """Without these the venue's own bad data produces 0.0, which reads as distance 1.0.
+
+    That is #277 again by a different route: a zero liquidation price is indistinguishable
+    from the flat case downstream, so the caller must never receive one.
+    """
+    args = {"entry_price": 100.0, "is_long": True, "leverage": 10}
+    args.update(kwargs)
+    with pytest.raises(ValueError, match=match):
+        isolated_liquidation_price(**args)
+
+
+@pytest.mark.parametrize("is_long", [True, False], ids=["long", "short"])
+def test_live_fallback_agrees_with_the_offline_env_it_trains_against(is_long):
+    """Live and offline must place liquidation at the same price for the same position.
+
+    This is the reason the rule was extracted rather than copied: a policy trained on the
+    offline geometry reads account_state[5] live and must be reading the same quantity.
+    Compares against the offline env's own method, so re-inlining either copy fails here.
+    """
+    from torchtrade.envs.offline.sequential import SequentialTradingEnv
+
+    offline = SimpleNamespace(
+        has_liquidation=True, leverage=20, maintenance_margin_rate=0.004
+    )
+    expected = SequentialTradingEnv._calculate_liquidation_price(
+        offline, 100.0, 1.0 if is_long else -1.0
+    )
+
+    assert isolated_liquidation_price(100.0, is_long=is_long, leverage=20) == expected
