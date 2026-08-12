@@ -615,13 +615,24 @@ class VectorizedSequentialTradingEnv(EnvBase):
             torch.minimum(open_prices, liq_price),
             torch.maximum(open_prices, liq_price),
         )
+        # Clamped to the bankruptcy price, as in the scalar engine: past it the position
+        # has consumed its margin and the insurance fund absorbs the rest. Clamping the
+        # fill keeps fee and PnL on one price.
+        is_long = self._position_sizes > 0
+        bankruptcy = self._entry_prices * torch.where(
+            is_long,
+            1 - 1 / float(self.config.leverage),
+            1 + 1 / float(self.config.leverage),
+        )
+        fill_price = torch.where(
+            is_long,
+            torch.maximum(fill_price, bankruptcy),
+            torch.minimum(fill_price, bankruptcy),
+        )
         pnl = (fill_price - self._entry_prices) * self._position_sizes
         margin_return = (
             self._position_sizes.abs() * self._entry_prices
         ) / float(self.config.leverage)
-        # Isolated margin: the position cannot lose more than it posted. Binds only on a
-        # gap -- at the liquidation price the loss is the margin less maintenance.
-        pnl = torch.maximum(pnl, -margin_return)
         fee = (self._position_sizes.abs() * fill_price) * self.transaction_fee
         self._balances = torch.where(
             liq_mask, self._balances + pnl - fee + margin_return, self._balances

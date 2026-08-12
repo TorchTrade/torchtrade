@@ -932,6 +932,20 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         is_long = self.position.position_size > 0
         fill_price = stop_fill_price(self.liquidation_price, open_price, is_long)
+        # Clamped to the bankruptcy price -- the price at which the position has consumed
+        # exactly its margin. Beyond it the venue closes and the insurance fund absorbs
+        # the rest, so nothing the account owns is priced further out. Clamping the FILL
+        # rather than capping the loss keeps the fee on the same price as the PnL: a cap
+        # applied to the loss alone left the fee tracking the gap, so a deeper crash was
+        # CHEAPER and, at the 1% fee this repo's own fixtures use, cheaper than booking
+        # at the liquidation price at all.
+        bankruptcy_price = self.position.entry_price * (
+            (1 - 1 / self.leverage) if is_long else (1 + 1 / self.leverage)
+        )
+        fill_price = (
+            max(fill_price, bankruptcy_price) if is_long
+            else min(fill_price, bankruptcy_price)
+        )
 
         if is_long:
             loss = (fill_price - self.position.entry_price) * self.position.position_size
@@ -940,9 +954,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         # Return locked margin before applying loss and fees
         margin_to_return = abs(self.position.position_size * self.position.entry_price) / self.leverage
-
-        # Isolated margin: the position cannot lose more than it posted.
-        loss = max(loss, -margin_to_return)
 
         # Apply loss, fees, and return margin
         liquidation_fee = abs(self.position.position_size * fill_price) * self.transaction_fee

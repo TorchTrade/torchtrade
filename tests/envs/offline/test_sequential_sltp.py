@@ -1145,7 +1145,8 @@ SHORT_TIGHT = ("short", 0.025, -0.025)
 
 
 def _run_sltp(actions, *, leverage, sl_levels, tp_levels, wick_high=None,
-              wick_low=None, wick_open=None, include_close=False):
+              wick_low=None, wick_open=None, include_close=False,
+              transaction_fee=0.0, position_fraction=None):
     """Run `actions` through a flat 100.0 series carrying one wick at bar 20.
 
     reset() caches bar 10, so action k executes at bar 10+k and is exposed to bar
@@ -1173,10 +1174,12 @@ def _run_sltp(actions, *, leverage, sl_levels, tp_levels, wick_high=None,
         leverage=leverage, initial_cash=10000,
         execute_on=TimeFrame(1, TimeFrameUnit.Minute),
         time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-        window_sizes=[10], transaction_fee=0.0, slippage=0.0,
+        window_sizes=[10], transaction_fee=transaction_fee, slippage=0.0,
         seed=42, random_start=False,
         stoploss_levels=sl_levels, takeprofit_levels=tp_levels,
         include_close_action=include_close,
+        **({} if position_fraction is None
+           else {"trade_mode": "fractional", "position_fraction": position_fraction}),
     )
     env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
     # Resolved from the map, not hardcoded: enabling the close action shifts every
@@ -1400,3 +1403,36 @@ def test_sltp_env_keeps_its_configured_action_levels(sample_ohlcv_df):
     assert env.action_levels == [-1, 0, 1]
     assert env.allows_short is True
     env.close()
+
+
+@pytest.mark.parametrize("side,gaps", [
+    ("long", [90.0, 70.0, 50.0, 30.0, 10.0]),
+    ("short", [110.0, 130.0, 150.0, 170.0, 190.0]),
+], ids=["long", "short"])
+def test_a_deeper_gap_never_leaves_the_account_richer(side, gaps):
+    # Stop-loss levels are negative for both directions; `side` carries the direction.
+    sl, tp = -0.05, 0.50
+    """The property that a point-check could not see (#314).
+
+    Capping the LOSS while the fee still tracked the gap made the fee shrink as the
+    crash deepened, so a 90% collapse ended richer than a 10% one -- and at the 1% fee
+    this file's own fixtures use, richer than booking at the liquidation price at all.
+    Clamping the FILL to the bankruptcy price prices both legs at one instant.
+
+    A non-zero fee is the whole point: at fee=0 the two formulations are identical, which
+    is why every existing gapped test was blind to this.
+    """
+    balances = [
+        _run_sltp(
+            # Shorts carry the pair swapped in the action map (see #279).
+            [HOLD] * 5 + [(side, sl, tp) if side == "long" else (side, tp, sl)] + [HOLD] * 4,
+            leverage=10, sl_levels=[sl], tp_levels=[tp],
+            wick_low=g if side == "long" else None,
+            wick_high=g if side == "short" else None,
+            wick_open=g, transaction_fee=0.01, position_fraction=0.30,
+        ).balance
+        for g in gaps
+    ]
+    assert balances == sorted(balances, reverse=True), (
+        f"a deeper gap left the account richer: {list(zip(gaps, balances))}"
+    )
