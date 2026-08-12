@@ -139,3 +139,31 @@ def test_the_maintenance_rate_follows_the_configured_one():
     ex.trade(side="buy", quantity=0.25)
 
     assert ex.liquidation_price == pytest.approx(40000.0 * (1 - 1 / 10 + 0.05))
+
+
+@pytest.mark.parametrize("rate", [float("nan"), float("inf"), -0.5, 1.5],
+                         ids=["nan", "inf", "negative", "above-one"])
+def test_an_unusable_maintenance_rate_is_refused_at_the_boundary(rate):
+    """Invariant 4, on the parameter this PR added.
+
+    NaN made the liquidation price NaN, so every comparison against it was False and a 5x
+    position survived a 50% adverse move -- #269 silently re-armed by its own fix. A
+    negative rate moved the price the wrong side of entry. Both offline configs already
+    raise in __post_init__; replay accepted all four.
+    """
+    with pytest.raises(ValueError, match="maintenance_margin_rate"):
+        ReplayOrderExecutor(initial_balance=1000.0, leverage=5, maintenance_margin_rate=rate)
+
+
+@pytest.mark.parametrize("quantity", [float("nan"), float("inf")])
+def test_an_unusable_quantity_never_opens_a_position(quantity):
+    """`quantity <= 0` is transparent to NaN, and inf defeats the balance check through
+    `inf * 0.0 = nan`. A NaN position was handed to the policy as a SHORT with a real
+    liquidation price, and advance_bar could never close it -- every NaN comparison is
+    False -- so it persisted for the rest of the episode against a NaN balance."""
+    ex = ReplayOrderExecutor(initial_balance=1000.0, leverage=5)
+    ex.current_price = 100.0
+
+    with pytest.raises(ValueError, match="quantity"):
+        ex.trade(side="buy", quantity=quantity)
+    assert ex.position_qty == 0

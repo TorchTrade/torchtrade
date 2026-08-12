@@ -59,6 +59,10 @@ class ReplayOrderExecutor:
         # Configurable, because the offline env takes it from config: hardcoding the
         # default here means a backtest tuned off it liquidates at a different price
         # in replay than offline -- the divergence this module exists to prevent.
+        if not math.isfinite(maintenance_margin_rate) or not 0 <= maintenance_margin_rate < 1:
+            raise ValueError(
+                f"maintenance_margin_rate must be in [0, 1), got {maintenance_margin_rate}"
+            )
         self.maintenance_margin_rate = maintenance_margin_rate
 
         # Position state
@@ -204,7 +208,7 @@ class ReplayOrderExecutor:
             raise ValueError(f"Unsupported side: {side}")
         if order_type.lower() != "market":
             raise ValueError(f"Unsupported order_type: {order_type}")
-        if quantity <= 0:
+        if not math.isfinite(quantity) or quantity <= 0:
             raise ValueError(f"quantity must be > 0, got {quantity}")
 
         price = self.current_price
