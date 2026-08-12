@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 from torchtrade.envs.utils.liquidation import (
+    bankruptcy_price,
     DEFAULT_MAINTENANCE_MARGIN_RATE,
     isolated_liquidation_price,
     stop_precedes_liquidation,
@@ -136,10 +137,9 @@ class ReplayOrderExecutor:
             # priced an exit differently (#314). It used to book AT liq on the claim
             # that liq was the isolated-margin cap; the cap is the bankruptcy price, and
             # a bar that gapped through liq never offered it.
-            f = self.transaction_fee
-            bankruptcy = self.entry_price * (
-                (1 - 1 / self.leverage) / (1 - f) if is_long
-                else (1 + 1 / self.leverage) / (1 + f)
+            bankruptcy = bankruptcy_price(
+                self.entry_price, is_long=is_long,
+                leverage=self.leverage, transaction_fee=self.transaction_fee,
             )
             fill = stop_fill_price(liq, open_price, is_long=is_long)
             fill = max(fill, bankruptcy) if is_long else min(fill, bankruptcy)

@@ -1410,8 +1410,6 @@ def test_sltp_env_keeps_its_configured_action_levels(sample_ohlcv_df):
     ("short", [110.0, 130.0, 150.0, 170.0, 190.0]),
 ], ids=["long", "short"])
 def test_a_deeper_gap_never_leaves_the_account_richer(side, gaps):
-    # Stop-loss levels are negative for both directions; `side` carries the direction.
-    sl, tp = -0.05, 0.50
     """The property that a point-check could not see (#314).
 
     Capping the LOSS while the fee still tracked the gap made the fee shrink as the
@@ -1422,6 +1420,8 @@ def test_a_deeper_gap_never_leaves_the_account_richer(side, gaps):
     A non-zero fee is the whole point: at fee=0 the two formulations are identical, which
     is why every existing gapped test was blind to this.
     """
+    # Stop-loss levels are negative for both directions; `side` carries the direction.
+    sl, tp = -0.05, 0.50
     balances = [
         _run_sltp(
             # Shorts carry the pair swapped in the action map (see #279).

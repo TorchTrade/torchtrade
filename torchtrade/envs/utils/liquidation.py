@@ -173,3 +173,25 @@ def stop_precedes_liquidation(
         gapped_past_liquidation = open_price >= liquidation_price
         stop_is_nearer = stop_price < liquidation_price
     return stop_is_nearer and not gapped_past_liquidation
+
+
+def bankruptcy_price(
+    entry_price: float, *, is_long: bool, leverage: float, transaction_fee: float
+) -> float:
+    """The price at which a position has consumed exactly the margin it posted (#314).
+
+    Past it the venue closes and the insurance fund absorbs the rest, so it is the worst
+    price a liquidation can be booked at however far the bar gapped.
+
+    Net of the exit fee: the venue takes the liquidation fee out of the margin -- that is
+    what the maintenance buffer is for -- so this is the fill where loss + fee equals the
+    margin. Charging the fee on top instead left replay with negative equity.
+
+    The vectorized engine keeps a tensorised copy, as it does for stop_fill_price; the
+    equivalence tests pin it, so it cannot drift unnoticed.
+    """
+    margin_fraction = 1.0 / leverage
+    return entry_price * (
+        (1 - margin_fraction) / (1 - transaction_fee) if is_long
+        else (1 + margin_fraction) / (1 + transaction_fee)
+    )

@@ -32,6 +32,7 @@ from torchtrade.envs.core.state import (
 from torchtrade.envs.core.default_rewards import log_return_reward
 from torchtrade.envs.utils.timeframe import TimeFrame, normalize_timeframe_config
 from torchtrade.envs.utils.sltp_helpers import stop_fill_price
+from torchtrade.envs.utils.liquidation import bankruptcy_price
 from torchtrade.envs.utils.fractional_sizing import (
     calculate_fractional_position,
     PositionCalculationParams,
@@ -916,12 +917,10 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         gapping straight through it never traded at (#314) -- the same rule #311 gave
         stop-losses, via the same helper.
 
-        The loss is then capped at the margin posted for this position, because that is
-        what isolated margin means: the venue closes at the bankruptcy price and the
-        insurance fund absorbs whatever the gap costs beyond the margin. Without the cap
-        the gap rule would overshoot in the other direction and lose more than the
-        account ever committed. The cap binds ONLY on a gap -- at the liquidation price
-        itself the loss is the margin less the maintenance buffer, by construction.
+        The fill is then clamped to the bankruptcy price, so the position can never cost
+        more than the margin it posted -- isolated margin, where the venue closes and the
+        insurance fund absorbs the rest. Clamping the FILL rather than capping the loss
+        keeps the fee on the same price as the PnL. Binds ONLY on a gap.
         """
         trade_info = {
             "executed": True,
@@ -939,21 +938,11 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         # applied to the loss alone left the fee tracking the gap, so a deeper crash was
         # CHEAPER and, at the 1% fee this repo's own fixtures use, cheaper than booking
         # at the liquidation price at all.
-        # Net of the exit fee: the venue takes the liquidation fee OUT of the margin --
-        # that is what the maintenance buffer is for -- so the bankruptcy price is the
-        # fill where loss + fee equals the margin exactly, entry*(1 -+ 1/L)/(1 -+ f).
-        # Charging the fee on top of a full-margin loss overdrew the account by the fee
-        # on every gapped liquidation, which _clamp_balance() then absorbed while logging
-        # "this likely indicates an accounting bug" about ordinary input (#314).
-        f = self.transaction_fee
-        bankruptcy_price = self.position.entry_price * (
-            (1 - 1 / self.leverage) / (1 - f) if is_long
-            else (1 + 1 / self.leverage) / (1 + f)
+        bankruptcy = bankruptcy_price(
+            self.position.entry_price, is_long=is_long,
+            leverage=self.leverage, transaction_fee=self.transaction_fee,
         )
-        fill_price = (
-            max(fill_price, bankruptcy_price) if is_long
-            else min(fill_price, bankruptcy_price)
-        )
+        fill_price = max(fill_price, bankruptcy) if is_long else min(fill_price, bankruptcy)
 
         if is_long:
             loss = (fill_price - self.position.entry_price) * self.position.position_size
