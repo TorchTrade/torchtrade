@@ -21,9 +21,24 @@ _MAX_TEXT_CHARS = 140
 # stray whitespace and trailing attributes all still read as a closing tag. This repo
 # already concedes the point -- parsers.py compiles extract_action with re.IGNORECASE.
 # Escaping the two exact literals left </TOOL_RESULTS> and </tool_results > working.
-_BLOCK_MARKER_RE = re.compile(
-    r"<\s*/?\s*(?:tool_results|answer|tool|think)\b[^>]*>", re.IGNORECASE
-)
+# `[\s/]*` as ONE class, not `\s*/?\s*`: two adjacent \s* around an optional slash is
+# ambiguous, so a whitespace run has O(n) split points and the match goes quadratic --
+# 52 SECONDS on a 60k run, inside a live trading step. `result` deliberately bypasses
+# _one_line, so a tool can emit one.
+# The trailing `>` is optional: the consumer is an LLM, and `</tool_results` at a line
+# end reads as a close to it.
+_TAG = r"<[\s/]*(?:%s)\b[^>\n]*>?"
+
+# Tool output: every tag the protocol gives meaning to. A hostile RSS headline has no
+# legitimate reason to carry any of them.
+_PROTOCOL_TAG_RE = re.compile(_TAG % "tool_results|answer|tool|think", re.IGNORECASE)
+
+# The model's OWN reply: delimiters only. <think> and <tool ...> are what the prompt
+# instructs it to emit, and escaping those showed the model its prior turn in a mangled
+# convention on every tool round -- few-shot imitation then yields &lt;answer&gt;N...,
+# which extract_action cannot parse, so it warns and returns 0. On futures action_levels
+# that is a FULL SHORT. Only the delimiters can move the trusted boundary.
+_BLOCK_MARKER_RE = re.compile(_TAG % "tool_results", re.IGNORECASE)
 
 
 def neutralise_block_markers(text: str) -> str:
@@ -36,6 +51,16 @@ def neutralise_block_markers(text: str) -> str:
     Applied once to the assembled body rather than per field, because the field-level
     helper deliberately does not see `result` -- and GoogleNewsTool renders titles
     straight from an RSS feed authored by whoever gets a headline indexed.
+    """
+    return _PROTOCOL_TAG_RE.sub(lambda m: "&lt;" + m.group(0)[1:], text)
+
+
+def neutralise_boundary_markers(text: str) -> str:
+    """Defuse only the block delimiters -- for text the MODEL authored (#330).
+
+    Narrower than `neutralise_block_markers` on purpose: the model is instructed to emit
+    <think> and <tool ...>, so escaping those in its own reply corrupts the convention it
+    is being shown, on every tool round.
     """
     return _BLOCK_MARKER_RE.sub(lambda m: "&lt;" + m.group(0)[1:], text)
 

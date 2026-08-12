@@ -187,9 +187,11 @@ the `[llm]` extra (adds `feedparser`).
   a single capped line before it enters the context, because a newline would
   otherwise let one entry occupy two numbered rows and fabricate a headline the model
   cannot distinguish from genuine tool output (#308).
-- **That guard covers row forgery and length, not inline markup.** A literal
-  `</tool_results>` in a headline would still close the results block early; tracked
-  in #330.
+- **Inline markup is neutralised at the assembly seam.** A literal `</tool_results>` in
+  a headline used to close the results block early, handing everything after it to the
+  model as its own reasoning (#330). Every protocol tag is now escaped in tool output,
+  matched case-insensitively and tolerant of whitespace and attributes -- the consumer is
+  a model, not a strict parser, so it honours `</TOOL_RESULTS>` just as readily.
 - **This is a live-path tool.** It returns news as of *now*, so using it during
   offline replay would show a historical episode present-day headlines.
 

@@ -5,7 +5,12 @@ from typing import TYPE_CHECKING, Callable, List, Optional, Union
 import torch
 
 from torchtrade.actor.parsers import extract_action, parse_tool_calls
-from torchtrade.actor.tools import Tool, _one_line, neutralise_block_markers
+from torchtrade.actor.tools import (
+    Tool,
+    _one_line,
+    neutralise_block_markers,
+    neutralise_boundary_markers,
+)
 
 if TYPE_CHECKING:
     from tensordict import TensorDict
@@ -257,7 +262,7 @@ class BaseLLMActor(ABC):
         # has two openers and two closers (#330). A legitimate response has no reason to
         # contain either marker.
         return (
-            f"{base_prompt}\n\n{neutralise_block_markers(response)}\n{results}\n\n"
+            f"{base_prompt}\n\n{neutralise_boundary_markers(response)}\n{results}\n\n"
             "Continue your analysis. When ready, respond with <answer>N</answer>."
         )
 
