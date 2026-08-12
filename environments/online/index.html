@@ -3117,11 +3117,42 @@ emitting a plausible one is worse than emitting none: the policy would act on a 
 size, exposure and liquidation distance the env has just admitted it cannot verify.</p>
 <p>So the env <strong>halts</strong>: it raises <code>LiveObservationHalt</code> and produces no transition.</p>
 <p><strong>Which reads this covers.</strong> Only the post-bar state read — the portfolio value and
-observation taken after the bar closes. Two other venue reads per step are <em>not</em> routed
-through it and still raise their original exception with no latch and no emergency
-flatten: the position read at the top of <code>_step()</code> (used for the position sync and the
-duplicate-action guard) and the initial read inside <code>_reset()</code>. Catch
-<code>PositionUnknownError</code> as well if you need to cover those. Closing that gap is #355.</p>
+observation taken after the bar closes. Every <em>other</em> venue read raises its original
+exception with no latch and no emergency flatten:</p>
+<table>
+<thead>
+<tr>
+<th>read</th>
+<th>raises</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>position read at the top of <code>_step()</code> (position sync, duplicate-action guard)</td>
+<td><code>PositionUnknownError</code></td>
+</tr>
+<tr>
+<td>the initial read inside <code>_reset()</code></td>
+<td><code>ValueError</code></td>
+</tr>
+<tr>
+<td><code>_current_mark_price()</code>, called at the top of every futures <code>_step()</code></td>
+<td><code>ValueError</code></td>
+</tr>
+<tr>
+<td>the sizing balance / portfolio checks</td>
+<td><code>ValueError</code></td>
+</tr>
+<tr>
+<td>the candle close that prices SL/TP brackets</td>
+<td><code>ValueError</code></td>
+</tr>
+</tbody>
+</table>
+<p>So <code>except LiveObservationHalt</code> alone does <strong>not</strong> give you a policy-driven emergency
+close on an unreadable price or balance — it catches the post-bar read and nothing else.
+Catch <code>ValueError</code> and <code>PositionUnknownError</code> too if you need to cover those. Alpaca and
+Polymarket do not route through this path at all. Closing the gap is #355.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.core.live</span><span class="w"> </span><span class="kn">import</span> <span class="n">LiveObservationHalt</span>
 </span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>
 </span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="k">try</span><span class="p">:</span>
