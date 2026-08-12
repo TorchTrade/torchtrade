@@ -5,7 +5,11 @@ import math
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from torchtrade.envs.utils.liquidation import isolated_liquidation_price
+from torchtrade.envs.utils.liquidation import (
+    DEFAULT_MAINTENANCE_MARGIN_RATE,
+    isolated_liquidation_price,
+    stop_precedes_liquidation,
+)
 from torchtrade.envs.utils.sltp_helpers import stop_fill_price
 
 logger = logging.getLogger(__name__)
@@ -47,10 +51,15 @@ class ReplayOrderExecutor:
         initial_balance: float = 10000.0,
         leverage: int = 1,
         transaction_fee: float = 0.0,
+        maintenance_margin_rate: float = DEFAULT_MAINTENANCE_MARGIN_RATE,
     ):
         self.initial_balance = initial_balance
         self.leverage = leverage
         self.transaction_fee = transaction_fee
+        # Configurable, because the offline env takes it from config: hardcoding the
+        # default here means a backtest tuned off it liquidates at a different price
+        # in replay than offline -- the divergence this module exists to prevent.
+        self.maintenance_margin_rate = maintenance_margin_rate
 
         # Position state
         self.position_qty = 0.0
@@ -71,16 +80,17 @@ class ReplayOrderExecutor:
 
     @property
     def liquidation_price(self) -> float:
-        """Where an isolated-margin position loses its margin, 0.0 when flat or unlevered.
+        """Where an isolated-margin position loses its margin; 0.0 when flat or unlevered.
 
-        Hardcoded 0.0 before (#269), which made futures_live_base fail open and report
-        account_state[5] as 1.0 for EVERY position -- a 5x levered position presented to
-        the policy as maximally far from liquidation. CLAUDE.md invariant 3 verbatim.
+        Hardcoded 0.0 before (#269). futures_live_base already falls back to this same
+        formula when a venue omits the price, so account_state[5] was not wrong -- the
+        real bug is that advance_bar never checked liquidation at all.
         """
         if self.position_qty == 0 or self.leverage <= 1 or self.entry_price <= 0:
             return 0.0
         return isolated_liquidation_price(
-            self.entry_price, is_long=self.position_qty > 0, leverage=self.leverage
+            self.entry_price, is_long=self.position_qty > 0, leverage=self.leverage,
+            maintenance_margin_rate=self.maintenance_margin_rate,
         )
 
     def advance_bar(self, ohlc: Dict[str, float]):
@@ -103,16 +113,23 @@ class ReplayOrderExecutor:
         low = float(ohlc["low"])
         open_price = float(ohlc["open"])
 
-        # BEFORE SL/TP, matching the offline env's priority (#299): the venue closes the
-        # position whatever the agent's bracket says.
+        # Liquidation outranks the bracket -- unless the stop sits nearer and the bar did
+        # not open past liquidation, in which case price crossed the stop on the way (#300,
+        # which superseded the #299 ordering). Shared with the offline env rather than
+        # restated, because replay answering this differently is the divergence #278 is
+        # about; an earlier version of this liquidated unconditionally and left 400 where
+        # offline leaves 5000 on the same bar.
+        is_long = self.position_qty > 0
         liq = self.liquidation_price
-        if liq > 0 and (
-            (self.position_qty > 0 and low <= liq) or (self.position_qty < 0 and high >= liq)
-        ):
-            self._close_at_price(stop_fill_price(liq, open_price, is_long=self.position_qty > 0))
-            # Isolated margin: the loss is capped at the posted margin, so a gap through
-            # the liquidation price cannot take the account below zero.
-            self.balance = max(self.balance, 0.0)
+        touched = liq > 0 and ((is_long and low <= liq) or (not is_long and high >= liq))
+        stop_first = self.sl_price > 0 and (
+            (is_long and low <= self.sl_price) or (not is_long and high >= self.sl_price)
+        ) and stop_precedes_liquidation(self.sl_price, liq, open_price, is_long=is_long)
+
+        if touched and not stop_first:
+            # Booked AT the liquidation price, as the offline env does: that price is the
+            # isolated-margin cap, so filling worse would breach the cap the venue enforces.
+            self._close_at_price(liq)
             return
 
         if self.sl_price == 0 and self.tp_price == 0:

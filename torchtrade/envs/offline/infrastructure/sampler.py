@@ -283,24 +283,26 @@ class MarketDataObservationSampler:
                 warnings.warn(warning_msg, UserWarning, stacklevel=2)
 
         execute_base_filled = execute_base_raw.ffill()
-        # A bar with no source rows has no trades of its own; forward-filling its range
-        # would let SL/TP re-trigger on the excursion the position already lived through
-        # one bar earlier. Narrower than nan_mask on purpose: a bar that merely lacks a
-        # usable close still has a real high/low, and discarding that would re-create the
-        # too-narrow range this aggregation exists to fix.
-        empty_bars = self.df.resample(execute_on.to_pandas_freq()).size() == 0
-        execute_base_filled.loc[empty_bars, ["open", "high", "low"]] = execute_base_filled.loc[empty_bars, "close"]
-
-        # An INCOMPLETE bar -- one that has trades but is missing a price field -- gets the
-        # same treatment (#353). Forward-filling volume is defensible; forward-filling a
-        # price that fills orders is not, because the result is a fill at a price the
-        # market never traded, and a high/low that answers "was this level touched?" with
-        # the previous bar's range. Its own close is the one price we actually know.
-        incomplete = execute_base_raw[["open", "high", "low"]].isna().any(axis=1) & ~empty_bars
-        if incomplete.any():
-            execute_base_filled.loc[incomplete, ["open", "high", "low"]] = (
-                execute_base_filled.loc[incomplete, "close"].values[:, None]
+        # Forward-filling volume is defensible; forward-filling a price that FILLS ORDERS
+        # is not -- stop_fill_price would fill at a price the market never traded, and
+        # high/low would answer "was this level touched?" with the previous bar's range.
+        #
+        # PER FIELD, not per row: a row mask overwrites the fields that were PRESENT, so a
+        # bar missing only its open lost its real high and low and became a flat bar on
+        # which no stop can trigger -- a backtest that skips losing exits, which is worse
+        # than the forward-fill it replaced. An empty bar has all three missing and still
+        # collapses to close, which is the behaviour that was already correct (#353).
+        for field in ("open", "high", "low"):
+            execute_base_filled[field] = execute_base_filled[field].where(
+                ~execute_base_raw[field].isna(), execute_base_filled["close"]
             )
+
+        # A stale close paired with this bar's real range can violate low <= close <= high,
+        # and close is what becomes current_price, the next entry, the mark and the reward.
+        # Clipping keeps it inside a range the market actually traded.
+        execute_base_filled["close"] = execute_base_filled["close"].clip(
+            lower=execute_base_filled["low"], upper=execute_base_filled["high"]
+        )
         self.execute_base_features_df = execute_base_filled[self.min_start_time:]
         if len(self.execute_base_features_df) == 0:
             raise ValueError("No execute_on base features available after min_start_time")
