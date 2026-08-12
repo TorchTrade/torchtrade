@@ -10,6 +10,25 @@ SYMBOL_QUERY_MAP = {
 # Longest free-text field rendered into the model's context, per field.
 _MAX_TEXT_CHARS = 140
 
+# The delimiters of the trusted region in the prompt.
+_BLOCK_MARKERS = ("<tool_results>", "</tool_results>")
+
+
+def neutralise_block_markers(text: str) -> str:
+    """Defuse any literal tool_results delimiter appearing inside tool output (#330).
+
+    A forged closing tag is strictly worse than the forged ROW #308 fixed: a fake row
+    adds an entry inside the trusted region, while a closing tag moves the boundary of
+    the region itself, so everything after it reads to the model as its own reasoning.
+
+    Applied once to the assembled body rather than per field, because the field-level
+    helper deliberately does not see `result` -- and GoogleNewsTool renders titles
+    straight from an RSS feed authored by whoever gets a headline indexed.
+    """
+    for marker in _BLOCK_MARKERS:
+        text = text.replace(marker, marker.replace("<", "&lt;"))
+    return text
+
 
 def _one_line(text: str) -> str:
     """Collapse text to a single capped line before it enters the model context.
@@ -19,9 +38,9 @@ def _one_line(text: str) -> str:
     model cannot distinguish from genuine tool output; the cap stops one field flooding the
     prompt.
 
-    Scoped to row forgery and length only -- it does not neutralise inline
-    markup such as a literal </tool_results>, which would still close the
-    results block early (#330).
+    Scoped to row forgery and length only. Inline markup is handled once at the
+    assembly seam by `neutralise_block_markers`, not per field: `result` is the
+    tool's own string and never passes through here (#330).
     """
     text = " ".join(text.split())
     return text[:_MAX_TEXT_CHARS] + "…" if len(text) > _MAX_TEXT_CHARS else text
