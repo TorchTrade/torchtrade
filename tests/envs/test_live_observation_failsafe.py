@@ -61,18 +61,24 @@ def test_a_non_terminal_failure_propagates_without_halting(error):
     assert closed == [], "a transient failure closed a live position"
 
 
-@pytest.mark.parametrize("policy,expect_closed", [
-    (ObservationFailurePolicy.HALT, False),
-    (ObservationFailurePolicy.FLATTEN, True),
-])
-def test_flatten_policy_controls_the_emergency_close(policy, expect_closed):
-    env, closed = _env(PositionUnknownError("outage"), policy=policy)
+@pytest.mark.parametrize("policy,close_result,expect_closed,expect_accepted", [
+    (ObservationFailurePolicy.HALT, True, False, None),
+    (ObservationFailurePolicy.FLATTEN, True, True, True),
+    # The venue can REJECT the close without raising. Reporting that as accepted is the
+    # "operator believes the position is flat when it is not" bug the exception warns of.
+    (ObservationFailurePolicy.FLATTEN, False, True, False),
+], ids=["halt", "flatten-accepted", "flatten-rejected"])
+def test_flatten_policy_controls_the_emergency_close(
+    policy, close_result, expect_closed, expect_accepted
+):
+    env, closed = _env(PositionUnknownError("outage"), policy=policy,
+                       close_result=close_result)
 
     with pytest.raises(LiveObservationHalt) as exc:
         TorchTradeFuturesLiveEnv._acquire_post_bar_state(env)
 
     assert bool(closed) is expect_closed
-    assert (exc.value.flatten_accepted is True) is expect_closed
+    assert exc.value.flatten_accepted is expect_accepted
 
 
 def test_a_failed_emergency_close_is_recorded_not_swallowed():
@@ -85,3 +91,49 @@ def test_a_failed_emergency_close_is_recorded_not_swallowed():
 
     assert isinstance(exc.value.flatten_error, RuntimeError)
     assert exc.value.flatten_accepted is not True
+
+
+@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
+@pytest.mark.parametrize("module", ["env", "env_sltp"])
+def test_every_futures_step_reads_state_through_the_halting_helper(exchange, module):
+    """The wiring, not the helper.
+
+    A `_step` reading the venue directly gets the raw exception -- no halt, no emergency
+    flatten -- and reverting one env to do so fails nothing else in the suite. Structural
+    because the alternative is eight live-env harnesses to assert one call site each.
+    """
+    import importlib
+    import inspect
+
+    ns = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}").__dict__
+    env_cls = next(v for k, v in ns.items()
+                   if inspect.isclass(v) and k.endswith("TorchTradingEnv")
+                   and v.__module__.endswith(module))
+    source = inspect.getsource(env_cls._step)
+
+    assert "_acquire_post_bar_state()" in source, f"{exchange}/{module} bypasses the halt"
+    assert "self._get_observation()" not in source, f"{exchange}/{module} reads directly"
+
+
+@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
+@pytest.mark.parametrize("module", ["env", "env_sltp"])
+def test_every_futures_config_coerces_its_failure_policy(exchange, module):
+    """Eight dataclasses each declare the field and coerce it in __post_init__.
+
+    A copy-pasted config missing the coercion would accept a bad string and only fail in
+    production -- the opposite of validating at the boundary.
+    """
+    import importlib
+    import inspect
+
+    ns = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}").__dict__
+    cfg_cls = next(v for k, v in ns.items()
+                   if inspect.isclass(v) and k.endswith("Config")
+                   and hasattr(v, "observation_failure_policy"))
+
+    assert cfg_cls().observation_failure_policy is ObservationFailurePolicy.HALT
+    assert cfg_cls(observation_failure_policy="flatten").observation_failure_policy is (
+        ObservationFailurePolicy.FLATTEN
+    )
+    with pytest.raises(ValueError):
+        cfg_cls(observation_failure_policy="nonsense")
