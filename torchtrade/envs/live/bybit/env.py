@@ -116,7 +116,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
             current_price = position_status.mark_price
             position_size = position_status.qty
         else:
-            current_price = self.trader.get_mark_price()
+            current_price = self._current_mark_price()
             position_size = 0.0
 
         # No-op today (this env's _execute_trade_if_needed recomputes qty live and never reads
@@ -258,7 +258,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
     def _execute_fractional_action(self, action_value: float) -> Dict:
         """Execute action using fractional position sizing."""
         current_qty = self._get_current_position_quantity()
-        current_price = self.trader.get_mark_price()
+        current_price = self._current_mark_price()
 
         if action_value == 0.0:
             if abs(current_qty) > 0:

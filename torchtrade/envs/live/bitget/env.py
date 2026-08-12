@@ -162,7 +162,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
             current_price = position_status.mark_price
             position_size = position_status.qty
         else:
-            current_price = self.trader.get_mark_price()
+            current_price = self._current_mark_price()
             position_size = 0.0
 
         self._sync_position_from_exchange(position_status)
@@ -331,7 +331,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         """
         # Get current position and price from exchange
         current_qty = self._get_current_position_quantity()
-        current_price = self.trader.get_mark_price()
+        current_price = self._current_mark_price()
 
         # Special case: Close to flat
         if action_value == 0.0:

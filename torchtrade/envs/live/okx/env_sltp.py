@@ -147,7 +147,7 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
             current_price = position_status.mark_price
             position_size = position_status.qty
         else:
-            current_price = self.trader.get_mark_price()
+            current_price = self._current_mark_price()
             position_size = 0.0
 
         # Sync position state from exchange — this is the source of truth.
@@ -259,7 +259,7 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
             return trade_info
 
         # Get current mark price (more accurate than candle close for bracket orders)
-        current_price = float(self.trader.get_mark_price())
+        current_price = float(self._current_mark_price())
 
         # Resolve quantity based on trade_mode
         if self.config.trade_mode == "fractional":

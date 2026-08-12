@@ -163,7 +163,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             current_price = position_status.mark_price
             position_size = position_status.qty
         else:
-            current_price = self.trader.get_mark_price()
+            current_price = self._current_mark_price()
             position_size = 0.0
 
         self._sync_position_from_exchange(position_status)
@@ -430,7 +430,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         """
         # 1. Query actual position from exchange (source of truth)
         current_qty = self._get_current_position_quantity()
-        current_price = self.trader.get_mark_price()
+        current_price = self._current_mark_price()
 
         # 2. Special case: Close to flat
         if action_value == 0.0:

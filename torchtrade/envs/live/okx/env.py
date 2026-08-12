@@ -119,7 +119,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         # action 0.0 closes nothing and still advances current_action_level (#283).
         position_size = position_qty_from_status(position_status)
         current_price = (
-            position_status.mark_price if position_status else self.trader.get_mark_price()
+            position_status.mark_price if position_status else self._current_mark_price()
         )
 
         # No-op today (this env's _execute_trade_if_needed recomputes qty live and never reads

@@ -95,6 +95,18 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                     )
             raise LiveObservationHalt(error, policy, accepted, flatten_error) from error
 
+    def _current_mark_price(self) -> float:
+        """The mark price, validated before it can size an order (#347).
+
+        `<= 0` passes NaN and `isfinite` passes a negative, and the sizing paths DIVIDE
+        by this -- a negative price flips the sign, so a long action opens a short.
+        """
+        price = self.trader.get_mark_price()
+        if not math.isfinite(price) or price <= 0:
+            raise ValueError(f"venue reported an unusable mark price ({price})")
+        return price
+
+
     def _get_observation(self, advance_hold: bool = True) -> TensorDictBase:
         """Get the current observation state.
 

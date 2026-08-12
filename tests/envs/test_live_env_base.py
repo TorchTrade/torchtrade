@@ -1486,35 +1486,39 @@ def test_no_adapter_fabricates_zero_equity():
     )
 
 
-def test_every_live_env_validates_its_bankruptcy_baseline():
-    """A baseline of 0 disables bankruptcy above zero: `current < threshold * 0` reduces
-    to `current < 0`, so it survives only for negative equity and a wipeout to zero never
-    terminates. Indexing the key stops an adapter fabricating the 0, and this stops a
-    genuinely empty account starting an episode that can never terminate.
+@pytest.mark.parametrize("equity,reason", [
+    (0.0, "an empty account"),
+    (-50.0, "negative equity"),
+    (float("nan"), "a non-finite reading"),
+    (float("inf"), "a non-finite reading"),
+], ids=["zero", "negative", "nan", "inf"])
+def test_a_bankruptcy_baseline_that_would_never_fire_is_refused(equity, reason):
+    """`is_bankrupt` is `current < threshold * initial`, so a baseline of 0 reduces to
+    `current < 0` -- it never fires above zero equity and a wiped account trades on.
 
-    Checks for the finiteness test specifically, not just a positivity one: `not (x > 0)`
-    catches NaN but passes `+inf`, and `is_bankrupt(current=1e9, initial=inf)` is True --
-    every step of every episode would read bankrupt.
-
-    Structural because the assignment sits inside per-exchange `_reset` scaffolding that
-    needs a live client to reach. Five copies of one line is itself the drift risk the
-    shared base exists to remove -- hoisting it is follow-up work (#345).
+    Behavioural now that #345 hoisted this into the shared base; it used to be a
+    structural grep over four per-exchange copies.
     """
-    live_root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
-    bases = sorted(live_root.glob("*/base.py"))
-    # Alpaca included, not exempted: it inherits the same _check_termination and the same
-    # is_bankrupt, and an unfunded paper account -- the documented default -- yields a
-    # baseline of exactly 0. Excluding it left the one env still carrying the bug as the
-    # one the guard skipped.
-    assert len(bases) >= 5, f"expected 5+ live bases, found {[p.parent.name for p in bases]}"
+    env = SimpleNamespace(
+        trader=SimpleNamespace(
+            get_account_balance=lambda: {"total_margin_balance": equity}
+        )
+    )
+    # The real validator, bound to the stand-in -- stubbing it would test nothing.
+    env._require_finite = lambda v, n: TorchTradeFuturesLiveEnv._require_finite(env, v, n)
 
-    unguarded = [
-        p.parent.name for p in bases
-        if "math.isfinite(self.initial_portfolio_value)" not in p.read_text()
-    ]
-    assert unguarded == [], (
-        f"{unguarded} assign initial_portfolio_value without rejecting a non-positive "
-        f"baseline, which silently disables the bankruptcy check for the whole episode"
+    with pytest.raises(ValueError):
+        TorchTradeFuturesLiveEnv._capture_bankruptcy_baseline(env)
+
+
+@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
+def test_every_futures_env_delegates_its_baseline(exchange):
+    """Four byte-identical copies is the drift shape this repo has paid for twice."""
+    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+           / "live" / exchange / "base.py").read_text()
+    assert "_capture_bankruptcy_baseline()" in src
+    assert 'balance["total_margin_balance"]' not in src, (
+        f"{exchange} re-forked the baseline read instead of delegating"
     )
 
 
@@ -1814,4 +1818,33 @@ def test_futures_sizing_rejects_a_non_finite_balance(exchange):
     )
     assert "math.isfinite(total_balance)" in src, (
         f"{exchange} does not check that the sizing balance is finite"
+    )
+
+
+@pytest.mark.parametrize("price", [float("nan"), float("inf"), float("-inf")],
+                         ids=["nan", "inf", "-inf"])
+def test_a_non_finite_mark_price_cannot_size_a_trade(price):
+    """#347: the sizing paths divide by this, and `<= 0` cannot see NaN.
+
+    A NaN price makes delta_qty NaN; `nan > 0` is False, so the trade falls to the SELL
+    branch -- which in some trade modes is intercepted as a full close. The venue's own
+    rejection names the pre-rounding size, so the error points away from the cause.
+    """
+    env = SimpleNamespace(trader=SimpleNamespace(get_mark_price=lambda: price))
+    env._require_finite = lambda v, n: TorchTradeFuturesLiveEnv._require_finite(env, v, n)
+
+    with pytest.raises(ValueError, match="non-finite mark price"):
+        TorchTradeFuturesLiveEnv._current_mark_price(env)
+
+
+@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
+@pytest.mark.parametrize("module", ["env", "env_sltp"])
+def test_no_futures_env_reads_the_mark_price_unvalidated(exchange, module):
+    """The wiring: 13 call sites across 8 files, and the helper alone proves none of them."""
+    path = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+            / "live" / exchange / f"{module}.py")
+    if not path.exists():
+        pytest.skip(f"{exchange} has no {module}")
+    assert "self.trader.get_mark_price()" not in path.read_text(), (
+        f"{exchange}/{module} sizes from an unvalidated mark price"
     )

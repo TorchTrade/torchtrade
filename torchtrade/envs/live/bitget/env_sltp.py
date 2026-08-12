@@ -186,7 +186,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
             current_price = position_status.mark_price
             position_size = position_status.qty
         else:
-            current_price = self.trader.get_mark_price()
+            current_price = self._current_mark_price()
             position_size = 0.0
 
         # Sync position state from exchange — this is the source of truth.
