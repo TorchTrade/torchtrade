@@ -2318,6 +2318,19 @@
 <p>Non-SLTP environments use <code>action_levels</code> for fractional position sizing — same as <a href="../offline/#fractional-position-sizing">offline environments</a>. Action values in [-1.0, 1.0] represent the fraction of balance to allocate. When adjusting positions (e.g., 100% to 50%), the environment only trades the delta, reducing transaction fees.</p>
 <p>Live environments use a <strong>query-first pattern</strong>: they query the actual exchange position (source of truth), calculate the target based on the action, round to exchange constraints (lot size, min notional), and trade only the delta.</p>
 <div class="admonition warning">
+<p class="admonition-title">Leverage is verified against the exchange at construction</p>
+<p>Futures environments refuse to start if the exchange rejects the configured
+<code>leverage</code>, or reports applying a different one. Either would otherwise size every
+position against leverage the account does not have, and make <code>account_state[4]</code>
+report the configured value while flat but the exchange's value once a position is
+open.</p>
+<p>A successful construction guarantees <strong>leverage only</strong>. Margin mode is still
+best-effort, and Bybit's set-leverage response carries no leverage, so on Bybit an
+accepted-but-clamped value is not detected. Passing your own <code>trader=</code> skips the
+handshake entirely — the environment still sizes from <code>config.leverage</code>, so an
+injected executor must already be at that leverage.</p>
+</div>
+<div class="admonition warning">
 <p class="admonition-title">Timeframe Format - Critical for Model Compatibility</p>
 <p>Always use canonical timeframe forms:</p>
 <ul>
