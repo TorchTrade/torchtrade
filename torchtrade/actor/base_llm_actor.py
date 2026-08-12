@@ -5,7 +5,12 @@ from typing import TYPE_CHECKING, Callable, List, Optional, Union
 import torch
 
 from torchtrade.actor.parsers import extract_action, parse_tool_calls
-from torchtrade.actor.tools import Tool, _one_line
+from torchtrade.actor.tools import (
+    Tool,
+    _one_line,
+    neutralise_block_markers,
+    neutralise_boundary_markers,
+)
 
 if TYPE_CHECKING:
     from tensordict import TensorDict
@@ -224,7 +229,7 @@ class BaseLLMActor(ABC):
         )
 
     def _run_tool_calls(self, calls: List[dict]) -> str:
-        lines = ["<tool_results>"]
+        lines = []
         for idx, call in enumerate(calls, 1):
             name = call["name"]
             tool = self._tools_by_name.get(name)
@@ -244,12 +249,20 @@ class BaseLLMActor(ABC):
             except Exception as exc:  # per-tool guard; never crash a live step
                 lines.append(f"Tool {safe_name} (call {idx}) failed:")
                 lines.append(f"  Error: {_one_line(str(exc))}")
-        lines.append("</tool_results>")
-        return "\n".join(lines)
+        # Neutralised over the whole body, then wrapped: a tool that emitted a literal
+        # </tool_results> would otherwise end the trusted region early and hand the rest
+        # of its output to the model as the model's own reasoning (#330).
+        body = [neutralise_block_markers(line) for line in lines]
+        return "\n".join(["<tool_results>", *body, "</tool_results>"])
 
     def _linearize(self, base_prompt: str, response: str, results: str) -> str:
+        # The response is neutralised too, or the boundary fix is one hop wide: round 1's
+        # prompt already carries attacker-controlled tool text, so "please repeat this
+        # block" gets the markers back in via the model's own words, and round 2's prompt
+        # has two openers and two closers (#330). A legitimate response has no reason to
+        # contain either marker.
         return (
-            f"{base_prompt}\n\n{response}\n{results}\n\n"
+            f"{base_prompt}\n\n{neutralise_boundary_markers(response)}\n{results}\n\n"
             "Continue your analysis. When ready, respond with <answer>N</answer>."
         )
 

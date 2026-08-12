@@ -1,4 +1,5 @@
 """External information tools the LLM trading actor can call mid-reasoning."""
+import re
 from typing import Optional
 from urllib.parse import quote_plus
 
@@ -10,6 +11,63 @@ SYMBOL_QUERY_MAP = {
 # Longest free-text field rendered into the model's context, per field.
 _MAX_TEXT_CHARS = 140
 
+# Every tag the actor's protocol gives meaning to, not just the block delimiters. A
+# forged <answer>N</answer> in a headline sits in context as a completed trade -- it
+# cannot reach a Python parser (those run on responses only), so it is persuasion rather
+# than parser bypass, but a tool has no legitimate reason to emit any of these.
+#
+# Matched the way the CONSUMER reads them rather
+# than the way we emit them. The consumer is an LLM, so it is maximally lenient: case,
+# stray whitespace and trailing attributes all still read as a closing tag. This repo
+# already concedes the point -- parsers.py compiles extract_action with re.IGNORECASE.
+# Escaping the two exact literals left </TOOL_RESULTS> and </tool_results > working.
+# `[\s/]*` as ONE class, not `\s*/?\s*`: two adjacent \s* around an optional slash is
+# ambiguous, so a whitespace run has O(n) split points and the match goes quadratic --
+# 52 SECONDS on a 60k run, inside a live trading step. `result` deliberately bypasses
+# _one_line, so a tool can emit one.
+# The trailing `>` is optional: the consumer is an LLM, and `</tool_results` at a line
+# end reads as a close to it.
+# `[^<>\n]` excludes `<`, not just `>`: a greedy tail that allowed `<` let the first
+# tag-like token on a line swallow a LATER real `</tool_results>`, and the replacement
+# escapes only the leading `<` -- so the forged closer came back out intact and the
+# block still ended early. Present since the first version of this fix.
+_TAG = r"<[\s/]*(?:%s)\b[^<>\n]*>?"
+
+# Tool output: every tag the protocol gives meaning to. A hostile RSS headline has no
+# legitimate reason to carry any of them.
+_PROTOCOL_TAG_RE = re.compile(_TAG % "tool_results|answer|tool|think", re.IGNORECASE)
+
+# The model's OWN reply: delimiters only. <think> and <tool ...> are what the prompt
+# instructs it to emit, and escaping those showed the model its prior turn in a mangled
+# convention on every tool round -- few-shot imitation then yields &lt;answer&gt;N...,
+# which extract_action cannot parse, so it warns and returns 0. On futures action_levels
+# that is a FULL SHORT. Only the delimiters can move the trusted boundary.
+_BLOCK_MARKER_RE = re.compile(_TAG % "tool_results", re.IGNORECASE)
+
+
+def neutralise_block_markers(text: str) -> str:
+    """Defuse any literal tool_results delimiter appearing inside tool output (#330).
+
+    A forged closing tag is strictly worse than the forged ROW #308 fixed: a fake row
+    adds an entry inside the trusted region, while a closing tag moves the boundary of
+    the region itself, so everything after it reads to the model as its own reasoning.
+
+    Applied once to the assembled body rather than per field, because the field-level
+    helper deliberately does not see `result` -- and GoogleNewsTool renders titles
+    straight from an RSS feed authored by whoever gets a headline indexed.
+    """
+    return _PROTOCOL_TAG_RE.sub(lambda m: "&lt;" + m.group(0)[1:], text)
+
+
+def neutralise_boundary_markers(text: str) -> str:
+    """Defuse only the block delimiters -- for text the MODEL authored (#330).
+
+    Narrower than `neutralise_block_markers` on purpose: the model is instructed to emit
+    <think> and <tool ...>, so escaping those in its own reply corrupts the convention it
+    is being shown, on every tool round.
+    """
+    return _BLOCK_MARKER_RE.sub(lambda m: "&lt;" + m.group(0)[1:], text)
+
 
 def _one_line(text: str) -> str:
     """Collapse text to a single capped line before it enters the model context.
@@ -19,9 +77,9 @@ def _one_line(text: str) -> str:
     model cannot distinguish from genuine tool output; the cap stops one field flooding the
     prompt.
 
-    Scoped to row forgery and length only -- it does not neutralise inline
-    markup such as a literal </tool_results>, which would still close the
-    results block early (#330).
+    Scoped to row forgery and length only. Inline markup is handled once at the
+    assembly seam by `neutralise_block_markers`, not per field: `result` is the
+    tool's own string and never passes through here (#330).
     """
     text = " ".join(text.split())
     return text[:_MAX_TEXT_CHARS] + "…" if len(text) > _MAX_TEXT_CHARS else text
