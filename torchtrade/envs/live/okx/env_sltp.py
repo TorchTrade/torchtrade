@@ -142,7 +142,7 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
-        status = self.trader.get_status()
+        status = self._halting(self.trader.get_status)
         position_status = status.get("position_status", None)
         current_price = self._current_mark_price(position_status)
         position_size = position_qty_from_status(position_status)

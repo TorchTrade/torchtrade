@@ -115,7 +115,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
-        status = self.trader.get_status()
+        status = self._halting(self.trader.get_status)
         position_status = status.get("position_status", None)
         # Size through the canonical rule, not the raw venue qty: a dust residual
         # read as a live position makes abs(current_qty) > 0 true on a flat account, so

@@ -178,7 +178,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         """Execute one environment step."""
 
         # Get current price and position from trader status (avoids redundant observation call)
-        status = self.trader.get_status()
+        status = self._halting(self.trader.get_status)
         position_status = status.get("position_status", None)
         current_price = self._current_mark_price(position_status)
         position_size = position_qty_from_status(position_status)

@@ -27,7 +27,11 @@ import torch
 from tensordict import TensorDict
 
 import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
-from torchtrade.envs.core.live import TorchTradeLiveEnv
+from torchtrade.envs.core.live import (
+    LiveObservationHalt,
+    ObservationFailurePolicy,
+    TorchTradeLiveEnv,
+)
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 from torchtrade.envs.utils.liquidation import (
@@ -637,11 +641,18 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
     env._current_mark_price = (
         lambda ps=None: TorchTradeFuturesLiveEnv._current_mark_price(env, ps)
     )
+    # The real halt wrapper: #355 routes the pre-trade read through it, so an outage now
+    # surfaces as LiveObservationHalt rather than the bare exception -- which is the point,
+    # since `except LiveObservationHalt` is what the docs and the DQN example catch.
+    env.config = SimpleNamespace(
+        observation_failure_policy=ObservationFailurePolicy.HALT, symbol="TEST"
+    )
+    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
 
     try:
         env_cls._step(env, {"action": 2})
         failed_closed = False
-    except PositionUnknownError:
+    except (PositionUnknownError, LiveObservationHalt):
         failed_closed = True
     except Exception as exc:
         # The fake is deliberately too thin to finish a whole step. Whether getting this
@@ -911,6 +922,10 @@ def test_okx_sizes_through_the_dust_rule_in_step():
     env._current_mark_price = (
         lambda ps=None: TorchTradeFuturesLiveEnv._current_mark_price(env, ps)
     )
+    env.config = SimpleNamespace(
+        observation_failure_policy=ObservationFailurePolicy.HALT, symbol="TEST"
+    )
+    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
     with pytest.raises(RuntimeError):
         OKXFuturesTorchTradingEnv._step(env, {"action": 1})
 
@@ -2435,3 +2450,43 @@ def test_a_released_guard_re_arms_only_when_the_env_is_at_target(
     else:
         assert env.position.current_action_level == expect_level
     assert env.position.target_qty == expect_target
+
+
+@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
+@pytest.mark.parametrize("module", ["env", "env_sltp"])
+def test_the_pre_trade_read_halts_like_the_post_bar_one(exchange, module):
+    """#355: only the POST-bar read was wrapped.
+
+    A POSITION_UNKNOWN between bars raised a bare PositionUnknownError from the read at
+    the top of _step -- so a caller doing `except LiveObservationHalt`, which is what the
+    docs and the DQN example show, did not catch it, and no emergency flatten ran even
+    under FLATTEN. That read happens BEFORE the env trades.
+    """
+    path = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+            / "live" / exchange / f"{module}.py")
+    assert "self._halting(self.trader.get_status)" in path.read_text(), (
+        f"{exchange}/{module} reads the venue before trading without the halt policy"
+    )
+
+
+@pytest.mark.parametrize("policy,expect_flatten", [
+    (ObservationFailurePolicy.FLATTEN, True),
+    (ObservationFailurePolicy.HALT, False),
+])
+def test_a_failed_read_runs_the_configured_policy(policy, expect_flatten):
+    """The wrapper is the whole point: it is what makes FLATTEN mean anything on a read
+    that is not the post-bar one."""
+    closed = []
+    env = SimpleNamespace(
+        config=SimpleNamespace(observation_failure_policy=policy, symbol="TEST"),
+        trader=SimpleNamespace(close_position=lambda: closed.append(1) or True),
+    )
+
+    def boom():
+        raise PositionUnknownError("venue unreachable")
+
+    with pytest.raises(LiveObservationHalt) as caught:
+        TorchTradeFuturesLiveEnv._halting(env, boom)
+
+    assert bool(closed) is expect_flatten
+    assert caught.value.flatten_accepted is (True if expect_flatten else None)

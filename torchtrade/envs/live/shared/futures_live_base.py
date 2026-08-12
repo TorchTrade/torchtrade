@@ -73,6 +73,33 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     - _reset(): Provider-specific reset scaffolding
     """
 
+    def _halting(self, read):
+        """Run a venue read under the halt policy, or raise LiveObservationHalt.
+
+        #343's rule is that ANY failure to read account state while a position is open
+        must halt -- not only the post-bar read. The pre-trade read at the top of _step
+        and the initial read in _reset bypassed this, so a POSITION_UNKNOWN between bars
+        raised a bare PositionUnknownError that `except LiveObservationHalt` did not
+        catch, and no emergency flatten ran even under FLATTEN (#355). The pre-trade read
+        is the one that happens BEFORE the env trades.
+        """
+        try:
+            return read()
+        # NOT RuntimeError: adapters wrap timeouts in it, and KeyError is a config
+        # error. See docs/environments/online.md.
+        except (PositionUnknownError, ValueError) as error:
+            policy = self.config.observation_failure_policy
+            accepted = flatten_error = None
+            if policy is ObservationFailurePolicy.FLATTEN:
+                try:
+                    accepted = bool(self.trader.close_position())
+                except Exception as exc:
+                    flatten_error = exc
+                    logger.exception(
+                        "Emergency close_position failed for %s", self.config.symbol
+                    )
+            raise LiveObservationHalt(error, policy, accepted, flatten_error) from error
+
     def _acquire_post_bar_state(self) -> tuple[float, TensorDictBase]:
         """Post-bar portfolio value and observation, or halt.
 
