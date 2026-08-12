@@ -14,7 +14,6 @@ from torchtrade.envs.live.okx.order_executor import (
     MarginMode,
     PositionMode,
 )
-from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.okx.base import OKXBaseTorchTradingEnv
 from torchtrade.envs.core.live import (
     ObservationFailurePolicy,
@@ -115,14 +114,11 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
-        status = self.trader.get_status()
-        position_status = status.get("position_status", None)
-        # Size through the canonical rule, not the raw venue qty: a dust residual
-        # read as a live position makes abs(current_qty) > 0 true on a flat account, so
-        # action 0.0 closes nothing and still advances current_action_level (#283).
-        position_size = position_qty_from_status(position_status)
-        # okx alone threads this into sizing rather than re-fetching, so BOTH halves matter.
-        current_price = self._current_mark_price(position_status)
+        # Sized through the canonical rule, not the raw venue qty: a dust residual read as
+        # a live position makes abs(current_qty) > 0 true on a flat account (#283). okx
+        # alone threads the price into sizing rather than re-fetching, so both halves of
+        # the mark read matter here too.
+        status, position_status, current_price, position_size = self._acquire_pre_trade_state()
 
         # No-op today (this env's _execute_trade_if_needed recomputes qty live and never reads
         # current_action_level), but keeps the field consistent so adding a duplicate-action

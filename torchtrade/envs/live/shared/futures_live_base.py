@@ -73,13 +73,18 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     - _reset(): Provider-specific reset scaffolding
     """
 
-    def _acquire_post_bar_state(self) -> tuple[float, TensorDictBase]:
-        """Post-bar portfolio value and observation, or halt.
+    def _halting(self, read):
+        """Run a venue read under the halt policy, or raise LiveObservationHalt.
 
-        Raises rather than returning a cached observation: see docs/environments/online.md.
+        #343's rule is that ANY failure to read account state while a position is open
+        must halt -- not only the post-bar read. The pre-trade read at the top of _step
+        and the initial read in _reset bypassed this, so a POSITION_UNKNOWN between bars
+        raised a bare PositionUnknownError that `except LiveObservationHalt` did not
+        catch, and no emergency flatten ran even under FLATTEN (#355). The pre-trade read
+        is the one that happens BEFORE the env trades.
         """
         try:
-            return self._get_portfolio_value(), self._get_observation()
+            return read()
         # NOT RuntimeError: adapters wrap timeouts in it, and KeyError is a config
         # error. See docs/environments/online.md.
         except (PositionUnknownError, ValueError) as error:
@@ -94,6 +99,35 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                         "Emergency close_position failed for %s", self.config.symbol
                     )
             raise LiveObservationHalt(error, policy, accepted, flatten_error) from error
+
+    def _acquire_pre_trade_state(self):
+        """The venue read at the TOP of _step, under the halt policy (#355).
+
+        Wrapping `get_status` alone catches nothing: it RETURNS the POSITION_UNKNOWN
+        sentinel rather than raising, and PositionUnknownError comes later, when something
+        touches the sentinel's attributes. So the wrapper has to span the reads that touch
+        it -- the direction, the size and the mark -- not just the call that fetched it.
+
+        Returns (status, position_status, current_price, position_size).
+        """
+        def read():
+            status = self.trader.get_status()
+            position_status = status.get("position_status", None)
+            return (
+                status,
+                position_status,
+                self._current_mark_price(position_status),
+                position_qty_from_status(position_status),
+            )
+
+        return self._halting(read)
+
+    def _acquire_post_bar_state(self) -> tuple[float, TensorDictBase]:
+        """Post-bar portfolio value and observation, or halt.
+
+        Raises rather than returning a cached observation: see docs/environments/online.md.
+        """
+        return self._halting(lambda: (self._get_portfolio_value(), self._get_observation()))
 
     def _current_mark_price(self, position_status=None) -> float:
         """The bar's mark price, validated before it can size an order (#347).

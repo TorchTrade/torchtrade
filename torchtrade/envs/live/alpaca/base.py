@@ -13,7 +13,6 @@ from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.core.state import (
-    POSITION_UNKNOWN,
     HistoryTracker,
     PositionState,
     advance_hold_counter,

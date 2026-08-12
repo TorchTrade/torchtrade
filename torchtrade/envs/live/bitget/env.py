@@ -7,7 +7,6 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import (
     BitgetFuturesOrderClass,
@@ -157,10 +156,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         """Execute one environment step."""
 
         # Get current price and position from trader status (avoids redundant observation call)
-        status = self.trader.get_status()
-        position_status = status.get("position_status", None)
-        current_price = self._current_mark_price(position_status)
-        position_size = position_qty_from_status(position_status)
+        status, position_status, current_price, position_size = self._acquire_pre_trade_state()
 
         self._sync_position_from_exchange(position_status)
 
