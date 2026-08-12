@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 from torchtrade.envs.live.bybit.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.state import POSITION_UNKNOWN
+from torchtrade.envs.utils.leverage import is_already_applied
 
 logger = logging.getLogger(__name__)
 
@@ -196,13 +197,31 @@ class BybitFuturesOrderClass:
         except Exception as e:
             logger.warning(f"Could not set position mode (may already be configured): {e}")
 
+        # NOT `except Exception: warning`, unlike the position/margin modes around it.
+        # Those two are preferences; leverage is an input to every position size this
+        # env will compute and to account_state[4]. A swallowed rejection left the env
+        # sizing 20x against an account the venue still had at 5x (#277).
         try:
-            self.client.set_leverage(
+            response = self.client.set_leverage(
                 category="linear", symbol=self.symbol,
                 buyLeverage=leverage_str, sellLeverage=leverage_str,
             )
         except Exception as e:
-            logger.warning(f"Could not set leverage (may already be configured): {e}")
+            if not is_already_applied(e):
+                raise
+            response = None
+
+        # pybit raises on a non-zero retCode, so this reads the code for adapters that
+        # return it instead -- and costs nothing when the exception path already fired.
+        if isinstance(response, dict):
+            ret_code = response.get("retCode")
+            if ret_code is not None and int(ret_code) != 0:
+                ret_msg = response.get("retMsg", "unknown error")
+                if not is_already_applied(f"{ret_code} {ret_msg}"):
+                    raise ValueError(
+                        f"bybit refused {self.leverage}x leverage for {self.symbol} "
+                        f"(retCode={ret_code}): {ret_msg}"
+                    )
 
         try:
             self.client.switch_margin_mode(

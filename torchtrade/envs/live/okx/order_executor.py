@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 from torchtrade.envs.live.okx.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.state import POSITION_UNKNOWN
+from torchtrade.envs.utils.leverage import is_already_applied, require_leverage_applied
 
 logger = logging.getLogger(__name__)
 
@@ -217,17 +218,33 @@ class OKXFuturesOrderClass:
         except Exception as e:
             logger.warning(f"Could not set position mode (may already be configured): {e}")
 
-        # Set leverage
+        # Set leverage. Unlike the position mode above, a failure here is not tolerable:
+        # leverage feeds every position size and account_state[4], so a warning left the
+        # env trading at a leverage the account did not have (#277).
         try:
             res = self.account_client.set_leverage(
                 instId=self.symbol,
                 lever=str(self.leverage),
                 mgnMode=self.margin_mode.value,
             )
-            if str(res.get("code", "-1")) != "0":
-                logger.warning(f"Failed to set leverage: code={res.get('code')} msg={res.get('msg')}")
         except Exception as e:
-            logger.warning(f"Could not set leverage (may already be configured): {e}")
+            if not is_already_applied(e):
+                raise
+            res = {}
+
+        code = str(res.get("code", "0"))
+        if code != "0":
+            msg = res.get("msg", "unknown error")
+            if not is_already_applied(f"{code} {msg}"):
+                raise ValueError(
+                    f"okx refused {self.leverage}x leverage for {self.symbol} "
+                    f"(code={code}): {msg}"
+                )
+
+        # OKX echoes the applied leverage, which is the only way to catch a venue that
+        # accepts the call and applies something else.
+        data = res.get("data") or [{}]
+        require_leverage_applied(self.symbol, self.leverage, data[0].get("lever"))
 
     def trade(
         self,

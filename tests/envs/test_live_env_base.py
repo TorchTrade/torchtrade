@@ -489,15 +489,24 @@ def _executor_with_failing_position_fetch(exchange):
     def boom(*a, **k):
         raise ConnectionError("simulated outage")
 
+    # The outage under test is the POSITION FETCH. Leverage has to be settable or the
+    # executor refuses to construct (#277) and the test would never reach the fetch --
+    # so these echo the requested leverage the way a healthy venue does.
+    def ok_leverage(*a, **k):
+        return {"leverage": 10, "code": "0", "retCode": 0, "data": [{"lever": "10"}]}
+
     if exchange == "binance":
         from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
-        client = SimpleNamespace(futures_position_information=boom, futures_exchange_info=boom)
+        client = SimpleNamespace(futures_position_information=boom, futures_exchange_info=boom,
+                                 futures_change_leverage=ok_leverage, futures_change_margin_type=boom)
         return BinanceFuturesOrderClass(
             symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10, client=client
         )
     if exchange == "bitget":
         from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
-        client = SimpleNamespace(fetch_positions=boom, load_markets=boom, markets={})
+        client = SimpleNamespace(fetch_positions=boom, load_markets=boom, markets={},
+                                 set_leverage=ok_leverage, set_position_mode=boom,
+                                 set_margin_mode=boom)
         return BitgetFuturesOrderClass(
             symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10, client=client
         )
@@ -505,7 +514,9 @@ def _executor_with_failing_position_fetch(exchange):
         from torchtrade.envs.live.bybit.order_executor import (
             BybitFuturesOrderClass, MarginMode, PositionMode,
         )
-        client = SimpleNamespace(get_positions=boom, get_instruments_info=boom)
+        client = SimpleNamespace(get_positions=boom, get_instruments_info=boom,
+                                 set_leverage=ok_leverage, switch_position_mode=boom,
+                                 switch_margin_mode=boom)
         return BybitFuturesOrderClass(
             symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10,
             margin_mode=MarginMode.ISOLATED, position_mode=PositionMode.ONE_WAY,
@@ -520,7 +531,8 @@ def _executor_with_failing_position_fetch(exchange):
             margin_mode=MarginMode.ISOLATED, position_mode=PositionMode.NET,
             api_key="k", api_secret="s", passphrase="p",
             client=SimpleNamespace(),
-            account_client=SimpleNamespace(get_positions=boom, set_leverage=boom),
+            account_client=SimpleNamespace(get_positions=boom, set_leverage=ok_leverage,
+                                           set_position_mode=boom),
             public_client=SimpleNamespace(get_instruments=boom),
         )
     if exchange == "alpaca":

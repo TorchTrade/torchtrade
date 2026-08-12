@@ -10,7 +10,11 @@ def mock_ccxt_client():
     client = MagicMock()
 
     # Mock account configuration methods
-    client.set_leverage = MagicMock(return_value={"leverage": 10})
+    # Echoes the requested leverage, as the venue does. A constant 10 made every
+    # executor built at another leverage look like a venue that had refused (#277).
+    client.set_leverage = MagicMock(
+        side_effect=lambda leverage, *a, **k: {"leverage": leverage}
+    )
     client.set_margin_mode = MagicMock(return_value={"marginMode": "isolated"})
     client.set_position_mode = MagicMock(return_value={"posMode": "one_way_mode"})
 

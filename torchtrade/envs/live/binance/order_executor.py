@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.common_types import MarginType, OrderStatus
 from torchtrade.envs.core.state import POSITION_UNKNOWN
+from torchtrade.envs.utils.leverage import is_already_applied, require_leverage_applied
 
 load_dotenv()
 
@@ -130,26 +131,33 @@ class BinanceFuturesOrderClass:
 
     def _setup_futures_account(self):
         """Configure futures account settings."""
+        # Leverage is outside the tolerant block below: it feeds every position size and
+        # account_state[4], and a swallowed rejection left the env sizing against a
+        # leverage the account never had (#277). Binance caps leverage per notional
+        # bracket, so the echoed value is checked too, not just the call.
         try:
-            # Set leverage
-            self.client.futures_change_leverage(
+            response = self.client.futures_change_leverage(
                 symbol=self.symbol,
                 leverage=self.leverage
             )
-
-            # Set margin type
-            try:
-                self.client.futures_change_margin_type(
-                    symbol=self.symbol,
-                    marginType=self.margin_type.value
-                )
-            except Exception as e:
-                # May fail if already set to this margin type
-                if "No need to change margin type" not in str(e):
-                    logger.warning(f"Could not set margin type: {e}")
-
         except Exception as e:
-            logger.warning(f"Could not setup futures account: {e}")
+            if not is_already_applied(e):
+                raise
+            response = {}
+
+        if isinstance(response, dict):
+            require_leverage_applied(self.symbol, self.leverage, response.get("leverage"))
+
+        # Margin type stays a preference: it does not size anything.
+        try:
+            self.client.futures_change_margin_type(
+                symbol=self.symbol,
+                marginType=self.margin_type.value
+            )
+        except Exception as e:
+            # May fail if already set to this margin type
+            if "No need to change margin type" not in str(e):
+                logger.warning(f"Could not set margin type: {e}")
 
     def _fetch_symbol_filters(self):
         """Cache the tick size and every symbol's LOT_SIZE step and minQty (#271).

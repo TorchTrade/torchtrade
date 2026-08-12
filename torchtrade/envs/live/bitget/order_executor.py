@@ -9,6 +9,7 @@ from torchtrade.envs.live.bitget.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.common_types import OrderStatus
 from torchtrade.envs.core.state import POSITION_UNKNOWN
+from torchtrade.envs.utils.leverage import is_already_applied, require_leverage_applied
 
 logger = logging.getLogger(__name__)
 
@@ -317,50 +318,59 @@ class BitgetFuturesOrderClass:
 
     def _setup_futures_account(self):
         """Configure futures account settings."""
+        params = {
+            'productType': self.product_type,
+            'marginCoin': self.margin_coin,
+        }
+
+        # Set position mode (one-way or hedge)
         try:
-            params = {
-                'productType': self.product_type,
-                'marginCoin': self.margin_coin,
-            }
+            position_mode_value = self.position_mode.value
+            logger.info(f"Setting position mode to: {position_mode_value}")
+            # Bitget API call to set position mode
+            # Note: This is exchange-specific and may not be in CCXT unified API
+            self.client.set_position_mode(
+                hedged=(self.position_mode == PositionMode.HEDGE),
+                symbol=self.symbol,
+                params=params
+            )
+            logger.info(f"Position mode set successfully to {position_mode_value}")
+        except Exception as e:
+            # May fail if already set or not supported
+            logger.warning(f"Could not set position mode (may already be configured): {e}")
 
-            # Set position mode (one-way or hedge)
-            try:
-                position_mode_value = self.position_mode.value
-                logger.info(f"Setting position mode to: {position_mode_value}")
-                # Bitget API call to set position mode
-                # Note: This is exchange-specific and may not be in CCXT unified API
-                response = self.client.set_position_mode(
-                    hedged=(self.position_mode == PositionMode.HEDGE),
-                    symbol=self.symbol,
-                    params=params
-                )
-                logger.info(f"Position mode set successfully to {position_mode_value}")
-            except Exception as e:
-                # May fail if already set or not supported
-                logger.warning(f"Could not set position mode (may already be configured): {e}")
-
-            # Set leverage using CCXT unified API
-            self.client.set_leverage(
+        # Set leverage using CCXT unified API. This one is not tolerated on failure:
+        # position and margin mode are preferences, but leverage feeds every position
+        # size and account_state[4]. The blanket handler this block used to sit in
+        # reported "may already be configured" for an outright rejection, and the env
+        # went on sizing against leverage the account did not have (#277).
+        try:
+            response = self.client.set_leverage(
                 leverage=self.leverage,
                 symbol=self.symbol,
                 params=params
             )
-
-            # Set margin mode using CCXT
-            try:
-                margin_mode_ccxt = self.margin_mode.to_ccxt()
-                logger.info(f"Setting margin mode to: {margin_mode_ccxt}")
-                self.client.set_margin_mode(
-                    marginMode=margin_mode_ccxt,
-                    symbol=self.symbol
-                )
-                logger.info(f"Margin mode set successfully to {margin_mode_ccxt}")
-            except Exception as e:
-                logger.error(f"Error setting margin mode to {margin_mode_ccxt}: {e}")
-
         except Exception as e:
-            # May fail if settings already configured - this is expected
-            logger.warning(f"Could not setup futures account (may already be configured): {e}")
+            if not is_already_applied(e):
+                raise
+            response = {}
+
+        if isinstance(response, dict):
+            require_leverage_applied(self.symbol, self.leverage, response.get("leverage"))
+
+        # Set margin mode using CCXT. Read before the try: it was assigned inside it and
+        # referenced from the handler, so a failure in to_ccxt() raised NameError from
+        # the error path -- invisible only because an outer blanket except caught that too.
+        margin_mode_ccxt = self.margin_mode.to_ccxt()
+        try:
+            logger.info(f"Setting margin mode to: {margin_mode_ccxt}")
+            self.client.set_margin_mode(
+                marginMode=margin_mode_ccxt,
+                symbol=self.symbol
+            )
+            logger.info(f"Margin mode set successfully to {margin_mode_ccxt}")
+        except Exception as e:
+            logger.error(f"Error setting margin mode to {margin_mode_ccxt}: {e}")
 
     def trade(
         self,
