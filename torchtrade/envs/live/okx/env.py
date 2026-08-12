@@ -8,7 +8,6 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.core.live import validate_action_levels
 from torchtrade.envs.live.okx.observation import OKXObservationClass
 from torchtrade.envs.live.okx.order_executor import (
     OKXFuturesOrderClass,
@@ -21,6 +20,7 @@ from torchtrade.envs.core.live import (
     ObservationFailurePolicy,
 )
 from torchtrade.envs.utils.fractional_sizing import (
+    validate_action_levels,
     calculate_fractional_position,
     PositionCalculationParams,
 )
@@ -220,7 +220,6 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
             self.position.current_position = 0
 
         return self._create_trade_info(
-            target_qty=0.0,
             executed=True,
             quantity=abs(current_qty),
             side=side,
@@ -278,6 +277,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         # _format_size() in trade() handles lot-step quantization
         info = self._execute_market_order(side, abs(delta_qty))
         info["target_qty"] = target_qty
+        info["target_tol"] = lot_size["min_qty"]
         return info
 
     def _execute_trade_if_needed(

@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.core.live import validate_action_levels
 from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.utils.timeframe import TimeFrame
 from torchtrade.envs.core.live import (
@@ -22,6 +21,7 @@ from torchtrade.envs.live.binance.order_executor import (
 )
 from torchtrade.envs.live.binance.base import BinanceBaseTorchTradingEnv
 from torchtrade.envs.utils.fractional_sizing import (
+    validate_action_levels,
     build_default_action_levels,
     calculate_fractional_position,
     PositionCalculationParams,
@@ -163,8 +163,6 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # Get current price and position from trader status (avoids redundant observation call)
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        # Both callees already handle None, and the mark read stays FIRST so an unknown
-        # status still raises PositionUnknownError with the price message it always did.
         current_price = self._current_mark_price(position_status)
         position_size = position_qty_from_status(position_status)
 
@@ -254,7 +252,6 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             return self._create_trade_info(executed=False, success=False)
 
         return self._create_trade_info(
-            target_qty=0.0,
             executed=True,
             quantity=abs(current_qty),
             side="CLOSE",
@@ -479,20 +476,20 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
                 return close_info
 
             # Open new position in opposite direction
-            side = "BUY" if target_qty > 0 else "SELL"
-            info = self._execute_market_order(side, abs(target_qty))
-            info["target_qty"] = target_qty
-            return info
-
+            side, amount = ("BUY" if target_qty > 0 else "SELL"), abs(target_qty)
         elif delta > 0:
-            # Increasing position (or opening long from flat)
-            return self._execute_market_order("BUY", abs(delta))
-
+            side, amount = "BUY", abs(delta)          # increase, or open long from flat
         elif delta < 0:
-            # Decreasing position (or opening short from flat)
-            return self._execute_market_order("SELL", abs(delta))
+            side, amount = "SELL", abs(delta)         # decrease, or open short from flat
+        else:
+            return self._create_trade_info(executed=False)
 
-        return self._create_trade_info(executed=False)
+        # One exit, so a fourth branch cannot silently skip the target and disable the
+        # partial-fill check: three of these four used to (#276 follow-up).
+        info = self._execute_market_order(side, amount)
+        info["target_qty"] = target_qty
+        info["target_tol"] = min_notional / current_price
+        return info
 
     def _execute_trade_if_needed(self, desired_action: float) -> Dict:
         """

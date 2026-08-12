@@ -105,6 +105,8 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         Every venue reads its mark as `float(pos.get("markPrice") or entry_price)`, which
         is 0.0 when both fields are blank.
         """
+        # Handles None itself, so callers pass the status straight through; keep this read
+        # ahead of any qty read so an unknown status still raises with the price message.
         price = position_status.mark_price if position_status else self.trader.get_mark_price()
         if not math.isfinite(price) or price <= 0:
             raise ValueError(f"venue reported an unusable mark price ({price})")

@@ -180,8 +180,6 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         # Get current price and position from trader status (avoids redundant observation call)
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        # Both callees already handle None, and the mark read stays FIRST so an unknown
-        # status still raises PositionUnknownError with the price message it always did.
         current_price = self._current_mark_price(position_status)
         position_size = position_qty_from_status(position_status)
 
@@ -202,11 +200,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         # Eagerly update position from trade result so the rest of this step
         # sees the new state without waiting for the next sync cycle.
         if trade_info["executed"] and trade_info.get("success") is not False:
-            # The TARGET side from the action, never the order side (#276): the same
-            # self-inflicted-mismatch chain applies here. binance and bitget also had
-            # their closed branch behind an elif that always matched first, so an SLTP
-            # close could never be recorded at all.
-            self.position.current_position = {"long": 1, "short": -1}.get(action_tuple[0], 0)
+            self._record_sltp_position(action_tuple[0])
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -279,8 +273,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
             return trade_info
 
         # Check if already in same position (ignore duplicate actions)
-        position_map = {"long": 1, "short": -1}
-        if side in position_map and self.position.current_position == position_map[side]:
+        if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
             return trade_info  # Already in this position, ignore duplicate action
 
         # Get current price for calculating absolute SL/TP levels

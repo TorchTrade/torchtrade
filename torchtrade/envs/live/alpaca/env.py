@@ -6,7 +6,7 @@ import math
 import torch
 
 logger = logging.getLogger(__name__)
-from torchtrade.envs.core.live import validate_action_levels
+from torchtrade.envs.utils.fractional_sizing import validate_action_levels
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.live.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
@@ -299,6 +299,11 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         # Execute trade
         try:
             success = self.trader.trade(side=side, amount=amount, order_type="market")
+            # Set here, not per-branch: alpaca reported no target at all, so the
+            # partial-fill check was dead on this env. min_trade_value is the smallest
+            # divergence alpaca will act on, so it is the tolerance.
+            trade_info["target_qty"] = target_qty
+            trade_info["target_tol"] = min_trade_value / current_price
             trade_info.update({
                 "executed": True,
                 "amount": amount,
@@ -315,31 +320,9 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         return trade_info
 
     def _calculate_trade_amount(self, side: str) -> float:
-        """Calculate the dollar amount to trade (not used in fractional mode)."""
+        """Required: the base declares this abstract. Fractional mode sizes in
+        _execute_fractional_action instead, so reaching here is a wiring error."""
         raise NotImplementedError("_calculate_trade_amount is not used in fractional mode")
-
-    def _create_info_dict(self, portfolio_value: float, trade_info: Dict, action_value: float) -> Dict:
-        """Create info dictionary for debugging."""
-        portfolio_return = ((portfolio_value - self.initial_portfolio_value) / 
-                        self.initial_portfolio_value)
-
-        account = self.trader.client.get_account()
-        cash = float(account.cash)
-        position_status = self.trader.get_status().get("position_status", None)
-        
-        return {
-            "portfolio_value": portfolio_value,
-            "portfolio_return": portfolio_return,
-            "cash": cash,
-            "position_qty": position_qty_from_status(position_status),
-            "position_market_value": position_status.market_value if position_status else 0,
-            "trade_executed": trade_info["executed"],
-            "trade_amount": trade_info["amount"],
-            "trade_success": trade_info["success"],
-            "trade_side": trade_info["side"],
-            "action": action_value,
-            "trade_mode": self.trader.trade_mode,
-        }
 
 
 if __name__ == "__main__":

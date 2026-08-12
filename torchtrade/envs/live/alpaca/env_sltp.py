@@ -164,10 +164,9 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         # Eagerly update position from trade result so the rest of this step
         # sees the new state without waiting for the next sync cycle.
         if trade_info["executed"] and trade_info.get("success") is not False:
-            # From the ACTION, not the order side (#276). Alpaca's map drops the side
-            # (long-only spot), so a bracket tuple targets a long and the close action's
-            # (None, None) targets flat.
-            self.position.current_position = 1 if action_tuple[0] is not None else 0
+            # Alpaca's action map drops the side (long-only spot), so a bracket tuple
+            # targets a long and the close action's (None, None) targets flat.
+            self._record_sltp_position("long" if action_tuple[0] is not None else None)
 
         # Wait for next time step
         self._wait_for_next_timestamp()

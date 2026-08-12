@@ -16,28 +16,13 @@ from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import (
     PositionState,
     position_direction_from_status,
+    POSITION_DUST_EPS,
     position_qty_from_status,
 )
 from torchtrade.envs.utils.termination import is_bankrupt
 
 
 logger = logging.getLogger(__name__)
-
-# A fill within this fraction of the requested size counts as the size that was asked for.
-# Relative, so it means the same thing on an asset priced in cents and one at $100k --
-# unlike a base-unit constant (#339).
-FILL_REL_TOL = 0.01
-
-
-def validate_action_levels(action_levels) -> None:
-    """Refuse a config whose levels cannot size an order (invariant 4: at the boundary).
-
-    A NaN level reaches sizing as `target_qty = nan`; `nan > 0` is False, so it takes the
-    SELL branch and puts `amount=nan` on the venue. Guarding it downstream would only make
-    the nonsense quieter -- the config is where it is wrong.
-    """
-    if not all(math.isfinite(level) for level in action_levels):
-        raise ValueError(f"action_levels must all be finite, got {action_levels}")
 
 
 class ObservationFailurePolicy(str, Enum):
@@ -265,18 +250,20 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
             self.position.current_action_level = 0.0 if observed == 0 else float("nan")
             self.position.hold_counter = 0
             self.position.target_qty = None
-        elif self.position.target_qty is not None and not math.isclose(
-            position_qty_from_status(position_status),
-            self.position.target_qty,
-            rel_tol=FILL_REL_TOL,
+        elif self.position.target_qty is not None and (
+            abs(position_qty_from_status(position_status) - self.position.target_qty)
+            >= max(self.position.target_tol, POSITION_DUST_EPS)
         ):
-            logger.warning(
-                "venue holds %s but the last action asked for %s; releasing the "
-                "duplicate-action guard so the agent can correct it",
-                position_qty_from_status(position_status), self.position.target_qty,
-            )
+            # Logged on the TRANSITION only -- the NaN level is its own already-reported
+            # flag. Clearing target_qty instead would turn a standing fault into a
+            # one-shot notice, and a divergence too small to trade away never re-arms.
+            if not math.isnan(self.position.current_action_level):
+                logger.warning(
+                    "venue holds %s but the last action asked for %s; releasing the "
+                    "duplicate-action guard so the agent can correct it",
+                    position_qty_from_status(position_status), self.position.target_qty,
+                )
             self.position.current_action_level = float("nan")
-            self.position.target_qty = None
 
         self.position.current_position = observed
 
@@ -308,18 +295,21 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 f"cannot start an episode on equity of {self.initial_portfolio_value}"
             )
 
-    def _record_position_after_trade(self, desired_action: float, target_qty=None) -> None:
+    def _record_position_after_trade(
+        self, desired_action: float, target_qty=None, target_tol: float = 0.0
+    ) -> None:
         """Record the position the trade RESULTED in, not the side that was sent (#276).
 
         Under fractional sizing a SELL that only trims a long leaves a long; recording it
         as a short makes the next bar's sync see a mismatch the env inflicted on itself.
 
-        `target_qty` is what the action asked for, so the next bar can tell a partial fill
-        from a complete one -- see `_sync_position_from_exchange`.
+        `target_qty` is what the action asked for and `target_tol` the smallest divergence
+        worth acting on, so the next bar can tell a partial fill from a complete one.
         """
         self.position.current_position = (desired_action > 0) - (desired_action < 0)
         self.position.current_action_level = desired_action
         self.position.target_qty = target_qty
+        self.position.target_tol = target_tol
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""

@@ -172,9 +172,11 @@ class PositionState:
     hold_counter: int = 0
     hold_direction: float = 0.0
     current_action_level: float = 0.0
-    # The quantity the last accepted action asked for, so a partial fill can be told from
-    # a complete one. None when the env has not traded, or the path cannot report a target.
+    # What the last accepted action asked for, and the smallest divergence from it worth
+    # acting on -- the venue's own minimum tradeable size, because anything below that
+    # cannot be corrected by placing an order. None when the env has not traded.
     target_qty: Optional[float] = None
+    target_tol: float = 0.0
 
     def reset(self):
         """Reset all position state to initial values."""

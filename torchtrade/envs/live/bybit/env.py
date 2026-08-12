@@ -8,7 +8,6 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.core.live import validate_action_levels
 from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
 from torchtrade.envs.live.bybit.order_executor import (
@@ -21,6 +20,7 @@ from torchtrade.envs.core.live import (
     ObservationFailurePolicy,
 )
 from torchtrade.envs.utils.fractional_sizing import (
+    validate_action_levels,
     calculate_fractional_position,
     PositionCalculationParams,
 )
@@ -116,8 +116,6 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         """Execute one environment step."""
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
-        # Both callees already handle None, and the mark read stays FIRST so an unknown
-        # status still raises PositionUnknownError with the price message it always did.
         current_price = self._current_mark_price(position_status)
         position_size = position_qty_from_status(position_status)
 
@@ -215,7 +213,6 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
             self.position.current_position = 0
 
         return self._create_trade_info(
-            target_qty=0.0,
             executed=True,
             quantity=abs(current_qty),
             side=side,
@@ -283,6 +280,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
 
         info = self._execute_market_order(side, amount)
         info["target_qty"] = target_qty
+        info["target_tol"] = lot_size["min_qty"]
         return info
 
     def _execute_trade_if_needed(self, desired_action: float) -> Dict:
