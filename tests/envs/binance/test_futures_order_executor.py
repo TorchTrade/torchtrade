@@ -13,7 +13,11 @@ class TestBinanceFuturesOrderClass:
         client = MagicMock()
 
         # Mock futures methods
-        client.futures_change_leverage = MagicMock(return_value={"leverage": 10})
+        # Echoes the request, as binance does -- it returns the leverage it actually
+        # applied, which is how a silent per-notional cap gets caught (#277).
+        client.futures_change_leverage = MagicMock(
+            side_effect=lambda symbol, leverage, **k: {"leverage": leverage}
+        )
         client.futures_change_margin_type = MagicMock(return_value={})
 
         client.futures_create_order = MagicMock(return_value={
@@ -343,13 +347,6 @@ class TestBinanceFuturesOrderClass:
         assert success is True
         mock_client.futures_cancel_all_open_orders.assert_called_once()
 
-    def test_set_leverage(self, order_executor, mock_client):
-        """Test changing leverage."""
-        success = order_executor.set_leverage(20)
-
-        assert success is True
-        assert order_executor.leverage == 20
-
     def test_reduce_only_order(self, order_executor, mock_client):
         """Test reduce only order."""
         success = order_executor.trade(
@@ -453,7 +450,9 @@ class TestBinanceLotSizeRounding:
         client.futures_exchange_info = MagicMock(
             return_value=exchange_info if exchange_info is not None else {"symbols": symbols}
         )
-        client.futures_change_leverage = MagicMock(return_value={})
+        client.futures_change_leverage = MagicMock(
+            side_effect=lambda symbol, leverage, **k: {"leverage": leverage}
+        )
         client.futures_change_margin_type = MagicMock(return_value={})
         return BinanceFuturesOrderClass(
             symbol=symbol, trade_mode="quantity", demo=True, leverage=10, client=client

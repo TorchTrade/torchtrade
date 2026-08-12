@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 from torchtrade.envs.live.bybit.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.state import POSITION_UNKNOWN
+from torchtrade.envs.utils.leverage import leverage_already_set, require_dict_response
 
 logger = logging.getLogger(__name__)
 
@@ -196,14 +197,9 @@ class BybitFuturesOrderClass:
         except Exception as e:
             logger.warning(f"Could not set position mode (may already be configured): {e}")
 
-        try:
-            self.client.set_leverage(
-                category="linear", symbol=self.symbol,
-                buyLeverage=leverage_str, sellLeverage=leverage_str,
-            )
-        except Exception as e:
-            logger.warning(f"Could not set leverage (may already be configured): {e}")
-
+        # Margin mode BEFORE leverage: switch_margin_mode carries buyLeverage and
+        # sellLeverage, so this tolerated call re-applies leverage and could
+        # silently undo the verified set that used to precede it (#277).
         try:
             self.client.switch_margin_mode(
                 category="linear", symbol=self.symbol,
@@ -213,6 +209,28 @@ class BybitFuturesOrderClass:
             logger.info(f"Margin mode set to {self.margin_mode.value}")
         except Exception as e:
             logger.warning(f"Could not set margin mode (may already be configured): {e}")
+
+        # Not tolerated like the modes above: leverage sizes every position (#277).
+        # bybit's response carries no leverage, so refusal is all that can be checked
+        # here -- an accepted-but-clamped leverage goes undetected on this venue.
+        try:
+            response = self.client.set_leverage(
+                category="linear", symbol=self.symbol,
+                buyLeverage=leverage_str, sellLeverage=leverage_str,
+            )
+        except Exception as e:
+            if not leverage_already_set(e):
+                raise
+        else:
+            require_dict_response(self.symbol, self.leverage, response)
+            ret_code = response.get("retCode")
+            if ret_code is not None and int(ret_code) != 0:
+                ret_msg = response.get("retMsg", "unknown error")
+                if not leverage_already_set(ret_msg):
+                    raise ValueError(
+                        f"bybit refused {self.leverage}x leverage for {self.symbol} "
+                        f"(retCode={ret_code}): {ret_msg}"
+                    )
 
     def trade(
         self,
@@ -658,35 +676,6 @@ class BybitFuturesOrderClass:
             except Exception:
                 pass
             logger.error(f"Error closing position: {e}")
-            return False
-
-    def set_leverage(self, leverage: int) -> bool:
-        """
-        Change leverage for the symbol.
-
-        Args:
-            leverage: New leverage value (1-100)
-
-        Returns:
-            bool: True if successful
-        """
-        try:
-            response = self.client.set_leverage(
-                category="linear",
-                symbol=self.symbol,
-                buyLeverage=str(leverage),
-                sellLeverage=str(leverage),
-            )
-            ret_code = response.get("retCode") if isinstance(response, dict) else None
-            if ret_code is not None and int(ret_code) != 0:
-                ret_msg = response.get("retMsg", "unknown error")
-                logger.error(f"set_leverage rejected (retCode={ret_code}): {ret_msg}")
-                return False
-            self.leverage = leverage
-            logger.debug(f"Leverage set to {leverage}x for {self.symbol}")
-            return True
-        except Exception as e:
-            logger.error(f"Error setting leverage: {str(e)}")
             return False
 
     def set_margin_mode(self, mode: MarginMode) -> bool:

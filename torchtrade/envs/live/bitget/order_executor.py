@@ -9,6 +9,11 @@ from torchtrade.envs.live.bitget.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.common_types import OrderStatus
 from torchtrade.envs.core.state import POSITION_UNKNOWN
+from torchtrade.envs.utils.leverage import (
+    leverage_already_set,
+    require_dict_response,
+    require_leverage_applied,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -317,50 +322,71 @@ class BitgetFuturesOrderClass:
 
     def _setup_futures_account(self):
         """Configure futures account settings."""
+        params = {
+            'productType': self.product_type,
+            'marginCoin': self.margin_coin,
+        }
+
+        # Set position mode (one-way or hedge)
         try:
-            params = {
-                'productType': self.product_type,
-                'marginCoin': self.margin_coin,
-            }
+            position_mode_value = self.position_mode.value
+            logger.info(f"Setting position mode to: {position_mode_value}")
+            # Bitget API call to set position mode
+            # Note: This is exchange-specific and may not be in CCXT unified API
+            self.client.set_position_mode(
+                hedged=(self.position_mode == PositionMode.HEDGE),
+                symbol=self.symbol,
+                params=params
+            )
+            logger.info(f"Position mode set successfully to {position_mode_value}")
+        except Exception as e:
+            # May fail if already set or not supported
+            logger.warning(f"Could not set position mode (may already be configured): {e}")
 
-            # Set position mode (one-way or hedge)
-            try:
-                position_mode_value = self.position_mode.value
-                logger.info(f"Setting position mode to: {position_mode_value}")
-                # Bitget API call to set position mode
-                # Note: This is exchange-specific and may not be in CCXT unified API
-                response = self.client.set_position_mode(
-                    hedged=(self.position_mode == PositionMode.HEDGE),
-                    symbol=self.symbol,
-                    params=params
-                )
-                logger.info(f"Position mode set successfully to {position_mode_value}")
-            except Exception as e:
-                # May fail if already set or not supported
-                logger.warning(f"Could not set position mode (may already be configured): {e}")
+        # Margin mode BEFORE leverage: bitget stores leverage per mode, so verifying
+        # it first confirmed a number that stopped being the account's leverage two
+        # statements later (#277). Read outside the try: the handler interpolates it.
+        margin_mode_ccxt = self.margin_mode.to_ccxt()
+        try:
+            logger.info(f"Setting margin mode to: {margin_mode_ccxt}")
+            self.client.set_margin_mode(
+                marginMode=margin_mode_ccxt,
+                symbol=self.symbol
+            )
+            logger.info(f"Margin mode set successfully to {margin_mode_ccxt}")
+        except Exception as e:
+            logger.error(f"Error setting margin mode to {margin_mode_ccxt}: {e}")
 
-            # Set leverage using CCXT unified API
-            self.client.set_leverage(
+        # Not tolerated like the modes around it: leverage sizes every position (#277).
+        try:
+            response = self.client.set_leverage(
                 leverage=self.leverage,
                 symbol=self.symbol,
                 params=params
             )
-
-            # Set margin mode using CCXT
-            try:
-                margin_mode_ccxt = self.margin_mode.to_ccxt()
-                logger.info(f"Setting margin mode to: {margin_mode_ccxt}")
-                self.client.set_margin_mode(
-                    marginMode=margin_mode_ccxt,
-                    symbol=self.symbol
-                )
-                logger.info(f"Margin mode set successfully to {margin_mode_ccxt}")
-            except Exception as e:
-                logger.error(f"Error setting margin mode to {margin_mode_ccxt}: {e}")
-
         except Exception as e:
-            # May fail if settings already configured - this is expected
-            logger.warning(f"Could not setup futures account (may already be configured): {e}")
+            if not leverage_already_set(e):
+                raise
+        else:
+            # ccxt returns bitget's raw body: the applied leverage sits per side under
+            # `data`, with no top-level `leverage` key (reading one confirmed nothing).
+            require_dict_response(self.symbol, self.leverage, response)
+            data = response.get("data")
+            # A non-dict `data` (the unified-account route answers "success") confirms
+            # nothing, and passing over it is the inert check again.
+            if not isinstance(data, dict):
+                raise ValueError(
+                    f"bitget confirmed no leverage for {self.symbol}: set-leverage "
+                    f"answered {data!r}, which carries no leverage to check "
+                    f"{self.leverage}x against."
+                )
+            fields = (
+                ("crossMarginLeverage",)
+                if data.get("marginMode") == "crossed"
+                else ("longLeverage", "shortLeverage")
+            )
+            for field in fields:
+                require_leverage_applied(self.symbol, self.leverage, data, field)
 
     def trade(
         self,
@@ -763,28 +789,6 @@ class BitgetFuturesOrderClass:
             else:
                 logger.error(f"Error closing position: {str(e)}")
                 return False
-
-    def set_leverage(self, leverage: int) -> bool:
-        """
-        Change leverage for the symbol using CCXT.
-
-        Args:
-            leverage: New leverage value (1-125)
-
-        Returns:
-            bool: True if successful
-        """
-        try:
-            params = {
-                'marginCoin': self.margin_coin,
-            }
-            self.client.set_leverage(leverage, self.symbol, params=params)
-            self.leverage = leverage
-            logger.debug(f"Leverage set to {leverage}x for {self.symbol}")
-            return True
-        except Exception as e:
-            logger.error(f"Error setting leverage: {str(e)}")
-            return False
 
     def set_margin_mode(self, mode: MarginMode) -> bool:
         """

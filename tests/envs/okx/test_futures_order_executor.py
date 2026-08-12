@@ -146,19 +146,6 @@ class TestOKXFuturesOrderClass:
             assert call_kwargs["side"] == expected_side
             assert call_kwargs["reduceOnly"] is True
 
-    @pytest.mark.parametrize("code,expected_success,expected_leverage", [
-        ("0", True, 20),
-        ("51101", False, 10),
-    ], ids=["success", "rejected"])
-    def test_set_leverage_validates_code(self, order_executor, mock_okx_account_client, code, expected_success, expected_leverage):
-        """set_leverage must validate code and only update local state on success."""
-        mock_okx_account_client.set_leverage = MagicMock(return_value={
-            "code": code, "msg": "", "data": [{}],
-        })
-        result = order_executor.set_leverage(20)
-        assert result is expected_success
-        assert order_executor.leverage == expected_leverage
-
     @pytest.mark.parametrize("code,expected_success,expect_mode_changed", [
         ("0", True, True),
         ("51101", False, False),

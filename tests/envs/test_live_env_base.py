@@ -484,20 +484,37 @@ assert len(_SIZING_ENVS) == 4, f"expected 4 envs that size from a live query, go
 _FAILING_FETCH_EXCHANGES = ["binance", "bitget", "bybit", "okx", "alpaca"]
 
 
+# Each venue's real set-leverage body at 10x. An executor refuses to construct without
+# one (#277): a response the echo cannot be read from confirms nothing, and skipping
+# silently is the fail-open the check exists to close.
+_LEVERAGE_BODIES = {
+    "bybit": {"retCode": 0},
+    "okx": {"code": "0", "data": [{"lever": "10"}]},
+    "bitget": {"code": "00000", "data": {
+        "longLeverage": "10", "shortLeverage": "10",
+        "crossMarginLeverage": "10", "marginMode": "isolated"}},
+    "binance": {"leverage": 10},
+}
+
+
 def _executor_with_failing_position_fetch(exchange):
     """Build a real order executor whose position fetch raises, as in an outage."""
     def boom(*a, **k):
         raise ConnectionError("simulated outage")
 
+
     if exchange == "binance":
         from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
-        client = SimpleNamespace(futures_position_information=boom, futures_exchange_info=boom)
+        client = SimpleNamespace(futures_position_information=boom, futures_exchange_info=boom,
+                                 futures_change_leverage=lambda *a, **k: _LEVERAGE_BODIES[exchange], futures_change_margin_type=boom)
         return BinanceFuturesOrderClass(
             symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10, client=client
         )
     if exchange == "bitget":
         from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
-        client = SimpleNamespace(fetch_positions=boom, load_markets=boom, markets={})
+        client = SimpleNamespace(fetch_positions=boom, load_markets=boom, markets={},
+                                 set_leverage=lambda *a, **k: _LEVERAGE_BODIES[exchange], set_position_mode=boom,
+                                 set_margin_mode=boom)
         return BitgetFuturesOrderClass(
             symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10, client=client
         )
@@ -505,7 +522,9 @@ def _executor_with_failing_position_fetch(exchange):
         from torchtrade.envs.live.bybit.order_executor import (
             BybitFuturesOrderClass, MarginMode, PositionMode,
         )
-        client = SimpleNamespace(get_positions=boom, get_instruments_info=boom)
+        client = SimpleNamespace(get_positions=boom, get_instruments_info=boom,
+                                 set_leverage=lambda *a, **k: _LEVERAGE_BODIES[exchange], switch_position_mode=boom,
+                                 switch_margin_mode=boom)
         return BybitFuturesOrderClass(
             symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10,
             margin_mode=MarginMode.ISOLATED, position_mode=PositionMode.ONE_WAY,
@@ -520,7 +539,8 @@ def _executor_with_failing_position_fetch(exchange):
             margin_mode=MarginMode.ISOLATED, position_mode=PositionMode.NET,
             api_key="k", api_secret="s", passphrase="p",
             client=SimpleNamespace(),
-            account_client=SimpleNamespace(get_positions=boom, set_leverage=boom),
+            account_client=SimpleNamespace(get_positions=boom, set_leverage=lambda *a, **k: _LEVERAGE_BODIES[exchange],
+                                           set_position_mode=boom),
             public_client=SimpleNamespace(get_instruments=boom),
         )
     if exchange == "alpaca":
@@ -1570,8 +1590,8 @@ def test_no_adapter_swaps_a_venue_reported_zero_leverage_for_the_config():
     Scope, stated so this is not mistaken for more than it is: a MISSING or BLANK venue
     leverage still falls back to the config value, deliberately, because refusing would
     leave OKX and bybit cross accounts unable to produce an observation at all. That
-    fallback is only as good as set_leverage having worked, which #277's unfixed half is
-    about. What this forbids is the silent case -- a leverage the venue did report, as 0,
+    fallback is only as good as set_leverage having worked, which #277 now verifies at
+    construction. What this forbids is the silent case -- a leverage the venue did report, as 0,
     being swapped for a different number.
     """
     live_root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
@@ -1903,6 +1923,7 @@ def _bitget_status(**pos_overrides):
            "entryPrice": 100.0, "markPrice": 101.0}
     pos.update(pos_overrides)
     client = MagicMock()
+    client.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["bitget"])
     client.fetch_positions = MagicMock(return_value=[pos])
     client.load_markets = MagicMock(return_value={})
     client.markets = {}
@@ -1953,7 +1974,7 @@ def test_okx_refuses_an_unusable_posside_instead_of_signing_it_long(pos_side):
          "avgPx": "100", "markPx": "101", "lever": "10", "mgnMode": "cross"}
     ]})
     account.set_position_mode = MagicMock(return_value={"code": "0"})
-    account.set_leverage = MagicMock(return_value={"code": "0"})
+    account.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["okx"])
     public = MagicMock()
     public.get_instruments = MagicMock(return_value={"data": []})
 
@@ -1975,7 +1996,7 @@ def test_okx_still_signs_a_recognised_short_negative():
          "avgPx": "100", "markPx": "101", "lever": "10", "mgnMode": "cross"}
     ]})
     account.set_position_mode = MagicMock(return_value={"code": "0"})
-    account.set_leverage = MagicMock(return_value={"code": "0"})
+    account.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["okx"])
     public = MagicMock()
     public.get_instruments = MagicMock(return_value={"data": []})
 
@@ -2023,6 +2044,7 @@ def test_an_emergency_close_refuses_an_unusable_side_instead_of_guessing(
     believed the position was closed, so the refusal must be explicit, not a rejection.
     """
     client = MagicMock()
+    client.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES[exchange])
     if exchange == "bybit":
         from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass as cls
         client.get_positions = MagicMock(return_value={"retCode": 0, "result": {"list": [
@@ -2037,7 +2059,7 @@ def test_an_emergency_close_refuses_an_unusable_side_instead_of_guessing(
             {"instId": "BTC-USDT-SWAP", "pos": "1.0", side_key: side}
         ]})
         account.set_position_mode = MagicMock(return_value={"code": "0"})
-        account.set_leverage = MagicMock(return_value={"code": "0"})
+        account.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["okx"])
         public = MagicMock(); public.get_instruments = MagicMock(return_value={"data": []})
         ex = cls(symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True, leverage=10,
                  api_key="k", api_secret="s", passphrase="p",

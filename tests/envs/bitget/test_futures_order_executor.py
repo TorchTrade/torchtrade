@@ -311,14 +311,6 @@ class TestBitgetFuturesOrderClass:
         # Should call cancel for each order
         assert mock_ccxt_client.cancel_order.call_count == 2
 
-    def test_set_leverage(self, order_executor, mock_ccxt_client):
-        """Test changing leverage."""
-        success = order_executor.set_leverage(20)
-
-        assert success is True
-        assert order_executor.leverage == 20
-        mock_ccxt_client.set_leverage.assert_called()
-
     def test_set_margin_mode(self, order_executor, mock_ccxt_client):
         """Test changing margin mode."""
         from torchtrade.envs.live.bitget.order_executor import MarginMode

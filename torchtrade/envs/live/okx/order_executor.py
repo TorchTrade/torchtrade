@@ -8,6 +8,11 @@ from typing import Dict, List, Optional
 from torchtrade.envs.live.okx.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.state import POSITION_UNKNOWN
+from torchtrade.envs.utils.leverage import (
+    leverage_already_set,
+    require_dict_response,
+    require_leverage_applied,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -217,17 +222,45 @@ class OKXFuturesOrderClass:
         except Exception as e:
             logger.warning(f"Could not set position mode (may already be configured): {e}")
 
-        # Set leverage
+        # Not tolerated like the position mode above: leverage sizes every position (#277).
         try:
             res = self.account_client.set_leverage(
                 instId=self.symbol,
                 lever=str(self.leverage),
                 mgnMode=self.margin_mode.value,
             )
-            if str(res.get("code", "-1")) != "0":
-                logger.warning(f"Failed to set leverage: code={res.get('code')} msg={res.get('msg')}")
         except Exception as e:
-            logger.warning(f"Could not set leverage (may already be configured): {e}")
+            if not leverage_already_set(e):
+                raise
+        else:
+            require_dict_response(self.symbol, self.leverage, res)
+            # "-1" default, matching every other code check in this file: a response
+            # with no code is an adapter surprise, not a confirmation.
+            code = str(res.get("code", "-1"))
+            if code != "0":
+                # sMsg carries the real reason; top-level msg is often "All operations
+                # failed" or empty, which points the operator at nothing.
+                entries = res.get("data") or []
+                msg = (entries[0].get("sMsg") if entries else None) or res.get(
+                    "msg", "unknown error"
+                )
+                raise ValueError(
+                    f"okx refused {self.leverage}x leverage for {self.symbol} "
+                    f"(code={code}): {msg}"
+                )
+
+            # Every entry: long_short_mode returns one per posSide, and checking only
+            # the first leaves the short side unverified. An empty list is not a pass --
+            # okx does not legitimately return one on success, and treating it as
+            # "nothing to check" is how this check goes inert.
+            entries = res.get("data") or []
+            if not entries:
+                raise ValueError(
+                    f"okx confirmed no leverage for {self.symbol}: the set-leverage "
+                    f"response carried no data to check {self.leverage}x against."
+                )
+            for entry in entries:
+                require_leverage_applied(self.symbol, self.leverage, entry, "lever")
 
     def trade(
         self,
@@ -653,34 +686,6 @@ class OKXFuturesOrderClass:
             except Exception:
                 pass
             logger.error(f"Error closing position: {e}")
-            return False
-
-    def set_leverage(self, leverage: int) -> bool:
-        """
-        Change leverage for the symbol.
-
-        Args:
-            leverage: New leverage value (1-125)
-
-        Returns:
-            bool: True if successful
-        """
-        try:
-            response = self.account_client.set_leverage(
-                instId=self.symbol,
-                lever=str(leverage),
-                mgnMode=self.margin_mode.value,
-            )
-            code = response.get("code", "-1")
-            if str(code) != "0":
-                msg = response.get("msg", "unknown error")
-                logger.error(f"set_leverage rejected (code={code}): {msg}")
-                return False
-            self.leverage = leverage
-            logger.debug(f"Leverage set to {leverage}x for {self.symbol}")
-            return True
-        except Exception as e:
-            logger.error(f"Error setting leverage: {str(e)}")
             return False
 
     def set_margin_mode(self, mode: MarginMode) -> bool:
