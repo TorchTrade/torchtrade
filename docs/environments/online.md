@@ -51,7 +51,9 @@ Live environments use a **query-first pattern**: they query the actual exchange 
 
     A successful construction guarantees **leverage only**. Margin mode is still
     best-effort, and Bybit's set-leverage response carries no leverage, so on Bybit an
-    accepted-but-clamped value is not detected.
+    accepted-but-clamped value is not detected. Passing your own `trader=` skips the
+    handshake entirely — the environment still sizes from `config.leverage`, so an
+    injected executor must already be at that leverage.
 
 !!! warning "Timeframe Format - Critical for Model Compatibility"
     Always use canonical timeframe forms:

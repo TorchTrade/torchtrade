@@ -343,6 +343,22 @@ class BitgetFuturesOrderClass:
             # May fail if already set or not supported
             logger.warning(f"Could not set position mode (may already be configured): {e}")
 
+        # Margin mode BEFORE leverage: bitget stores leverage per mode, so verifying
+        # it first confirmed a number that stopped being the account's leverage two
+        # statements later (#277). Read outside the try because it was assigned
+        # inside it and referenced from the handler -- a failure in to_ccxt() raised
+        # NameError from the error path, hidden by an outer blanket except.
+        margin_mode_ccxt = self.margin_mode.to_ccxt()
+        try:
+            logger.info(f"Setting margin mode to: {margin_mode_ccxt}")
+            self.client.set_margin_mode(
+                marginMode=margin_mode_ccxt,
+                symbol=self.symbol
+            )
+            logger.info(f"Margin mode set successfully to {margin_mode_ccxt}")
+        except Exception as e:
+            logger.error(f"Error setting margin mode to {margin_mode_ccxt}: {e}")
+
         # Not tolerated like the modes around it: leverage sizes every position (#277).
         try:
             response = self.client.set_leverage(
@@ -359,33 +375,25 @@ class BitgetFuturesOrderClass:
             # not raise -- it silently confirmed nothing, on every account.
             # The unified-account route answers `"data": "success"` with no leverage
             # at all, hence the isinstance rather than a bare index.
-            data = require_dict_response(
-                self.symbol, self.leverage, response
-            ).get("data")
-            if isinstance(data, dict):
-                # Under crossed margin the effective leverage is the cross field; under
-                # isolated the two sides can differ and both size real positions.
-                fields = (
-                    ("crossMarginLeverage",)
-                    if data.get("marginMode") == "crossed"
-                    else ("longLeverage", "shortLeverage")
+            require_dict_response(self.symbol, self.leverage, response)
+            data = response.get("data")
+            # Under crossed margin the effective leverage is the cross field; under
+            # isolated the two sides can differ and both size real positions. A `data`
+            # that is not a dict (the unified-account route answers the string
+            # "success") confirms nothing, and passing over it is the inert check again.
+            if not isinstance(data, dict):
+                raise ValueError(
+                    f"bitget confirmed no leverage for {self.symbol}: set-leverage "
+                    f"answered {data!r}, which carries no leverage to check "
+                    f"{self.leverage}x against."
                 )
-                for field in fields:
-                    require_leverage_applied(self.symbol, self.leverage, data.get(field))
-
-        # Set margin mode using CCXT. Read before the try: it was assigned inside it and
-        # referenced from the handler, so a failure in to_ccxt() raised NameError from
-        # the error path -- invisible only because an outer blanket except caught that too.
-        margin_mode_ccxt = self.margin_mode.to_ccxt()
-        try:
-            logger.info(f"Setting margin mode to: {margin_mode_ccxt}")
-            self.client.set_margin_mode(
-                marginMode=margin_mode_ccxt,
-                symbol=self.symbol
+            fields = (
+                ("crossMarginLeverage",)
+                if data.get("marginMode") == "crossed"
+                else ("longLeverage", "shortLeverage")
             )
-            logger.info(f"Margin mode set successfully to {margin_mode_ccxt}")
-        except Exception as e:
-            logger.error(f"Error setting margin mode to {margin_mode_ccxt}: {e}")
+            for field in fields:
+                require_leverage_applied(self.symbol, self.leverage, data, field)
 
     def trade(
         self,

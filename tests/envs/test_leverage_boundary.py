@@ -161,3 +161,56 @@ def test_a_response_the_echo_cannot_be_read_from_stops_construction(exchange):
     """
     with pytest.raises(TypeError, match="not a dict"):
         _build(exchange, 20, lambda *a, **k: None)
+
+
+def test_bitget_reads_the_leverage_of_the_margin_mode_actually_in_force():
+    """bitget stores leverage per margin mode, and the body reports all of them.
+
+    The side fields agree with the request here and only the cross field disagrees, so
+    this passes if and only if the crossed body selects `crossMarginLeverage`. Every
+    other fixture in the repo is isolated, which left this branch executing in no test
+    at all -- the same shape of gap that let the first version of the check ship inert.
+    """
+    crossed = {
+        "code": "00000",
+        "data": {
+            "symbol": "BTCUSDT", "marginCoin": "USDT",
+            "longLeverage": "20", "shortLeverage": "20",
+            "crossMarginLeverage": "5", "marginMode": "crossed",
+        },
+    }
+    with pytest.raises(ValueError, match="but the venue applied"):
+        _build("bitget", 20, lambda *a, **k: crossed)
+
+
+# A response the venue DID return, whose leverage field is missing or renamed. Distinct
+# from a non-dict response: the call looks entirely successful.
+_ECHO_MISSING = {
+    "binance": {"symbol": "BTCUSDT", "maxNotionalValue": "1000"},
+    "bitget": {"code": "00000", "data": {"symbol": "BTCUSDT", "marginMode": "isolated"}},
+    "okx": {"code": "0", "data": [{"instId": "BTC-USDT-SWAP"}]},
+}
+
+
+@pytest.mark.parametrize("exchange", sorted(_ECHO_MISSING))
+def test_a_venue_that_reports_no_leverage_confirms_nothing(exchange):
+    """Absent is not "close enough".
+
+    Reading a key that does not exist, finding None and returning happy is exactly how
+    the first version of this check shipped inert on bitget. A renamed or dropped field
+    has to fail loudly, or the check silently stops checking and the suite stays green.
+    """
+    with pytest.raises(ValueError, match="did not report"):
+        _build(exchange, 20, lambda *a, **k: _ECHO_MISSING[exchange])
+
+
+def test_okx_confirms_nothing_when_it_returns_no_entries():
+    """An empty data list is a failure to confirm, not a pass."""
+    with pytest.raises(ValueError, match="confirmed no leverage"):
+        _build("okx", 20, lambda *a, **k: {"code": "0", "data": []})
+
+
+def test_bitget_confirms_nothing_on_the_unified_account_route():
+    """The unified route answers `"data": "success"` -- a string, carrying no leverage."""
+    with pytest.raises(ValueError, match="confirmed no leverage"):
+        _build("bitget", 20, lambda *a, **k: {"code": "00000", "data": "success"})

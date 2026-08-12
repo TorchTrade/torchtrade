@@ -250,9 +250,17 @@ class OKXFuturesOrderClass:
                 )
 
             # Every entry: long_short_mode returns one per posSide, and checking only
-            # the first leaves the short side unverified.
-            for entry in res.get("data") or []:
-                require_leverage_applied(self.symbol, self.leverage, entry.get("lever"))
+            # the first leaves the short side unverified. An empty list is not a pass --
+            # okx does not legitimately return one on success, and treating it as
+            # "nothing to check" is how this check goes inert.
+            entries = res.get("data") or []
+            if not entries:
+                raise ValueError(
+                    f"okx confirmed no leverage for {self.symbol}: the set-leverage "
+                    f"response carried no data to check {self.leverage}x against."
+                )
+            for entry in entries:
+                require_leverage_applied(self.symbol, self.leverage, entry, "lever")
 
     def trade(
         self,

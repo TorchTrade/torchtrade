@@ -147,11 +147,7 @@ class BinanceFuturesOrderClass:
             if not leverage_already_set(e):
                 raise
         else:
-            require_leverage_applied(
-                self.symbol,
-                self.leverage,
-                require_dict_response(self.symbol, self.leverage, response).get("leverage"),
-            )
+            require_leverage_applied(self.symbol, self.leverage, response, "leverage")
 
         # Margin type stays a preference for SIZING; note it does affect liquidation
         # risk, so a construction that succeeds guarantees leverage only.

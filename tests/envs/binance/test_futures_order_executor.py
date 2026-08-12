@@ -450,7 +450,9 @@ class TestBinanceLotSizeRounding:
         client.futures_exchange_info = MagicMock(
             return_value=exchange_info if exchange_info is not None else {"symbols": symbols}
         )
-        client.futures_change_leverage = MagicMock(return_value={})
+        client.futures_change_leverage = MagicMock(
+            side_effect=lambda symbol, leverage, **k: {"leverage": leverage}
+        )
         client.futures_change_margin_type = MagicMock(return_value={})
         return BinanceFuturesOrderClass(
             symbol=symbol, trade_mode="quantity", demo=True, leverage=10, client=client

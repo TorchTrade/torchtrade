@@ -33,7 +33,10 @@ def mock_okx_account_client():
 
     # Mock account configuration
     client.set_position_mode = MagicMock(return_value={"code": "0", "msg": ""})
-    client.set_leverage = MagicMock(return_value={"code": "0", "msg": "", "data": [{}]})
+    # `lever` present: an entry without it no longer confirms anything (#277).
+    client.set_leverage = MagicMock(
+        side_effect=lambda instId=None, lever=None, **k: {
+            "code": "0", "msg": "", "data": [{"lever": lever}]})
 
     # Mock position information
     client.get_positions = MagicMock(return_value={
