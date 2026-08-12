@@ -64,12 +64,13 @@ def calculate_fractional_position(params: PositionCalculationParams) -> Tuple[fl
         >>> assert abs(pos_size - 0.5) < 0.01
         >>> assert side == "long"
     """
-    if not 0 < params.current_price < float("inf"):
-        raise ValueError(f"cannot size a position at a price of {params.current_price}")
 
     # Handle neutral case
     if params.action_value == 0.0:
         return 0.0, 0.0, "flat"
+
+    if not 0 < params.current_price < float("inf"):
+        raise ValueError(f"cannot size a position at a price of {params.current_price}")
 
     # Calculate fraction and direction
     fraction = abs(params.action_value)

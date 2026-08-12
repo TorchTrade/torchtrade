@@ -143,3 +143,64 @@ def test_the_vectorized_floor_holds_a_sub_dollar_resize(gap_usd, expect_hold):
     assert held is expect_hold, (
         f"a ${gap_usd} gap was {'not ' if expect_hold else ''}held by the floor"
     )
+
+
+@pytest.mark.parametrize("price", [100_000.0, 100.0, 0.35, 0.01],
+                         ids=["btc", "eth-ish", "doge", "cent"])
+def test_both_engines_open_a_sub_dollar_position_from_flat(price):
+    """An open from flat is not a resize, and the floor must not refuse it.
+
+    The scalar gate was unconditional while the vectorized gates on `has_position`, so
+    from flat the floor refused the scalar open and let the vectorized one through -- the
+    policy saw a long in one engine and nothing in the other. Worse on the scalar side it
+    was absorbing: with the portfolio under $1 the agent could never re-enter at all.
+
+    Every fixture in the equivalence harness holds a position before stepping, so
+    `has_position` is always true there and this branch is never reached.
+    """
+    scalar = _env_at(price)
+    assert scalar.position.position_size == 0, "this test is about opening from FLAT"
+
+    info = scalar._execute_fractional_action(action_value=0.00005, execution_price=price)
+
+    assert info["executed"] is True, "the floor refused an open from flat"
+
+
+@pytest.mark.parametrize("env_cls,cfg_cls", [
+    (SequentialTradingEnv, SequentialTradingEnvConfig),
+    (VectorizedSequentialTradingEnv, VectorizedSequentialTradingEnvConfig),
+])
+def test_slippage_of_one_is_refused_by_every_engine(env_cls, cfg_cls):
+    """`slippage == 1.0` makes uniform_(0, 2) legal, so a fill price can reach ~0.
+
+    Measured before this was closed: a minimum fill of $0.0005 against a true price of
+    $100, and a $4.14e10 position opened from a $10,000 account -- with no exception and
+    account_state reading a tidy 1.0. The bound was tightened in core/base.py and the
+    vectorized config kept its own copy at `<= 1`, so half the fix landed.
+    """
+    idx = pd.date_range("2024-01-01", periods=600, freq="1min")
+    df = pd.DataFrame({"timestamp": idx, "open": 100.0, "high": 100.1,
+                       "low": 99.9, "close": 100.0, "volume": 10.0})
+    kwargs = dict(symbol="X", time_frames=["1Minute"], window_sizes=[10],
+                  execute_on="1Minute", slippage=1.0)
+    if cfg_cls is VectorizedSequentialTradingEnvConfig:
+        kwargs["num_envs"] = 1
+
+    with pytest.raises(ValueError, match="[Ss]lippage"):
+        env_cls(df, cfg_cls(**kwargs))
+
+
+def test_a_flat_command_survives_a_zero_price_bar():
+    """The boundary raise sat above the neutral return, so a flat command crashed.
+
+    A bar of all zeros is internally consistent and passes the OHLC validator. A policy
+    that only ever commands flat and holds nothing does no sizing arithmetic at all --
+    raising there killed an episode that previously ran fine.
+    """
+    from torchtrade.envs.utils.fractional_sizing import (
+        PositionCalculationParams, calculate_fractional_position,
+    )
+
+    assert calculate_fractional_position(PositionCalculationParams(
+        balance=10_000.0, action_value=0.0, current_price=0.0, leverage=1,
+    )) == (0.0, 0.0, "flat")

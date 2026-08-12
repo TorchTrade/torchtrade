@@ -698,7 +698,13 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         )
 
         # Check if already at target position (implicit hold)
-        if abs(target_position_size - self.position.position_size) < tolerance:
+        # `position_size != 0` mirrors the vectorized engine's `has_position` term. The
+        # floor asks whether a RESIZE is worth the fee; an open from flat is not a resize
+        # any more than a close is. Without it the two engines disagreed on every open
+        # worth under $1 -- and the scalar could never re-enter, an absorbing dead state.
+        if self.position.position_size != 0 and (
+            abs(target_position_size - self.position.position_size) < tolerance
+        ):
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Execute appropriate position change

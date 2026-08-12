@@ -87,7 +87,7 @@ class VectorizedSequentialTradingEnvConfig:
             raise ValueError(
                 f"Transaction fee must be between 0 and 1, got {self.transaction_fee}"
             )
-        if not (0 <= self.slippage <= 1):
+        if not (0 <= self.slippage < 1):
             raise ValueError(
                 f"Slippage must be between 0 and 1, got {self.slippage}"
             )
