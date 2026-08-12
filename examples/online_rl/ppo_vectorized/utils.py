@@ -11,7 +11,6 @@ from torchrl.envs import (
     StepCounter,
 )
 from torchrl.collectors import Collector
-import torchrl
 import torch
 from torchrl.modules import (
     ActorValueOperator,

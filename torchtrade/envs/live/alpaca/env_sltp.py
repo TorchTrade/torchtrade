@@ -228,7 +228,6 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
             amount = self._calculate_trade_amount("buy")
 
             # Get current price to calculate absolute SL/TP levels
-            status = self.trader.get_status()
             # Use market data to get current price
             obs = self.observer.get_observations(return_base_ohlc=True)
             current_price = float(obs["base_features"][-1, 3])  # Close price

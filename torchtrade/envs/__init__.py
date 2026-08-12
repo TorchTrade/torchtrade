@@ -37,7 +37,6 @@ from torchtrade.envs.live.binance import (
     BinanceFuturesTorchTradingEnv,
     BinanceFuturesTradingEnvConfig,
     TradeMode,
-    PositionSide,
 )
 
 # Live environments - Bybit

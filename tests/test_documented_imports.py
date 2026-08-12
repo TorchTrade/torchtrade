@@ -20,6 +20,14 @@ IMPORT_LINE = re.compile(r"^from (torchtrade[\w.]*) import (?:\(([^)]*)\)|([^\n(
 PY_BLOCK = re.compile(r"```python\n(.*?)```", re.S)
 
 
+def _safe_walk(block):
+    """Blocks using the `Config(a=1, ...)` ellipsis idiom do not parse; skip them here."""
+    try:
+        return list(ast.walk(ast.parse(block)))
+    except SyntaxError:
+        return []
+
+
 def _doc_sources():
     """Tracked markdown only. Sourcing from the index rather than the filesystem keeps
     anyone's untracked local notes from failing the suite, without hardcoding a
@@ -44,7 +52,7 @@ def _documented_imports():
 CASES = list(_documented_imports())
 README_BLOCKS = [
     pytest.param(block, id=f"{p.relative_to(REPO)}::block{i}")
-    for p in sorted((REPO / "torchtrade").rglob("README.md"))
+    for p in _doc_sources() if p.name == "README.md" and p.is_relative_to(REPO / "torchtrade")
     for i, block in enumerate(PY_BLOCK.findall(p.read_text()))
 ]
 
@@ -62,7 +70,15 @@ def test_a_documented_code_block_parses(block):
 
 
 def test_the_sweep_still_covers_every_source():
-    """A floor of 50 let a whole lost glob through (docs/ dropping out still left 61).
-    These sit just under the real counts, so losing any one source turns this red."""
-    assert len(CASES) > 140, f"only {len(CASES)} documented imports discovered"
-    assert len(README_BLOCKS) > 20, f"only {len(README_BLOCKS)} code blocks discovered"
+    """Floors set just under the real counts, because a generous one hides exactly what it
+    is for: >140 against 190 still passed with the largest source (49) removed, and >20
+    against 66 tolerated losing two thirds. Raise these when the docs grow."""
+    assert len(CASES) > 185, f"only {len(CASES)} documented imports discovered"
+    assert len(README_BLOCKS) > 60, f"only {len(README_BLOCKS)} code blocks discovered"
+
+
+# NOT ENABLED YET: an AST pass comparing documented kwargs against dataclasses.fields()
+# turns up 31 in-package README call sites using fields that do not exist -- e.g.
+# AlpacaTradingEnvConfig(api_key=..., timeframe=...), where api_key is an env constructor
+# argument and the field is time_frames. That is #287's remaining half: the bodies, not
+# the import lines. Enabling this guard is the first step of that pass, not this one.
