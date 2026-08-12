@@ -21,7 +21,6 @@ from torchtrade.envs.core.live import (
     TorchTradeLiveEnv,
 )
 from torchtrade.envs.core.state import (
-    position_qty_from_status,
     PositionUnknownError,
     advance_hold_counter,
     position_direction_from_status,
@@ -128,22 +127,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         Raises rather than returning a cached observation: see docs/environments/online.md.
         """
-        try:
-            return self._get_portfolio_value(), self._get_observation()
-        # NOT RuntimeError: adapters wrap timeouts in it, and KeyError is a config
-        # error. See docs/environments/online.md.
-        except (PositionUnknownError, ValueError) as error:
-            policy = self.config.observation_failure_policy
-            accepted = flatten_error = None
-            if policy is ObservationFailurePolicy.FLATTEN:
-                try:
-                    accepted = bool(self.trader.close_position())
-                except Exception as exc:
-                    flatten_error = exc
-                    logger.exception(
-                        "Emergency close_position failed for %s", self.config.symbol
-                    )
-            raise LiveObservationHalt(error, policy, accepted, flatten_error) from error
+        return self._halting(lambda: (self._get_portfolio_value(), self._get_observation()))
 
     def _current_mark_price(self, position_status=None) -> float:
         """The bar's mark price, validated before it can size an order (#347).

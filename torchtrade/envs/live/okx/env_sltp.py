@@ -8,7 +8,6 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.okx.observation import OKXObservationClass
 from torchtrade.envs.live.okx.order_executor import (
     OKXFuturesOrderClass,

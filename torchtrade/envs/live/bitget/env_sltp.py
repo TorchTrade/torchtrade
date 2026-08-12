@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import (
     BitgetFuturesOrderClass,

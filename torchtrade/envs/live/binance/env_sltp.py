@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.utils.timeframe import TimeFrame
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (

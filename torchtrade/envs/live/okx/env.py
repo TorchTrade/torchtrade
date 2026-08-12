@@ -14,7 +14,6 @@ from torchtrade.envs.live.okx.order_executor import (
     MarginMode,
     PositionMode,
 )
-from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.okx.base import OKXBaseTorchTradingEnv
 from torchtrade.envs.core.live import (
     ObservationFailurePolicy,

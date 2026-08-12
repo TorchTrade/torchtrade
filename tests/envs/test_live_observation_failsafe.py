@@ -18,12 +18,16 @@ def _env(error, policy=ObservationFailurePolicy.HALT, close_result=True):
         closed.append(True)
         return close_result
 
-    return SimpleNamespace(
+    env = SimpleNamespace(
         _get_portfolio_value=lambda: (_ for _ in ()).throw(error),
         _get_observation=lambda **k: None,
         trader=SimpleNamespace(close_position=close_position),
         config=SimpleNamespace(symbol="BTCUSDT", observation_failure_policy=policy),
-    ), closed
+    )
+    # The post-bar read delegates to the shared policy now rather than restating it, so
+    # these tests exercise `_halting` itself -- which is the point of extracting it.
+    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    return env, closed
 
 
 @pytest.mark.parametrize("error", [

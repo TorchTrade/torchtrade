@@ -2499,3 +2499,82 @@ def test_a_failed_read_runs_the_configured_policy(policy, expect_flatten):
 
     assert bool(closed) is expect_flatten
     assert caught.value.flatten_accepted is (True if expect_flatten else None)
+
+
+@pytest.mark.parametrize("policy,expect_flatten", [
+    (ObservationFailurePolicy.FLATTEN, True),
+    (ObservationFailurePolicy.HALT, False),
+])
+def test_an_unreadable_position_halts_before_the_env_trades(policy, expect_flatten):
+    """Drives the REAL pre-trade read with POSITION_UNKNOWN (#355).
+
+    The structural guard next to this one asserts a source substring, so it passes on
+    code that wraps `get_status` and halts on nothing -- get_status catches its own venue
+    errors and RETURNS the sentinel, so the error comes from the reads that follow. Only
+    driving the value through can tell the difference.
+    """
+    closed = []
+    env = SimpleNamespace(
+        config=SimpleNamespace(observation_failure_policy=policy, symbol="TEST"),
+        trader=SimpleNamespace(
+            get_status=lambda: {"position_status": POSITION_UNKNOWN},
+            close_position=lambda: closed.append("close") or True,
+        ),
+    )
+    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    env._current_mark_price = (
+        lambda ps=None: TorchTradeFuturesLiveEnv._current_mark_price(env, ps)
+    )
+
+    with pytest.raises(LiveObservationHalt) as caught:
+        TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
+
+    assert bool(closed) is expect_flatten
+    assert caught.value.flatten_accepted is (True if expect_flatten else None)
+
+
+def test_a_reset_on_an_unreadable_position_still_raises_the_bare_exception():
+    """Pins what reset ACTUALLY does, which is not what the halt promises.
+
+    Routing reset through the halt was reverted deliberately: `_halting` runs
+    close_position on any ValueError, and _get_observation raises ValueError for METADATA
+    gaps -- a Bybit portfolio-margin account, which always blanks liqPrice, would be
+    market-flattened on every reset, overriding close_position_on_reset=False.
+
+    So an unreadable position at reset raises a BARE PositionUnknownError, which the
+    documented `except LiveObservationHalt` does not catch. That is a known hole, and
+    this test exists so a future refactor cannot silently turn it into a swallow instead.
+    """
+    from torchtrade.envs.core.state import position_direction_from_status
+
+    with pytest.raises(PositionUnknownError):
+        position_direction_from_status(POSITION_UNKNOWN)
+
+
+def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():
+    """Eight sites unpack one 4-tuple, and only okx would notice a swap.
+
+    In the other six the pair reaches `history.record_step(price=, position=)`, which
+    feeds the reward and the recorded price series -- so transposing them corrupts the
+    training signal rather than crashing, and mutation testing showed 6 of 8 accept it
+    with a green suite. Collapsing eight per-file mistakes into one shared line makes the
+    mistake cheaper to make, so the shape has to be pinned somewhere.
+    """
+    ps = SimpleNamespace(qty=0.25, mark_price=50000.0)
+    env = SimpleNamespace(
+        config=SimpleNamespace(
+            observation_failure_policy=ObservationFailurePolicy.HALT, symbol="T"
+        ),
+        trader=SimpleNamespace(get_status=lambda: {"position_status": ps},
+                               get_mark_price=lambda: 50000.0),
+    )
+    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    env._current_mark_price = (
+        lambda p=None: TorchTradeFuturesLiveEnv._current_mark_price(env, p)
+    )
+
+    status, position_status, price, size = TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
+
+    assert position_status is ps
+    assert price == 50000.0, "slot 2 is the PRICE"
+    assert size == 0.25, "slot 3 is the SIZE"

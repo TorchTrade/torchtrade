@@ -8,7 +8,6 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
 from torchtrade.envs.live.bybit.order_executor import (
     BybitFuturesOrderClass,
