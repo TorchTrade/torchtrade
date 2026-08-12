@@ -408,13 +408,12 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         if side is None:
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
-        # CLOSE action (shouldn't happen in one-step, but handle for safety)
+        # CLOSE action. A one-step episode resets before every step, so the position is
+        # always flat by the time an action is executed and there is never anything to
+        # close -- measured 0 of 399 entries with a nonzero size, including with
+        # include_close_action=True. The close-and-reopen path this used to hold was
+        # unreachable defensive code, not a behaviour.
         if side == "close":
-            if self.position.position_size != 0:
-                # Apply slippage
-                price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage, generator=self._rng).item()
-                execution_price = base_price * price_noise
-                return self._close_position(execution_price)
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
         # Opening new position (long or short)
@@ -424,13 +423,8 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
         if side == "short" and self.position.position_size < 0:
             return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
 
-        # If switching direction, close existing position first
-        if self.position.position_size != 0:
-            price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage, generator=self._rng).item()
-            execution_price = base_price * price_noise
-            self._close_position(execution_price)
-            # Recalculate base_price after closing (balance may have changed)
-            base_price = self._cached_base_features["close"]
+        # No switch-direction branch here for the same reason: the position is always flat
+        # at this point in a one-step episode.
 
         # Apply slippage for opening
         price_noise = torch.empty(1).uniform_(1 - self.slippage, 1 + self.slippage, generator=self._rng).item()

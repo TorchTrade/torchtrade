@@ -399,9 +399,10 @@ class TestSetSeedReachesTheEpisodeRNGs:
 
     The two RNGs that determine what an episode IS -- the sampler's start index and the
     initial cash -- are built once from `config.seed` and were never touched again. The
-    consequence was not "set_seed is a no-op": SerialEnv/ParallelEnv seed their workers
-    `seed, seed+1, ...` precisely to decorrelate them, so every worker replayed the same
-    start indices and the same starting cash. A batch of N workers had a diversity of 1.
+    consequence was not "set_seed is a no-op": SerialEnv/ParallelEnv give each worker a
+    DIFFERENT seed precisely to decorrelate them, so every worker replayed the same start
+    indices and the same starting cash regardless. A batch of N workers had a diversity of
+    1. (Worker seeds come from seed_generator(), a PCG64 hash -- not `seed+1`.)
     """
 
     @staticmethod
@@ -425,19 +426,17 @@ class TestSetSeedReachesTheEpisodeRNGs:
             out.append((int(env.sampler._sequential_idx), float(env.balance)))
         return out
 
-    def test_different_seeds_give_different_episodes(self, large_ohlcv_df):
-        """The measurement from the issue: these two were byte-identical."""
-        assert self._episodes(large_ohlcv_df, 1) != self._episodes(large_ohlcv_df, 999)
+    @pytest.mark.parametrize("a,b", [(1, 999), (1, 2)], ids=["distant", "adjacent"])
+    def test_different_seeds_give_different_episodes(self, large_ohlcv_df, a, b):
+        """(1, 999) is the measurement from the issue -- these were byte-identical.
 
-    def test_adjacent_seeds_give_different_episodes(self, large_ohlcv_df):
-        """Adjacent, because `--seed $i` over 1..N is how sweeps and multi-process launches
-        are actually started.
-
-        (Not because torchrl hands workers `seed+1` -- it derives them through
-        seed_generator(), a PCG64 hash. Adjacency comes from the caller.) A fix that only
-        decorrelates distant seeds would leave the common case broken.
+        (1, 2) is the pair that matters in practice: `--seed $i` over 1..N is how sweeps
+        and multi-process launches are started, so a fix that only decorrelated distant
+        seeds would leave the common case broken. (Not because torchrl hands workers
+        `seed+1` -- it derives them through seed_generator(), a PCG64 hash. Adjacency
+        comes from the caller.)
         """
-        assert self._episodes(large_ohlcv_df, 1) != self._episodes(large_ohlcv_df, 2)
+        assert self._episodes(large_ohlcv_df, a) != self._episodes(large_ohlcv_df, b)
 
     def test_same_seed_still_reproduces(self, large_ohlcv_df):
         """The point of the fix is reproducibility, not merely difference."""
@@ -515,6 +514,47 @@ class TestSetSeedReachesTheEpisodeRNGs:
                 != self._first_entry_price(large_ohlcv_df, 2))
         assert (self._first_entry_price(large_ohlcv_df, 7)
                 == self._first_entry_price(large_ohlcv_df, 7))
+
+    def test_sltp_close_slippage_also_uses_the_private_generator(self, large_ohlcv_df):
+        """The close branch is a separate call site from the open one, and reachable.
+
+        `include_close_action=True` puts CLOSE at action 1, so this sets REALIZED PnL --
+        arguably more money-relevant than the entry slippage the parametrized cell covers.
+        Reverting only that site left the full suite green, because every other cell opens
+        a position and never closes one.
+        """
+        config = SequentialTradingEnvSLTPConfig(
+            symbol="TEST/USD",
+            time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
+            window_sizes=[10],
+            execute_on=TimeFrame(1, TimeFrameUnit.Minute),
+            initial_cash=10000,
+            slippage=0.01,
+            leverage=2,
+            random_start=False,
+            include_close_action=True,
+            **LONGONLY_SLTP_CONFIG,
+        )
+
+        torch.manual_seed(1234)
+        control = torch.rand(3)
+
+        env = SequentialTradingEnvSLTP(
+            large_ohlcv_df.copy(), config, feature_preprocessing_fn=simple_feature_fn
+        )
+        env.set_seed(3)
+        torch.manual_seed(1234)
+        td = env.reset()
+        td["action"] = torch.tensor(2)      # open
+        td = env.step(td)["next"]
+        td["action"] = torch.tensor(1)      # close
+        env.step(td)
+        after = torch.rand(3)
+
+        assert torch.equal(control, after), (
+            "closing moved the global torch stream, so the close-branch slippage draw "
+            "still shares it with the policy's exploration"
+        )
 
     @pytest.mark.parametrize("env_class,config_class,extra,action", [
         (SequentialTradingEnv, SequentialTradingEnvConfig, {}, 2),
