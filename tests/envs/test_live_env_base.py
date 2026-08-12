@@ -1356,7 +1356,7 @@ def test_every_live_env_validates_its_bankruptcy_baseline():
     every step of every episode would read bankrupt.
 
     Structural because the assignment sits inside per-exchange `_reset` scaffolding that
-    needs a live client to reach. Four copies of one line is itself the drift risk the
+    needs a live client to reach. Five copies of one line is itself the drift risk the
     shared base exists to remove -- hoisting it is follow-up work (#345).
     """
     live_root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
@@ -1629,3 +1629,48 @@ def test_polymarket_refuses_non_finite_market_numbers(field):
 
     with pytest.raises(ValueError, match="not a finite non-negative number"):
         _finite("nan", field, "some-market")
+
+
+def test_alpaca_sizing_refuses_a_non_finite_position_quantity():
+    """Alpaca hand-rolled `float(position_status.qty)` here, bypassing the dust rule.
+
+    The dust half of that is absorbed downstream -- a 1e-12 difference in delta_qty loses
+    to the $1 minimum-trade tolerance -- so this asserts the half that survives: a NaN qty
+    used to flow into `delta_qty = target_qty - current_qty`, and `nan > 0` is False, so
+    the trade fell to the SELL branch. In trade_mode="notional" a sell is intercepted as
+    close_position(). Going through position_qty_from_status raises instead.
+    """
+    from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv
+
+    submitted = []
+    env = SimpleNamespace(
+        trader=SimpleNamespace(
+            get_status=lambda: {"position_status": SimpleNamespace(
+                qty=float("nan"), market_value=1000.0, current_price=100.0)},
+            trade=lambda **kw: submitted.append(kw) or True,
+        ),
+        _get_current_price=lambda ps: 100.0,
+        _calculate_fractional_position=lambda *a, **k: (1000.0, 10.0),
+    )
+    with pytest.raises(ValueError, match="non-finite position quantity"):
+        AlpacaTorchTradingEnv._execute_fractional_action(env, 1.0)
+    assert submitted == [], f"an order was submitted from a NaN quantity: {submitted}"
+
+
+@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
+def test_futures_sizing_rejects_a_non_finite_balance(exchange):
+    """`not (x > 0)` catches NaN but passes +inf, and these four lines are this PR's own.
+
+    An inf balance sizes an inf target: bitget's amount rounding then yields NaN and hands
+    it to create_order, while binance and bybit raise an undiagnosable OverflowError
+    mid-step. The alpaca sibling written in the same commit is safe only because it
+    isfinite-checks its inputs first.
+    """
+    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+           / "live" / exchange / "env.py").read_text()
+    assert "if not (total_balance > 0):" not in src, (
+        f"{exchange} sizes against a balance guarded by `not (x > 0)`, which +inf passes"
+    )
+    assert "math.isfinite(total_balance)" in src, (
+        f"{exchange} does not check that the sizing balance is finite"
+    )

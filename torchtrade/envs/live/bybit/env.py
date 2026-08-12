@@ -233,7 +233,10 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         # size a NaN position (#277).
         total_balance = balance_info['total_margin_balance']
 
-        if not (total_balance > 0):
+        # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
+        # balance sizes an inf target -- bitget's amount rounding then yields NaN and
+        # hands it to create_order. Same defect this PR fixed on the baselines (#277).
+        if not math.isfinite(total_balance) or total_balance <= 0:
             logger.warning("No balance for fractional position sizing")
             return 0.0, 0.0, "flat"
 

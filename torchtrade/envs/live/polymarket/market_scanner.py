@@ -40,6 +40,7 @@ def _finite(raw_value, field, slug) -> float:
         )
     return value
 
+
 def _valid_price(raw_price, field, slug) -> float:
     """A market price must be a real probability, or the whole episode goes NaN.
 
@@ -315,11 +316,15 @@ class MarketScanner:
                 continue
             try:
                 markets.append(self._parse_market(raw))
-            except (KeyError, json.JSONDecodeError, IndexError, ValueError):
+            except (KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
                 # ValueError included so a single market with an unusable price is skipped
                 # rather than aborting the whole scan -- which is what a bare float() on a
                 # garbage price would have done here too, once it stopped being silent.
-                logger.warning("Failed to parse market: %s", raw.get("id", "unknown"))
+                # The reason, not just the id: adding ValueError above made this the sink
+                # for every diagnostic the price/finiteness guards emit, and without it a
+                # systematic API change silently empties the scan -- indistinguishable
+                # from "no markets matched the filter".
+                logger.warning("Failed to parse market %s: %s", raw.get("id", "unknown"), exc)
                 continue
 
         return self._filter_markets(markets)
@@ -362,10 +367,14 @@ class MarketScanner:
                 continue
             try:
                 return self._parse_market(raw)
-            except (KeyError, json.JSONDecodeError, IndexError, ValueError):
+            except (KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
                 # ValueError included so a single market with an unusable price is skipped
                 # rather than aborting the whole scan -- which is what a bare float() on a
                 # garbage price would have done here too, once it stopped being silent.
-                logger.warning("Failed to parse market: %s", raw.get("id", "unknown"))
+                # The reason, not just the id: adding ValueError above made this the sink
+                # for every diagnostic the price/finiteness guards emit, and without it a
+                # systematic API change silently empties the scan -- indistinguishable
+                # from "no markets matched the filter".
+                logger.warning("Failed to parse market %s: %s", raw.get("id", "unknown"), exc)
                 continue
         return None
