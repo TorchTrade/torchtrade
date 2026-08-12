@@ -11,12 +11,19 @@ SYMBOL_QUERY_MAP = {
 # Longest free-text field rendered into the model's context, per field.
 _MAX_TEXT_CHARS = 140
 
-# The delimiters of the trusted region, matched the way the CONSUMER reads them rather
+# Every tag the actor's protocol gives meaning to, not just the block delimiters. A
+# forged <answer>N</answer> in a headline sits in context as a completed trade -- it
+# cannot reach a Python parser (those run on responses only), so it is persuasion rather
+# than parser bypass, but a tool has no legitimate reason to emit any of these.
+#
+# Matched the way the CONSUMER reads them rather
 # than the way we emit them. The consumer is an LLM, so it is maximally lenient: case,
 # stray whitespace and trailing attributes all still read as a closing tag. This repo
 # already concedes the point -- parsers.py compiles extract_action with re.IGNORECASE.
 # Escaping the two exact literals left </TOOL_RESULTS> and </tool_results > working.
-_BLOCK_MARKER_RE = re.compile(r"<\s*/?\s*tool_results\b[^>]*>", re.IGNORECASE)
+_BLOCK_MARKER_RE = re.compile(
+    r"<\s*/?\s*(?:tool_results|answer|tool|think)\b[^>]*>", re.IGNORECASE
+)
 
 
 def neutralise_block_markers(text: str) -> str:
