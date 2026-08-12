@@ -114,6 +114,14 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # position value -- so the two cannot drift apart. The futures bases already read
         # an equity figure for this reason.
         self.initial_portfolio_value = self._get_portfolio_value()
+        if not (self.initial_portfolio_value > 0):
+            raise ValueError(
+                f"cannot start an episode on a portfolio value of "
+                f"{self.initial_portfolio_value}: the bankruptcy baseline would be 0, "
+                f"and `current < threshold * 0` reduces to `current < 0`, so it never "
+                f"fires above zero equity -- an unfunded paper account would trade on "
+                f"with the check disabled"
+            )
 
         # Build observation specs
         self._build_observation_specs()

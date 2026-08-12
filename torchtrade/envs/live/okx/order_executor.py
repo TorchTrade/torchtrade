@@ -370,7 +370,12 @@ class OKXFuturesOrderClass:
                     unrealized_pnl=unrealized_pnl,
                     unrealized_pnl_pct=unrealized_pnl_pct,
                     mark_price=mark_price,
-                    leverage=float(pos.get("lever") or self.leverage),
+                    # `in (None, "")` and not `or`: a venue-reported leverage of numeric 0 is
+                    # falsy, and `or` would swap it for the config value -- inventing a
+                    # liquidation distance from a leverage the venue never confirmed (#277).
+                    leverage=float(
+                        self.leverage if pos.get("lever") in (None, "") else pos.get("lever")
+                    ),
                     margin_mode=pos.get("mgnMode", self.margin_mode.value),
                     liquidation_price=liq_price,
                 )

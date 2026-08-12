@@ -576,7 +576,12 @@ class BitgetFuturesOrderClass:
                         unrealized_pnl=unrealized_pnl,
                         unrealized_pnl_pct=unrealized_pnl_pct,
                         mark_price=mark_price,
-                        leverage=float(pos.get('leverage') or self.leverage),
+                        # `in (None, "")` and not `or`: a venue-reported leverage of numeric 0 is
+                        # falsy, and `or` would swap it for the config value -- inventing a
+                        # liquidation distance from a leverage the venue never confirmed (#277).
+                        leverage=float(
+                            self.leverage if pos.get('leverage') in (None, "") else pos.get('leverage')
+                        ),
                         margin_mode=pos.get('marginMode', self.margin_mode.value),
                         liquidation_price=float(pos.get('liquidationPrice', 0)),
                     )

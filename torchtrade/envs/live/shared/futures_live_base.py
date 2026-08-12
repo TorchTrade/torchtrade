@@ -101,11 +101,18 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             # clamp to a distance of 0.0, telling the policy a healthy position is AT
             # liquidation on one garbage tick. Checked once, here, rather than at each
             # comparison (#277).
+            # Every venue number this branch reads, not just the ones feeding
+            # distance_to_liquidation: a NaN notional_value is worse than a NaN
+            # liquidation price, because exposure_pct = nan/equity puts NaN straight into
+            # the observation tensor and from there into the policy network.
             for _name, _value in (
                 ("qty", position_status.qty),
                 ("mark_price", position_status.mark_price),
                 ("leverage", position_status.leverage),
                 ("liquidation_price", position_status.liquidation_price),
+                ("notional_value", position_status.notional_value),
+                ("unrealized_pnl_pct", position_status.unrealized_pnl_pct),
+                ("entry_price", position_status.entry_price),
             ):
                 if not math.isfinite(_value):
                     raise ValueError(

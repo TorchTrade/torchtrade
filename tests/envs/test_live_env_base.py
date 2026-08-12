@@ -1277,7 +1277,13 @@ def test_one_x_with_a_published_liq_price_deliberately_beats_offline(is_long):
     assert obs["account_state"][5].item() == pytest.approx(0.996, rel=1e-4)
 
 
-@pytest.mark.parametrize("field", ["mark_price", "liquidation_price", "qty"])
+@pytest.mark.parametrize("field", [
+    "mark_price", "liquidation_price", "qty",
+    # These three reach account_state directly. notional_value is the worst of the set:
+    # exposure_pct = nan/equity puts NaN into the tensor handed to the policy, where a
+    # NaN liquidation price at least clamped to a number first.
+    "notional_value", "unrealized_pnl_pct", "entry_price",
+])
 def test_non_finite_venue_numbers_refuse_to_build_an_account_state(field):
     """NaN defeats every comparison downstream, so it is caught once at the source.
 
@@ -1306,6 +1312,11 @@ def test_no_adapter_fabricates_zero_equity():
     Structural rather than behavioural: reaching these lines needs a faithful fake of
     three different venue clients, and a wrong fake proves nothing about the adapter. The
     guard is on the coercion itself, which is the thing that must not come back.
+
+    Note for anyone writing the behavioural version: all three adapters wrap their body in
+    `except Exception as e: raise RuntimeError(...) from e`, so the ValueError surfaces to
+    the caller as a RuntimeError with the message preserved. It still raises rather than
+    returning a fabricated balance, which is the property that matters here.
     """
     live_root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
     equity_key = r"""["'](total|totalEquity|totalEq|totalMarginBalance)["']"""
@@ -1329,10 +1340,10 @@ def test_no_adapter_fabricates_zero_equity():
     )
 
 
-def test_every_futures_env_validates_its_bankruptcy_baseline():
-    """A baseline of 0 disables bankruptcy permanently: `current < threshold * 0` is never
-    true for any non-negative equity, so the account can be wiped out and the episode
-    trades on. Indexing the key stops an adapter fabricating the 0, and this stops a
+def test_every_live_env_validates_its_bankruptcy_baseline():
+    """A baseline of 0 disables bankruptcy above zero: `current < threshold * 0` reduces
+    to `current < 0`, so it survives only for negative equity and a wipeout to zero never
+    terminates. Indexing the key stops an adapter fabricating the 0, and this stops a
     genuinely empty account starting an episode that can never terminate.
 
     Structural because the assignment sits inside per-exchange `_reset` scaffolding that
@@ -1341,11 +1352,14 @@ def test_every_futures_env_validates_its_bankruptcy_baseline():
     """
     live_root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
     bases = sorted(live_root.glob("*/base.py"))
-    futures = [p for p in bases if p.parent.name != "alpaca"]
-    assert len(futures) == 4, f"expected 4 futures bases, found {[p.parent.name for p in futures]}"
+    # Alpaca included, not exempted: it inherits the same _check_termination and the same
+    # is_bankrupt, and an unfunded paper account -- the documented default -- yields a
+    # baseline of exactly 0. Excluding it left the one env still carrying the bug as the
+    # one the guard skipped.
+    assert len(bases) >= 5, f"expected 5+ live bases, found {[p.parent.name for p in bases]}"
 
     unguarded = [
-        p.parent.name for p in futures
+        p.parent.name for p in bases
         if "if not (self.initial_portfolio_value > 0):" not in p.read_text()
     ]
     assert unguarded == [], (
@@ -1380,3 +1394,28 @@ def test_fractional_leverage_still_gets_a_real_distance(qty):
 
     assert distance == pytest.approx(1 / 1.5 - 0.004, rel=1e-4)
     assert distance < 1.0
+
+
+def test_no_adapter_falls_back_to_config_leverage_with_or():
+    """`float(pos.get("leverage") or self.leverage)` swaps a venue-reported 0 for the config.
+
+    A numeric 0 is falsy, so `or` silently substitutes a leverage the venue never
+    confirmed and the position gets a plausible liquidation distance computed from it --
+    #277 on the field that was being hardened. bitget reads ccxt's unified `leverage`,
+    which is a number rather than a REST string, so `0` arrives falsy there today.
+
+    Structural because the behavioural cells construct PositionStatus directly and so
+    cannot see the adapter's parsing at all -- which is why this regression survived a
+    mutation run that killed everything else.
+    """
+    live_root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
+    offenders = [
+        f"{path.relative_to(live_root.parent)}:{i}"
+        for path in sorted(live_root.rglob("order_executor.py"))
+        for i, line in enumerate(path.read_text().splitlines(), 1)
+        if not line.lstrip().startswith("#") and "or self.leverage" in line
+    ]
+    assert offenders == [], (
+        f"venue leverage falls back to the config value via `or` at {offenders}; test "
+        f"`in (None, \"\")` so a genuine 0 stays 0 and fails loudly downstream"
+    )
