@@ -625,10 +625,11 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # while every money tensor here is float64. That silently broke the
         # scalar/vectorized contract at the repo's own 1e-9 tolerance, worst case 9.5e-3.
         margin_fraction = 1.0 / float(self.config.leverage)
+        f = self.transaction_fee
         bankruptcy = torch.where(
             is_long,
-            self._entry_prices * (1 - margin_fraction),
-            self._entry_prices * (1 + margin_fraction),
+            self._entry_prices * ((1 - margin_fraction) / (1 - f)),
+            self._entry_prices * ((1 + margin_fraction) / (1 + f)),
         )
         fill_price = torch.where(
             is_long,

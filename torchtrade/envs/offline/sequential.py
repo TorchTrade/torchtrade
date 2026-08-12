@@ -939,8 +939,16 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         # applied to the loss alone left the fee tracking the gap, so a deeper crash was
         # CHEAPER and, at the 1% fee this repo's own fixtures use, cheaper than booking
         # at the liquidation price at all.
+        # Net of the exit fee: the venue takes the liquidation fee OUT of the margin --
+        # that is what the maintenance buffer is for -- so the bankruptcy price is the
+        # fill where loss + fee equals the margin exactly, entry*(1 -+ 1/L)/(1 -+ f).
+        # Charging the fee on top of a full-margin loss overdrew the account by the fee
+        # on every gapped liquidation, which _clamp_balance() then absorbed while logging
+        # "this likely indicates an accounting bug" about ordinary input (#314).
+        f = self.transaction_fee
         bankruptcy_price = self.position.entry_price * (
-            (1 - 1 / self.leverage) if is_long else (1 + 1 / self.leverage)
+            (1 - 1 / self.leverage) / (1 - f) if is_long
+            else (1 + 1 / self.leverage) / (1 + f)
         )
         fill_price = (
             max(fill_price, bankruptcy_price) if is_long

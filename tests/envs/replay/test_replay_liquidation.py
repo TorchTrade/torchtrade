@@ -169,3 +169,32 @@ def test_an_unusable_quantity_never_opens_a_position(quantity):
     with pytest.raises(ValueError, match="quantity"):
         ex.trade(side="buy", quantity=quantity)
     assert ex.position_qty == 0
+
+
+@pytest.mark.parametrize("leverage,fee", [(10, 0.001), (5, 0.002), (20, 0.0005)],
+                         ids=["10x", "5x", "20x"])
+def test_a_gapped_liquidation_never_leaves_negative_equity(leverage, fee):
+    """Every other liquidation test here runs at the default transaction_fee=0.0 (#314).
+
+    At fee=0 charging the exit fee out of the margin and charging it on top are
+    indistinguishable, so the whole file was blind to the difference. Charging it on top
+    overdrew the account by the fee on every gapped liquidation -- and unlike the offline
+    engine, ReplayOrderExecutor has no floor, so it simply ended with negative equity
+    (-466.67 at 50x). The bankruptcy price is net of the fee instead: the venue takes it
+    out of the margin, which is what the maintenance buffer is for.
+    """
+    ex = ReplayOrderExecutor(initial_balance=1000.0, leverage=leverage, transaction_fee=fee)
+    ex.advance_bar({"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0})
+    # All-in: margin + entry fee == the whole balance, so the margin is the ONLY
+    # cushion. Any leftover cash absorbs the overdraft and hides the bug.
+    ex.trade("buy", 1000.0 / (100.0 / leverage + 100.0 * fee))
+    ex.advance_bar({"open": 70.0, "high": 70.0, "low": 70.0, "close": 70.0})
+
+    assert ex.position_qty == 0, "a bar opening 30% down must liquidate a leveraged long"
+    # Tolerance is float noise around an exact zero, not slack: all-in means the loss
+    # consumes precisely the margin. The bug this pins overdrew by the FEE, which is
+    # 0.05-0.2% of notional -- orders of magnitude above 1e-9.
+    assert ex.balance >= -1e-9, (
+        f"the exit fee came out of the margin, so equity cannot go negative -- got "
+        f"{ex.balance}"
+    )
