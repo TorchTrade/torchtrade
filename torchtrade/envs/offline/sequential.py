@@ -793,10 +793,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         delta_position = target_position_size - self.position.position_size
         delta_notional = abs(delta_position * execution_price)
 
-        # Check if delta is negligible
-        if abs(delta_position) * execution_price < POSITION_TOLERANCE_NOTIONAL:
-            return {"executed": False, "side": None, "fee_paid": 0.0, "liquidated": False}
-
         # Determine if increasing or decreasing
         is_increasing = abs(target_position_size) > abs(self.position.position_size)
 

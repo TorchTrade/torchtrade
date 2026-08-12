@@ -1,5 +1,6 @@
-import math
 """Shared utilities for fractional position sizing across environments."""
+
+import math
 
 from typing import Tuple
 from dataclasses import dataclass
@@ -65,10 +66,8 @@ def calculate_fractional_position(params: PositionCalculationParams) -> Tuple[fl
         >>> assert abs(pos_size - 0.5) < 0.01
         >>> assert side == "long"
     """
-    if not math.isfinite(params.current_price) or params.current_price <= 0:
-        raise ValueError(
-            f"cannot size a position at a price of {params.current_price}"
-        )
+    if not 0 < params.current_price < math.inf:
+        raise ValueError(f"cannot size a position at a price of {params.current_price}")
 
     # Handle neutral case
     if params.action_value == 0.0:
@@ -157,5 +156,3 @@ def validate_action_levels(action_levels: list[float]) -> None:
         raise ValueError(
             f"action_levels must contain at least 2 actions, got {len(action_levels)}"
         )
-
-

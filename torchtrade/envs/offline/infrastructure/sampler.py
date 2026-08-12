@@ -12,7 +12,6 @@ FeatureProcessingFn = Optional[Union[Callable, Sequence[Callable]]]
 
 logger = logging.getLogger(__name__)
 
-# PERF: NamedTuple is faster than dict for attribute access
 
 
 def _bounded(value, limit: int = 60) -> str:

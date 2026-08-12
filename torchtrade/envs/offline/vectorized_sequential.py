@@ -686,7 +686,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # Tolerance check: avoid churn from small position changes
         tolerance = torch.maximum(
             target_sizes.abs() * POSITION_TOLERANCE_PCT,
-            POSITION_TOLERANCE_NOTIONAL / execution_prices.clamp(min=1e-12),
+            POSITION_TOLERANCE_NOTIONAL / execution_prices,
         )
         # A CLOSE is exempt, exactly as in the scalar engine. The floor answers "is this
         # resize worth the fee", and going flat is not a resize -- applied to it, a lane
