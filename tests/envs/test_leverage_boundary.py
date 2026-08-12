@@ -348,3 +348,30 @@ def test_okx_refuses_to_construct_when_only_one_side_took_the_leverage():
                                            set_position_mode=_boom, get_positions=_boom),
             public_client=SimpleNamespace(get_instruments=_boom),
         )
+
+
+def test_okx_refuses_a_confirmation_for_the_wrong_side():
+    """Echoing `lever` is not confirming the leg that was asked about (#363).
+
+    A response carrying posSide="long" for the SHORT call passed verification, because
+    only `lever` was ever compared -- so the short side went unconfirmed while the check
+    reported success. Every fake in this file echoes the CORRECT side, which is why
+    disabling the comparison entirely left all 32 tests green.
+    """
+    from torchtrade.envs.live.okx.order_executor import (
+        OKXFuturesOrderClass, MarginMode, PositionMode,
+    )
+
+    def always_long(**kwargs):
+        return {"code": "0", "data": [{"lever": "20", "posSide": "long"}]}
+
+    with pytest.raises(ValueError, match="posSide"):
+        OKXFuturesOrderClass(
+            symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True, leverage=20,
+            margin_mode=MarginMode.ISOLATED, position_mode=PositionMode.LONG_SHORT,
+            api_key="k", api_secret="s", passphrase="p",
+            client=SimpleNamespace(),
+            account_client=SimpleNamespace(set_leverage=always_long,
+                                           set_position_mode=_boom, get_positions=_boom),
+            public_client=SimpleNamespace(get_instruments=_boom),
+        )
