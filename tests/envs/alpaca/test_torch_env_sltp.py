@@ -167,6 +167,24 @@ class TestAlpacaSLTPTradingEnvReset:
 
         assert env.trader.position_qty == 0, "no entry may be opened on an unusable close"
 
+    @pytest.mark.parametrize("cash", [float("nan"), float("inf"), -250.0],
+                             ids=["nan", "inf", "negative"])
+    def test_a_bracket_is_never_sized_off_an_unusable_cash_balance(self, env, cash):
+        """#347: alpaca SLTP sizes off self.balance, written raw in _reset.
+
+        _get_portfolio_value DOES validate -- but it is a SEPARATE fetch, and this env's
+        _step calls it AFTER _execute_trade_if_needed. So the venue could report healthy
+        cash on that later call while the NaN captured at reset had already sized a
+        full-balance bracket buy: the raise landed after the order was live.
+        """
+        env._wait_for_next_timestamp = lambda: None
+        env.trader.cash = cash
+
+        with pytest.raises(ValueError, match="unusable cash balance"):
+            env.reset()
+
+        assert env.trader.position_qty == 0, "no entry may be sized off an unusable balance"
+
     def test_reset_clears_a_live_bracket(self, env):
         """Reset must clear SL/TP levels that an episode actually set.
 

@@ -308,6 +308,19 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
         return out_td
 
+    def _read_cash(self) -> float:
+        """The cash balance, validated at the read (#347).
+
+        The SLTP env sizes orders straight off `self.balance`, and `_get_portfolio_value`
+        -- which does check -- is a SEPARATE fetch its `_step` makes AFTER the order is
+        already on the venue. Zero cash is legitimate (fully invested); negative is a
+        margin debit that would size a negative-notional buy.
+        """
+        cash = float(self.trader.client.get_account().cash)
+        if not math.isfinite(cash) or cash < 0:
+            raise ValueError(f"venue reported an unusable cash balance ({cash})")
+        return cash
+
     def _get_portfolio_value(self) -> float:
         """
         Calculate total portfolio value for Alpaca.
@@ -319,8 +332,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
 
-        account = self.trader.client.get_account()
-        self.balance = float(account.cash)
+        self.balance = self._read_cash()
 
         if position_status is None:
             portfolio_value = self.balance
@@ -349,9 +361,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Reset history tracking
         self.history.reset()
 
-        # Get current state
-        account = self.trader.client.get_account()
-        self.balance = float(account.cash)
+        self.balance = self._read_cash()
 
         status = self.trader.get_status()
         position_status = status.get("position_status")

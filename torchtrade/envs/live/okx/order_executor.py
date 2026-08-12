@@ -605,7 +605,11 @@ class OKXFuturesOrderClass:
             all_closed = True
             for pos in non_zero:
                 raw_pos = float(pos.get("pos", 0))
-                pos_side = pos.get("posSide", "net")
+                pos_side = pos.get("posSide")
+                if pos_side not in ("long", "short", "net"):
+                    logger.error(f"Refusing to close a position with posSide {pos_side!r}")
+                    all_closed = False
+                    continue
                 if pos_side in ("long", "net") and raw_pos > 0:
                     close_side = "sell"
                 else:

@@ -143,7 +143,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         status = self.trader.get_status()
         position_status = status.get("position_status", None)
         if position_status:
-            current_price = position_status.mark_price
+            current_price = self._current_mark_price(position_status)
             position_size = position_status.qty
         else:
             current_price = self._current_mark_price()

@@ -1,5 +1,6 @@
 """Base class for live trading environments."""
 
+import math
 import time
 from abc import abstractmethod
 from datetime import datetime, timedelta
@@ -257,10 +258,12 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
     def _capture_bankruptcy_baseline(self) -> None:
         """Record the equity an episode starts from, or refuse to start (#345).
 
-        `is_bankrupt` is `current < threshold * initial`, so a baseline of 0 never fires.
+        `is_bankrupt` is `current < threshold * initial`, so a baseline of 0 never fires,
+        and a NaN baseline makes the comparison False forever -- the check is then off for
+        the whole episode. `nan <= 0` is False, so isfinite has to carry that half.
         """
         self.initial_portfolio_value = self._get_portfolio_value()
-        if self.initial_portfolio_value <= 0:
+        if not math.isfinite(self.initial_portfolio_value) or self.initial_portfolio_value <= 0:
             raise ValueError(
                 f"cannot start an episode on equity of {self.initial_portfolio_value}"
             )

@@ -118,14 +118,8 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         # read as a live position makes abs(current_qty) > 0 true on a flat account, so
         # action 0.0 closes nothing and still advances current_action_level (#283).
         position_size = position_qty_from_status(position_status)
-        # BOTH halves: the sweep guarded the `else` and left the branch that runs on every
-        # resize. A negative mark_price flips the sign in fractional_sizing, so a max-long
-        # action places a short -- the exact failure _current_mark_price exists to stop.
-        current_price = (
-            position_status.mark_price if position_status else self._current_mark_price()
-        )
-        if not math.isfinite(current_price) or current_price <= 0:
-            raise ValueError(f"venue reported an unusable mark price ({current_price})")
+        # okx alone threads this into sizing rather than re-fetching, so BOTH halves matter.
+        current_price = self._current_mark_price(position_status)
 
         # No-op today (this env's _execute_trade_if_needed recomputes qty live and never reads
         # current_action_level), but keeps the field consistent so adding a duplicate-action

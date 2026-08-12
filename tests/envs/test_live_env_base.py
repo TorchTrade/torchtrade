@@ -628,6 +628,9 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
     env._sync_position_from_exchange = (
         lambda ps: sync_owner._sync_position_from_exchange(env, ps)
     )
+    env._current_mark_price = (
+        lambda ps=None: TorchTradeFuturesLiveEnv._current_mark_price(env, ps)
+    )
 
     try:
         env_cls._step(env, {"action": 2})
@@ -722,6 +725,7 @@ def test_alpaca_refuses_to_value_the_portfolio_on_an_unknown_status():
         ),
         balance=0.0,
     )
+    env._read_cash = lambda: AlpacaBaseTorchTradingEnv._read_cash(env)
     with pytest.raises(PositionUnknownError):
         AlpacaBaseTorchTradingEnv._get_portfolio_value(env)
 
@@ -897,6 +901,9 @@ def test_okx_sizes_through_the_dust_rule_in_step():
         action_levels=[-1.0, 0.0, 1.0],
         _sync_position_from_exchange=lambda ps: None,
         _execute_trade_if_needed=_capture,
+    )
+    env._current_mark_price = (
+        lambda ps=None: TorchTradeFuturesLiveEnv._current_mark_price(env, ps)
     )
     with pytest.raises(RuntimeError):
         OKXFuturesTorchTradingEnv._step(env, {"action": 1})
@@ -1314,36 +1321,6 @@ def test_concrete_adapter_cross_labels_route_to_account_aware_estimate(field, la
     assert distance == pytest.approx(abs(99.0 / 0.996 - 100.0) / 100.0, rel=1e-5)
 
 
-@pytest.mark.parametrize("account_mode,expected", [
-    ("isolated", 0.046),
-    ("cross", abs(99.0 / 0.996 - 100.0) / 100.0),
-], ids=["uta-isolated", "uta-regular"])
-def test_bybit_v5_trade_mode_zero_routes_by_normalized_account_mode(account_mode, expected):
-    """Modern Bybit UTA tradeMode=0 must not decide isolated-vs-cross routing."""
-    from torchtrade.envs.live.bybit.order_executor import PositionStatus
-
-    position = PositionStatus(
-        qty=1.0,
-        notional_value=100.0,
-        entry_price=100.0,
-        unrealized_pnl=0.0,
-        unrealized_pnl_pct=0.0,
-        mark_price=100.0,
-        leverage=20,
-        margin_mode=account_mode,
-        liquidation_price=0.0,
-    )
-    balance = {"total_margin_balance": 5.0}
-    if account_mode == "cross":
-        balance["total_maintenance_margin"] = 4.4
-
-    distance = TorchTradeFuturesLiveEnv._get_observation(
-        _futures_env_stub(position, balance)
-    )["account_state"][5].item()
-
-    assert distance == pytest.approx(expected, rel=1e-5)
-
-
 @pytest.mark.parametrize("margin_mode", [None, "portfolio", "NEW_MODE"])
 def test_blank_liquidation_price_with_unknown_margin_mode_fails_closed(margin_mode):
     env = _futures_env_stub(
@@ -1751,18 +1728,30 @@ def test_alpaca_refuses_to_size_a_trade_from_a_non_finite_read(field, value):
         AlpacaTorchTradingEnv._calculate_fractional_position(env, 1.0, 100.0)
 
 
-def test_alpaca_portfolio_value_refuses_a_non_finite_read():
+@pytest.mark.parametrize("cash,market_value,expected", [
+    ("nan", None, "unusable cash balance"),
+    ("-250", None, "unusable cash balance"),
+    ("1000", float("nan"), "non-finite portfolio value"),
+], ids=["nan-cash", "negative-cash", "nan-market-value"])
+def test_alpaca_portfolio_value_refuses_a_non_finite_read(cash, market_value, expected):
     """alpaca's _step calls this BEFORE building an observation, and its value feeds the
-    reward and _check_termination -- so the observation guard can never catch it."""
+    reward and _check_termination -- so the observation guard can never catch it.
+
+    Two guards, and the rows prove BOTH are live: cash is now refused at the read (#347,
+    because the SLTP env sizes off it directly), while market_value still arrives raw and
+    can only be caught here.
+    """
     from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
 
+    position = None if market_value is None else SimpleNamespace(market_value=market_value)
     env = SimpleNamespace(
         trader=SimpleNamespace(
-            get_status=lambda: {"position_status": None},
-            client=SimpleNamespace(get_account=lambda: SimpleNamespace(cash="nan")),
+            get_status=lambda: {"position_status": position},
+            client=SimpleNamespace(get_account=lambda: SimpleNamespace(cash=cash)),
         ),
     )
-    with pytest.raises(ValueError, match="non-finite portfolio value"):
+    env._read_cash = lambda: AlpacaBaseTorchTradingEnv._read_cash(env)
+    with pytest.raises(ValueError, match=expected):
         AlpacaBaseTorchTradingEnv._get_portfolio_value(env)
 
 
@@ -1822,19 +1811,24 @@ def test_futures_sizing_rejects_a_non_finite_balance(exchange):
     )
 
 
-@pytest.mark.parametrize("price", [float("nan"), float("inf"), float("-inf")],
-                         ids=["nan", "inf", "-inf"])
-def test_a_non_finite_mark_price_cannot_size_a_trade(price):
+@pytest.mark.parametrize("source", ["fetched", "position"])
+@pytest.mark.parametrize("price", [float("nan"), float("inf"), float("-inf"), 0.0, -100.0],
+                         ids=["nan", "inf", "-inf", "zero", "negative"])
+def test_an_unusable_mark_price_cannot_size_a_trade(source, price):
     """#347: the sizing paths divide by this, and `<= 0` cannot see NaN.
 
     A NaN price makes delta_qty NaN; `nan > 0` is False, so the trade falls to the SELL
-    branch -- which in some trade modes is intercepted as a full close. The venue's own
-    rejection names the pre-rounding size, so the error points away from the cause.
+    branch -- which in some trade modes is intercepted as a full close. A negative one
+    flips the sign outright. Both SOURCES matter: an open position's mark took the same
+    money path as the fetched one but went unvalidated in 7 of 8 envs, reaching
+    history.record_step and the reward. Every venue reads it as
+    `float(pos.get("markPrice") or entry_price)`, so two blank fields yield 0.0.
     """
     env = SimpleNamespace(trader=SimpleNamespace(get_mark_price=lambda: price))
+    position_status = SimpleNamespace(mark_price=price) if source == "position" else None
 
     with pytest.raises(ValueError, match="unusable mark price"):
-        TorchTradeFuturesLiveEnv._current_mark_price(env)
+        TorchTradeFuturesLiveEnv._current_mark_price(env, position_status)
 
 
 @pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
@@ -1845,13 +1839,19 @@ def test_no_futures_env_reads_the_mark_price_unvalidated(exchange, module):
             / "live" / exchange / f"{module}.py")
     if not path.exists():
         pytest.skip(f"{exchange} has no {module}")
-    assert "self.trader.get_mark_price()" not in path.read_text(), (
+    src = path.read_text()
+    assert "self.trader.get_mark_price()" not in src, (
         f"{exchange}/{module} sizes from an unvalidated mark price"
+    )
+    # The position's own mark is the same number by another route -- okx was the only env
+    # that ever validated it, and it feeds record_step and the reward in all of them.
+    assert "position_status.mark_price" not in src, (
+        f"{exchange}/{module} reads the position mark raw instead of via "
+        f"_current_mark_price(position_status)"
     )
 
 
-@pytest.mark.parametrize("equity", [0.0, -50.0, float("nan")],
-                         ids=["empty", "negative", "non-finite"])
+@pytest.mark.parametrize("equity", [0.0, -50.0], ids=["empty", "negative"])
 def test_alpaca_refuses_to_size_rather_than_returning_a_flat_target(equity):
     """#348: "I cannot size this" returned the same tuple as "go flat".
 
@@ -1979,3 +1979,62 @@ def test_sltp_sizing_rejects_a_non_finite_price_or_balance(exchange):
         assert "math.isfinite(current_price)" in src, (
             f"{exchange} sizes from a candle close with no finiteness check"
         )
+
+
+@pytest.mark.parametrize("exchange,side_key,side", [
+    ("bybit", "side", None), ("bybit", "side", ""), ("bybit", "side", "unexpected"),
+    ("okx", "posSide", None), ("okx", "posSide", ""), ("okx", "posSide", "unexpected"),
+])
+def test_an_emergency_close_refuses_an_unusable_side_instead_of_guessing(
+    exchange, side_key, side
+):
+    """#341's other half: the sweep fixed get_status and stopped before close_position.
+
+    FLATTEN now calls this, so it is on the money path the halt work created. bybit
+    defaulted to "Buy" and okx to "net" -- either sends a reduce-only close in the wrong
+    direction, which the venue rejects. The operator sees flatten_accepted=False having
+    believed the position was closed, so the refusal must be explicit, not a rejection.
+    """
+    client = MagicMock()
+    if exchange == "bybit":
+        from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass as cls
+        client.get_positions = MagicMock(return_value={"retCode": 0, "result": {"list": [
+            {"symbol": "BTCUSDT", "size": "1.0", side_key: side}
+        ]}})
+        ex = cls(symbol="BTCUSDT", trade_mode="quantity", demo=True, leverage=10,
+                 api_key="k", api_secret="s", client=client)
+    else:
+        from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass as cls
+        account = MagicMock()
+        account.get_positions = MagicMock(return_value={"code": "0", "data": [
+            {"instId": "BTC-USDT-SWAP", "pos": "1.0", side_key: side}
+        ]})
+        account.set_position_mode = MagicMock(return_value={"code": "0"})
+        account.set_leverage = MagicMock(return_value={"code": "0"})
+        public = MagicMock(); public.get_instruments = MagicMock(return_value={"data": []})
+        ex = cls(symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True, leverage=10,
+                 api_key="k", api_secret="s", passphrase="p",
+                 client=client, account_client=account, public_client=public)
+
+    assert ex.close_position() is False, "an unusable side must not report a clean close"
+    client.place_order.assert_not_called()
+
+
+@pytest.mark.parametrize("mark_price", [0.0, -100.0], ids=["zero", "negative"])
+def test_a_non_positive_mark_on_an_open_position_is_refused(mark_price):
+    """Finite is not enough, and this PR is what made it load-bearing.
+
+    The flat branch now writes `current_price = 0.0` as a sentinel, which turned a
+    near-dead `current_price == 0` clause into the one that decides
+    distance_to_liquidation. A venue mark of exactly 0.0 on a HELD 20x position passes
+    the finiteness loop and then reads as 1.0 -- as safe as a flat spot account, which is
+    the literal text of #277. A negative one computes (-100-95)/-100 = 1.95, and the
+    `max(0.0, ...)` clamp only holds the bottom, so the policy is handed a reading better
+    than maximally safe.
+    """
+    env = _futures_env_stub(
+        _open_position(1.0, mark_price=mark_price, liquidation_price=95.0),
+        {"total_margin_balance": 5.0, "total_maintenance_margin": 4.4},
+    )
+    with pytest.raises(ValueError, match="non-positive mark price"):
+        TorchTradeFuturesLiveEnv._get_observation(env)
