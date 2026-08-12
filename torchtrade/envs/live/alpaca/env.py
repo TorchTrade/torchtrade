@@ -300,8 +300,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         try:
             success = self.trader.trade(side=side, amount=amount, order_type="market")
             # Set here, not per-branch: alpaca reported no target at all, so the
-            # partial-fill check was dead on this env. min_trade_value is the smallest
-            # divergence alpaca will act on, so it is the tolerance.
+            # partial-fill check was dead on this env.
             trade_info["target_qty"] = target_qty
             trade_info["target_tol"] = min_trade_value / current_price
             trade_info.update({
