@@ -46,12 +46,16 @@ env = SequentialTradingEnv(df=your_dataframe, config=config)
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 
 # Create an Alpaca live trading environment
+# Credentials are CONSTRUCTOR arguments, not config fields; the config carries the
+# market/observation shape. `time_frames` is a list -- there is no `timeframe`.
 config = AlpacaTradingEnvConfig(
-    api_key="your_key",
-    api_secret="your_secret",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
+    symbol="BTC/USD",
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    paper=True,
 )
-env = AlpacaTorchTradingEnv(config=config)
+env = AlpacaTorchTradingEnv(config, api_key="your_key", api_secret="your_secret")
 ```
 
 ## Architecture Overview

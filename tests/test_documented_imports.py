@@ -146,9 +146,6 @@ def _resolve_config(cls_name):
 # fails until it is removed, so the list cannot drift away from the docs in either
 # direction.
 KNOWN_BROKEN = {
-    ("torchtrade/envs/README.md", "AlpacaTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/README.md", "AlpacaTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/README.md", "AlpacaTradingEnvConfig", "timeframe"),
     ("torchtrade/envs/live/README.md", "AlpacaSLTPTradingEnvConfig", "sl_percent"),
     ("torchtrade/envs/live/README.md", "AlpacaSLTPTradingEnvConfig", "tp_percent"),
     ("torchtrade/envs/live/README.md", "AlpacaTradingEnvConfig", "api_key"),
@@ -161,15 +158,6 @@ KNOWN_BROKEN = {
     ("torchtrade/envs/live/README.md", "BinanceFuturesTradingEnvConfig", "max_leverage"),
     ("torchtrade/envs/live/README.md", "BinanceFuturesTradingEnvConfig", "testnet"),
     ("torchtrade/envs/live/README.md", "BinanceFuturesTradingEnvConfig", "timeframe"),
-    ("torchtrade/envs/live/alpaca/README.md", "AlpacaSLTPTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/alpaca/README.md", "AlpacaSLTPTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/alpaca/README.md", "AlpacaSLTPTradingEnvConfig", "sl_percent"),
-    ("torchtrade/envs/live/alpaca/README.md", "AlpacaSLTPTradingEnvConfig", "timeframe"),
-    ("torchtrade/envs/live/alpaca/README.md", "AlpacaSLTPTradingEnvConfig", "tp_percent"),
-    ("torchtrade/envs/live/alpaca/README.md", "AlpacaTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/alpaca/README.md", "AlpacaTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/alpaca/README.md", "AlpacaTradingEnvConfig", "initial_cash"),
-    ("torchtrade/envs/live/alpaca/README.md", "AlpacaTradingEnvConfig", "timeframe"),
     ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "api_key"),
     ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "api_secret"),
     ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "max_leverage"),
