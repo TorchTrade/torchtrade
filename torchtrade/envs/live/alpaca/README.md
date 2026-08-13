@@ -15,7 +15,6 @@ Live trading integration with Alpaca for US equities and crypto spot markets.
 
 ```python
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
-from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 # Credentials are CONSTRUCTOR arguments, not config fields. The config carries the
 # market and observation shape: `time_frames` (a list) with matching `window_sizes`,
@@ -46,15 +45,19 @@ obs = env.reset()
 ```python
 @dataclass
 class AlpacaTradingEnvConfig:
-    api_key: str
-    api_secret: str
-    symbol: str
-    timeframe: TimeFrame
+    symbol: str = "BTC/USD"
+    time_frames: list = ...         # e.g. ["1Min", "5Min"] -- a LIST
+    window_sizes: list = ...        # one per timeframe
+    execute_on: str = "1Min"        # which timeframe drives a step
+    action_levels: list = ...       # fraction of portfolio per action
     paper: bool = True              # Paper or live trading
-    base_url: str = None            # Custom API endpoint
-    extended_hours: bool = False    # Trade extended hours
-    initial_cash: float = 10000.0
-    window_size: int = 50
+    trade_mode: str = "fractional"
+    done_on_bankruptcy: bool = True
+    bankrupt_threshold: float = 0.1
+    include_base_features: bool = False
+    seed: int = 42
+    # Credentials are CONSTRUCTOR arguments, not fields:
+    #   AlpacaTorchTradingEnv(config, api_key=..., api_secret=...)
 ```
 
 ## Supported Symbols
@@ -81,7 +84,7 @@ Check Alpaca docs for full list: https://alpaca.markets/docs/trading/
 
 **Market Orders** (default):
 ```python
-action = 0  # BUY at current market price
+action = 1  # action 0 is flat/HOLD; 1..N open a position
 ```
 
 **Time-in-Force**: Day orders (default), good-til-canceled (GTC) optional
@@ -111,17 +114,19 @@ env = AlpacaTorchTradingEnv(
 obs = env.reset()
 for _ in range(100):
     action = agent.get_action(obs)
-    obs, reward, done, info = env.step(action)
+    td = env.step(td)  # step takes and returns a TensorDict
 
     if done:
         break
 
-print(f"Final value: ${env.portfolio_value:.2f}")
+print(f"Final value: ${env._get_portfolio_value():.2f}")
 ```
 
 ## Example: With Stop-Loss/Take-Profit
 
 ```python
+import torch
+
 from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
 
 # SL/TP are LEVELS lists, not single percentages -- the action space is one entry per
@@ -141,14 +146,12 @@ env = AlpacaSLTPTorchTradingEnv(
     api_key=os.environ["ALPACA_KEY"],
     api_secret=os.environ["ALPACA_SECRET"],
 )
-obs = env.reset()
+td = env.reset()
 
-# SL/TP triggers automatically
-action = 0  # BUY
-obs, reward, done, info = env.step(action)
-
-if info.get("sl_triggered"):
-    print("Stop loss hit!")
+# The bracket is placed with the entry; SL/TP then trigger on the venue.
+# Action 0 is HOLD -- 1..N are the (stoploss, takeprofit) pairs.
+td["action"] = torch.tensor(1)
+td = env.step(td)
 ```
 
 ## Best Practices
