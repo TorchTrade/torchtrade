@@ -111,10 +111,10 @@ The core sequential trading environment. Trading mode is determined by configura
 
 ```python
 observation = {
-    "market_data_1Minute": Tensor([12, num_features]),    # 1m window
-    "market_data_5Minute": Tensor([8, num_features]),     # 5m window
-    "market_data_15Minute": Tensor([8, num_features]),    # 15m window
-    "market_data_1Hour": Tensor([24, num_features]),      # 1h window
+    "market_data_1Minute_12": Tensor([12, num_features]),    # 1m window
+    "market_data_5Minute_8": Tensor([8, num_features]),     # 5m window
+    "market_data_15Minute_8": Tensor([8, num_features]),    # 15m window
+    "market_data_1Hour_24": Tensor([24, num_features]),      # 1h window
     "account_state": Tensor([6]),                         # See Account State above
 }
 ```

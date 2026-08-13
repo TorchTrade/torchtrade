@@ -104,8 +104,11 @@ env = SequentialTradingEnv(df, config)
 
 # Run
 tensordict = env.reset()
+# reset() carries no action -- step() needs one set on the tensordict it is given.
+tensordict["action"] = env.action_spec.rand()
 tensordict = env.step(tensordict)
-print(f"Reward: {tensordict['reward'].item()}")
+# step() writes the outcome under "next", leaving the input state intact.
+print(f"Reward: {tensordict['next']['reward'].item()}")
 ```
 
 ### 3. Train Your First Policy
@@ -333,11 +336,12 @@ uv run pytest tests/ -v
 ```python
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 import datasets
+import pandas as pd
 
 # Load historical data from HuggingFace
 df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
 df = df["train"].to_pandas()
-df['0'] = pd.to_datetime(df['0'])
+df['timestamp'] = pd.to_datetime(df['timestamp'])
 
 # Configure multi-timeframe environment
 config = SequentialTradingEnvConfig(
