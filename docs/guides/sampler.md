@@ -271,7 +271,8 @@ def futures_features(df: pd.DataFrame) -> pd.DataFrame:
     df["features_funding_rate"] = df["funding_rate"]  # auxiliary column
     df["features_basis_norm"] = df["basis"] / df["close"]  # derived from aux + OHLCV
     df.fillna(0, inplace=True)
-    return df
+    # timestamp must come back as a COLUMN for the offline sampler (see custom-features)
+    return df.reset_index()
 ```
 
 ### When to Use Auxiliary Columns vs Feature Processing

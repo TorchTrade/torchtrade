@@ -146,14 +146,6 @@ def _resolve_config(cls_name):
 # fails until it is removed, so the list cannot drift away from the docs in either
 # direction.
 KNOWN_BROKEN = {
-    ("docs/environments/online.md", "BinanceFuturesSLTPTradingEnvConfig", "intervals"),
-    ("docs/environments/online.md", "BinanceFuturesTradingEnvConfig", "intervals"),
-    ("docs/environments/online.md", "BinanceFuturesTradingEnvConfig", "quantity_per_trade"),
-    ("docs/environments/online.md", "BitgetFuturesTradingEnvConfig", "quantity_per_trade"),
-    ("docs/getting-started.md", "BinanceFuturesTradingEnvConfig", "intervals"),
-    ("docs/getting-started.md", "BinanceFuturesTradingEnvConfig", "quantity_per_trade"),
-    ("docs/guides/custom-features.md", "SequentialTradingEnvConfig", "feature_preprocessing_fn"),
-    ("docs/guides/reward-functions.md", "SequentialTradingEnvConfig", "reward_function"),
     ("torchtrade/envs/README.md", "AlpacaTradingEnvConfig", "api_key"),
     ("torchtrade/envs/README.md", "AlpacaTradingEnvConfig", "api_secret"),
     ("torchtrade/envs/README.md", "AlpacaTradingEnvConfig", "timeframe"),

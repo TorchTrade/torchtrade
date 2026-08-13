@@ -29,11 +29,9 @@ Pass your reward function via the environment config:
 ```python
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 
-config = SequentialTradingEnvConfig(
-    reward_function=my_reward,
-    ...
-)
-env = SequentialTradingEnv(df, config)
+config = SequentialTradingEnvConfig(...)
+# reward_function is a CONSTRUCTOR argument, not a config field.
+env = SequentialTradingEnv(df, config, reward_function=my_reward)
 ```
 
 ---
@@ -67,7 +65,6 @@ from torchtrade.envs.core.default_rewards import (
 )
 
 config = SequentialTradingEnvConfig(
-    reward_function=sharpe_ratio_reward,
     ...
 )
 ```

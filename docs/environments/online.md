@@ -116,11 +116,10 @@ from torchtrade.envs.live.binance import BinanceFuturesTorchTradingEnv, BinanceF
 
 config = BinanceFuturesTradingEnvConfig(
     symbol="BTCUSDT",
-    intervals=["1m", "5m", "15m"],
+    time_frames=["1m", "5m", "15m"],
     window_sizes=[12, 8, 8],
     execute_on="1m",
     leverage=5,
-    quantity_per_trade=0.01,
     demo=True,  # Testnet (recommended!)
 )
 
@@ -134,7 +133,7 @@ from torchtrade.envs.live.binance import BinanceFuturesSLTPTorchTradingEnv, Bina
 
 config = BinanceFuturesSLTPTradingEnvConfig(
     symbol="BTCUSDT",
-    intervals=["1m", "5m"],
+    time_frames=["1m", "5m"],
     window_sizes=[12, 8],
     execute_on="1m",
     stoploss_levels=[-0.02, -0.05],
@@ -189,7 +188,6 @@ config = BitgetFuturesTradingEnvConfig(
     execute_on="1min",
     product_type="USDT-FUTURES",
     leverage=5,
-    quantity_per_trade=0.002,
     margin_mode=MarginMode.ISOLATED,     # ISOLATED (safer) or CROSSED
     position_mode=PositionMode.ONE_WAY,  # ONE_WAY (simpler) or HEDGE
     demo=True,
