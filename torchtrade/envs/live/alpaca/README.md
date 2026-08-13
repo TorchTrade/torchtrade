@@ -29,7 +29,7 @@ config = AlpacaTradingEnvConfig(
 )
 
 env = AlpacaTorchTradingEnv(config, api_key="YOUR_KEY", api_secret="YOUR_SECRET")
-obs = env.reset()
+td = env.reset()  # a TensorDict, not a bare array
 ```
 
 ## Features
@@ -46,16 +46,16 @@ obs = env.reset()
 @dataclass
 class AlpacaTradingEnvConfig:
     symbol: str = "BTC/USD"
-    time_frames: list = ...         # e.g. ["1Min", "5Min"] -- a LIST
-    window_sizes: list = ...        # one per timeframe
-    execute_on: str = "1Min"        # which timeframe drives a step
-    action_levels: list = ...       # fraction of portfolio per action
-    paper: bool = True              # Paper or live trading
-    trade_mode: str = "fractional"
+    action_levels: Optional[List[float]] = None     # None -> [0.0, 0.5, 1.0]
+    time_frames: Union[List[str | TimeFrame], str, TimeFrame] = "1Hour"
+    window_sizes: Union[List[int], int] = 10        # one per timeframe
+    execute_on: Union[str, TimeFrame] = "1Hour"     # which timeframe drives a step
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1
+    paper: bool = True                              # Paper or live trading
+    trade_mode: Literal["fractional", "notional", "quantity"] = "notional"
+    seed: Optional[int] = 42
     include_base_features: bool = False
-    seed: int = 42
     # Credentials are CONSTRUCTOR arguments, not fields:
     #   AlpacaTorchTradingEnv(config, api_key=..., api_secret=...)
 ```
@@ -111,20 +111,23 @@ env = AlpacaTorchTradingEnv(
 )
 
 # Trading loop
-obs = env.reset()
+td = env.reset()
 for _ in range(100):
-    action = agent.get_action(obs)
-    td = env.step(td)  # step takes and returns a TensorDict
-
-    if done:
+    td["action"] = agent.get_action(td)
+    # step_and_maybe_reset, not step: step() nests the outcome under "next", so
+    # re-feeding its output to step() would re-step from the stale observation.
+    td = env.step_and_maybe_reset(td)
+    if td["next", "done"]:
         break
 
-print(f"Final value: ${env._get_portfolio_value():.2f}")
+print(f"Final value: ${env.history.portfolio_values[-1]:.2f}")
 ```
 
 ## Example: With Stop-Loss/Take-Profit
 
 ```python
+import os
+
 import torch
 
 from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
