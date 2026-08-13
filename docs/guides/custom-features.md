@@ -70,10 +70,10 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     # Fill NaN values (important!)
     df.fillna(0, inplace=True)
 
-    return df
+    # timestamp must come back as a COLUMN, or the sampler raises
+    # KeyError: ['timestamp'] not in index
+    return df.reset_index()
 
-# feature_preprocessing_fn is a CONSTRUCTOR argument, not a config field:
-#   env = SequentialTradingEnv(df, config, custom_preprocessing)
 config = SequentialTradingEnvConfig(
     time_frames=["1min", "5min", "15min"],  # Note: use "1hour" not "60min"
     window_sizes=[12, 8, 8],
@@ -81,7 +81,8 @@ config = SequentialTradingEnvConfig(
     initial_cash=1000
 )
 
-env = SequentialTradingEnv(df, config)
+# feature_preprocessing_fn is the CONSTRUCTOR's third argument, not a config field.
+env = SequentialTradingEnv(df, config, custom_preprocessing)
 ```
 
 ### Example 2: Normalized Features (Recommended)
@@ -118,7 +119,9 @@ def normalized_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     # Fill NaN values
     df.fillna(0, inplace=True)
 
-    return df
+    # timestamp must come back as a COLUMN, or the sampler raises
+    # KeyError: ['timestamp'] not in index
+    return df.reset_index()
 
 config = SequentialTradingEnvConfig(
     ...
@@ -278,9 +281,9 @@ def binance_features(df: pd.DataFrame) -> pd.DataFrame:
     # Standard price features
     df["features_close"] = df["close"].pct_change().fillna(0)
     df.fillna(0, inplace=True)
-    # timestamp must come back as a COLUMN, or the sampler raises
-    # KeyError: ['timestamp'] not in index
-    return df.reset_index()
+    # No reset_index() here: the live observer hands this a RangeIndex frame and never
+    # touches the offline sampler, so there is no timestamp index to restore.
+    return df
 
 env = BinanceFuturesTorchTradingEnv(
     config=config,
@@ -298,7 +301,7 @@ Bitget (via CCXT) and Bybit (via pybit) kline APIs return only standard OHLCV co
 
 1. **Feature prefix** (when using `feature_preprocessing_fn`): All output columns MUST start with `features_` (e.g., `features_rsi_14`). Columns without this prefix are ignored. Without a preprocessing function, raw columns (OHLCV + auxiliary) are used directly.
 2. **Handle NaN**: Technical indicators produce NaN at the start. Always call `df.fillna(0, inplace=True)` (or `ffill`/`bfill`).
-3. **Return the DataFrame**: Your function must `return df`.
+3. **Return the DataFrame with `timestamp` as a COLUMN**: offline environments resample on a timestamp index, so a function that returns it as the index fails with `KeyError: ['timestamp'] not in index`. End with `return df.reset_index()`. Live observers hand you a RangeIndex frame instead, so `return df` is correct there.
 4. **No lookahead bias**: Only use past data. Never use `.shift(-1)` or future values.
 5. **List length must match**: When using a list of functions, it must have the same length as `time_frames`.
 
