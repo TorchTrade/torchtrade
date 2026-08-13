@@ -429,6 +429,7 @@ def custom_preprocessing(df):
 
 config = SequentialTradingEnvConfig(
     leverage=1,
+    action_levels=[0, 1],   # long-only; the default [-1, 0, 1] warns under leverage=1
     time_frames=["1min", "5min"],
     window_sizes=[12, 8],
 )
@@ -450,6 +451,7 @@ See **[Advanced Customization](https://torchtrade.github.io/torchtrade/guides/cu
 ```python
 config = SequentialTradingEnvConfig(
     leverage=1,
+    action_levels=[0, 1],   # long-only; the default [-1, 0, 1] warns under leverage=1
     time_frames=["1min", "5min", "15min", "60min"],
     window_sizes=[12, 8, 8, 24],
     execute_on="5Min"
