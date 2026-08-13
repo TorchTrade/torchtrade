@@ -198,7 +198,11 @@ def bankruptcy_price(
 
 
 def require_fee_fits_maintenance(
-    transaction_fee: float, *, leverage: float, maintenance_margin_rate: float
+    transaction_fee: float,
+    *,
+    leverage: float,
+    maintenance_margin_rate: float,
+    allows_short: bool = True,
 ) -> None:
     """Refuse a fee the maintenance buffer cannot absorb (#314).
 
@@ -220,9 +224,24 @@ def require_fee_fits_maintenance(
         raise ValueError(
             f"Transaction fee must be in [0, 1), got {transaction_fee}"
         )
-    # Strict: at fee=0 with mmr=0 the bankruptcy price EQUALS the liquidation price, so
-    # the clamp is a no-op rather than a violation.
-    if leverage > 1 and transaction_fee * (1 + 1 / leverage) > maintenance_margin_rate:
+    # The exact condition, per direction, rather than a conservative bound over both.
+    # Long:  bankruptcy <= liq  <=>  (1 - 1/L)/(1 - f) <= (1 - 1/L + mmr)
+    #                           <=>  f * (1 - 1/L + mmr) <= mmr
+    # Short: bankruptcy >= liq  <=>  (1 + 1/L)/(1 + f) >= (1 + 1/L - mmr)
+    #                           <=>  f * (1 + 1/L - mmr) <= mmr
+    # `f * (1 + 1/L) <= mmr` implies both but is strictly stronger, so it refused valid
+    # configs: at L=2, mmr=0.004, fee=0.004 the long bankruptcy price is 50.2008 against
+    # a liquidation of 50.4 -- the clamp is still a floor, and the config is fine.
+    # `>` not `>=`: equality means bankruptcy lands exactly ON liquidation, where the
+    # clamp is a no-op rather than an inversion.
+    # Only the directions the config can actually take. The short constraint is the
+    # binding one whenever 1/L > mmr, so applying it to a long-only config refuses
+    # perfectly safe setups -- L=2, mmr=0.004, fee=0.004 is a floor for longs
+    # (50.2008 <= 50.4) and an inversion only for a short it can never open.
+    worst = 1 - 1 / leverage + maintenance_margin_rate
+    if allows_short:
+        worst = max(worst, 1 + 1 / leverage - maintenance_margin_rate)
+    if leverage > 1 and transaction_fee * worst > maintenance_margin_rate:
         raise ValueError(
             f"transaction_fee {transaction_fee} does not fit inside "
             f"maintenance_margin_rate {maintenance_margin_rate} at leverage {leverage}: "

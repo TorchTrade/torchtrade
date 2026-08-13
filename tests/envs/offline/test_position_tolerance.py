@@ -274,3 +274,43 @@ def test_every_public_path_to_the_bankruptcy_price_refuses_an_inconsistent_fee(
             VectorizedSequentialTradingEnvConfig(num_envs=1, **common, **kwargs)
         else:
             ReplayOrderExecutor(initial_balance=1000.0, **kwargs)
+
+
+@pytest.mark.parametrize("leverage,mmr,fee,allows_short,accepted", [
+    # Charlie's counter-example: a floor for longs (bankruptcy 50.2008 <= liq 50.4),
+    # an inversion only for a short this config cannot open.
+    (2, 0.004, 0.004, False, True),
+    (2, 0.004, 0.004, True, False),
+    # Exact equality: bankruptcy lands ON liquidation, where the clamp is a no-op.
+    (10, 0.004, 0.004 / (1 + 1 / 10 - 0.004), True, True),
+    # A hair past it inverts.
+    (10, 0.004, 0.004 / (1 + 1 / 10 - 0.004) * 1.001, True, False),
+], ids=["long-only-safe", "same-config-with-shorts", "exact-equality", "just-past"])
+def test_the_fee_bound_is_the_exact_condition_not_a_conservative_one(
+    leverage, mmr, fee, allows_short, accepted
+):
+    """`fee*(1 + 1/L) <= mmr` implies the real condition but is strictly stronger (#314).
+
+    The exact constraint is per direction --
+      long:  fee * (1 - 1/L + mmr) <= mmr
+      short: fee * (1 + 1/L - mmr) <= mmr
+    -- and the short one binds whenever 1/L > mmr. Applying it to a long-only config
+    refused setups whose clamp is still a floor, which is a compatibility regression at
+    every public construction boundary.
+
+    Equality is accepted deliberately: bankruptcy landing exactly on liquidation makes
+    the clamp a no-op, not an inversion.
+    """
+    from torchtrade.envs.utils.liquidation import require_fee_fits_maintenance
+
+    def check():
+        require_fee_fits_maintenance(
+            fee, leverage=leverage, maintenance_margin_rate=mmr,
+            allows_short=allows_short,
+        )
+
+    if accepted:
+        check()
+    else:
+        with pytest.raises(ValueError, match="does not fit inside"):
+            check()

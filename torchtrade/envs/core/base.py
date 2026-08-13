@@ -93,6 +93,9 @@ class TorchTradeBaseEnv(EnvBase):
             maintenance_margin_rate=getattr(
                 config, "maintenance_margin_rate", DEFAULT_MAINTENANCE_MARGIN_RATE
             ),
+            allows_short=any(
+                level < 0 for level in (getattr(config, "action_levels", None) or [-1])
+            ),
         )
         if not (0 <= config.slippage < 1):
             raise ValueError(

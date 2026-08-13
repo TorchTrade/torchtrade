@@ -87,6 +87,7 @@ class VectorizedSequentialTradingEnvConfig:
             self.transaction_fee,
             leverage=self.leverage,
             maintenance_margin_rate=self.maintenance_margin_rate,
+            allows_short=any(level < 0 for level in (self.action_levels or [-1])),
         )
         if not (0 <= self.slippage < 1):
             raise ValueError(
