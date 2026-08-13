@@ -674,6 +674,19 @@ class TestBybitSLTPNotionalTradeMode:
             # margin_balance=1100 * fraction=0.1 * leverage=5 / price=50000 = 0.011
             from torchtrade.envs.live.bybit.order_executor import TAKER_FEE
             expected = 0.011 * 0.98 / (1 + 5 * TAKER_FEE)
+
+            # The ACCEPTED branch of the fee guard, which nothing else exercises: every
+            # SLTP test passes a MagicMock trader, and a MagicMock is REJECTED, so they
+            # all assert the venue-constant fallback. Tighten the guard to reject
+            # everything and the suite stays green while #278 returns.
+            baseline_qty = mock_env_trader.trade.call_args[1]["quantity"]
+            mock_env_trader.transaction_fee = 0.002
+            mock_env_trader.trade.reset_mock()
+            env._execute_trade_if_needed(("long", -0.02, 0.03))
+            assert mock_env_trader.trade.call_args[1]["quantity"] < baseline_qty, (
+                "the env must reserve the trader's higher rate, sizing SMALLER than the "
+                "venue constant -- otherwise the venue refuses the open"
+            )
         assert call_kwargs["quantity"] == pytest.approx(expected, rel=1e-4)
 
 
