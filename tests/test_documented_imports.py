@@ -104,7 +104,8 @@ COMMENT = re.compile(r"#[^\n]*")
 # INNER call's kwargs out as if they belonged to the config, so
 # `reward_function=partial(fn, alpha=0.5)` yields a phantom `alpha`. That either cries
 # wolf or -- worse -- passes silently when the inner name collides with a real field.
-# No doc does this today; the point is that the next one to try cannot break the check.
+# No doc does this today. Handles arbitrary nesting depth INSIDE a captured call;
+# the depth CONFIG_CALL itself can capture is pinned separately below.
 NESTED = re.compile(r"\([^()]*\)")
 
 
@@ -115,7 +116,7 @@ def _documented_config_kwargs():
             for cls_name, body in CONFIG_CALL.findall(COMMENT.sub("", block)):
                 flat = body
                 while NESTED.search(flat):
-                    flat = NESTED.sub(lambda m: " " * len(m.group(0)), flat)
+                    flat = NESTED.sub("", flat)
                 for kwarg in KWARG.findall(flat):
                     yield str(path.relative_to(REPO)), cls_name, kwarg
 
@@ -237,6 +238,34 @@ def test_no_known_broken_entry_has_gone_stale():
     assert not stale, (
         f"{len(stale)} KNOWN_BROKEN entries are no longer in the docs -- delete them: "
         f"{stale}"
+    )
+
+
+CONFIG_OPEN = re.compile(r"\b\w*Config\(")
+
+
+def test_every_documented_config_call_is_actually_captured():
+    """A call the pattern cannot parse vanishes silently -- no failure, no xfail, nothing.
+
+    CONFIG_CALL tolerates one level of nesting, so a doubly-nested callable
+    (`Config(reward_function=partial(f, w=partial(g, x=1)), initial_cash=1)`) makes the
+    WHOLE call unmatchable, taking its legitimate kwargs with it. That is a worse failure
+    than the phantom kwarg it replaced, because it produces no signal at all.
+
+    Counting opens against matches is the cheap invariant: it does not care how the
+    pattern is written, only that every documented call reached the check.
+    """
+    missed = []
+    for path in _doc_sources():
+        for block in PY_BLOCK.findall(path.read_text()):
+            block = COMMENT.sub("", block)
+            opens = len(CONFIG_OPEN.findall(block))
+            matched = len(CONFIG_CALL.findall(block))
+            if opens != matched:
+                missed.append(f"{path.relative_to(REPO)}: {opens} calls, {matched} parsed")
+    assert not missed, (
+        "documented config calls the pattern could not parse, so they are unchecked:\n"
+        + "\n".join(missed)
     )
 
 
