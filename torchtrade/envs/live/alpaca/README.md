@@ -17,16 +17,19 @@ Live trading integration with Alpaca for US equities and crypto spot markets.
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
+# Credentials are CONSTRUCTOR arguments, not config fields. The config carries the
+# market and observation shape: `time_frames` (a list) with matching `window_sizes`,
+# and `execute_on`. There is no `timeframe` or `initial_cash` -- a live account's cash
+# comes from the broker.
 config = AlpacaTradingEnvConfig(
-    api_key="YOUR_KEY",
-    api_secret="YOUR_SECRET",
     paper=True,  # Paper trading
     symbol="AAPL",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    initial_cash=10000.0,
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
 )
 
-env = AlpacaTorchTradingEnv(config=config)
+env = AlpacaTorchTradingEnv(config, api_key="YOUR_KEY", api_secret="YOUR_SECRET")
 obs = env.reset()
 ```
 
@@ -91,14 +94,18 @@ from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTrading
 
 # Load keys from environment
 config = AlpacaTradingEnvConfig(
-    api_key=os.environ["ALPACA_KEY"],
-    api_secret=os.environ["ALPACA_SECRET"],
     paper=True,
     symbol="SPY",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
 )
 
-env = AlpacaTorchTradingEnv(config=config)
+env = AlpacaTorchTradingEnv(
+    config,
+    api_key=os.environ["ALPACA_KEY"],
+    api_secret=os.environ["ALPACA_SECRET"],
+)
 
 # Trading loop
 obs = env.reset()
@@ -117,17 +124,23 @@ print(f"Final value: ${env.portfolio_value:.2f}")
 ```python
 from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
 
+# SL/TP are LEVELS lists, not single percentages -- the action space is one entry per
+# (stoploss, takeprofit) pair, so a single number could not describe it.
 config = AlpacaSLTPTradingEnvConfig(
-    api_key=os.environ["ALPACA_KEY"],
-    api_secret=os.environ["ALPACA_SECRET"],
     paper=True,
     symbol="AAPL",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    sl_percent=0.02,  # 2% stop loss
-    tp_percent=0.05,  # 5% take profit
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    stoploss_levels=[-0.02],   # 2% stop loss
+    takeprofit_levels=[0.05],  # 5% take profit
 )
 
-env = AlpacaSLTPTorchTradingEnv(config=config)
+env = AlpacaSLTPTorchTradingEnv(
+    config,
+    api_key=os.environ["ALPACA_KEY"],
+    api_secret=os.environ["ALPACA_SECRET"],
+)
 obs = env.reset()
 
 # SL/TP triggers automatically
