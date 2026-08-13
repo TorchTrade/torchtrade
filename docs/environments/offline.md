@@ -201,7 +201,7 @@ config = SequentialTradingEnvSLTPConfig(
 
     # Futures parameters (leverage > 1 enables short bracket orders)
     leverage=5,
-    margin_call_threshold=0.2,
+    maintenance_margin_rate=0.004,
 
     # Position sizing: "fractional" (% of portfolio), "notional" (fixed USD), or "quantity" (fixed units)
     trade_mode="fractional",     # "fractional", "notional", or "quantity"
@@ -303,11 +303,11 @@ config = OneStepTradingEnvConfig(
     stoploss_levels=[-0.02, -0.05],
     takeprofit_levels=[0.05, 0.10],
     include_hold_action=True,
-    rollout_steps=24,
+    max_traj_length=24,
 
     # Futures parameters (leverage > 1 enables short bracket orders)
     leverage=5,
-    margin_call_threshold=0.2,
+    maintenance_margin_rate=0.004,
 
     # Position sizing (see Position Sizing section above)
     trade_mode="fractional",     # "fractional", "notional", or "quantity"

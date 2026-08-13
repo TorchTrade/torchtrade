@@ -63,7 +63,7 @@ Trade with leverage and manage margin:
 config = SequentialTradingEnvConfig(
     leverage=10,                       # 10x leverage
     initial_cash=10000,
-    margin_call_threshold=0.2,         # 20% margin ratio triggers liquidation
+    maintenance_margin_rate=0.004,     # maintenance margin; liquidation buffer
 )
 ```
 
