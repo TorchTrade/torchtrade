@@ -378,16 +378,23 @@ def test_okx_refuses_a_confirmation_for_the_wrong_side():
 
 
 @pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
-def test_sltp_fractional_sizing_is_affordable_through_the_real_executor(venue):
-    """Drives the ENV's sizing into a real ReplayOrderExecutor (#278).
+def test_the_sizing_rule_is_affordable_against_a_real_executor(venue):
+    """The sizing RULE against a real ReplayOrderExecutor -- not the env (#278).
 
-    The first version of this test called the sizer directly and never touched an
-    env_sltp -- reverting all four envs to the broken inline arithmetic still passed it.
-    It has to go through the env, because that is where the defect lived.
+    Scope stated exactly, because two earlier versions of this test claimed more than
+    they did: it reproduces the expression env_sltp uses and feeds the result to a real
+    executor. It therefore proves the rule is affordable, and is structurally BLIND to an
+    env reverting to the old inline arithmetic. Verified: reverting all four env_sltp.py
+    to main leaves this passing 4/4.
 
-    Also varies the executor's own fee: the env reserves what the TRADER will charge, not
-    a constant, so a caller with a higher rate must still be able to open. Reserving the
-    venue constant left those callers refused, which is #278 reproduced one level over.
+    Env-path coverage lives in the four per-venue test_fractional_converts_balance_to_
+    quantity tests, which construct the real env and do catch that revert, the missing
+    0.98 buffer, and the MagicMock-fee guard -- all mutation-verified.
+
+    What this adds over those: strength. The leverage/fee cells are chosen so the 0.98
+    buffer cannot absorb the reservation -- (25, 0.001) catches dropping it entirely and
+    (50, 0.001) catches HALVING it, which no smaller cell sees. The `balance > 0`
+    assertion is what the two leverage-5 cells are for.
     """
     from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
     from torchtrade.envs.utils.fractional_sizing import (
