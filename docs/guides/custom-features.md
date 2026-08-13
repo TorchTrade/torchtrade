@@ -72,12 +72,12 @@ def custom_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-# Use in environment config
+# feature_preprocessing_fn is a CONSTRUCTOR argument, not a config field:
+#   env = SequentialTradingEnv(df, config, custom_preprocessing)
 config = SequentialTradingEnvConfig(
-    feature_preprocessing_fn=custom_preprocessing,
     time_frames=["1min", "5min", "15min"],  # Note: use "1hour" not "60min"
     window_sizes=[12, 8, 8],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     initial_cash=1000
 )
 
@@ -121,7 +121,6 @@ def normalized_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 config = SequentialTradingEnvConfig(
-    feature_preprocessing_fn=normalized_preprocessing,
     ...
 )
 ```
@@ -168,7 +167,6 @@ config = SequentialTradingEnvConfig(
     time_frames=["1min", "1hour"],
     window_sizes=[30, 10],
     execute_on="1min",
-    feature_preprocessing_fn=[process_1min, process_1hour],  # List of functions
     initial_cash=10000,
 )
 

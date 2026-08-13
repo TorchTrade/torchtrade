@@ -224,11 +224,10 @@ from torchtrade.envs.live.binance import (
 
 config = BinanceFuturesTradingEnvConfig(
     symbol="BTCUSDT",
-    intervals=["1m", "5m"],
+    time_frames=["1m", "5m"],
     window_sizes=[12, 8],
     execute_on="1m",
     leverage=5,                        # 5x leverage
-    quantity_per_trade=0.01,
     demo=True,                         # Use testnet
 )
 
