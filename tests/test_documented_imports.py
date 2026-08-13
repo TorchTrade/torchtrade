@@ -146,7 +146,6 @@ def _resolve_config(cls_name):
 # fails until it is removed, so the list cannot drift away from the docs in either
 # direction.
 KNOWN_BROKEN = {
-    ("docs/guides/custom-features.md", "SequentialTradingEnvConfig", "feature_preprocessing_fn"),
     ("torchtrade/envs/README.md", "AlpacaTradingEnvConfig", "api_key"),
     ("torchtrade/envs/README.md", "AlpacaTradingEnvConfig", "api_secret"),
     ("torchtrade/envs/README.md", "AlpacaTradingEnvConfig", "timeframe"),

@@ -151,7 +151,9 @@ def process_1min(df: pd.DataFrame) -> pd.DataFrame:
     df["features_volume"] = df["volume"]
     df["features_range"] = df["high"] - df["low"]
     df.fillna(0, inplace=True)
-    return df
+    # timestamp must come back as a COLUMN, or the sampler raises
+    # KeyError: ['timestamp'] not in index
+    return df.reset_index()
 
 def process_1hour(df: pd.DataFrame) -> pd.DataFrame:
     """Slow timeframe: trend features (5 features)."""
@@ -161,7 +163,9 @@ def process_1hour(df: pd.DataFrame) -> pd.DataFrame:
     df["features_volatility"] = df["close"].pct_change().rolling(10).std()
     df["features_volume_ma"] = df["volume"].rolling(10).mean()
     df.fillna(0, inplace=True)
-    return df
+    # timestamp must come back as a COLUMN, or the sampler raises
+    # KeyError: ['timestamp'] not in index
+    return df.reset_index()
 
 config = SequentialTradingEnvConfig(
     time_frames=["1min", "1hour"],
@@ -170,7 +174,8 @@ config = SequentialTradingEnvConfig(
     initial_cash=10000,
 )
 
-env = SequentialTradingEnv(df, config)
+# One preprocessing fn per timeframe, passed as the constructor's third argument.
+env = SequentialTradingEnv(df, config, [process_1min, process_1hour])
 
 # Observation specs will have different shapes:
 # - market_data_1Minute_30: shape (30, 3)
@@ -185,8 +190,9 @@ Use `None` in the list to skip processing for a timeframe (keeps raw OHLCV):
 config = SequentialTradingEnvConfig(
     time_frames=["1min", "5min"],
     window_sizes=[30, 10],
-    feature_preprocessing_fn=[process_1min, None],  # 1min processed, 5min raw OHLCV
 )
+# None skips processing for that timeframe: 1min processed, 5min raw OHLCV.
+env = SequentialTradingEnv(df, config, [process_1min, None])
 ```
 
 ### Backward Compatibility
@@ -226,7 +232,9 @@ def futures_features(df: pd.DataFrame) -> pd.DataFrame:
     df["features_basis_norm"] = df["basis"] / df["close"]
 
     df.fillna(0, inplace=True)
-    return df
+    # timestamp must come back as a COLUMN, or the sampler raises
+    # KeyError: ['timestamp'] not in index
+    return df.reset_index()
 ```
 
 **Two modes of operation:**
@@ -270,7 +278,9 @@ def binance_features(df: pd.DataFrame) -> pd.DataFrame:
     # Standard price features
     df["features_close"] = df["close"].pct_change().fillna(0)
     df.fillna(0, inplace=True)
-    return df
+    # timestamp must come back as a COLUMN, or the sampler raises
+    # KeyError: ['timestamp'] not in index
+    return df.reset_index()
 
 env = BinanceFuturesTorchTradingEnv(
     config=config,
@@ -333,7 +343,9 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     ).average_true_range()
 
     df.fillna(0, inplace=True)
-    return df
+    # timestamp must come back as a COLUMN, or the sampler raises
+    # KeyError: ['timestamp'] not in index
+    return df.reset_index()
 ```
 
 ---
