@@ -230,7 +230,7 @@ class OneStepTradingEnv(SequentialTradingEnvSLTP):
 
         # Execute action (only HOLD or open position - no closing in one-step)
         if self._check_liquidation(cached_base):
-            trade_info = self._execute_liquidation()
+            trade_info = self._execute_liquidation(cached_base["open"])
         else:
             trade_info = self._execute_sltp_action(side, sl_pct, tp_pct, cached_price)
 

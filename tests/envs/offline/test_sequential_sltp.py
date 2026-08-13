@@ -24,7 +24,7 @@ def sltp_config_spot():
         execute_on=TimeFrame(1, TimeFrameUnit.Minute),
         time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
         window_sizes=[10],
-        transaction_fee=0.01,
+        transaction_fee=0.0004,
         slippage=0.0,
         seed=42,
         max_traj_length=100,
@@ -43,7 +43,7 @@ def sltp_config_futures():
         execute_on=TimeFrame(1, TimeFrameUnit.Minute),
         time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
         window_sizes=[10],
-        transaction_fee=0.01,
+        transaction_fee=0.0004,
         slippage=0.0,
         seed=42,
         max_traj_length=100,
@@ -1145,7 +1145,8 @@ SHORT_TIGHT = ("short", 0.025, -0.025)
 
 
 def _run_sltp(actions, *, leverage, sl_levels, tp_levels, wick_high=None,
-              wick_low=None, wick_open=None, include_close=False):
+              wick_low=None, wick_open=None, include_close=False,
+              transaction_fee=0.0, position_fraction=None):
     """Run `actions` through a flat 100.0 series carrying one wick at bar 20.
 
     reset() caches bar 10, so action k executes at bar 10+k and is exposed to bar
@@ -1173,10 +1174,12 @@ def _run_sltp(actions, *, leverage, sl_levels, tp_levels, wick_high=None,
         leverage=leverage, initial_cash=10000,
         execute_on=TimeFrame(1, TimeFrameUnit.Minute),
         time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
-        window_sizes=[10], transaction_fee=0.0, slippage=0.0,
+        window_sizes=[10], transaction_fee=transaction_fee, slippage=0.0,
         seed=42, random_start=False,
         stoploss_levels=sl_levels, takeprofit_levels=tp_levels,
         include_close_action=include_close,
+        **({} if position_fraction is None
+           else {"trade_mode": "fractional", "position_fraction": position_fraction}),
     )
     env = SequentialTradingEnvSLTP(df, config, simple_feature_fn)
     # Resolved from the map, not hardcoded: enabling the close action shifts every
@@ -1298,9 +1301,11 @@ class TestLiquidationVsBracketOnADoubleBreachBar:
             f"a gapped-open bar must liquidate, not fill the stop -- got "
             f"{env.history.action_types}"
         )
-        # 400 is an #314 number: the liquidation books at liq_price even though the bar
-        # opened below it. When that is fixed this expectation moves with it.
-        assert env.balance == pytest.approx(400.0)
+        # Wiped, not 400. The bar opened 15% below a 10x entry -- 1.5x the posted
+        # margin -- so isolated margin caps the loss at the whole margin and the account
+        # is gone (#314). Booking at liq_price handed back 400 and told the agent it had
+        # survived, and the understatement grew with leverage.
+        assert env.balance == pytest.approx(0.0)
 
     # The action tuple is spelled out rather than derived: create_sltp_action_map
     # stores a short as ("short", tp, sl) -- the pair swapped, not negated -- so a
@@ -1398,3 +1403,72 @@ def test_sltp_env_keeps_its_configured_action_levels(sample_ohlcv_df):
     assert env.action_levels == [-1, 0, 1]
     assert env.allows_short is True
     env.close()
+
+
+@pytest.mark.parametrize("side,gaps", [
+    ("long", [90.0, 70.0, 50.0, 30.0, 10.0]),
+    ("short", [110.0, 130.0, 150.0, 170.0, 190.0]),
+], ids=["long", "short"])
+def test_a_deeper_gap_never_leaves_the_account_richer(side, gaps):
+    """The property that a point-check could not see (#314).
+
+    Capping the LOSS while the fee still tracked the gap made the fee shrink as the
+    crash deepened, so a 90% collapse ended richer than a 10% one -- and at the 1% fee
+    this file's own fixtures use, richer than booking at the liquidation price at all.
+    Clamping the FILL to the bankruptcy price prices both legs at one instant.
+
+    A non-zero fee is the whole point: at fee=0 the two formulations are identical, which
+    is why every existing gapped test was blind to this.
+    """
+    # Stop-loss levels are negative for both directions; `side` carries the direction.
+    sl, tp = -0.05, 0.50
+    balances = [
+        _run_sltp(
+            # Shorts carry the pair swapped in the action map (see #279).
+            [HOLD] * 5 + [(side, sl, tp) if side == "long" else (side, tp, sl)] + [HOLD] * 4,
+            leverage=10, sl_levels=[sl], tp_levels=[tp],
+            wick_low=g if side == "long" else None,
+            wick_high=g if side == "short" else None,
+            wick_open=g, transaction_fee=0.0004, position_fraction=0.30,
+        ).balance
+        for g in gaps
+    ]
+    assert balances == sorted(balances, reverse=True), (
+        f"a deeper gap left the account richer: {list(zip(gaps, balances))}"
+    )
+
+
+@pytest.mark.parametrize("side,wick,deep_gaps", [
+    ("long", 89.0, [85.0, 60.0, 20.0]),
+    ("short", 111.0, [115.0, 140.0, 180.0]),
+], ids=["long", "short"])
+def test_every_gap_past_bankruptcy_costs_exactly_the_posted_margin(side, wick, deep_gaps):
+    """With free cash left over, the clamp is observable; all-in, it is not (#314).
+
+    Every gapped-liquidation test in this suite ran at position_fraction=1.0, where
+    _clamp_balance() floors the balance at 0 whether the loss was clamped or ran far
+    past the margin -- so deleting the clamp entirely left all 796 offline tests green.
+    Leaving cash outside the margin is what makes the two distinguishable.
+
+    Asserted as an identity rather than a hardcoded balance: once price is past the
+    bankruptcy price the account has lost exactly its margin, so every deeper gap must
+    cost the SAME. An unclamped loss makes them differ; a fill that ignored the gap
+    makes them equal the wick case instead.
+    """
+    def run(open_price, low_or_high):
+        return _run_sltp(
+            [HOLD] * 5 + [(side, -0.05, 0.50) if side == "long" else (side, 0.50, -0.05)] + [HOLD] * 4,
+            leverage=10, sl_levels=[-0.05], tp_levels=[0.50],
+            wick_low=low_or_high if side == "long" else None,
+            wick_high=low_or_high if side == "short" else None,
+            wick_open=open_price, position_fraction=0.30,
+        ).balance
+
+    deep = [run(g, g) for g in deep_gaps]
+    assert deep[0] == pytest.approx(deep[1]) == pytest.approx(deep[2]), (
+        f"past the bankruptcy price the loss is the margin, so these must agree: "
+        f"{list(zip(deep_gaps, deep))}"
+    )
+    # Strictly worse than a bar that only wicked to liquidation: that one fills at the
+    # liquidation price, which is nearer than bankruptcy.
+    assert deep[0] < run(100.0, wick), "a gap must cost more than a wick to the same level"

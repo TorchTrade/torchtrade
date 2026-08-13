@@ -31,6 +31,8 @@ from torchtrade.envs.core.state import (
 )
 from torchtrade.envs.core.default_rewards import log_return_reward
 from torchtrade.envs.utils.timeframe import TimeFrame, normalize_timeframe_config
+from torchtrade.envs.utils.sltp_helpers import stop_fill_price
+from torchtrade.envs.utils.liquidation import bankruptcy_price
 from torchtrade.envs.utils.fractional_sizing import (
     calculate_fractional_position,
     PositionCalculationParams,
@@ -541,7 +543,7 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         # Bar N+1, against whatever the action above left open. Must precede the portfolio
         # value and the history record below, or both read a state that ignores this exit.
         if self._check_liquidation(base_features):
-            trade_info = self._execute_liquidation()
+            trade_info = self._execute_liquidation(base_features["open"])
 
         # Age the position once per step through the canonical rule, whatever happened
         # above (#275). Five hand-rolled sites used to do this -- hold, tolerance-hold,
@@ -908,8 +910,18 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
 
         return {"executed": True, "side": "close", "fee_paid": fee, "liquidated": False}
 
-    def _execute_liquidation(self) -> Dict:
-        """Execute forced liquidation of position (futures only)."""
+    def _execute_liquidation(self, open_price: float) -> Dict:
+        """Execute forced liquidation of position (futures only).
+
+        Books at the price the bar actually offered, not at the liquidation price a bar
+        gapping straight through it never traded at (#314) -- the same rule #311 gave
+        stop-losses, via the same helper.
+
+        The fill is then clamped to the bankruptcy price, so the position can never cost
+        more than the margin it posted -- isolated margin, where the venue closes and the
+        insurance fund absorbs the rest. Clamping the FILL rather than capping the loss
+        keeps the fee on the same price as the PnL. Binds ONLY on a gap.
+        """
         trade_info = {
             "executed": True,
             "side": "liquidation",
@@ -917,19 +929,31 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
             "liquidated": True,
         }
 
-        # Realize the loss at liquidation price
-        if self.position.position_size > 0:
-            # Long position liquidated
-            loss = (self.liquidation_price - self.position.entry_price) * self.position.position_size
+        is_long = self.position.position_size > 0
+        fill_price = stop_fill_price(self.liquidation_price, open_price, is_long)
+        # Clamped to the bankruptcy price -- the price at which the position has consumed
+        # exactly its margin. Beyond it the venue closes and the insurance fund absorbs
+        # the rest, so nothing the account owns is priced further out. Clamping the FILL
+        # rather than capping the loss keeps the fee on the same price as the PnL: a cap
+        # applied to the loss alone left the fee tracking the gap, so a deeper crash was
+        # CHEAPER and, at the 1% fee this repo's own fixtures use, cheaper than booking
+        # at the liquidation price at all.
+        bankruptcy = bankruptcy_price(
+            self.position.entry_price, is_long=is_long,
+            leverage=self.leverage, transaction_fee=self.transaction_fee,
+        )
+        fill_price = max(fill_price, bankruptcy) if is_long else min(fill_price, bankruptcy)
+
+        if is_long:
+            loss = (fill_price - self.position.entry_price) * self.position.position_size
         else:
-            # Short position liquidated
-            loss = (self.position.entry_price - self.liquidation_price) * abs(self.position.position_size)
+            loss = (self.position.entry_price - fill_price) * abs(self.position.position_size)
 
         # Return locked margin before applying loss and fees
         margin_to_return = abs(self.position.position_size * self.position.entry_price) / self.leverage
 
         # Apply loss, fees, and return margin
-        liquidation_fee = abs(self.position.position_size * self.liquidation_price) * self.transaction_fee
+        liquidation_fee = abs(self.position.position_size * fill_price) * self.transaction_fee
         self.balance += loss - liquidation_fee + margin_to_return
         self._clamp_balance()
         trade_info["fee_paid"] = liquidation_fee

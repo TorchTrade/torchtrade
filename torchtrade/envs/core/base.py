@@ -6,10 +6,20 @@ from typing import Any, Optional
 
 import numpy as np
 import torch
+
+from torchtrade.envs.utils.liquidation import (
+    DEFAULT_MAINTENANCE_MARGIN_RATE,
+    require_fee_fits_maintenance,
+)
 from torchrl.data import Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
 
 logger = logging.getLogger(__name__)
+
+
+def _levels(config):
+    """The config's action levels, defaulting to both directions when it has none."""
+    return getattr(config, "action_levels", None) or [-1, 1]
 
 
 class TorchTradeBaseEnv(EnvBase):
@@ -82,10 +92,17 @@ class TorchTradeBaseEnv(EnvBase):
         Raises:
             ValueError: If parameters are out of valid range [0, 1]
         """
-        if not (0 <= config.transaction_fee <= 1):
-            raise ValueError(
-                f"Transaction fee must be between 0 and 1, got {config.transaction_fee}"
-            )
+        require_fee_fits_maintenance(
+            config.transaction_fee,
+            leverage=getattr(config, "leverage", 1),
+            maintenance_margin_rate=getattr(
+                config, "maintenance_margin_rate", DEFAULT_MAINTENANCE_MARGIN_RATE
+            ),
+            # Default [-1] when a config has no action_levels: assume both directions
+            # rather than assume neither, which would skip the check entirely.
+            allows_long=any(level > 0 for level in _levels(config)),
+            allows_short=any(level < 0 for level in _levels(config)),
+        )
         if not (0 <= config.slippage < 1):
             raise ValueError(
                 f"Slippage must be between 0 and 1, got {config.slippage}"

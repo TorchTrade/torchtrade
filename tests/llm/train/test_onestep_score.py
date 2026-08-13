@@ -16,7 +16,7 @@ def _make_onestep_env(df):
         execute_on=TimeFrame(1, TimeFrameUnit.Minute),
         time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
         window_sizes=[10],
-        transaction_fee=0.01,
+        transaction_fee=0.0004,
         slippage=0.0,
         seed=42,
         random_start=False,  # forced to True internally by OneStepTradingEnvConfig

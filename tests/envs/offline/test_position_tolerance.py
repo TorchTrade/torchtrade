@@ -232,3 +232,103 @@ def test_the_relative_term_binds_on_a_large_position(gap_pct, within):
         f"a {gap_pct:.0%} gap on a $5,000 position was "
         f"{'not ' if within else ''}treated as close enough"
     )
+
+
+# Charlie's counter-example on #364: at these values the bankruptcy price is 100.194
+# while liquidation is 99.6, so max(fill, bankruptcy) stops being a floor and books a
+# liquidated long ABOVE the bar and above entry.
+_INVERTING = dict(leverage=125, maintenance_margin_rate=0.004, transaction_fee=0.01)
+_DIV_ZERO = dict(leverage=10, maintenance_margin_rate=0.004, transaction_fee=1.0)
+
+
+@pytest.mark.parametrize("kwargs,match", [
+    (_INVERTING, "does not fit inside"),
+    (_DIV_ZERO, r"\[0, 1\)"),
+], ids=["fee-exceeds-buffer", "fee-of-one"])
+@pytest.mark.parametrize("boundary", ["scalar", "vectorized", "replay"])
+def test_every_public_path_to_the_bankruptcy_price_refuses_an_inconsistent_fee(
+    boundary, kwargs, match
+):
+    """Three constructors reach the same formula, and the first fix validated one (#314).
+
+    The scalar env, the vectorized config and ReplayOrderExecutor are each their own
+    public boundary. Validating only the scalar left the inversion and the divide-by-zero
+    fully reachable through the other two -- fix-the-instance, not the class.
+    """
+    from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
+    from torchtrade.envs.offline.vectorized_sequential import (
+        VectorizedSequentialTradingEnvConfig,
+    )
+
+    with pytest.raises(ValueError, match=match):
+        common = dict(time_frames=["1Minute"], window_sizes=[10],
+                      execute_on="1Minute")
+        if boundary == "scalar":
+            idx = pd.date_range("2024-01-01", periods=600, freq="1min")
+            df = pd.DataFrame({"timestamp": idx, "open": 100.0, "high": 100.1,
+                               "low": 99.9, "close": 100.0, "volume": 10.0})
+            SequentialTradingEnv(
+                df, SequentialTradingEnvConfig(symbol="X", **common, **kwargs)
+            )
+        elif boundary == "vectorized":
+            VectorizedSequentialTradingEnvConfig(num_envs=1, **common, **kwargs)
+        else:
+            ReplayOrderExecutor(initial_balance=1000.0, **kwargs)
+
+
+@pytest.mark.parametrize("leverage,mmr,fee,allows_long,allows_short,accepted", [
+    # Charlie's counter-example: a floor for longs (bankruptcy 50.2008 <= liq 50.4),
+    # an inversion only for a short this config cannot open.
+    (2, 0.004, 0.004, True, False, True),
+    (2, 0.004, 0.004, True, True, False),
+    # Exact equality: bankruptcy lands ON liquidation, where the clamp is a no-op.
+    (10, 0.004, 0.004 / (1 + 1 / 10 - 0.004), True, True, True),
+    # A hair past it inverts.
+    (10, 0.004, 0.004 / (1 + 1 / 10 - 0.004) * 1.001, True, True, False),
+    # The mirror: a SHORT-ONLY config must not be measured against the long
+    # constraint it can never reach. Its own constraint is the binding one, so
+    # the fee that a long-only config tolerates is refused here.
+    (2, 0.004, 0.004, False, True, False),
+    # ...and a fee that satisfies only the long side is accepted long-only,
+    # refused short-only -- the asymmetry Charlie flagged, in both directions.
+    (2, 0.004, 0.0039, True, False, True),
+    (2, 0.004, 0.0039, False, True, False),
+    # The case that actually pins the LONG gate. Everywhere above, the short term is the
+    # binding one (it is, whenever 1/L > mmr), so ungating the long constraint changes
+    # nothing and the mutant survives. With mmr > 1/L the long term binds instead:
+    # at L=2, mmr=0.6, fee=0.6 the short side passes (0.540 <= 0.6) and the long side
+    # does not (0.660 > 0.6). A short-only config must therefore be ACCEPTED, and is
+    # refused the moment the long constraint is applied unconditionally.
+    (2, 0.6, 0.6, False, True, True),
+    (2, 0.6, 0.6, True, True, False),
+], ids=["long-only-safe", "same-config-with-shorts", "exact-equality", "just-past",
+     "short-only-refused", "long-only-accepts", "short-only-refuses-same",
+     "long-term-binds-short-only", "long-term-binds-both"])
+def test_the_fee_bound_is_the_exact_condition_not_a_conservative_one(
+    leverage, mmr, fee, allows_long, allows_short, accepted
+):
+    """`fee*(1 + 1/L) <= mmr` implies the real condition but is strictly stronger (#314).
+
+    The exact constraint is per direction --
+      long:  fee * (1 - 1/L + mmr) <= mmr
+      short: fee * (1 + 1/L - mmr) <= mmr
+    -- and the short one binds whenever 1/L > mmr. Applying it to a long-only config
+    refused setups whose clamp is still a floor, which is a compatibility regression at
+    every public construction boundary.
+
+    Equality is accepted deliberately: bankruptcy landing exactly on liquidation makes
+    the clamp a no-op, not an inversion.
+    """
+    from torchtrade.envs.utils.liquidation import require_fee_fits_maintenance
+
+    def check():
+        require_fee_fits_maintenance(
+            fee, leverage=leverage, maintenance_margin_rate=mmr,
+            allows_long=allows_long, allows_short=allows_short,
+        )
+
+    if accepted:
+        check()
+    else:
+        with pytest.raises(ValueError, match="does not fit inside"):
+            check()

@@ -30,7 +30,7 @@ from torchtrade.envs.utils.fractional_sizing import (
 )
 
 from torchtrade.envs.core.common_types import MarginType
-from torchtrade.envs.utils.liquidation import DEFAULT_MAINTENANCE_MARGIN_RATE
+from torchtrade.envs.utils.liquidation import DEFAULT_MAINTENANCE_MARGIN_RATE, require_fee_fits_maintenance
 
 # Money, prices and position sizes are tracked in float64 to match the scalar envs' Python
 # floats. In float32 the accumulated relative epsilon, scaled up by leverage, lands on a
@@ -83,10 +83,13 @@ class VectorizedSequentialTradingEnvConfig:
 
         if self.num_envs < 1:
             raise ValueError(f"num_envs must be >= 1, got {self.num_envs}")
-        if not (0 <= self.transaction_fee <= 1):
-            raise ValueError(
-                f"Transaction fee must be between 0 and 1, got {self.transaction_fee}"
-            )
+        require_fee_fits_maintenance(
+            self.transaction_fee,
+            leverage=self.leverage,
+            maintenance_margin_rate=self.maintenance_margin_rate,
+            allows_long=any(level > 0 for level in (self.action_levels or [-1])),
+            allows_short=any(level < 0 for level in (self.action_levels or [-1])),
+        )
         if not (0 <= self.slippage < 1):
             raise ValueError(
                 f"Slippage must be between 0 and 1, got {self.slippage}"
@@ -522,6 +525,8 @@ class VectorizedSequentialTradingEnv(EnvBase):
         self._step_indices.clamp_(max=self._total_exec_times - 1)
 
         # Bar N+1
+        # open, for pricing a liquidation on a bar that gapped through it (#314)
+        new_open = self._base_tensor[self._step_indices, 0]
         new_high = self._base_tensor[self._step_indices, 1]
         new_low = self._base_tensor[self._step_indices, 2]
         new_prices = self._base_tensor[self._step_indices, 3]
@@ -530,7 +535,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
         self._execute_trades(action_values, trade_prices)
 
         # Bar N+1's wick, against whatever the trade left open
-        self._apply_liquidation(new_high, new_low)
+        self._apply_liquidation(new_open, new_high, new_low)
         self._advance_hold_counters()
 
 
@@ -569,6 +574,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
     def _apply_liquidation(
         self,
+        open_prices: torch.Tensor,
         high_prices: torch.Tensor,
         low_prices: torch.Tensor,
         exempt_fn: Optional[Callable[[], torch.Tensor]] = None,
@@ -603,12 +609,41 @@ class VectorizedSequentialTradingEnv(EnvBase):
             if not liq_mask.any():
                 return
 
-        # PnL at the liquidation price (both directions, via signed sizes)
-        pnl = (liq_price - self._entry_prices) * self._position_sizes
+        # Booked where the bar actually traded, not at a liquidation price a bar that
+        # gapped straight through it never offered (#314). The scalar engine reaches the
+        # same number through stop_fill_price; torch.where is the batched spelling of
+        # that min/max, and it self-selects for wicks the same way.
+        fill_price = torch.where(
+            self._position_sizes > 0,
+            torch.minimum(open_prices, liq_price),
+            torch.maximum(open_prices, liq_price),
+        )
+        # Clamped to the bankruptcy price, as in the scalar engine: past it the position
+        # has consumed its margin and the insurance fund absorbs the rest. Clamping the
+        # fill keeps fee and PnL on one price.
+        is_long = self._position_sizes > 0
+        # Each branch built as a tensor expression, the house pattern that
+        # _compute_liq_prices already follows. Two bare Python floats give torch.where
+        # no float tensor operand, so it falls back to the default dtype -- float32 --
+        # while every money tensor here is float64. That silently broke the
+        # scalar/vectorized contract at the repo's own 1e-9 tolerance, worst case 9.5e-3.
+        margin_fraction = 1.0 / float(self.config.leverage)
+        f = self.transaction_fee
+        bankruptcy = torch.where(
+            is_long,
+            self._entry_prices * ((1 - margin_fraction) / (1 - f)),
+            self._entry_prices * ((1 + margin_fraction) / (1 + f)),
+        )
+        fill_price = torch.where(
+            is_long,
+            torch.maximum(fill_price, bankruptcy),
+            torch.minimum(fill_price, bankruptcy),
+        )
+        pnl = (fill_price - self._entry_prices) * self._position_sizes
         margin_return = (
             self._position_sizes.abs() * self._entry_prices
         ) / float(self.config.leverage)
-        fee = (self._position_sizes.abs() * liq_price) * self.transaction_fee
+        fee = (self._position_sizes.abs() * fill_price) * self.transaction_fee
         self._balances = torch.where(
             liq_mask, self._balances + pnl - fee + margin_return, self._balances
         )

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 from torchtrade.envs.utils.liquidation import (
+    require_fee_fits_maintenance,
+    bankruptcy_price,
     DEFAULT_MAINTENANCE_MARGIN_RATE,
     isolated_liquidation_price,
     stop_precedes_liquidation,
@@ -53,6 +55,11 @@ class ReplayOrderExecutor:
         transaction_fee: float = 0.0,
         maintenance_margin_rate: float = DEFAULT_MAINTENANCE_MARGIN_RATE,
     ):
+        require_fee_fits_maintenance(
+            transaction_fee,
+            leverage=leverage,
+            maintenance_margin_rate=maintenance_margin_rate,
+        )
         self.initial_balance = initial_balance
         self.leverage = leverage
         self.transaction_fee = transaction_fee
@@ -131,9 +138,18 @@ class ReplayOrderExecutor:
         ) and stop_precedes_liquidation(self.sl_price, liq, open_price, is_long=is_long)
 
         if touched and not stop_first:
-            # Booked AT the liquidation price, as the offline env does: that price is the
-            # isolated-margin cap, so filling worse would breach the cap the venue enforces.
-            self._close_at_price(liq)
+            # Where the bar traded, clamped to the bankruptcy price -- the offline env's
+            # rule, restated here only because this branch is the one place replay
+            # priced an exit differently (#314). It used to book AT liq on the claim
+            # that liq was the isolated-margin cap; the cap is the bankruptcy price, and
+            # a bar that gapped through liq never offered it.
+            bankruptcy = bankruptcy_price(
+                self.entry_price, is_long=is_long,
+                leverage=self.leverage, transaction_fee=self.transaction_fee,
+            )
+            fill = stop_fill_price(liq, open_price, is_long=is_long)
+            fill = max(fill, bankruptcy) if is_long else min(fill, bankruptcy)
+            self._close_at_price(fill)
             return
 
         if self.sl_price == 0 and self.tp_price == 0:

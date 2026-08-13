@@ -686,7 +686,7 @@ class TestScalarVecEquivalenceLiquidation:
         df = trending_down_df if direction == "long" else trending_up_df
         actions = [open_idx] * 200
         mismatches = _run_sequence(
-            df, actions, leverage=20, fee=0.01, max_traj=200,
+            df, actions, leverage=20, fee=0.0004, max_traj=200,
             label=f"liquidation-{direction}"
         )
         assert not mismatches, "\n".join(mismatches)

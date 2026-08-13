@@ -218,7 +218,9 @@ class TestMarginAndFeeInteraction:
     @pytest.mark.parametrize("leverage,fee,min_expected,max_expected", [
         (1, 0.001, 0.98, 1.0),      # Spot: ~99% invested (accounting for fee)
         (10, 0.001, 9.7, 10.0),     # 10x: ~9.8x invested (accounting for fee)
-        (20, 0.01, 16.0, 20.0),     # 20x + 1% fee: ~16.5x (margin + fee impact)
+        # 0.3%, not 1%: a fee above the maintenance buffer puts the bankruptcy price
+        # past the liquidation price and is refused at construction now (#314).
+        (20, 0.003, 18.0, 20.0),    # 20x + 0.3% fee (margin + fee impact)
     ])
     def test_margin_calculation_with_fees(self, sample_df, leverage, fee, min_expected, max_expected):
         """Margin calculation should account for fees correctly to prevent over-leveraging.

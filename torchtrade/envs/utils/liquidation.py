@@ -173,3 +173,85 @@ def stop_precedes_liquidation(
         gapped_past_liquidation = open_price >= liquidation_price
         stop_is_nearer = stop_price < liquidation_price
     return stop_is_nearer and not gapped_past_liquidation
+
+
+def bankruptcy_price(
+    entry_price: float, *, is_long: bool, leverage: float, transaction_fee: float
+) -> float:
+    """The price at which a position has consumed exactly the margin it posted (#314).
+
+    Past it the venue closes and the insurance fund absorbs the rest, so it is the worst
+    price a liquidation can be booked at however far the bar gapped.
+
+    Net of the exit fee: the venue takes the liquidation fee out of the margin -- that is
+    what the maintenance buffer is for -- so this is the fill where loss + fee equals the
+    margin. Charging the fee on top instead left replay with negative equity.
+
+    The vectorized engine keeps a tensorised copy, as it does for stop_fill_price; the
+    equivalence tests pin it, so it cannot drift unnoticed.
+    """
+    margin_fraction = 1.0 / leverage
+    return entry_price * (
+        (1 - margin_fraction) / (1 - transaction_fee) if is_long
+        else (1 + margin_fraction) / (1 + transaction_fee)
+    )
+
+
+def require_fee_fits_maintenance(
+    transaction_fee: float,
+    *,
+    leverage: float,
+    maintenance_margin_rate: float,
+    allows_long: bool = True,
+    allows_short: bool = True,
+) -> None:
+    """Refuse a fee the maintenance buffer cannot absorb (#314).
+
+    `bankruptcy_price` divides by `1 -+ fee`, so a fee at or above the buffer pushes it
+    PAST the liquidation price and the fill clamp stops being a floor: at L=125,
+    mmr=0.004, fee=0.01, liquidation is 99.6 and the clamp returns 100.194 -- above the
+    bar and above entry, so a liquidated long books a profit on price. A fee of exactly
+    1 divides by zero outright.
+
+    Lives here rather than in any one config because there are THREE public paths to
+    that formula -- the scalar env, the vectorized config and ReplayOrderExecutor -- and
+    the first fix validated only the scalar one, leaving the defect reachable through
+    the other two.
+
+    Real venues sit far from this: Binance futures taker ~0.04% against ~0.4%
+    maintenance, so the buffer is an order of magnitude above the fee.
+    """
+    if not (0 <= transaction_fee < 1):
+        raise ValueError(
+            f"Transaction fee must be in [0, 1), got {transaction_fee}"
+        )
+    # The exact condition, per direction, rather than a conservative bound over both.
+    # Long:  bankruptcy <= liq  <=>  (1 - 1/L)/(1 - f) <= (1 - 1/L + mmr)
+    #                           <=>  f * (1 - 1/L + mmr) <= mmr
+    # Short: bankruptcy >= liq  <=>  (1 + 1/L)/(1 + f) >= (1 + 1/L - mmr)
+    #                           <=>  f * (1 + 1/L - mmr) <= mmr
+    # `f * (1 + 1/L) <= mmr` implies both but is strictly stronger, so it refused valid
+    # configs: at L=2, mmr=0.004, fee=0.004 the long bankruptcy price is 50.2008 against
+    # a liquidation of 50.4 -- the clamp is still a floor, and the config is fine.
+    # `>` not `>=`: equality means bankruptcy lands exactly ON liquidation, where the
+    # clamp is a no-op rather than an inversion.
+    # Only the directions the config can actually take. The short constraint is the
+    # binding one whenever 1/L > mmr, so applying it to a long-only config refuses
+    # perfectly safe setups -- L=2, mmr=0.004, fee=0.004 is a floor for longs
+    # (50.2008 <= 50.4) and an inversion only for a short it can never open.
+    # Both directions gated, not just the short one. A SHORT-ONLY config was still being
+    # measured against the long constraint it can never reach -- the mirror of the
+    # long-only regression, and asymmetric for no reason.
+    constraints = []
+    if allows_long:
+        constraints.append(1 - 1 / leverage + maintenance_margin_rate)
+    if allows_short:
+        constraints.append(1 + 1 / leverage - maintenance_margin_rate)
+    worst = max(constraints) if constraints else 0.0
+    if leverage > 1 and transaction_fee * worst > maintenance_margin_rate:
+        raise ValueError(
+            f"transaction_fee {transaction_fee} does not fit inside "
+            f"maintenance_margin_rate {maintenance_margin_rate} at leverage {leverage}: "
+            f"the fee would consume the maintenance buffer, putting the bankruptcy price "
+            f"past the liquidation price"
+        )
