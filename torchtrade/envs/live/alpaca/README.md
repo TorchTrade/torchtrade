@@ -14,6 +14,8 @@ Live trading integration with Alpaca for US equities and crypto spot markets.
 ## Quick Start
 
 ```python
+from torchrl.envs.utils import step_mdp
+
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 
 # Credentials are CONSTRUCTOR arguments, not config fields. The config carries the
@@ -93,6 +95,8 @@ action = 1  # action 0 is flat/HOLD; 1..N open a position
 
 ```python
 import os
+from torchrl.envs.utils import step_mdp
+
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 
 # Load keys from environment
@@ -114,11 +118,13 @@ env = AlpacaTorchTradingEnv(
 td = env.reset()
 for _ in range(100):
     td["action"] = agent.get_action(td)
-    # step_and_maybe_reset, not step: step() nests the outcome under "next", so
-    # re-feeding its output to step() would re-step from the stale observation.
-    td = env.step_and_maybe_reset(td)
+    td = env.step(td)
     if td["next", "done"]:
         break
+    # step_mdp, NOT step_and_maybe_reset: the latter returns a 2-tuple, and its
+    # auto-reset calls cancel_open_orders() on the real broker -- it would cancel the
+    # SL/TP brackets placed below and clear env.history.
+    td = step_mdp(td)
 
 print(f"Final value: ${env.history.portfolio_values[-1]:.2f}")
 ```
