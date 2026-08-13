@@ -93,10 +93,11 @@ df['timestamp'] = pd.to_datetime(df['timestamp'])
 
 # Create environment (spot trading = long-only)
 config = SequentialTradingEnvConfig(
-    leverage=1,  # 1 = spot; >1 for leveraged futures
+    leverage=1,             # 1 = spot; >1 for leveraged futures
+    action_levels=[0, 1],   # long-only; the default [-1, 0, 1] warns under leverage=1
     time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     initial_cash=1000
 )
 env = SequentialTradingEnv(df, config)
@@ -340,10 +341,11 @@ df['0'] = pd.to_datetime(df['0'])
 
 # Configure multi-timeframe environment
 config = SequentialTradingEnvConfig(
-    leverage=1,  # spot; action_levels controls long-only vs bidirectional
+    leverage=1,             # spot
+    action_levels=[0, 1],   # long-only; the default [-1, 0, 1] warns under leverage=1
     time_frames=["1min", "5min", "15min", "60min"],
     window_sizes=[12, 8, 8, 24],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     initial_cash=[1000, 5000],  # Domain randomization
     transaction_fee=0.0025,
     slippage=0.001
@@ -417,7 +419,9 @@ def custom_preprocessing(df):
         df["close"], window=14
     ).rsi()
     df.fillna(0, inplace=True)
-    return df
+    # timestamp must come back as a COLUMN, not an index, or the sampler raises
+    # KeyError: ['timestamp'] not in index
+    return df.reset_index()
 
 config = SequentialTradingEnvConfig(
     leverage=1,
@@ -444,14 +448,14 @@ config = SequentialTradingEnvConfig(
     leverage=1,
     time_frames=["1min", "5min", "15min", "60min"],
     window_sizes=[12, 8, 8, 24],
-    execute_on=(5, "Minute")
+    execute_on="5Min"
 )
 
 # Results in observations:
 # - market_data_1Minute_12: [12, num_features] - Last 12 one-minute bars
-# - market_data_5min: [8, num_features] - Last 40 minutes
-# - market_data_15min: [8, num_features] - Last 120 minutes
-# - market_data_60min: [24, num_features] - Last 24 hours
+# - market_data_5Minute_8: [8, num_features] - Last 40 minutes
+# - market_data_15Minute_8: [8, num_features] - Last 120 minutes
+# - market_data_60Minute_24: [24, num_features] - Last 24 hours
 ```
 
 ### Observation Structure
@@ -459,7 +463,7 @@ config = SequentialTradingEnvConfig(
 ```python
 observation = {
     "market_data_1Minute_12": tensor([12, num_features]),
-    "market_data_5min": tensor([8, num_features]),
+    "market_data_5Minute_8": tensor([8, num_features]),
     "account_state": tensor([6]),  # Universal 6-element state
 }
 

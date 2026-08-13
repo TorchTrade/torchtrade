@@ -79,7 +79,7 @@ The core sequential trading environment. Trading mode is determined by configura
     config = SequentialTradingEnvConfig(
         time_frames=["1min", "5min", "15min", "1hour"],
         window_sizes=[12, 8, 8, 24],
-        execute_on=(5, "Minute"),
+        execute_on="5Min",
         action_levels=[0.0, 0.5, 1.0],    # Close / 50% / 100% long
         initial_cash=1000,
         transaction_fee=0.0025,
@@ -96,7 +96,7 @@ The core sequential trading environment. Trading mode is determined by configura
     config = SequentialTradingEnvConfig(
         time_frames=["1min", "5min", "15min", "1hour"],
         window_sizes=[12, 8, 8, 24],
-        execute_on=(5, "Minute"),
+        execute_on="5Min",
         leverage=5,
         action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # Short/neutral/long
         initial_cash=10000,
@@ -137,7 +137,7 @@ config = VectorizedSequentialTradingEnvConfig(
     num_envs=64,
     time_frames=["1min", "5min", "15min", "1hour"],
     window_sizes=[12, 8, 8, 24],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     action_levels=[0.0, 0.5, 1.0],
     initial_cash=1000,
     transaction_fee=0.0025,
@@ -168,7 +168,7 @@ config = VectorizedSequentialTradingEnvSLTPConfig(
     takeprofit_levels=[0.05, 0.10],
     time_frames=["1min", "5min", "15min", "1hour"],
     window_sizes=[12, 8, 8, 24],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     initial_cash=1000,
     transaction_fee=0.0025,
     leverage=1,  # or >1 for futures with short bracket orders
@@ -212,7 +212,7 @@ config = SequentialTradingEnvSLTPConfig(
 
     time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     initial_cash=10000,
     transaction_fee=0.0004,
     slippage=0.001,
@@ -315,7 +315,7 @@ config = OneStepTradingEnvConfig(
 
     time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     initial_cash=10000,
     transaction_fee=0.0004,
 )

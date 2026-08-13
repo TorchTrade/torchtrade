@@ -52,7 +52,7 @@ Observe market data at multiple time scales simultaneously:
 config = SequentialTradingEnvConfig(
     time_frames=["1min", "5min", "15min", "60min"],
     window_sizes=[12, 8, 8, 24],       # Lookback per timeframe
-    execute_on=(5, "Minute")           # Execute every 5 minutes
+    execute_on="5Min"           # Execute every 5 minutes
 )
 ```
 
