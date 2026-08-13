@@ -220,6 +220,7 @@ df = pd.DataFrame({
     "timestamp": ..., "open": ..., "high": ..., "low": ..., "close": ..., "volume": ...,
     "funding_rate": ...,  # auxiliary
     "open_interest": ..., # auxiliary
+    "basis": ...,         # auxiliary, read by futures_features below
 })
 
 def futures_features(df: pd.DataFrame) -> pd.DataFrame:
