@@ -10,7 +10,8 @@ TradeMode = Literal["fractional", "notional", "quantity"]
 Position sizing mode for trading environments.
 
 - "fractional": Fraction of portfolio per trade (e.g., 0.1 = 10%)
-  - Position size: portfolio_value * position_fraction * leverage / price
+  - Position size: portfolio_value * position_fraction * leverage / price,
+    net of the entry fee (see fractional_sizing.fee_multiplier, #278)
   - Best for: training and adaptive live sizing
 
 - "quantity": Fixed quantity per trade (e.g., 0.001 BTC)

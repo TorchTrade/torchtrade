@@ -656,7 +656,7 @@ All live SLTP environments support three position sizing modes, matching the off
 
 | Mode | Config field | Formula | Use case |
 |------|-------------|---------|----------|
-| `"fractional"` | `position_fraction` | `account_balance × fraction × leverage / price` | Adaptive sizing (scales with account) |
+| `"fractional"` | `position_fraction` | `account_balance × fraction × leverage / price`, net of the entry fee | Adaptive sizing (scales with account) |
 | `"notional"` | `quantity_per_trade` | `quantity_per_trade / price` | Fixed USD per trade |
 | `"quantity"` | `quantity_per_trade` | `quantity_per_trade` directly | Fixed base-asset units per trade |
 

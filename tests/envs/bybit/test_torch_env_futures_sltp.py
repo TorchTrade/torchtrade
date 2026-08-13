@@ -673,7 +673,7 @@ class TestBybitSLTPNotionalTradeMode:
             call_kwargs = mock_env_trader.trade.call_args[1]
             # margin_balance=1100 * fraction=0.1 * leverage=5 / price=50000 = 0.011
             from torchtrade.envs.live.bybit.order_executor import TAKER_FEE
-            expected = 0.011 / (1 + 5 * TAKER_FEE)
+            expected = 0.011 * 0.98 / (1 + 5 * TAKER_FEE)
         assert call_kwargs["quantity"] == pytest.approx(expected, rel=1e-4)
 
 

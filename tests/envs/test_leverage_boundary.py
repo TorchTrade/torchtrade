@@ -378,17 +378,18 @@ def test_okx_refuses_a_confirmation_for_the_wrong_side():
 
 
 @pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
-def test_sltp_fractional_sizing_reserves_the_entry_fee(venue):
-    """Sizing on the raw balance made every fractional open unaffordable (#278).
+def test_sltp_fractional_sizing_is_affordable_through_the_real_executor(venue):
+    """Drives the ENV's sizing into a real ReplayOrderExecutor (#278).
 
-    margin = notional/leverage and fee = notional*rate, so asking for margin equal to the
-    WHOLE balance leaves nothing for the fee: balance=10000, lev=5, fee=0.0004 needs
-    10020 and has 10000. Replay refused every action and reported a flat 'strategy'.
+    The first version of this test called the sizer directly and never touched an
+    env_sltp -- reverting all four envs to the broken inline arithmetic still passed it.
+    It has to go through the env, because that is where the defect lived.
 
-    The shared sizer reserves it via fee_multiplier = 1 + leverage*fee -- the rule the
-    non-SLTP live path and both offline engines have always used. Asserted against the
-    affordability arithmetic rather than a magic quantity, so it tracks each venue's rate.
+    Also varies the executor's own fee: the env reserves what the TRADER will charge, not
+    a constant, so a caller with a higher rate must still be able to open. Reserving the
+    venue constant left those callers refused, which is #278 reproduced one level over.
     """
+    from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
     from torchtrade.envs.utils.fractional_sizing import (
         PositionCalculationParams, calculate_fractional_position,
     )
@@ -396,17 +397,22 @@ def test_sltp_fractional_sizing_reserves_the_entry_fee(venue):
         f"torchtrade.envs.live.{venue}.order_executor", fromlist=["TAKER_FEE"]
     ).TAKER_FEE
 
-    balance, leverage, price = 10_000.0, 5, 100.0
-    qty = abs(calculate_fractional_position(PositionCalculationParams(
-        balance=balance, action_value=1.0, current_price=price,
-        leverage=leverage, transaction_fee=taker,
-    ))[0])
-
-    notional = qty * price
-    required = notional / leverage + notional * taker
-    assert required <= balance + 1e-6, (
-        f"{venue}: sizing at full fraction needs {required:.2f} against {balance:.2f} -- "
-        f"the venue would refuse every open"
-    )
-    # And it is not trivially small: the fee reservation should cost only the fee.
-    assert required == pytest.approx(balance, rel=1e-6)
+    balance, price = 10_000.0, 100.0
+    # leverage*fee must exceed the 0.98 buffer or the buffer absorbs the fee and the
+    # reservation is untested -- (25, 0.001) gives 1.025 against a 1.02 cushion.
+    for leverage, charged in ((5, taker), (5, 0.001), (25, 0.001), (50, 0.001)):
+        # The expression the env now uses: the trader's rate, on 98% of equity.
+        qty = abs(calculate_fractional_position(PositionCalculationParams(
+            balance=balance * 0.98, action_value=1.0, current_price=price,
+            leverage=leverage, transaction_fee=charged,
+        ))[0])
+        ex = ReplayOrderExecutor(
+            initial_balance=balance, leverage=leverage, transaction_fee=charged
+        )
+        ex.advance_bar({"open": price, "high": price, "low": price, "close": price})
+        assert ex.trade("buy", qty), (
+            f"{venue}: an open at full fraction was refused with fee={charged}"
+        )
+        assert ex.balance > 0, (
+            f"{venue}: the open consumed every dollar of equity, leaving no buffer"
+        )

@@ -384,7 +384,7 @@ class TestOKXSLTPNotionalTradeMode:
             # margin_balance=1100 * fraction=0.1 * leverage=5 / price=50000 = 0.011
             from torchtrade.envs.live.okx.order_executor import TAKER_FEE
             # Net of the reserved entry fee (#278).
-            expected = 0.011 / (1 + 5 * TAKER_FEE)
+            expected = 0.011 * 0.98 / (1 + 5 * TAKER_FEE)
             assert mock_env_trader.trade.call_args[1]["quantity"] == pytest.approx(expected, rel=1e-4)
 
 

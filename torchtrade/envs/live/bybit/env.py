@@ -236,13 +236,12 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
             )
 
         effective_balance = total_balance * 0.98
-        fee_rate = TAKER_FEE
         params = PositionCalculationParams(
             balance=effective_balance,
             action_value=action_value,
             current_price=current_price,
             leverage=self.config.leverage,
-            transaction_fee=fee_rate,
+            transaction_fee=TAKER_FEE,
         )
         return calculate_fractional_position(params)
 

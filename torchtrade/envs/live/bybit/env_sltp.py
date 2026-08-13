@@ -266,17 +266,29 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
                 logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
                 trade_info["success"] = False
                 return trade_info
-            # Through the shared sizer, which reserves the fee via
-            # fee_multiplier = 1 + leverage*fee. Sizing on the raw balance asked for
-            # margin equal to the WHOLE balance, leaving nothing for the fee, so the
-            # affordability check refused every open and replay reported a flat
-            # 'strategy' (#278). The non-SLTP path has always gone through here.
+            # Reserve what will actually be CHARGED: ReplayOrderExecutor carries its own
+            # rate, so reserving a constant left a higher-fee caller with every open
+            # refused -- #278 reproduced. 0.98 as the non-SLTP path uses, so a
+            # full-fraction open leaves some maintenance buffer instead of zero.
+            # `float()` on a trader whose transaction_fee is not a real number is not
+            # safe: MagicMock implements __float__ and returns 1.0, i.e. a 100% fee,
+            # which silently divides the size by (1 + leverage). Accept only a finite
+            # rate in [0, 1); anything else falls back to the venue constant.
+            venue_fee = getattr(self.trader, "transaction_fee", None)
+            fee = (
+                float(venue_fee)
+                if isinstance(venue_fee, (int, float))
+                and not isinstance(venue_fee, bool)
+                and math.isfinite(venue_fee)
+                and 0 <= venue_fee < 1
+                else TAKER_FEE
+            )
             quantity = abs(calculate_fractional_position(PositionCalculationParams(
-                balance=balance,
+                balance=balance * 0.98,
                 action_value=self.config.position_fraction,
                 current_price=current_price,
                 leverage=self.config.leverage,
-                transaction_fee=TAKER_FEE,
+                transaction_fee=fee,
             ))[0])
         elif self.config.trade_mode == "notional":
             quantity = float(self.config.quantity_per_trade) / current_price

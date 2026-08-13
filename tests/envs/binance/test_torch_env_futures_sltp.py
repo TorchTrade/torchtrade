@@ -1174,7 +1174,7 @@ class TestBinanceSLTPNotionalTradeMode:
         from torchtrade.envs.live.binance.order_executor import TAKER_FEE
         # Net of the reserved entry fee: sizing on the raw allocation left
         # nothing for the fee, so every open was refused (#278).
-        expected_qty = 1100.0 * 0.1 * 5 / 50050.0 / (1 + 5 * TAKER_FEE)
+        expected_qty = 1100.0 * 0.1 * 5 / 50050.0 * 0.98 / (1 + 5 * TAKER_FEE)
         assert call_kwargs["quantity"] == pytest.approx(expected_qty, rel=1e-4)
 
 
