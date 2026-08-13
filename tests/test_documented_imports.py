@@ -90,15 +90,23 @@ def test_the_sweep_still_covers_every_source():
 # docs with ZERO occurrences in the package while all 257 import cases here passed
 # (#287). An import check validates that a NAME resolves, not that a CALL is
 # constructible -- the boundary was the import line, and every defect lived below it.
-CONFIG_CALL = re.compile(r"\b(\w*Config)\(\s*\n(.*?)^\)", re.S | re.M)
-KWARG = re.compile(r"^\s{4}(\w+)\s*=", re.M)
+# Indentation-tolerant, and single-line calls too. A 4-space-only pattern silently
+# skipped both flagship SequentialTradingEnvConfig examples -- they sit inside mkdocs
+# `=== "Spot Trading"` tabs, so the whole fence is indented -- plus every Polymarket
+# example and a live api_key bug in torchtrade/envs/live/README.md that this check's own
+# premise says it should catch.
+CONFIG_CALL = re.compile(r"\b(\w*Config)\(([^()]*(?:\([^()]*\)[^()]*)*)\)", re.S)
+KWARG = re.compile(r"(?:^|[\s,(])([A-Za-z_]\w*)\s*=(?!=)", re.M)
+# Comments are stripped first: a value comment like `# 1 = spot` parses as a kwarg
+# named "1" otherwise, and an identifier cannot start with a digit anyway.
+COMMENT = re.compile(r"#[^\n]*")
 
 
 def _documented_config_kwargs():
     """Every (config class, kwarg) pair written in a tracked markdown code block."""
     for path in _doc_sources():
         for block in PY_BLOCK.findall(path.read_text()):
-            for cls_name, body in CONFIG_CALL.findall(block):
+            for cls_name, body in CONFIG_CALL.findall(COMMENT.sub("", block)):
                 for kwarg in KWARG.findall(body):
                     yield str(path.relative_to(REPO)), cls_name, kwarg
 
@@ -110,7 +118,8 @@ def _resolve_config(cls_name):
     """The config class by name, or None when the docs name one we do not ship."""
     for module in ("torchtrade.envs.offline", "torchtrade.envs.live.alpaca",
                    "torchtrade.envs.live.binance", "torchtrade.envs.live.bitget",
-                   "torchtrade.envs.live.bybit", "torchtrade.envs.live.okx"):
+                   "torchtrade.envs.live.bybit", "torchtrade.envs.live.okx",
+                   "torchtrade.envs.live.polymarket"):
         try:
             found = getattr(importlib.import_module(module), cls_name, None)
         except Exception:
@@ -204,6 +213,21 @@ def test_a_documented_config_kwarg_exists(source, cls_name, kwarg):
     assert kwarg in fields, (
         f"{source} documents {cls_name}({kwarg}=...), which raises TypeError -- "
         f"the class accepts {sorted(fields)}"
+    )
+
+
+def test_no_known_broken_entry_has_gone_stale():
+    """A doc line DELETED rather than fixed leaves an entry nothing tests.
+
+    The ratchet is two-directional for "still broken" and "now fixed", but a third case
+    slips through: remove the offending line from the docs and its triple vanishes from
+    CONFIG_KWARGS, leaving dead weight in KNOWN_BROKEN that no longer guards anything.
+    """
+    documented = set(CONFIG_KWARGS)
+    stale = sorted(entry for entry in KNOWN_BROKEN if entry not in documented)
+    assert not stale, (
+        f"{len(stale)} KNOWN_BROKEN entries are no longer in the docs -- delete them: "
+        f"{stale}"
     )
 
 
