@@ -93,18 +93,22 @@ df['timestamp'] = pd.to_datetime(df['timestamp'])
 
 # Create environment (spot trading = long-only)
 config = SequentialTradingEnvConfig(
-    trading_mode="spot",  # or "futures" for leveraged trading
+    leverage=1,             # 1 = spot; >1 for leveraged futures
+    action_levels=[0, 1],   # long-only; the default [-1, 0, 1] warns under leverage=1
     time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     initial_cash=1000
 )
 env = SequentialTradingEnv(df, config)
 
 # Run
 tensordict = env.reset()
+# reset() carries no action -- step() needs one set on the tensordict it is given.
+tensordict["action"] = env.action_spec.rand()
 tensordict = env.step(tensordict)
-print(f"Reward: {tensordict['reward'].item()}")
+# step() writes the outcome under "next", leaving the input state intact.
+print(f"Reward: {tensordict['next']['reward'].item()}")
 ```
 
 ### 3. Train Your First Policy
@@ -332,18 +336,20 @@ uv run pytest tests/ -v
 ```python
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 import datasets
+import pandas as pd
 
 # Load historical data from HuggingFace
 df = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
 df = df["train"].to_pandas()
-df['0'] = pd.to_datetime(df['0'])
+df['timestamp'] = pd.to_datetime(df['timestamp'])
 
 # Configure multi-timeframe environment
 config = SequentialTradingEnvConfig(
-    trading_mode="spot",  # Long-only trading
+    leverage=1,             # spot
+    action_levels=[0, 1],   # long-only; the default [-1, 0, 1] warns under leverage=1
     time_frames=["1min", "5min", "15min", "60min"],
     window_sizes=[12, 8, 8, 24],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     initial_cash=[1000, 5000],  # Domain randomization
     transaction_fee=0.0025,
     slippage=0.001
@@ -417,14 +423,19 @@ def custom_preprocessing(df):
         df["close"], window=14
     ).rsi()
     df.fillna(0, inplace=True)
-    return df
+    # timestamp must come back as a COLUMN, not an index, or the sampler raises
+    # KeyError: ['timestamp'] not in index
+    return df.reset_index()
 
 config = SequentialTradingEnvConfig(
-    trading_mode="spot",
-    feature_preprocessing_fn=custom_preprocessing,
+    leverage=1,
+    action_levels=[0, 1],   # long-only; the default [-1, 0, 1] warns under leverage=1
     time_frames=["1min", "5min"],
     window_sizes=[12, 8],
 )
+
+# feature_preprocessing_fn is a CONSTRUCTOR argument, not a config field.
+env = SequentialTradingEnv(df, config, custom_preprocessing)
 ```
 
 See **[Advanced Customization](https://torchtrade.github.io/torchtrade/guides/custom-features/)** for more examples.
@@ -439,25 +450,26 @@ See **[Advanced Customization](https://torchtrade.github.io/torchtrade/guides/cu
 
 ```python
 config = SequentialTradingEnvConfig(
-    trading_mode="spot",
+    leverage=1,
+    action_levels=[0, 1],   # long-only; the default [-1, 0, 1] warns under leverage=1
     time_frames=["1min", "5min", "15min", "60min"],
     window_sizes=[12, 8, 8, 24],
-    execute_on=(5, "Minute")
+    execute_on="5Min"
 )
 
 # Results in observations:
-# - market_data_1min: [12, num_features] - Last 12 one-minute bars
-# - market_data_5min: [8, num_features] - Last 40 minutes
-# - market_data_15min: [8, num_features] - Last 120 minutes
-# - market_data_60min: [24, num_features] - Last 24 hours
+# - market_data_1Minute_12: [12, num_features] - Last 12 one-minute bars
+# - market_data_5Minute_8: [8, num_features] - Last 40 minutes
+# - market_data_15Minute_8: [8, num_features] - Last 120 minutes
+# - market_data_60Minute_24: [24, num_features] - Last 24 hours
 ```
 
 ### Observation Structure
 
 ```python
 observation = {
-    "market_data_1min": tensor([12, num_features]),
-    "market_data_5min": tensor([8, num_features]),
+    "market_data_1Minute_12": tensor([12, num_features]),
+    "market_data_5Minute_8": tensor([8, num_features]),
     "account_state": tensor([6]),  # Universal 6-element state
 }
 
@@ -521,7 +533,7 @@ loss:
 # examples/online_rl/env/sequential_sltp.yaml
 env:
   name: SequentialTradingEnvSLTP
-  trading_mode: "spot"
+  leverage: 1
   symbol: "BTC/USD"
   time_frames: ["5Min", "15Min"]
   window_sizes: [10, 10]

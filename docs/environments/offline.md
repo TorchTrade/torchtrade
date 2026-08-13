@@ -79,7 +79,7 @@ The core sequential trading environment. Trading mode is determined by configura
     config = SequentialTradingEnvConfig(
         time_frames=["1min", "5min", "15min", "1hour"],
         window_sizes=[12, 8, 8, 24],
-        execute_on=(5, "Minute"),
+        execute_on="5Min",
         action_levels=[0.0, 0.5, 1.0],    # Close / 50% / 100% long
         initial_cash=1000,
         transaction_fee=0.0025,
@@ -96,7 +96,7 @@ The core sequential trading environment. Trading mode is determined by configura
     config = SequentialTradingEnvConfig(
         time_frames=["1min", "5min", "15min", "1hour"],
         window_sizes=[12, 8, 8, 24],
-        execute_on=(5, "Minute"),
+        execute_on="5Min",
         leverage=5,
         action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # Short/neutral/long
         initial_cash=10000,
@@ -111,10 +111,10 @@ The core sequential trading environment. Trading mode is determined by configura
 
 ```python
 observation = {
-    "market_data_1Minute": Tensor([12, num_features]),    # 1m window
-    "market_data_5Minute": Tensor([8, num_features]),     # 5m window
-    "market_data_15Minute": Tensor([8, num_features]),    # 15m window
-    "market_data_1Hour": Tensor([24, num_features]),      # 1h window
+    "market_data_1Minute_12": Tensor([12, num_features]),    # 1m window
+    "market_data_5Minute_8": Tensor([8, num_features]),     # 5m window
+    "market_data_15Minute_8": Tensor([8, num_features]),    # 15m window
+    "market_data_1Hour_24": Tensor([24, num_features]),      # 1h window
     "account_state": Tensor([6]),                         # See Account State above
 }
 ```
@@ -137,7 +137,7 @@ config = VectorizedSequentialTradingEnvConfig(
     num_envs=64,
     time_frames=["1min", "5min", "15min", "1hour"],
     window_sizes=[12, 8, 8, 24],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     action_levels=[0.0, 0.5, 1.0],
     initial_cash=1000,
     transaction_fee=0.0025,
@@ -168,7 +168,7 @@ config = VectorizedSequentialTradingEnvSLTPConfig(
     takeprofit_levels=[0.05, 0.10],
     time_frames=["1min", "5min", "15min", "1hour"],
     window_sizes=[12, 8, 8, 24],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     initial_cash=1000,
     transaction_fee=0.0025,
     leverage=1,  # or >1 for futures with short bracket orders
@@ -201,7 +201,7 @@ config = SequentialTradingEnvSLTPConfig(
 
     # Futures parameters (leverage > 1 enables short bracket orders)
     leverage=5,
-    margin_call_threshold=0.2,
+    maintenance_margin_rate=0.004,
 
     # Position sizing: "fractional" (% of portfolio), "notional" (fixed USD), or "quantity" (fixed units)
     trade_mode="fractional",     # "fractional", "notional", or "quantity"
@@ -212,7 +212,7 @@ config = SequentialTradingEnvSLTPConfig(
 
     time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     initial_cash=10000,
     transaction_fee=0.0004,
     slippage=0.001,
@@ -303,11 +303,11 @@ config = OneStepTradingEnvConfig(
     stoploss_levels=[-0.02, -0.05],
     takeprofit_levels=[0.05, 0.10],
     include_hold_action=True,
-    rollout_steps=24,
+    max_traj_length=24,
 
     # Futures parameters (leverage > 1 enables short bracket orders)
     leverage=5,
-    margin_call_threshold=0.2,
+    maintenance_margin_rate=0.004,
 
     # Position sizing (see Position Sizing section above)
     trade_mode="fractional",     # "fractional", "notional", or "quantity"
@@ -315,7 +315,7 @@ config = OneStepTradingEnvConfig(
 
     time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     initial_cash=10000,
     transaction_fee=0.0004,
 )
