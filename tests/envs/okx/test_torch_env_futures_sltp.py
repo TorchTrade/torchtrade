@@ -350,7 +350,14 @@ class TestOKXSLTPNotionalTradeMode:
             assert mock_env_trader.trade.call_args[1]["quantity"] == pytest.approx(0.001, rel=1e-6)
 
     def test_fractional_converts_balance_to_quantity(self, mock_env_observer, mock_env_trader):
-        """Fractional mode must compute quantity from balance * fraction * leverage / price."""
+        """Fractional mode sizes from balance * fraction * leverage / price, NET OF FEE.
+
+        The raw figure asks for margin equal to the whole allocation, leaving nothing for
+        the entry fee, so the affordability check refuses the open (#278). The shared
+        sizer reserves it via fee_multiplier = 1 + leverage*fee, which is the same rule
+        the non-SLTP path and the offline envs have always used. Asserted as the rule
+        rather than a constant, so it tracks the venue's taker rate.
+        """
         from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTorchTradingEnv, OKXFuturesSLTPTradingEnvConfig
 
         config = OKXFuturesSLTPTradingEnvConfig(
@@ -375,7 +382,10 @@ class TestOKXSLTPNotionalTradeMode:
             env.reset()
             env._execute_trade_if_needed(("long", -0.02, 0.03))
             # margin_balance=1100 * fraction=0.1 * leverage=5 / price=50000 = 0.011
-            assert mock_env_trader.trade.call_args[1]["quantity"] == pytest.approx(0.011, rel=1e-4)
+            from torchtrade.envs.live.okx.order_executor import TAKER_FEE
+            # Net of the reserved entry fee (#278).
+            expected = 0.011 * 0.98 / (1 + 5 * TAKER_FEE)
+            assert mock_env_trader.trade.call_args[1]["quantity"] == pytest.approx(expected, rel=1e-4)
 
 
 class TestOKXSLTPLockPosition:

@@ -10,6 +10,7 @@ from torchrl.data import Categorical
 
 from torchtrade.envs.live.okx.observation import OKXObservationClass
 from torchtrade.envs.live.okx.order_executor import (
+    TAKER_FEE,
     OKXFuturesOrderClass,
     MarginMode,
     PositionMode,
@@ -242,13 +243,12 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
             )
 
         effective_balance = total_balance * 0.98
-        fee_rate = 0.0005  # OKX futures taker fee
         params = PositionCalculationParams(
             balance=effective_balance,
             action_value=action_value,
             current_price=current_price,
             leverage=self.config.leverage,
-            transaction_fee=fee_rate,
+            transaction_fee=TAKER_FEE,
         )
         return calculate_fractional_position(params)
 

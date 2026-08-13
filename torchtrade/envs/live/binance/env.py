@@ -15,6 +15,7 @@ from torchtrade.envs.core.live import (
 )
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
+    TAKER_FEE,
     BinanceFuturesOrderClass,
     MarginType,
 )
@@ -327,13 +328,12 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # Use shared utility for core position calculation
         # Reserve 2% buffer for exchange maintenance margin requirements
         effective_balance = total_balance * 0.98
-        fee_rate = 0.0004  # Binance futures maker/taker fee
         params = PositionCalculationParams(
             balance=effective_balance,
             action_value=action_value,
             current_price=current_price,
             leverage=self.config.leverage,
-            transaction_fee=fee_rate,
+            transaction_fee=TAKER_FEE,
         )
         position_size, notional_value, side = calculate_fractional_position(params)
 

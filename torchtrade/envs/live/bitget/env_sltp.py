@@ -1,3 +1,8 @@
+from torchtrade.envs.utils.fractional_sizing import (
+    PositionCalculationParams,
+    calculate_fractional_position,
+)
+from torchtrade.envs.live.bitget.order_executor import TAKER_FEE
 import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
@@ -298,7 +303,38 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
                 logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
                 trade_info["success"] = False
                 return trade_info
-            quantity = balance * self.config.position_fraction * self.config.leverage / current_price
+            # Reserve what will actually be CHARGED: ReplayOrderExecutor carries its own
+            # rate, so reserving a constant left a higher-fee caller with every open
+            # refused -- #278 reproduced. 0.98 as the non-SLTP path uses, so a
+            # full-fraction open leaves some maintenance buffer instead of zero.
+            # Reserve what the trader will CHARGE, or say so. float() alone is unsafe --
+            # MagicMock implements __float__ and returns 1.0 -- but an isinstance chain
+            # is worse: it rejects np.float32 and Decimal, which reproduces #278 with no
+            # diagnostic at all (the only log is the executor's "Insufficient balance",
+            # which reads like a small account rather than an under-reserving sizer).
+            # Coerce, range-check, and WARN on the fallback.
+            raw = getattr(self.trader, "transaction_fee", None)
+            fee = TAKER_FEE
+            if raw is not None:
+                try:
+                    candidate = float(raw)
+                except (TypeError, ValueError):
+                    candidate = None
+                if candidate is not None and math.isfinite(candidate) and 0 <= candidate < 1:
+                    fee = candidate
+                else:
+                    logger.warning(
+                        f"{self.config.symbol}: trader.transaction_fee={raw!r} is not a "
+                        f"usable rate; reserving the venue constant {TAKER_FEE}. If the "
+                        f"trader charges more, opens will be refused."
+                    )
+            quantity = abs(calculate_fractional_position(PositionCalculationParams(
+                balance=balance * 0.98,
+                action_value=self.config.position_fraction,
+                current_price=current_price,
+                leverage=self.config.leverage,
+                transaction_fee=fee,
+            ))[0])
         elif self.config.trade_mode == "notional":
             quantity = float(self.config.quantity_per_trade) / current_price
         elif self.config.trade_mode == "quantity":

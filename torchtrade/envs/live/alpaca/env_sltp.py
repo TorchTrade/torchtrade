@@ -286,6 +286,10 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
             return -1  # Close full position
 
         if self.config.trade_mode == "fractional":
+            # Not fee-reserved, unlike the futures SLTP envs (#278). Alpaca's rate is
+            # asset-class dependent -- commission-free on stocks, a taker fee on crypto --
+            # so there is no single constant to reserve, and spot at leverage 1 makes the
+            # shortfall the fee itself rather than a multiple of it. Left deliberately.
             return self.balance * self.config.position_fraction
         elif self.config.trade_mode == "notional":
             return float(self.config.quantity_per_trade)

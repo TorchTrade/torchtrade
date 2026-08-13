@@ -16,6 +16,9 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# Venue taker rate, read by env.py and env_sltp.py alike (#278).
+TAKER_FEE = 0.0004
+
 
 _FALLBACK_QTY_STEP = 0.001
 _FALLBACK_QTY_STEP_PAIR = (_FALLBACK_QTY_STEP, 3)

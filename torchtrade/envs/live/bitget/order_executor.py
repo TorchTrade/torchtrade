@@ -17,6 +17,9 @@ from torchtrade.envs.utils.leverage import (
 
 logger = logging.getLogger(__name__)
 
+# Venue taker rate, read by env.py and env_sltp.py alike (#278).
+TAKER_FEE = 0.0006
+
 # Bitget error codes that indicate no position exists (expected, not real errors)
 BITGET_NO_POSITION_ERRORS = ["22002", "40773", "No position to close"]
 

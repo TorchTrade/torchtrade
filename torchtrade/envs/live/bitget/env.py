@@ -9,6 +9,7 @@ from torchrl.data import Categorical
 
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import (
+    TAKER_FEE,
     BitgetFuturesOrderClass,
     MarginMode,
     PositionMode,
@@ -295,13 +296,12 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         # Use shared utility for core position calculation
         # Reserve 2% buffer for exchange maintenance margin requirements
         effective_balance = total_balance * 0.98
-        fee_rate = 0.0002  # Bitget futures maker/taker fee
         params = PositionCalculationParams(
             balance=effective_balance,
             action_value=action_value,
             current_price=current_price,
             leverage=self.config.leverage,
-            transaction_fee=fee_rate,
+            transaction_fee=TAKER_FEE,
         )
         position_size, notional_value, side = calculate_fractional_position(params)
 

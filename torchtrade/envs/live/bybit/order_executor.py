@@ -11,6 +11,9 @@ from torchtrade.envs.utils.leverage import leverage_already_set, require_dict_re
 
 logger = logging.getLogger(__name__)
 
+# Venue taker rate, read by env.py and env_sltp.py alike (#278).
+TAKER_FEE = 0.00055
+
 _DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001}
 
 

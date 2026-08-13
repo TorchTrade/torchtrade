@@ -788,7 +788,14 @@ class TestBitgetSLTPNotionalTradeMode:
         assert call_kwargs["quantity"] == pytest.approx(0.001, rel=1e-6)
 
     def test_fractional_converts_balance_to_quantity(self):
-        """Fractional mode must compute quantity from balance * fraction * leverage / price."""
+        """Fractional mode sizes from balance * fraction * leverage / price, NET OF FEE.
+
+        The raw figure asks for margin equal to the whole allocation, leaving nothing for
+        the entry fee, so the affordability check refuses the open (#278). The shared
+        sizer reserves it via fee_multiplier = 1 + leverage*fee, which is the same rule
+        the non-SLTP path and the offline envs have always used. Asserted as the rule
+        rather than a constant, so it tracks the venue's taker rate.
+        """
         from torchtrade.envs.live.bitget.env_sltp import (
             BitgetFuturesSLTPTorchTradingEnv,
             BitgetFuturesSLTPTradingEnvConfig,
@@ -846,7 +853,10 @@ class TestBitgetSLTPNotionalTradeMode:
 
         call_kwargs = mock_trader.trade.call_args[1]
         # margin_balance=1100 * fraction=0.1 * leverage=5 / candle_close=50050 ≈ 0.01099
-        expected_qty = 1100.0 * 0.1 * 5 / 50050.0
+        from torchtrade.envs.live.bitget.order_executor import TAKER_FEE
+        # Net of the reserved entry fee: sizing on the raw allocation left
+        # nothing for the fee, so every open was refused (#278).
+        expected_qty = 1100.0 * 0.1 * 5 / 50050.0 * 0.98 / (1 + 5 * TAKER_FEE)
         assert call_kwargs["quantity"] == pytest.approx(expected_qty, rel=1e-4)
 
 

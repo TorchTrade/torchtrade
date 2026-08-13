@@ -375,3 +375,51 @@ def test_okx_refuses_a_confirmation_for_the_wrong_side():
                                            set_position_mode=_boom, get_positions=_boom),
             public_client=SimpleNamespace(get_instruments=_boom),
         )
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
+def test_the_sizing_rule_is_affordable_against_a_real_executor(venue):
+    """The sizing RULE against a real ReplayOrderExecutor -- not the env (#278).
+
+    Scope stated exactly, because two earlier versions of this test claimed more than
+    they did: it reproduces the expression env_sltp uses and feeds the result to a real
+    executor. It therefore proves the rule is affordable, and is structurally BLIND to an
+    env reverting to the old inline arithmetic. Verified: reverting all four env_sltp.py
+    to main leaves this passing 4/4.
+
+    Env-path coverage lives in the four per-venue test_fractional_converts_balance_to_
+    quantity tests, which construct the real env and do catch that revert, the missing
+    0.98 buffer, and the MagicMock-fee guard -- all mutation-verified.
+
+    What this adds over those: strength. The leverage/fee cells are chosen so the 0.98
+    buffer cannot absorb the reservation -- (25, 0.001) catches dropping it entirely and
+    (50, 0.001) catches HALVING it, which no smaller cell sees. The `balance > 0`
+    assertion is what the two leverage-5 cells are for.
+    """
+    from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
+    from torchtrade.envs.utils.fractional_sizing import (
+        PositionCalculationParams, calculate_fractional_position,
+    )
+    taker = __import__(
+        f"torchtrade.envs.live.{venue}.order_executor", fromlist=["TAKER_FEE"]
+    ).TAKER_FEE
+
+    balance, price = 10_000.0, 100.0
+    # leverage*fee must exceed the 0.98 buffer or the buffer absorbs the fee and the
+    # reservation is untested -- (25, 0.001) gives 1.025 against a 1.02 cushion.
+    for leverage, charged in ((5, taker), (5, 0.001), (25, 0.001), (50, 0.001)):
+        # The expression the env now uses: the trader's rate, on 98% of equity.
+        qty = abs(calculate_fractional_position(PositionCalculationParams(
+            balance=balance * 0.98, action_value=1.0, current_price=price,
+            leverage=leverage, transaction_fee=charged,
+        ))[0])
+        ex = ReplayOrderExecutor(
+            initial_balance=balance, leverage=leverage, transaction_fee=charged
+        )
+        ex.advance_bar({"open": price, "high": price, "low": price, "close": price})
+        assert ex.trade("buy", qty), (
+            f"{venue}: an open at full fraction was refused with fee={charged}"
+        )
+        assert ex.balance > 0, (
+            f"{venue}: the open consumed every dollar of equity, leaving no buffer"
+        )
