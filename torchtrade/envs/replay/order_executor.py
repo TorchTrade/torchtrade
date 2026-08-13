@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 from torchtrade.envs.utils.liquidation import (
+    require_fee_fits_maintenance,
     bankruptcy_price,
     DEFAULT_MAINTENANCE_MARGIN_RATE,
     isolated_liquidation_price,
@@ -54,6 +55,11 @@ class ReplayOrderExecutor:
         transaction_fee: float = 0.0,
         maintenance_margin_rate: float = DEFAULT_MAINTENANCE_MARGIN_RATE,
     ):
+        require_fee_fits_maintenance(
+            transaction_fee,
+            leverage=leverage,
+            maintenance_margin_rate=maintenance_margin_rate,
+        )
         self.initial_balance = initial_balance
         self.leverage = leverage
         self.transaction_fee = transaction_fee

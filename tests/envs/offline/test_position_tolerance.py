@@ -232,3 +232,45 @@ def test_the_relative_term_binds_on_a_large_position(gap_pct, within):
         f"a {gap_pct:.0%} gap on a $5,000 position was "
         f"{'not ' if within else ''}treated as close enough"
     )
+
+
+# Charlie's counter-example on #364: at these values the bankruptcy price is 100.194
+# while liquidation is 99.6, so max(fill, bankruptcy) stops being a floor and books a
+# liquidated long ABOVE the bar and above entry.
+_INVERTING = dict(leverage=125, maintenance_margin_rate=0.004, transaction_fee=0.01)
+_DIV_ZERO = dict(leverage=10, maintenance_margin_rate=0.004, transaction_fee=1.0)
+
+
+@pytest.mark.parametrize("kwargs,match", [
+    (_INVERTING, "does not fit inside"),
+    (_DIV_ZERO, r"\[0, 1\)"),
+], ids=["fee-exceeds-buffer", "fee-of-one"])
+@pytest.mark.parametrize("boundary", ["scalar", "vectorized", "replay"])
+def test_every_public_path_to_the_bankruptcy_price_refuses_an_inconsistent_fee(
+    boundary, kwargs, match
+):
+    """Three constructors reach the same formula, and the first fix validated one (#314).
+
+    The scalar env, the vectorized config and ReplayOrderExecutor are each their own
+    public boundary. Validating only the scalar left the inversion and the divide-by-zero
+    fully reachable through the other two -- fix-the-instance, not the class.
+    """
+    from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
+    from torchtrade.envs.offline.vectorized_sequential import (
+        VectorizedSequentialTradingEnvConfig,
+    )
+
+    with pytest.raises(ValueError, match=match):
+        common = dict(time_frames=["1Minute"], window_sizes=[10],
+                      execute_on="1Minute")
+        if boundary == "scalar":
+            idx = pd.date_range("2024-01-01", periods=600, freq="1min")
+            df = pd.DataFrame({"timestamp": idx, "open": 100.0, "high": 100.1,
+                               "low": 99.9, "close": 100.0, "volume": 10.0})
+            SequentialTradingEnv(
+                df, SequentialTradingEnvConfig(symbol="X", **common, **kwargs)
+            )
+        elif boundary == "vectorized":
+            VectorizedSequentialTradingEnvConfig(num_envs=1, **common, **kwargs)
+        else:
+            ReplayOrderExecutor(initial_balance=1000.0, **kwargs)

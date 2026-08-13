@@ -30,7 +30,7 @@ from torchtrade.envs.utils.fractional_sizing import (
 )
 
 from torchtrade.envs.core.common_types import MarginType
-from torchtrade.envs.utils.liquidation import DEFAULT_MAINTENANCE_MARGIN_RATE
+from torchtrade.envs.utils.liquidation import DEFAULT_MAINTENANCE_MARGIN_RATE, require_fee_fits_maintenance
 
 # Money, prices and position sizes are tracked in float64 to match the scalar envs' Python
 # floats. In float32 the accumulated relative epsilon, scaled up by leverage, lands on a
@@ -83,10 +83,11 @@ class VectorizedSequentialTradingEnvConfig:
 
         if self.num_envs < 1:
             raise ValueError(f"num_envs must be >= 1, got {self.num_envs}")
-        if not (0 <= self.transaction_fee <= 1):
-            raise ValueError(
-                f"Transaction fee must be between 0 and 1, got {self.transaction_fee}"
-            )
+        require_fee_fits_maintenance(
+            self.transaction_fee,
+            leverage=self.leverage,
+            maintenance_margin_rate=self.maintenance_margin_rate,
+        )
         if not (0 <= self.slippage < 1):
             raise ValueError(
                 f"Slippage must be between 0 and 1, got {self.slippage}"

@@ -6,6 +6,11 @@ from typing import Any, Optional
 
 import numpy as np
 import torch
+
+from torchtrade.envs.utils.liquidation import (
+    DEFAULT_MAINTENANCE_MARGIN_RATE,
+    require_fee_fits_maintenance,
+)
 from torchrl.data import Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
 
@@ -82,32 +87,13 @@ class TorchTradeBaseEnv(EnvBase):
         Raises:
             ValueError: If parameters are out of valid range [0, 1]
         """
-        # `< 1`, not `<= 1`: a fee of exactly 1 divides by zero in the bankruptcy price
-        # (the same off-by-one slippage carried until #361).
-        if not (0 <= config.transaction_fee < 1):
-            raise ValueError(
-                f"Transaction fee must be in [0, 1), got {config.transaction_fee}"
-            )
-        # The fee must fit inside the maintenance buffer, or the bankruptcy price
-        # entry*(1 -+ 1/L)/(1 -+ f) crosses PAST the liquidation price and the fill clamp
-        # stops being a floor: at L=125, mmr=0.004, fee=0.01, liquidation is 99.6 and the
-        # clamp returns 100.194 -- above the bar AND above entry, so a liquidated long
-        # books a profit on price (#314). Rejected here rather than absorbed in the clamp,
-        # because a guard that swallows an inconsistent config makes it silent.
-        # Real venues sit far from this: Binance futures taker ~0.04% against ~0.4%
-        # maintenance, so mmr is an order of magnitude above the fee.
-        leverage = getattr(config, "leverage", 1)
-        mmr = getattr(config, "maintenance_margin_rate", None)
-        if leverage > 1 and mmr is not None:
-            # Strict: at fee=0 with mmr=0 the bankruptcy price EQUALS the
-            # liquidation price, so the clamp is a no-op rather than a violation.
-            if config.transaction_fee * (1 + 1 / leverage) > mmr:
-                raise ValueError(
-                    f"transaction_fee {config.transaction_fee} does not fit inside "
-                    f"maintenance_margin_rate {mmr} at leverage {leverage}: the fee would "
-                    f"consume the maintenance buffer, putting the bankruptcy price past "
-                    f"the liquidation price"
-                )
+        require_fee_fits_maintenance(
+            config.transaction_fee,
+            leverage=getattr(config, "leverage", 1),
+            maintenance_margin_rate=getattr(
+                config, "maintenance_margin_rate", DEFAULT_MAINTENANCE_MARGIN_RATE
+            ),
+        )
         if not (0 <= config.slippage < 1):
             raise ValueError(
                 f"Slippage must be between 0 and 1, got {config.slippage}"

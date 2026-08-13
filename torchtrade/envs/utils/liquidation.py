@@ -195,3 +195,37 @@ def bankruptcy_price(
         (1 - margin_fraction) / (1 - transaction_fee) if is_long
         else (1 + margin_fraction) / (1 + transaction_fee)
     )
+
+
+def require_fee_fits_maintenance(
+    transaction_fee: float, *, leverage: float, maintenance_margin_rate: float
+) -> None:
+    """Refuse a fee the maintenance buffer cannot absorb (#314).
+
+    `bankruptcy_price` divides by `1 -+ fee`, so a fee at or above the buffer pushes it
+    PAST the liquidation price and the fill clamp stops being a floor: at L=125,
+    mmr=0.004, fee=0.01, liquidation is 99.6 and the clamp returns 100.194 -- above the
+    bar and above entry, so a liquidated long books a profit on price. A fee of exactly
+    1 divides by zero outright.
+
+    Lives here rather than in any one config because there are THREE public paths to
+    that formula -- the scalar env, the vectorized config and ReplayOrderExecutor -- and
+    the first fix validated only the scalar one, leaving the defect reachable through
+    the other two.
+
+    Real venues sit far from this: Binance futures taker ~0.04% against ~0.4%
+    maintenance, so the buffer is an order of magnitude above the fee.
+    """
+    if not (0 <= transaction_fee < 1):
+        raise ValueError(
+            f"Transaction fee must be in [0, 1), got {transaction_fee}"
+        )
+    # Strict: at fee=0 with mmr=0 the bankruptcy price EQUALS the liquidation price, so
+    # the clamp is a no-op rather than a violation.
+    if leverage > 1 and transaction_fee * (1 + 1 / leverage) > maintenance_margin_rate:
+        raise ValueError(
+            f"transaction_fee {transaction_fee} does not fit inside "
+            f"maintenance_margin_rate {maintenance_margin_rate} at leverage {leverage}: "
+            f"the fee would consume the maintenance buffer, putting the bankruptcy price "
+            f"past the liquidation price"
+        )
