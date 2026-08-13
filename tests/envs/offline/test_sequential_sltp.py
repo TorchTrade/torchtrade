@@ -24,7 +24,7 @@ def sltp_config_spot():
         execute_on=TimeFrame(1, TimeFrameUnit.Minute),
         time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
         window_sizes=[10],
-        transaction_fee=0.01,
+        transaction_fee=0.0004,
         slippage=0.0,
         seed=42,
         max_traj_length=100,
@@ -43,7 +43,7 @@ def sltp_config_futures():
         execute_on=TimeFrame(1, TimeFrameUnit.Minute),
         time_frames=[TimeFrame(1, TimeFrameUnit.Minute)],
         window_sizes=[10],
-        transaction_fee=0.01,
+        transaction_fee=0.0004,
         slippage=0.0,
         seed=42,
         max_traj_length=100,
@@ -1429,7 +1429,7 @@ def test_a_deeper_gap_never_leaves_the_account_richer(side, gaps):
             leverage=10, sl_levels=[sl], tp_levels=[tp],
             wick_low=g if side == "long" else None,
             wick_high=g if side == "short" else None,
-            wick_open=g, transaction_fee=0.01, position_fraction=0.30,
+            wick_open=g, transaction_fee=0.0004, position_fraction=0.30,
         ).balance
         for g in gaps
     ]
