@@ -17,6 +17,11 @@ from torchrl.envs import EnvBase
 logger = logging.getLogger(__name__)
 
 
+def _levels(config):
+    """The config's action levels, defaulting to both directions when it has none."""
+    return getattr(config, "action_levels", None) or [-1, 1]
+
+
 class TorchTradeBaseEnv(EnvBase):
     """
     Base class for all TorchTrade environments.
@@ -93,9 +98,10 @@ class TorchTradeBaseEnv(EnvBase):
             maintenance_margin_rate=getattr(
                 config, "maintenance_margin_rate", DEFAULT_MAINTENANCE_MARGIN_RATE
             ),
-            allows_short=any(
-                level < 0 for level in (getattr(config, "action_levels", None) or [-1])
-            ),
+            # Default [-1] when a config has no action_levels: assume both directions
+            # rather than assume neither, which would skip the check entirely.
+            allows_long=any(level > 0 for level in _levels(config)),
+            allows_short=any(level < 0 for level in _levels(config)),
         )
         if not (0 <= config.slippage < 1):
             raise ValueError(

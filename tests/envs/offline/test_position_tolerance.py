@@ -276,18 +276,36 @@ def test_every_public_path_to_the_bankruptcy_price_refuses_an_inconsistent_fee(
             ReplayOrderExecutor(initial_balance=1000.0, **kwargs)
 
 
-@pytest.mark.parametrize("leverage,mmr,fee,allows_short,accepted", [
+@pytest.mark.parametrize("leverage,mmr,fee,allows_long,allows_short,accepted", [
     # Charlie's counter-example: a floor for longs (bankruptcy 50.2008 <= liq 50.4),
     # an inversion only for a short this config cannot open.
-    (2, 0.004, 0.004, False, True),
-    (2, 0.004, 0.004, True, False),
+    (2, 0.004, 0.004, True, False, True),
+    (2, 0.004, 0.004, True, True, False),
     # Exact equality: bankruptcy lands ON liquidation, where the clamp is a no-op.
-    (10, 0.004, 0.004 / (1 + 1 / 10 - 0.004), True, True),
+    (10, 0.004, 0.004 / (1 + 1 / 10 - 0.004), True, True, True),
     # A hair past it inverts.
-    (10, 0.004, 0.004 / (1 + 1 / 10 - 0.004) * 1.001, True, False),
-], ids=["long-only-safe", "same-config-with-shorts", "exact-equality", "just-past"])
+    (10, 0.004, 0.004 / (1 + 1 / 10 - 0.004) * 1.001, True, True, False),
+    # The mirror: a SHORT-ONLY config must not be measured against the long
+    # constraint it can never reach. Its own constraint is the binding one, so
+    # the fee that a long-only config tolerates is refused here.
+    (2, 0.004, 0.004, False, True, False),
+    # ...and a fee that satisfies only the long side is accepted long-only,
+    # refused short-only -- the asymmetry Charlie flagged, in both directions.
+    (2, 0.004, 0.0039, True, False, True),
+    (2, 0.004, 0.0039, False, True, False),
+    # The case that actually pins the LONG gate. Everywhere above, the short term is the
+    # binding one (it is, whenever 1/L > mmr), so ungating the long constraint changes
+    # nothing and the mutant survives. With mmr > 1/L the long term binds instead:
+    # at L=2, mmr=0.6, fee=0.6 the short side passes (0.540 <= 0.6) and the long side
+    # does not (0.660 > 0.6). A short-only config must therefore be ACCEPTED, and is
+    # refused the moment the long constraint is applied unconditionally.
+    (2, 0.6, 0.6, False, True, True),
+    (2, 0.6, 0.6, True, True, False),
+], ids=["long-only-safe", "same-config-with-shorts", "exact-equality", "just-past",
+     "short-only-refused", "long-only-accepts", "short-only-refuses-same",
+     "long-term-binds-short-only", "long-term-binds-both"])
 def test_the_fee_bound_is_the_exact_condition_not_a_conservative_one(
-    leverage, mmr, fee, allows_short, accepted
+    leverage, mmr, fee, allows_long, allows_short, accepted
 ):
     """`fee*(1 + 1/L) <= mmr` implies the real condition but is strictly stronger (#314).
 
@@ -306,7 +324,7 @@ def test_the_fee_bound_is_the_exact_condition_not_a_conservative_one(
     def check():
         require_fee_fits_maintenance(
             fee, leverage=leverage, maintenance_margin_rate=mmr,
-            allows_short=allows_short,
+            allows_long=allows_long, allows_short=allows_short,
         )
 
     if accepted:

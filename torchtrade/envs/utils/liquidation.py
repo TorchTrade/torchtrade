@@ -202,6 +202,7 @@ def require_fee_fits_maintenance(
     *,
     leverage: float,
     maintenance_margin_rate: float,
+    allows_long: bool = True,
     allows_short: bool = True,
 ) -> None:
     """Refuse a fee the maintenance buffer cannot absorb (#314).
@@ -238,9 +239,15 @@ def require_fee_fits_maintenance(
     # binding one whenever 1/L > mmr, so applying it to a long-only config refuses
     # perfectly safe setups -- L=2, mmr=0.004, fee=0.004 is a floor for longs
     # (50.2008 <= 50.4) and an inversion only for a short it can never open.
-    worst = 1 - 1 / leverage + maintenance_margin_rate
+    # Both directions gated, not just the short one. A SHORT-ONLY config was still being
+    # measured against the long constraint it can never reach -- the mirror of the
+    # long-only regression, and asymmetric for no reason.
+    constraints = []
+    if allows_long:
+        constraints.append(1 - 1 / leverage + maintenance_margin_rate)
     if allows_short:
-        worst = max(worst, 1 + 1 / leverage - maintenance_margin_rate)
+        constraints.append(1 + 1 / leverage - maintenance_margin_rate)
+    worst = max(constraints) if constraints else 0.0
     if leverage > 1 and transaction_fee * worst > maintenance_margin_rate:
         raise ValueError(
             f"transaction_fee {transaction_fee} does not fit inside "
