@@ -375,3 +375,38 @@ def test_okx_refuses_a_confirmation_for_the_wrong_side():
                                            set_position_mode=_boom, get_positions=_boom),
             public_client=SimpleNamespace(get_instruments=_boom),
         )
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
+def test_sltp_fractional_sizing_reserves_the_entry_fee(venue):
+    """Sizing on the raw balance made every fractional open unaffordable (#278).
+
+    margin = notional/leverage and fee = notional*rate, so asking for margin equal to the
+    WHOLE balance leaves nothing for the fee: balance=10000, lev=5, fee=0.0004 needs
+    10020 and has 10000. Replay refused every action and reported a flat 'strategy'.
+
+    The shared sizer reserves it via fee_multiplier = 1 + leverage*fee -- the rule the
+    non-SLTP live path and both offline engines have always used. Asserted against the
+    affordability arithmetic rather than a magic quantity, so it tracks each venue's rate.
+    """
+    from torchtrade.envs.utils.fractional_sizing import (
+        PositionCalculationParams, calculate_fractional_position,
+    )
+    taker = __import__(
+        f"torchtrade.envs.live.{venue}.order_executor", fromlist=["TAKER_FEE"]
+    ).TAKER_FEE
+
+    balance, leverage, price = 10_000.0, 5, 100.0
+    qty = abs(calculate_fractional_position(PositionCalculationParams(
+        balance=balance, action_value=1.0, current_price=price,
+        leverage=leverage, transaction_fee=taker,
+    ))[0])
+
+    notional = qty * price
+    required = notional / leverage + notional * taker
+    assert required <= balance + 1e-6, (
+        f"{venue}: sizing at full fraction needs {required:.2f} against {balance:.2f} -- "
+        f"the venue would refuse every open"
+    )
+    # And it is not trivially small: the fee reservation should cost only the fee.
+    assert required == pytest.approx(balance, rel=1e-6)

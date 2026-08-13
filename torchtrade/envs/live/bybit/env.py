@@ -10,6 +10,7 @@ from torchrl.data import Categorical
 
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
 from torchtrade.envs.live.bybit.order_executor import (
+    TAKER_FEE,
     BybitFuturesOrderClass,
     MarginMode,
     PositionMode,
@@ -235,7 +236,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
             )
 
         effective_balance = total_balance * 0.98
-        fee_rate = 0.00055  # Bybit futures taker fee
+        fee_rate = TAKER_FEE
         params = PositionCalculationParams(
             balance=effective_balance,
             action_value=action_value,

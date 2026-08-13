@@ -16,6 +16,11 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# The venue's taker rate, in ONE place. env.py hardcoded it while env_sltp.py
+# reserved no fee at all, so fractional SLTP sizing asked for margin equal to the
+# whole balance and every open was refused for want of the fee (#278).
+TAKER_FEE = 0.0004
+
 
 _FALLBACK_QTY_STEP = 0.001
 _FALLBACK_QTY_STEP_PAIR = (_FALLBACK_QTY_STEP, 3)

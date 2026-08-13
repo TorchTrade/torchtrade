@@ -16,6 +16,11 @@ from torchtrade.envs.utils.leverage import (
 
 logger = logging.getLogger(__name__)
 
+# The venue's taker rate, in ONE place. env.py hardcoded it while env_sltp.py
+# reserved no fee at all, so fractional SLTP sizing asked for margin equal to the
+# whole balance and every open was refused for want of the fee (#278).
+TAKER_FEE = 0.0005
+
 _DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001}
 
 

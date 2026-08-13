@@ -1,4 +1,9 @@
 """OKX Futures TorchRL trading environment with Stop Loss and Take Profit."""
+from torchtrade.envs.utils.fractional_sizing import (
+    PositionCalculationParams,
+    calculate_fractional_position,
+)
+from torchtrade.envs.live.okx.order_executor import TAKER_FEE
 import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
@@ -260,7 +265,18 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
                 logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
                 trade_info["success"] = False
                 return trade_info
-            quantity = balance * self.config.position_fraction * self.config.leverage / current_price
+            # Through the shared sizer, which reserves the fee via
+            # fee_multiplier = 1 + leverage*fee. Sizing on the raw balance asked for
+            # margin equal to the WHOLE balance, leaving nothing for the fee, so the
+            # affordability check refused every open and replay reported a flat
+            # 'strategy' (#278). The non-SLTP path has always gone through here.
+            quantity = abs(calculate_fractional_position(PositionCalculationParams(
+                balance=balance,
+                action_value=self.config.position_fraction,
+                current_price=current_price,
+                leverage=self.config.leverage,
+                transaction_fee=TAKER_FEE,
+            ))[0])
         elif self.config.trade_mode == "notional":
             quantity = float(self.config.quantity_per_trade) / current_price
         elif self.config.trade_mode == "quantity":
