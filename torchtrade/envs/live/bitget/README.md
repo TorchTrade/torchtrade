@@ -14,21 +14,27 @@ Live trading integration with Bitget for crypto futures markets (USDT-margined).
 ## Quick Start
 
 ```python
+import os
+
 from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = BitgetFuturesTradingEnvConfig(
-    api_key="YOUR_KEY",
-    api_secret="YOUR_SECRET",
-    passphrase="YOUR_PASSPHRASE",
     symbol="BTCUSDT",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    testnet=True,  # Use testnet first!
-    max_leverage=10.0,
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,  # Use testnet first!
+    leverage=10.0,
     margin_mode="isolated",
 )
 
-env = BitgetFuturesTorchTradingEnv(config=config)
+env = BitgetFuturesTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BITGET_API_KEY"],
+    api_secret=os.environ["BITGET_SECRET"],
+    api_passphrase=os.environ["BITGET_PASSPHRASE"],
+)
 obs = env.reset()
 ```
 
@@ -64,10 +70,7 @@ class BitgetFuturesTradingEnvConfig:
 **Testnet**:
 ```python
 config = BitgetFuturesTradingEnvConfig(
-    api_key=testnet_key,
-    api_secret=testnet_secret,
-    passphrase=testnet_passphrase,
-    testnet=True,
+    demo=True,
 )
 ```
 
@@ -76,10 +79,7 @@ Get testnet credentials: https://www.bitget.com/en/testnet/
 **Mainnet**:
 ```python
 config = BitgetFuturesTradingEnvConfig(
-    api_key=mainnet_key,
-    api_secret=mainnet_secret,
-    passphrase=mainnet_passphrase,
-    testnet=False,
+    demo=False,
 )
 ```
 
@@ -89,7 +89,7 @@ config = BitgetFuturesTradingEnvConfig(
 ```python
 config = BitgetFuturesTradingEnvConfig(
     margin_mode="isolated",
-    max_leverage=10.0,
+    leverage=10.0,
 )
 ```
 
@@ -97,7 +97,7 @@ config = BitgetFuturesTradingEnvConfig(
 ```python
 config = BitgetFuturesTradingEnvConfig(
     margin_mode="crossed",
-    max_leverage=20.0,
+    leverage=20.0,
 )
 ```
 
@@ -107,16 +107,20 @@ config = BitgetFuturesTradingEnvConfig(
 from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv
 
 config = BitgetFuturesTradingEnvConfig(
-    api_key=os.environ["BITGET_TESTNET_KEY"],
-    api_secret=os.environ["BITGET_TESTNET_SECRET"],
-    passphrase=os.environ["BITGET_TESTNET_PASSPHRASE"],
     symbol="BTCUSDT",
-    timeframe=TimeFrame(5, TimeFrameUnit.MINUTE),
-    testnet=True,
-    max_leverage=5.0,
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,
+    leverage=5.0,
 )
 
-env = BitgetFuturesTorchTradingEnv(config=config)
+env = BitgetFuturesTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BITGET_API_KEY"],
+    api_secret=os.environ["BITGET_SECRET"],
+    api_passphrase=os.environ["BITGET_PASSPHRASE"],
+)
 obs = env.reset()
 
 # Long position
@@ -130,18 +134,22 @@ obs, reward, done, info = env.step(action)
 from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTorchTradingEnv
 
 config = BitgetFuturesSLTPTradingEnvConfig(
-    api_key=os.environ["BITGET_TESTNET_KEY"],
-    api_secret=os.environ["BITGET_TESTNET_SECRET"],
-    passphrase=os.environ["BITGET_TESTNET_PASSPHRASE"],
     symbol="ETHUSDT",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    testnet=True,
-    max_leverage=3.0,
-    sl_percent=0.02,
-    tp_percent=0.04,
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,
+    leverage=3.0,
+    stoploss_levels=[-0.02],
+    takeprofit_levels=[0.04],
 )
 
-env = BitgetFuturesSLTPTorchTradingEnv(config=config)
+env = BitgetFuturesSLTPTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BITGET_API_KEY"],
+    api_secret=os.environ["BITGET_SECRET"],
+    api_passphrase=os.environ["BITGET_PASSPHRASE"],
+)
 obs = env.reset()
 ```
 

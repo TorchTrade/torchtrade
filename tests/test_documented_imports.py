@@ -145,46 +145,9 @@ def _resolve_config(cls_name):
 # kwarg is not on the list and fails immediately, and an entry that gets FIXED also
 # fails until it is removed, so the list cannot drift away from the docs in either
 # direction.
-KNOWN_BROKEN = {
-    ("torchtrade/envs/live/README.md", "AlpacaSLTPTradingEnvConfig", "sl_percent"),
-    ("torchtrade/envs/live/README.md", "AlpacaSLTPTradingEnvConfig", "tp_percent"),
-    ("torchtrade/envs/live/README.md", "AlpacaTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/README.md", "AlpacaTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/README.md", "AlpacaTradingEnvConfig", "initial_cash"),
-    ("torchtrade/envs/live/README.md", "AlpacaTradingEnvConfig", "max_position_size"),
-    ("torchtrade/envs/live/README.md", "AlpacaTradingEnvConfig", "timeframe"),
-    ("torchtrade/envs/live/README.md", "BinanceFuturesTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/README.md", "BinanceFuturesTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/README.md", "BinanceFuturesTradingEnvConfig", "max_leverage"),
-    ("torchtrade/envs/live/README.md", "BinanceFuturesTradingEnvConfig", "testnet"),
-    ("torchtrade/envs/live/README.md", "BinanceFuturesTradingEnvConfig", "timeframe"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "max_leverage"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "sl_percent"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "testnet"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "timeframe"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "tp_percent"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesTradingEnvConfig", "max_leverage"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesTradingEnvConfig", "testnet"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesTradingEnvConfig", "timeframe"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "max_leverage"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "passphrase"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "sl_percent"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "testnet"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "timeframe"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "tp_percent"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesTradingEnvConfig", "max_leverage"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesTradingEnvConfig", "passphrase"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesTradingEnvConfig", "testnet"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesTradingEnvConfig", "timeframe")
-}
+# EMPTY. Every documented config kwarg now exists. Keep it that way: a new bad kwarg
+# fails immediately rather than being added here.
+KNOWN_BROKEN = set()
 
 
 @pytest.mark.parametrize("source,cls_name,kwarg", CONFIG_KWARGS,

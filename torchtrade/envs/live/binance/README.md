@@ -14,20 +14,26 @@ Live trading integration with Binance for crypto futures markets (USDT-margined)
 ## Quick Start
 
 ```python
+import os
+
 from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = BinanceFuturesTradingEnvConfig(
-    api_key="YOUR_KEY",
-    api_secret="YOUR_SECRET",
     symbol="BTCUSDT",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    testnet=True,  # Use testnet first!
-    max_leverage=10.0,
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,  # Use testnet first!
+    leverage=10.0,
     margin_type="ISOLATED",
 )
 
-env = BinanceFuturesTorchTradingEnv(config=config)
+env = BinanceFuturesTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BINANCE_API_KEY"],
+    api_secret=os.environ["BINANCE_SECRET_KEY"],
+)
 obs = env.reset()
 ```
 
@@ -60,9 +66,7 @@ class BinanceFuturesTradingEnvConfig:
 **Testnet** (recommended for development):
 ```python
 config = BinanceFuturesTradingEnvConfig(
-    api_key=testnet_key,
-    api_secret=testnet_secret,
-    testnet=True,  # Fake funds
+    demo=True,  # Fake funds
 )
 ```
 
@@ -71,9 +75,7 @@ Get testnet API keys: https://testnet.binancefuture.com/
 **Mainnet** (real money):
 ```python
 config = BinanceFuturesTradingEnvConfig(
-    api_key=mainnet_key,
-    api_secret=mainnet_secret,
-    testnet=False,  # Real trading!
+    demo=False,  # Real trading!
 )
 ```
 
@@ -87,7 +89,7 @@ config = BinanceFuturesTradingEnvConfig(
 ```python
 config = BinanceFuturesTradingEnvConfig(
     margin_type="ISOLATED",
-    max_leverage=10.0,
+    leverage=10.0,
 )
 ```
 
@@ -99,7 +101,7 @@ config = BinanceFuturesTradingEnvConfig(
 ```python
 config = BinanceFuturesTradingEnvConfig(
     margin_type="CROSS",
-    max_leverage=20.0,
+    leverage=20.0,
 )
 ```
 
@@ -110,12 +112,12 @@ Set leverage per symbol:
 ```python
 # Conservative leverage
 config = BinanceFuturesTradingEnvConfig(
-    max_leverage=3.0,  # 3x leverage
+    leverage=3.0,  # 3x leverage
 )
 
 # Higher leverage (risky!)
 config = BinanceFuturesTradingEnvConfig(
-    max_leverage=50.0,  # 50x leverage
+    leverage=50.0,  # 50x leverage
 )
 ```
 
@@ -173,16 +175,20 @@ Environments simulate funding fees automatically.
 from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 
 config = BinanceFuturesTradingEnvConfig(
-    api_key=os.environ["BINANCE_TESTNET_KEY"],
-    api_secret=os.environ["BINANCE_TESTNET_SECRET"],
     symbol="BTCUSDT",
-    timeframe=TimeFrame(5, TimeFrameUnit.MINUTE),
-    testnet=True,
-    max_leverage=5.0,
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,
+    leverage=5.0,
     margin_type="ISOLATED",
 )
 
-env = BinanceFuturesTorchTradingEnv(config=config)
+env = BinanceFuturesTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BINANCE_API_KEY"],
+    api_secret=os.environ["BINANCE_SECRET_KEY"],
+)
 obs = env.reset()
 
 # Go long with 5x leverage
@@ -199,17 +205,21 @@ print(f"Unrealized PnL: ${info['unrealized_pnl']:.2f}")
 from torchtrade.envs.live.binance.env_sltp import BinanceFuturesSLTPTorchTradingEnv
 
 config = BinanceFuturesSLTPTradingEnvConfig(
-    api_key=os.environ["BINANCE_TESTNET_KEY"],
-    api_secret=os.environ["BINANCE_TESTNET_SECRET"],
     symbol="ETHUSDT",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    testnet=True,
-    max_leverage=3.0,
-    sl_percent=0.02,  # 2% stop loss (important with leverage!)
-    tp_percent=0.04,  # 4% take profit
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,
+    leverage=3.0,
+    stoploss_levels=[-0.02],  # 2% stop loss (important with leverage!)
+    takeprofit_levels=[0.04],  # 4% take profit
 )
 
-env = BinanceFuturesSLTPTorchTradingEnv(config=config)
+env = BinanceFuturesSLTPTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BINANCE_API_KEY"],
+    api_secret=os.environ["BINANCE_SECRET_KEY"],
+)
 obs = env.reset()
 ```
 

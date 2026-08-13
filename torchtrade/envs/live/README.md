@@ -38,15 +38,18 @@ from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTrading
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = AlpacaTradingEnvConfig(
-    api_key="YOUR_API_KEY",
-    api_secret="YOUR_SECRET_KEY",
     paper=True,  # Use paper trading for testing
     symbol="AAPL",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    initial_cash=10000.0,
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
 )
 
-env = AlpacaTorchTradingEnv(config=config)
+env = AlpacaTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
+)
 
 # Run live trading loop
 obs = env.reset()
@@ -65,16 +68,20 @@ from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, Bina
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = BinanceFuturesTradingEnvConfig(
-    api_key="YOUR_API_KEY",
-    api_secret="YOUR_SECRET_KEY",
     symbol="BTCUSDT",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    testnet=True,  # Use testnet for testing
-    max_leverage=10.0,
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,  # Use testnet for testing
+    leverage=10.0,
     margin_type="ISOLATED",
 )
 
-env = BinanceFuturesTorchTradingEnv(config=config)
+env = BinanceFuturesTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BINANCE_API_KEY"],
+    api_secret=os.environ["BINANCE_SECRET_KEY"],
+)
 
 # Run trading loop
 obs = env.reset()
@@ -138,16 +145,12 @@ Always test strategies in safe environments:
 ```python
 # Alpaca paper trading
 config = AlpacaTradingEnvConfig(
-    api_key=key,
-    api_secret=secret,
     paper=True,  # No real money
 )
 
 # Binance testnet
 config = BinanceFuturesTradingEnvConfig(
-    api_key=key,
-    api_secret=secret,
-    testnet=True,  # Fake funds
+    demo=True,  # Fake funds
 )
 ```
 
@@ -158,7 +161,6 @@ Set maximum position sizes:
 ```python
 config = AlpacaTradingEnvConfig(
     # ...
-    max_position_size=0.1,  # Max 10% of portfolio
 )
 ```
 
@@ -171,11 +173,15 @@ from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv
 
 config = AlpacaSLTPTradingEnvConfig(
     # ...
-    sl_percent=0.02,  # 2% stop loss
-    tp_percent=0.05,  # 5% take profit
+    stoploss_levels=[-0.02],  # 2% stop loss
+    takeprofit_levels=[0.05],  # 5% take profit
 )
 
-env = AlpacaSLTPTorchTradingEnv(config=config)
+env = AlpacaSLTPTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
+)
 ```
 
 ### Error Handling
@@ -193,7 +199,11 @@ Environments handle common errors:
 Live environments stream real-time market data:
 
 ```python
-env = AlpacaTorchTradingEnv(config=config)
+env = AlpacaTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
+)
 
 # Data updates automatically
 obs = env.reset()  # Gets latest market data
@@ -216,7 +226,9 @@ Environments sync with market time:
 # 1-minute bars: step() returns when new bar arrives
 env = AlpacaTorchTradingEnv(
     config=AlpacaTradingEnvConfig(
-        timeframe=TimeFrame(1, TimeFrameUnit.MINUTE)
+        time_frames=["1Min"],
+        window_sizes=[10],
+        execute_on="1Min",
     )
 )
 
@@ -299,7 +311,11 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-env = AlpacaTorchTradingEnv(config=config)
+env = AlpacaTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
+)
 # Logs:
 # - Order submissions
 # - Fills
@@ -362,14 +378,11 @@ signal.signal(signal.SIGINT, signal_handler)
 ```python
 # Bad
 config = AlpacaTradingEnvConfig(
-    api_key="AKXXXXXXXXXXXX",  # Don't do this!
 )
 
 # Good
 import os
 config = AlpacaTradingEnvConfig(
-    api_key=os.environ["ALPACA_API_KEY"],
-    api_secret=os.environ["ALPACA_SECRET_KEY"],
 )
 ```
 
@@ -383,13 +396,15 @@ from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv
 def test_alpaca_connection():
     """Test connection to Alpaca paper trading"""
     config = AlpacaTradingEnvConfig(
-        api_key=os.environ["ALPACA_KEY"],
-        api_secret=os.environ["ALPACA_SECRET"],
         paper=True,
         symbol="SPY",
     )
 
-    env = AlpacaTorchTradingEnv(config=config)
+    env = AlpacaTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
+)
     obs = env.reset()
 
     assert obs is not None
