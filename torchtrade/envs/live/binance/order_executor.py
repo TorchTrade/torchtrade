@@ -1,4 +1,6 @@
 import logging
+
+from torchtrade.envs.utils.precision import decimals_for_step
 from dataclasses import dataclass
 import math
 from decimal import Decimal
@@ -31,9 +33,18 @@ def _step_and_decimals(step_str: str):
     part, so the naive version reported 0 decimals and the final rounding then annihilated
     the quantity. Binance sends fixed-point today, but okx's _format_size carries a comment
     about being bitten by exactly this, so it is not a hypothetical.
+
+    This was the ONLY venue that got it right, and the rule stayed local while four other
+    sites kept doing the string surgery -- which is how bybit came to refuse every open
+    over a 1e-06 step (#278). Shared now.
     """
-    d = Decimal(step_str).normalize()
-    return float(d), max(0, -d.as_tuple().exponent)
+    step = float(Decimal(step_str))
+    # isfinite, because decimals_for_step is total by design and answers 0 for NaN. This
+    # guard is deliberately fail-CLOSED -- a junk stepSize must abort construction, not
+    # sail through and surface as "cannot convert float NaN to integer" at order time.
+    if not math.isfinite(step):
+        raise ValueError(f"non-finite LOT_SIZE step {step_str!r}")
+    return step, decimals_for_step(step_str)
 
 
 
@@ -192,10 +203,8 @@ class BinanceFuturesOrderClass:
                         # crash, it logs "position opened without SL" and leaves a live
                         # position the policy has no way to exit under lock_position_until_sltp.
                         if tick_size > 0:
-                            self._tick_size = tick_size
-                            if '.' in tick_str:
-                                decimal_part = tick_str.rstrip('0').split('.')[1]
-                                self._tick_decimals = len(decimal_part) if decimal_part else 0
+                            tick_decimals = decimals_for_step(tick_size)
+                            self._tick_size, self._tick_decimals = tick_size, tick_decimals
                 except Exception as e:
                     logger.warning(
                         f"Skipping malformed {f.get('filterType', '?')} for {symbol}: {e}"

@@ -207,7 +207,11 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         self._wait_for_next_timestamp()
 
         # Get updated state
-        new_portfolio_value, next_tensordict = self._acquire_post_bar_state()
+        new_portfolio_value, new_price, new_qty, next_tensordict = self._acquire_post_bar_state()
+        # None when the account is flat: there is no position mark to read, and
+        # fetching one would add a round-trip that can halt the episode. The
+        # pre-trade price is the honest fallback -- flat rows carry no PnL anyway.
+        new_price = new_price if new_price is not None else current_price
 
         # Convert action_tuple to numeric action for history
         # action_tuple is (side, sl, tp) where side can be "long", "short", or None
@@ -221,11 +225,11 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
 
         # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(
-            price=current_price,
+            price=new_price,
             action=action_value,
             reward=0.0,  # Placeholder, will be set after reward calculation
             portfolio_value=new_portfolio_value,
-            position=position_size
+            position=new_qty
         )
 
         # Calculate reward using UPDATED history tracker

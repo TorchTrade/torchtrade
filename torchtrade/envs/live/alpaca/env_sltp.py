@@ -2,6 +2,7 @@ import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
 import logging
+import math
 
 import torch
 
@@ -171,20 +172,54 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         # Wait for next time step
         self._wait_for_next_timestamp()
 
-        # Get updated state
-        new_portfolio_value = self._get_portfolio_value()
+        # Observation FIRST, then the portfolio value (#278). Under a ReplayObserver the
+        # clock advances only inside get_observations(), so reading PV first recorded the
+        # PREVIOUS bar's equity against this bar's action.
         next_tensordict = self._get_observation()
+        new_portfolio_value = self._get_portfolio_value()
+        # Post-bar price too: recording the pre-trade one here put two different bars in
+        # a single history row (#278). Non-fatal, unlike the observation and equity reads
+        # above -- this value only labels a history row, and letting it raise here would
+        # add a failure point that can end a live episode for a price nothing trades on.
+        try:
+            new_price = self._get_current_price()
+        except Exception:
+            new_price = 0.0
+        # Post-trade size too: recording the size held ENTERING the bar against a
+        # post-bar price and PV labels a return with the exposure that did not produce
+        # it -- opening rows read flat, closing rows read still-open. Offline records the
+        # post-trade size. Non-fatal for the same reason as the price.
+        try:
+            new_qty = position_qty_from_status(
+                self.trader.get_status().get("position_status", None)
+            )
+        except Exception:
+            logger.warning(
+                "post-bar position unavailable for %s; the history row will carry the "
+                "pre-trade size", self.config.symbol,
+            )
+            new_qty = position_size
+
+        if not new_price or not math.isfinite(new_price) or new_price <= 0:
+            # _get_current_price RETURNS 0.0 when all three sources fail rather than
+            # raising, so an except-only guard never fired on the path that actually
+            # degrades (#290). Check the value, not just the exception.
+            logger.warning(
+                "post-bar price unavailable for %s; the history row will carry the "
+                "pre-trade price", self.config.symbol,
+            )
+            new_price = current_price
 
         # Convert action_tuple to numeric action for history
         action_value = 1.0 if action_tuple != (None, None) else 0.0
 
         # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(
-            price=current_price,
+            price=new_price,
             action=action_value,
             reward=0.0,  # Placeholder, will be set after reward calculation
             portfolio_value=new_portfolio_value,
-            position=position_size,
+            position=new_qty,
         )
 
         # Calculate reward using UPDATED history tracker

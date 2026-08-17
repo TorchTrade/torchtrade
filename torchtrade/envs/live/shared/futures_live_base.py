@@ -122,12 +122,62 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         return self._halting(read)
 
-    def _acquire_post_bar_state(self) -> tuple[float, TensorDictBase]:
+    def _acquire_post_bar_state(self) -> tuple[float, float, float, TensorDictBase]:
         """Post-bar portfolio value and observation, or halt.
 
         Raises rather than returning a cached observation: see docs/environments/online.md.
+
+        Observation FIRST, and the order is load-bearing (#278). A tuple evaluates left
+        to right, so reading the portfolio value first sampled it before the observer had
+        advanced the clock. Live that is merely early; in replay the clock advances only
+        inside `ReplayObserver.get_observations()`, so every recorded PV was the PREVIOUS
+        bar's equity: the reward at step t belonged to the action at t-1, and an SL/TP
+        close during the bar was invisible to the step that caused it. Measured before
+        the swap: recorded PV matched the decision bar 8/8 and the next bar 0/8, while
+        `account_state` in the SAME step was already at the new bar -- observation and
+        reward disagreeing about which bar it was.
+
+        Returns (portfolio_value, mark_price, position_qty, observation), all read AFTER the
+        bar. The price is in here because the first version of this fix moved only the
+        PV and left `price=` on the pre-trade mark, so a history row carried two
+        different bars: `price[t] == close[t-1]` while `portfolio_value[t] == equity[t]`.
+        Offline records both at the new bar (`offline/sequential.py`), and replay
+        agreeing with offline is the whole point of #278.
+
+        With a position open the mark comes from the snapshot `_get_observation` ALREADY
+        read -- no extra round-trip, and the same moment as the `unrealized_pnl_pct` and
+        `exposure_pct` in the row. A FLAT account has no position mark, and taking the
+        pre-trade price there was wrong for the row that matters most: the EXIT row is
+        flat and carries the realized PnL, so 12 of 14 rows ended up with
+        `price[t] == close[t-1]` against `portfolio_value[t] == equity[t]`.
+
+        So flat rows do fetch, but NEVER fatally. The first version of this fix called
+        `_current_mark_price()` inside the halt wrapper, where a non-positive or missing
+        mark raises -- and under FLATTEN that emergency-closes a real position (bybit and
+        okx raise RuntimeError, which `_halting` does not even catch). A price that only
+        labels a history row is not worth a market order, so an unavailable mark returns
+        None and the caller records the pre-trade price instead.
         """
-        return self._halting(lambda: (self._get_portfolio_value(), self._get_observation()))
+        def read():
+            self._last_observed_mark = None
+            self._last_observed_qty = None
+            observation = self._get_observation()
+            portfolio_value = self._get_portfolio_value()
+            mark = self._last_observed_mark
+            if mark is None:
+                try:
+                    mark = self.trader.get_mark_price()
+                    if not math.isfinite(mark) or mark <= 0:
+                        mark = None
+                except Exception:
+                    logger.warning(
+                        "post-bar mark unavailable for %s; the history row will carry the "
+                        "pre-trade price", self.symbol,
+                    )
+                    mark = None
+            return portfolio_value, mark, self._last_observed_qty, observation
+
+        return self._halting(read)
 
     def _current_mark_price(self, position_status=None) -> float:
         """The bar's mark price, validated before it can size an order (#347).
@@ -204,6 +254,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         if position_direction == 0:
             position_size = 0.0
+            self._last_observed_qty = 0.0
             position_value = 0.0
             # No venue call: distance_to_liquidation short-circuits to 1.0 when flat,
             # so this price is never read. Fetching it cost a round-trip per bar and
@@ -246,8 +297,10 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                 )
 
             position_size = position_status.qty
+            self._last_observed_qty = position_size
             position_value = abs(position_status.notional_value)
             current_price = position_status.mark_price
+            self._last_observed_mark = current_price
             unrealized_pnl_pct = position_status.unrealized_pnl_pct
             leverage = float(position_status.leverage)
             liquidation_price = position_status.liquidation_price

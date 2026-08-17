@@ -1,5 +1,7 @@
 """Bybit Futures TorchRL trading environment with fractional position sizing."""
 import math
+
+from torchtrade.envs.utils.precision import decimals_for_step
 from dataclasses import dataclass
 from typing import List, Optional, Union, Callable, Dict
 import logging
@@ -141,14 +143,18 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
 
         self._wait_for_next_timestamp()
 
-        new_portfolio_value, next_tensordict = self._acquire_post_bar_state()
+        new_portfolio_value, new_price, new_qty, next_tensordict = self._acquire_post_bar_state()
+        # None when the account is flat: there is no position mark to read, and
+        # fetching one would add a round-trip that can halt the episode. The
+        # pre-trade price is the honest fallback -- flat rows carry no PnL anyway.
+        new_price = new_price if new_price is not None else current_price
 
         self.history.record_step(
-            price=current_price,
+            price=new_price,
             action=desired_action,
             reward=0.0,
             portfolio_value=new_portfolio_value,
-            position=position_size
+            position=new_qty
         )
 
         reward = float(self.reward_function(self.history))
@@ -266,9 +272,10 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
             return self._create_trade_info(executed=False, at_target=True)
 
         side = "buy" if delta_qty > 0 else "sell"
-        # Use round() to avoid float artifacts (e.g., 0.003000000000003)
-        step_decimals = len(str(qty_step).rstrip('0').split('.')[-1]) if '.' in str(qty_step) else 0
-        amount = round(int(abs(delta_qty) / qty_step) * qty_step, step_decimals)
+        # round() to avoid float artifacts (e.g. 0.003000000000003). The decimals come
+        # from Decimal, not from str(): a 1e-06 step has no "." in its repr, so the old
+        # string check answered 0 and rounded 0.977 up to a whole unit (#278).
+        amount = round(int(abs(delta_qty) / qty_step) * qty_step, decimals_for_step(qty_step))
 
         if amount < min_qty:
             return self._create_trade_info(executed=False, at_target=True)
