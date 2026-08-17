@@ -14,6 +14,7 @@ import ast
 import pathlib
 import re
 import inspect
+import textwrap
 import math
 from types import SimpleNamespace
 
@@ -2602,6 +2603,31 @@ def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():
     assert size == 0.25, "slot 3 is the SIZE"
 
 
+def _calls_observer_reset(func) -> bool:
+    """True if the body really CALLS self.observer.reset() -- AST, not substring.
+
+    A substring check on inspect.getsource passes on a comment: replacing okx's live
+    lines with `# NOTE: self.observer.reset() handled by the caller` left the entire
+    suite green while okx's second episode continued mid-stream (#278 review). The four
+    older guards in this file already parse; this one had to as well.
+    """
+    tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        if (isinstance(f, ast.Attribute) and f.attr == "reset"
+                and isinstance(f.value, ast.Attribute) and f.value.attr == "observer"
+                and isinstance(f.value.value, ast.Name) and f.value.value.id == "self"):
+            return True
+        # `super()._reset(...)` delegates to the base, which does call it.
+        if (isinstance(f, ast.Attribute) and f.attr == "_reset"
+                and isinstance(f.value, ast.Call) and isinstance(f.value.func, ast.Name)
+                and f.value.func.id == "super"):
+            return True
+    return False
+
+
 def test_every_live_reset_rewinds_its_observer():
     """One line, five places, and only ONE venue's tests would notice it missing.
 
@@ -2610,16 +2636,10 @@ def test_every_live_reset_rewinds_its_observer():
     to exist for bybit only. Without this guard a sixth exchange, or a copy-paste that
     drops the line, ships an env whose second episode continues mid-stream with the
     previous episode's balance and an inherited position.
-
-    Structural, deliberately: driving it behaviourally per venue needs a ReplayObserver
-    fixture for each, and this is the property that must hold for ALL of them.
     """
     missing = [
         c.__name__ for c in LIVE_ENVS
-        if (r := c.__dict__.get("_reset")) is not None
-        and "self.observer.reset()" not in (src := inspect.getsource(r))
-        # Delegating to the base is the SLTP envs' whole pattern, and the base does it.
-        and "super()._reset(" not in src
+        if (r := c.__dict__.get("_reset")) is not None and not _calls_observer_reset(r)
     ]
     assert not missing, (
         f"{len(missing)} live _reset methods never rewind their observer: {missing}"
@@ -2643,9 +2663,8 @@ def test_the_observer_interface_declares_reset():
                 BaseFuturesObservationClass, ReplayObserver):
         assert callable(getattr(cls, "reset", None)), f"{cls.__name__} has no reset()"
 
-    # And the return value is the contract: a live observer rewinds nothing and says so,
-    # so the env keeps its run-level bankruptcy baseline instead of rebasing onto a
-    # shrinking account.
-    assert BaseFuturesObservationClass.reset(None) is False
-    assert AlpacaObservationClass.reset(None) is False
-    assert BinanceObservationClass.reset(None) is False
+    # A live reset must be a genuine no-op: it takes no arguments beyond self and
+    # returns nothing. If one starts rebasing account state, the run-level bankruptcy
+    # baseline it protects goes with it.
+    for cls in (AlpacaObservationClass, BinanceObservationClass, BaseFuturesObservationClass):
+        assert cls.reset(None) is None, f"{cls.__name__}.reset must be a no-op"

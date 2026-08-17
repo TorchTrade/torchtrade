@@ -9,21 +9,12 @@ from alpaca.data.historical.crypto import CryptoHistoricalDataClient
 
 class AlpacaObservationClass:
 
-    def reset(self) -> bool:
-        """Rewind to the start of an episode; True if any account state was rewound.
+    def reset(self) -> None:
+        """Rewind to the start of an episode; a live observer has nothing to rewind.
 
-        A live observer has nothing to rewind and returns False. ReplayObserver returns
-        True: it rewinds the sampler AND the simulated executor, restoring the balance.
-
-        The return value decides whether the bankruptcy baseline is re-captured (#278).
-        Rebasing it every episode looked like offline parity and is not: offline resets
-        the BALANCE and the baseline together, so the ratio starts at 1.0 because the
-        account was reset too. A live account persists, so rebasing only the yardstick
-        makes it chase the equity down -- an account halving every episode reached 0.39%
-        of its starting value without ever reporting bankrupt. So the baseline follows
-        the account: rebased when the account is, run-level when it is not.
+        See BaseFuturesObservationClass.reset for why this exists and why it does not
+        touch the bankruptcy baseline (#278).
         """
-        return False
 
     def __init__(
         self,

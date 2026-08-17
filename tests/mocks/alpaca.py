@@ -290,9 +290,8 @@ class MockObserver:
     """
 
 
-    def reset(self) -> bool:
-        """No-op, matching the live observers: nothing to rewind, so False (#278)."""
-        return False
+    def reset(self) -> None:
+        """No-op, matching the live observers: nothing to rewind (#278)."""
 
     def __init__(
         self,

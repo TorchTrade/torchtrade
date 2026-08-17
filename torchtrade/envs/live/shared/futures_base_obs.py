@@ -18,21 +18,21 @@ class BaseFuturesObservationClass(ABC):
     """
 
 
-    def reset(self) -> bool:
-        """Rewind to the start of an episode; True if any account state was rewound.
+    def reset(self) -> None:
+        """Rewind to the start of an episode. A live observer has nothing to rewind.
 
-        A live observer has nothing to rewind and returns False. ReplayObserver returns
-        True: it rewinds the sampler AND the simulated executor, restoring the balance.
+        Declared so the envs can call it unconditionally (#278): ReplayObserver overrides
+        it to rewind the sampler and the simulated executor, and before this existed
+        nothing but a test ever called it -- so under a collector, episode 2 continued
+        mid-stream with episode 1's balance and an inherited position whose brackets had
+        been cancelled. A `hasattr` guard at the call site would be fail-open: an observer
+        that renamed the method would silently stop rewinding.
 
-        The return value decides whether the bankruptcy baseline is re-captured (#278).
-        Rebasing it every episode looked like offline parity and is not: offline resets
-        the BALANCE and the baseline together, so the ratio starts at 1.0 because the
-        account was reset too. A live account persists, so rebasing only the yardstick
-        makes it chase the equity down -- an account halving every episode reached 0.39%
-        of its starting value without ever reporting bankrupt. So the baseline follows
-        the account: rebased when the account is, run-level when it is not.
+        The bankruptcy baseline is deliberately NOT re-captured here. Rebasing it per
+        episode removes the cross-episode drawdown circuit breaker on a live account,
+        which persists between episodes -- and on replay it is a no-op, because the
+        executor rewinds to the same initial_balance every time.
         """
-        return False
 
     def __init__(
         self,

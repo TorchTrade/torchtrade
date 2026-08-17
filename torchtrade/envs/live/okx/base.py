@@ -164,15 +164,8 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         """Reset the environment."""
         # Before any read below: ReplayObserver rewinds the sampler AND the simulated
         # executor here, so the balance/position/price reads that follow must see the
-        # rewound state. Re-capture the bankruptcy baseline only if it did rewind the
-        # account -- see the observer's reset() for why a live account must keep its
-        # run-level baseline (#278).
-        # `is True`, not truthiness: a MagicMock observer returns a truthy Mock from
-        # reset(), which would silently re-capture the baseline on every venue whose
-        # tests mock the observer -- the same shape as the float(MagicMock()) bug in
-        # #278's sizing path. Only an observer that explicitly says it rewound counts.
-        if self.observer.reset() is True:
-            self._capture_bankruptcy_baseline()
+        # rewound state (#278).
+        self.observer.reset()
         if not self.trader.cancel_open_orders():
             logger.warning("cancel_open_orders failed during reset; proceeding with potentially stale orders")
         self.history.reset()
