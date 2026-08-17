@@ -6,7 +6,6 @@ python blocks in the in-package READMEs. Config kwargs are covered below; observ
 
 import ast
 import builtins
-import sys
 import functools
 import dataclasses
 import importlib
@@ -236,12 +235,32 @@ def _package_names():
     """
     names = set()
     package = importlib.import_module("torchtrade")
-    for info in pkgutil.walk_packages(package.__path__, prefix="torchtrade."):
+    failed = []
+    # onerror, because a subpackage __init__ that raises does NOT surface through a
+    # try/except around the loop body: an ImportError makes walk_packages drop that
+    # whole subtree silently, and a non-ImportError propagates out of the generator
+    # itself and would fail every test here with a traceback naming an unrelated
+    # module. Either way the name set silently SHRINKS, and a smaller set makes real
+    # API read as a phantom -- false failures, not false passes.
+    walker = pkgutil.walk_packages(package.__path__, prefix="torchtrade.",
+                                   onerror=failed.append)
+    while True:
+        try:
+            info = next(walker)
+        except StopIteration:
+            break
+        except Exception:
+            continue
         try:
             module = importlib.import_module(info.name)
         except Exception:
-            continue  # optional deps; the import tests cover what must import
+            failed.append(info.name)
+            continue
         names.update(n for n in vars(module) if not n.startswith("_"))
+    assert not failed, (
+        f"{len(failed)} torchtrade modules could not be walked or imported, so this "
+        f"guard is checking against an incomplete picture of the package: {failed}"
+    )
     return names
 
 

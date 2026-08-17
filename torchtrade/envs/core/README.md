@@ -105,11 +105,17 @@ class MyCustomEnv(TorchTradeOfflineEnv):
         super().__init__(df, config)
         self.custom_param = config.custom_param
 
+    # TorchTradeOfflineEnv leaves TWO abstract methods; overriding only _step raises
+    # "Can't instantiate abstract class". And _step is abstract all the way up on
+    # torchrl's EnvBase, so delegating to super() raises NotImplementedError -- there is
+    # no base implementation to extend. Write the body.
+    def _get_portfolio_value(self) -> float:
+        return self.cash
+
     def _step(self, tensordict):
-        # TensorDict in, TensorDict out -- NOT the gym (obs, reward, done, info) tuple.
-        # The outcome goes under "next"; see the live/README.md loop for how a caller
-        # steps on the result.
-        return super()._step(tensordict)
+        # TensorDict in, TensorDict out -- never the gym (obs, reward, done, info)
+        # tuple. The outcome goes under "next".
+        raise NotImplementedError("your logic here")
 ```
 
 ### Using Position State
@@ -147,22 +153,16 @@ def drawdown_penalised_return(history) -> float:
 
 ### Template Method Pattern
 
-Base classes define the overall algorithm structure:
+TorchRL's `EnvBase` owns the public `reset()`/`step()`; environments implement the
+underscored hooks. There is no `_initialize`/`_finalize` pair -- neither exists in the
+package:
 
 ```python
-def reset(self, **kwargs):
-    # Common setup
-    self._initialize()
-
-    # Call subclass-specific logic
-    observation = self._reset(**kwargs)
-
-    # Common cleanup
-    self._finalize()
-    return observation
+# EnvBase.reset() validates, calls YOUR _reset(), then checks the output against the
+# specs. Subclasses override _reset and _step, never reset and step.
+def _reset(self, tensordict=None, **kwargs):
+    ...  # return a TensorDict matching observation_spec
 ```
-
-Subclasses override `_reset()` to provide specific behavior.
 
 ### Strategy Pattern
 
@@ -183,27 +183,21 @@ env = SequentialTradingEnv(
 
 ## Key Abstractions
 
-### Observation Space
+### Specs
 
-Environments must define their observation space:
-
-```python
-def _make_observation_space(self):
-    return spaces.Box(
-        low=-np.inf,
-        high=np.inf,
-        shape=(self.window_size, self.n_features),
-        dtype=np.float32
-    )
-```
-
-### Action Space
-
-Environments must define their action space:
+There is no `_make_observation_space` / `_make_action_space` hook, and no gym `spaces` --
+gym is not a dependency of this package. Environments ASSIGN TorchRL specs, normally in
+`__init__`:
 
 ```python
-def _make_action_space(self):
-    return spaces.Discrete(3)  # BUY, SELL, HOLD
+import torch
+from torchrl.data import Categorical, Composite, Unbounded
+
+observation_spec = Composite(
+    market_data_1Min_10=Unbounded(shape=(10, 5), dtype=torch.float32),
+    account_state=Unbounded(shape=(6,), dtype=torch.float32),
+)
+action_spec = Categorical(3)  # index into action_levels
 ```
 
 ### TensorDict Integration
@@ -247,13 +241,12 @@ def test_custom_env():
     check_env_specs(env)
 
     # Test reset
-    obs = env.reset()
-    assert obs is not None
+    td = env.reset()
 
-    # Test step
-    action = env.action_space.sample()
-    next_obs, reward, done, info = env.step(action)
-    assert next_obs is not None
+    # action_spec, not action_space -- and step takes/returns a TensorDict.
+    td["action"] = env.action_spec.rand()
+    transition, td = env.step_and_maybe_reset(td)
+    assert transition["next", "done"] is not None
 ```
 
 ## See Also

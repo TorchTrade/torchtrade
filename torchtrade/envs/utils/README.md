@@ -23,9 +23,14 @@ Time period management and provider-specific conversions.
 **Example:**
 ```python
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.utils.timeframe import (
+    parse_timeframe_string,
+    timeframe_to_alpaca,
+    timeframe_to_binance,
+)
 
 # Create timeframe
-tf = TimeFrame(5, TimeFrameUnit.MINUTE)
+tf = TimeFrame(5, TimeFrameUnit.Minute)
 
 # Parse from string
 tf = parse_timeframe_string("1d")
@@ -40,19 +45,23 @@ binance_tf = timeframe_to_binance(tf)  # "1d"
 Discrete action space mappings for different trading strategies.
 
 **Functions:**
-- `create_alpaca_sltp_action_map()`: 3-action map (BUY, SELL, HOLD)
-- `create_sltp_action_map()`: Simplified 3-action map
+- `create_alpaca_sltp_action_map(stoploss_levels, takeprofit_levels)`: long-only bracket
+  map of `(sl_pct, tp_pct)`
+- `create_sltp_action_map(stoploss_levels, takeprofit_levels)`: bracket map of
+  `(side, sl_pct, tp_pct)` for envs that can short
+
+Neither is a BUY/SELL/HOLD map. Both are `1 + len(sl) * len(tp)` entries, index 0 being
+the flat/no-bracket action.
 
 **Example:**
 ```python
 from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map
 
-action_map = create_alpaca_sltp_action_map()
-# Returns: {0: "BUY", 1: "SELL", 2: "HOLD"}
+action_map = create_alpaca_sltp_action_map([0.02], [0.05])
+# {0: (None, None), 1: (0.02, 0.05)}
+#   index 0 -> stay flat; index 1 -> enter with a 2% stop and a 5% target
 
-# Use in environment
-action = 0  # BUY
-action_name = action_map[action]
+sl_pct, tp_pct = action_map[1]
 ```
 
 ### `sltp_helpers.py`
@@ -172,7 +181,7 @@ from torchtrade.envs.utils import (
 )
 
 # Universal timeframe
-tf = TimeFrame(5, TimeFrameUnit.MINUTE)
+tf = TimeFrame(5, TimeFrameUnit.Minute)
 
 # Convert for different providers
 alpaca_format = timeframe_to_alpaca(tf)  # "5Min"
