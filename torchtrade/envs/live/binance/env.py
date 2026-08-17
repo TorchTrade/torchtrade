@@ -103,7 +103,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         position_size = (balance × |action| × leverage) / price
         (rounded to exchange step size)
 
-    Default action_levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
+    Default action_levels: [-1, 0, 1] (short / flat / long)
     Custom levels supported: e.g., [-1, -0.3, -0.1, 0, 0.1, 0.3, 1]
 
     Leverage Design:
@@ -115,10 +115,10 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
     Could be implemented as multi-dimensional actions if needed, but fixed
     leverage is recommended for most use cases.
 
-    Account State (10 elements):
+    Account State (6 elements; the list is ACCOUNT_STATE on the exchange base class):
     ---------------------------
-    [cash, position_size, position_value, entry_price, current_price,
-     unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
+    [exposure_pct, position_direction, unrealized_pnlpct, holding_time,
+     leverage, distance_to_liquidation]
     """
 
     def __init__(

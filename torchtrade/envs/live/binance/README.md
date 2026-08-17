@@ -18,7 +18,6 @@ import os
 
 from torchtrade.envs.core.common_types import MarginType
 from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
-from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = BinanceFuturesTradingEnvConfig(
     symbol="BTCUSDT",
@@ -42,7 +41,6 @@ obs = env.reset()
 
 - **Leverage Trading**: Up to 125x leverage (use responsibly!)
 - **Isolated/Cross Margin**: Choose margin mode
-- **Funding Fees**: Realistic funding fee simulation
 - **Liquidation**: Automatic liquidation handling
 - **Testnet**: Safe testing environment with fake funds
 
@@ -188,12 +186,14 @@ env = BinanceFuturesTorchTradingEnv(
 
 ## Funding Fees
 
-Futures have periodic funding fees:
-- **Rate**: ±0.01% typically
-- **Frequency**: Every 8 hours (00:00, 08:00, 16:00 UTC)
-- **Direction**: Longs pay shorts (or vice versa)
+Perpetual futures charge funding every 8 hours (00:00 / 08:00 / 16:00 UTC), typically
+±0.01%, paid between longs and shorts.
 
-Environments simulate funding fees automatically.
+**These environments do not model funding.** `grep -ri funding torchtrade/ --include=*.py`
+returns nothing: no offline env accrues it and no live env reads the venue's funding rate.
+A held position therefore costs less in backtest than it does on the exchange, and the
+error grows with holding time and leverage. Budget for it outside the environment when
+evaluating a policy that carries positions across funding timestamps.
 
 ## Example: Basic Futures Trading
 

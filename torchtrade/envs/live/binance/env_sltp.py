@@ -116,9 +116,9 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
     - Tracks active SL/TP levels
     - Can optionally disable short positions for long-only strategies
 
-    Account State (10 elements):
-    [cash, position_size, position_value, entry_price, current_price,
-     unrealized_pnl_pct, leverage, margin_ratio, liquidation_price, holding_time]
+    Account State (6 elements; the list is ACCOUNT_STATE on the exchange base class):
+    [exposure_pct, position_direction, unrealized_pnlpct, holding_time,
+     leverage, distance_to_liquidation]
     """
 
     def __init__(

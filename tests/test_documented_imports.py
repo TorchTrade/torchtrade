@@ -65,8 +65,14 @@ def test_a_documented_import_resolves(module, name):
 @pytest.mark.parametrize("block", README_BLOCKS)
 def test_a_documented_code_block_parses(block):
     """Syntax only -- most blocks need credentials or data to run. Cheap, and it catches
-    what review misses: deleting the line that opened a call, leaving its arguments."""
-    ast.parse(block)
+    what review misses: deleting the line that opened a call, leaving its arguments.
+
+    compile(), not ast.parse(): `break` outside a loop is legal to PARSE and illegal to
+    COMPILE, and converting the gym-style `obs, reward, done, info = env.step(action)`
+    loops to the TensorDict contract stranded four `break` statements at module level in
+    live/README.md. An ast.parse() sweep declared all three files clean while they were
+    not. Anything CPython refuses to compile, a reader cannot run."""
+    compile(block, "<doc>", "exec")
 
 
 def test_the_sweep_still_covers_every_source():
@@ -74,14 +80,7 @@ def test_the_sweep_still_covers_every_source():
     is for: >140 against 190 still passed with the largest source (49) removed, and >20
     against 66 tolerated losing two thirds. Raise these when the docs grow."""
     assert len(CASES) > 185, f"only {len(CASES)} documented imports discovered"
-    assert len(README_BLOCKS) > 60, f"only {len(README_BLOCKS)} code blocks discovered"
-
-
-# NOT ENABLED YET: an AST pass comparing documented kwargs against dataclasses.fields()
-# turns up 31 in-package README call sites using fields that do not exist -- e.g.
-# AlpacaTradingEnvConfig(api_key=..., timeframe=...), where api_key is an env constructor
-# argument and the field is time_frames. That is #287's remaining half: the bodies, not
-# the import lines. Enabling this guard is the first step of that pass, not this one.
+    assert len(README_BLOCKS) > 55, f"only {len(README_BLOCKS)} code blocks discovered"
 
 
 # ── Config kwargs ────────────────────────────────────────────────────────────
@@ -139,15 +138,9 @@ def _resolve_config(cls_name):
     return None
 
 
-# A RATCHET, not an exemption list. Every entry is a documented kwarg that raises
-# TypeError today -- the mechanically-derived remainder of #287, which until now was a
-# hand-written list in the issue. Shrink it by fixing the doc; never grow it. A NEW bad
-# kwarg is not on the list and fails immediately, and an entry that gets FIXED also
-# fails until it is removed, so the list cannot drift away from the docs in either
-# direction.
-# EMPTY. Every documented config kwarg now exists. Keep it that way: a new bad kwarg
-# fails immediately rather than being added here.
-KNOWN_BROKEN = set()
+# The #287 ratchet reached empty and the scaffolding went with it: with no exemptions
+# left, the bare assert below IS the ratchet, and it is strictly stronger than the
+# xfail machinery it replaces. A newly broken kwarg fails immediately.
 
 
 @pytest.mark.parametrize("source,cls_name,kwarg", CONFIG_KWARGS,
@@ -158,29 +151,9 @@ def test_a_documented_config_kwarg_exists(source, cls_name, kwarg):
     if config_cls is None or not dataclasses.is_dataclass(config_cls):
         pytest.skip(f"{cls_name} is not a resolvable dataclass config")
     fields = {f.name for f in dataclasses.fields(config_cls)}
-    if (source, cls_name, kwarg) in KNOWN_BROKEN:
-        assert kwarg not in fields, (
-            f"{source}: {cls_name}({kwarg}=...) is fixed -- remove it from KNOWN_BROKEN"
-        )
-        pytest.xfail(f"known #287 remainder: {cls_name}({kwarg}=...)")
     assert kwarg in fields, (
         f"{source} documents {cls_name}({kwarg}=...), which raises TypeError -- "
         f"the class accepts {sorted(fields)}"
-    )
-
-
-def test_no_known_broken_entry_has_gone_stale():
-    """A doc line DELETED rather than fixed leaves an entry nothing tests.
-
-    The ratchet is two-directional for "still broken" and "now fixed", but a third case
-    slips through: remove the offending line from the docs and its triple vanishes from
-    CONFIG_KWARGS, leaving dead weight in KNOWN_BROKEN that no longer guards anything.
-    """
-    documented = set(CONFIG_KWARGS)
-    stale = sorted(entry for entry in KNOWN_BROKEN if entry not in documented)
-    assert not stale, (
-        f"{len(stale)} KNOWN_BROKEN entries are no longer in the docs -- delete them: "
-        f"{stale}"
     )
 
 

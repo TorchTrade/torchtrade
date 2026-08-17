@@ -18,7 +18,6 @@ import os
 
 from torchtrade.envs.live.bitget.order_executor import MarginMode
 from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig
-from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = BitgetFuturesTradingEnvConfig(
     symbol="BTCUSDT",
@@ -152,10 +151,11 @@ env = BitgetFuturesTorchTradingEnv(
 )
 td = env.reset()
 
-# Actions are CATEGORICAL indices into action_levels, which defaults to [-1, 0, 1]:
-# 0 = full short, 1 = flat, 2 = full long. Leverage and size come from the config,
+# Actions are CATEGORICAL indices into action_levels, which on Bitget
+# defaults to [-1.0, -0.5, 0.0, 0.5, 1.0]:
+# 0 = full short, 2 = flat, 4 = full long. Leverage and size come from the config,
 # not from the action.
-td["action"] = torch.tensor(2)  # go long
+td["action"] = torch.tensor(4)  # go full long
 td = env.step(td)
 ```
 
