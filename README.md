@@ -280,7 +280,7 @@ See **[Examples Documentation](https://torchtrade.github.io/torchtrade/examples/
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.11+
 - CUDA (optional, for GPU acceleration)
 - [UV](https://docs.astral.sh/uv/) - Fast Python package installer
 

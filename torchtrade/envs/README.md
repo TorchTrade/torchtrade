@@ -68,7 +68,8 @@ Contains the fundamental base classes that all environments inherit from:
 - **TorchTradeOfflineEnv**: Base for backtesting environments
 - **TorchTradeLiveEnv**: Base for live trading environments
 - **PositionState**: State management for positions
-- **RewardFunction**: Reward calculation abstractions
+- **HistoryTracker**: Episode history used by every environment
+- **default_rewards**: the built-in reward functions
 
 See [core/README.md](core/README.md) for details.
 

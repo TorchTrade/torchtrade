@@ -10,7 +10,8 @@ Time period management and provider-specific conversions.
 
 **Key Classes:**
 - `TimeFrame`: Represents a time period (e.g., "1 day", "5 minutes")
-- `TimeFrameUnit`: Enum of time units (SECOND, MINUTE, HOUR, DAY, WEEK, MONTH)
+- `TimeFrameUnit`: Enum of time units -- exactly `Minute`, `Hour`, `Day`, in that
+  capitalisation. There is no SECOND, WEEK or MONTH.
 
 **Functions:**
 - `parse_timeframe_string()`: Parse strings like "1d", "5m" into TimeFrame objects
@@ -23,15 +24,20 @@ Time period management and provider-specific conversions.
 **Example:**
 ```python
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
+from torchtrade.envs.utils.timeframe import (
+    parse_timeframe_string,
+    timeframe_to_alpaca,
+    timeframe_to_binance,
+)
 
 # Create timeframe
-tf = TimeFrame(5, TimeFrameUnit.MINUTE)
+tf = TimeFrame(5, TimeFrameUnit.Minute)
 
 # Parse from string
 tf = parse_timeframe_string("1d")
 
 # Convert to provider format
-alpaca_tf = timeframe_to_alpaca(tf)  # "1Day"
+alpaca_tf = timeframe_to_alpaca(tf)   # an alpaca TimeFrame object, not a string
 binance_tf = timeframe_to_binance(tf)  # "1d"
 ```
 
@@ -40,19 +46,28 @@ binance_tf = timeframe_to_binance(tf)  # "1d"
 Discrete action space mappings for different trading strategies.
 
 **Functions:**
-- `create_alpaca_sltp_action_map()`: 3-action map (BUY, SELL, HOLD)
-- `create_sltp_action_map()`: Simplified 3-action map
+- `create_alpaca_sltp_action_map(stoploss_levels, takeprofit_levels)`: long-only bracket
+  map of `(sl_pct, tp_pct)`
+- `create_sltp_action_map(stoploss_levels, takeprofit_levels)`: bracket map of
+  `(side, sl_pct, tp_pct)`; pass `include_short_positions=True` for the short half,
+  which is off by default
+
+Neither is a BUY/SELL/HOLD map. Index 0 is the flat/no-bracket action; the long grid adds
+`len(sl) * len(tp)` entries, and `create_sltp_action_map(..., include_short_positions=True)`
+adds that many again for the short side.
 
 **Example:**
 ```python
 from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map
 
-action_map = create_alpaca_sltp_action_map()
-# Returns: {0: "BUY", 1: "SELL", 2: "HOLD"}
+# The map PRESERVES the sign it is given -- it does not normalise -- and these values
+# are fed straight to calculate_bracket_prices. A positive stop here puts a long's stop
+# ABOVE its entry, so stoploss levels are negative, matching what the configs validate.
+action_map = create_alpaca_sltp_action_map([-0.02], [0.05])
+# {0: (None, None), 1: (-0.02, 0.05)}
+#   index 0 -> stay flat; index 1 -> enter with a 2% stop and a 5% target
 
-# Use in environment
-action = 0  # BUY
-action_name = action_map[action]
+sl_pct, tp_pct = action_map[1]
 ```
 
 ### `sltp_helpers.py`
@@ -64,27 +79,26 @@ Stop-loss and take-profit calculation utilities.
 
 **Example:**
 ```python
-from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
+from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices, stop_fill_price
 
-# Calculate SL/TP levels
-entry_price = 100.0
-sl_price, tp_price = calculate_sltp_prices(
-    entry_price=entry_price,
-    direction="long",
-    sl_percent=0.02,  # 2% stop loss
-    tp_percent=0.05,  # 5% take profit
+# sl_pct is SIGNED and its sign is not the same for both sides. For a long the stop
+# sits BELOW entry, so sl_pct is negative; for a short it sits above, so it is
+# positive. The helper does not normalise this -- passing +0.02 for a long puts the
+# stop 2% ABOVE the entry, where it is not a stop at all.
+sl_price, tp_price = calculate_bracket_prices(
+    side="long",
+    entry_price=100.0,
+    sl_pct=-0.02,   # 2% BELOW entry
+    tp_pct=0.05,    # 5% above entry
 )
 # sl_price = 98.0, tp_price = 105.0
 
-# Check if hit
-current_price = 97.5
-sl_hit, tp_hit = check_sltp_hit(
-    current_price=current_price,
-    sl_price=sl_price,
-    tp_price=tp_price,
-    direction="long"
-)
-# sl_hit = True, tp_hit = False
+# Whether a bracket triggered is decided by the environment against the bar's high and
+# low; there is no check-if-hit helper here. What this module does provide is the price
+# a triggered stop actually FILLS at, which is not the stop price when the bar gaps
+# through it.
+stop_fill_price(stop_price=98.0, open_price=97.0, is_long=True)   # -> 97.0, the gap open
+stop_fill_price(stop_price=98.0, open_price=99.0, is_long=True)   # -> 98.0, the stop
 ```
 
 ### `sltp_mixin.py`
@@ -97,23 +111,20 @@ Mixin class for adding SL/TP functionality to environments.
 **Usage:**
 ```python
 from torchtrade.envs.utils import SLTPMixin
-from torchtrade.envs.core import TorchTradeOfflineEnv
 
-class MyEnvWithSLTP(SLTPMixin, TorchTradeOfflineEnv):
-    def __init__(self, config):
-        super().__init__(config)
-        self._init_sltp(
-            sl_percent=config.sl_percent,
-            tp_percent=config.tp_percent
-        )
+# SLTPMixin is small and deliberately so: SIDE_DIRECTION, _record_sltp_position,
+# _reset_sltp_state and _sync_position_from_exchange. It does NOT own bracket pricing,
+# trigger detection or the exit -- those live in the environment, because whether a
+# bracket fired is a question about the bar's high and low, which the mixin cannot see.
+class MyEnvWithSLTP(SLTPMixin):
+    def _open(self, side):
+        # Records the position the ACTION targets, never the order side (#276): a long
+        # bracket is placed with SELL stop orders, and recording those would invert the
+        # position direction the policy observes.
+        self._record_sltp_position(side)
 
-    def _step(self, action):
-        # Check SL/TP before processing action
-        if self._check_sltp_triggered(current_price):
-            return self._execute_sltp_exit()
-
-        # Normal step logic
-        return super()._step(action)
+    def _close(self):
+        self._reset_sltp_state()
 ```
 
 ### `fractional_sizing.py`
@@ -176,10 +187,10 @@ from torchtrade.envs.utils import (
 )
 
 # Universal timeframe
-tf = TimeFrame(5, TimeFrameUnit.MINUTE)
+tf = TimeFrame(5, TimeFrameUnit.Minute)
 
 # Convert for different providers
-alpaca_format = timeframe_to_alpaca(tf)  # "5Min"
+alpaca_format = timeframe_to_alpaca(tf)   # an alpaca TimeFrame object, not a string
 binance_format = timeframe_to_binance(tf)  # "5m"
 
 # Use in API calls
@@ -189,29 +200,7 @@ binance_client.get_klines(symbol, interval=binance_format)
 
 ### Adding SL/TP to Custom Environment
 
-```python
-from torchtrade.envs.core import TorchTradeOfflineEnv
-from torchtrade.envs.utils import SLTPMixin
-from dataclasses import dataclass
-
-@dataclass
-class MyEnvConfig:
-    sl_percent: float = 0.02
-    tp_percent: float = 0.05
-
-class MyEnv(SLTPMixin, TorchTradeOfflineEnv):
-    def __init__(self, config):
-        super().__init__(config)
-        self._init_sltp(config.sl_percent, config.tp_percent)
-
-    def _step(self, action):
-        # SL/TP check happens automatically
-        if self.has_position and self._check_sltp():
-            return self._execute_sltp_exit()
-
-        # Normal logic
-        return super()._step(action)
-```
+See the SLTPMixin section above for the real surface.
 
 ## Design Principles
 

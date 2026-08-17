@@ -4,9 +4,13 @@ Scope: `from torchtrade... import X` (flat AND parenthesized), plus a syntax che
 python blocks in the in-package READMEs. Config kwargs are covered below; observation keys still are not.
 """
 
+import ast
+import builtins
+import functools
 import dataclasses
 import importlib
 import pathlib
+import pkgutil
 import re
 import subprocess
 
@@ -41,10 +45,18 @@ def _documented_imports():
 
 
 CASES = list(_documented_imports())
+_README_SOURCES = [p for p in _doc_sources()
+                   if p.name == "README.md" and p.is_relative_to(REPO / "torchtrade")]
+# Read each README once. The guard needs a block's predecessors, so blocks are carried
+# per-file and the flat list is derived from that rather than re-globbing.
+_BLOCKS_BY_FILE = [(p, PY_BLOCK.findall(p.read_text())) for p in _README_SOURCES]
 README_BLOCKS = [
     pytest.param(block, id=f"{p.relative_to(REPO)}::block{i}")
-    for p in _doc_sources() if p.name == "README.md" and p.is_relative_to(REPO / "torchtrade")
-    for i, block in enumerate(PY_BLOCK.findall(p.read_text()))
+    for p, blocks in _BLOCKS_BY_FILE for i, block in enumerate(blocks)
+]
+README_BLOCKS_IN_CONTEXT = [
+    pytest.param(blocks[:i], block, id=f"{p.relative_to(REPO)}::block{i}")
+    for p, blocks in _BLOCKS_BY_FILE for i, block in enumerate(blocks)
 ]
 
 
@@ -204,4 +216,154 @@ def test_no_readme_redefines_a_package_config_as_a_dataclass():
     assert not offenders, (
         f"{len(offenders)} README blocks redefine a real config as a dataclass instead "
         f"of importing it: {offenders}"
+    )
+
+
+@functools.lru_cache(maxsize=None)
+def _package_names():
+    """Every public name any torchtrade module exports, collected DETERMINISTICALLY.
+
+    The first version scanned `sys.modules`, which made the verdict depend on which
+    other tests had run first: selected alone it saw 71 torchtrade modules, after the
+    import tests 102, and `ReplayObserver` -- a real exported class -- resolved False in
+    the first case and True in the second. Identical file, opposite results, so the test
+    failed on real API under `-k`, under xdist sharding, or under any reordering. An
+    lru_cache on top froze whichever answer came first.
+
+    Walking the package is slower once and correct always.
+    """
+    names = set()
+    package = importlib.import_module("torchtrade")
+    unwalkable = []
+    # onerror, because walk_packages routes EVERY exception in a subpackage __init__
+    # here when it is set -- with onerror=None an ImportError silently drops that whole
+    # subtree and anything else escapes the generator. Either way the name set shrinks,
+    # and a shrunken set makes real API read as a phantom: false failures, not false
+    # passes. So a package that cannot be WALKED is fatal.
+    #
+    # A module that cannot be IMPORTED is not: vllm, chronos and openai are optional
+    # extras, and every one of them is imported lazily inside a function today, so this
+    # currently collects nothing extra -- but the day one moves to module scope, a dev
+    # without the extra should not see doc tests fail. The import tests cover what must
+    # import.
+    for info in pkgutil.walk_packages(package.__path__, prefix="torchtrade.",
+                                      onerror=unwalkable.append):
+        try:
+            module = importlib.import_module(info.name)
+        except Exception:
+            continue
+        names.update(n for n in vars(module) if not n.startswith("_"))
+    assert not unwalkable, (
+        f"{len(unwalkable)} torchtrade subpackages could not be walked, so this guard "
+        f"is checking against a truncated package: {unwalkable}"
+    )
+    return names
+
+
+def _resolves_anywhere(name: str) -> bool:
+    return name in _package_names()
+
+
+def _names_bound_by(block, *, before_line=None):
+    """Names bound at MODULE level in `block`, optionally only those defined earlier.
+
+    Module level, and line-ordered, because a reader executes the fence top to bottom.
+    Walking the whole AST accepted two things Python does not (#373 review):
+    `phantom(); def phantom(): ...` -- a forward definition, which raises NameError when
+    the fence is actually run -- and a `phantom` local inside an earlier helper, which
+    masks a later top-level `phantom()`. Both let a real phantom through.
+    """
+    try:
+        tree = ast.parse(block)
+    except SyntaxError:
+        return set()
+
+    bound = set()
+    for node in tree.body:  # module level only; a nested local binds nothing out here
+        if before_line is not None and node.lineno >= before_line:
+            break
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound |= {a.asname or a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        else:
+            bound |= {n.id for n in ast.walk(node)
+                      if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+
+    return bound
+
+
+def _params_of(node):
+    a = node.args
+    return {p.arg for p in (*a.posonlyargs, *a.args, *a.kwonlyargs,
+                            *([a.vararg] if a.vararg else []),
+                            *([a.kwarg] if a.kwarg else []))}
+
+
+def _calls_with_scope(node, enclosing=frozenset()):
+    """Yield (call_name, lineno, names-in-scope-from-enclosing-functions).
+
+    Parameters are visible only INSIDE the function that declares them. Adding them to
+    a block-wide set accepted `def helper(phantom): ...` followed by a top-level
+    `phantom()` (#373 review), which raises NameError -- the guard's claim to check
+    scope at the call site was false for exactly this case.
+    """
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            inner = enclosing | _params_of(child) | {child.name}
+            yield from _calls_with_scope(child, inner)
+            continue
+        if isinstance(child, ast.Call) and isinstance(child.func, ast.Name):
+            yield child.func.id, child.lineno, enclosing
+        yield from _calls_with_scope(child, enclosing)
+
+
+# Objects a reader is expected to bring; naming one is not a claim about the package.
+_READER_SUPPLIED = {"env", "config", "action", "agent", "df", "td", "transition", "obs",
+                    "your_dataframe", "policy", "model", "data", "trainer"}
+
+
+@pytest.mark.parametrize("earlier_blocks,block", README_BLOCKS_IN_CONTEXT)
+def test_a_documented_block_calls_nothing_that_does_not_exist(earlier_blocks, block):
+    """A CALL to a name the block never binds and the package never defines.
+
+    This is the gap the import test cannot cover: it checks `from x import y` lines, so
+    a block whose import line was corrected while its BODY kept calling the old name
+    passes it. That is exactly what happened -- utils/README.md imported the real
+    calculate_bracket_prices and then called calculate_sltp_prices and check_sltp_hit,
+    neither of which has ever existed, three doc PRs in a row.
+
+    Flags a called name that is not bound in the block, not bound by any earlier block
+    in the same file, not a builtin, not reader-supplied, and exported nowhere in
+    torchtrade. ATTRIBUTE calls (`self.foo()`, `obj.bar()`) are NOT covered -- that gap
+    is how `_init_sltp` survived three rounds, and closing it needs the callee's type.
+    """
+    try:
+        tree = ast.parse(block)
+    except SyntaxError:
+        pytest.skip("covered by the compile test")
+
+    # A reader meets the blocks in order, so anything an EARLIER block defined is in
+    # scope here -- that is what makes `MyEnv(...)` in a subclassing walkthrough legal
+    # while `calculate_sltp_prices(...)`, defined nowhere at all, is not.
+    bound = set()
+    for earlier in earlier_blocks:
+        # include_params=False: a parameter is local to its own block. Carrying them
+        # forward let `def helper(calculate_sltp_prices)` in ANY earlier snippet
+        # whitelist that phantom for the whole rest of the file -- and core/README.md
+        # really does bind df/config/tensordict/self/kwargs that way in block 0.
+        bound |= _names_bound_by(earlier)
+
+    # Each call is judged against what is in scope AT ITS OWN LINE, so a definition
+    # further down the fence does not retroactively legitimise a call above it.
+    unknown = set()
+    for name, lineno, in_scope in _calls_with_scope(tree):
+        if name in _READER_SUPPLIED or hasattr(builtins, name):
+            continue
+        visible = bound | in_scope | _names_bound_by(block, before_line=lineno)
+        if name in visible or _resolve_config(name) or _resolves_anywhere(name):
+            continue
+        unknown.add(name)
+    assert not unknown, (
+        f"calls names that exist nowhere in torchtrade: {sorted(unknown)}"
     )
