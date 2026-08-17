@@ -196,7 +196,7 @@ obs = env.reset()
 
 Lower than most competitors!
 
-**Funding Fees**:
+**Funding Fees** (charged by the venue; **not modelled by these environments**):
 - Rate: Varies (typically ±0.01%)
 - Frequency: Every 8 hours
 
@@ -214,7 +214,7 @@ Check symbols: https://api.bitget.com/api/mix/v1/market/contracts?productType=um
 2. **Start with testnet**: Test thoroughly before live trading
 3. **Use conservative leverage**: 2-5x recommended
 4. **Enable IP whitelist**: Restrict API access to known IPs
-5. **Monitor fees**: Funding fees can add up
+5. **Monitor fees**: funding fees can add up, and nothing here accounts for them
 
 ## API Rate Limits
 

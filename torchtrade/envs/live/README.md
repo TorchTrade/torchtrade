@@ -155,7 +155,9 @@ that differ between exchanges:
 **Alpaca:**
 ```python
 paper: bool = True                          # Paper or live trading
-trade_mode: str = "notional"                # "fractional" | "notional" | "quantity"
+trade_mode: str = "notional"                # "notional" | "quantity" here.
+# "fractional" is validated and implemented only on AlpacaSLTPTradingEnvConfig; this
+# config accepts the string without validating and then executes it as quantity mode.
 ```
 
 **Binance:**
@@ -337,11 +339,14 @@ for entries and native bracket orders for SL/TP.
 
 ### Partial Fills
 
-**Environments do not handle partial fills.** There is no retry-to-fill and no size
-adjustment; `binance/env.py` carries an open TODO to track partial execution state at
-all. What you get is the truth after the fact: `account_state` reports the position the
-exchange actually holds, so a partially filled order shows up as a smaller
-`exposure_pct` than the action requested.
+There is **no retry-to-fill**: the env does not resubmit the unfilled remainder. What it
+does do is stop the agent from being locked out of correcting it. A partial fill leaves
+the position *direction* intact, so the duplicate-action guard would otherwise suppress
+every corrective order silently and permanently; `core/live.py` compares held size
+against the requested size and releases the guard when they differ by more than the
+venue's minimum tradeable size, so the next action can resize. `account_state` reports
+what the exchange actually holds, so a partial fill shows up as a smaller
+`exposure_pct` than the action asked for.
 
 ## Position Management
 
@@ -374,6 +379,8 @@ import torch
 
 # Close all positions
 action = torch.tensor(env.action_levels.index(0.0))  # the flat level
+# Non-SLTP envs only -- SLTP envs have no action_levels -- and only when 0.0 is among
+# them: validate_action_levels checks range and duplicates, never that a flat level exists.
 td["action"] = action
 transition, td = env.step_and_maybe_reset(td)
 

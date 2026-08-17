@@ -4,7 +4,6 @@ Scope: `from torchtrade... import X` (flat AND parenthesized), plus a syntax che
 python blocks in the in-package READMEs. Config kwargs are covered below; observation keys still are not.
 """
 
-import ast
 import dataclasses
 import importlib
 import pathlib
@@ -18,14 +17,6 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # skipped set contained the exact phantoms the sweep that added this test had missed.
 IMPORT_LINE = re.compile(r"^from (torchtrade[\w.]*) import (?:\(([^)]*)\)|([^\n(]+))$", re.M)
 PY_BLOCK = re.compile(r"```python\n(.*?)```", re.S)
-
-
-def _safe_walk(block):
-    """Blocks using the `Config(a=1, ...)` ellipsis idiom do not parse; skip them here."""
-    try:
-        return list(ast.walk(ast.parse(block)))
-    except SyntaxError:
-        return []
 
 
 def _doc_sources():
@@ -80,7 +71,7 @@ def test_the_sweep_still_covers_every_source():
     is for: >140 against 190 still passed with the largest source (49) removed, and >20
     against 66 tolerated losing two thirds. Raise these when the docs grow."""
     assert len(CASES) > 185, f"only {len(CASES)} documented imports discovered"
-    assert len(README_BLOCKS) > 55, f"only {len(README_BLOCKS)} code blocks discovered"
+    assert len(README_BLOCKS) > 60, f"only {len(README_BLOCKS)} code blocks discovered"
 
 
 # ── Config kwargs ────────────────────────────────────────────────────────────
