@@ -179,3 +179,29 @@ def test_every_documented_config_call_is_actually_captured():
 def test_the_kwarg_sweep_found_configs_to_check():
     """A regex that silently matched nothing would make the check above vacuous."""
     assert len(CONFIG_KWARGS) > 40, f"only {len(CONFIG_KWARGS)} documented kwargs found"
+
+
+def test_no_readme_redefines_a_package_config_as_a_dataclass():
+    """A `@dataclass class SomeConfig:` block shadowing a REAL config is two copies.
+
+    Both rot independently, and the doc copy rots worse: written without annotations --
+    `symbol = "BTCUSDT"` rather than `symbol: str = "BTCUSDT"` -- the decorator sees
+    zero fields, so the class it builds rejects every kwarg the same page documents.
+    Copying it raises TypeError on construction. compile() cannot see this; the block is
+    valid Python that builds a useless class, which is why it survived three rounds.
+
+    Only names that resolve to a real package config count. A `MyEnvConfig` in a
+    subclassing example is the reader's own class, not a shadow.
+    """
+    offenders = []
+    for path in _doc_sources():
+        if path.name != "README.md" or not path.is_relative_to(REPO / "torchtrade"):
+            continue
+        for block in PY_BLOCK.findall(path.read_text()):
+            for name in re.findall(r"@dataclass\s*\nclass\s+(\w+)\b", block):
+                if _resolve_config(name) is not None:
+                    offenders.append(f"{path.relative_to(REPO)}::{name}")
+    assert not offenders, (
+        f"{len(offenders)} README blocks redefine a real config as a dataclass instead "
+        f"of importing it: {offenders}"
+    )

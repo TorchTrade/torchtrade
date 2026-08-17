@@ -52,28 +52,33 @@ obs = env.reset()
 from torchtrade.envs.live.bitget.order_executor import MarginMode
 from torchtrade.envs.core.live import ObservationFailurePolicy
 from torchtrade.envs.live.bitget.order_executor import PositionMode
-from dataclasses import dataclass
+from torchtrade.envs.live.bitget import BitgetFuturesTradingEnvConfig
 
-@dataclass
-class BitgetFuturesTradingEnvConfig:
-    symbol = 'BTCUSDT'
-    time_frames = '1Hour'
-    window_sizes = 10
-    execute_on = '1Hour'
-    product_type = 'USDT-FUTURES'
-    leverage = 1
-    margin_mode = MarginMode.ISOLATED
-    position_mode = PositionMode.ONE_WAY
-    action_levels = None
-    done_on_bankruptcy = True
-    bankrupt_threshold = 0.1
-    demo = True
-    seed = 42
-    include_base_features = False
-    close_position_on_init = True
-    close_position_on_reset = False
-    observation_failure_policy = ObservationFailurePolicy.HALT
-    # Credentials: Env(config, api_key=..., api_secret=..., api_passphrase=...)
+from torchtrade.envs.live.bitget.order_executor import MarginMode
+from torchtrade.envs.core.live import ObservationFailurePolicy
+from torchtrade.envs.live.bitget.order_executor import PositionMode
+
+# Every field of BitgetFuturesTradingEnvConfig, with its real default.
+# Credentials are NOT fields -- they are constructor arguments on the env.
+config = BitgetFuturesTradingEnvConfig(
+    symbol='BTCUSDT',
+    time_frames='1Hour',
+    window_sizes=10,
+    execute_on='1Hour',
+    product_type='USDT-FUTURES',
+    leverage=1,
+    margin_mode=MarginMode.ISOLATED,
+    position_mode=PositionMode.ONE_WAY,
+    action_levels=None,
+    done_on_bankruptcy=True,
+    bankrupt_threshold=0.1,
+    demo=True,
+    seed=42,
+    include_base_features=False,
+    close_position_on_init=True,
+    close_position_on_reset=False,
+    observation_failure_policy=ObservationFailurePolicy.HALT,
+)
 ```
 
 **Note**: Bitget requires a passphrase in addition to API key/secret.

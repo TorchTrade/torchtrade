@@ -49,26 +49,30 @@ obs = env.reset()
 ```python
 from torchtrade.envs.core.common_types import MarginType
 from torchtrade.envs.core.live import ObservationFailurePolicy
-from dataclasses import dataclass
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
 
-@dataclass
-class BinanceFuturesTradingEnvConfig:
-    symbol = 'BTCUSDT'
-    time_frames = '1Hour'
-    window_sizes = 10
-    execute_on = '1Hour'
-    leverage = 1
-    margin_type = MarginType.ISOLATED
-    action_levels = None
-    done_on_bankruptcy = True
-    bankrupt_threshold = 0.1
-    demo = True
-    seed = 42
-    include_base_features = False
-    close_position_on_init = True
-    close_position_on_reset = False
-    observation_failure_policy = ObservationFailurePolicy.HALT
-    # Credentials: Env(config, api_key=..., api_secret=...)
+from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.live import ObservationFailurePolicy
+
+# Every field of BinanceFuturesTradingEnvConfig, with its real default.
+# Credentials are NOT fields -- they are constructor arguments on the env.
+config = BinanceFuturesTradingEnvConfig(
+    symbol='BTCUSDT',
+    time_frames='1Hour',
+    window_sizes=10,
+    execute_on='1Hour',
+    leverage=1,
+    margin_type=MarginType.ISOLATED,
+    action_levels=None,
+    done_on_bankruptcy=True,
+    bankrupt_threshold=0.1,
+    demo=True,
+    seed=42,
+    include_base_features=False,
+    close_position_on_init=True,
+    close_position_on_reset=False,
+    observation_failure_policy=ObservationFailurePolicy.HALT,
+)
 ```
 
 ## Testnet vs Mainnet
