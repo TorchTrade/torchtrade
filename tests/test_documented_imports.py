@@ -4,7 +4,6 @@ Scope: `from torchtrade... import X` (flat AND parenthesized), plus a syntax che
 python blocks in the in-package READMEs. Config kwargs are covered below; observation keys still are not.
 """
 
-import ast
 import dataclasses
 import importlib
 import pathlib
@@ -18,14 +17,6 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # skipped set contained the exact phantoms the sweep that added this test had missed.
 IMPORT_LINE = re.compile(r"^from (torchtrade[\w.]*) import (?:\(([^)]*)\)|([^\n(]+))$", re.M)
 PY_BLOCK = re.compile(r"```python\n(.*?)```", re.S)
-
-
-def _safe_walk(block):
-    """Blocks using the `Config(a=1, ...)` ellipsis idiom do not parse; skip them here."""
-    try:
-        return list(ast.walk(ast.parse(block)))
-    except SyntaxError:
-        return []
 
 
 def _doc_sources():
@@ -65,8 +56,14 @@ def test_a_documented_import_resolves(module, name):
 @pytest.mark.parametrize("block", README_BLOCKS)
 def test_a_documented_code_block_parses(block):
     """Syntax only -- most blocks need credentials or data to run. Cheap, and it catches
-    what review misses: deleting the line that opened a call, leaving its arguments."""
-    ast.parse(block)
+    what review misses: deleting the line that opened a call, leaving its arguments.
+
+    compile(), not ast.parse(): `break` outside a loop is legal to PARSE and illegal to
+    COMPILE, and converting the gym-style `obs, reward, done, info = env.step(action)`
+    loops to the TensorDict contract stranded four `break` statements at module level in
+    live/README.md. An ast.parse() sweep declared all three files clean while they were
+    not. Anything CPython refuses to compile, a reader cannot run."""
+    compile(block, "<doc>", "exec")
 
 
 def test_the_sweep_still_covers_every_source():
@@ -75,13 +72,6 @@ def test_the_sweep_still_covers_every_source():
     against 66 tolerated losing two thirds. Raise these when the docs grow."""
     assert len(CASES) > 185, f"only {len(CASES)} documented imports discovered"
     assert len(README_BLOCKS) > 60, f"only {len(README_BLOCKS)} code blocks discovered"
-
-
-# NOT ENABLED YET: an AST pass comparing documented kwargs against dataclasses.fields()
-# turns up 31 in-package README call sites using fields that do not exist -- e.g.
-# AlpacaTradingEnvConfig(api_key=..., timeframe=...), where api_key is an env constructor
-# argument and the field is time_frames. That is #287's remaining half: the bodies, not
-# the import lines. Enabling this guard is the first step of that pass, not this one.
 
 
 # ── Config kwargs ────────────────────────────────────────────────────────────
@@ -139,52 +129,9 @@ def _resolve_config(cls_name):
     return None
 
 
-# A RATCHET, not an exemption list. Every entry is a documented kwarg that raises
-# TypeError today -- the mechanically-derived remainder of #287, which until now was a
-# hand-written list in the issue. Shrink it by fixing the doc; never grow it. A NEW bad
-# kwarg is not on the list and fails immediately, and an entry that gets FIXED also
-# fails until it is removed, so the list cannot drift away from the docs in either
-# direction.
-KNOWN_BROKEN = {
-    ("torchtrade/envs/live/README.md", "AlpacaSLTPTradingEnvConfig", "sl_percent"),
-    ("torchtrade/envs/live/README.md", "AlpacaSLTPTradingEnvConfig", "tp_percent"),
-    ("torchtrade/envs/live/README.md", "AlpacaTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/README.md", "AlpacaTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/README.md", "AlpacaTradingEnvConfig", "initial_cash"),
-    ("torchtrade/envs/live/README.md", "AlpacaTradingEnvConfig", "max_position_size"),
-    ("torchtrade/envs/live/README.md", "AlpacaTradingEnvConfig", "timeframe"),
-    ("torchtrade/envs/live/README.md", "BinanceFuturesTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/README.md", "BinanceFuturesTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/README.md", "BinanceFuturesTradingEnvConfig", "max_leverage"),
-    ("torchtrade/envs/live/README.md", "BinanceFuturesTradingEnvConfig", "testnet"),
-    ("torchtrade/envs/live/README.md", "BinanceFuturesTradingEnvConfig", "timeframe"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "max_leverage"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "sl_percent"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "testnet"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "timeframe"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesSLTPTradingEnvConfig", "tp_percent"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesTradingEnvConfig", "max_leverage"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesTradingEnvConfig", "testnet"),
-    ("torchtrade/envs/live/binance/README.md", "BinanceFuturesTradingEnvConfig", "timeframe"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "max_leverage"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "passphrase"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "sl_percent"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "testnet"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "timeframe"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesSLTPTradingEnvConfig", "tp_percent"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesTradingEnvConfig", "api_key"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesTradingEnvConfig", "api_secret"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesTradingEnvConfig", "max_leverage"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesTradingEnvConfig", "passphrase"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesTradingEnvConfig", "testnet"),
-    ("torchtrade/envs/live/bitget/README.md", "BitgetFuturesTradingEnvConfig", "timeframe")
-}
+# The #287 ratchet reached empty and the scaffolding went with it: with no exemptions
+# left, the bare assert below IS the ratchet, and it is strictly stronger than the
+# xfail machinery it replaces. A newly broken kwarg fails immediately.
 
 
 @pytest.mark.parametrize("source,cls_name,kwarg", CONFIG_KWARGS,
@@ -195,29 +142,9 @@ def test_a_documented_config_kwarg_exists(source, cls_name, kwarg):
     if config_cls is None or not dataclasses.is_dataclass(config_cls):
         pytest.skip(f"{cls_name} is not a resolvable dataclass config")
     fields = {f.name for f in dataclasses.fields(config_cls)}
-    if (source, cls_name, kwarg) in KNOWN_BROKEN:
-        assert kwarg not in fields, (
-            f"{source}: {cls_name}({kwarg}=...) is fixed -- remove it from KNOWN_BROKEN"
-        )
-        pytest.xfail(f"known #287 remainder: {cls_name}({kwarg}=...)")
     assert kwarg in fields, (
         f"{source} documents {cls_name}({kwarg}=...), which raises TypeError -- "
         f"the class accepts {sorted(fields)}"
-    )
-
-
-def test_no_known_broken_entry_has_gone_stale():
-    """A doc line DELETED rather than fixed leaves an entry nothing tests.
-
-    The ratchet is two-directional for "still broken" and "now fixed", but a third case
-    slips through: remove the offending line from the docs and its triple vanishes from
-    CONFIG_KWARGS, leaving dead weight in KNOWN_BROKEN that no longer guards anything.
-    """
-    documented = set(CONFIG_KWARGS)
-    stale = sorted(entry for entry in KNOWN_BROKEN if entry not in documented)
-    assert not stale, (
-        f"{len(stale)} KNOWN_BROKEN entries are no longer in the docs -- delete them: "
-        f"{stale}"
     )
 
 
@@ -252,3 +179,29 @@ def test_every_documented_config_call_is_actually_captured():
 def test_the_kwarg_sweep_found_configs_to_check():
     """A regex that silently matched nothing would make the check above vacuous."""
     assert len(CONFIG_KWARGS) > 40, f"only {len(CONFIG_KWARGS)} documented kwargs found"
+
+
+def test_no_readme_redefines_a_package_config_as_a_dataclass():
+    """A `@dataclass class SomeConfig:` block shadowing a REAL config is two copies.
+
+    Both rot independently, and the doc copy rots worse: written without annotations --
+    `symbol = "BTCUSDT"` rather than `symbol: str = "BTCUSDT"` -- the decorator sees
+    zero fields, so the class it builds rejects every kwarg the same page documents.
+    Copying it raises TypeError on construction. compile() cannot see this; the block is
+    valid Python that builds a useless class, which is why it survived three rounds.
+
+    Only names that resolve to a real package config count. A `MyEnvConfig` in a
+    subclassing example is the reader's own class, not a shadow.
+    """
+    offenders = []
+    for path in _doc_sources():
+        if path.name != "README.md" or not path.is_relative_to(REPO / "torchtrade"):
+            continue
+        for block in PY_BLOCK.findall(path.read_text()):
+            for name in re.findall(r"@dataclass\s*\nclass\s+(\w+)\b", block):
+                if _resolve_config(name) is not None:
+                    offenders.append(f"{path.relative_to(REPO)}::{name}")
+    assert not offenders, (
+        f"{len(offenders)} README blocks redefine a real config as a dataclass instead "
+        f"of importing it: {offenders}"
+    )

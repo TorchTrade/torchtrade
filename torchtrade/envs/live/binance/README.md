@@ -14,20 +14,26 @@ Live trading integration with Binance for crypto futures markets (USDT-margined)
 ## Quick Start
 
 ```python
+import os
+
+from torchtrade.envs.core.common_types import MarginType
 from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
-from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = BinanceFuturesTradingEnvConfig(
-    api_key="YOUR_KEY",
-    api_secret="YOUR_SECRET",
     symbol="BTCUSDT",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    testnet=True,  # Use testnet first!
-    max_leverage=10.0,
-    margin_type="ISOLATED",
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,  # Use testnet first!
+    leverage=10.0,
+    margin_type=MarginType.ISOLATED,
 )
 
-env = BinanceFuturesTorchTradingEnv(config=config)
+env = BinanceFuturesTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BINANCE_API_KEY"],
+    api_secret=os.environ["BINANCE_SECRET_KEY"],
+)
 obs = env.reset()
 ```
 
@@ -35,34 +41,48 @@ obs = env.reset()
 
 - **Leverage Trading**: Up to 125x leverage (use responsibly!)
 - **Isolated/Cross Margin**: Choose margin mode
-- **Funding Fees**: Realistic funding fee simulation
 - **Liquidation**: Automatic liquidation handling
 - **Testnet**: Safe testing environment with fake funds
 
 ## Configuration
 
 ```python
-@dataclass
-class BinanceFuturesTradingEnvConfig:
-    api_key: str
-    api_secret: str
-    symbol: str
-    timeframe: TimeFrame
-    testnet: bool = True            # Testnet or mainnet
-    max_leverage: float = 10.0      # Maximum leverage
-    margin_type: str = "ISOLATED"   # ISOLATED or CROSS
-    initial_margin: float = 1000.0
-    window_size: int = 50
+from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.live import ObservationFailurePolicy
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
+
+from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.live import ObservationFailurePolicy
+
+# Every field of BinanceFuturesTradingEnvConfig, with its real default.
+# Credentials are NOT fields -- they are constructor arguments on the env.
+config = BinanceFuturesTradingEnvConfig(
+    symbol='BTCUSDT',
+    time_frames='1Hour',
+    window_sizes=10,
+    execute_on='1Hour',
+    leverage=1,
+    margin_type=MarginType.ISOLATED,
+    action_levels=None,
+    done_on_bankruptcy=True,
+    bankrupt_threshold=0.1,
+    demo=True,
+    seed=42,
+    include_base_features=False,
+    close_position_on_init=True,
+    close_position_on_reset=False,
+    observation_failure_policy=ObservationFailurePolicy.HALT,
+)
 ```
 
 ## Testnet vs Mainnet
 
 **Testnet** (recommended for development):
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
+
 config = BinanceFuturesTradingEnvConfig(
-    api_key=testnet_key,
-    api_secret=testnet_secret,
-    testnet=True,  # Fake funds
+    demo=True,  # Fake funds
 )
 ```
 
@@ -70,10 +90,10 @@ Get testnet API keys: https://testnet.binancefuture.com/
 
 **Mainnet** (real money):
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
+
 config = BinanceFuturesTradingEnvConfig(
-    api_key=mainnet_key,
-    api_secret=mainnet_secret,
-    testnet=False,  # Real trading!
+    demo=False,  # Real trading!
 )
 ```
 
@@ -85,9 +105,12 @@ config = BinanceFuturesTradingEnvConfig(
 - Lower risk, position-specific leverage
 
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
+from torchtrade.envs.core.common_types import MarginType
+
 config = BinanceFuturesTradingEnvConfig(
-    margin_type="ISOLATED",
-    max_leverage=10.0,
+    margin_type=MarginType.ISOLATED,
+    leverage=10.0,
 )
 ```
 
@@ -97,9 +120,12 @@ config = BinanceFuturesTradingEnvConfig(
 - Higher leverage, shared risk
 
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
+from torchtrade.envs.core.common_types import MarginType
+
 config = BinanceFuturesTradingEnvConfig(
-    margin_type="CROSS",
-    max_leverage=20.0,
+    margin_type=MarginType.CROSSED,
+    leverage=20.0,
 )
 ```
 
@@ -108,14 +134,16 @@ config = BinanceFuturesTradingEnvConfig(
 Set leverage per symbol:
 
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
+
 # Conservative leverage
 config = BinanceFuturesTradingEnvConfig(
-    max_leverage=3.0,  # 3x leverage
+    leverage=3.0,  # 3x leverage
 )
 
 # Higher leverage (risky!)
 config = BinanceFuturesTradingEnvConfig(
-    max_leverage=50.0,  # 50x leverage
+    leverage=50.0,  # 50x leverage
 )
 ```
 
@@ -137,6 +165,8 @@ The Binance observation class exposes all fields from Binance klines to your cus
 These extra fields allow you to derive sentiment features without additional API calls:
 
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesTorchTradingEnv
+
 def my_preprocessing(df):
     df = df.copy()
     # Taker buy ratio: proportion of volume from aggressive buyers
@@ -160,56 +190,79 @@ env = BinanceFuturesTorchTradingEnv(
 
 ## Funding Fees
 
-Futures have periodic funding fees:
-- **Rate**: ±0.01% typically
-- **Frequency**: Every 8 hours (00:00, 08:00, 16:00 UTC)
-- **Direction**: Longs pay shorts (or vice versa)
+Perpetual futures charge funding every 8 hours (00:00 / 08:00 / 16:00 UTC), typically
+±0.01%, paid between longs and shorts.
 
-Environments simulate funding fees automatically.
+**These environments do not model funding.** `grep -ri funding torchtrade/ --include=*.py`
+returns nothing: no offline env accrues it and no live env reads the venue's funding rate.
+A held position therefore costs less in backtest than it does on the exchange, and the
+error grows with holding time and leverage. Budget for it outside the environment when
+evaluating a policy that carries positions across funding timestamps.
 
 ## Example: Basic Futures Trading
 
 ```python
+from torchtrade.envs.core.common_types import MarginType
+
+import os
+import torch
+
 from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 
 config = BinanceFuturesTradingEnvConfig(
-    api_key=os.environ["BINANCE_TESTNET_KEY"],
-    api_secret=os.environ["BINANCE_TESTNET_SECRET"],
     symbol="BTCUSDT",
-    timeframe=TimeFrame(5, TimeFrameUnit.MINUTE),
-    testnet=True,
-    max_leverage=5.0,
-    margin_type="ISOLATED",
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,
+    leverage=5.0,
+    margin_type=MarginType.ISOLATED,
 )
 
-env = BinanceFuturesTorchTradingEnv(config=config)
-obs = env.reset()
+env = BinanceFuturesTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BINANCE_API_KEY"],
+    api_secret=os.environ["BINANCE_SECRET_KEY"],
+)
+td = env.reset()
 
-# Go long with 5x leverage
-action = {"direction": "long", "leverage": 5.0, "size": 0.5}
-obs, reward, done, info = env.step(action)
+# Actions are CATEGORICAL indices into action_levels, which defaults to [-1, 0, 1]:
+# 0 = full short, 1 = flat, 2 = full long. Leverage and size come from the config,
+# not from the action.
+td["action"] = torch.tensor(2)  # go long
+td = env.step(td)
 
-print(f"Position: {info['position']}")
-print(f"Unrealized PnL: ${info['unrealized_pnl']:.2f}")
+# account_state: [exposure, direction, unrealized_pnl_pct, holding_time,
+# leverage, distance_to_liquidation] -- step() returns no `info` dict.
+acct = td["next", "account_state"]
+print(f"Direction: {acct[1].item()}  Unrealized PnL %: {acct[2].item():.4f}")
 ```
 
 ## Example: With Risk Management
 
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesSLTPTradingEnvConfig
+
+import os
+
 from torchtrade.envs.live.binance.env_sltp import BinanceFuturesSLTPTorchTradingEnv
 
 config = BinanceFuturesSLTPTradingEnvConfig(
-    api_key=os.environ["BINANCE_TESTNET_KEY"],
-    api_secret=os.environ["BINANCE_TESTNET_SECRET"],
     symbol="ETHUSDT",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    testnet=True,
-    max_leverage=3.0,
-    sl_percent=0.02,  # 2% stop loss (important with leverage!)
-    tp_percent=0.04,  # 4% take profit
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,
+    leverage=3.0,
+    stoploss_levels=[-0.02],  # 2% stop loss (important with leverage!)
+    takeprofit_levels=[0.04],  # 4% take profit
 )
 
-env = BinanceFuturesSLTPTorchTradingEnv(config=config)
+env = BinanceFuturesSLTPTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BINANCE_API_KEY"],
+    api_secret=os.environ["BINANCE_SECRET_KEY"],
+)
 obs = env.reset()
 ```
 

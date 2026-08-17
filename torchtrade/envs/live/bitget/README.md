@@ -14,21 +14,27 @@ Live trading integration with Bitget for crypto futures markets (USDT-margined).
 ## Quick Start
 
 ```python
+import os
+
+from torchtrade.envs.live.bitget.order_executor import MarginMode
 from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig
-from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = BitgetFuturesTradingEnvConfig(
-    api_key="YOUR_KEY",
-    api_secret="YOUR_SECRET",
-    passphrase="YOUR_PASSPHRASE",
     symbol="BTCUSDT",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    testnet=True,  # Use testnet first!
-    max_leverage=10.0,
-    margin_mode="isolated",
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,  # Use testnet first!
+    leverage=10.0,
+    margin_mode=MarginMode.ISOLATED,
 )
 
-env = BitgetFuturesTorchTradingEnv(config=config)
+env = BitgetFuturesTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BITGET_API_KEY"],
+    api_secret=os.environ["BITGET_SECRET"],
+    api_passphrase=os.environ["BITGET_PASSPHRASE"],
+)
 obs = env.reset()
 ```
 
@@ -43,18 +49,36 @@ obs = env.reset()
 ## Configuration
 
 ```python
-@dataclass
-class BitgetFuturesTradingEnvConfig:
-    api_key: str
-    api_secret: str
-    passphrase: str              # Bitget requires passphrase
-    symbol: str
-    timeframe: TimeFrame
-    testnet: bool = True         # Testnet or mainnet
-    max_leverage: float = 10.0   # Maximum leverage
-    margin_mode: str = "isolated"  # isolated or crossed
-    initial_margin: float = 1000.0
-    window_size: int = 50
+from torchtrade.envs.live.bitget.order_executor import MarginMode
+from torchtrade.envs.core.live import ObservationFailurePolicy
+from torchtrade.envs.live.bitget.order_executor import PositionMode
+from torchtrade.envs.live.bitget import BitgetFuturesTradingEnvConfig
+
+from torchtrade.envs.live.bitget.order_executor import MarginMode
+from torchtrade.envs.core.live import ObservationFailurePolicy
+from torchtrade.envs.live.bitget.order_executor import PositionMode
+
+# Every field of BitgetFuturesTradingEnvConfig, with its real default.
+# Credentials are NOT fields -- they are constructor arguments on the env.
+config = BitgetFuturesTradingEnvConfig(
+    symbol='BTCUSDT',
+    time_frames='1Hour',
+    window_sizes=10,
+    execute_on='1Hour',
+    product_type='USDT-FUTURES',
+    leverage=1,
+    margin_mode=MarginMode.ISOLATED,
+    position_mode=PositionMode.ONE_WAY,
+    action_levels=None,
+    done_on_bankruptcy=True,
+    bankrupt_threshold=0.1,
+    demo=True,
+    seed=42,
+    include_base_features=False,
+    close_position_on_init=True,
+    close_position_on_reset=False,
+    observation_failure_policy=ObservationFailurePolicy.HALT,
+)
 ```
 
 **Note**: Bitget requires a passphrase in addition to API key/secret.
@@ -63,11 +87,10 @@ class BitgetFuturesTradingEnvConfig:
 
 **Testnet**:
 ```python
+from torchtrade.envs.live.bitget import BitgetFuturesTradingEnvConfig
+
 config = BitgetFuturesTradingEnvConfig(
-    api_key=testnet_key,
-    api_secret=testnet_secret,
-    passphrase=testnet_passphrase,
-    testnet=True,
+    demo=True,
 )
 ```
 
@@ -75,11 +98,10 @@ Get testnet credentials: https://www.bitget.com/en/testnet/
 
 **Mainnet**:
 ```python
+from torchtrade.envs.live.bitget import BitgetFuturesTradingEnvConfig
+
 config = BitgetFuturesTradingEnvConfig(
-    api_key=mainnet_key,
-    api_secret=mainnet_secret,
-    passphrase=mainnet_passphrase,
-    testnet=False,
+    demo=False,
 )
 ```
 
@@ -87,61 +109,87 @@ config = BitgetFuturesTradingEnvConfig(
 
 ### Isolated Margin
 ```python
+from torchtrade.envs.live.bitget import BitgetFuturesTradingEnvConfig
+from torchtrade.envs.live.bitget.order_executor import MarginMode
+
 config = BitgetFuturesTradingEnvConfig(
-    margin_mode="isolated",
-    max_leverage=10.0,
+    margin_mode=MarginMode.ISOLATED,
+    leverage=10.0,
 )
 ```
 
 ### Crossed Margin
 ```python
+from torchtrade.envs.live.bitget import BitgetFuturesTradingEnvConfig
+from torchtrade.envs.live.bitget.order_executor import MarginMode
+
 config = BitgetFuturesTradingEnvConfig(
-    margin_mode="crossed",
-    max_leverage=20.0,
+    margin_mode=MarginMode.CROSSED,
+    leverage=20.0,
 )
 ```
 
 ## Example: Basic Trading
 
 ```python
+from torchtrade.envs.live.bitget import BitgetFuturesTradingEnvConfig
+
+import os
+import torch
+
 from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv
 
 config = BitgetFuturesTradingEnvConfig(
-    api_key=os.environ["BITGET_TESTNET_KEY"],
-    api_secret=os.environ["BITGET_TESTNET_SECRET"],
-    passphrase=os.environ["BITGET_TESTNET_PASSPHRASE"],
     symbol="BTCUSDT",
-    timeframe=TimeFrame(5, TimeFrameUnit.MINUTE),
-    testnet=True,
-    max_leverage=5.0,
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,
+    leverage=5.0,
 )
 
-env = BitgetFuturesTorchTradingEnv(config=config)
-obs = env.reset()
+env = BitgetFuturesTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BITGET_API_KEY"],
+    api_secret=os.environ["BITGET_SECRET"],
+    api_passphrase=os.environ["BITGET_PASSPHRASE"],
+)
+td = env.reset()
 
-# Long position
-action = {"direction": "long", "leverage": 5.0, "size": 0.5}
-obs, reward, done, info = env.step(action)
+# Actions are CATEGORICAL indices into action_levels, which on Bitget
+# defaults to [-1.0, -0.5, 0.0, 0.5, 1.0]:
+# 0 = full short, 2 = flat, 4 = full long. Leverage and size come from the config,
+# not from the action.
+td["action"] = torch.tensor(4)  # go full long
+td = env.step(td)
 ```
 
 ## Example: With SL/TP
 
 ```python
+from torchtrade.envs.live.bitget import BitgetFuturesSLTPTradingEnvConfig
+
+import os
+
 from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTorchTradingEnv
 
 config = BitgetFuturesSLTPTradingEnvConfig(
-    api_key=os.environ["BITGET_TESTNET_KEY"],
-    api_secret=os.environ["BITGET_TESTNET_SECRET"],
-    passphrase=os.environ["BITGET_TESTNET_PASSPHRASE"],
     symbol="ETHUSDT",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    testnet=True,
-    max_leverage=3.0,
-    sl_percent=0.02,
-    tp_percent=0.04,
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,
+    leverage=3.0,
+    stoploss_levels=[-0.02],
+    takeprofit_levels=[0.04],
 )
 
-env = BitgetFuturesSLTPTorchTradingEnv(config=config)
+env = BitgetFuturesSLTPTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BITGET_API_KEY"],
+    api_secret=os.environ["BITGET_SECRET"],
+    api_passphrase=os.environ["BITGET_PASSPHRASE"],
+)
 obs = env.reset()
 ```
 
@@ -153,7 +201,7 @@ obs = env.reset()
 
 Lower than most competitors!
 
-**Funding Fees**:
+**Funding Fees** (charged by the venue; **not modelled by these environments**):
 - Rate: Varies (typically ±0.01%)
 - Frequency: Every 8 hours
 
@@ -171,7 +219,7 @@ Check symbols: https://api.bitget.com/api/mix/v1/market/contracts?productType=um
 2. **Start with testnet**: Test thoroughly before live trading
 3. **Use conservative leverage**: 2-5x recommended
 4. **Enable IP whitelist**: Restrict API access to known IPs
-5. **Monitor fees**: Funding fees can add up
+5. **Monitor fees**: funding fees can add up, and nothing here accounts for them
 
 ## API Rate Limits
 

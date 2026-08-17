@@ -9,7 +9,10 @@ live/
 ├── shared/      # Shared components (futures base observation)
 ├── alpaca/      # Alpaca (US equities & crypto spot)
 ├── binance/     # Binance Futures (crypto)
-└── bitget/      # Bitget Futures (crypto)
+├── bitget/      # Bitget Futures (crypto)
+├── bybit/       # Bybit Futures (crypto, cross/isolated margin)
+├── okx/         # OKX Futures (crypto, bybit-derived)
+└── polymarket/  # Polymarket prediction markets (has a dry_run paper path)
 ```
 
 ## Supported Providers
@@ -22,111 +25,160 @@ live/
 ### Binance (`binance/`)
 - **Markets**: Crypto futures (USDT-margined)
 - **Environments**: `BinanceFuturesTorchTradingEnv`, `BinanceFuturesSLTPTorchTradingEnv`
-- **Features**: Leverage trading, isolated/cross margin, funding fees
+- **Features**: Leverage trading, isolated/cross margin
 
 ### Bitget (`bitget/`)
 - **Markets**: Crypto futures (USDT-margined)
 - **Environments**: `BitgetFuturesTorchTradingEnv`, `BitgetFuturesSLTPTorchTradingEnv`
-- **Features**: Leverage trading, low fees, copy trading integration
+- **Features**: Leverage trading, cross/isolated margin, one-way or hedge position mode
+
+### Bybit (`bybit/`)
+- **Markets**: Crypto futures (USDT-margined)
+- **Environments**: `BybitFuturesTorchTradingEnv`, `BybitFuturesSLTPTorchTradingEnv`
+- **Features**: Leverage trading, cross/isolated margin, testnet
+
+### OKX (`okx/`)
+- **Markets**: Crypto futures (USDT-margined)
+- **Environments**: `OKXFuturesTorchTradingEnv`, `OKXFuturesSLTPTorchTradingEnv`
+- **Features**: Bybit-derived integration, leverage trading, testnet
+
+### Polymarket (`polymarket/`)
+- **Markets**: Prediction markets
+- **Components**: `PolymarketBetEnv`, `MarketScanner`, `PolymarketOrderExecutor`
+- **Features**: `dry_run` paper path
+
+No environment on any venue models funding fees -- see the note in `binance/README.md`.
 
 ## Quick Start
 
 ### Alpaca Live Trading
 
 ```python
+import os
+
+import torch
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
-from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = AlpacaTradingEnvConfig(
-    api_key="YOUR_API_KEY",
-    api_secret="YOUR_SECRET_KEY",
     paper=True,  # Use paper trading for testing
     symbol="AAPL",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    initial_cash=10000.0,
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
 )
 
-env = AlpacaTorchTradingEnv(config=config)
+env = AlpacaTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
+)
 
 # Run live trading loop
-obs = env.reset()
+td = env.reset()
 while True:
-    action = agent.get_action(obs)
-    obs, reward, done, info = env.step(action)
-
-    if done:
+    td["action"] = agent.get_action(td)
+    # Returns (transition_td, next_root_td). The transition carries ("next", ...) --
+    # the outcome and the done flag -- while ITS root is the observation you just acted
+    # on. The second element is the step_mdp'd observation to act on next. Keeping only
+    # the first stalls the policy on the reset observation forever.
+    transition, td = env.step_and_maybe_reset(td)
+    if transition["next", "done"]:
         break
 ```
 
 ### Binance Futures Trading
 
 ```python
+from torchtrade.envs.core.common_types import MarginType
+
+import os
 from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
-from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 config = BinanceFuturesTradingEnvConfig(
-    api_key="YOUR_API_KEY",
-    api_secret="YOUR_SECRET_KEY",
     symbol="BTCUSDT",
-    timeframe=TimeFrame(1, TimeFrameUnit.MINUTE),
-    testnet=True,  # Use testnet for testing
-    max_leverage=10.0,
-    margin_type="ISOLATED",
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    demo=True,  # Use testnet for testing
+    leverage=10.0,
+    margin_type=MarginType.ISOLATED,
 )
 
-env = BinanceFuturesTorchTradingEnv(config=config)
+env = BinanceFuturesTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["BINANCE_API_KEY"],
+    api_secret=os.environ["BINANCE_SECRET_KEY"],
+)
 
 # Run trading loop
-obs = env.reset()
-while not done:
-    action = agent.get_action(obs)
-    obs, reward, done, info = env.step(action)
+td = env.reset()
+while True:
+    td["action"] = agent.get_action(td)
+    # step_and_maybe_reset returns (transition_td, next_root_td). BOTH are needed:
+    # `transition` carries ("next", ...) -- the outcome and the done flag -- while its
+    # ROOT is still the observation you just acted on. `root` is the step_mdp'd
+    # observation to act on next. Keeping only [0] leaves the policy reading the reset
+    # observation forever, which is the same silent stall as `td = env.step(td)`.
+    transition, root = env.step_and_maybe_reset(td)
+    if transition["next", "done"]:
+        break
+    td = root
 ```
 
 ## Configuration
 
 ### Common Parameters
 
-All live environments share these base parameters:
+The non-SLTP live environments share these base parameters:
 
 ```python
-@dataclass
-class LiveEnvConfig:
-    api_key: str                   # API key
-    api_secret: str                # API secret
-    symbol: str                    # Trading symbol
-    timeframe: TimeFrame           # Bar timeframe
-    window_size: int = 50         # Observation window
-    initial_cash: float = 10000.0  # Starting capital
+# There is no shared LiveEnvConfig -- each exchange ships its own dataclass. What they
+# have in common:
+#
+#   symbol, time_frames (a LIST), window_sizes (one per timeframe), execute_on,
+#   action_levels, done_on_bankruptcy, bankrupt_threshold, seed,
+#   include_base_features
+#
+# Futures configs add: leverage, margin_type/margin_mode, demo,
+#   close_position_on_init, close_position_on_reset, observation_failure_policy
+# Alpaca adds: paper, trade_mode
+#
+# Credentials are CONSTRUCTOR arguments on every exchange, never config fields.
+# See the per-exchange READMEs for the exact field list.
 ```
 
 ### Provider-Specific
 
+These are standalone dataclasses -- there is no shared base to inherit from. The fields
+that differ between exchanges:
+
 **Alpaca:**
 ```python
-@dataclass
-class AlpacaTradingEnvConfig(LiveEnvConfig):
-    paper: bool = True             # Paper or live trading
-    base_url: str = None           # Custom API endpoint
-    extended_hours: bool = False   # Trade extended hours
+paper: bool = True                          # Paper or live trading
+trade_mode: str = "notional"                # "notional" | "quantity" here.
+# "fractional" is validated and implemented only on AlpacaSLTPTradingEnvConfig; this
+# config accepts the string without validating and then executes it as quantity mode.
 ```
 
 **Binance:**
 ```python
-@dataclass
-class BinanceFuturesTradingEnvConfig(LiveEnvConfig):
-    testnet: bool = True           # Testnet or mainnet
-    max_leverage: float = 10.0     # Maximum leverage
-    margin_type: str = "ISOLATED"  # ISOLATED or CROSS
+from torchtrade.envs.core.common_types import MarginType
+
+demo: bool = True                           # Testnet or mainnet
+leverage: int = 1                           # the leverage APPLIED, not a cap
+margin_type: MarginType = MarginType.ISOLATED   # ISOLATED or CROSSED (the enum)
 ```
 
 **Bitget:**
 ```python
-@dataclass
-class BitgetFuturesTradingEnvConfig(LiveEnvConfig):
-    testnet: bool = True           # Testnet or mainnet
-    max_leverage: float = 10.0     # Maximum leverage
-    margin_mode: str = "isolated"  # isolated or crossed
+from torchtrade.envs.live.bitget.order_executor import MarginMode
+from torchtrade.envs.live.bitget.order_executor import PositionMode
+
+demo: bool = True                           # Testnet or mainnet
+leverage: int = 1                           # the leverage APPLIED, not a cap
+margin_mode: MarginMode = MarginMode.ISOLATED   # ISOLATED or CROSSED (the enum)
+position_mode: PositionMode = PositionMode.ONE_WAY
+product_type: str = "USDT-FUTURES"
 ```
 
 ## Safety Features
@@ -136,29 +188,34 @@ class BitgetFuturesTradingEnvConfig(LiveEnvConfig):
 Always test strategies in safe environments:
 
 ```python
+from torchtrade.envs.live.alpaca import AlpacaTradingEnvConfig
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
+
 # Alpaca paper trading
 config = AlpacaTradingEnvConfig(
-    api_key=key,
-    api_secret=secret,
     paper=True,  # No real money
 )
 
 # Binance testnet
 config = BinanceFuturesTradingEnvConfig(
-    api_key=key,
-    api_secret=secret,
-    testnet=True,  # Fake funds
+    demo=True,  # Fake funds
 )
 ```
 
 ### Position Limits
 
-Set maximum position sizes:
+Position size is capped by `action_levels` -- each entry is the fraction of the
+portfolio an action allocates, so the largest level is the maximum exposure:
 
 ```python
+from torchtrade.envs.live.alpaca import AlpacaTradingEnvConfig
+
 config = AlpacaTradingEnvConfig(
-    # ...
-    max_position_size=0.1,  # Max 10% of portfolio
+    symbol="BTC/USD",
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    action_levels=[0.0, 0.25, 0.5],  # never more than 50% of the portfolio
 )
 ```
 
@@ -167,21 +224,27 @@ config = AlpacaTradingEnvConfig(
 Use SL/TP environments for automatic risk management:
 
 ```python
+from torchtrade.envs.live.alpaca import AlpacaSLTPTradingEnvConfig
+
+import os
 from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv
 
 config = AlpacaSLTPTradingEnvConfig(
     # ...
-    sl_percent=0.02,  # 2% stop loss
-    tp_percent=0.05,  # 5% take profit
+    stoploss_levels=[-0.02],  # 2% stop loss
+    takeprofit_levels=[0.05],  # 5% take profit
 )
 
-env = AlpacaSLTPTorchTradingEnv(config=config)
+env = AlpacaSLTPTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
+)
 ```
 
 ### Error Handling
 
 Environments handle common errors:
-- Network failures → Auto-retry with exponential backoff
 - API rate limits → Automatic throttling
 - Invalid orders → Error logging, no crash
 - Position desync → Automatic reconciliation
@@ -193,13 +256,23 @@ Environments handle common errors:
 Live environments stream real-time market data:
 
 ```python
-env = AlpacaTorchTradingEnv(config=config)
+from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv
+import os
+import torch
+
+env = AlpacaTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
+)
 
 # Data updates automatically
-obs = env.reset()  # Gets latest market data
+td = env.reset()  # Gets latest market data
 
-# Step waits for new bar
-obs, reward, done, info = env.step(action)  # Waits for next bar
+# Step blocks until the new bar arrives
+td["action"] = torch.tensor(1)
+transition, td = env.step_and_maybe_reset(td)  # Waits for next bar
+
 ```
 
 ### Latency Considerations
@@ -213,16 +286,29 @@ obs, reward, done, info = env.step(action)  # Waits for next bar
 Environments sync with market time:
 
 ```python
-# 1-minute bars: step() returns when new bar arrives
+from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv
+from torchtrade.envs.live.alpaca import AlpacaTradingEnvConfig
+import os
+import time
+import torch
+
+# 1-minute bars: step() returns when the new bar arrives
 env = AlpacaTorchTradingEnv(
-    config=AlpacaTradingEnvConfig(
-        timeframe=TimeFrame(1, TimeFrameUnit.MINUTE)
-    )
+    AlpacaTradingEnvConfig(
+        time_frames=["1Min"],
+        window_sizes=[10],
+        execute_on="1Min",
+    ),
+    api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
 )
 
-# Step waits until next minute
+# Step blocks until the next minute closes
+td = env.reset()
 start = time.time()
-obs, reward, done, info = env.step(action)
+td["action"] = torch.tensor(1)
+transition, td = env.step_and_maybe_reset(td)
+
 elapsed = time.time() - start
 # elapsed ≈ 60 seconds (wait for new bar)
 ```
@@ -233,13 +319,14 @@ elapsed = time.time() - start
 
 **Market Orders** (default):
 ```python
-action = 0  # BUY at market price
+import torch
+
+action = torch.tensor(2)  # action_levels [0.0, 0.5, 1.0] -> 2 = fully long
 ```
 
-**Limit Orders** (future feature):
-```python
-action = {"type": "limit", "price": 100.0, "side": "buy"}
-```
+**Limit Orders**: not exposed through the action space. Actions are categorical indices
+into `action_levels`; order type is decided by the executor, which places market orders
+for entries and native bracket orders for SL/TP.
 
 ### Execution Flow
 
@@ -252,10 +339,14 @@ action = {"type": "limit", "price": 100.0, "side": "buy"}
 
 ### Partial Fills
 
-Environments handle partial fills:
-- Retry until fully filled
-- Or adjust position size accordingly
-- Logged in `info` dict
+There is **no retry-to-fill**: the env does not resubmit the unfilled remainder. What it
+does do is stop the agent from being locked out of correcting it. A partial fill leaves
+the position *direction* intact, so the duplicate-action guard would otherwise suppress
+every corrective order silently and permanently; `core/live.py` compares held size
+against the requested size and releases the guard when they differ by more than the
+venue's minimum tradeable size, so the next action can resize. `account_state` reports
+what the exchange actually holds, so a partial fill shows up as a smaller
+`exposure_pct` than the action asked for.
 
 ## Position Management
 
@@ -264,10 +355,14 @@ Environments handle partial fills:
 Environments track positions automatically:
 
 ```python
-obs, reward, done, info = env.step(action)
+td["action"] = action
+transition, td = env.step_and_maybe_reset(td)
 
-current_position = info["position"]
-current_pnl = info["unrealized_pnl"]
+
+# account_state is [exposure, direction, unrealized_pnl_pct, holding_time,
+# leverage, distance_to_liquidation] -- there is no `info` dict.
+direction = transition["next", "account_state"][1].item()
+unrealized_pnl_pct = transition["next", "account_state"][2].item()
 ```
 
 ### Position Synchronization
@@ -280,12 +375,18 @@ Environments sync with exchange:
 ### Closing Positions
 
 ```python
-# Close all positions
-action = 1  # SELL action
-obs, reward, done, info = env.step(action)
+import torch
 
-# Or use close_all_positions() method
-env.close_all_positions()
+# Close all positions
+action = torch.tensor(env.action_levels.index(0.0))  # the flat level
+# Non-SLTP envs only -- SLTP envs have no action_levels -- and only when 0.0 is among
+# them: validate_action_levels checks range and duplicates, never that a flat level exists.
+td["action"] = action
+transition, td = env.step_and_maybe_reset(td)
+
+
+# Or close directly through the trader
+env.trader.close_position()
 ```
 
 ## Monitoring
@@ -295,11 +396,18 @@ env.close_all_positions()
 Environments log important events:
 
 ```python
+from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv
+
+import os
 import logging
 
 logging.basicConfig(level=logging.INFO)
 
-env = AlpacaTorchTradingEnv(config=config)
+env = AlpacaTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
+)
 # Logs:
 # - Order submissions
 # - Fills
@@ -313,11 +421,9 @@ Track live performance:
 
 ```python
 # Get real-time metrics
-metrics = env.get_metrics()
 
-print(f"Portfolio Value: ${metrics['portfolio_value']:.2f}")
-print(f"Total PnL: ${metrics['realized_pnl']:.2f}")
-print(f"Open Positions: {metrics['num_positions']}")
+print(f"Portfolio Value: ${env.history.portfolio_values[-1]:.2f}")
+print(f"Steps recorded: {len(env.history.portfolio_values)}")
 ```
 
 ### Integration with Monitoring Tools
@@ -345,11 +451,13 @@ Environments can integrate with monitoring:
 ### Error Recovery
 
 ```python
+import sys
+
 import signal
 
 def signal_handler(sig, frame):
     print("Shutting down gracefully...")
-    env.close_all_positions()
+    env.trader.close_position()
     env.close()
     sys.exit(0)
 
@@ -358,16 +466,20 @@ signal.signal(signal.SIGINT, signal_handler)
 
 ### API Key Security
 
-**Never hardcode keys:**
+**Never hardcode keys.** They are constructor arguments, so this is where the contrast
+lives -- the config itself never holds a credential:
+
 ```python
-# Bad
-config = AlpacaTradingEnvConfig(
-    api_key="AKXXXXXXXXXXXX",  # Don't do this!
-)
+from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv
+
+import os
+
+# Bad -- a key in the source is a key in your git history
+env = AlpacaTorchTradingEnv(config, api_key="PKXXXXXXXXXXXXXXXXXX")
 
 # Good
-import os
-config = AlpacaTradingEnvConfig(
+env = AlpacaTorchTradingEnv(
+    config,
     api_key=os.environ["ALPACA_API_KEY"],
     api_secret=os.environ["ALPACA_SECRET_KEY"],
 )
@@ -376,6 +488,9 @@ config = AlpacaTradingEnvConfig(
 ## Testing Live Environments
 
 ```python
+from torchtrade.envs.live.alpaca import AlpacaTradingEnvConfig
+
+import os
 import pytest
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv
 
@@ -383,17 +498,18 @@ from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv
 def test_alpaca_connection():
     """Test connection to Alpaca paper trading"""
     config = AlpacaTradingEnvConfig(
-        api_key=os.environ["ALPACA_KEY"],
-        api_secret=os.environ["ALPACA_SECRET"],
         paper=True,
         symbol="SPY",
     )
 
-    env = AlpacaTorchTradingEnv(config=config)
-    obs = env.reset()
+    env = AlpacaTorchTradingEnv(
+    # Credentials are CONSTRUCTOR arguments, not config fields.
+    config, api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
+)
+    td = env.reset()
 
-    assert obs is not None
-    assert env.is_connected()
+    assert td is not None
 ```
 
 ## Troubleshooting
@@ -412,9 +528,9 @@ def test_alpaca_connection():
 - Leverage too high
 
 **Position desync:**
-- Environment resets automatically
 - Check exchange for manual trades
-- Use `sync_positions()` method
+- The env re-reads the exchange position every step, so a manual trade is picked
+  up on the next bar (see `_sync_position_from_exchange`)
 
 ## See Also
 

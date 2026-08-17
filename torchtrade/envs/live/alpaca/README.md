@@ -45,21 +45,23 @@ td = env.reset()  # a TensorDict, not a bare array
 ## Configuration
 
 ```python
-@dataclass
-class AlpacaTradingEnvConfig:
-    symbol: str = "BTC/USD"
-    action_levels: Optional[List[float]] = None     # None -> [0.0, 0.5, 1.0]
-    time_frames: Union[List[str | TimeFrame], str, TimeFrame] = "1Hour"
-    window_sizes: Union[List[int], int] = 10        # one per timeframe
-    execute_on: Union[str, TimeFrame] = "1Hour"     # which timeframe drives a step
-    done_on_bankruptcy: bool = True
-    bankrupt_threshold: float = 0.1
-    paper: bool = True                              # Paper or live trading
-    trade_mode: Literal["fractional", "notional", "quantity"] = "notional"
-    seed: Optional[int] = 42
-    include_base_features: bool = False
-    # Credentials are CONSTRUCTOR arguments, not fields:
-    #   AlpacaTorchTradingEnv(config, api_key=..., api_secret=...)
+from torchtrade.envs.live.alpaca import AlpacaTradingEnvConfig
+
+# Every field of AlpacaTradingEnvConfig, with its real default.
+# Credentials are NOT fields -- they are constructor arguments on the env.
+config = AlpacaTradingEnvConfig(
+    symbol='BTC/USD',
+    action_levels=None,
+    time_frames='1Hour',
+    window_sizes=10,
+    execute_on='1Hour',
+    done_on_bankruptcy=True,
+    bankrupt_threshold=0.1,
+    paper=True,
+    trade_mode='notional',
+    seed=42,
+    include_base_features=False,
+)
 ```
 
 ## Supported Symbols
