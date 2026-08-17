@@ -38,7 +38,13 @@ def _step_and_decimals(step_str: str):
     sites kept doing the string surgery -- which is how bybit came to refuse every open
     over a 1e-06 step (#278). Shared now.
     """
-    return float(Decimal(step_str)), decimals_for_step(step_str)
+    step = float(Decimal(step_str))
+    # isfinite, because decimals_for_step is total by design and answers 0 for NaN. This
+    # guard is deliberately fail-CLOSED -- a junk stepSize must abort construction, not
+    # sail through and surface as "cannot convert float NaN to integer" at order time.
+    if not math.isfinite(step):
+        raise ValueError(f"non-finite LOT_SIZE step {step_str!r}")
+    return step, decimals_for_step(step_str)
 
 
 
@@ -197,8 +203,8 @@ class BinanceFuturesOrderClass:
                         # crash, it logs "position opened without SL" and leaves a live
                         # position the policy has no way to exit under lock_position_until_sltp.
                         if tick_size > 0:
-                            self._tick_size = tick_size
-                            self._tick_decimals = decimals_for_step(tick_size)
+                            tick_decimals = decimals_for_step(tick_size)
+                            self._tick_size, self._tick_decimals = tick_size, tick_decimals
                 except Exception as e:
                     logger.warning(
                         f"Skipping malformed {f.get('filterType', '?')} for {symbol}: {e}"

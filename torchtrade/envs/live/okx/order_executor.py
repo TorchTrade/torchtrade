@@ -173,12 +173,14 @@ class OKXFuturesOrderClass:
                 # default is 3. Zeroing it re-created the #278 rounding bug on the
                 # degraded path -- _format_size(0.977065) -> '1'.
                 lot_sz_str = instrument.get("lotSz", "0.001")
+                # Everything parsed BEFORE anything is assigned: a blank minSz raising
+                # between the two left decimals overwritten and the cache None, which
+                # falls back to a 0.001 step and re-creates the #278 rounding bug.
                 qty_step = float(lot_sz_str)
-                self._lot_size_decimals = decimals_for_step(lot_sz_str)
-                self._lot_size_cache = {
-                    "min_qty": float(instrument.get("minSz", 0.001)),
-                    "qty_step": qty_step,
-                }
+                min_qty = float(instrument.get("minSz", 0.001))
+                lot_decimals = decimals_for_step(lot_sz_str)
+                self._lot_size_decimals = lot_decimals
+                self._lot_size_cache = {"min_qty": min_qty, "qty_step": qty_step}
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
 

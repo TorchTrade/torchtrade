@@ -177,6 +177,10 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
 
         # Get updated state
         new_portfolio_value, new_price, next_tensordict = self._acquire_post_bar_state()
+        # None when the account is flat: there is no position mark to read, and
+        # fetching one would add a round-trip that can halt the episode. The
+        # pre-trade price is the honest fallback -- flat rows carry no PnL anyway.
+        new_price = new_price if new_price is not None else current_price
 
         # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(

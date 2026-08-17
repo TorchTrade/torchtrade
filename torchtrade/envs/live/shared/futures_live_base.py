@@ -143,10 +143,20 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         different bars: `price[t] == close[t-1]` while `portfolio_value[t] == equity[t]`.
         Offline records both at the new bar (`offline/sequential.py`), and replay
         agreeing with offline is the whole point of #278.
+
+        The mark is taken from the snapshot `_get_observation` ALREADY read, not from a
+        fresh `_current_mark_price()`. Fetching it again was wrong twice over: it added a
+        fourth venue round-trip per step whose value came from a DIFFERENT moment than
+        the `unrealized_pnl_pct` and `exposure_pct` in the same row -- re-creating, on the
+        live path, the two-moments-one-row problem this method exists to fix -- and it
+        introduced a halt trigger that could not exist before, so a blank post-bar ticker
+        would emergency-FLATTEN a real position. A price for the history is not worth a
+        market order.
         """
         def read():
+            self._last_observed_mark = None
             observation = self._get_observation()
-            return self._get_portfolio_value(), self._current_mark_price(), observation
+            return self._get_portfolio_value(), self._last_observed_mark, observation
 
         return self._halting(read)
 
@@ -269,6 +279,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             position_size = position_status.qty
             position_value = abs(position_status.notional_value)
             current_price = position_status.mark_price
+            self._last_observed_mark = current_price
             unrealized_pnl_pct = position_status.unrealized_pnl_pct
             leverage = float(position_status.leverage)
             liquidation_price = position_status.liquidation_price

@@ -177,6 +177,10 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         self._wait_for_next_timestamp()
 
         new_portfolio_value, new_price, next_tensordict = self._acquire_post_bar_state()
+        # None when the account is flat: there is no position mark to read, and
+        # fetching one would add a round-trip that can halt the episode. The
+        # pre-trade price is the honest fallback -- flat rows carry no PnL anyway.
+        new_price = new_price if new_price is not None else current_price
 
         side, _, _ = action_tuple
         if side == "long":

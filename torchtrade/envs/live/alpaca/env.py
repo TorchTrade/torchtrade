@@ -140,8 +140,14 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         next_tensordict = self._get_observation()
         new_portfolio_value = self._get_portfolio_value()
         # Post-bar price too: recording the pre-trade one here put two different bars in
-        # a single history row (#278).
-        new_price = self._get_current_price()
+        # a single history row (#278). Non-fatal, unlike the observation and equity reads
+        # above -- this value only labels a history row, and letting it raise here would
+        # add a failure point that can end a live episode for a price nothing trades on.
+        try:
+            new_price = self._get_current_price()
+        except Exception:
+            logger.warning("post-bar price unavailable; recording the pre-trade price")
+            new_price = current_price
 
         # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(

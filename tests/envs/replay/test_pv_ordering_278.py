@@ -71,14 +71,17 @@ def test_the_recorded_portfolio_value_is_the_bar_the_action_moved_to():
     )
 
 
-def test_the_recorded_price_is_the_same_bar_as_the_recorded_portfolio_value():
-    """Both facts in a history row must describe one bar.
+def test_the_recorded_price_and_portfolio_value_describe_the_same_bar():
+    """Both facts in a history row must come from one bar.
 
-    The first version of this fix moved only the PV, leaving `price=` on the pre-trade
-    mark: `price[t] == close[t-1]` while `portfolio_value[t] == equity[t]`. Before that
-    the pair was at least self-consistent, and offline records both at the new bar --
-    replay agreeing with offline is what #278 is for.
+    The first version of this test asserted only that the recorded price was within 1.0
+    of SOME close in the frame -- which every bar satisfies, so reverting `price=` to the
+    pre-trade mark left it passing. It tested nothing. This pins the price and the equity
+    to the SAME post-step snapshot, and fails under either mutation: price reverted to
+    pre-trade, or the pair read before the observation.
     """
+    import torch
+
     df = _df()
     config = BybitFuturesSLTPTradingEnvConfig(
         symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10], execute_on="1m",
@@ -89,14 +92,28 @@ def test_the_recorded_price_is_the_same_bar_as_the_recorded_portfolio_value():
     observer = ReplayObserver(df=df, time_frames=config.time_frames,
                               window_sizes=config.window_sizes,
                               execute_on=config.execute_on, executor=executor)
+
+    snapshot = lambda: (executor.get_account_balance()["total_margin_balance"],
+                        executor.get_mark_price())
+    at_decision, at_next, recorded = [], [], []
+
     with patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
         env = BybitFuturesSLTPTorchTradingEnv(config=config, observer=observer, trader=executor)
         td = env.reset()
-        for _ in range(5):
-            td["action"] = env.action_spec.rand()
-            td = env.step_and_maybe_reset(td)[1]
+        for step in range(8):
+            at_decision.append(snapshot())
+            acted = td.clone()
+            # Fixed, not action_spec.rand(): an unseeded action sequence makes a failure
+            # unreproducible, and holding a position open is what exposes the lag.
+            acted["action"] = torch.tensor(1 if step == 0 else 0)
+            td = env.step(acted)["next"]
+            at_next.append(snapshot())
+            recorded.append((env.history.portfolio_values[-1], env.history.base_prices[-1]))
 
-    closes = list(df["close"])
-    for recorded_price in env.history.base_prices:
-        lag = [abs(recorded_price - c) for c in closes]
-        assert min(lag) < 1.0, f"recorded price {recorded_price} is not any bar's close"
+    stale = [i for i, (r, d) in enumerate(zip(recorded, at_decision))
+             if r[1] == pytest.approx(d[1])]
+    correct = [i for i, (r, n) in enumerate(zip(recorded, at_next)) if r == pytest.approx(n)]
+    assert len(correct) == len(recorded) and not stale, (
+        f"{len(correct)}/{len(recorded)} rows have BOTH facts at the post-bar snapshot; "
+        f"rows {stale} carry the decision bar's price against the next bar's equity (#278)"
+    )
