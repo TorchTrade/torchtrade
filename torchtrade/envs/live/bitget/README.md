@@ -50,6 +50,11 @@ obs = env.reset()
 ## Configuration
 
 ```python
+from torchtrade.envs.live.bitget.order_executor import MarginMode
+from torchtrade.envs.core.live import ObservationFailurePolicy
+from torchtrade.envs.live.bitget.order_executor import PositionMode
+from dataclasses import dataclass
+
 @dataclass
 class BitgetFuturesTradingEnvConfig:
     symbol = 'BTCUSDT'
@@ -78,6 +83,8 @@ class BitgetFuturesTradingEnvConfig:
 
 **Testnet**:
 ```python
+from torchtrade.envs.live.bitget import BitgetFuturesTradingEnvConfig
+
 config = BitgetFuturesTradingEnvConfig(
     demo=True,
 )
@@ -87,6 +94,8 @@ Get testnet credentials: https://www.bitget.com/en/testnet/
 
 **Mainnet**:
 ```python
+from torchtrade.envs.live.bitget import BitgetFuturesTradingEnvConfig
+
 config = BitgetFuturesTradingEnvConfig(
     demo=False,
 )
@@ -96,6 +105,9 @@ config = BitgetFuturesTradingEnvConfig(
 
 ### Isolated Margin
 ```python
+from torchtrade.envs.live.bitget import BitgetFuturesTradingEnvConfig
+from torchtrade.envs.live.bitget.order_executor import MarginMode
+
 config = BitgetFuturesTradingEnvConfig(
     margin_mode=MarginMode.ISOLATED,
     leverage=10.0,
@@ -104,6 +116,9 @@ config = BitgetFuturesTradingEnvConfig(
 
 ### Crossed Margin
 ```python
+from torchtrade.envs.live.bitget import BitgetFuturesTradingEnvConfig
+from torchtrade.envs.live.bitget.order_executor import MarginMode
+
 config = BitgetFuturesTradingEnvConfig(
     margin_mode=MarginMode.CROSSED,
     leverage=20.0,
@@ -113,6 +128,11 @@ config = BitgetFuturesTradingEnvConfig(
 ## Example: Basic Trading
 
 ```python
+from torchtrade.envs.live.bitget import BitgetFuturesTradingEnvConfig
+
+import os
+import torch
+
 from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv
 
 config = BitgetFuturesTradingEnvConfig(
@@ -130,16 +150,22 @@ env = BitgetFuturesTorchTradingEnv(
     api_secret=os.environ["BITGET_SECRET"],
     api_passphrase=os.environ["BITGET_PASSPHRASE"],
 )
-obs = env.reset()
+td = env.reset()
 
-# Long position
-action = {"direction": "long", "leverage": 5.0, "size": 0.5}
-obs, reward, done, info = env.step(action)
+# Actions are CATEGORICAL indices into action_levels, which defaults to [-1, 0, 1]:
+# 0 = full short, 1 = flat, 2 = full long. Leverage and size come from the config,
+# not from the action.
+td["action"] = torch.tensor(2)  # go long
+td = env.step(td)
 ```
 
 ## Example: With SL/TP
 
 ```python
+from torchtrade.envs.live.bitget import BitgetFuturesSLTPTradingEnvConfig
+
+import os
+
 from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTorchTradingEnv
 
 config = BitgetFuturesSLTPTradingEnvConfig(

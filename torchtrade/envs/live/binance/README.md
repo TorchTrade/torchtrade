@@ -49,6 +49,10 @@ obs = env.reset()
 ## Configuration
 
 ```python
+from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.live import ObservationFailurePolicy
+from dataclasses import dataclass
+
 @dataclass
 class BinanceFuturesTradingEnvConfig:
     symbol = 'BTCUSDT'
@@ -73,6 +77,8 @@ class BinanceFuturesTradingEnvConfig:
 
 **Testnet** (recommended for development):
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
+
 config = BinanceFuturesTradingEnvConfig(
     demo=True,  # Fake funds
 )
@@ -82,6 +88,8 @@ Get testnet API keys: https://testnet.binancefuture.com/
 
 **Mainnet** (real money):
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
+
 config = BinanceFuturesTradingEnvConfig(
     demo=False,  # Real trading!
 )
@@ -95,6 +103,9 @@ config = BinanceFuturesTradingEnvConfig(
 - Lower risk, position-specific leverage
 
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
+from torchtrade.envs.core.common_types import MarginType
+
 config = BinanceFuturesTradingEnvConfig(
     margin_type=MarginType.ISOLATED,
     leverage=10.0,
@@ -107,6 +118,9 @@ config = BinanceFuturesTradingEnvConfig(
 - Higher leverage, shared risk
 
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
+from torchtrade.envs.core.common_types import MarginType
+
 config = BinanceFuturesTradingEnvConfig(
     margin_type=MarginType.CROSSED,
     leverage=20.0,
@@ -118,6 +132,8 @@ config = BinanceFuturesTradingEnvConfig(
 Set leverage per symbol:
 
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
+
 # Conservative leverage
 config = BinanceFuturesTradingEnvConfig(
     leverage=3.0,  # 3x leverage
@@ -147,6 +163,8 @@ The Binance observation class exposes all fields from Binance klines to your cus
 These extra fields allow you to derive sentiment features without additional API calls:
 
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesTorchTradingEnv
+
 def my_preprocessing(df):
     df = df.copy()
     # Taker buy ratio: proportion of volume from aggressive buyers
@@ -180,6 +198,11 @@ Environments simulate funding fees automatically.
 ## Example: Basic Futures Trading
 
 ```python
+from torchtrade.envs.core.common_types import MarginType
+
+import os
+import torch
+
 from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 
 config = BinanceFuturesTradingEnvConfig(
@@ -197,19 +220,27 @@ env = BinanceFuturesTorchTradingEnv(
     config, api_key=os.environ["BINANCE_API_KEY"],
     api_secret=os.environ["BINANCE_SECRET_KEY"],
 )
-obs = env.reset()
+td = env.reset()
 
-# Go long with 5x leverage
-action = {"direction": "long", "leverage": 5.0, "size": 0.5}
-obs, reward, done, info = env.step(action)
+# Actions are CATEGORICAL indices into action_levels, which defaults to [-1, 0, 1]:
+# 0 = full short, 1 = flat, 2 = full long. Leverage and size come from the config,
+# not from the action.
+td["action"] = torch.tensor(2)  # go long
+td = env.step(td)
 
-print(f"Position: {info['position']}")
-print(f"Unrealized PnL: ${info['unrealized_pnl']:.2f}")
+# account_state: [exposure, direction, unrealized_pnl_pct, holding_time,
+# leverage, distance_to_liquidation] -- step() returns no `info` dict.
+acct = td["next", "account_state"]
+print(f"Direction: {acct[1].item()}  Unrealized PnL %: {acct[2].item():.4f}")
 ```
 
 ## Example: With Risk Management
 
 ```python
+from torchtrade.envs.live.binance import BinanceFuturesSLTPTradingEnvConfig
+
+import os
+
 from torchtrade.envs.live.binance.env_sltp import BinanceFuturesSLTPTorchTradingEnv
 
 config = BinanceFuturesSLTPTradingEnvConfig(

@@ -57,17 +57,19 @@ env = AlpacaTorchTradingEnv(
 # Run live trading loop
 td = env.reset()
 while True:
-    action = agent.get_action(obs)
-    td["action"] = action
-    td = env.step(td)
-
-    if done:
+    td["action"] = agent.get_action(td)
+    # step_and_maybe_reset returns (next_td, reset_td); the first element is the one
+    # to keep stepping. Plain step() leaves the root observation at its reset value.
+    td = env.step_and_maybe_reset(td)[0]
+    if td["next", "done"]:
         break
 ```
 
 ### Binance Futures Trading
 
 ```python
+from torchtrade.envs.core.common_types import MarginType
+
 import os
 from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
@@ -79,7 +81,7 @@ config = BinanceFuturesTradingEnvConfig(
     execute_on="1Min",
     demo=True,  # Use testnet for testing
     leverage=10.0,
-    margin_type="ISOLATED",
+    margin_type=MarginType.ISOLATED,
 )
 
 env = BinanceFuturesTorchTradingEnv(
@@ -90,10 +92,13 @@ env = BinanceFuturesTorchTradingEnv(
 
 # Run trading loop
 td = env.reset()
-while not done:
-    action = agent.get_action(obs)
-    td["action"] = action
-    td = env.step(td)
+while True:
+    td["action"] = agent.get_action(td)
+    # step_and_maybe_reset returns (next_td, reset_td); keep the first to step on.
+    # Plain step() leaves the root observation at its reset value forever.
+    td = env.step_and_maybe_reset(td)[0]
+    if td["next", "done"]:
+        break
 ```
 
 ## Configuration
@@ -131,6 +136,8 @@ trade_mode: str = "notional"                # "fractional" | "notional" | "quant
 
 **Binance:**
 ```python
+from torchtrade.envs.core.common_types import MarginType
+
 demo: bool = True                           # Testnet or mainnet
 leverage: int = 1                           # the leverage APPLIED, not a cap
 margin_type: MarginType = MarginType.ISOLATED   # ISOLATED or CROSSED (the enum)
@@ -138,6 +145,9 @@ margin_type: MarginType = MarginType.ISOLATED   # ISOLATED or CROSSED (the enum)
 
 **Bitget:**
 ```python
+from torchtrade.envs.live.bitget.order_executor import MarginMode
+from torchtrade.envs.live.bitget.order_executor import PositionMode
+
 demo: bool = True                           # Testnet or mainnet
 leverage: int = 1                           # the leverage APPLIED, not a cap
 margin_mode: MarginMode = MarginMode.ISOLATED   # ISOLATED or CROSSED (the enum)
@@ -152,6 +162,9 @@ product_type: str = "USDT-FUTURES"
 Always test strategies in safe environments:
 
 ```python
+from torchtrade.envs.live.alpaca import AlpacaTradingEnvConfig
+from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
+
 # Alpaca paper trading
 config = AlpacaTradingEnvConfig(
     paper=True,  # No real money
@@ -169,6 +182,8 @@ Position size is capped by `action_levels` -- each entry is the fraction of the
 portfolio an action allocates, so the largest level is the maximum exposure:
 
 ```python
+from torchtrade.envs.live.alpaca import AlpacaTradingEnvConfig
+
 config = AlpacaTradingEnvConfig(
     symbol="BTC/USD",
     time_frames=["1Min"],
@@ -183,6 +198,8 @@ config = AlpacaTradingEnvConfig(
 Use SL/TP environments for automatic risk management:
 
 ```python
+from torchtrade.envs.live.alpaca import AlpacaSLTPTradingEnvConfig
+
 import os
 from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv
 
@@ -214,6 +231,8 @@ Environments handle common errors:
 Live environments stream real-time market data:
 
 ```python
+from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv
+
 import os
 env = AlpacaTorchTradingEnv(
     # Credentials are CONSTRUCTOR arguments, not config fields.
@@ -226,7 +245,11 @@ td = env.reset()  # Gets latest market data
 
 # Step waits for new bar
 td["action"] = action
-td = env.step(td)  # Waits for next bar
+td = env.step_and_maybe_reset(td)[0]  # Waits for next bar
+
+if td["next", "done"]:
+
+    break
 ```
 
 ### Latency Considerations
@@ -240,6 +263,10 @@ td = env.step(td)  # Waits for next bar
 Environments sync with market time:
 
 ```python
+from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv
+from torchtrade.envs.live.alpaca import AlpacaTradingEnvConfig
+import time
+
 # 1-minute bars: step() returns when new bar arrives
 env = AlpacaTorchTradingEnv(
     config=AlpacaTradingEnvConfig(
@@ -252,7 +279,11 @@ env = AlpacaTorchTradingEnv(
 # Step waits until next minute
 start = time.time()
 td["action"] = action
-td = env.step(td)
+td = env.step_and_maybe_reset(td)[0]
+
+if td["next", "done"]:
+
+    break
 elapsed = time.time() - start
 # elapsed ≈ 60 seconds (wait for new bar)
 ```
@@ -263,13 +294,14 @@ elapsed = time.time() - start
 
 **Market Orders** (default):
 ```python
+import torch
+
 action = torch.tensor(2)  # action_levels [0.0, 0.5, 1.0] -> 2 = fully long
 ```
 
-**Limit Orders** (future feature):
-```python
-action = {"type": "limit", "price": 100.0, "side": "buy"}
-```
+**Limit Orders**: not exposed through the action space. Actions are categorical indices
+into `action_levels`; order type is decided by the executor, which places market orders
+for entries and native bracket orders for SL/TP.
 
 ### Execution Flow
 
@@ -285,7 +317,7 @@ action = {"type": "limit", "price": 100.0, "side": "buy"}
 Environments handle partial fills:
 - Retry until fully filled
 - Or adjust position size accordingly
-- Logged in `info` dict
+- Read from `account_state` in the observation
 
 ## Position Management
 
@@ -295,10 +327,16 @@ Environments track positions automatically:
 
 ```python
 td["action"] = action
-td = env.step(td)
+td = env.step_and_maybe_reset(td)[0]
 
-current_position = info["position"]
-current_pnl = info["unrealized_pnl"]
+if td["next", "done"]:
+
+    break
+
+# account_state is [exposure, direction, unrealized_pnl_pct, holding_time,
+# leverage, distance_to_liquidation] -- there is no `info` dict.
+direction = td["next", "account_state"][1].item()
+unrealized_pnl_pct = td["next", "account_state"][2].item()
 ```
 
 ### Position Synchronization
@@ -311,10 +349,16 @@ Environments sync with exchange:
 ### Closing Positions
 
 ```python
+import torch
+
 # Close all positions
 action = torch.tensor(0)  # 0 allocates 0% -- i.e. go flat
 td["action"] = action
-td = env.step(td)
+td = env.step_and_maybe_reset(td)[0]
+
+if td["next", "done"]:
+
+    break
 
 # Or close directly through the trader
 env.trader.close_position()
@@ -327,6 +371,8 @@ env.trader.close_position()
 Environments log important events:
 
 ```python
+from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv
+
 import os
 import logging
 
@@ -351,9 +397,8 @@ Track live performance:
 ```python
 # Get real-time metrics
 
-print(f"Portfolio Value: ${metrics['portfolio_value']:.2f}")
-print(f"Total PnL: ${metrics['realized_pnl']:.2f}")
-print(f"Open Positions: {metrics['num_positions']}")
+print(f"Portfolio Value: ${env.history.portfolio_values[-1]:.2f}")
+print(f"Steps recorded: {len(env.history.portfolio_values)}")
 ```
 
 ### Integration with Monitoring Tools
@@ -381,6 +426,8 @@ Environments can integrate with monitoring:
 ### Error Recovery
 
 ```python
+import sys
+
 import signal
 
 def signal_handler(sig, frame):
@@ -398,6 +445,8 @@ signal.signal(signal.SIGINT, signal_handler)
 lives -- the config itself never holds a credential:
 
 ```python
+from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv
+
 import os
 
 # Bad -- a key in the source is a key in your git history
@@ -414,6 +463,8 @@ env = AlpacaTorchTradingEnv(
 ## Testing Live Environments
 
 ```python
+from torchtrade.envs.live.alpaca import AlpacaTradingEnvConfig
+
 import os
 import pytest
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv
@@ -433,7 +484,7 @@ def test_alpaca_connection():
 )
     td = env.reset()
 
-    assert obs is not None
+    assert td is not None
 ```
 
 ## Troubleshooting
