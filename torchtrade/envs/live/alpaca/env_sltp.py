@@ -185,6 +185,21 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
             new_price = self._get_current_price()
         except Exception:
             new_price = 0.0
+        # Post-trade size too: recording the size held ENTERING the bar against a
+        # post-bar price and PV labels a return with the exposure that did not produce
+        # it -- opening rows read flat, closing rows read still-open. Offline records the
+        # post-trade size. Non-fatal for the same reason as the price.
+        try:
+            new_qty = position_qty_from_status(
+                self.trader.get_status().get("position_status", None)
+            )
+        except Exception:
+            logger.warning(
+                "post-bar position unavailable for %s; the history row will carry the "
+                "pre-trade size", self.config.symbol,
+            )
+            new_qty = position_size
+
         if not new_price or not math.isfinite(new_price) or new_price <= 0:
             # _get_current_price RETURNS 0.0 when all three sources fail rather than
             # raising, so an except-only guard never fired on the path that actually
@@ -204,7 +219,7 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
             action=action_value,
             reward=0.0,  # Placeholder, will be set after reward calculation
             portfolio_value=new_portfolio_value,
-            position=position_size,
+            position=new_qty,
         )
 
         # Calculate reward using UPDATED history tracker

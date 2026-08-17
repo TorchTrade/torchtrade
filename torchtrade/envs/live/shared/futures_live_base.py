@@ -122,7 +122,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         return self._halting(read)
 
-    def _acquire_post_bar_state(self) -> tuple[float, float, TensorDictBase]:
+    def _acquire_post_bar_state(self) -> tuple[float, float, float, TensorDictBase]:
         """Post-bar portfolio value and observation, or halt.
 
         Raises rather than returning a cached observation: see docs/environments/online.md.
@@ -137,7 +137,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         `account_state` in the SAME step was already at the new bar -- observation and
         reward disagreeing about which bar it was.
 
-        Returns (portfolio_value, mark_price, observation), all three read AFTER the
+        Returns (portfolio_value, mark_price, position_qty, observation), all read AFTER the
         bar. The price is in here because the first version of this fix moved only the
         PV and left `price=` on the pre-trade mark, so a history row carried two
         different bars: `price[t] == close[t-1]` while `portfolio_value[t] == equity[t]`.
@@ -160,6 +160,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         """
         def read():
             self._last_observed_mark = None
+            self._last_observed_qty = None
             observation = self._get_observation()
             portfolio_value = self._get_portfolio_value()
             mark = self._last_observed_mark
@@ -174,7 +175,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                         "pre-trade price", self.symbol,
                     )
                     mark = None
-            return portfolio_value, mark, observation
+            return portfolio_value, mark, self._last_observed_qty, observation
 
         return self._halting(read)
 
@@ -253,6 +254,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         if position_direction == 0:
             position_size = 0.0
+            self._last_observed_qty = 0.0
             position_value = 0.0
             # No venue call: distance_to_liquidation short-circuits to 1.0 when flat,
             # so this price is never read. Fetching it cost a round-trip per bar and
@@ -295,6 +297,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                 )
 
             position_size = position_status.qty
+            self._last_observed_qty = position_size
             position_value = abs(position_status.notional_value)
             current_price = position_status.mark_price
             self._last_observed_mark = current_price

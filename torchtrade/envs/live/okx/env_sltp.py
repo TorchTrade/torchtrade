@@ -175,7 +175,7 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
 
         self._wait_for_next_timestamp()
 
-        new_portfolio_value, new_price, next_tensordict = self._acquire_post_bar_state()
+        new_portfolio_value, new_price, new_qty, next_tensordict = self._acquire_post_bar_state()
         # None when the account is flat: there is no position mark to read, and
         # fetching one would add a round-trip that can halt the episode. The
         # pre-trade price is the honest fallback -- flat rows carry no PnL anyway.
@@ -194,7 +194,7 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
             action=action_value,
             reward=0.0,
             portfolio_value=new_portfolio_value,
-            position=position_size
+            position=new_qty
         )
 
         reward = float(self.reward_function(self.history))

@@ -392,10 +392,25 @@ def test_alpaca_history_records_price_and_position_on_a_flat_bar(sltp):
     )
 
     step(open_action)
-    step(hold_action)
-    # The recorded size is the one held ENTERING the bar, as on every other live env, so
-    # it appears on the bar AFTER the one that opened the position.
+    # POST-trade, so the size appears on the bar that opened the position -- not the one
+    # after. Recording the entering size against a post-bar price and portfolio value
+    # labelled the return with the exposure that did not produce it, and is what offline
+    # has always done (#278).
     assert env.history.positions[-1] != 0, (
-        "an open position must reach history.positions, not stay at the 0.0 default"
+        "the opening bar must record the position it opened, not the flat size it "
+        "entered with"
     )
+    # The next bar records where it ENDED, which differs by variant: on the plain env
+    # `hold_action` is index 0 of [0.0, 0.5, 1.0], a 0% allocation that exits, so the row
+    # reads flat. On the SLTP env index 0 is a no-op and the position exits only via
+    # SL/TP, so it is still open. Under the old pre-trade semantics the plain env's
+    # closing row claimed the exposure it had just given up.
+    step(hold_action)
+    if sltp:
+        assert env.history.positions[-1] != 0, "the position is still open on this bar"
+    else:
+        assert env.history.positions[-1] == 0, (
+            "the closing bar must record the flat size it ended at, not the one it "
+            "entered with"
+        )
     env.close()
