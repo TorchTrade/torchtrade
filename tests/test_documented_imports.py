@@ -264,16 +264,34 @@ def _resolves_anywhere(name: str) -> bool:
     return name in _package_names()
 
 
-def _names_bound_by(block, *, include_params=True):
+def _names_bound_by(block, *, include_params=True, before_line=None):
+    """Names bound at MODULE level in `block`, optionally only those defined earlier.
+
+    Module level, and line-ordered, because a reader executes the fence top to bottom.
+    Walking the whole AST accepted two things Python does not (#373 review):
+    `phantom(); def phantom(): ...` -- a forward definition, which raises NameError when
+    the fence is actually run -- and a `phantom` local inside an earlier helper, which
+    masks a later top-level `phantom()`. Both let a real phantom through.
+    """
     try:
         tree = ast.parse(block)
     except SyntaxError:
         return set()
-    bound = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
-    bound |= {a.asname or a.name.split(".")[0] for n in ast.walk(tree)
-              if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
-    bound |= {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+
+    bound = set()
+    for node in tree.body:  # module level only; a nested local binds nothing out here
+        if before_line is not None and node.lineno >= before_line:
+            break
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound |= {a.asname or a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        else:
+            bound |= {n.id for n in ast.walk(node)
+                      if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+
     if include_params:
+        # Parameters are in scope inside their own function, so a call there is legal.
         bound |= {a.arg for n in ast.walk(tree) if isinstance(n, ast.arguments)
                   for a in (*n.posonlyargs, *n.args, *n.kwonlyargs,
                             *([n.vararg] if n.vararg else []),
@@ -309,7 +327,7 @@ def test_a_documented_block_calls_nothing_that_does_not_exist(earlier_blocks, bl
     # A reader meets the blocks in order, so anything an EARLIER block defined is in
     # scope here -- that is what makes `MyEnv(...)` in a subclassing walkthrough legal
     # while `calculate_sltp_prices(...)`, defined nowhere at all, is not.
-    bound = set(_names_bound_by(block))
+    bound = set()
     for earlier in earlier_blocks:
         # include_params=False: a parameter is local to its own block. Carrying them
         # forward let `def helper(calculate_sltp_prices)` in ANY earlier snippet
@@ -317,11 +335,19 @@ def test_a_documented_block_calls_nothing_that_does_not_exist(earlier_blocks, bl
         # really does bind df/config/tensordict/self/kwargs that way in block 0.
         bound |= _names_bound_by(earlier, include_params=False)
 
-    called = {n.func.id for n in ast.walk(tree)
-              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-    unknown = sorted(
-        name for name in called - bound - _READER_SUPPLIED
-        if not hasattr(builtins, name) and _resolve_config(name) is None
-        and not _resolves_anywhere(name)
+    # Each call is judged against what is in scope AT ITS OWN LINE, so a definition
+    # further down the fence does not retroactively legitimise a call above it.
+    unknown = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        name = node.func.id
+        if name in _READER_SUPPLIED or hasattr(builtins, name):
+            continue
+        visible = bound | _names_bound_by(block, before_line=node.lineno)
+        if name in visible or _resolve_config(name) or _resolves_anywhere(name):
+            continue
+        unknown.add(name)
+    assert not unknown, (
+        f"calls names that exist nowhere in torchtrade: {sorted(unknown)}"
     )
-    assert not unknown, f"calls names that exist nowhere in torchtrade: {unknown}"
