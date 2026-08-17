@@ -126,8 +126,22 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         """Post-bar portfolio value and observation, or halt.
 
         Raises rather than returning a cached observation: see docs/environments/online.md.
+
+        Observation FIRST, and the order is load-bearing (#278). A tuple evaluates left
+        to right, so reading the portfolio value first sampled it before the observer had
+        advanced the clock. Live that is merely early; in replay the clock advances only
+        inside `ReplayObserver.get_observations()`, so every recorded PV was the PREVIOUS
+        bar's equity: the reward at step t belonged to the action at t-1, and an SL/TP
+        close during the bar was invisible to the step that caused it. Measured before
+        the swap: recorded PV matched the decision bar 8/8 and the next bar 0/8, while
+        `account_state` in the SAME step was already at the new bar -- observation and
+        reward disagreeing about which bar it was.
         """
-        return self._halting(lambda: (self._get_portfolio_value(), self._get_observation()))
+        def read():
+            observation = self._get_observation()
+            return self._get_portfolio_value(), observation
+
+        return self._halting(read)
 
     def _current_mark_price(self, position_status=None) -> float:
         """The bar's mark price, validated before it can size an order (#347).

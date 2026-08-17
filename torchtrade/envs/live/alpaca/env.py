@@ -134,9 +134,11 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         # Wait for next time step
         self._wait_for_next_timestamp()
 
-        # Get updated state
-        new_portfolio_value = self._get_portfolio_value()
+        # Observation FIRST, then the portfolio value (#278). Under a ReplayObserver the
+        # clock advances only inside get_observations(), so reading PV first recorded the
+        # PREVIOUS bar's equity against this bar's action.
         next_tensordict = self._get_observation()
+        new_portfolio_value = self._get_portfolio_value()
 
         # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(

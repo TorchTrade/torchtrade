@@ -1,4 +1,6 @@
 import logging
+
+from torchtrade.envs.utils.precision import decimals_for_step
 from dataclasses import dataclass
 import math
 from decimal import Decimal
@@ -193,9 +195,7 @@ class BinanceFuturesOrderClass:
                         # position the policy has no way to exit under lock_position_until_sltp.
                         if tick_size > 0:
                             self._tick_size = tick_size
-                            if '.' in tick_str:
-                                decimal_part = tick_str.rstrip('0').split('.')[1]
-                                self._tick_decimals = len(decimal_part) if decimal_part else 0
+                            self._tick_decimals = decimals_for_step(tick_size)
                 except Exception as e:
                     logger.warning(
                         f"Skipping malformed {f.get('filterType', '?')} for {symbol}: {e}"

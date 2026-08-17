@@ -1,5 +1,7 @@
 """Order executor for OKX Futures trading using python-okx."""
 import logging
+
+from torchtrade.envs.utils.precision import decimals_for_step
 import math
 from dataclasses import dataclass
 from enum import Enum
@@ -160,16 +162,12 @@ class OKXFuturesOrderClass:
                 tick_size = float(tick_str)
                 if tick_size > 0:
                     self._tick_size = tick_size
-                    if '.' in tick_str:
-                        decimal_part = tick_str.rstrip('0').split('.')[1]
-                        self._tick_decimals = len(decimal_part) if decimal_part else 0
+                    self._tick_decimals = decimals_for_step(tick_size)
                     logger.info(f"Tick size for {self.symbol}: {self._tick_size} ({self._tick_decimals} decimals)")
 
-                # Cache lot size and derive decimal places from raw string
+                # Cache lot size and derive decimal places from the step
                 lot_sz_str = instrument.get("lotSz", "0.001")
-                if '.' in lot_sz_str:
-                    decimal_part = lot_sz_str.rstrip('0').split('.')[1]
-                    self._lot_size_decimals = len(decimal_part) if decimal_part else 0
+                self._lot_size_decimals = decimals_for_step(lot_sz_str)
                 self._lot_size_cache = {
                     "min_qty": float(instrument.get("minSz", 0.001)),
                     "qty_step": float(lot_sz_str),

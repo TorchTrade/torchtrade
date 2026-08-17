@@ -1,5 +1,7 @@
 """Order executor for Bybit Futures trading using pybit."""
 import logging
+
+from torchtrade.envs.utils.precision import decimals_for_step
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
@@ -150,9 +152,7 @@ class BybitFuturesOrderClass:
                 if tick_size > 0:
                     self._tick_size = tick_size
                     # Derive decimal places from tick string for clean formatting
-                    if '.' in tick_str:
-                        decimal_part = tick_str.rstrip('0').split('.')[1]
-                        self._tick_decimals = len(decimal_part) if decimal_part else 0
+                    self._tick_decimals = decimals_for_step(tick_size)
                     logger.info(f"Tick size for {self.symbol}: {self._tick_size} ({self._tick_decimals} decimals)")
 
                 # Also cache lot size to avoid a second API call from get_lot_size()
