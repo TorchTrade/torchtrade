@@ -211,7 +211,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
         self._wait_for_next_timestamp()
 
         # Get updated state
-        new_portfolio_value, next_tensordict = self._acquire_post_bar_state()
+        new_portfolio_value, new_price, next_tensordict = self._acquire_post_bar_state()
 
         # Convert action_tuple to numeric action for history
         # action_tuple is (side, sl, tp) where side can be "long", "short", or None
@@ -225,7 +225,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
 
         # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(
-            price=current_price,
+            price=new_price,
             action=action_value,
             reward=0.0,  # Placeholder, will be set after reward calculation
             portfolio_value=new_portfolio_value,

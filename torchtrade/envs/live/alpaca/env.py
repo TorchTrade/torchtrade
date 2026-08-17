@@ -139,10 +139,13 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         # PREVIOUS bar's equity against this bar's action.
         next_tensordict = self._get_observation()
         new_portfolio_value = self._get_portfolio_value()
+        # Post-bar price too: recording the pre-trade one here put two different bars in
+        # a single history row (#278).
+        new_price = self._get_current_price()
 
         # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(
-            price=current_price,
+            price=new_price,
             action=desired_action,
             reward=0.0,  # Placeholder, will be set after reward calculation
             portfolio_value=new_portfolio_value,

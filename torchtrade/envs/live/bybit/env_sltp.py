@@ -176,7 +176,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
 
         self._wait_for_next_timestamp()
 
-        new_portfolio_value, next_tensordict = self._acquire_post_bar_state()
+        new_portfolio_value, new_price, next_tensordict = self._acquire_post_bar_state()
 
         side, _, _ = action_tuple
         if side == "long":
@@ -187,7 +187,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
             action_value = 0.0
 
         self.history.record_step(
-            price=current_price,
+            price=new_price,
             action=action_value,
             reward=0.0,
             portfolio_value=new_portfolio_value,

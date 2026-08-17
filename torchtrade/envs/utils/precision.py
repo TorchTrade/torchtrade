@@ -19,9 +19,10 @@ def decimals_for_step(step) -> int:
     Decimal reads the exponent instead of the repr, so notation cannot change the answer.
     """
     try:
-        exponent = Decimal(str(step)).normalize().as_tuple().exponent
+        # Integral steps normalize to a POSITIVE exponent (1000 -> 1E+3); they imply no
+        # decimals, and max() keeps that from becoming a negative ndigits. int() is
+        # INSIDE the try because NaN and Infinity are valid Decimals whose exponent is
+        # the string 'n'/'F', so converting them raises where the guard promised 0.
+        return max(0, -int(Decimal(str(step)).normalize().as_tuple().exponent))
     except (InvalidOperation, ValueError, TypeError):
         return 0
-    # Integral steps normalize to a POSITIVE exponent (1000 -> 1E+3); they imply no
-    # decimals, and max() is what keeps that from becoming a negative ndigits.
-    return max(0, -int(exponent))

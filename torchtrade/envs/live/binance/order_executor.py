@@ -33,9 +33,12 @@ def _step_and_decimals(step_str: str):
     part, so the naive version reported 0 decimals and the final rounding then annihilated
     the quantity. Binance sends fixed-point today, but okx's _format_size carries a comment
     about being bitten by exactly this, so it is not a hypothetical.
+
+    This was the ONLY venue that got it right, and the rule stayed local while four other
+    sites kept doing the string surgery -- which is how bybit came to refuse every open
+    over a 1e-06 step (#278). Shared now.
     """
-    d = Decimal(step_str).normalize()
-    return float(d), max(0, -d.as_tuple().exponent)
+    return float(Decimal(step_str)), decimals_for_step(step_str)
 
 
 

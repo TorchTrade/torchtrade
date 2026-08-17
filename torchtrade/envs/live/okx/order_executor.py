@@ -161,16 +161,23 @@ class OKXFuturesOrderClass:
                 tick_str = instrument.get("tickSz", "0")
                 tick_size = float(tick_str)
                 if tick_size > 0:
-                    self._tick_size = tick_size
-                    self._tick_decimals = decimals_for_step(tick_size)
+                    # Both, or neither: assigning the size before computing the decimals
+                    # left a half-configured executor formatting prices at 0 dp.
+                    tick_decimals = decimals_for_step(tick_size)
+                    self._tick_size, self._tick_decimals = tick_size, tick_decimals
                     logger.info(f"Tick size for {self.symbol}: {self._tick_size} ({self._tick_decimals} decimals)")
 
                 # Cache lot size and derive decimal places from the step
+                # float() first: on a blank lotSz this raises into the handler below
+                # WITHOUT having already zeroed _lot_size_decimals, whose declared
+                # default is 3. Zeroing it re-created the #278 rounding bug on the
+                # degraded path -- _format_size(0.977065) -> '1'.
                 lot_sz_str = instrument.get("lotSz", "0.001")
+                qty_step = float(lot_sz_str)
                 self._lot_size_decimals = decimals_for_step(lot_sz_str)
                 self._lot_size_cache = {
                     "min_qty": float(instrument.get("minSz", 0.001)),
-                    "qty_step": float(lot_sz_str),
+                    "qty_step": qty_step,
                 }
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")

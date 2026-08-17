@@ -122,7 +122,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         return self._halting(read)
 
-    def _acquire_post_bar_state(self) -> tuple[float, TensorDictBase]:
+    def _acquire_post_bar_state(self) -> tuple[float, float, TensorDictBase]:
         """Post-bar portfolio value and observation, or halt.
 
         Raises rather than returning a cached observation: see docs/environments/online.md.
@@ -136,10 +136,17 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         the swap: recorded PV matched the decision bar 8/8 and the next bar 0/8, while
         `account_state` in the SAME step was already at the new bar -- observation and
         reward disagreeing about which bar it was.
+
+        Returns (portfolio_value, mark_price, observation), all three read AFTER the
+        bar. The price is in here because the first version of this fix moved only the
+        PV and left `price=` on the pre-trade mark, so a history row carried two
+        different bars: `price[t] == close[t-1]` while `portfolio_value[t] == equity[t]`.
+        Offline records both at the new bar (`offline/sequential.py`), and replay
+        agreeing with offline is the whole point of #278.
         """
         def read():
             observation = self._get_observation()
-            return self._get_portfolio_value(), observation
+            return self._get_portfolio_value(), self._current_mark_price(), observation
 
         return self._halting(read)
 

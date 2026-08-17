@@ -177,11 +177,11 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         self._wait_for_next_timestamp()
 
         # Get updated state
-        new_portfolio_value, next_tensordict = self._acquire_post_bar_state()
+        new_portfolio_value, new_price, next_tensordict = self._acquire_post_bar_state()
 
         # Record step history FIRST (reward function needs updated history!)
         self.history.record_step(
-            price=current_price,
+            price=new_price,
             action=desired_action,
             reward=0.0,  # Placeholder, will be set after reward calculation
             portfolio_value=new_portfolio_value,
