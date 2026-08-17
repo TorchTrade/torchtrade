@@ -16,6 +16,7 @@ Live trading integration with Bitget for crypto futures markets (USDT-margined).
 ```python
 import os
 
+from torchtrade.envs.live.bitget.order_executor import MarginMode
 from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
@@ -26,7 +27,7 @@ config = BitgetFuturesTradingEnvConfig(
     execute_on="1Min",
     demo=True,  # Use testnet first!
     leverage=10.0,
-    margin_mode="isolated",
+    margin_mode=MarginMode.ISOLATED,
 )
 
 env = BitgetFuturesTorchTradingEnv(
@@ -51,16 +52,24 @@ obs = env.reset()
 ```python
 @dataclass
 class BitgetFuturesTradingEnvConfig:
-    api_key: str
-    api_secret: str
-    passphrase: str              # Bitget requires passphrase
-    symbol: str
-    timeframe: TimeFrame
-    testnet: bool = True         # Testnet or mainnet
-    max_leverage: float = 10.0   # Maximum leverage
-    margin_mode: str = "isolated"  # isolated or crossed
-    initial_margin: float = 1000.0
-    window_size: int = 50
+    symbol = 'BTCUSDT'
+    time_frames = '1Hour'
+    window_sizes = 10
+    execute_on = '1Hour'
+    product_type = 'USDT-FUTURES'
+    leverage = 1
+    margin_mode = MarginMode.ISOLATED
+    position_mode = PositionMode.ONE_WAY
+    action_levels = None
+    done_on_bankruptcy = True
+    bankrupt_threshold = 0.1
+    demo = True
+    seed = 42
+    include_base_features = False
+    close_position_on_init = True
+    close_position_on_reset = False
+    observation_failure_policy = ObservationFailurePolicy.HALT
+    # Credentials: Env(config, api_key=..., api_secret=..., api_passphrase=...)
 ```
 
 **Note**: Bitget requires a passphrase in addition to API key/secret.
@@ -88,7 +97,7 @@ config = BitgetFuturesTradingEnvConfig(
 ### Isolated Margin
 ```python
 config = BitgetFuturesTradingEnvConfig(
-    margin_mode="isolated",
+    margin_mode=MarginMode.ISOLATED,
     leverage=10.0,
 )
 ```
@@ -96,7 +105,7 @@ config = BitgetFuturesTradingEnvConfig(
 ### Crossed Margin
 ```python
 config = BitgetFuturesTradingEnvConfig(
-    margin_mode="crossed",
+    margin_mode=MarginMode.CROSSED,
     leverage=20.0,
 )
 ```

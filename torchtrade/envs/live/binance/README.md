@@ -16,6 +16,7 @@ Live trading integration with Binance for crypto futures markets (USDT-margined)
 ```python
 import os
 
+from torchtrade.envs.core.common_types import MarginType
 from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
@@ -26,7 +27,7 @@ config = BinanceFuturesTradingEnvConfig(
     execute_on="1Min",
     demo=True,  # Use testnet first!
     leverage=10.0,
-    margin_type="ISOLATED",
+    margin_type=MarginType.ISOLATED,
 )
 
 env = BinanceFuturesTorchTradingEnv(
@@ -50,15 +51,22 @@ obs = env.reset()
 ```python
 @dataclass
 class BinanceFuturesTradingEnvConfig:
-    api_key: str
-    api_secret: str
-    symbol: str
-    timeframe: TimeFrame
-    testnet: bool = True            # Testnet or mainnet
-    max_leverage: float = 10.0      # Maximum leverage
-    margin_type: str = "ISOLATED"   # ISOLATED or CROSS
-    initial_margin: float = 1000.0
-    window_size: int = 50
+    symbol = 'BTCUSDT'
+    time_frames = '1Hour'
+    window_sizes = 10
+    execute_on = '1Hour'
+    leverage = 1
+    margin_type = MarginType.ISOLATED
+    action_levels = None
+    done_on_bankruptcy = True
+    bankrupt_threshold = 0.1
+    demo = True
+    seed = 42
+    include_base_features = False
+    close_position_on_init = True
+    close_position_on_reset = False
+    observation_failure_policy = ObservationFailurePolicy.HALT
+    # Credentials: Env(config, api_key=..., api_secret=...)
 ```
 
 ## Testnet vs Mainnet
@@ -88,7 +96,7 @@ config = BinanceFuturesTradingEnvConfig(
 
 ```python
 config = BinanceFuturesTradingEnvConfig(
-    margin_type="ISOLATED",
+    margin_type=MarginType.ISOLATED,
     leverage=10.0,
 )
 ```
@@ -100,7 +108,7 @@ config = BinanceFuturesTradingEnvConfig(
 
 ```python
 config = BinanceFuturesTradingEnvConfig(
-    margin_type="CROSS",
+    margin_type=MarginType.CROSSED,
     leverage=20.0,
 )
 ```
@@ -181,7 +189,7 @@ config = BinanceFuturesTradingEnvConfig(
     execute_on="1Min",
     demo=True,
     leverage=5.0,
-    margin_type="ISOLATED",
+    margin_type=MarginType.ISOLATED,
 )
 
 env = BinanceFuturesTorchTradingEnv(

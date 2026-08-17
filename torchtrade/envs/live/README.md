@@ -34,6 +34,9 @@ live/
 ### Alpaca Live Trading
 
 ```python
+import os
+
+import torch
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
@@ -52,10 +55,11 @@ env = AlpacaTorchTradingEnv(
 )
 
 # Run live trading loop
-obs = env.reset()
+td = env.reset()
 while True:
     action = agent.get_action(obs)
-    obs, reward, done, info = env.step(action)
+    td["action"] = action
+    td = env.step(td)
 
     if done:
         break
@@ -64,6 +68,7 @@ while True:
 ### Binance Futures Trading
 
 ```python
+import os
 from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
@@ -84,10 +89,11 @@ env = BinanceFuturesTorchTradingEnv(
 )
 
 # Run trading loop
-obs = env.reset()
+td = env.reset()
 while not done:
     action = agent.get_action(obs)
-    obs, reward, done, info = env.step(action)
+    td["action"] = action
+    td = env.step(td)
 ```
 
 ## Configuration
@@ -97,43 +103,46 @@ while not done:
 All live environments share these base parameters:
 
 ```python
-@dataclass
-class LiveEnvConfig:
-    api_key: str                   # API key
-    api_secret: str                # API secret
-    symbol: str                    # Trading symbol
-    timeframe: TimeFrame           # Bar timeframe
-    window_size: int = 50         # Observation window
-    initial_cash: float = 10000.0  # Starting capital
+# There is no shared LiveEnvConfig -- each exchange ships its own dataclass. What they
+# have in common:
+#
+#   symbol, time_frames (a LIST), window_sizes (one per timeframe), execute_on,
+#   action_levels, done_on_bankruptcy, bankrupt_threshold, seed,
+#   include_base_features
+#
+# Futures configs add: leverage, margin_type/margin_mode, demo,
+#   close_position_on_init, close_position_on_reset, observation_failure_policy
+# Alpaca adds: paper, trade_mode
+#
+# Credentials are CONSTRUCTOR arguments on every exchange, never config fields.
+# See the per-exchange READMEs for the exact field list.
 ```
 
 ### Provider-Specific
 
+These are standalone dataclasses -- there is no shared base to inherit from. The fields
+that differ between exchanges:
+
 **Alpaca:**
 ```python
-@dataclass
-class AlpacaTradingEnvConfig(LiveEnvConfig):
-    paper: bool = True             # Paper or live trading
-    base_url: str = None           # Custom API endpoint
-    extended_hours: bool = False   # Trade extended hours
+paper: bool = True                          # Paper or live trading
+trade_mode: str = "notional"                # "fractional" | "notional" | "quantity"
 ```
 
 **Binance:**
 ```python
-@dataclass
-class BinanceFuturesTradingEnvConfig(LiveEnvConfig):
-    testnet: bool = True           # Testnet or mainnet
-    max_leverage: float = 10.0     # Maximum leverage
-    margin_type: str = "ISOLATED"  # ISOLATED or CROSS
+demo: bool = True                           # Testnet or mainnet
+leverage: int = 1                           # the leverage APPLIED, not a cap
+margin_type: MarginType = MarginType.ISOLATED   # ISOLATED or CROSSED (the enum)
 ```
 
 **Bitget:**
 ```python
-@dataclass
-class BitgetFuturesTradingEnvConfig(LiveEnvConfig):
-    testnet: bool = True           # Testnet or mainnet
-    max_leverage: float = 10.0     # Maximum leverage
-    margin_mode: str = "isolated"  # isolated or crossed
+demo: bool = True                           # Testnet or mainnet
+leverage: int = 1                           # the leverage APPLIED, not a cap
+margin_mode: MarginMode = MarginMode.ISOLATED   # ISOLATED or CROSSED (the enum)
+position_mode: PositionMode = PositionMode.ONE_WAY
+product_type: str = "USDT-FUTURES"
 ```
 
 ## Safety Features
@@ -156,11 +165,16 @@ config = BinanceFuturesTradingEnvConfig(
 
 ### Position Limits
 
-Set maximum position sizes:
+Position size is capped by `action_levels` -- each entry is the fraction of the
+portfolio an action allocates, so the largest level is the maximum exposure:
 
 ```python
 config = AlpacaTradingEnvConfig(
-    # ...
+    symbol="BTC/USD",
+    time_frames=["1Min"],
+    window_sizes=[10],
+    execute_on="1Min",
+    action_levels=[0.0, 0.25, 0.5],  # never more than 50% of the portfolio
 )
 ```
 
@@ -169,6 +183,7 @@ config = AlpacaTradingEnvConfig(
 Use SL/TP environments for automatic risk management:
 
 ```python
+import os
 from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv
 
 config = AlpacaSLTPTradingEnvConfig(
@@ -199,6 +214,7 @@ Environments handle common errors:
 Live environments stream real-time market data:
 
 ```python
+import os
 env = AlpacaTorchTradingEnv(
     # Credentials are CONSTRUCTOR arguments, not config fields.
     config, api_key=os.environ["ALPACA_API_KEY"],
@@ -206,10 +222,11 @@ env = AlpacaTorchTradingEnv(
 )
 
 # Data updates automatically
-obs = env.reset()  # Gets latest market data
+td = env.reset()  # Gets latest market data
 
 # Step waits for new bar
-obs, reward, done, info = env.step(action)  # Waits for next bar
+td["action"] = action
+td = env.step(td)  # Waits for next bar
 ```
 
 ### Latency Considerations
@@ -234,7 +251,8 @@ env = AlpacaTorchTradingEnv(
 
 # Step waits until next minute
 start = time.time()
-obs, reward, done, info = env.step(action)
+td["action"] = action
+td = env.step(td)
 elapsed = time.time() - start
 # elapsed ≈ 60 seconds (wait for new bar)
 ```
@@ -245,7 +263,7 @@ elapsed = time.time() - start
 
 **Market Orders** (default):
 ```python
-action = 0  # BUY at market price
+action = torch.tensor(2)  # action_levels [0.0, 0.5, 1.0] -> 2 = fully long
 ```
 
 **Limit Orders** (future feature):
@@ -276,7 +294,8 @@ Environments handle partial fills:
 Environments track positions automatically:
 
 ```python
-obs, reward, done, info = env.step(action)
+td["action"] = action
+td = env.step(td)
 
 current_position = info["position"]
 current_pnl = info["unrealized_pnl"]
@@ -293,11 +312,12 @@ Environments sync with exchange:
 
 ```python
 # Close all positions
-action = 1  # SELL action
-obs, reward, done, info = env.step(action)
+action = torch.tensor(0)  # 0 allocates 0% -- i.e. go flat
+td["action"] = action
+td = env.step(td)
 
-# Or use close_all_positions() method
-env.close_all_positions()
+# Or close directly through the trader
+env.trader.close_position()
 ```
 
 ## Monitoring
@@ -307,6 +327,7 @@ env.close_all_positions()
 Environments log important events:
 
 ```python
+import os
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -329,7 +350,6 @@ Track live performance:
 
 ```python
 # Get real-time metrics
-metrics = env.get_metrics()
 
 print(f"Portfolio Value: ${metrics['portfolio_value']:.2f}")
 print(f"Total PnL: ${metrics['realized_pnl']:.2f}")
@@ -365,7 +385,7 @@ import signal
 
 def signal_handler(sig, frame):
     print("Shutting down gracefully...")
-    env.close_all_positions()
+    env.trader.close_position()
     env.close()
     sys.exit(0)
 
@@ -374,21 +394,27 @@ signal.signal(signal.SIGINT, signal_handler)
 
 ### API Key Security
 
-**Never hardcode keys:**
+**Never hardcode keys.** They are constructor arguments, so this is where the contrast
+lives -- the config itself never holds a credential:
+
 ```python
-# Bad
-config = AlpacaTradingEnvConfig(
-)
+import os
+
+# Bad -- a key in the source is a key in your git history
+env = AlpacaTorchTradingEnv(config, api_key="PKXXXXXXXXXXXXXXXXXX")
 
 # Good
-import os
-config = AlpacaTradingEnvConfig(
+env = AlpacaTorchTradingEnv(
+    config,
+    api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
 )
 ```
 
 ## Testing Live Environments
 
 ```python
+import os
 import pytest
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv
 
@@ -405,10 +431,9 @@ def test_alpaca_connection():
     config, api_key=os.environ["ALPACA_API_KEY"],
     api_secret=os.environ["ALPACA_SECRET_KEY"],
 )
-    obs = env.reset()
+    td = env.reset()
 
     assert obs is not None
-    assert env.is_connected()
 ```
 
 ## Troubleshooting
@@ -429,7 +454,8 @@ def test_alpaca_connection():
 **Position desync:**
 - Environment resets automatically
 - Check exchange for manual trades
-- Use `sync_positions()` method
+- The env re-reads the exchange position every step, so a manual trade is picked
+  up on the next bar (see `_sync_position_from_exchange`)
 
 ## See Also
 
