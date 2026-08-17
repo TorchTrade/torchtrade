@@ -52,15 +52,19 @@ Discrete action space mappings for different trading strategies.
   `(side, sl_pct, tp_pct)`; pass `include_short_positions=True` for the short half,
   which is off by default
 
-Neither is a BUY/SELL/HOLD map. Both are `1 + len(sl) * len(tp)` entries, index 0 being
-the flat/no-bracket action.
+Neither is a BUY/SELL/HOLD map. Index 0 is the flat/no-bracket action; the long grid adds
+`len(sl) * len(tp)` entries, and `create_sltp_action_map(..., include_short_positions=True)`
+adds that many again for the short side.
 
 **Example:**
 ```python
 from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map
 
-action_map = create_alpaca_sltp_action_map([0.02], [0.05])
-# {0: (None, None), 1: (0.02, 0.05)}
+# The map PRESERVES the sign it is given -- it does not normalise -- and these values
+# are fed straight to calculate_bracket_prices. A positive stop here puts a long's stop
+# ABOVE its entry, so stoploss levels are negative, matching what the configs validate.
+action_map = create_alpaca_sltp_action_map([-0.02], [0.05])
+# {0: (None, None), 1: (-0.02, 0.05)}
 #   index 0 -> stay flat; index 1 -> enter with a 2% stop and a 5% target
 
 sl_pct, tp_pct = action_map[1]

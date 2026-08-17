@@ -234,11 +234,19 @@ def _get_observation(self):
 ## Testing Your Custom Environment
 
 ```python
-import pytest
 from torchrl.envs.utils import check_env_specs
 
-def test_custom_env():
-    env = MyCustomEnv(df=test_data, config=test_config)
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
+
+def test_env():
+    # A CONCRETE env, not the MyCustomEnv sketch above: that one deliberately leaves
+    # _get_observation unwritten, so it satisfies the ABC and still raises on reset().
+    env = SequentialTradingEnv(
+        test_data,
+        SequentialTradingEnvConfig(
+            time_frames=["1Min"], window_sizes=[10], execute_on="1Min"
+        ),
+    )
 
     # Check environment specs
     check_env_specs(env)

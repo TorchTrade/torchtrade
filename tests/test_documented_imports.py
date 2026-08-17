@@ -264,7 +264,7 @@ def _resolves_anywhere(name: str) -> bool:
     return name in _package_names()
 
 
-def _names_bound_by(block, *, include_params=True, before_line=None):
+def _names_bound_by(block, *, before_line=None):
     """Names bound at MODULE level in `block`, optionally only those defined earlier.
 
     Module level, and line-ordered, because a reader executes the fence top to bottom.
@@ -290,13 +290,32 @@ def _names_bound_by(block, *, include_params=True, before_line=None):
             bound |= {n.id for n in ast.walk(node)
                       if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
 
-    if include_params:
-        # Parameters are in scope inside their own function, so a call there is legal.
-        bound |= {a.arg for n in ast.walk(tree) if isinstance(n, ast.arguments)
-                  for a in (*n.posonlyargs, *n.args, *n.kwonlyargs,
-                            *([n.vararg] if n.vararg else []),
-                            *([n.kwarg] if n.kwarg else []))}
     return bound
+
+
+def _params_of(node):
+    a = node.args
+    return {p.arg for p in (*a.posonlyargs, *a.args, *a.kwonlyargs,
+                            *([a.vararg] if a.vararg else []),
+                            *([a.kwarg] if a.kwarg else []))}
+
+
+def _calls_with_scope(node, enclosing=frozenset()):
+    """Yield (call_name, lineno, names-in-scope-from-enclosing-functions).
+
+    Parameters are visible only INSIDE the function that declares them. Adding them to
+    a block-wide set accepted `def helper(phantom): ...` followed by a top-level
+    `phantom()` (#373 review), which raises NameError -- the guard's claim to check
+    scope at the call site was false for exactly this case.
+    """
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            inner = enclosing | _params_of(child) | {child.name}
+            yield from _calls_with_scope(child, inner)
+            continue
+        if isinstance(child, ast.Call) and isinstance(child.func, ast.Name):
+            yield child.func.id, child.lineno, enclosing
+        yield from _calls_with_scope(child, enclosing)
 
 
 # Objects a reader is expected to bring; naming one is not a claim about the package.
@@ -333,18 +352,15 @@ def test_a_documented_block_calls_nothing_that_does_not_exist(earlier_blocks, bl
         # forward let `def helper(calculate_sltp_prices)` in ANY earlier snippet
         # whitelist that phantom for the whole rest of the file -- and core/README.md
         # really does bind df/config/tensordict/self/kwargs that way in block 0.
-        bound |= _names_bound_by(earlier, include_params=False)
+        bound |= _names_bound_by(earlier)
 
     # Each call is judged against what is in scope AT ITS OWN LINE, so a definition
     # further down the fence does not retroactively legitimise a call above it.
     unknown = set()
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
-            continue
-        name = node.func.id
+    for name, lineno, in_scope in _calls_with_scope(tree):
         if name in _READER_SUPPLIED or hasattr(builtins, name):
             continue
-        visible = bound | _names_bound_by(block, before_line=node.lineno)
+        visible = bound | in_scope | _names_bound_by(block, before_line=lineno)
         if name in visible or _resolve_config(name) or _resolves_anywhere(name):
             continue
         unknown.add(name)
