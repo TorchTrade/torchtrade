@@ -8,6 +8,19 @@ from alpaca.data.requests import CryptoBarsRequest
 from alpaca.data.historical.crypto import CryptoHistoricalDataClient
 
 class AlpacaObservationClass:
+
+    def reset(self) -> None:
+        """Rewind to the start of an episode. A live observer has nothing to rewind.
+
+        Declared here so the envs can call it unconditionally (#278). ReplayObserver
+        overrides it to rewind the sampler and the simulated executor, and before this
+        existed nothing but a test ever called it -- so under a collector, episode 2
+        continued mid-stream with episode 1's balance, an inherited position whose
+        brackets had been cancelled, and a bankruptcy baseline from the previous episode.
+        A `hasattr` check at the call site would have been fail-open: an observer that
+        renames the method would silently stop rewinding.
+        """
+
     def __init__(
         self,
         symbol: str,

@@ -306,10 +306,12 @@ class TestAlpacaSLTPTradingEnvTermination:
             observer=MockObserver(window_sizes=[10]),
             trader=MockTrader(initial_cash=500.0),
         )
-        env.initial_portfolio_value = 10000.0  # the 500 cash is below 10% of this
         env._wait_for_next_timestamp = lambda: None
 
         env.reset()
+        # AFTER reset: the baseline is re-captured per episode (#278), so an override set
+        # before it is discarded. Simulates an episode that STARTED rich and collapsed.
+        env.initial_portfolio_value = 10000.0  # the 500 cash is below 10% of this
         next_td = env.step(TensorDict({"action": torch.tensor(0)}, batch_size=()))
         assert next_td["next"]["done"].item() is expected_done
 

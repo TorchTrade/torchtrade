@@ -289,6 +289,15 @@ class MockObserver:
     Provides synthetic observation data without needing a real data client.
     """
 
+
+    def reset(self) -> None:
+        """No-op, matching the live observers (#278).
+
+        The envs call this unconditionally so ReplayObserver gets a chance to rewind;
+        a `hasattr` guard at the call site would be fail-open, silently skipping the
+        rewind for any observer that renamed the method.
+        """
+
     def __init__(
         self,
         symbol: str = "BTC/USD",
