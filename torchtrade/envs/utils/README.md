@@ -96,23 +96,20 @@ Mixin class for adding SL/TP functionality to environments.
 **Usage:**
 ```python
 from torchtrade.envs.utils import SLTPMixin
-from torchtrade.envs.core import TorchTradeOfflineEnv
 
-class MyEnvWithSLTP(SLTPMixin, TorchTradeOfflineEnv):
-    def __init__(self, config):
-        super().__init__(config)
-        self._init_sltp(
-            sl_pct=config.sl_pct,
-            tp_percent=config.tp_percent
-        )
+# SLTPMixin is small and deliberately so: SIDE_DIRECTION, _record_sltp_position,
+# _reset_sltp_state and _sync_position_from_exchange. It does NOT own bracket pricing,
+# trigger detection or the exit -- those live in the environment, because whether a
+# bracket fired is a question about the bar's high and low, which the mixin cannot see.
+class MyEnvWithSLTP(SLTPMixin):
+    def _open(self, side):
+        # Records the position the ACTION targets, never the order side (#276): a long
+        # bracket is placed with SELL stop orders, and recording those would invert the
+        # position direction the policy observes.
+        self._record_sltp_position(side)
 
-    def _step(self, action):
-        # Check SL/TP before processing action
-        if self._check_sltp_triggered(current_price):
-            return self._execute_sltp_exit()
-
-        # Normal step logic
-        return super()._step(action)
+    def _close(self):
+        self._reset_sltp_state()
 ```
 
 ### `fractional_sizing.py`
@@ -188,29 +185,7 @@ binance_client.get_klines(symbol, interval=binance_format)
 
 ### Adding SL/TP to Custom Environment
 
-```python
-from torchtrade.envs.core import TorchTradeOfflineEnv
-from torchtrade.envs.utils import SLTPMixin
-from dataclasses import dataclass
-
-@dataclass
-class MyEnvConfig:
-    sl_percent: float = 0.02
-    tp_percent: float = 0.05
-
-class MyEnv(SLTPMixin, TorchTradeOfflineEnv):
-    def __init__(self, config):
-        super().__init__(config)
-        self._init_sltp(config.sl_percent, config.tp_percent)
-
-    def _step(self, action):
-        # SL/TP check happens automatically
-        if self.has_position and self._check_sltp():
-            return self._execute_sltp_exit()
-
-        # Normal logic
-        return super()._step(action)
-```
+See the SLTPMixin section above for the real surface.
 
 ## Design Principles
 

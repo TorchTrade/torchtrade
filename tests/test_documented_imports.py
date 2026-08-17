@@ -11,6 +11,7 @@ import functools
 import dataclasses
 import importlib
 import pathlib
+import pkgutil
 import re
 import subprocess
 
@@ -47,14 +48,16 @@ def _documented_imports():
 CASES = list(_documented_imports())
 _README_SOURCES = [p for p in _doc_sources()
                    if p.name == "README.md" and p.is_relative_to(REPO / "torchtrade")]
+# Read each README once. The guard needs a block's predecessors, so blocks are carried
+# per-file and the flat list is derived from that rather than re-globbing.
+_BLOCKS_BY_FILE = [(p, PY_BLOCK.findall(p.read_text())) for p in _README_SOURCES]
 README_BLOCKS = [
     pytest.param(block, id=f"{p.relative_to(REPO)}::block{i}")
-    for p in _README_SOURCES for i, block in enumerate(PY_BLOCK.findall(p.read_text()))
+    for p, blocks in _BLOCKS_BY_FILE for i, block in enumerate(blocks)
 ]
-# (file, index, block) for the guard that needs to see a block's predecessors.
 README_BLOCKS_IN_CONTEXT = [
-    pytest.param(p, i, block, id=f"{p.relative_to(REPO)}::block{i}")
-    for p in _README_SOURCES for i, block in enumerate(PY_BLOCK.findall(p.read_text()))
+    pytest.param(blocks[:i], block, id=f"{p.relative_to(REPO)}::block{i}")
+    for p, blocks in _BLOCKS_BY_FILE for i, block in enumerate(blocks)
 ]
 
 
@@ -219,20 +222,34 @@ def test_no_readme_redefines_a_package_config_as_a_dataclass():
 
 # Names a reader supplies, or that a block deliberately continues from an earlier one.
 @functools.lru_cache(maxsize=None)
-def _resolves_anywhere(name: str) -> bool:
-    """True if `name` is exported by any already-imported torchtrade module.
+def _package_names():
+    """Every public name any torchtrade module exports, collected DETERMINISTICALLY.
 
-    Only modules the doc sweep has already pulled in are searched -- importing the whole
-    package to answer this would make the test's cost unbounded and its failures depend
-    on import order.
+    The first version scanned `sys.modules`, which made the verdict depend on which
+    other tests had run first: selected alone it saw 71 torchtrade modules, after the
+    import tests 102, and `ReplayObserver` -- a real exported class -- resolved False in
+    the first case and True in the second. Identical file, opposite results, so the test
+    failed on real API under `-k`, under xdist sharding, or under any reordering. An
+    lru_cache on top froze whichever answer came first.
+
+    Walking the package is slower once and correct always.
     """
-    for module in list(sys.modules.values()):
-        if getattr(module, "__name__", "").startswith("torchtrade") and hasattr(module, name):
-            return True
-    return False
+    names = set()
+    package = importlib.import_module("torchtrade")
+    for info in pkgutil.walk_packages(package.__path__, prefix="torchtrade."):
+        try:
+            module = importlib.import_module(info.name)
+        except Exception:
+            continue  # optional deps; the import tests cover what must import
+        names.update(n for n in vars(module) if not n.startswith("_"))
+    return names
 
 
-def _names_bound_by(block):
+def _resolves_anywhere(name: str) -> bool:
+    return name in _package_names()
+
+
+def _names_bound_by(block, *, include_params=True):
     try:
         tree = ast.parse(block)
     except SyntaxError:
@@ -241,7 +258,11 @@ def _names_bound_by(block):
     bound |= {a.asname or a.name.split(".")[0] for n in ast.walk(tree)
               if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
     bound |= {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
-    bound |= {a.arg for n in ast.walk(tree) if isinstance(n, ast.arguments) for a in n.args}
+    if include_params:
+        bound |= {a.arg for n in ast.walk(tree) if isinstance(n, ast.arguments)
+                  for a in (*n.posonlyargs, *n.args, *n.kwonlyargs,
+                            *([n.vararg] if n.vararg else []),
+                            *([n.kwarg] if n.kwarg else []))}
     return bound
 
 
@@ -250,8 +271,8 @@ _READER_SUPPLIED = {"env", "config", "action", "agent", "df", "td", "transition"
                     "your_dataframe", "policy", "model", "data", "trainer"}
 
 
-@pytest.mark.parametrize("path,index,block", README_BLOCKS_IN_CONTEXT)
-def test_a_documented_block_calls_nothing_that_does_not_exist(path, index, block):
+@pytest.mark.parametrize("earlier_blocks,block", README_BLOCKS_IN_CONTEXT)
+def test_a_documented_block_calls_nothing_that_does_not_exist(earlier_blocks, block):
     """A CALL to a name the block never binds and the package never defines.
 
     This is the gap the import test cannot cover: it checks `from x import y` lines, so
@@ -272,8 +293,12 @@ def test_a_documented_block_calls_nothing_that_does_not_exist(path, index, block
     # scope here -- that is what makes `MyEnv(...)` in a subclassing walkthrough legal
     # while `calculate_sltp_prices(...)`, defined nowhere at all, is not.
     bound = set(_names_bound_by(block))
-    for earlier in PY_BLOCK.findall(path.read_text())[:index]:
-        bound |= _names_bound_by(earlier)
+    for earlier in earlier_blocks:
+        # include_params=False: a parameter is local to its own block. Carrying them
+        # forward let `def helper(calculate_sltp_prices)` in ANY earlier snippet
+        # whitelist that phantom for the whole rest of the file -- and core/README.md
+        # really does bind df/config/tensordict/self/kwargs that way in block 0.
+        bound |= _names_bound_by(earlier, include_params=False)
 
     called = {n.func.id for n in ast.walk(tree)
               if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}

@@ -52,14 +52,12 @@ Position state management.
 - Unrealized P&L
 - Position metadata
 
-### `reward.py`
-Reward function abstractions.
+### `default_rewards.py`
+The shipped reward functions.
 
 **Key Classes:**
-- `default_rewards`: the shipped reward functions (e.g. `log_return_reward`)
-- `log_return_reward`, `sharpe_ratio_reward`, `drawdown_penalty_reward`: the three
-  shipped reward functions. They are plain functions, not classes -- there is nothing
-  to instantiate.
+- `default_rewards`: `log_return_reward`, `sharpe_ratio_reward` and
+  `drawdown_penalty_reward`. Plain functions, not classes -- nothing to instantiate.
 
 **Extensibility:**
 A reward function is a plain callable passed to the env constructor; see `torchtrade/envs/core/default_rewards.py`.
@@ -68,7 +66,7 @@ A reward function is a plain callable passed to the env constructor; see `torcht
 Common types and enums.
 
 **Key Types:**
-- `ActionType`: Enum for discrete action types (BUY, SELL, HOLD)
+- `TradeMode` / `validate_trade_mode`: the three position-sizing modes
 - Shared constants and type definitions
 
 ## Class Hierarchy
@@ -91,26 +89,27 @@ TorchTradeBaseEnv (base.py)
 ### Extending the Base Environment
 
 ```python
-from torchtrade.envs.core import TorchTradeOfflineEnv
 from dataclasses import dataclass
 
+from torchtrade.envs.core import TorchTradeOfflineEnv
+from torchtrade.envs.offline import SequentialTradingEnvConfig
+
+# There is no exported TorchTradeEnvConfig base -- subclass the config of the env you
+# are extending.
 @dataclass
-class MyEnvConfig(TorchTradeEnvConfig):
+class MyEnvConfig(SequentialTradingEnvConfig):
     custom_param: float = 1.0
 
 class MyCustomEnv(TorchTradeOfflineEnv):
     def __init__(self, df, config: MyEnvConfig):
-        super().__init__(config)
-        self.df = df
+        super().__init__(df, config)
         self.custom_param = config.custom_param
 
-    def _reset(self, tensordict=None, **kwargs):
-        # Custom reset logic
-        return self._get_observation()
-
     def _step(self, tensordict):
-        # Custom step logic
-        return self._get_observation(), reward, done, info
+        # TensorDict in, TensorDict out -- NOT the gym (obs, reward, done, info) tuple.
+        # The outcome goes under "next"; see the live/README.md loop for how a caller
+        # steps on the result.
+        return super()._step(tensordict)
 ```
 
 ### Using Position State
@@ -118,16 +117,14 @@ class MyCustomEnv(TorchTradeOfflineEnv):
 ```python
 from torchtrade.envs.core import PositionState
 
-# Track position
+# The fields are the ones the envs actually keep. There is no `size`/`direction` kwarg,
+# no .update() and no .unrealized_pnl() -- the environment writes these directly.
 position = PositionState(
-    size=100.0,
+    current_position=1,        # -1 short, 0 flat, +1 long
+    position_size=100.0,
     entry_price=50.0,
-    direction="long",
 )
-
-# Update position
-position.update(current_price=55.0)
-unrealized_pnl = position.unrealized_pnl()
+position.unrealized_pnlpc = (55.0 - position.entry_price) / position.entry_price
 ```
 
 ### Creating Custom Rewards
@@ -178,19 +175,10 @@ from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvCo
 # The kwarg is `reward_function` and it takes the function itself -- not `reward_fn`,
 # and not an instance, since these are functions rather than classes.
 env = SequentialTradingEnv(
-    df,
+    your_dataframe,
     SequentialTradingEnvConfig(time_frames=["1Min"], window_sizes=[10], execute_on="1Min"),
     reward_function=sharpe_ratio_reward,
 )
-```
-
-### Observer Pattern
-
-State changes notify observers:
-
-```python
-position.register_observer(logger)
-position.update(price=new_price)  # Notifies logger
 ```
 
 ## Key Abstractions
