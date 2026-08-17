@@ -150,9 +150,9 @@ class BybitFuturesOrderClass:
                 tick_str = price_filter.get("tickSize", "0")
                 tick_size = float(tick_str)
                 if tick_size > 0:
-                    self._tick_size = tick_size
-                    # Derive decimal places from tick string for clean formatting
-                    self._tick_decimals = decimals_for_step(tick_size)
+                    # Computed before either is assigned, like binance and okx.
+                    tick_decimals = decimals_for_step(tick_size)
+                    self._tick_size, self._tick_decimals = tick_size, tick_decimals
                     logger.info(f"Tick size for {self.symbol}: {self._tick_size} ({self._tick_decimals} decimals)")
 
                 # Also cache lot size to avoid a second API call from get_lot_size()

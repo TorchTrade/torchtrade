@@ -6,10 +6,44 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from torchtrade.envs.live.binance.env_sltp import (
+    BinanceFuturesSLTPTorchTradingEnv,
+    BinanceFuturesSLTPTradingEnvConfig,
+)
+from torchtrade.envs.live.bitget.env_sltp import (
+    BitgetFuturesSLTPTorchTradingEnv,
+    BitgetFuturesSLTPTradingEnvConfig,
+)
 from torchtrade.envs.live.bybit.env_sltp import (
     BybitFuturesSLTPTorchTradingEnv,
     BybitFuturesSLTPTradingEnvConfig,
 )
+from torchtrade.envs.live.okx.env_sltp import (
+    OKXFuturesSLTPTorchTradingEnv,
+    OKXFuturesSLTPTradingEnvConfig,
+)
+
+# The change is byte-identical across eight files, so it is checked on all four venues.
+# Covering only one is how the flat-row regression survived a round.
+VENUES = [
+    pytest.param(BybitFuturesSLTPTorchTradingEnv, BybitFuturesSLTPTradingEnvConfig, id="bybit"),
+    pytest.param(BinanceFuturesSLTPTorchTradingEnv, BinanceFuturesSLTPTradingEnvConfig, id="binance"),
+    pytest.param(BitgetFuturesSLTPTorchTradingEnv, BitgetFuturesSLTPTradingEnvConfig, id="bitget"),
+    pytest.param(OKXFuturesSLTPTorchTradingEnv, OKXFuturesSLTPTradingEnvConfig, id="okx"),
+]
+
+
+def _build(Env, Cfg, df):
+    config = Cfg(
+        symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10], execute_on="1m",
+        stoploss_levels=(-0.02,), takeprofit_levels=(0.001,), leverage=5,
+        trade_mode="quantity", quantity_per_trade=0.01,
+    )
+    executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
+    observer = ReplayObserver(df=df, time_frames=config.time_frames,
+                              window_sizes=config.window_sizes,
+                              execute_on=config.execute_on, executor=executor)
+    return config, executor, observer
 from torchtrade.envs.replay.observer import ReplayObserver
 from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
 
@@ -21,91 +55,41 @@ def _df(n=80):
                          "low": prices - 10, "close": prices, "volume": np.ones(n) * 100})
 
 
-def test_the_recorded_portfolio_value_is_the_bar_the_action_moved_to():
-    """Behavioural, not a source-text check.
+@pytest.mark.parametrize("Env,Cfg", VENUES)
+def test_the_recorded_price_and_portfolio_value_describe_the_same_bar(Env, Cfg):
+    """Every history row must carry one bar's facts -- including the rows that end FLAT.
 
-    The first version of this test asserted that `_get_observation()` appeared before
-    `_get_portfolio_value()` in the module source. That is one docstring away from
-    vacuous -- `str.find` takes the first occurrence anywhere, prose included, and this
-    fix's own comments name both methods. Drive the value through instead.
+    Behavioural, not a source-text check: the first version asserted
+    `source.find("_get_observation()") < source.find("_get_portfolio_value()")`, which
+    `str.find` satisfies from any comment. The version after that asserted only that the
+    recorded price was within 1.0 of SOME close, which every bar satisfies.
 
-    The bug: a tuple evaluates left to right, and under a ReplayObserver the clock
-    advances only inside `get_observations()`, so reading PV first recorded the PREVIOUS
-    bar's equity against this bar's action -- 8/8 against the decision bar, 0/8 against
-    the next.
+    The flat rows are the point. `_last_observed_mark` is set only when a position is
+    open, so an earlier fix let every flat row fall back to the PRE-trade mark -- and the
+    EXIT row is flat and carries the realized PnL, giving `price[t] == close[t-1]`
+    against `portfolio_value[t] == equity[t]` on 12 of 14 rows. A test that only opens
+    and holds never sees it, which is exactly how it survived a review round.
     """
     import torch
 
     df = _df()
-    config = BybitFuturesSLTPTradingEnvConfig(
-        symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10], execute_on="1m",
-        stoploss_levels=(-0.02,), takeprofit_levels=(0.03,), leverage=5,
-        trade_mode="quantity", quantity_per_trade=0.01,
-    )
-    executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
-    observer = ReplayObserver(df=df, time_frames=config.time_frames,
-                              window_sizes=config.window_sizes,
-                              execute_on=config.execute_on, executor=executor)
-
-    equity = lambda: executor.get_account_balance()["total_margin_balance"]
-    at_decision, at_next, recorded = [], [], []
-
-    # A live env sleeps until the next real bar boundary; replay supplies the bars.
-    with patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
-        env = BybitFuturesSLTPTorchTradingEnv(config=config, observer=observer, trader=executor)
-        td = env.reset()
-        for step in range(8):
-            at_decision.append(equity())            # the bar the policy is looking at
-            acted = td.clone()
-            acted["action"] = torch.tensor(1 if step == 0 else 0)  # open, then hold
-            td = env.step(acted)["next"]
-            at_next.append(equity())                # the bar the action moved us to
-            recorded.append(env.history.portfolio_values[-1])
-
-    stale = sum(r == pytest.approx(d) for r, d in zip(recorded, at_decision))
-    correct = sum(r == pytest.approx(n) for r, n in zip(recorded, at_next))
-    assert correct == len(recorded) and stale == 0, (
-        f"{stale}/{len(recorded)} recorded PVs are the DECISION bar's equity (stale) "
-        f"and {correct}/{len(recorded)} are the next bar's -- the reward at step t would "
-        f"belong to the action at t-1 (#278)"
-    )
-
-
-def test_the_recorded_price_and_portfolio_value_describe_the_same_bar():
-    """Both facts in a history row must come from one bar.
-
-    The first version of this test asserted only that the recorded price was within 1.0
-    of SOME close in the frame -- which every bar satisfies, so reverting `price=` to the
-    pre-trade mark left it passing. It tested nothing. This pins the price and the equity
-    to the SAME post-step snapshot, and fails under either mutation: price reverted to
-    pre-trade, or the pair read before the observation.
-    """
-    import torch
-
-    df = _df()
-    config = BybitFuturesSLTPTradingEnvConfig(
-        symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10], execute_on="1m",
-        stoploss_levels=(-0.02,), takeprofit_levels=(0.03,), leverage=5,
-        trade_mode="quantity", quantity_per_trade=0.01,
-    )
-    executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
-    observer = ReplayObserver(df=df, time_frames=config.time_frames,
-                              window_sizes=config.window_sizes,
-                              execute_on=config.execute_on, executor=executor)
-
+    config, executor, observer = _build(Env, Cfg, df)
     snapshot = lambda: (executor.get_account_balance()["total_margin_balance"],
                         executor.get_mark_price())
     at_decision, at_next, recorded = [], [], []
 
-    with patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
-        env = BybitFuturesSLTPTorchTradingEnv(config=config, observer=observer, trader=executor)
+    # A live env sleeps until the next real bar boundary; replay supplies the bars.
+    with patch.object(Env, "_wait_for_next_timestamp"):
+        env = Env(config=config, observer=observer, trader=executor)
         td = env.reset()
-        for step in range(8):
+        # Open, hold, then CLOSE -- so the sequence contains flat rows, and one of them
+        # is the exit row whose PnL is realized.
+        for action in (1, 0, 0, 0, 0, 0, 0, 0):
             at_decision.append(snapshot())
             acted = td.clone()
-            # Fixed, not action_spec.rand(): an unseeded action sequence makes a failure
-            # unreproducible, and holding a position open is what exposes the lag.
-            acted["action"] = torch.tensor(1 if step == 0 else 0)
+            # Fixed rather than action_spec.rand(): an unseeded sequence makes a failure
+            # unreproducible and may never reach the flat rows this test exists for.
+            acted["action"] = torch.tensor(action)
             td = env.step(acted)["next"]
             at_next.append(snapshot())
             recorded.append((env.history.portfolio_values[-1], env.history.base_prices[-1]))

@@ -144,19 +144,37 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         Offline records both at the new bar (`offline/sequential.py`), and replay
         agreeing with offline is the whole point of #278.
 
-        The mark is taken from the snapshot `_get_observation` ALREADY read, not from a
-        fresh `_current_mark_price()`. Fetching it again was wrong twice over: it added a
-        fourth venue round-trip per step whose value came from a DIFFERENT moment than
-        the `unrealized_pnl_pct` and `exposure_pct` in the same row -- re-creating, on the
-        live path, the two-moments-one-row problem this method exists to fix -- and it
-        introduced a halt trigger that could not exist before, so a blank post-bar ticker
-        would emergency-FLATTEN a real position. A price for the history is not worth a
-        market order.
+        With a position open the mark comes from the snapshot `_get_observation` ALREADY
+        read -- no extra round-trip, and the same moment as the `unrealized_pnl_pct` and
+        `exposure_pct` in the row. A FLAT account has no position mark, and taking the
+        pre-trade price there was wrong for the row that matters most: the EXIT row is
+        flat and carries the realized PnL, so 12 of 14 rows ended up with
+        `price[t] == close[t-1]` against `portfolio_value[t] == equity[t]`.
+
+        So flat rows do fetch, but NEVER fatally. The first version of this fix called
+        `_current_mark_price()` inside the halt wrapper, where a non-positive or missing
+        mark raises -- and under FLATTEN that emergency-closes a real position (bybit and
+        okx raise RuntimeError, which `_halting` does not even catch). A price that only
+        labels a history row is not worth a market order, so an unavailable mark returns
+        None and the caller records the pre-trade price instead.
         """
         def read():
             self._last_observed_mark = None
             observation = self._get_observation()
-            return self._get_portfolio_value(), self._last_observed_mark, observation
+            portfolio_value = self._get_portfolio_value()
+            mark = self._last_observed_mark
+            if mark is None:
+                try:
+                    mark = self.trader.get_mark_price()
+                    if not math.isfinite(mark) or mark <= 0:
+                        mark = None
+                except Exception:
+                    logger.warning(
+                        "post-bar mark unavailable for %s; the history row will carry the "
+                        "pre-trade price", self.symbol,
+                    )
+                    mark = None
+            return portfolio_value, mark, observation
 
         return self._halting(read)
 

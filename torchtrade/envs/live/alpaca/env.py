@@ -146,7 +146,15 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         try:
             new_price = self._get_current_price()
         except Exception:
-            logger.warning("post-bar price unavailable; recording the pre-trade price")
+            new_price = 0.0
+        if not new_price or not math.isfinite(new_price) or new_price <= 0:
+            # _get_current_price RETURNS 0.0 when all three sources fail rather than
+            # raising, so an except-only guard never fired on the path that actually
+            # degrades (#290). Check the value, not just the exception.
+            logger.warning(
+                "post-bar price unavailable for %s; the history row will carry the "
+                "pre-trade price", self.config.symbol,
+            )
             new_price = current_price
 
         # Record step history FIRST (reward function needs updated history!)
