@@ -4,6 +4,10 @@ Scope: `from torchtrade... import X` (flat AND parenthesized), plus a syntax che
 python blocks in the in-package READMEs. Config kwargs are covered below; observation keys still are not.
 """
 
+import ast
+import builtins
+import sys
+import functools
 import dataclasses
 import importlib
 import pathlib
@@ -41,10 +45,16 @@ def _documented_imports():
 
 
 CASES = list(_documented_imports())
+_README_SOURCES = [p for p in _doc_sources()
+                   if p.name == "README.md" and p.is_relative_to(REPO / "torchtrade")]
 README_BLOCKS = [
     pytest.param(block, id=f"{p.relative_to(REPO)}::block{i}")
-    for p in _doc_sources() if p.name == "README.md" and p.is_relative_to(REPO / "torchtrade")
-    for i, block in enumerate(PY_BLOCK.findall(p.read_text()))
+    for p in _README_SOURCES for i, block in enumerate(PY_BLOCK.findall(p.read_text()))
+]
+# (file, index, block) for the guard that needs to see a block's predecessors.
+README_BLOCKS_IN_CONTEXT = [
+    pytest.param(p, i, block, id=f"{p.relative_to(REPO)}::block{i}")
+    for p in _README_SOURCES for i, block in enumerate(PY_BLOCK.findall(p.read_text()))
 ]
 
 
@@ -205,3 +215,71 @@ def test_no_readme_redefines_a_package_config_as_a_dataclass():
         f"{len(offenders)} README blocks redefine a real config as a dataclass instead "
         f"of importing it: {offenders}"
     )
+
+
+# Names a reader supplies, or that a block deliberately continues from an earlier one.
+@functools.lru_cache(maxsize=None)
+def _resolves_anywhere(name: str) -> bool:
+    """True if `name` is exported by any already-imported torchtrade module.
+
+    Only modules the doc sweep has already pulled in are searched -- importing the whole
+    package to answer this would make the test's cost unbounded and its failures depend
+    on import order.
+    """
+    for module in list(sys.modules.values()):
+        if getattr(module, "__name__", "").startswith("torchtrade") and hasattr(module, name):
+            return True
+    return False
+
+
+def _names_bound_by(block):
+    try:
+        tree = ast.parse(block)
+    except SyntaxError:
+        return set()
+    bound = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+    bound |= {a.asname or a.name.split(".")[0] for n in ast.walk(tree)
+              if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
+    bound |= {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+    bound |= {a.arg for n in ast.walk(tree) if isinstance(n, ast.arguments) for a in n.args}
+    return bound
+
+
+# Objects a reader is expected to bring; naming one is not a claim about the package.
+_READER_SUPPLIED = {"env", "config", "action", "agent", "df", "td", "transition", "obs",
+                    "your_dataframe", "policy", "model", "data", "trainer"}
+
+
+@pytest.mark.parametrize("path,index,block", README_BLOCKS_IN_CONTEXT)
+def test_a_documented_block_calls_nothing_that_does_not_exist(path, index, block):
+    """A CALL to a name the block never binds and the package never defines.
+
+    This is the gap the import test cannot cover: it checks `from x import y` lines, so
+    a block whose import line was corrected while its BODY kept calling the old name
+    passes it. That is exactly what happened -- utils/README.md imported the real
+    calculate_bracket_prices and then called calculate_sltp_prices and check_sltp_hit,
+    neither of which has ever existed, three doc PRs in a row.
+
+    Only flags names that look like package API (snake_case functions, CamelCase
+    classes) and resolve nowhere in torchtrade. Anything the reader defines is theirs.
+    """
+    try:
+        tree = ast.parse(block)
+    except SyntaxError:
+        pytest.skip("covered by the compile test")
+
+    # A reader meets the blocks in order, so anything an EARLIER block defined is in
+    # scope here -- that is what makes `MyEnv(...)` in a subclassing walkthrough legal
+    # while `calculate_sltp_prices(...)`, defined nowhere at all, is not.
+    bound = set(_names_bound_by(block))
+    for earlier in PY_BLOCK.findall(path.read_text())[:index]:
+        bound |= _names_bound_by(earlier)
+
+    called = {n.func.id for n in ast.walk(tree)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    unknown = sorted(
+        name for name in called - bound - _READER_SUPPLIED
+        if not hasattr(builtins, name) and _resolve_config(name) is None
+        and not _resolves_anywhere(name)
+    )
+    assert not unknown, f"calls names that exist nowhere in torchtrade: {unknown}"

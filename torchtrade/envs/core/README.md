@@ -57,10 +57,9 @@ Reward function abstractions.
 
 **Key Classes:**
 - `default_rewards`: the shipped reward functions (e.g. `log_return_reward`)
-- `LogReturnReward`: Log return-based rewards
-- `PercentReturnReward`: Percentage return rewards
-- `RealizedPnLReward`: Realized profit/loss rewards
-- `SharpeRatioReward`: Risk-adjusted return rewards
+- `log_return_reward`, `sharpe_ratio_reward`, `drawdown_penalty_reward`: the three
+  shipped reward functions. They are plain functions, not classes -- there is nothing
+  to instantiate.
 
 **Extensibility:**
 A reward function is a plain callable passed to the env constructor; see `torchtrade/envs/core/default_rewards.py`.
@@ -77,9 +76,10 @@ Common types and enums.
 ```
 TorchTradeBaseEnv (base.py)
 ├── TorchTradeOfflineEnv (offline_base.py)
-│   ├── SeqLongOnlyEnv
-│   ├── SeqFuturesEnv
-│   └── ...
+│   ├── SequentialTradingEnv
+│   ├── SequentialTradingEnvSLTP
+│   ├── OneStepTradingEnv
+│   └── VectorizedSequentialTradingEnv(+SLTP)
 └── TorchTradeLiveEnv (live.py)
     ├── AlpacaBaseTorchTradingEnv
     ├── BinanceBaseTorchTradingEnv
@@ -172,9 +172,15 @@ Subclasses override `_reset()` to provide specific behavior.
 Reward functions use the strategy pattern:
 
 ```python
-env = MyEnv(
-    config=config,
-    reward_fn=SharpeRatioReward()  # Pluggable reward
+from torchtrade.envs.core.default_rewards import sharpe_ratio_reward
+from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
+
+# The kwarg is `reward_function` and it takes the function itself -- not `reward_fn`,
+# and not an instance, since these are functions rather than classes.
+env = SequentialTradingEnv(
+    df,
+    SequentialTradingEnvConfig(time_frames=["1Min"], window_sizes=[10], execute_on="1Min"),
+    reward_function=sharpe_ratio_reward,
 )
 ```
 

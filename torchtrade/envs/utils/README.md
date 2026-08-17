@@ -64,27 +64,26 @@ Stop-loss and take-profit calculation utilities.
 
 **Example:**
 ```python
-from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
+from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices, stop_fill_price
 
-# Calculate SL/TP levels
-entry_price = 100.0
-sl_price, tp_price = calculate_sltp_prices(
-    entry_price=entry_price,
-    direction="long",
-    sl_percent=0.02,  # 2% stop loss
-    tp_percent=0.05,  # 5% take profit
+# sl_pct is SIGNED and its sign is not the same for both sides. For a long the stop
+# sits BELOW entry, so sl_pct is negative; for a short it sits above, so it is
+# positive. The helper does not normalise this -- passing +0.02 for a long puts the
+# stop 2% ABOVE the entry, where it is not a stop at all.
+sl_price, tp_price = calculate_bracket_prices(
+    side="long",
+    entry_price=100.0,
+    sl_pct=-0.02,   # 2% BELOW entry
+    tp_pct=0.05,    # 5% above entry
 )
 # sl_price = 98.0, tp_price = 105.0
 
-# Check if hit
-current_price = 97.5
-sl_hit, tp_hit = check_sltp_hit(
-    current_price=current_price,
-    sl_price=sl_price,
-    tp_price=tp_price,
-    direction="long"
-)
-# sl_hit = True, tp_hit = False
+# Whether a bracket triggered is decided by the environment against the bar's high and
+# low; there is no check-if-hit helper here. What this module does provide is the price
+# a triggered stop actually FILLS at, which is not the stop price when the bar gaps
+# through it.
+stop_fill_price(stop_price=98.0, open_price=97.0, is_long=True)   # -> 97.0, the gap open
+stop_fill_price(stop_price=98.0, open_price=99.0, is_long=True)   # -> 98.0, the stop
 ```
 
 ### `sltp_mixin.py`
@@ -103,7 +102,7 @@ class MyEnvWithSLTP(SLTPMixin, TorchTradeOfflineEnv):
     def __init__(self, config):
         super().__init__(config)
         self._init_sltp(
-            sl_percent=config.sl_percent,
+            sl_pct=config.sl_pct,
             tp_percent=config.tp_percent
         )
 
