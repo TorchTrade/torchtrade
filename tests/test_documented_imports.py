@@ -219,7 +219,6 @@ def test_no_readme_redefines_a_package_config_as_a_dataclass():
     )
 
 
-# Names a reader supplies, or that a block deliberately continues from an earlier one.
 @functools.lru_cache(maxsize=None)
 def _package_names():
     """Every public name any torchtrade module exports, collected DETERMINISTICALLY.
@@ -235,31 +234,28 @@ def _package_names():
     """
     names = set()
     package = importlib.import_module("torchtrade")
-    failed = []
-    # onerror, because a subpackage __init__ that raises does NOT surface through a
-    # try/except around the loop body: an ImportError makes walk_packages drop that
-    # whole subtree silently, and a non-ImportError propagates out of the generator
-    # itself and would fail every test here with a traceback naming an unrelated
-    # module. Either way the name set silently SHRINKS, and a smaller set makes real
-    # API read as a phantom -- false failures, not false passes.
-    walker = pkgutil.walk_packages(package.__path__, prefix="torchtrade.",
-                                   onerror=failed.append)
-    while True:
-        try:
-            info = next(walker)
-        except StopIteration:
-            break
-        except Exception:
-            continue
+    unwalkable = []
+    # onerror, because walk_packages routes EVERY exception in a subpackage __init__
+    # here when it is set -- with onerror=None an ImportError silently drops that whole
+    # subtree and anything else escapes the generator. Either way the name set shrinks,
+    # and a shrunken set makes real API read as a phantom: false failures, not false
+    # passes. So a package that cannot be WALKED is fatal.
+    #
+    # A module that cannot be IMPORTED is not: vllm, chronos and openai are optional
+    # extras, and every one of them is imported lazily inside a function today, so this
+    # currently collects nothing extra -- but the day one moves to module scope, a dev
+    # without the extra should not see doc tests fail. The import tests cover what must
+    # import.
+    for info in pkgutil.walk_packages(package.__path__, prefix="torchtrade.",
+                                      onerror=unwalkable.append):
         try:
             module = importlib.import_module(info.name)
         except Exception:
-            failed.append(info.name)
             continue
         names.update(n for n in vars(module) if not n.startswith("_"))
-    assert not failed, (
-        f"{len(failed)} torchtrade modules could not be walked or imported, so this "
-        f"guard is checking against an incomplete picture of the package: {failed}"
+    assert not unwalkable, (
+        f"{len(unwalkable)} torchtrade subpackages could not be walked, so this guard "
+        f"is checking against a truncated package: {unwalkable}"
     )
     return names
 
@@ -300,8 +296,10 @@ def test_a_documented_block_calls_nothing_that_does_not_exist(earlier_blocks, bl
     calculate_bracket_prices and then called calculate_sltp_prices and check_sltp_hit,
     neither of which has ever existed, three doc PRs in a row.
 
-    Only flags names that look like package API (snake_case functions, CamelCase
-    classes) and resolve nowhere in torchtrade. Anything the reader defines is theirs.
+    Flags a called name that is not bound in the block, not bound by any earlier block
+    in the same file, not a builtin, not reader-supplied, and exported nowhere in
+    torchtrade. ATTRIBUTE calls (`self.foo()`, `obj.bar()`) are NOT covered -- that gap
+    is how `_init_sltp` survived three rounds, and closing it needs the callee's type.
     """
     try:
         tree = ast.parse(block)

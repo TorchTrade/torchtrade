@@ -10,7 +10,8 @@ Time period management and provider-specific conversions.
 
 **Key Classes:**
 - `TimeFrame`: Represents a time period (e.g., "1 day", "5 minutes")
-- `TimeFrameUnit`: Enum of time units (SECOND, MINUTE, HOUR, DAY, WEEK, MONTH)
+- `TimeFrameUnit`: Enum of time units -- exactly `Minute`, `Hour`, `Day`, in that
+  capitalisation. There is no SECOND, WEEK or MONTH.
 
 **Functions:**
 - `parse_timeframe_string()`: Parse strings like "1d", "5m" into TimeFrame objects
@@ -36,7 +37,7 @@ tf = TimeFrame(5, TimeFrameUnit.Minute)
 tf = parse_timeframe_string("1d")
 
 # Convert to provider format
-alpaca_tf = timeframe_to_alpaca(tf)  # "1Day"
+alpaca_tf = timeframe_to_alpaca(tf)   # an alpaca TimeFrame object, not a string
 binance_tf = timeframe_to_binance(tf)  # "1d"
 ```
 
@@ -48,7 +49,8 @@ Discrete action space mappings for different trading strategies.
 - `create_alpaca_sltp_action_map(stoploss_levels, takeprofit_levels)`: long-only bracket
   map of `(sl_pct, tp_pct)`
 - `create_sltp_action_map(stoploss_levels, takeprofit_levels)`: bracket map of
-  `(side, sl_pct, tp_pct)` for envs that can short
+  `(side, sl_pct, tp_pct)`; pass `include_short_positions=True` for the short half,
+  which is off by default
 
 Neither is a BUY/SELL/HOLD map. Both are `1 + len(sl) * len(tp)` entries, index 0 being
 the flat/no-bracket action.
@@ -184,7 +186,7 @@ from torchtrade.envs.utils import (
 tf = TimeFrame(5, TimeFrameUnit.Minute)
 
 # Convert for different providers
-alpaca_format = timeframe_to_alpaca(tf)  # "5Min"
+alpaca_format = timeframe_to_alpaca(tf)   # an alpaca TimeFrame object, not a string
 binance_format = timeframe_to_binance(tf)  # "5m"
 
 # Use in API calls

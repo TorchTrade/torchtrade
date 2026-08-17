@@ -105,12 +105,15 @@ class MyCustomEnv(TorchTradeOfflineEnv):
         super().__init__(df, config)
         self.custom_param = config.custom_param
 
-    # TorchTradeOfflineEnv leaves TWO abstract methods; overriding only _step raises
-    # "Can't instantiate abstract class". And _step is abstract all the way up on
-    # torchrl's EnvBase, so delegating to super() raises NotImplementedError -- there is
-    # no base implementation to extend. Write the body.
-    def _get_portfolio_value(self) -> float:
-        return self.cash
+    # Filling the two abstract methods (_step, _get_portfolio_value) is necessary but
+    # NOT sufficient: the base _reset also calls self._get_observation(), which the base
+    # neither defines nor declares abstract, so a class that satisfies the ABC still
+    # fails at reset(). Subclass a concrete env instead unless you intend to write all
+    # three. And note _step is abstract all the way up on torchrl's EnvBase -- there is
+    # no base implementation for super() to extend.
+    def _get_portfolio_value(self, current_price=None) -> float:
+        # `balance` -- there is no `cash` attribute on the offline envs.
+        return self.balance
 
     def _step(self, tensordict):
         # TensorDict in, TensorDict out -- never the gym (obs, reward, done, info)
@@ -194,7 +197,7 @@ import torch
 from torchrl.data import Categorical, Composite, Unbounded
 
 observation_spec = Composite(
-    market_data_1Min_10=Unbounded(shape=(10, 5), dtype=torch.float32),
+    market_data_1Minute_10=Unbounded(shape=(10, 5), dtype=torch.float32),
     account_state=Unbounded(shape=(6,), dtype=torch.float32),
 )
 action_spec = Categorical(3)  # index into action_levels
@@ -246,7 +249,8 @@ def test_custom_env():
     # action_spec, not action_space -- and step takes/returns a TensorDict.
     td["action"] = env.action_spec.rand()
     transition, td = env.step_and_maybe_reset(td)
-    assert transition["next", "done"] is not None
+    # A tensor is never None, so `is not None` here would assert nothing.
+    assert transition["next", "done"].numel() == 1
 ```
 
 ## See Also
