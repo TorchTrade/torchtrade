@@ -365,17 +365,15 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
         """
         env.config.done_on_bankruptcy = done_on_bankruptcy
 
+        mock_trader.get_account_balance = MagicMock(return_value={
+            "total_wallet_balance": 50.0,  # below 10% of the 1000 captured at __init__
+            "available_balance": 50.0,
+            "total_unrealized_profit": 0.0,
+            "total_margin_balance": 50.0,
+        })
+
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            # AFTER reset: the baseline is re-captured per episode (#278), so an episode
-            # that STARTS at 50 is a small episode, not a bankrupt one. The collapse has
-            # to happen within the episode to mean anything.
-            mock_trader.get_account_balance = MagicMock(return_value={
-                "total_wallet_balance": 50.0,  # below 10% of the 1000 captured at __init__
-                "available_balance": 50.0,
-                "total_unrealized_profit": 0.0,
-                "total_margin_balance": 50.0,
-            })
             next_td = env.step(TensorDict({"action": torch.tensor(0)}, batch_size=()))
             assert next_td["next"]["done"].item() is expected_done
 

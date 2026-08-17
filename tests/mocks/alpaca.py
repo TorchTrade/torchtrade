@@ -290,13 +290,9 @@ class MockObserver:
     """
 
 
-    def reset(self) -> None:
-        """No-op, matching the live observers (#278).
-
-        The envs call this unconditionally so ReplayObserver gets a chance to rewind;
-        a `hasattr` guard at the call site would be fail-open, silently skipping the
-        rewind for any observer that renamed the method.
-        """
+    def reset(self) -> bool:
+        """No-op, matching the live observers: nothing to rewind, so False (#278)."""
+        return False
 
     def __init__(
         self,

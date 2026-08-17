@@ -498,13 +498,11 @@ class TestAlpacaTorchTradingEnvTermination:
             observer=mock_observer,
             trader=mock_trader,
         )
+        # Override initial_portfolio_value to simulate having started with more
+        env.initial_portfolio_value = 10000.0
         env._wait_for_next_timestamp = lambda: None
 
         env.reset()
-        # Override AFTER reset: the baseline is re-captured per episode (#278), so an
-        # override applied before it is discarded. Simulates an episode that STARTED rich
-        # and has since collapsed, which is what bankruptcy means.
-        env.initial_portfolio_value = 10000.0
         td_in = TensorDict({"action": torch.tensor(1)}, batch_size=())
         td_out = env._step(td_in)
 

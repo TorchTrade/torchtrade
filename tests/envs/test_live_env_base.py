@@ -2600,3 +2600,52 @@ def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():
     assert position_status is ps
     assert price == 50000.0, "slot 2 is the PRICE"
     assert size == 0.25, "slot 3 is the SIZE"
+
+
+def test_every_live_reset_rewinds_its_observer():
+    """One line, five places, and only ONE venue's tests would notice it missing.
+
+    A mutation sweep replacing `self.observer.reset()` with `pass` at each of the five
+    call sites left four of them green (#278 review): the replay-backed env tests happen
+    to exist for bybit only. Without this guard a sixth exchange, or a copy-paste that
+    drops the line, ships an env whose second episode continues mid-stream with the
+    previous episode's balance and an inherited position.
+
+    Structural, deliberately: driving it behaviourally per venue needs a ReplayObserver
+    fixture for each, and this is the property that must hold for ALL of them.
+    """
+    missing = [
+        c.__name__ for c in LIVE_ENVS
+        if (r := c.__dict__.get("_reset")) is not None
+        and "self.observer.reset()" not in (src := inspect.getsource(r))
+        # Delegating to the base is the SLTP envs' whole pattern, and the base does it.
+        and "super()._reset(" not in src
+    ]
+    assert not missing, (
+        f"{len(missing)} live _reset methods never rewind their observer: {missing}"
+    )
+
+
+def test_the_observer_interface_declares_reset():
+    """The call above needs no hasattr guard only because every observer HAS the method.
+
+    A hasattr guard would be fail-open -- an observer that renamed it would silently stop
+    rewinding, which is the defect #278 fixed. That safety rests on the interface, so the
+    interface is asserted rather than assumed: without this, a new exchange's observation
+    class fails at runtime on episode 2, not in CI.
+    """
+    from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
+    from torchtrade.envs.live.binance.observation import BinanceObservationClass
+    from torchtrade.envs.live.shared.futures_base_obs import BaseFuturesObservationClass
+    from torchtrade.envs.replay.observer import ReplayObserver
+
+    for cls in (AlpacaObservationClass, BinanceObservationClass,
+                BaseFuturesObservationClass, ReplayObserver):
+        assert callable(getattr(cls, "reset", None)), f"{cls.__name__} has no reset()"
+
+    # And the return value is the contract: a live observer rewinds nothing and says so,
+    # so the env keeps its run-level bankruptcy baseline instead of rebasing onto a
+    # shrinking account.
+    assert BaseFuturesObservationClass.reset(None) is False
+    assert AlpacaObservationClass.reset(None) is False
+    assert BinanceObservationClass.reset(None) is False

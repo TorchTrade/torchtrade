@@ -60,6 +60,10 @@ def test_a_second_episode_rewinds_the_data_the_balance_and_the_baseline():
             "the first episode must actually move the balance, or this test proves "
             "nothing about the rewind"
         )
+        assert after_first[2] != pytest.approx(0.0), (
+            "the first episode must END holding a position, or the qty assertion below "
+            "compares zero to zero -- a round trip moves the balance too"
+        )
 
         env.reset()
         idx, balance, qty = (observer.sampler._sequential_idx,
@@ -69,44 +73,49 @@ def test_a_second_episode_rewinds_the_data_the_balance_and_the_baseline():
     assert idx < after_first[0], f"episode 2 starts at index {idx}, mid-stream after {after_first[0]}"
     assert balance == pytest.approx(10000.0), f"episode 2 inherited balance {balance}"
     assert qty == pytest.approx(0.0), f"episode 2 inherited a {qty} position with cancelled brackets"
-    assert env.initial_portfolio_value == pytest.approx(balance), (
-        f"bankruptcy baseline {env.initial_portfolio_value} is not this episode's "
-        f"starting equity {balance}"
-    )
+    # No baseline assertion here: replay rewinds the balance to the SAME number, so
+    # capturing once and capturing per episode are indistinguishable in this scenario.
+    # An assertion that cannot fail is worse than none -- the sibling test carries it.
 
 
-def test_the_bankruptcy_baseline_follows_a_live_account_between_episodes():
-    """Separate from the rewind test, because replay cannot show this.
+def test_a_live_account_keeps_its_run_level_bankruptcy_baseline():
+    """The yardstick must not chase the account down.
 
-    A replayed episode rewinds the balance to its starting value, so a baseline captured
-    once in __init__ and one re-captured per episode are numerically identical -- the
-    assertion passes either way and proves nothing. A LIVE account persists, and that is
-    where capturing once was wrong: episode 2 of a run already down 40% was measured
-    against episode 1's opening equity and read as 40% down on its first step.
+    Rebasing the baseline every episode looks like offline parity and is not: offline
+    resets the BALANCE and the baseline together, so its ratio starts at 1.0 because the
+    account was reset too. A live account persists, so rebasing only the yardstick
+    removes the cross-episode drawdown circuit breaker entirely -- an account halving
+    every episode reached 0.39% of its starting value without ever reporting bankrupt.
     """
-    from unittest.mock import MagicMock
-
     from tests.mocks.alpaca import MockObserver, MockTrader
     from torchtrade.envs.live.alpaca.env import (
         AlpacaTorchTradingEnv,
         AlpacaTradingEnvConfig,
     )
 
-    trader = MockTrader(initial_cash=10000.0)
+    trader = MockTrader(initial_cash=1000.0)
     env = AlpacaTorchTradingEnv(
-        config=AlpacaTradingEnvConfig(symbol="BTC/USD", window_sizes=[10]),
+        config=AlpacaTradingEnvConfig(
+            symbol="BTC/USD", window_sizes=[10], bankrupt_threshold=0.1,
+        ),
         observer=MockObserver(window_sizes=[10]),
         trader=trader,
     )
     env._wait_for_next_timestamp = lambda: None
 
     env.reset()
-    assert env.initial_portfolio_value == pytest.approx(10000.0)
+    assert env.initial_portfolio_value == pytest.approx(1000.0)
 
-    # The account has lost 40% by the time the next episode starts.
-    trader.cash = 6000.0
-    env.reset()
-    assert env.initial_portfolio_value == pytest.approx(6000.0), (
-        "the baseline is still the previous episode's equity, so this episode begins "
-        "40% down against a yardstick it never had (#278)"
+    # The account halves each episode. A live observer rewinds nothing, so the baseline
+    # must stay at the equity the RUN started from.
+    for equity in (500.0, 250.0, 125.0, 62.5):
+        trader.cash = equity
+        env.reset()
+        assert env.initial_portfolio_value == pytest.approx(1000.0), (
+            f"baseline rebased to {env.initial_portfolio_value} at equity {equity}; it "
+            f"now chases the account down and bankruptcy can never fire (#278)"
+        )
+
+    assert env._check_termination(62.5) is True, (
+        "62.5 is below 10% of the 1000 this run started with and must terminate"
     )

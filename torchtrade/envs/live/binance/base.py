@@ -178,19 +178,17 @@ class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
-        # FIRST, before any read below: ReplayObserver rewinds the sampler AND the
-        # simulated executor here, so the balance/position/price reads that follow must
-        # see the rewound state. Nothing but a test ever called it, so under a collector
-        # episode 2 continued mid-stream with episode 1's balance and an inherited
-        # position whose brackets had been cancelled (#278). A live observer's reset()
-        # is a no-op, declared on the observation classes so this call needs no hasattr
-        # guard -- which would be fail-open.
-        self.observer.reset()
-        # And RE-capture the bankruptcy baseline for THIS episode. __init__ still sets it
-        # so the attribute always exists; leaving it there alone measured episode 2
-        # against episode 1's starting equity, so a run already down 40% read as 40% down
-        # on its first step.
-        self._capture_bankruptcy_baseline()
+        # Before any read below: ReplayObserver rewinds the sampler AND the simulated
+        # executor here, so the balance/position/price reads that follow must see the
+        # rewound state. Re-capture the bankruptcy baseline only if it did rewind the
+        # account -- see the observer's reset() for why a live account must keep its
+        # run-level baseline (#278).
+        # `is True`, not truthiness: a MagicMock observer returns a truthy Mock from
+        # reset(), which would silently re-capture the baseline on every venue whose
+        # tests mock the observer -- the same shape as the float(MagicMock()) bug in
+        # #278's sizing path. Only an observer that explicitly says it rewound counts.
+        if self.observer.reset() is True:
+            self._capture_bankruptcy_baseline()
         # Cancel all orders
         self.trader.cancel_open_orders()
 
