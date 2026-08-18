@@ -542,13 +542,23 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # Compute portfolio values (mode-aware)
         new_pvs = self._compute_portfolio_values(new_prices)
 
-        # Rewards: log(new_pv / old_pv)
+        # Rewards: log(new_pv / old_pv), matching log_return_reward exactly.
         old_pvs = self._portfolio_values
-        # Guard against non-positive values
-        safe_old = old_pvs.clamp(min=1e-10)
+        # A non-positive OLD value is a calculation error, not a market outcome: the
+        # previous step's PV was already checked, and bankruptcy terminates before it can
+        # go negative. The scalar reward RAISES here for that reason; clamping to 1e-10
+        # instead fabricated log(new/1e-10) -- a reward around +25 for an env whose
+        # accounting had broken, silently, for the rest of the batch (#289).
+        if (old_pvs <= 0).any():
+            broken = torch.nonzero(old_pvs <= 0).flatten().tolist()
+            raise ValueError(
+                f"Invalid previous portfolio value in envs {broken}: "
+                f"{old_pvs[old_pvs <= 0].tolist()}. Portfolio value must be positive; "
+                f"this indicates a calculation error."
+            )
+        # new_pv <= 0 IS reachable -- it is bankruptcy -- and both paths report -10.0.
         safe_new = new_pvs.clamp(min=1e-10)
-        rewards = torch.log(safe_new / safe_old)
-        # Bankruptcy: large negative reward
+        rewards = torch.log(safe_new / old_pvs)
         rewards = torch.where(new_pvs <= 0, torch.full_like(rewards, -10.0), rewards)
 
         # Update stored portfolio values
