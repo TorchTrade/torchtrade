@@ -32,13 +32,42 @@ def test_reduce_only_closes_the_quantity_it_was_given(reduce_by, expected_remain
 def test_a_partial_reduce_keeps_the_entry_price_and_the_brackets():
     """The remainder was opened at that price; selling part of it does not change its
     cost basis. And a partially reduced position still HAS brackets -- clearing them
-    would leave a live position with no stop, which is what a full close does."""
+    would leave a live position with no stop, which is what a full close does.
+
+    The bar MUST move first. The earlier version reduced at the opening price, so
+    `fill == entry` and the entry assertion was a tautology: re-basing the remainder to
+    the fill on every partial passed it. That matters -- `entry_price` feeds
+    `liquidation_price`, the next reduce's margin release, and unrealized PnL.
+    """
     executor = _opened()
-    executor.sl_price, executor.tp_price = 98.0, 103.0
+    # Levels the move below does NOT cross: at tp=103 the bar advance fires the take
+    # profit and flattens the position, so the test would assert against a closed one.
+    executor.sl_price, executor.tp_price = 90.0, 130.0
+    executor.advance_bar({"open": 110.0, "high": 111.0, "low": 109.0, "close": 110.0})
+
     executor.trade("SELL", 0.25, reduce_only=True)
 
-    assert executor.entry_price == pytest.approx(100.0)
-    assert (executor.sl_price, executor.tp_price) == (98.0, 103.0)
+    assert executor.entry_price == pytest.approx(100.0), (
+        "the remainder was opened at 100 and must keep that cost basis, not re-base to "
+        "the 110 it was partially sold at"
+    )
+    assert (executor.sl_price, executor.tp_price) == (90.0, 130.0)
+
+
+def test_reducing_a_position_away_in_uneven_steps_leaves_no_phantom_dust():
+    """Seven reduces of 1/7 leave -2.2e-16, which `get_status()` reads as an open short.
+
+    That is CLAUDE.md invariant 1: an exchange residual read as a position freezes the
+    duplicate-action guard AND puts a phantom position in the observation. The dust rule
+    is why this file imports POSITION_DUST_EPS, and nothing exercised it -- replacing the
+    guard with `== 0.0` passed every replay test.
+    """
+    executor = _opened(qty=1.0, side="SELL")
+    for _ in range(7):
+        assert executor.trade("BUY", 1.0 / 7, reduce_only=True) is True
+
+    assert executor.position_qty == 0.0
+    assert executor.get_status()["position_status"] is None
 
 
 @pytest.mark.parametrize("open_side,reduce_side,direction", [

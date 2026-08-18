@@ -192,9 +192,6 @@ class ReplayOrderExecutor:
         closing = self.position_qty if quantity is None else math.copysign(
             min(abs(quantity), abs(self.position_qty)), self.position_qty
         )
-        if closing == 0:
-            return
-
         pnl = closing * (price - self.entry_price)
         notional = abs(closing * price)
         fee = notional * self.transaction_fee
@@ -253,17 +250,17 @@ class ReplayOrderExecutor:
         # partial (#278). No env passes reduce_only today, so this was latent interface
         # divergence rather than a live defect.
         if reduce_only:
-            if self.position_qty == 0:
+            # The dust rule, not `== 0`: a 1e-12 residual is not a position, and
+            # deciding a side against one books a trade against dust (invariant 1).
+            if abs(self.position_qty) <= POSITION_DUST_EPS:
                 return False
-            # `side` is load-bearing on every venue and must OPPOSE the position: bybit
-            # routes a BUY reduceOnly to the short leg (`positionIdx = 2 if Buy else 1`),
-            # okx sets `posSide = "short" if buy else "long"`, and binance/bybit build
-            # their close side as the inverse of the held one. In one-way mode the venue
-            # REJECTS a same-direction reduceOnly outright. Deriving the direction from
-            # the position instead would accept a nonsense order and quietly apply it --
-            # the same divergence this branch exists to remove, one argument over.
-            reducing_long = side.upper() in ("SELL", "ASK")
-            if reducing_long != (self.position_qty > 0):
+            # `side` must OPPOSE the position, as on every venue: bybit routes a BUY
+            # reduceOnly to the short leg, okx sets `posSide = "short" if buy else
+            # "long"`, and in one-way mode a same-direction reduceOnly is rejected.
+            # Through the dust rule, not `> 0`: a 1e-12 residual is not a position, and
+            # deciding a side against one books a trade against dust (invariant 1).
+            reducing_long = side_upper == "SELL"
+            if reducing_long != (self.position_qty > POSITION_DUST_EPS):
                 logger.warning(
                     "%s reduce_only on a %s position is rejected by the venues in one-way "
                     "mode; refusing it here too",
