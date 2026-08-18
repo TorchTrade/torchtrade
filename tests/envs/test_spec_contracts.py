@@ -175,9 +175,10 @@ def test_offline_env_specs_sample_finite(sample_ohlcv_df, env_cls, config_cls, e
 
 
 class _StubObserver:
-    """Satisfies every live observer interface the spec builders read: alpaca, binance and
-    bitget take the feature width from get_observations(); bybit and okx from
-    get_features(). All five read get_keys()."""
+    """Satisfies every live observer interface the spec builders read.
+
+    All five venues now take the feature width from get_features() and read get_keys();
+    get_observations() is kept because the step path uses it, not the spec path (#288)."""
 
     def get_keys(self):
         return ["1Minute_10", "5Minute_10"]

@@ -134,4 +134,3 @@ class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
             leverage=self.config.leverage,
             margin_type=self.config.margin_type,
         )
-

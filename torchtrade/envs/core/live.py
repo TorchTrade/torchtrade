@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import torch
 from tensordict import TensorDictBase
-from torchrl.data import Unbounded
+from torchrl.data import Composite, Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import (
@@ -267,6 +267,38 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 "base_features",
                 Unbounded(shape=(base_window, 4), dtype=torch.float),
             )
+
+    def _build_observation_specs(self):
+        """Declare the observation spec without touching the network (#288).
+
+        The feature count comes from `get_features()`, which runs the preprocessing
+        function over a synthetic frame, rather than from a live kline fetch per
+        timeframe. That the two agree is pinned by
+        `BaseObservationClassTests.test_the_declared_feature_width_matches_the_observation`.
+
+        Here rather than on the futures base for the reason `get_account_state` gives
+        below: leaving alpaca its own copy turns five into two, not one.
+        """
+        num_features = len(self.observer.get_features()["observation_features"])
+        # A list of matching length is guaranteed by every config's __post_init__ via
+        # normalize_timeframe_config; strict=True makes an injected observer that
+        # disagrees with the config raise instead of silently mis-declaring a window.
+        window_sizes = self.config.window_sizes
+
+        self.observation_spec = Composite(shape=())
+        self.account_state_key = "account_state"
+        self.observation_spec.set(
+            self.account_state_key,
+            Unbounded(shape=(len(self.ACCOUNT_STATE),), dtype=torch.float),
+        )
+
+        self.market_data_keys = []
+        for name, ws in zip(self.observer.get_keys(), window_sizes, strict=True):
+            key = "market_data_" + name
+            self.observation_spec.set(key, Unbounded(shape=(ws, num_features), dtype=torch.float))
+            self.market_data_keys.append(key)
+
+        self._declare_base_features_spec(window_sizes[0])
 
     def get_account_state(self) -> List[str]:
         """The account-state field names. Four byte-identical copies (#288).

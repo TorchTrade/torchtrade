@@ -119,4 +119,3 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
                 feature_preprocessing_fn=self._feature_preprocessing_fn,
                 demo=demo,
             )
-

@@ -146,4 +146,3 @@ class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
             margin_mode=self.config.margin_mode,
             position_mode=self.config.position_mode if hasattr(self.config, 'position_mode') else None,
         )
-

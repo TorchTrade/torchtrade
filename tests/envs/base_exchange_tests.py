@@ -16,6 +16,22 @@ from abc import ABC, abstractmethod
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
+def mirror_features_on(observer):
+    """Derive a mock observer's get_features from the observations it actually emits.
+
+    The envs build observation_spec from get_features() (#288), so a fixture that stubs
+    only get_observations declares width 0 against emitted 4 -- which is exactly what the
+    binance and bitget check_env_specs tests caught when the switch landed. Deriving
+    means a fixture cannot declare a width its own data contradicts.
+    """
+    width = next(iter(observer.get_observations().values())).shape[1]
+    observer.get_features = MagicMock(return_value={
+        "observation_features": [f"feature_{i}" for i in range(width)],
+        "original_features": [],
+    })
+    return observer
+
+
 class BaseObservationClassTests(ABC):
     """
     Base test class for exchange observation classes.

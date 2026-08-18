@@ -15,7 +15,6 @@ import logging
 import math
 
 import torch
-from torchrl.data import Composite, Unbounded
 from tensordict import TensorDict, TensorDictBase
 
 from torchtrade.envs.core.live import (
@@ -510,45 +509,6 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         rather than 0 and let `abs(current_qty) > 0` fire on a flat account (#283).
         """
         return position_qty_from_status(self.trader.get_status().get("position_status"))
-
-    def _build_observation_specs(self):
-        """Declare the observation spec. No network calls (#288).
-
-        binance and bitget derived the feature count from `observer.get_observations()`
-        -- a LIVE kline fetch per timeframe, issued during `__init__`, purely to read
-        `.shape[1]`. Constructing an env hit the exchange N times, and an outage or a
-        short response failed construction rather than the first step.
-
-        `get_features()` runs the same preprocessing function over a synthetic frame
-        instead. That the two agree is not assumed: `BaseObservationClassTests`
-        cross-checks the declared width against a real `get_observations()` on all five
-        venues, and every preprocessing function in this repo and its examples was run
-        through both paths before the switch.
-        """
-        num_features = len(self.observer.get_features()["observation_features"])
-        market_data_names = self.observer.get_keys()
-        window_sizes = (
-            self.config.window_sizes
-            if isinstance(self.config.window_sizes, list)
-            else [self.config.window_sizes]
-        )
-
-        self.observation_spec = Composite(shape=())
-        self.market_data_key = "market_data"
-        self.account_state_key = "account_state"
-        self.observation_spec.set(
-            self.account_state_key,
-            Unbounded(shape=(len(self.ACCOUNT_STATE),), dtype=torch.float),
-        )
-
-        self.market_data_keys = []
-        for i, market_data_name in enumerate(market_data_names):
-            key = "market_data_" + market_data_name
-            ws = window_sizes[i] if i < len(window_sizes) else window_sizes[0]
-            self.observation_spec.set(key, Unbounded(shape=(ws, num_features), dtype=torch.float))
-            self.market_data_keys.append(key)
-
-        self._declare_base_features_spec(window_sizes[0])
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment.

@@ -205,18 +205,25 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     )
 
 
-# Every live env that defines its own _build_observation_specs -- auto-discovered from LIVE_ENVS
-# (base + SLTP variants collapse to their defining base classes), so a future exchange, or a new
-# non-futures env, is covered without editing this list. This spans both the 4 futures exchanges
-# AND alpaca (spot) -- alpaca declares base_features via the same shared helper too.
+# Every DISTINCT _build_observation_specs any live env resolves to -- deduped on the
+# function, not on which class declares it. The `in vars(c)` form emptied the moment all
+# five venues shared one implementation (#288) and pytest errored on an empty parameter
+# set: loud, which is the point, but it would also have silently narrowed had one venue
+# kept a copy. Resolving instead means a future re-fork ADDS a case rather than removing
+# the guard's only subject.
 _BASE_FEATURES_SPEC_CLASSES = sorted(
-    {c for c in LIVE_ENVS if "_build_observation_specs" in vars(c)},
-    key=lambda c: c.__module__.split(".")[-2],
+    {c._build_observation_specs: c for c in LIVE_ENVS}.values(),
+    key=lambda c: c.__name__,
 )
 
 
+def test_the_base_features_guard_has_something_to_check():
+    """An empty or shrinking discovered set is how this guard stops guarding."""
+    assert _BASE_FEATURES_SPEC_CLASSES
+
+
 @pytest.mark.parametrize(
-    "env_cls", _BASE_FEATURES_SPEC_CLASSES, ids=lambda c: c.__module__.split(".")[-2]
+    "env_cls", _BASE_FEATURES_SPEC_CLASSES, ids=lambda c: c.__name__
 )
 def test_every_live_env_declares_base_features_via_the_shared_helper(env_cls):
     """Every live env's _build_observation_specs must call the shared _declare_base_features_spec.
@@ -229,7 +236,7 @@ def test_every_live_env_declares_base_features_via_the_shared_helper(env_cls):
     tests each guard only their own exchange; this catches a FUTURE exchange that forgets the call.
     AST, not source text (like the guards above), so a comment mentioning the method can't satisfy it.
     """
-    tree = ast.parse(inspect.getsource(env_cls.__dict__["_build_observation_specs"]).lstrip())
+    tree = ast.parse(textwrap.dedent(inspect.getsource(env_cls._build_observation_specs)))
     called = {
         node.func.attr for node in ast.walk(tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
@@ -3314,28 +3321,87 @@ def test_close_accepts_the_keyword_torchrl_passes_it(owner):
     ]
 
 
-@pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
-def test_building_the_spec_makes_no_market_data_call(env_cls):
-    """binance and bitget fetched live klines during __init__ just to count columns.
+def test_construction_survives_an_observer_that_cannot_reach_the_exchange():
+    """binance and bitget built the spec from `get_observations()` -- a live kline fetch
+    PER TIMEFRAME, during __init__ -- purely to read `.shape[1]`.
 
-    `get_observations()` issues one request PER TIMEFRAME. Building a spec from it meant
-    constructing an env hit the exchange N times, and an outage or a short response
-    failed construction rather than the first step. bybit and okx already used
-    `get_features()`, which runs the preprocessing fn over a synthetic frame.
-
-    Measured before the switch: 1 call on main, 0 here, same observation_spec.
-    That the two paths agree is pinned separately, by
-    `BaseObservationClassTests.test_the_declared_feature_width_matches_the_observation`
-    across all five venues.
+    So an outage made CONSTRUCTION fail rather than the first step, and alpaca did the
+    same. Behavioural rather than structural: the AST form this replaced asserted which
+    method is called by name, which a rename of the bad path escapes, and it parametrized
+    12 envs that all resolve to one function -- 12 copies of one assertion.
     """
-    # AST, not source text: the method's own docstring names get_observations, and a
-    # substring check would match that -- a guard that fires on its own explanation.
-    tree = ast.parse(textwrap.dedent(inspect.getsource(env_cls._build_observation_specs)))
-    called = {
-        n.func.attr for n in ast.walk(tree)
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-    }
-    assert "get_observations" not in called, (
-        f"{env_cls.__name__} builds its spec from a live fetch; use get_features()"
+    from torchtrade.envs.live.binance.env import (
+        BinanceFuturesTorchTradingEnv,
+        BinanceFuturesTradingEnvConfig,
     )
-    assert "get_features" in called
+
+    observer = MagicMock()
+    observer.get_keys = MagicMock(return_value=["1Minute_10"])
+    observer.get_features = MagicMock(return_value={
+        "observation_features": ["a", "b", "c", "d"], "original_features": []})
+    observer.get_observations = MagicMock(side_effect=ConnectionError("exchange down"))
+
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1000.0, "total_margin_balance": 1000.0,
+        "total_wallet_balance": 1000.0,
+    }
+    trader.get_status.return_value = {"position_status": None}
+    trader.cancel_open_orders.return_value = True
+    trader.close_position.return_value = True
+    trader.get_mark_price.return_value = 100.0
+
+    config = BinanceFuturesTradingEnvConfig(
+        symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10], execute_on="1m",
+    )
+    with patch("time.sleep"), patch.object(
+        BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"
+    ):
+        env = BinanceFuturesTorchTradingEnv(
+            config=config, observer=observer, trader=trader
+        )
+
+    observer.get_observations.assert_not_called()
+    assert env.observation_spec["market_data_1Minute_10"].shape == torch.Size([10, 4])
+
+
+def test_each_timeframe_declares_its_own_window_size():
+    """The loop pairs `get_keys()` with `config.window_sizes` positionally.
+
+    Collapsing every window to `window_sizes[0]` passed 1366 tests: every multi-timeframe
+    env test in the suite uses uniform sizes, so the pairing was never exercised. This is
+    the shape-corruption class the spec guards exist for -- a policy fed a 20-bar window
+    declared as 10.
+    """
+    from torchtrade.envs.live.binance.env import (
+        BinanceFuturesTorchTradingEnv,
+        BinanceFuturesTradingEnvConfig,
+    )
+
+    observer = MagicMock()
+    observer.get_keys = MagicMock(return_value=["1Minute_10", "1Hour_20"])
+    observer.get_features = MagicMock(return_value={
+        "observation_features": ["a", "b", "c"], "original_features": []})
+
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1000.0, "total_margin_balance": 1000.0,
+        "total_wallet_balance": 1000.0,
+    }
+    trader.get_status.return_value = {"position_status": None}
+    trader.cancel_open_orders.return_value = True
+    trader.close_position.return_value = True
+    trader.get_mark_price.return_value = 100.0
+
+    config = BinanceFuturesTradingEnvConfig(
+        symbol="BTCUSDT", time_frames=["1m", "1h"], window_sizes=[10, 20], execute_on="1m",
+    )
+    with patch("time.sleep"), patch.object(
+        BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"
+    ):
+        env = BinanceFuturesTorchTradingEnv(
+            config=config, observer=observer, trader=trader
+        )
+
+    assert env.observation_spec["market_data_1Minute_10"].shape == torch.Size([10, 3])
+    assert env.observation_spec["market_data_1Hour_20"].shape == torch.Size([20, 3])

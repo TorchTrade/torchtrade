@@ -1,5 +1,6 @@
 """Tests for BinanceFuturesTorchTradingEnv."""
 
+from tests.envs.base_exchange_tests import mirror_features_on
 import logging
 import pytest
 import torch
@@ -33,13 +34,7 @@ class TestBinanceFuturesTorchTradingEnv:
             return obs
 
         observer.get_observations = MagicMock(side_effect=mock_observations)
-        # Derived from the emitted data, so a fixture cannot declare a width its own
-        # observations contradict -- the env builds its spec from get_features (#288).
-        _w = next(iter(observer.get_observations().values())).shape[1]
-        observer.get_features = MagicMock(return_value={
-            "observation_features": [f"feature_{i}" for i in range(_w)],
-            "original_features": [],
-        })
+        mirror_features_on(observer)
         observer.intervals = ["1m", "5m"]
         observer.window_sizes = [10, 10]
 
@@ -587,13 +582,7 @@ class TestBinanceFractionalPositionResizing:
                 obs["base_timestamps"] = np.arange(10)
             return obs
         observer.get_observations = MagicMock(side_effect=mock_observations)
-        # Derived from the emitted data, so a fixture cannot declare a width its own
-        # observations contradict -- the env builds its spec from get_features (#288).
-        _w = next(iter(observer.get_observations().values())).shape[1]
-        observer.get_features = MagicMock(return_value={
-            "observation_features": [f"feature_{i}" for i in range(_w)],
-            "original_features": [],
-        })
+        mirror_features_on(observer)
         observer.intervals = ["1m", "5m"]
         observer.window_sizes = [10, 10]
         return observer
@@ -678,13 +667,7 @@ class TestMultipleSteps:
         mock_observer.get_observations = MagicMock(return_value={
             "1m_10": np.random.randn(10, 4).astype(np.float32),
         })
-        # Derived from the emitted data, so a fixture cannot declare a width its own
-        # observations contradict -- the env builds its spec from get_features (#288).
-        _w = next(iter(mock_observer.get_observations().values())).shape[1]
-        mock_observer.get_features = MagicMock(return_value={
-            "observation_features": [f"feature_{i}" for i in range(_w)],
-            "original_features": [],
-        })
+        mirror_features_on(mock_observer)
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
@@ -759,13 +742,7 @@ class TestBinanceInitCleanup:
         observer.get_observations = MagicMock(return_value={
             "1m_10": np.random.randn(10, 4).astype(np.float32),
         })
-        # Derived from the emitted data, so a fixture cannot declare a width its own
-        # observations contradict -- the env builds its spec from get_features (#288).
-        _w = next(iter(observer.get_observations().values())).shape[1]
-        observer.get_features = MagicMock(return_value={
-            "observation_features": [f"feature_{i}" for i in range(_w)],
-            "original_features": [],
-        })
+        mirror_features_on(observer)
         return observer
 
     @pytest.fixture

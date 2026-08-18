@@ -117,4 +117,3 @@ class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
                 client=shared_client,
                 demo=demo,
             )
-
