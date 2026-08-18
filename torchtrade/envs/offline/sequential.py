@@ -69,11 +69,11 @@ class SequentialTradingEnvConfig:
 
     # Environment settings
     seed: Optional[int] = 42
-    # Declared and NEVER READ by any offline env (#289). Kept because hydra configs in
-    # examples/ pass it, so removing it turns working configs into a TypeError -- but
-    # __post_init__ rejects True, because silently ignoring a flag a user deliberately
-    # set is the failure this repo's boundary-validation rule exists to prevent. The
-    # LIVE envs have a real one that core/live.py reads; the offline envs emit no
+    # Declared and NEVER READ by any offline env (#289). Kept rather than deleted only
+    # because it is a public field someone outside this repo may pass; every in-repo
+    # caller hardcodes False. __post_init__ rejects True, because silently ignoring a
+    # flag a user deliberately set is the failure boundary validation exists to prevent.
+    # The LIVE envs have a real one that core/live.py reads; the offline envs emit no
     # base_features at all.
     include_base_features: bool = False
     max_traj_length: Optional[int] = None
@@ -91,6 +91,13 @@ class SequentialTradingEnvConfig:
 
     def __post_init__(self):
         """Validate configuration and normalize timeframes."""
+        if self.margin_type is not MarginType.ISOLATED:
+            raise ValueError(
+                f"margin_type={self.margin_type} is not implemented for the offline "
+                f"environments: liquidation always uses isolated_liquidation_price, so "
+                f"CROSSED silently produced isolated liquidation math (#289). Nothing "
+                f"reads this field. Use ISOLATED, or the live envs, which honour it."
+            )
         if self.include_base_features:
             raise ValueError(
                 "include_base_features=True is not implemented for the offline "
