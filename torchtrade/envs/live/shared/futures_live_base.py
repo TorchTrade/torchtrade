@@ -170,6 +170,30 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             closed_position=True,
         )
 
+    def _execute_market_order(self, side: str, quantity: float) -> Dict:
+        """Place a market order and report what happened. Four identical copies (#288).
+
+        `side` is lowercase on every venue: binance passed uppercase until this hoist,
+        and its executor upper-cases whatever it receives, so the difference only ever
+        surfaced as a mixed-case `trade_info["side"]` across exchanges.
+        """
+        try:
+            success = self.trader.trade(
+                side=side,
+                quantity=quantity,
+                order_type="market",
+            )
+            return self._create_trade_info(
+                executed=True,
+                quantity=quantity,
+                side=side,
+                success=success,
+            )
+        except Exception as e:
+            logger.error(f"{side.capitalize()} trade failed for {self.config.symbol}: quantity={quantity}, error={e}")
+            return self._create_trade_info(executed=False, success=False)
+
+
     def _acquire_post_bar_state(self) -> tuple[float, float, float, TensorDictBase]:
         """Post-bar portfolio value and observation, or halt.
 

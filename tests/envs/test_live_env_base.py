@@ -180,6 +180,7 @@ def test_no_live_env_overrides_shared_method(env_cls, method):
         "_get_portfolio_value",
         "_create_trade_info",
         "_handle_close_action",
+        "_execute_market_order",
     ],
 )
 @pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
@@ -2940,3 +2941,20 @@ def test_a_close_with_no_position_does_not_report_a_trade():
     env = SimpleNamespace(_create_trade_info=TorchTradeFuturesLiveEnv._create_trade_info.__get__(object()))
     info = TorchTradeFuturesLiveEnv._handle_close_action(env, 0)
     assert info["executed"] is False and info["side"] is None
+
+
+@pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
+def test_every_venue_sends_a_lowercase_order_side(env_cls):
+    """binance passed "BUY"/"SELL" where its siblings passed "buy"/"sell" (#288).
+
+    Its executor upper-cases whatever it receives, so the venue never saw a difference --
+    it surfaced only as a mixed-case `trade_info["side"]` across exchanges, in the field
+    a preceding slice had just unified. Normalising it is what made the four
+    `_execute_market_order` copies identical enough to hoist.
+    """
+    source = inspect.getsource(env_cls)
+    for upper in ('"BUY"', '"SELL"'):
+        assert upper not in source, (
+            f"{env_cls.__name__} builds an uppercase order side {upper}; every venue "
+            f"sends lowercase and the executors normalise"
+        )

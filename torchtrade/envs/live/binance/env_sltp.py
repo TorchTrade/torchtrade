@@ -363,7 +363,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
 
             try:
                 success = self.trader.trade(
-                    side="BUY",
+                    side="buy",
                     quantity=quantity,
                     order_type="market",
                     take_profit=take_profit_price,
@@ -379,7 +379,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
                 trade_info.update({
                     "executed": True,
                     "quantity": quantity,
-                    "side": "BUY",
+                    "side": "buy",
                     "success": success,
                     "stop_loss": stop_loss_price,
                     "take_profit": take_profit_price,
@@ -397,7 +397,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
 
             try:
                 success = self.trader.trade(
-                    side="SELL",
+                    side="sell",
                     quantity=quantity,
                     order_type="market",
                     take_profit=take_profit_price,
@@ -412,7 +412,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
                 trade_info.update({
                     "executed": True,
                     "quantity": quantity,
-                    "side": "SELL",
+                    "side": "sell",
                     "success": success,
                     "stop_loss": stop_loss_price,
                     "take_profit": take_profit_price,

@@ -206,24 +206,6 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
 
         return next_tensordict
 
-    def _execute_market_order(self, side: str, quantity: float) -> Dict:
-        """Execute a market order with error handling."""
-        try:
-            success = self.trader.trade(
-                side=side,
-                quantity=quantity,
-                order_type="market",
-            )
-            return self._create_trade_info(
-                executed=True,
-                quantity=quantity,
-                side=side,
-                success=success,
-            )
-        except Exception as e:
-            logger.error(f"{side.capitalize()} trade failed for {self.config.symbol}: quantity={quantity}, error={e}")
-            return self._create_trade_info(executed=False, success=False)
-
 
     def _calculate_fractional_position(self, action_value: float, current_price: float) -> tuple[float, float, str]:
         """Calculate target position size from fractional action.
