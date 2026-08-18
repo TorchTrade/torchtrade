@@ -193,14 +193,6 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         """Execute trade if position change is needed."""
         raise NotImplementedError
 
-    def get_market_data_keys(self) -> List[str]:
-        """Return the list of market data keys."""
-        return self.market_data_keys
-
-    def get_account_state(self) -> List[str]:
-        """Return the list of account state field names."""
-        return self.ACCOUNT_STATE
-
     def close(self):
         """Clean up resources."""
         try:

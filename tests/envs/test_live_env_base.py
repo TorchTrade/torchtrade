@@ -2809,3 +2809,44 @@ def test_the_bar_wait_derives_from_the_timeframe_not_a_string_alias():
                           "TimeFrameUnit.Hour", "Hour", "h", "H", "seconds",
                           "TimeFrameUnit.Day", "Day", "D", "d", "hour", "day"}
     assert not regrown, f"the unit alias table is regrowing in the wait path: {regrown}"
+
+
+def test_no_futures_env_re_forks_the_shared_accessors():
+    """`get_account_state` / `get_market_data_keys` were four byte-identical copies.
+
+    One-line returns, so the copies were harmless in themselves -- but this repo has
+    shipped a fix landing on some exchanges and not others three times (lot size #271,
+    full_done_spec #272, hedge-mode surface), and a copy that has not drifted YET is
+    still a copy (#288).
+    """
+    from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
+
+    for name in ("get_account_state", "get_market_data_keys"):
+        offenders = [
+            c.__name__ for c in LIVE_ENVS
+            if issubclass(c, TorchTradeFuturesLiveEnv)
+            for base in c.__mro__
+            if base.__module__.startswith("torchtrade.envs.live.")
+            and not base.__module__.startswith("torchtrade.envs.live.shared")
+            and name in base.__dict__
+        ]
+        assert not offenders, f"{name} re-forked on {sorted(set(offenders))}"
+
+
+def test_every_futures_env_reports_the_same_account_state_layout():
+    """The accessor is shared; the DATA still lives per exchange, so pin it.
+
+    `account_state` is the observation vector a policy consumes, and offline/live parity
+    depends on all venues agreeing on its order. Hoisting the accessor would otherwise
+    hide a divergence in what it returns.
+    """
+    from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
+
+    layouts = {
+        c.__name__: tuple(c.ACCOUNT_STATE)
+        for c in LIVE_ENVS if issubclass(c, TorchTradeFuturesLiveEnv)
+        and hasattr(c, "ACCOUNT_STATE")
+    }
+    assert layouts, "no futures env exposed ACCOUNT_STATE"
+    assert len(set(layouts.values())) == 1, f"venues disagree on account_state: {layouts}"
+    assert len(next(iter(layouts.values()))) == 6, "the universal vector is 6 elements"

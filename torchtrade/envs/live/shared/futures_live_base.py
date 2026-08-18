@@ -9,6 +9,7 @@ Alpaca (spot) is NOT a futures env: it hardcodes leverage=1 and distance_to_liqu
 and reads cash rather than total_wallet_balance. It keeps its own `_get_observation` and
 inherits `TorchTradeLiveEnv` directly.
 """
+from typing import List
 import logging
 import math
 
@@ -121,6 +122,20 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             )
 
         return self._halting(read)
+
+    def get_account_state(self) -> List[str]:
+        """The account-state field names. Four byte-identical copies (#288).
+
+        Each exchange still owns its ACCOUNT_STATE list -- what was duplicated was the
+        accessor, not the data. The lists are already identical across all five venues,
+        so a divergence here would be a real one, and it belongs in a contract test
+        rather than in four copies of a one-line return.
+        """
+        return self.ACCOUNT_STATE
+
+    def get_market_data_keys(self) -> List[str]:
+        """The market-data keys. Four byte-identical copies (#288)."""
+        return self.market_data_keys
 
     def _acquire_post_bar_state(self) -> tuple[float, float, float, TensorDictBase]:
         """Post-bar portfolio value and observation, or halt.
