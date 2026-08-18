@@ -96,8 +96,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         )
 
         # Extract execute_on timeframe
-        self.execute_on_value = config.execute_on.value
-        self.execute_on_unit = str(config.execute_on.unit.value)
+        self.execute_on = config.execute_on
 
         # Reset settings
         self.trader.close_all_positions()
