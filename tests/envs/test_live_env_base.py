@@ -3312,3 +3312,30 @@ def test_close_accepts_the_keyword_torchrl_passes_it(owner):
     assert [(n, p.kind, p.default) for n, p in ours.items()] == [
         (n, p.kind, p.default) for n, p in theirs.items()
     ]
+
+
+@pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
+def test_building_the_spec_makes_no_market_data_call(env_cls):
+    """binance and bitget fetched live klines during __init__ just to count columns.
+
+    `get_observations()` issues one request PER TIMEFRAME. Building a spec from it meant
+    constructing an env hit the exchange N times, and an outage or a short response
+    failed construction rather than the first step. bybit and okx already used
+    `get_features()`, which runs the preprocessing fn over a synthetic frame.
+
+    Measured before the switch: 1 call on main, 0 here, same observation_spec.
+    That the two paths agree is pinned separately, by
+    `BaseObservationClassTests.test_the_declared_feature_width_matches_the_observation`
+    across all five venues.
+    """
+    # AST, not source text: the method's own docstring names get_observations, and a
+    # substring check would match that -- a guard that fires on its own explanation.
+    tree = ast.parse(textwrap.dedent(inspect.getsource(env_cls._build_observation_specs)))
+    called = {
+        n.func.attr for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+    }
+    assert "get_observations" not in called, (
+        f"{env_cls.__name__} builds its spec from a live fetch; use get_features()"
+    )
+    assert "get_features" in called

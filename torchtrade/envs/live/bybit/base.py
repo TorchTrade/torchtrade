@@ -2,10 +2,6 @@
 
 from typing import Callable, Optional
 
-import torch
-from torchrl.data import Unbounded
-from torchrl.data.tensor_specs import Composite
-
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
 from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
@@ -122,29 +118,3 @@ class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
                 demo=demo,
             )
 
-    def _build_observation_specs(self):
-        """Build observation specs for account state and market data (no network calls)."""
-        features_info = self.observer.get_features()
-        num_features = len(features_info["observation_features"])
-        market_data_names = self.observer.get_keys()
-
-        window_sizes = self.config.window_sizes if isinstance(self.config.window_sizes, list) else [self.config.window_sizes]
-
-        self.observation_spec = Composite(shape=())
-        self.market_data_key = "market_data"
-        self.account_state_key = "account_state"
-
-        # Account state spec (6 elements)
-        account_state_spec = Unbounded(shape=(len(self.ACCOUNT_STATE),), dtype=torch.float)
-        self.observation_spec.set(self.account_state_key, account_state_spec)
-
-        # Market data specs (one per interval/timeframe)
-        self.market_data_keys = []
-        for i, market_data_name in enumerate(market_data_names):
-            market_data_key = "market_data_" + market_data_name
-            ws = window_sizes[i] if i < len(window_sizes) else window_sizes[0]
-            market_data_spec = Unbounded(shape=(ws, num_features), dtype=torch.float)
-            self.observation_spec.set(market_data_key, market_data_spec)
-            self.market_data_keys.append(market_data_key)
-
-        self._declare_base_features_spec(window_sizes[0])

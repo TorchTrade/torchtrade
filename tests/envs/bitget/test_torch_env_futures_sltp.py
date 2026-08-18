@@ -34,6 +34,13 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
             return obs
 
         observer.get_observations = MagicMock(side_effect=mock_observations)
+        # Derived from the emitted data, so a fixture cannot declare a width its own
+        # observations contradict -- the env builds its spec from get_features (#288).
+        _w = next(iter(observer.get_observations().values())).shape[1]
+        observer.get_features = MagicMock(return_value={
+            "observation_features": [f"feature_{i}" for i in range(_w)],
+            "original_features": [],
+        })
         observer.intervals = ["1m"]
         observer.window_sizes = [10]
 
@@ -490,6 +497,13 @@ class TestDuplicateActionPrevention:
             return obs
 
         mock_observer.get_observations = MagicMock(side_effect=mock_get_observations)
+        # Derived from the emitted data, so a fixture cannot declare a width its own
+        # observations contradict -- the env builds its spec from get_features (#288).
+        _w = next(iter(mock_observer.get_observations().values())).shape[1]
+        mock_observer.get_features = MagicMock(return_value={
+            "observation_features": [f"feature_{i}" for i in range(_w)],
+            "original_features": [],
+        })
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
@@ -662,6 +676,13 @@ class TestBitgetSLTPNotionalTradeMode:
             return obs
 
         mock_observer.get_observations = MagicMock(side_effect=mock_observations)
+        # Derived from the emitted data, so a fixture cannot declare a width its own
+        # observations contradict -- the env builds its spec from get_features (#288).
+        _w = next(iter(mock_observer.get_observations().values())).shape[1]
+        mock_observer.get_features = MagicMock(return_value={
+            "observation_features": [f"feature_{i}" for i in range(_w)],
+            "original_features": [],
+        })
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
@@ -751,6 +772,13 @@ class TestBitgetSLTPNotionalTradeMode:
                 [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
             ),
         })
+        # Derived from the emitted data, so a fixture cannot declare a width its own
+        # observations contradict -- the env builds its spec from get_features (#288).
+        _w = next(iter(mock_observer.get_observations().values())).shape[1]
+        mock_observer.get_features = MagicMock(return_value={
+            "observation_features": [f"feature_{i}" for i in range(_w)],
+            "original_features": [],
+        })
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
@@ -813,6 +841,13 @@ class TestBitgetSLTPNotionalTradeMode:
             return obs
 
         mock_observer.get_observations = MagicMock(side_effect=mock_observations)
+        # Derived from the emitted data, so a fixture cannot declare a width its own
+        # observations contradict -- the env builds its spec from get_features (#288).
+        _w = next(iter(mock_observer.get_observations().values())).shape[1]
+        mock_observer.get_features = MagicMock(return_value={
+            "observation_features": [f"feature_{i}" for i in range(_w)],
+            "original_features": [],
+        })
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
@@ -877,6 +912,13 @@ class TestBitgetSLTPLockPosition:
             "base_features": np.array(
                 [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
             ),
+        })
+        # Derived from the emitted data, so a fixture cannot declare a width its own
+        # observations contradict -- the env builds its spec from get_features (#288).
+        _w = next(iter(mock_observer.get_observations().values())).shape[1]
+        mock_observer.get_features = MagicMock(return_value={
+            "observation_features": [f"feature_{i}" for i in range(_w)],
+            "original_features": [],
         })
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
