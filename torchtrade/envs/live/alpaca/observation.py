@@ -8,6 +8,10 @@ from alpaca.data.requests import CryptoBarsRequest
 from alpaca.data.historical.crypto import CryptoHistoricalDataClient
 
 class AlpacaObservationClass:
+
+    def reset(self) -> None:
+        """No-op; see BaseFuturesObservationClass.reset (#278)."""
+
     def __init__(
         self,
         symbol: str,

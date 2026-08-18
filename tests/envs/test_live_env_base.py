@@ -14,6 +14,7 @@ import ast
 import pathlib
 import re
 import inspect
+import textwrap
 import math
 from types import SimpleNamespace
 
@@ -2600,3 +2601,126 @@ def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():
     assert position_status is ps
     assert price == 50000.0, "slot 2 is the PRICE"
     assert size == 0.25, "slot 3 is the SIZE"
+
+
+def _calls_observer_reset(func) -> bool:
+    """True if the body has `self.observer.reset()` as an unconditional statement.
+
+    A substring check on inspect.getsource passes on a comment: replacing okx's live
+    line with `# NOTE: self.observer.reset() handled by the caller` left the entire
+    suite green while okx's second episode continued mid-stream (#278 review). The five
+    older guards in this file already parse; this one had to as well.
+
+    Top-level statements only, not `ast.walk`: walking accepts a call that never runs --
+    `if False:`, a nested def, a line after `return` -- and the point is that the reset
+    HAPPENS, on every reset, before the reads below it.
+    """
+    body = ast.parse(textwrap.dedent(inspect.getsource(func))).body[0].body
+    for stmt in body:
+        # The three shapes a top-level call takes: bare, returned, or assigned. Anything
+        # nested (a branch, an inner def, code after a return) is deliberately excluded.
+        call = None
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            call = stmt.value
+        elif isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Call):
+            call = stmt.value
+        elif isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Call):
+            call = stmt.value
+        if call is None:
+            continue
+        f = call.func
+        if (isinstance(f, ast.Attribute) and f.attr == "reset"
+                and isinstance(f.value, ast.Attribute) and f.value.attr == "observer"
+                and isinstance(f.value.value, ast.Name) and f.value.value.id == "self"):
+            return True
+        # `super()._reset(...)` delegates to the base, which does call it.
+        if (isinstance(f, ast.Attribute) and f.attr == "_reset"
+                and isinstance(f.value, ast.Call) and isinstance(f.value.func, ast.Name)
+                and f.value.func.id == "super"):
+            return True
+    return False
+
+
+def test_every_live_reset_rewinds_its_observer():
+    """One line, five places, and only ONE venue's tests would notice it missing.
+
+    A mutation sweep replacing `self.observer.reset()` with `pass` at each of the five
+    call sites left four of them green (#278 review): the replay-backed env tests happen
+    to exist for bybit only. Without this guard a sixth exchange, or a copy-paste that
+    drops the line, ships an env whose second episode continues mid-stream with the
+    previous episode's balance and an inherited position.
+    """
+    missing = [
+        c.__name__ for c in LIVE_ENVS
+        if (r := c.__dict__.get("_reset")) is not None and not _calls_observer_reset(r)
+    ]
+    assert not missing, (
+        f"{len(missing)} live _reset methods never rewind their observer: {missing}"
+    )
+
+
+def test_the_observer_interface_declares_reset():
+    """The call above needs no hasattr guard only because every observer HAS the method.
+
+    A hasattr guard would be fail-open -- an observer that renamed it would silently stop
+    rewinding, which is the defect #278 fixed. That safety rests on the interface, so the
+    interface is asserted rather than assumed: without this, a new exchange's observation
+    class fails at runtime on episode 2, not in CI.
+    """
+    from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
+    from torchtrade.envs.live.binance.observation import BinanceObservationClass
+    from torchtrade.envs.live.shared.futures_base_obs import BaseFuturesObservationClass
+    from torchtrade.envs.replay.observer import ReplayObserver
+
+    for cls in (AlpacaObservationClass, BinanceObservationClass,
+                BaseFuturesObservationClass, ReplayObserver):
+        assert callable(getattr(cls, "reset", None)), f"{cls.__name__} has no reset()"
+
+    # A live reset must be a genuine no-op: it takes no arguments beyond self and
+    # returns nothing. If one starts rebasing account state, the run-level bankruptcy
+    # baseline it protects goes with it.
+    for cls in (AlpacaObservationClass, BinanceObservationClass, BaseFuturesObservationClass):
+        assert cls.reset(None) is None, f"{cls.__name__}.reset must be a no-op"
+
+
+def test_a_live_account_keeps_its_run_level_bankruptcy_baseline():
+    """The yardstick must not chase the account down.
+
+    Rebasing the baseline every episode looks like offline parity and is not: offline
+    resets the BALANCE and the baseline together, so its ratio starts at 1.0 because the
+    account was reset too. A live account persists, so rebasing only the yardstick
+    removes the cross-episode drawdown circuit breaker entirely -- an account halving
+    every episode reached 0.39% of its starting value without ever reporting bankrupt.
+    """
+    from tests.mocks.alpaca import MockObserver, MockTrader
+    from torchtrade.envs.live.alpaca.env import (
+        AlpacaTorchTradingEnv,
+        AlpacaTradingEnvConfig,
+    )
+
+    trader = MockTrader(initial_cash=1000.0)
+    env = AlpacaTorchTradingEnv(
+        config=AlpacaTradingEnvConfig(
+            symbol="BTC/USD", window_sizes=[10], bankrupt_threshold=0.1,
+        ),
+        observer=MockObserver(window_sizes=[10]),
+        trader=trader,
+    )
+    env._wait_for_next_timestamp = lambda: None
+
+    env.reset()
+    assert env.initial_portfolio_value == pytest.approx(1000.0)
+
+    # The account halves each episode. A live observer rewinds nothing, so the baseline
+    # must stay at the equity the RUN started from.
+    for equity in (500.0, 250.0, 125.0, 62.5):
+        trader.cash = equity
+        env.reset()
+        assert env.initial_portfolio_value == pytest.approx(1000.0), (
+            f"baseline rebased to {env.initial_portfolio_value} at equity {equity}; it "
+            f"now chases the account down and bankruptcy can never fire (#278)"
+        )
+
+    assert env._check_termination(62.5) is True, (
+        "62.5 is below 10% of the 1000 this run started with and must terminate"
+    )

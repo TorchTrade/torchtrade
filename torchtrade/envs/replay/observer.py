@@ -102,8 +102,8 @@ class ReplayObserver:
         """
         return self.sampler._sequential_idx >= self.sampler._end_idx
 
-    def reset(self):
-        """Reset observer to start of data."""
+    def reset(self) -> None:
+        """Rewind to the start of the data, and the simulated account with it."""
         self.sampler.reset(random_start=False)
         self.truncated = False
         if self.executor is not None:

@@ -160,6 +160,10 @@ class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
+        # Before any read below: ReplayObserver rewinds the sampler AND the simulated
+        # executor here, so the balance/position/price reads that follow must see the
+        # rewound state (#278).
+        self.observer.reset()
         if not self.trader.cancel_open_orders():
             logger.warning("cancel_open_orders failed during reset; proceeding with potentially stale orders")
         self.history.reset()

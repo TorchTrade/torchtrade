@@ -162,6 +162,8 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
+        # Before any read below -- see the bybit copy for why the order matters (#278).
+        self.observer.reset()
         if not self.trader.cancel_open_orders():
             logger.warning("cancel_open_orders failed during reset; proceeding with potentially stale orders")
         self.history.reset()

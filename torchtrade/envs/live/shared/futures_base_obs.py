@@ -17,6 +17,22 @@ class BaseFuturesObservationClass(ABC):
     only need to implement data fetching and parsing logic.
     """
 
+    def reset(self) -> None:
+        """Rewind to the start of an episode. A live observer has nothing to rewind.
+
+        Declared so the envs can call it unconditionally (#278): ReplayObserver overrides
+        it to rewind the sampler and the simulated executor, and before this existed
+        nothing but a test ever called it -- so under a collector, episode 2 continued
+        mid-stream with episode 1's balance and an inherited position whose brackets had
+        been cancelled. A `hasattr` guard at the call site would be fail-open: an observer
+        that renamed the method would silently stop rewinding.
+
+        The bankruptcy baseline is deliberately NOT re-captured here. Rebasing it per
+        episode removes the cross-episode drawdown circuit breaker on a live account,
+        which persists between episodes -- and on replay it is a no-op, because the
+        executor rewinds to the same initial_balance every time.
+        """
+
     def __init__(
         self,
         symbol: str,

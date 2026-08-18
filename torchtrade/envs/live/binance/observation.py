@@ -13,6 +13,9 @@ class BinanceObservationClass:
     Supports multiple timeframes and custom feature preprocessing.
     """
 
+    def reset(self) -> None:
+        """No-op; see BaseFuturesObservationClass.reset (#278)."""
+
     def __init__(
         self,
         symbol: str,

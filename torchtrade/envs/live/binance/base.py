@@ -178,6 +178,8 @@ class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
+        # Before any read below -- see the bybit copy for why the order matters (#278).
+        self.observer.reset()
         # Cancel all orders
         self.trader.cancel_open_orders()
 
