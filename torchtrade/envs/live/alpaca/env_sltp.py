@@ -39,6 +39,11 @@ class AlpacaSLTPTradingEnvConfig:
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
     paper: bool = True
+    # Parity with the four futures exchanges (#289): alpaca hardcoded the init close and
+    # offered no reset close at all, so a restart had no escape hatch for a stale
+    # position. Defaults reproduce the previous behaviour exactly.
+    close_position_on_init: bool = True
+    close_position_on_reset: bool = False
     trade_mode: TradeMode = "fractional"
     position_fraction: float = 1.0        # Used when trade_mode="fractional" (1.0 = all-in, backward compat)
     quantity_per_trade: float = 100.0      # Used when trade_mode="notional"

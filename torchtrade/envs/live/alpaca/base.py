@@ -99,7 +99,8 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.execute_on = config.execute_on
 
         # Reset settings
-        self.trader.close_all_positions()
+        if config.close_position_on_init:
+            self.trader.close_all_positions()
         self.trader.cancel_open_orders()
 
         # The env's own measure, not account.cash. close_all_positions() above submits
@@ -357,6 +358,8 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.observer.reset()
         # Cancel all orders
         self.trader.cancel_open_orders()
+        if self.config.close_position_on_reset:
+            self.trader.close_all_positions()
 
         # Reset history tracking
         self.history.reset()
