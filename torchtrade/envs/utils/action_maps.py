@@ -58,26 +58,25 @@ def create_sltp_action_map(
         take_profit.
 
     Warning:
-        That swap reuses the opposite list's MAGNITUDES, so short action k is not the
-        mirror of long action k -- it is the mirror with risk and reward exchanged.
+        That swap reuses the opposite list's MAGNITUDES, so a short action is never the
+        mirror of its long counterpart -- it is the mirror with risk and reward
+        exchanged. This is unconditional: both halves iterate the same
+        ``product(stoploss_levels, takeprofit_levels)``, so the nth long and the nth
+        short always carry the same magnitude pair the other way round. It is only
+        INVISIBLE when every magnitude is equal.
+
         With ``stoploss_levels=(-0.025, -0.05, -0.1)`` and
-        ``takeprofit_levels=(0.05, 0.1, 0.2)`` at entry 100:
+        ``takeprofit_levels=(0.05, 0.1, 0.2)`` at entry 100, pairing the nth long with
+        the nth short (actions 1 and 10, then 3 and 12):
 
-        ===  ==================  ==================
-        k    long (risk/reward)  short (risk/reward)
-        ===  ==================  ==================
-        0    2.5% / 5%           5% / 2.5%
-        2    2.5% / 20%          20% / 2.5%
-        ===  ==================  ==================
+        - long 1 = ``(-0.025, 0.05)``  -> risk 2.5%, reward 5%
+        - short 10 = ``(0.05, -0.025)`` -> risk 5%, reward 2.5%
+        - long 3 = ``(-0.025, 0.2)``   -> risk 2.5%, reward 20%
+        - short 12 = ``(0.2, -0.025)``  -> risk 20%, reward 2.5%
 
-        Long stops are {2.5, 5, 10}% and short stops are {5, 10, 20}%: there is no short
-        action with a 2.5% stop anywhere in the space. A policy that learned "tight stop,
-        wide target" gets the opposite geometry the moment it goes short.
-
-        This holds for EVERY configuration where the two magnitude lists differ
-        element-wise -- including symmetric-looking ones like ``(-0.05, -0.1)`` against
-        ``(0.05, 0.1)``, where long k=1 risks 5% to make 10% and short k=1 risks 10% to
-        make 5%. It is a property of the construction, not of unlucky inputs.
+        Long stops are {2.5, 5, 10}% and short stops are {5, 10, 20}%: no short action
+        has a 2.5% stop anywhere in the space. A policy that learned "tight stop, wide
+        target" gets the opposite geometry the moment it goes short.
 
         Whether to mirror the magnitudes instead is #279, and it is deliberately open:
         the fix leaves the action-space SIZE unchanged (19 actions either way) while
