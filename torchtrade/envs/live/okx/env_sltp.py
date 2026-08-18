@@ -23,11 +23,7 @@ from torchtrade.envs.live.okx.order_executor import (
 from torchtrade.envs.live.okx.base import OKXBaseTorchTradingEnv
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
-from torchtrade.envs.core.live import (
-    ObservationFailurePolicy,
-)
 from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
-from torchtrade.envs.core.common import TradeMode
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +44,6 @@ class OKXFuturesSLTPTradingEnvConfig(BaseFuturesSLTPConfig):
     # Trading parameters
     margin_mode: MarginMode = MarginMode.ISOLATED
     position_mode: PositionMode = PositionMode.NET
-
-    # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
-    # Take profit levels as percentages (positive values, e.g., 0.05 = 5%)
-    # Include short positions in action space
-    # Include HOLD action (index 0)
-    # Include CLOSE action for manual position exit
-
-    # Termination settings
-
-    # Environment settings
 
     def __post_init__(self):
         from torchtrade.envs.live.okx.utils import normalize_okx_timeframe_config

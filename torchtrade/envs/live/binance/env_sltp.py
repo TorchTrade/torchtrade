@@ -19,15 +19,11 @@ from torchtrade.envs.utils.timeframe import TimeFrame
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
     BinanceFuturesOrderClass,
-    TradeMode,
     MarginType,
 )
 from torchtrade.envs.live.binance.base import BinanceBaseTorchTradingEnv
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
-from torchtrade.envs.core.live import (
-    ObservationFailurePolicy,
-)
 
 
 @dataclass
@@ -46,16 +42,6 @@ class BinanceFuturesSLTPTradingEnvConfig(BaseFuturesSLTPConfig):
 
     # Trading parameters
     margin_type: MarginType = MarginType.ISOLATED
-
-    # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
-    # Take profit levels as percentages (positive values, e.g., 0.05 = 5%)
-    # Include short positions in action space
-    # Include HOLD action (index 0) in action space
-    # Include CLOSE action for manual position exit (default: False for SLTP)
-
-    # Termination settings
-
-    # Environment settings
 
     def __post_init__(self):
         """Normalize timeframe configuration and validate trade_mode."""

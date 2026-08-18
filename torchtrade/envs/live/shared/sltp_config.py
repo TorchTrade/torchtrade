@@ -16,11 +16,8 @@ class BaseFuturesSLTPConfig:
     surface differs in NAME -- binance calls it `margin_type: MarginType`, the other
     three `margin_mode: MarginMode`, and bitget adds `product_type`.
 
-    That naming split is deliberately NOT resolved here. #289 lists it separately, and
-    whichever name wins changes one venue's public API -- a decision that should be made
-    on its own rather than buried in a config extraction. Collapsing first and letting
-    the merge pick a winner is how a behaviour change ships wearing a refactor's clothes,
-    which this issue has already produced twice (#386, #387).
+    That naming split is #289's, not this extraction's: whichever name wins changes one
+    venue's public API.
     """
 
     window_sizes: Union[List[int], int] = 10

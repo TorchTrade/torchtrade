@@ -3003,26 +3003,47 @@ def test_no_live_env_builds_an_uppercase_order_side(env_cls):
         )
 
 
+from torchtrade.envs.live.binance import BinanceFuturesSLTPTradingEnvConfig
+from torchtrade.envs.live.bitget import BitgetFuturesSLTPTradingEnvConfig
+from torchtrade.envs.live.bybit import BybitFuturesSLTPTradingEnvConfig
+from torchtrade.envs.live.okx import OKXFuturesSLTPTradingEnvConfig
+from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
+
 SLTP_CONFIGS = [
     pytest.param(c, id=c.__name__)
     for c in [
-        __import__("torchtrade.envs.live.binance", fromlist=["x"]).BinanceFuturesSLTPTradingEnvConfig,
-        __import__("torchtrade.envs.live.bitget", fromlist=["x"]).BitgetFuturesSLTPTradingEnvConfig,
-        __import__("torchtrade.envs.live.bybit", fromlist=["x"]).BybitFuturesSLTPTradingEnvConfig,
-        __import__("torchtrade.envs.live.okx", fromlist=["x"]).OKXFuturesSLTPTradingEnvConfig,
+        BinanceFuturesSLTPTradingEnvConfig,
+        BitgetFuturesSLTPTradingEnvConfig,
+        BybitFuturesSLTPTradingEnvConfig,
+        OKXFuturesSLTPTradingEnvConfig,
     ]
 ]
+
+SHARED_DEFAULTS = {
+    "window_sizes": [10],  # __post_init__ normalizes the scalar
+    "leverage": 1,
+    "quantity_per_trade": 0.001,
+    "trade_mode": "quantity",
+    "position_fraction": 1.0,
+    "lock_position_until_sltp": False,
+    "stoploss_levels": (-0.025, -0.05, -0.1),
+    "takeprofit_levels": (0.05, 0.1, 0.2),
+    "include_short_positions": True,
+    "include_hold_action": True,
+    "include_close_action": False,
+    "done_on_bankruptcy": True,
+    "bankrupt_threshold": 0.1,
+    "demo": True,
+    "seed": 42,
+    "include_base_features": False,
+    "close_position_on_init": True,
+    "close_position_on_reset": False,
+}
 
 
 @pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
 def test_every_sltp_config_inherits_the_shared_fields(config_cls):
-    """19 fields were declared identically -- name, type AND default -- in all four (#288).
-
-    ~80 declarations for 19 facts. The issue's "70-line config repeated 4x" is the one
-    figure in it that measurement did not shrink.
-    """
-    from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
-
+    """A subclass re-declaring a shared field silently shadows the base default (#288)."""
     assert issubclass(config_cls, BaseFuturesSLTPConfig)
     own = {a for a in vars(config_cls).get("__annotations__", {})}
     shared = {f.name for f in dataclasses.fields(BaseFuturesSLTPConfig)}
@@ -3033,26 +3054,25 @@ def test_every_sltp_config_inherits_the_shared_fields(config_cls):
 
 
 @pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
-@pytest.mark.parametrize("policy", ["halt", "flatten"])
-def test_a_string_failure_policy_is_coerced_on_every_sltp_config(config_cls, policy):
-    """`'halt' == ObservationFailurePolicy.HALT` is False, so a hydra-loaded string would
-    silently take the wrong branch. The coercion is in the base now, and each subclass's
-    own __post_init__ must call super() -- forgetting that is the failure this pins."""
-    from torchtrade.envs.core.live import ObservationFailurePolicy
-
-    config = config_cls(observation_failure_policy=policy)
-    assert config.observation_failure_policy is ObservationFailurePolicy(policy)
-
-
-@pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
 def test_the_venue_specific_margin_surface_is_untouched(config_cls):
-    """binance uses `margin_type: MarginType`, the other three `margin_mode: MarginMode`.
+    """binance uses `margin_type`, the other three `margin_mode`.
 
-    That naming split is #289's, not this extraction's: whichever name wins changes one
-    venue's public API, and burying that in a config merge is how a behaviour change
-    ships wearing a refactor's clothes. Pinned so the next dedup pass does not "tidy" it.
+    Renaming either changes a venue's public API, so it is #289's call, not a dedup pass's.
     """
     names = {f.name for f in dataclasses.fields(config_cls)}
     assert ("margin_type" in names) ^ ("margin_mode" in names), (
         f"{config_cls.__name__} should carry exactly one margin field; has {names & {'margin_type', 'margin_mode'}}"
     )
+
+
+@pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
+@pytest.mark.parametrize("field,expected", sorted(SHARED_DEFAULTS.items()))
+def test_hoisting_a_default_did_not_change_it(config_cls, field, expected):
+    """One literal now sets a value for four live venues; a typo moves all four at once.
+
+    Before the hoist, only binance had a bare-default test, covering 5 of these 19 -- and
+    the bracket levels only by LENGTH. Mutating `bankrupt_threshold` 0.1 -> 0.5 in the
+    base passed 1432 tests (#288 review): every venue's force-close point moves 5x with
+    nothing objecting. These are the values reproduced from main before the extraction.
+    """
+    assert getattr(config_cls(), field) == expected

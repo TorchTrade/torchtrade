@@ -18,16 +18,12 @@ from torchrl.data import Categorical
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import (
     BitgetFuturesOrderClass,
-    TradeMode,
     MarginMode,
     PositionMode,
 )
 from torchtrade.envs.live.bitget.base import BitgetBaseTorchTradingEnv
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
-from torchtrade.envs.core.live import (
-    ObservationFailurePolicy,
-)
 from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
 
 
@@ -49,16 +45,6 @@ class BitgetFuturesSLTPTradingEnvConfig(BaseFuturesSLTPConfig):
     product_type: str = "USDT-FUTURES"  # V2 API: USDT-FUTURES, COIN-FUTURES, USDC-FUTURES
     margin_mode: MarginMode = MarginMode.ISOLATED
     position_mode: PositionMode = PositionMode.ONE_WAY  # ONE_WAY or HEDGE
-
-    # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
-    # Take profit levels as percentages (positive values, e.g., 0.05 = 5%)
-    # Include short positions in action space
-    # Include HOLD action (index 0) in action space
-    # Include CLOSE action for manual position exit (default: False for SLTP)
-
-    # Termination settings
-
-    # Environment settings
 
     def __post_init__(self):
         from torchtrade.envs.live.bitget.utils import normalize_bitget_timeframe_config
