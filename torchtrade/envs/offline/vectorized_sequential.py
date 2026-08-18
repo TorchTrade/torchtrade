@@ -542,20 +542,40 @@ class VectorizedSequentialTradingEnv(EnvBase):
         # Compute portfolio values (mode-aware)
         new_pvs = self._compute_portfolio_values(new_prices)
 
-        # Rewards: log(new_pv / old_pv)
+        # Rewards: log(new_pv / old_pv), matching log_return_reward exactly.
         old_pvs = self._portfolio_values
-        # Guard against non-positive values
-        safe_old = old_pvs.clamp(min=1e-10)
+        # A non-positive OLD value is a calculation error: the previous step's PV was
+        # checked and the termination above now ends any lane that reaches zero, so this
+        # is unreachable in normal operation and an assertion rather than a new crash
+        # mode. It matches `log_return_reward`, which raises on the same input.
+        #
+        # It is deliberately NOT the clamp it replaced: `old_pvs.clamp(min=1e-10)` made a
+        # broken accumulator survivable and silent. But the clamp was not producing the
+        # fabricated positive reward an earlier version of this comment claimed -- once
+        # PV reaches 0 the lane's new_pv is 0 too, so the -10.0 branch overrode it. The
+        # real defect was the termination predicate above.
+        if (old_pvs <= 0).any():
+            broken = torch.nonzero(old_pvs <= 0).flatten().tolist()
+            raise ValueError(
+                f"Invalid previous portfolio value in envs {broken}: "
+                f"{old_pvs[old_pvs <= 0].tolist()}. Portfolio value must be positive; "
+                f"this indicates a calculation error."
+            )
+        # new_pv <= 0 IS reachable -- it is bankruptcy -- and both paths report -10.0.
         safe_new = new_pvs.clamp(min=1e-10)
-        rewards = torch.log(safe_new / safe_old)
-        # Bankruptcy: large negative reward
+        rewards = torch.log(safe_new / old_pvs)
         rewards = torch.where(new_pvs <= 0, torch.full_like(rewards, -10.0), rewards)
 
         # Update stored portfolio values
         self._portfolio_values = new_pvs
 
         # Termination signals
-        terminated = new_pvs < (self._initial_pvs * self.bankrupt_threshold)
+        # `<=` on the zero floor, not just `<` the threshold. `_apply_liquidation`
+        # clamps a wiped balance to exactly 0.0, and with `bankrupt_threshold=0.0`
+        # (explicitly permitted, and documented as "leveraged positions can still
+        # terminate on portfolio_value <= 0") the test was `0.0 < 0.0` -- False. So a
+        # dead lane never terminated, never reset, and kept stepping (#289).
+        terminated = (new_pvs < (self._initial_pvs * self.bankrupt_threshold)) | (new_pvs <= 0)
         truncated = (
             ((self._step_indices + 1) >= self._end_indices)
             | (self._step_counters >= self._max_traj_lengths)
