@@ -1,10 +1,8 @@
 """Base class for Bitget live trading environments."""
 
-from abc import abstractmethod
 from typing import Callable, Optional
 
 import torch
-from tensordict import TensorDictBase
 from torchrl.data import Unbounded
 from torchrl.data.tensor_specs import Composite
 
@@ -14,9 +12,7 @@ from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveE
 from torchtrade.envs.core.state import (
     HistoryTracker,
     PositionState,
-    position_direction_from_status,
 )
-
 
 class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     """

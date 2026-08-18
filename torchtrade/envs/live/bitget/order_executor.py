@@ -715,18 +715,22 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
             # Get all open orders first
             open_orders = self.get_open_orders()
 
-            # Cancel each order
+            # Cancel each order. The per-order failure was logged but not counted, so
+            # this returned True with every cancel having failed -- and _reset's warning
+            # about stale brackets could never fire for bitget (#288).
+            failed = 0
             for order in open_orders:
                 try:
                     self.client.cancel_order(order['id'], self.symbol)
                 except Exception as e:
+                    failed += 1
                     logger.warning(f"Failed to cancel order {order['id']}: {e}")
 
             if len(open_orders) > 0:
-                logger.info(f"Cancelled {len(open_orders)} open orders")
+                logger.info(f"Cancelled {len(open_orders) - failed}/{len(open_orders)} open orders")
             else:
                 logger.debug("No open orders to cancel")
-            return True
+            return failed == 0
         except Exception as e:
             logger.error(f"Error cancelling open orders: {str(e)}")
             return False

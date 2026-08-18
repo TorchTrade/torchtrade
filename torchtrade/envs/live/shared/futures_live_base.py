@@ -9,8 +9,8 @@ Alpaca (spot) is NOT a futures env: it hardcodes leverage=1 and distance_to_liqu
 and reads cash rather than total_wallet_balance. It keeps its own `_get_observation` and
 inherits `TorchTradeLiveEnv` directly.
 """
-from typing import Dict
 from abc import abstractmethod
+from typing import Dict
 import logging
 import math
 
@@ -513,18 +513,17 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         return position_qty_from_status(self.trader.get_status().get("position_status"))
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
-        """Reset the environment. Was four copies, two of which ignored failures (#288).
+        """Reset the environment.
 
         `observer.reset()` runs before ANY read below: ReplayObserver rewinds the sampler
         AND the simulated executor here, so the balance/position reads that follow must
         see the rewound state (#278).
 
-        The return values are checked because binance and bitget discarded them. A failed
-        `cancel_open_orders` leaves live brackets attached to a position the new episode
-        believes is clean; a failed `close_position` leaves real exposure the account
-        state will not show. Neither is recoverable here -- the episode has to start --
-        but silence made them invisible. All four venues return True when flat, so a flat
-        reset does not warn.
+        A failed `cancel_open_orders` leaves live brackets attached to a position the new
+        episode believes is clean; a failed `close_position` leaves real exposure the
+        account state will not show. Neither is recoverable here -- the episode has to
+        start -- so they warn. All four venues return True when flat, so a clean reset is
+        silent.
         """
         self.observer.reset()
         if not self.trader.cancel_open_orders():
@@ -548,9 +547,11 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             status.get("position_status")
         )
 
-        # No-op where _execute_trade_if_needed recomputes qty live and never reads
-        # current_action_level, but keeps the field consistent so adding a duplicate-action
-        # guard cannot reintroduce the silent no-op that bit bitget/binance/alpaca.
+        # Load-bearing for binance and bitget, whose _execute_trade_if_needed compares
+        # `desired_action == self.position.current_action_level` and returns executed=False
+        # on a match: without this, a position that predates the episode leaves a stale
+        # level behind which the guard refuses the very trade that would close it (#243).
+        # Inert for bybit and okx, which recompute qty live and never read the field.
         self._sync_action_level_after_reset()
 
         # advance_hold=False: hold_counter was just zeroed above; a reset must never
@@ -562,13 +563,13 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         """Execute trade if position change is needed. Action format varies by subclass."""
         raise NotImplementedError
 
-    def close(self):
+    def close(self, *, raise_if_closed: bool = True):
         """Cancel open orders. Deliberately does NOT close positions.
 
         Automated closure on cleanup could liquidate an intended position or interrupt a
         longer-term strategy, so it warns instead; call `env.trader.close_position()`
-        first if you want flat. Was three different versions -- binance warned about
-        nothing, bitget warned but let a cancel failure propagate out of cleanup.
+        first if you want flat. Must never raise: close() runs during teardown, where an
+        exception replaces whatever error you were trying to see.
         """
         try:
             status = self.trader.get_status()
@@ -584,3 +585,8 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             self.trader.cancel_open_orders()
         except Exception as e:
             logger.error(f"Failed to cancel open orders on close(): {e}")
+
+        # keyword-only, matching EnvBase.close: TransformedEnv and the collector's
+        # shutdown both forward it, and all four venues' bare `def close(self)` raised
+        # TypeError on the way out of a rollout. polymarket already carried this fix.
+        super().close(raise_if_closed=raise_if_closed)

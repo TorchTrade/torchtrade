@@ -1,22 +1,17 @@
 """Base class for Binance live trading environments."""
 
-from abc import abstractmethod
 from typing import Callable, Optional
 
 import torch
-from tensordict import TensorDictBase
 from torchrl.data import Composite, Unbounded
 
-from torchtrade.envs.utils.timeframe import timeframe_to_seconds
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 from torchtrade.envs.core.state import (
     HistoryTracker,
     PositionState,
-    position_direction_from_status,
 )
-
 
 class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     """

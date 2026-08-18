@@ -1,5 +1,7 @@
 """Tests for BinanceFuturesTorchTradingEnv."""
 
+from types import SimpleNamespace
+import logging
 import pytest
 import torch
 from torchrl.envs.utils import check_env_specs
@@ -282,10 +284,50 @@ class TestBinanceFuturesTorchTradingEnv:
             next_td = env.step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
             assert next_td["next"]["done"].item() is expected_done
 
-    def test_close_method(self, env, mock_trader):
-        """Test environment close method."""
-        env.close()
-        mock_trader.cancel_open_orders.assert_called()
+    def test_close_method(self, env, mock_trader, caplog):
+        """close() cancels orders, warns about an open position, and never raises.
+
+        `assert_called()` here was satisfied by __init__, which cancels too -- so a
+        close() that did nothing at all passed. Reset the mock first (#288).
+        """
+        mock_trader.cancel_open_orders.reset_mock()
+        mock_trader.get_status = MagicMock(return_value={"position_status": None})
+        with caplog.at_level(logging.WARNING, logger="torchtrade.envs.live.shared.futures_live_base"):
+            env.close()
+        mock_trader.cancel_open_orders.assert_called_once()
+        assert not caplog.records, [r.message for r in caplog.records]
+
+    def test_close_warns_when_walking_away_from_an_open_position(self, env, mock_trader, caplog):
+        """close() deliberately does NOT flatten, so this warning is the only signal.
+
+        Automated closure on cleanup could liquidate an intended position, so the env
+        leaves it -- and binance said nothing about it at all before this (#288).
+        """
+        mock_trader.get_status = MagicMock(
+            return_value={"position_status": SimpleNamespace(qty=0.5)}
+        )
+        with caplog.at_level(logging.WARNING, logger="torchtrade.envs.live.shared.futures_live_base"):
+            env.close()
+        assert any("open position" in r.message for r in caplog.records)
+
+    @pytest.mark.parametrize("cancel_ok,close_ok", [
+        (False, True), (True, False), (False, False),
+    ], ids=["cancel-fails", "close-fails", "both-fail"])
+    def test_reset_logs_warning_on_cleanup_failure(self, env, mock_trader, caplog, cancel_ok, close_ok):
+        """binance discarded both return values; bybit and okx warned (#288).
+
+        A failed cancel leaves live brackets on a position the new episode believes is
+        clean; a failed close leaves exposure the account state will not show.
+        """
+        env.config.close_position_on_reset = True
+        mock_trader.cancel_open_orders = MagicMock(return_value=cancel_ok)
+        mock_trader.close_position = MagicMock(return_value=close_ok)
+        with caplog.at_level(logging.WARNING, logger="torchtrade.envs.live.shared.futures_live_base"):
+            assert env.reset() is not None
+        logged = " ".join(r.message for r in caplog.records)
+        for fragment in ([] if cancel_ok else ["cancel_open_orders failed"]) + (
+                [] if close_ok else ["close_position failed"]):
+            assert fragment in logged, f"{fragment!r} not logged; got {logged!r}"
 
     def test_reenters_after_external_position_close(self, env, mock_trader):
         """A position closed on the exchange must not leave the guard refusing to re-enter.

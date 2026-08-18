@@ -1,5 +1,6 @@
 """Tests for BybitFuturesTorchTradingEnv."""
 
+import logging
 import pytest
 import torch
 from torchrl.envs.utils import check_env_specs
@@ -534,8 +535,12 @@ class TestBybitInitCleanup:
         (True, False),   # close fails
         (False, False),  # both fail
     ], ids=["cancel-fails", "close-fails", "both-fail"])
-    def test_reset_logs_warning_on_cleanup_failure(self, mock_env_observer, mock_env_trader, cancel_ok, close_ok):
-        """reset() must warn but not raise when cleanup calls return False."""
+    def test_reset_logs_warning_on_cleanup_failure(self, caplog, mock_env_observer, mock_env_trader, cancel_ok, close_ok):
+        """reset() must warn AND not raise when cleanup calls return False.
+
+        The name promised a warning and only "not raise" was asserted, so deleting the
+        warning left all six of these green (#288).
+        """
         from torchtrade.envs.live.bybit.env import (
             BybitFuturesTorchTradingEnv,
             BybitFuturesTradingEnvConfig,
@@ -558,9 +563,17 @@ class TestBybitInitCleanup:
         mock_env_trader.cancel_open_orders = MagicMock(return_value=cancel_ok)
         mock_env_trader.close_position = MagicMock(return_value=close_ok)
 
-        # Must not raise — reset proceeds despite cleanup failures
-        obs = env.reset()
+        # Must not raise -- reset proceeds despite cleanup failures -- and must say so
+        with caplog.at_level(logging.WARNING, logger="torchtrade.envs.live.shared.futures_live_base"):
+            obs = env.reset()
         assert obs is not None
+        expected = ([] if cancel_ok else ["cancel_open_orders failed"]) + (
+            [] if close_ok else ["close_position failed"])
+        logged = " ".join(r.message for r in caplog.records)
+        for fragment in expected:
+            assert fragment in logged, f"{fragment!r} not logged; got {logged!r}"
+        if not expected:
+            assert not caplog.records, logged
 
     def test_close_resilient_when_cancel_raises(self, mock_env_observer, mock_env_trader):
         """close() must not raise even if cancel_open_orders fails."""

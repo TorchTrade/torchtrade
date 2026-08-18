@@ -1,11 +1,8 @@
 """Base class for OKX live trading environments."""
-import logging
 
-from abc import abstractmethod
 from typing import Callable, Optional
 
 import torch
-from tensordict import TensorDictBase
 from torchrl.data import Unbounded
 from torchrl.data.tensor_specs import Composite
 
@@ -14,11 +11,7 @@ from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 from torchtrade.envs.core.state import (
     HistoryTracker,
-    position_direction_from_status,
 )
-
-logger = logging.getLogger(__name__)
-
 
 class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     """

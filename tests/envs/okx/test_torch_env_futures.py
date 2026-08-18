@@ -1,5 +1,6 @@
 """Tests for OKXFuturesTorchTradingEnv."""
 
+import logging
 import pytest
 import torch
 from torchrl.envs.utils import check_env_specs
@@ -472,8 +473,12 @@ class TestOKXInitCleanup:
     @pytest.mark.parametrize("cancel_ok,close_ok", [
         (False, True), (True, False), (False, False),
     ], ids=["cancel-fails", "close-fails", "both-fail"])
-    def test_reset_logs_warning_on_cleanup_failure(self, mock_env_observer, mock_env_trader, cancel_ok, close_ok):
-        """reset() must warn but not raise when cleanup calls return False."""
+    def test_reset_logs_warning_on_cleanup_failure(self, caplog, mock_env_observer, mock_env_trader, cancel_ok, close_ok):
+        """reset() must warn AND not raise when cleanup calls return False.
+
+        The name promised a warning and only "not raise" was asserted, so deleting the
+        warning left all six of these green (#288).
+        """
         from torchtrade.envs.live.okx.env import OKXFuturesTorchTradingEnv, OKXFuturesTradingEnvConfig
 
         config = OKXFuturesTradingEnvConfig(
@@ -486,7 +491,12 @@ class TestOKXInitCleanup:
 
         mock_env_trader.cancel_open_orders = MagicMock(return_value=cancel_ok)
         mock_env_trader.close_position = MagicMock(return_value=close_ok)
-        assert env.reset() is not None
+        with caplog.at_level(logging.WARNING, logger="torchtrade.envs.live.shared.futures_live_base"):
+            assert env.reset() is not None
+        logged = " ".join(r.message for r in caplog.records)
+        for fragment in ([] if cancel_ok else ["cancel_open_orders failed"]) + (
+                [] if close_ok else ["close_position failed"]):
+            assert fragment in logged, f"{fragment!r} not logged; got {logged!r}"
 
     def test_close_resilient_when_cancel_raises(self, mock_env_observer, mock_env_trader):
         """close() must not raise even if cancel_open_orders fails."""
