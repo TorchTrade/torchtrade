@@ -105,8 +105,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         # Store execution timeframe
         # Note: Subclasses should ensure execute_on has 'value' and 'unit' attributes
         # For TimeFrame objects: execute_on.value (int) and execute_on.unit (TimeFrameUnit enum)
-        self.execute_on_value = None
-        self.execute_on_unit = None
+        self.execute_on = None
 
         # Initialize trading clients (observer and trader)
         # Subclasses should override _init_trading_clients to provide provider-specific setup

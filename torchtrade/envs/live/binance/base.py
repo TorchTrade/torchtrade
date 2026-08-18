@@ -89,8 +89,6 @@ class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
 
         # Extract execute timeframe and convert to seconds
         self.execute_on = config.execute_on
-        self.execute_on_value = timeframe_to_seconds(config.execute_on)
-        self.execute_on_unit = "seconds"  # Binance uses simple seconds-based intervals
 
         # Flatten on startup for a clean state (configurable, default: True)
         self.trader.cancel_open_orders()

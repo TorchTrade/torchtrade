@@ -81,8 +81,6 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
 
         # Extract execute timeframe (already normalized to TimeFrame in config.__post_init__)
         self.execute_on = config.execute_on
-        self.execute_on_value = config.execute_on.value
-        self.execute_on_unit = str(config.execute_on.unit)
 
         # Flatten on startup for a clean state (configurable, default: True)
         self.trader.cancel_open_orders()

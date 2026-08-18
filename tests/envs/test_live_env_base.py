@@ -2726,6 +2726,62 @@ def test_a_live_account_keeps_its_run_level_bankruptcy_baseline():
     )
 
 
+@pytest.mark.parametrize("cls", LIVE_ENVS, ids=lambda c: c.__name__)
+def test_every_live_env_can_actually_run_the_bar_wait(cls):
+    """RUN it, do not inspect it. This is the test that was missing.
+
+    `_wait_for_next_timestamp` reads `self.execute_on`, and alpaca's base set only
+    `execute_on_value`/`execute_on_unit` -- so both alpaca envs raised AttributeError at
+    the first bar, AFTER the order was placed and the position recorded. 834 exchange
+    tests and 513 contract tests passed, because every one of them stubs this method
+    (`env._wait_for_next_timestamp = lambda: None` or `patch.object(...)`). Nothing ever
+    executed the body.
+
+    Constructing a live env needs credentials, so this asserts the attribute the body
+    reads is set by __init__ on every exchange -- the cheapest thing that fails when it
+    is not.
+    """
+    # The EXCHANGE base, not the whole MRO: TorchTradeLiveEnv initialises
+    # `self.execute_on = None`, so an MRO-wide search passes on a concrete class that
+    # never assigns it -- which is exactly the alpaca break, certified clean. First
+    # version of this test did that and the mutation survived.
+    exchange_bases = [
+        base for base in cls.__mro__
+        if base.__module__.startswith("torchtrade.envs.live.")
+        and not base.__module__.startswith("torchtrade.envs.live.shared")
+    ]
+    if not exchange_bases:
+        pytest.skip(f"{cls.__name__} is a shared base, not an exchange env")
+    assert any(
+        "self.execute_on = " in inspect.getsource(base) for base in exchange_bases
+    ), (
+        f"{cls.__name__} never assigns self.execute_on in its exchange base; the shared "
+        f"bar wait reads it and will AttributeError at the first bar, after the order"
+    )
+
+
+def test_the_bar_wait_actually_sleeps_for_the_timeframe():
+    """Drive the real body with a stub env, since no exchange test ever does."""
+    from unittest.mock import patch
+
+    from torchtrade.envs.core.live import TorchTradeLiveEnv
+    from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
+
+    for value, unit, expected in ((1, TimeFrameUnit.Minute, 60),
+                                  (5, TimeFrameUnit.Minute, 300),
+                                  (4, TimeFrameUnit.Hour, 14400),
+                                  (1, TimeFrameUnit.Day, 86400)):
+        env = SimpleNamespace(execute_on=TimeFrame(value, unit), timezone=None)
+        with patch("torchtrade.envs.core.live.time.sleep") as slept:
+            TorchTradeLiveEnv._wait_for_next_timestamp(env)
+        assert slept.called, f"{value}{unit.name} did not sleep at all"
+        # The truncation to whole minutes means the slept value is within a minute of
+        # the period; the point is that it scales with the timeframe, not that it is exact.
+        assert 0 < slept.call_args[0][0] <= expected, (
+            f"{value}{unit.name} slept {slept.call_args[0][0]}s, not ~{expected}s"
+        )
+
+
 def test_the_bar_wait_derives_from_the_timeframe_not_a_string_alias():
     """One duration rule, not an alias table that grows per spelling (#288).
 

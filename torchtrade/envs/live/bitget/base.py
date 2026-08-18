@@ -8,7 +8,6 @@ from tensordict import TensorDictBase
 from torchrl.data import Unbounded
 from torchrl.data.tensor_specs import Composite
 
-from torchtrade.envs.utils.timeframe import TimeFrame
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
@@ -93,10 +92,7 @@ class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
 
         # Extract execute timeframe
         self.execute_on = config.execute_on
-        # Set execute_on_value and execute_on_unit from the TimeFrame object
-        # Both arms of the old isinstance check were byte-identical.
-        self.execute_on_value = config.execute_on.value
-        self.execute_on_unit = str(config.execute_on.unit)
+        # The execution timeframe, read by the shared bar wait.
 
         # Flatten on startup for a clean state (configurable, default: True)
         self.trader.cancel_open_orders()
