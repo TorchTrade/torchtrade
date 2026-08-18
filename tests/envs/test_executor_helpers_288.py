@@ -8,7 +8,10 @@ from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
 from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
 from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
-from torchtrade.envs.live.shared.executor_helpers import ExecutorHelpersMixin
+from torchtrade.envs.live.shared.executor_helpers import (
+    ExecutorHelpersMixin,
+    TickSizeMixin,
+)
 
 EXECUTORS = [BinanceFuturesOrderClass, BitgetFuturesOrderClass,
              BybitFuturesOrderClass, OKXFuturesOrderClass]
@@ -36,7 +39,7 @@ def test_tick_rounding_goes_through_the_shared_helper(cls):
     it OVERRIDES with CCXT's `price_to_precision`, a different mechanism with a different
     failure mode, and collapsing it in to shorten the file would be the opposite error.
     """
-    assert cls._round_price is ExecutorHelpersMixin._round_price
+    assert cls._round_price is TickSizeMixin._round_price
 
 
 @pytest.mark.parametrize("cls", EXECUTORS, ids=lambda c: c.__name__)
@@ -67,12 +70,40 @@ def test_price_formatting_goes_through_the_shared_helper(cls):
     """Two verbatim copies. It emits a STRING because the venues parse the wire value and
     `repr` of a rounded float can carry more digits than the tick allows -- so a drifted
     copy is a rejected or silently re-rounded order, not a cosmetic difference."""
-    assert cls._format_price is ExecutorHelpersMixin._format_price
+    assert cls._format_price is TickSizeMixin._format_price
 
 
 def test_bitget_keeps_its_ccxt_rounding():
     """Pinned so a later dedup pass does not 'finish the job' by folding it in."""
     assert "price_to_precision" in inspect.getsource(BitgetFuturesOrderClass._round_price)
+
+
+def test_bitget_does_not_inherit_the_tick_helpers_at_all():
+    """It has no `_tick_size`, so those methods would raise on call.
+
+    An override only covers the one you remember to write: `_round_price` had a bitget
+    override and `_format_price` did not, so bitget silently inherited a method that
+    always AttributeErrors. Not mixing them in cannot be half-done.
+    """
+    assert not issubclass(BitgetFuturesOrderClass, TickSizeMixin)
+    assert not hasattr(BitgetFuturesOrderClass, "_format_price")
+
+
+@pytest.mark.parametrize("cls", [BybitFuturesOrderClass, OKXFuturesOrderClass],
+                         ids=lambda c: c.__name__)
+def test_price_formatting_is_not_re_inlined_at_a_call_site(cls):
+    """By RULE, not identity -- the identity check is blind to an inlined copy.
+
+    That is the same hole the name-based PnL guard had, and this file already carries
+    that lesson: replacing `self._format_price(x)` with an inline
+    `f"{rounded:.{self._tick_decimals}f}"` leaves every identity assertion passing.
+    Tick-decimal formatting belongs in the mixin and nowhere else.
+    """
+    source = inspect.getsource(cls)
+    assert "_tick_decimals}f}" not in source, (
+        f"{cls.__name__} formats a price against _tick_decimals inline instead of "
+        f"calling the shared _format_price -- an inlined copy is still a copy"
+    )
 
 
 @pytest.mark.parametrize("qty,expected", [

@@ -1,7 +1,10 @@
 """Order executor for Bybit Futures trading using pybit."""
 import logging
 
-from torchtrade.envs.live.shared.executor_helpers import ExecutorHelpersMixin
+from torchtrade.envs.live.shared.executor_helpers import (
+    ExecutorHelpersMixin,
+    TickSizeMixin,
+)
 
 from torchtrade.envs.utils.precision import decimals_for_step
 from dataclasses import dataclass
@@ -65,7 +68,7 @@ class PositionStatus:
     liquidation_price: float
 
 
-class BybitFuturesOrderClass(ExecutorHelpersMixin):
+class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
     """
     Order executor for Bybit Futures trading using pybit.
 

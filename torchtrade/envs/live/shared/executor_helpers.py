@@ -39,14 +39,20 @@ class ExecutorHelpersMixin:
             return (entry_price - mark_price) / entry_price
         return 0.0
 
-    def _round_price(self, price: float) -> float:
-        """Round to the cached tick size. Three verbatim copies (binance, bybit, okx).
 
-        bitget OVERRIDES this with CCXT's `price_to_precision`: a different mechanism
-        with a different failure mode, not a copy to be collapsed. It is the only class
-        here without `_tick_size`, so inheriting this unusably is the point -- the
-        override is what makes it work, and removing the override breaks loudly.
-        """
+class TickSizeMixin:
+    """Helpers that need a cached `_tick_size`/`_tick_decimals`.
+
+    Separate from ExecutorHelpersMixin because BITGET HAS NEITHER -- it rounds through
+    CCXT's `price_to_precision`. Handing it these would give it methods that raise
+    AttributeError on call, and an override only covers the one you remember to write:
+    `_round_price` had a bitget override, `_format_price` did not, so bitget silently
+    inherited an always-raising method (#288 review). Not mixing them in at all is the
+    version that cannot be half-done.
+    """
+
+    def _round_price(self, price: float) -> float:
+        """Round to the cached tick size. Three verbatim copies (binance, bybit, okx)."""
         if self._tick_size is not None:
             rounded = round(price / self._tick_size) * self._tick_size
             return round(rounded, self._tick_decimals)
@@ -57,8 +63,7 @@ class ExecutorHelpersMixin:
 
         A string, not a float, because the venues parse the wire value and `repr` of a
         rounded float can carry more digits than the tick allows -- which the venue then
-        rejects or silently re-rounds. The `_tick_size is None` fallback keeps `str()`
-        rather than inventing a precision the venue never reported.
+        rejects or silently re-rounds.
         """
         rounded = self._round_price(price)
         if self._tick_size is not None:

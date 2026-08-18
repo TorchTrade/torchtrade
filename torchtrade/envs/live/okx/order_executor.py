@@ -1,7 +1,10 @@
 """Order executor for OKX Futures trading using python-okx."""
 import logging
 
-from torchtrade.envs.live.shared.executor_helpers import ExecutorHelpersMixin
+from torchtrade.envs.live.shared.executor_helpers import (
+    ExecutorHelpersMixin,
+    TickSizeMixin,
+)
 
 from torchtrade.envs.utils.precision import decimals_for_step
 import math
@@ -62,7 +65,7 @@ class PositionStatus:
     liquidation_price: float
 
 
-class OKXFuturesOrderClass(ExecutorHelpersMixin):
+class OKXFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
     """
     Order executor for OKX Futures trading using python-okx.
 
