@@ -250,7 +250,17 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         # 7. Compute rewards: log(new_pv / old_pv)
         new_pvs = self._compute_portfolio_values(new_close)
         old_pvs = self._portfolio_values
-        safe_old = old_pvs.clamp(min=1e-10)
+        # Same rule as the non-SLTP twin (#289): a non-positive previous PV is a
+        # calculation error, and clamping made it silent. With `old_pv = -5.0` this path
+        # emitted a reward of +32.21.
+        if (old_pvs <= 0).any():
+            broken = torch.nonzero(old_pvs <= 0).flatten().tolist()
+            raise ValueError(
+                f"Invalid previous portfolio value in envs {broken}: "
+                f"{old_pvs[old_pvs <= 0].tolist()}. Portfolio value must be positive; "
+                f"this indicates a calculation error."
+            )
+        safe_old = old_pvs
         safe_new = new_pvs.clamp(min=1e-10)
         rewards = torch.log(safe_new / safe_old)
         rewards = torch.where(new_pvs <= 0, torch.full_like(rewards, -10.0), rewards)
@@ -258,7 +268,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         self._portfolio_values = new_pvs
 
         # 8. Compute termination signals
-        terminated = new_pvs < (self._initial_pvs * self.bankrupt_threshold)
+        terminated = (new_pvs < (self._initial_pvs * self.bankrupt_threshold)) | (new_pvs <= 0)
         truncated = (
             ((self._step_indices + 1) >= self._end_indices)
             | (self._step_counters >= self._max_traj_lengths)
