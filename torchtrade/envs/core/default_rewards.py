@@ -5,6 +5,7 @@ the history tracker interface. Users can use these as-is or create their own.
 """
 
 import numpy as np
+import torch
 
 
 def log_return_reward(history) -> float:
@@ -126,3 +127,26 @@ def drawdown_penalty_reward(history) -> float:
     dd_penalty = -5.0 * current_drawdown if current_drawdown > 0.1 else 0.0
 
     return log_ret + dd_penalty
+
+
+def batched_log_return_reward(old_pvs, new_pvs):
+    """`log_return_reward` over a batch: same formula, same bankruptcy constant.
+
+    The vectorized envs cannot use the scalar signature -- `fn(history) -> float` would
+    mean a Python loop over the batch, which is what that class exists to avoid -- so the
+    pluggable contract there is `fn(old_pvs, new_pvs) -> Tensor` (#289).
+
+    A non-positive OLD value raises, exactly as the scalar does: the previous step's PV
+    was checked and termination ends any lane that reaches zero, so it is unreachable and
+    an assertion rather than a crash mode. `new_pv <= 0` IS reachable -- it is
+    bankruptcy -- and reports -10.0 on both paths.
+    """
+    if (old_pvs <= 0).any():
+        broken = torch.nonzero(old_pvs <= 0).flatten().tolist()
+        raise ValueError(
+            f"Invalid previous portfolio value in envs {broken}: "
+            f"{old_pvs[old_pvs <= 0].tolist()}. Portfolio value must be positive; "
+            f"this indicates a calculation error."
+        )
+    rewards = torch.log(new_pvs.clamp(min=1e-10) / old_pvs)
+    return torch.where(new_pvs <= 0, torch.full_like(rewards, -10.0), rewards)

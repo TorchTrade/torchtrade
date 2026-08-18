@@ -119,6 +119,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         df: pd.DataFrame,
         config: VectorizedSequentialTradingEnvSLTPConfig,
         feature_preprocessing_fn: Optional[Callable] = None,
+        reward_function: Optional[Callable] = None,
     ):
         # Store SLTP config before parent init
         self.stoploss_levels = config.stoploss_levels
@@ -144,7 +145,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         original_action_levels = config.action_levels
         config.action_levels = [0.0, 1.0]
 
-        super().__init__(df, config, feature_preprocessing_fn)
+        super().__init__(df, config, feature_preprocessing_fn, reward_function)
 
         # Restored on the CONFIG and on the instance: the parent copies the dummy onto
         # self during its own __init__, so restoring only the config leaves
@@ -250,20 +251,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
         # 7. Compute rewards: log(new_pv / old_pv)
         new_pvs = self._compute_portfolio_values(new_close)
         old_pvs = self._portfolio_values
-        # Same rule as the non-SLTP twin (#289): a non-positive previous PV is a
-        # calculation error, and clamping made it silent. With `old_pv = -5.0` this path
-        # emitted a reward of +32.21.
-        if (old_pvs <= 0).any():
-            broken = torch.nonzero(old_pvs <= 0).flatten().tolist()
-            raise ValueError(
-                f"Invalid previous portfolio value in envs {broken}: "
-                f"{old_pvs[old_pvs <= 0].tolist()}. Portfolio value must be positive; "
-                f"this indicates a calculation error."
-            )
-        safe_old = old_pvs
-        safe_new = new_pvs.clamp(min=1e-10)
-        rewards = torch.log(safe_new / safe_old)
-        rewards = torch.where(new_pvs <= 0, torch.full_like(rewards, -10.0), rewards)
+        rewards = self.reward_function(old_pvs, new_pvs)
 
         self._portfolio_values = new_pvs
 

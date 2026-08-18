@@ -9,6 +9,8 @@ from torchtrade.envs.core.default_rewards import log_return_reward
 from torchtrade.envs.offline import (
     VectorizedSequentialTradingEnv,
     VectorizedSequentialTradingEnvConfig,
+    VectorizedSequentialTradingEnvSLTP,
+    VectorizedSequentialTradingEnvSLTPConfig,
 )
 
 
@@ -178,3 +180,114 @@ def test_the_bankruptcy_reward_constant_matches_the_scalar():
         f"bankruptcy rewards {set(bankrupt_rewards)} -- log_return_reward returns -10.0"
     )
     assert log_return_reward(_History([100.0, 0.0])) == -10.0
+
+
+# BOTH twins. The single genuinely new line in this change is the SLTP env threading
+# `reward_function` through `super().__init__`, and dropping it silently passed the whole
+# offline suite -- a user would have got the default with no error.
+@pytest.mark.parametrize("env_cls,cfg_cls,extra", [
+    (VectorizedSequentialTradingEnv, VectorizedSequentialTradingEnvConfig, {}),
+    (VectorizedSequentialTradingEnvSLTP, VectorizedSequentialTradingEnvSLTPConfig,
+     {"stoploss_levels": [-0.02], "takeprofit_levels": [0.03], "leverage": 5}),
+])
+def test_the_reward_function_is_pluggable(env_cls, cfg_cls, extra):
+    """#289: the scalar envs take `reward_function`; the vectorized ones did not, and
+    hardcoded the arithmetic inline -- which is why the SLTP twin drifted from it.
+
+    The signature is BATCHED (`fn(old_pvs, new_pvs) -> Tensor`), not the scalar
+    `fn(history) -> float`: calling that per env would be a Python loop over the batch,
+    which is the one thing this class exists to avoid.
+    """
+    n = 200
+    prices = 100 + np.cumsum(np.random.RandomState(11).randn(n) * 0.1)
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": prices, "high": prices + 0.2, "low": prices - 0.2,
+        "close": prices, "volume": np.ones(n) * 1000,
+    })
+    calls = []
+
+    def constant_reward(old_pvs, new_pvs):
+        calls.append((old_pvs.shape, new_pvs.shape))
+        return torch.full_like(old_pvs, 0.5)
+
+    env = env_cls(
+        df,
+        cfg_cls(time_frames=["1Min"], window_sizes=[10], execute_on="1Min", num_envs=6,
+                **extra),
+        reward_function=constant_reward,
+    )
+    td = env.reset()
+    td["action"] = torch.randint(0, env.action_spec.n, (6,))
+    td = env.step(td)["next"]
+
+    assert calls, "the custom reward function was never called"
+    assert calls[0] == (torch.Size([6]), torch.Size([6])), (
+        f"expected batched tensors of shape (6,), got {calls[0]} -- a per-env loop would "
+        f"undo the vectorization this class exists for"
+    )
+    assert torch.allclose(td["reward"].flatten(), torch.full((6,), 0.5))
+
+
+@pytest.mark.parametrize("env_cls,cfg_cls,extra", [
+    (VectorizedSequentialTradingEnv, VectorizedSequentialTradingEnvConfig, {}),
+    (VectorizedSequentialTradingEnvSLTP, VectorizedSequentialTradingEnvSLTPConfig,
+     {"stoploss_levels": [-0.02], "takeprofit_levels": [0.03], "leverage": 5}),
+])
+def test_a_custom_reward_is_not_preempted_by_a_hardcoded_precondition(
+    env_cls, cfg_cls, extra
+):
+    """The precondition belongs to the reward function, not the env.
+
+    The base env kept an inline `old_pvs <= 0` raise after the SLTP twin dropped it, so a
+    custom reward that deliberately tolerates a non-positive old PV was preempted in one
+    env and honoured in the other -- the twin divergence this change exists to remove,
+    moved from the arithmetic to the guard.
+    """
+    n = 200
+    prices = 100 + np.cumsum(np.random.RandomState(21).randn(n) * 0.1)
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": prices, "high": prices + 0.2, "low": prices - 0.2,
+        "close": prices, "volume": np.ones(n) * 1000,
+    })
+    called = []
+
+    def tolerant_reward(old_pvs, new_pvs):
+        called.append(True)
+        return torch.zeros_like(old_pvs)
+
+    env = env_cls(
+        df,
+        cfg_cls(time_frames=["1Min"], window_sizes=[10], execute_on="1Min", num_envs=4,
+                **extra),
+        reward_function=tolerant_reward,
+    )
+    td = env.reset()
+    env._portfolio_values[1] = -5.0          # what the removed guard rejected
+
+    td["action"] = torch.randint(0, env.action_spec.n, (4,))
+    env.step(td)                              # must not raise
+
+    assert called, "the env preempted the custom reward with its own precondition"
+
+
+def test_the_default_reward_is_the_batched_log_return():
+    """Unchanged behaviour when nothing is passed -- the default IS the batched
+    equivalent of `log_return_reward`, which the parity test above pins numerically."""
+    from torchtrade.envs.core.default_rewards import batched_log_return_reward
+
+    n = 200
+    prices = 100 + np.cumsum(np.random.RandomState(12).randn(n) * 0.1)
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": prices, "high": prices + 0.2, "low": prices - 0.2,
+        "close": prices, "volume": np.ones(n) * 1000,
+    })
+    env = VectorizedSequentialTradingEnv(
+        df,
+        VectorizedSequentialTradingEnvConfig(
+            time_frames=["1Min"], window_sizes=[10], execute_on="1Min", num_envs=4,
+        ),
+    )
+    assert env.reward_function is batched_log_return_reward
