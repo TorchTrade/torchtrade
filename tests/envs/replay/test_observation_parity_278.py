@@ -78,28 +78,42 @@ def test_features_are_reported_when_no_preprocessing_fn_is_given():
     )
 
 
-@pytest.mark.parametrize("steps", [1, 2, 10, 14])
-def test_base_features_is_as_full_as_the_market_data_from_the_first_step(steps):
-    """`include_base_features=True` declares a (window, 4) spec and puts it in the
-    OBSERVATION, so a policy consuming that key read 9 of 10 rows as zero on every step.
-    Only the newest row was written.
+# The timeframe layout is the axis both base_features bugs lived on, and the original
+# test parametrized only `steps` on a single-timeframe fixture -- so it could not see
+# either. execute_on COARSER than time_frames[0] is deliberately absent: market_data
+# there extends past the window this builds, and asserting a relationship I have not
+# pinned down would be worse than saying so.
+LAYOUTS = [
+    pytest.param([TF], [10], TF, id="single-1Min"),
+    pytest.param([TimeFrame(5, TimeFrameUnit.Minute), TF], [6, 10], TF, id="5Min-first"),
+    pytest.param([TimeFrame(15, TimeFrameUnit.Minute), TF], [4, 10], TF, id="15Min-first"),
+]
 
-    Filling from the sampler's TRUNCATED execution frame fixed nine steps out of ten and
-    left step 1 at 9/10 zeros -- while `market_data_*`, same timeframe and window, was
-    full of real bars from step 1. Those bars exist; they were outside the frame. This
-    compares the two keys rather than a hardcoded count, so no zero-padding regime can
-    be codified as expected again.
+
+@pytest.mark.parametrize("time_frames,window_sizes,execute_on", LAYOUTS)
+@pytest.mark.parametrize("steps", [1, 30])
+def test_base_features_is_the_first_timeframes_bars(time_frames, window_sizes, execute_on, steps):
+    """base_features is `time_frames[0]`'s raw OHLC -- not the execution timeframe's.
+
+    Live gates on `timeframe == self.time_frames[0]` and every venue sizes the spec off
+    `window_sizes[0]`. Filling from `execute_on` gave a window of the right SHAPE holding
+    entirely different bars: with `[15Min, 1Min]` it spanned 4 minutes where live spans
+    an hour. That is worse than the original defect, which left the mismatched rows
+    visibly zero -- this one looks plausible and `check_env_specs` passes.
+
+    Asserted against `market_data_*` for the same timeframe rather than a hardcoded
+    count, so neither a zero-padding regime nor a wrong-timeframe window can be written
+    down as expected.
     """
-    observer = _observer()
+    observer = ReplayObserver(df=_df(1200), time_frames=time_frames,
+                              window_sizes=window_sizes, execute_on=execute_on)
     for _ in range(steps):
         obs = observer.get_observations(return_base_ohlc=True)
-    base = obs["base_features"]
-    market = obs[observer.get_keys()[0]]
+    base, market = obs["base_features"], obs[observer.get_keys()[0]]
 
-    base_zero = int((base == 0).all(axis=1).sum())
-    market_zero = int((market == 0).all(axis=1).sum())
-    assert base_zero == market_zero, (
-        f"base_features has {base_zero} empty rows against market_data's {market_zero}"
+    assert base.shape == (window_sizes[0], 4)
+    assert int((base == 0).all(axis=1).sum()) == int((market == 0).all(axis=1).sum())
+    assert np.allclose(base[:, 3], market[:, 3], atol=1e-3), (
+        f"base_features closes {base[:, 3]} are not {time_frames[0]}'s bars "
+        f"{market[:, 3]} -- wrong timeframe or shifted by the end-time relabel"
     )
-    closes = base[:, 3]
-    assert np.all(np.diff(closes) > 0), f"rows are not consecutive bars in order: {closes}"

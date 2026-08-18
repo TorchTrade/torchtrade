@@ -148,6 +148,7 @@ class MarketDataObservationSampler:
             if len(resampled) == 0:
                 raise ValueError(f"Resampled dataframe for timeframe {tf.obs_key_freq()} is empty")
 
+
             # Fix lookahead bias: shift higher timeframe bars forward by their period
             # This ensures bars are indexed by their END time, not START time
             # Only completed bars will be visible to the agent at any execution time
@@ -189,6 +190,17 @@ class MarketDataObservationSampler:
                 resampled.index = edges[1:][
                     bin_starts.get_indexer(resampled.index)
                 ].rename(bin_starts.name)
+
+            # base_features is the FIRST timeframe's raw OHLC, per the live observers
+            # (`live/shared/futures_base_obs.py` gates on `timeframe == time_frames[0]`),
+            # and every venue sizes its spec off window_sizes[0].
+            #
+            # AFTER the END-time relabel above and BEFORE feature processing. Capturing it
+            # before the relabel indexed coarse bars by their bin START, so a window
+            # ending "now" included a bar that had not closed yet -- lookahead bias, in
+            # the observation, which is the whole reason that relabel exists (#320).
+            if tf == time_frames[0]:
+                self.base_ohlc_df = resampled[["open", "high", "low", "close"]].copy()
 
             if proc_fn is not None:
                 resampled = proc_fn(resampled)
@@ -314,11 +326,6 @@ class MarketDataObservationSampler:
         execute_base_filled["close"] = execute_base_filled["close"].clip(
             lower=execute_base_filled["low"], upper=execute_base_filled["high"]
         )
-        # Kept untruncated as well: the truncated frame starts at min_start_time, so a
-        # consumer wanting a WINDOW of base bars ending at the first tradable bar has
-        # nothing to look back at. ReplayObserver needs exactly that (#278); the
-        # truncated frame remains what everything else uses.
-        self.execute_base_full_df = execute_base_filled
         self.execute_base_features_df = execute_base_filled[self.min_start_time:]
         if len(self.execute_base_features_df) == 0:
             raise ValueError("No execute_on base features available after min_start_time")
@@ -381,11 +388,11 @@ class MarketDataObservationSampler:
         self.execute_base_tensor = torch.from_numpy(base_arr)  # shape (M, F)
         base_ts_int64 = self.execute_base_features_df.index.as_unit('ns').asi8
         self.execute_base_idx = torch.from_numpy(base_ts_int64).to(torch.long)
-        self.execute_base_full_tensor = torch.from_numpy(
-            self.execute_base_full_df.to_numpy(dtype=np.float32)
+        self.base_ohlc_tensor = torch.from_numpy(
+            self.base_ohlc_df.to_numpy(dtype=np.float32)
         )
-        self.execute_base_full_idx = torch.from_numpy(
-            self.execute_base_full_df.index.as_unit('ns').asi8
+        self.base_ohlc_idx = torch.from_numpy(
+            self.base_ohlc_df.index.as_unit("ns").asi8
         ).to(torch.long)
 
         # Validate 1:1 correspondence between exec_times and execute_base_features_df

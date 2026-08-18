@@ -134,22 +134,28 @@ class ReplayObserver:
         the array in the OBSERVATION, so a policy consuming that key read 90% zeros --
         9 of 10 rows (#278). Real observers fill the whole window.
 
-        Read from the sampler's UNTRUNCATED execution frame. The truncated one starts at
-        min_start_time, so the first `window` steps of every episode were still mostly
-        zeros -- `market_data_*` for the same timeframe and window was full of real bars
-        from step 1 while `base_features` was 9/10 zero. Those bars exist; they were just
-        outside the frame. Rows genuinely before the data begin stay zero.
+        The FIRST timeframe's bars, not the execution timeframe's. Live gates on
+        `timeframe == self.time_frames[0]` and every venue sizes the spec off
+        `window_sizes[0]`, so filling it from `execute_on` produced a window of the right
+        SHAPE holding entirely different bars -- with `time_frames=[15Min, 1Min]` a
+        replayed window spanned 4 minutes where live spans an hour. Worse than the
+        original bug, which left the mismatched rows visibly zero; this one looks
+        plausible.
+
+        Untruncated, so a window ending at the first tradable bar has bars to look back
+        at: the truncated frame starts at min_start_time, which left step 1 at 9/10 zeros
+        while `market_data_*` was already full.
         """
         ws = self.window_sizes[0]
         base_arr = np.zeros((ws, 4), dtype=np.float32)
         end = int(torch.searchsorted(
-            self.sampler.execute_base_full_idx,
+            self.sampler.base_ohlc_idx,
             torch.tensor(int(timestamp.value), dtype=torch.long),
             right=True,
         ).item())
         if end <= 0:
             return base_arr
         start = max(0, end - ws)
-        window = self.sampler.execute_base_full_tensor[start:end, :4].numpy().astype(np.float32)
+        window = self.sampler.base_ohlc_tensor[start:end].numpy().astype(np.float32)
         base_arr[-len(window):] = window
         return base_arr
