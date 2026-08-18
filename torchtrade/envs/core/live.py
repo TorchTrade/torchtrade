@@ -19,6 +19,7 @@ from torchtrade.envs.core.state import (
     POSITION_DUST_EPS,
     position_qty_from_status,
 )
+from torchtrade.envs.utils.timeframe import timeframe_to_seconds
 from torchtrade.envs.utils.termination import is_bankrupt
 
 
@@ -146,43 +147,17 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         This is COMMON across all live environments - timing logic is universal.
 
         Uses:
-        - self.execute_on_value: Number of time units
-        - self.execute_on_unit: Time unit (e.g., "Minute", "Hour", "Day")
+        - self.execute_on: the execution TimeFrame
         - self.timezone: Timezone for time calculations
         """
-        # Map time unit strings to timedelta kwargs
-        unit_to_timedelta = {
-            "TimeFrameUnit.Minute": "minutes",
-            "TimeFrameUnit.Hour": "hours",
-            "TimeFrameUnit.Day": "days",
-            # Alpaca uses different naming
-            "Minute": "minutes",
-            "Hour": "hours",
-            "Day": "days",
-            # Pandas frequency codes (from TimeFrameUnit enum values)
-            "Min": "minutes",
-            "H": "hours",
-            # Lowercase variants (TimeFrameUnit.value uses lowercase)
-            "min": "minutes",
-            "h": "hours",
-            "d": "days",
-            "minute": "minutes",
-            "hour": "hours",
-            "day": "days",
-            "seconds": "seconds",
-            "D": "days",
-        }
-
-        if self.execute_on_unit not in unit_to_timedelta:
-            raise ValueError(
-                f"Unsupported time unit: {self.execute_on_unit}. "
-                f"Supported: {list(unit_to_timedelta.keys())}"
-            )
-
-        # Calculate wait duration
-        wait_duration = timedelta(
-            **{unit_to_timedelta[self.execute_on_unit]: self.execute_on_value}
-        )
+        # One canonical duration, from the TimeFrame itself. This used to look the
+        # unit up in a 17-entry alias map -- "TimeFrameUnit.Minute", "Minute", "Min",
+        # "min", "minute", "h", "H", "D", "d", "seconds" -- because five exchanges
+        # stringified the same enum four different ways (`str(unit)`, `str(unit.value)`,
+        # a hardcoded "seconds") and the map grew an entry per spelling rather than the
+        # spellings being fixed. A sixth exchange spelling it a fifth way would have
+        # raised at the first bar, in production, on a timer (#288).
+        wait_duration = timedelta(seconds=timeframe_to_seconds(self.execute_on))
 
         # Calculate next step time
         current_time = datetime.now(self.timezone)

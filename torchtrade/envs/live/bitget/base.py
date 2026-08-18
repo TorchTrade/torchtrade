@@ -94,13 +94,9 @@ class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         # Extract execute timeframe
         self.execute_on = config.execute_on
         # Set execute_on_value and execute_on_unit from the TimeFrame object
-        if isinstance(config.execute_on, TimeFrame):
-            self.execute_on_value = config.execute_on.value
-            self.execute_on_unit = str(config.execute_on.unit)  # e.g., "TimeFrameUnit.Minute"
-        else:
-            # Fallback: should not happen after normalization, but handle it
-            self.execute_on_value = config.execute_on.value
-            self.execute_on_unit = str(config.execute_on.unit)
+        # Both arms of the old isinstance check were byte-identical.
+        self.execute_on_value = config.execute_on.value
+        self.execute_on_unit = str(config.execute_on.unit)
 
         # Flatten on startup for a clean state (configurable, default: True)
         self.trader.cancel_open_orders()

@@ -2724,3 +2724,32 @@ def test_a_live_account_keeps_its_run_level_bankruptcy_baseline():
     assert env._check_termination(62.5) is True, (
         "62.5 is below 10% of the 1000 this run started with and must terminate"
     )
+
+
+def test_the_bar_wait_derives_from_the_timeframe_not_a_string_alias():
+    """One duration rule, not an alias table that grows per spelling (#288).
+
+    `_wait_for_next_timestamp` looked its unit up in a 17-entry map --
+    "TimeFrameUnit.Minute", "Minute", "Min", "min", "minute", "h", "H", "D", "d",
+    "seconds" -- because five exchanges stringified the same enum four different ways
+    and the map grew an entry per spelling rather than the spellings being fixed. A
+    sixth exchange spelling it a fifth way would have raised at the first bar, in
+    production, on a timer.
+    """
+    from torchtrade.envs.core import live as live_module
+
+    tree = ast.parse(textwrap.dedent(
+        inspect.getsource(live_module.TorchTradeLiveEnv._wait_for_next_timestamp)
+    ))
+    called = {n.func.id for n in ast.walk(tree)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    assert "timeframe_to_seconds" in called, "the wait must derive from the TimeFrame"
+
+    # Literals only -- the explanation above quotes the old spellings, and a check that
+    # a comment can trip is a check a comment can also satisfy.
+    literals = {n.value for n in ast.walk(tree)
+                if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    regrown = literals & {"TimeFrameUnit.Minute", "Minute", "Min", "min", "minute",
+                          "TimeFrameUnit.Hour", "Hour", "h", "H", "seconds",
+                          "TimeFrameUnit.Day", "Day", "D", "d", "hour", "day"}
+    assert not regrown, f"the unit alias table is regrowing in the wait path: {regrown}"
