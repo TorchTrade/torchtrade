@@ -225,25 +225,6 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             logger.error(f"{side} trade failed for {self.config.symbol}: quantity={quantity}, error={e}")
             return self._create_trade_info(executed=False, success=False)
 
-    def _handle_close_action(self, current_qty: float) -> Dict:
-        """Handle close position action."""
-        if current_qty == 0:
-            return self._create_trade_info(executed=False)
-
-        try:
-            success = self.trader.close_position()
-        except Exception as e:
-            logger.error(f"Close position failed for {self.config.symbol}: {e}")
-            return self._create_trade_info(executed=False, success=False)
-
-        return self._create_trade_info(
-            executed=True,
-            quantity=abs(current_qty),
-            side="CLOSE",
-            success=success,
-            closed_position=True,
-        )
-
 
     def _get_symbol_info(self) -> Dict:
         """Get exchange symbol information for precision and lot size.

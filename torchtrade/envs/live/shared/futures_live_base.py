@@ -140,6 +140,36 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             **kwargs,
         }
 
+    def _handle_close_action(self, current_qty: float) -> Dict:
+        """Close the position and report the ORDER SIDE that closed it.
+
+        Four identical copies once binance stopped reporting the literal "CLOSE" (#288).
+        `side` is what went to the venue -- `closed_position=True` in the same dict
+        already says it was a close, so a literal there lost the only fact this field
+        carries.
+        """
+        if current_qty == 0:
+            return self._create_trade_info(executed=False)
+
+        try:
+            success = self.trader.close_position()
+        except Exception as e:
+            logger.error(f"Close position failed for {self.config.symbol}: {e}")
+            return self._create_trade_info(executed=False, success=False)
+
+        side = "sell" if current_qty > 0 else "buy"
+
+        if success:
+            self.position.current_position = 0
+
+        return self._create_trade_info(
+            executed=True,
+            quantity=abs(current_qty),
+            side=side,
+            success=success,
+            closed_position=True,
+        )
+
     def _acquire_post_bar_state(self) -> tuple[float, float, float, TensorDictBase]:
         """Post-bar portfolio value and observation, or halt.
 

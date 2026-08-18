@@ -175,7 +175,12 @@ def test_no_live_env_overrides_shared_method(env_cls, method):
 
 @pytest.mark.parametrize(
     "method",
-    ["_get_observation", "_get_portfolio_value", "_create_trade_info"],
+    [
+        "_get_observation",
+        "_get_portfolio_value",
+        "_create_trade_info",
+        "_handle_close_action",
+    ],
 )
 @pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
 def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
@@ -2896,3 +2901,42 @@ def test_the_trade_info_defaults_are_the_whole_contract():
     extra = TorchTradeFuturesLiveEnv._create_trade_info(None, at_target=True, target_qty=0.5)
     assert extra["at_target"] is True and extra["target_qty"] == 0.5
     assert extra["executed"] is False, "an unknown key must not disturb the defaults"
+
+
+@pytest.mark.parametrize("qty,expected_side", [(0.5, "sell"), (-0.5, "buy")])
+def test_closing_reports_the_order_side_that_closed_it(qty, expected_side):
+    """binance reported the literal "CLOSE" where its three siblings report the real side.
+
+    `side` is what went to the venue, and `closed_position=True` in the same dict already
+    says it was a close -- so the literal added nothing and lost the one fact this field
+    carries. That is the silent per-exchange divergence #288 exists to remove, and it is
+    why the four copies could not be hoisted until it was resolved: whichever version
+    became shared, one venue's observable output changed, and it had to change
+    deliberately.
+    """
+    from types import SimpleNamespace
+
+    from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
+
+    env = SimpleNamespace(
+        trader=SimpleNamespace(close_position=lambda: True),
+        config=SimpleNamespace(symbol="BTCUSDT"),
+        position=SimpleNamespace(current_position=1),
+        _create_trade_info=TorchTradeFuturesLiveEnv._create_trade_info.__get__(object()),
+    )
+    info = TorchTradeFuturesLiveEnv._handle_close_action(env, qty)
+
+    assert info["side"] == expected_side, "a close must report the side it sent"
+    assert info["closed_position"] is True and info["executed"] is True
+    assert info["quantity"] == abs(qty)
+    assert env.position.current_position == 0, "a successful close must zero the position"
+
+
+def test_a_close_with_no_position_does_not_report_a_trade():
+    from types import SimpleNamespace
+
+    from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
+
+    env = SimpleNamespace(_create_trade_info=TorchTradeFuturesLiveEnv._create_trade_info.__get__(object()))
+    info = TorchTradeFuturesLiveEnv._handle_close_action(env, 0)
+    assert info["executed"] is False and info["side"] is None
