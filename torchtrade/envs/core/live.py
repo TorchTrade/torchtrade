@@ -268,7 +268,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 Unbounded(shape=(base_window, 4), dtype=torch.float),
             )
 
-    def _build_observation_specs(self):
+    def _build_observation_specs(self) -> None:
         """Declare the observation spec without touching the network (#288).
 
         The feature count comes from `get_features()`, which runs the preprocessing
@@ -276,23 +276,26 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         timeframe. That the two agree is pinned by
         `BaseObservationClassTests.test_the_declared_feature_width_matches_the_observation`.
 
-        Here rather than on the futures base for the reason `get_account_state` gives
-        below: leaving alpaca its own copy turns five into two, not one.
+        On TorchTradeLiveEnv, not the futures base -- see `get_account_state` below.
         """
         num_features = len(self.observer.get_features()["observation_features"])
-        # A list of matching length is guaranteed by every config's __post_init__ via
-        # normalize_timeframe_config; strict=True makes an injected observer that
-        # disagrees with the config raise instead of silently mis-declaring a window.
         window_sizes = self.config.window_sizes
 
         self.observation_spec = Composite(shape=())
         self.account_state_key = "account_state"
+        # Only alpaca's copy set this, and folding the five dropped it --
+        # examples/llm/{frontier,local}/live.py read env.account_state off an
+        # AlpacaTorchTradingEnv and raised AttributeError. Now uniform across all five.
+        self.account_state = self.ACCOUNT_STATE
         self.observation_spec.set(
             self.account_state_key,
             Unbounded(shape=(len(self.ACCOUNT_STATE),), dtype=torch.float),
         )
 
         self.market_data_keys = []
+        # strict=True: every config's __post_init__ normalizes window_sizes to a list as
+        # long as time_frames, so a mismatch means an INJECTED observer disagreeing with
+        # the config. The old code silently gave those extra keys window_sizes[0].
         for name, ws in zip(self.observer.get_keys(), window_sizes, strict=True):
             key = "market_data_" + name
             self.observation_spec.set(key, Unbounded(shape=(ws, num_features), dtype=torch.float))

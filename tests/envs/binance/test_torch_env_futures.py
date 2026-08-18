@@ -1,8 +1,9 @@
 """Tests for BinanceFuturesTorchTradingEnv."""
 
-from tests.envs.base_exchange_tests import mirror_features_on
 import logging
 import pytest
+
+from tests.envs.base_exchange_tests import mirror_features_on
 import torch
 from torchrl.envs.utils import check_env_specs
 import numpy as np

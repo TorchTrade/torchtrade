@@ -175,10 +175,10 @@ def test_offline_env_specs_sample_finite(sample_ohlcv_df, env_cls, config_cls, e
 
 
 class _StubObserver:
-    """Satisfies every live observer interface the spec builders read.
+    """Satisfies every live observer interface the spec builder reads.
 
-    All five venues now take the feature width from get_features() and read get_keys();
-    get_observations() is kept because the step path uses it, not the spec path (#288)."""
+    All five venues take the feature width from get_features() and read get_keys(); the
+    spec path never calls get_observations(), so this stub does not define it (#288)."""
 
     def get_keys(self):
         return ["1Minute_10", "5Minute_10"]
@@ -186,8 +186,6 @@ class _StubObserver:
     def get_features(self):
         return {"observation_features": ["a", "b", "c", "d", "e"]}
 
-    def get_observations(self):
-        return {k: np.zeros((10, 5)) for k in self.get_keys()}
 
 
 def _concrete_live_envs():

@@ -165,7 +165,7 @@ def test_discovery_covers_every_live_exchange():
 
 
 @pytest.mark.parametrize("method", [
-    "_check_termination", "_sync_action_level_after_reset",
+    "_check_termination", "_sync_action_level_after_reset", "_build_observation_specs",
 ])
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
 def test_no_live_env_overrides_shared_method(env_cls, method):
@@ -205,45 +205,31 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     )
 
 
-# Every DISTINCT _build_observation_specs any live env resolves to -- deduped on the
-# function, not on which class declares it. The `in vars(c)` form emptied the moment all
-# five venues shared one implementation (#288) and pytest errored on an empty parameter
-# set: loud, which is the point, but it would also have silently narrowed had one venue
-# kept a copy. Resolving instead means a future re-fork ADDS a case rather than removing
-# the guard's only subject.
-_BASE_FEATURES_SPEC_CLASSES = sorted(
-    {c._build_observation_specs: c for c in LIVE_ENVS}.values(),
-    key=lambda c: c.__name__,
-)
+def test_the_shared_spec_builder_declares_base_features() -> None:
+    """The one _build_observation_specs must call the shared _declare_base_features_spec.
 
+    #61 was a class-level defect: base_features is EMITTED by the shared _get_observation
+    but was DECLARED only by okx, so spec and observation disagreed and a collector
+    pre-allocating from the spec silently dropped it.
 
-def test_the_base_features_guard_has_something_to_check():
-    """An empty or shrinking discovered set is how this guard stops guarding."""
-    assert _BASE_FEATURES_SPEC_CLASSES
+    Unparametrized because all five venues now resolve to one function -- the earlier
+    discovery form (`"_build_observation_specs" in vars(c)`) emptied the moment that
+    happened, and its replacement asserted only that the discovered set was non-empty,
+    which `empty_parameter_set_mark = "fail_at_collect"` already guarantees. A venue
+    re-forking the method is caught by test_no_live_env_overrides_shared_method instead.
 
-
-@pytest.mark.parametrize(
-    "env_cls", _BASE_FEATURES_SPEC_CLASSES, ids=lambda c: c.__name__
-)
-def test_every_live_env_declares_base_features_via_the_shared_helper(env_cls):
-    """Every live env's _build_observation_specs must call the shared _declare_base_features_spec.
-
-    #61 was a class-level defect: base_features is EMITTED by the shared _get_observation but was
-    DECLARED in observation_spec only by okx (3 of 4 futures exchanges forgot), so spec and
-    observation disagreed and a collector pre-allocating from the spec silently dropped it. The
-    helper now lives on TorchTradeLiveEnv (the common ancestor of both the futures base and
-    alpaca), so this guard spans every live env, not just futures. The per-exchange behavioural
-    tests each guard only their own exchange; this catches a FUTURE exchange that forgets the call.
-    AST, not source text (like the guards above), so a comment mentioning the method can't satisfy it.
+    AST, not source text, so a comment naming the method cannot satisfy it.
     """
-    tree = ast.parse(textwrap.dedent(inspect.getsource(env_cls._build_observation_specs)))
+    tree = ast.parse(
+        textwrap.dedent(inspect.getsource(TorchTradeLiveEnv._build_observation_specs))
+    )
     called = {
         node.func.attr for node in ast.walk(tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
     }
     assert "_declare_base_features_spec" in called, (
-        f"{env_cls.__name__}._build_observation_specs never calls _declare_base_features_spec -- "
-        f"base_features would be emitted but not declared in observation_spec (#61)."
+        "the shared _build_observation_specs never calls _declare_base_features_spec -- "
+        "base_features would be emitted but not declared in observation_spec (#61)."
     )
 
 
@@ -3368,8 +3354,9 @@ def test_construction_survives_an_observer_that_cannot_reach_the_exchange():
 def test_each_timeframe_declares_its_own_window_size():
     """The loop pairs `get_keys()` with `config.window_sizes` positionally.
 
-    Collapsing every window to `window_sizes[0]` passed 1366 tests: every multi-timeframe
-    env test in the suite uses uniform sizes, so the pairing was never exercised. This is
+    Collapsing every window to `window_sizes[0]` passed the whole suite bar this test:
+    every other multi-timeframe env test uses uniform sizes, so the pairing was never
+    exercised. This is
     the shape-corruption class the spec guards exist for -- a policy fed a 20-bar window
     declared as 10.
     """
@@ -3405,3 +3392,64 @@ def test_each_timeframe_declares_its_own_window_size():
 
     assert env.observation_spec["market_data_1Minute_10"].shape == torch.Size([10, 3])
     assert env.observation_spec["market_data_1Hour_20"].shape == torch.Size([20, 3])
+
+
+def test_an_observer_disagreeing_with_the_config_raises_rather_than_guessing():
+    """`zip(..., strict=True)` -- the fail-open case the old index fallback absorbed.
+
+    Every config's __post_init__ normalizes window_sizes to a list as long as time_frames,
+    so a mismatch can only come from an INJECTED observer. The old
+    `window_sizes[i] if i < len(window_sizes) else window_sizes[0]` silently declared the
+    first window for every extra key, which is a spec that quietly lies about its shape.
+    Dropping strict=True failed nothing before this.
+    """
+    from torchtrade.envs.live.binance.env import (
+        BinanceFuturesTorchTradingEnv,
+        BinanceFuturesTradingEnvConfig,
+    )
+
+    observer = MagicMock()
+    observer.get_keys = MagicMock(return_value=["1Minute_10", "1Hour_20"])  # 2 keys...
+    observer.get_features = MagicMock(return_value={
+        "observation_features": ["a", "b"], "original_features": []})
+
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1000.0, "total_margin_balance": 1000.0,
+        "total_wallet_balance": 1000.0,
+    }
+    trader.get_status.return_value = {"position_status": None}
+    trader.cancel_open_orders.return_value = True
+    trader.close_position.return_value = True
+    trader.get_mark_price.return_value = 100.0
+
+    config = BinanceFuturesTradingEnvConfig(  # ...against 1 window
+        symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10], execute_on="1m",
+    )
+    with patch("time.sleep"), patch.object(
+        BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"
+    ), pytest.raises(ValueError, match="zip"):
+        BinanceFuturesTorchTradingEnv(config=config, observer=observer, trader=trader)
+
+
+@pytest.mark.parametrize("env_cls", NON_SLTP_ENVS, ids=lambda c: c.__name__)
+def test_every_live_env_exposes_the_account_state_labels(env_cls):
+    """`env.account_state` -- set by alpaca's spec builder only, and folding lost it.
+
+    `examples/llm/{frontier,local}/live.py` read it off an AlpacaTorchTradingEnv to label
+    the observation for the LLM actor, so dropping it raised AttributeError there with
+    the whole suite green. Pinned for all five now, not just the venue that happened to
+    have it.
+    """
+    assert env_cls.ACCOUNT_STATE, f"{env_cls.__name__} declares no ACCOUNT_STATE"
+    tree = ast.parse(
+        textwrap.dedent(inspect.getsource(TorchTradeLiveEnv._build_observation_specs))
+    )
+    assigned = {
+        t.attr for node in ast.walk(tree) if isinstance(node, ast.Assign)
+        for t in node.targets if isinstance(t, ast.Attribute)
+    }
+    assert "account_state" in assigned, (
+        "the shared _build_observation_specs no longer sets self.account_state -- "
+        "the LLM live examples read it and would raise AttributeError"
+    )

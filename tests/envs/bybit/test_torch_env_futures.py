@@ -602,8 +602,6 @@ class TestBybitInitCleanup:
         env.close()
 
 
-class TestBybitObservationSpecsNoNetwork:
-    """Test that _build_observation_specs doesn't make live API calls."""
 
 
 

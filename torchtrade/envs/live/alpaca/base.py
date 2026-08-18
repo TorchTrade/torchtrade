@@ -18,7 +18,9 @@ from torchtrade.envs.core.state import (
     position_direction_from_status,
 )
 
+
 logger = logging.getLogger(__name__)
+
 
 class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
     """

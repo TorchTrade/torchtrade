@@ -29,7 +29,6 @@ def mirror_features_on(observer):
         "observation_features": [f"feature_{i}" for i in range(width)],
         "original_features": [],
     })
-    return observer
 
 
 class BaseObservationClassTests(ABC):
