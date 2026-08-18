@@ -9,6 +9,7 @@ Alpaca (spot) is NOT a futures env: it hardcodes leverage=1 and distance_to_liqu
 and reads cash rather than total_wallet_balance. It keeps its own `_get_observation` and
 inherits `TorchTradeLiveEnv` directly.
 """
+from typing import Dict
 import logging
 import math
 
@@ -121,6 +122,23 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             )
 
         return self._halting(read)
+
+    def _create_trade_info(self, executed: bool = False, **kwargs) -> Dict:
+        """The trade-info dict every futures `_step` returns. Four identical copies (#288).
+
+        The DEFAULTS are the point: `_step` builds this on paths that did not trade, and
+        a missing key there is read downstream as an absent fact rather than a default
+        one. Four copies meant four chances for one venue's default set to drift from
+        the others while every test stayed green.
+        """
+        return {
+            "executed": executed,
+            "quantity": 0,
+            "side": None,
+            "success": None,
+            "closed_position": False,
+            **kwargs,
+        }
 
     def _acquire_post_bar_state(self) -> tuple[float, float, float, TensorDictBase]:
         """Post-bar portfolio value and observation, or halt.

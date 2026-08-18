@@ -206,18 +206,6 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
 
         return next_tensordict
 
-    def _create_trade_info(self, executed=False, **kwargs) -> Dict:
-        """Create trade info dictionary with defaults."""
-        info = {
-            "executed": executed,
-            "quantity": 0,
-            "side": None,
-            "success": None,
-            "closed_position": False,
-        }
-        info.update(kwargs)
-        return info
-
     def _execute_market_order(self, side: str, quantity: float) -> Dict:
         """Execute a market order with error handling."""
         try:

@@ -173,7 +173,10 @@ def test_no_live_env_overrides_shared_method(env_cls, method):
     )
 
 
-@pytest.mark.parametrize("method", ["_get_observation", "_get_portfolio_value"])
+@pytest.mark.parametrize(
+    "method",
+    ["_get_observation", "_get_portfolio_value", "_create_trade_info"],
+)
 @pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
 def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     """The 4 futures exchanges share ONE _get_observation/_get_portfolio_value.
@@ -2868,3 +2871,28 @@ def test_every_live_env_reports_the_same_account_state_layout():
     assert len(layouts) >= 10, f"only {len(layouts)} concrete live envs checked"
     wrong = {n: v for n, v in layouts.items() if v != expected}
     assert not wrong, f"venues disagree with the universal account_state vector: {wrong}"
+
+
+def test_the_trade_info_defaults_are_the_whole_contract():
+    """A path that did not trade still returns this dict, so a MISSING key reads
+    downstream as an absent fact rather than a default one -- which is what four copies
+    risked drifting on."""
+    from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
+
+    info = TorchTradeFuturesLiveEnv._create_trade_info(None)
+    assert info == {
+        "executed": False, "quantity": 0, "side": None,
+        "success": None, "closed_position": False,
+    }
+    # kwargs override, and do not silently drop a default.
+    overridden = TorchTradeFuturesLiveEnv._create_trade_info(None, executed=True, side="BUY")
+    assert overridden["executed"] is True and overridden["side"] == "BUY"
+    assert overridden["closed_position"] is False and overridden["quantity"] == 0
+
+    # An UNKNOWN key must survive: `at_target` is read by core/live.py to re-arm
+    # current_action_level, so a merge that kept only known keys would silently drop a
+    # money-moving fact. That is the one semantic this hoist actually changed
+    # (`dict(...).update(kwargs)` -> `{**defaults, **kwargs}`) and nothing covered it.
+    extra = TorchTradeFuturesLiveEnv._create_trade_info(None, at_target=True, target_qty=0.5)
+    assert extra["at_target"] is True and extra["target_qty"] == 0.5
+    assert extra["executed"] is False, "an unknown key must not disturb the defaults"
