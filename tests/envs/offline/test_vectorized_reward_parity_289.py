@@ -178,3 +178,65 @@ def test_the_bankruptcy_reward_constant_matches_the_scalar():
         f"bankruptcy rewards {set(bankrupt_rewards)} -- log_return_reward returns -10.0"
     )
     assert log_return_reward(_History([100.0, 0.0])) == -10.0
+
+
+@pytest.mark.parametrize("env_cls,cfg_cls", [
+    (VectorizedSequentialTradingEnv, VectorizedSequentialTradingEnvConfig),
+])
+def test_the_reward_function_is_pluggable(env_cls, cfg_cls):
+    """#289: the scalar envs take `reward_function`; the vectorized ones did not, and
+    hardcoded the arithmetic inline -- which is why the SLTP twin drifted from it.
+
+    The signature is BATCHED (`fn(old_pvs, new_pvs) -> Tensor`), not the scalar
+    `fn(history) -> float`: calling that per env would be a Python loop over the batch,
+    which is the one thing this class exists to avoid.
+    """
+    n = 200
+    prices = 100 + np.cumsum(np.random.RandomState(11).randn(n) * 0.1)
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": prices, "high": prices + 0.2, "low": prices - 0.2,
+        "close": prices, "volume": np.ones(n) * 1000,
+    })
+    calls = []
+
+    def constant_reward(old_pvs, new_pvs):
+        calls.append((old_pvs.shape, new_pvs.shape))
+        return torch.full_like(old_pvs, 0.5)
+
+    env = env_cls(
+        df,
+        cfg_cls(time_frames=["1Min"], window_sizes=[10], execute_on="1Min", num_envs=6),
+        reward_function=constant_reward,
+    )
+    td = env.reset()
+    td["action"] = torch.randint(0, env.action_spec.n, (6,))
+    td = env.step(td)["next"]
+
+    assert calls, "the custom reward function was never called"
+    assert calls[0] == (torch.Size([6]), torch.Size([6])), (
+        f"expected batched tensors of shape (6,), got {calls[0]} -- a per-env loop would "
+        f"undo the vectorization this class exists for"
+    )
+    assert torch.allclose(td["reward"].flatten(), torch.full((6,), 0.5))
+
+
+def test_the_default_reward_is_the_batched_log_return():
+    """Unchanged behaviour when nothing is passed -- the default IS the batched
+    equivalent of `log_return_reward`, which the parity test above pins numerically."""
+    from torchtrade.envs.core.default_rewards import batched_log_return_reward
+
+    n = 200
+    prices = 100 + np.cumsum(np.random.RandomState(12).randn(n) * 0.1)
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        "open": prices, "high": prices + 0.2, "low": prices - 0.2,
+        "close": prices, "volume": np.ones(n) * 1000,
+    })
+    env = VectorizedSequentialTradingEnv(
+        df,
+        VectorizedSequentialTradingEnvConfig(
+            time_frames=["1Min"], window_sizes=[10], execute_on="1Min", num_envs=4,
+        ),
+    )
+    assert env.reward_function is batched_log_return_reward

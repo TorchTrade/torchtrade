@@ -16,6 +16,8 @@ from typing import Callable, List, Optional, Tuple, Union
 
 import pandas as pd
 import torch
+
+from torchtrade.envs.core.default_rewards import batched_log_return_reward
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
@@ -142,8 +144,17 @@ class VectorizedSequentialTradingEnv(EnvBase):
         df: pd.DataFrame,
         config: VectorizedSequentialTradingEnvConfig,
         feature_preprocessing_fn: Optional[Callable] = None,
+        reward_function: Optional[Callable] = None,
     ):
         self.config = config
+        # A BATCHED signature, not the scalar envs' `fn(history) -> float`. Those take a
+        # HistoryTracker and return one number; calling that per env would be a Python
+        # loop over the batch, which is the one thing this class exists to avoid. So the
+        # contract is `fn(old_pvs, new_pvs) -> Tensor`, same shape in and out (#289).
+        #
+        # `log_return_reward` is the scalar default and this is its batched equivalent;
+        # `test_vectorized_reward_parity_289` pins them to the same numbers.
+        self.reward_function = reward_function or batched_log_return_reward
         self._num_envs = config.num_envs
 
         # Store config values
@@ -561,10 +572,7 @@ class VectorizedSequentialTradingEnv(EnvBase):
                 f"{old_pvs[old_pvs <= 0].tolist()}. Portfolio value must be positive; "
                 f"this indicates a calculation error."
             )
-        # new_pv <= 0 IS reachable -- it is bankruptcy -- and both paths report -10.0.
-        safe_new = new_pvs.clamp(min=1e-10)
-        rewards = torch.log(safe_new / old_pvs)
-        rewards = torch.where(new_pvs <= 0, torch.full_like(rewards, -10.0), rewards)
+        rewards = self.reward_function(old_pvs, new_pvs)
 
         # Update stored portfolio values
         self._portfolio_values = new_pvs
