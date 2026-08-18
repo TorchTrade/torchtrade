@@ -6,6 +6,7 @@ Only Alpaca-specific tests (client injection, data integrity, feature semantics)
 and stricter assertions live here.
 """
 
+from unittest.mock import MagicMock
 import numpy as np
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
@@ -131,3 +132,40 @@ class TestAlpacaObservationClass(BaseObservationClassTests):
         timestamps = obs.get_observations(return_base_ohlc=True)["base_timestamps"]
         for i in range(len(timestamps) - 1):
             assert timestamps[i] < timestamps[i + 1]
+
+
+def test_a_malformed_candle_never_reaches_alpaca_base_features(monkeypatch):
+    """Alpaca already dropped NaN before slicing base_features; nothing tested it.
+
+    Deleting that dropna failed zero tests, because every mock client returns clean
+    candles -- so the protection that the futures base was missing (#395) was itself
+    unguarded on the one venue that had it. Injected at the frame level, since which
+    malformed payload produces a NaN is venue-specific.
+    """
+    import numpy as np
+    import pandas as pd
+    from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
+    from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+    observer = AlpacaObservationClass(
+        symbol="BTC/USD",
+        timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+        window_sizes=10,
+        client=MagicMock(),
+    )
+
+    def frame_with_a_hole(timeframe, limit=None):
+        n = 60
+        df = pd.DataFrame({
+            "symbol": ["BTC/USD"] * n,  # alpaca's default preprocessing drops this column
+            "open": np.full(n, 100.0), "high": np.full(n, 101.0),
+            "low": np.full(n, 99.0), "close": np.full(n, 100.5),
+            "volume": np.full(n, 10.0),
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        })
+        df.loc[57, "close"] = np.nan  # inside the last 10, as a coerced parse would leave it
+        return df
+
+    monkeypatch.setattr(observer, "_fetch_single_timeframe", frame_with_a_hole)
+    observations = observer.get_observations(return_base_ohlc=True)
+    assert not np.isnan(observations["base_features"]).any()

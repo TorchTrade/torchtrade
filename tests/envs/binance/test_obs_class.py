@@ -212,3 +212,17 @@ class TestBinanceSharesTheObservationBase:
             TimeFrame(1, TimeFrameUnit.Minute), limit=20
         )
         assert df["open_time"].is_monotonic_increasing
+
+    def test_a_malformed_candle_never_reaches_base_features(self):
+        """`to_numeric(errors="coerce")` turns an unparseable close into NaN by design.
+
+        Measured before the fix: a bad candle INSIDE the window gave
+        `base_features NaN=True` while the feature array stayed clean, because the
+        feature path drops it in preprocessing and base_features was built from the raw
+        frame. Outside the window it never showed. (#395)
+        """
+        rows = self._klines(60)
+        rows[57][4] = "NOT_A_NUMBER"  # close, inside the last 10
+        obs = self._obs(rows).get_observations(return_base_ohlc=True)
+        assert not np.isnan(obs["base_features"]).any()
+        assert not np.isnan(obs["1Minute_5"]).any()

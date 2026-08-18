@@ -280,7 +280,14 @@ class BaseFuturesObservationClass(ABC):
 
             # Store base OHLC features if this is the first timeframe and return_base_ohlc is True
             if return_base_ohlc and timeframe == self.time_frames[0]:
-                base_df = df.copy()
+                # dropna BEFORE slicing, as alpaca's observer already did (#395). The
+                # venues parse klines with `to_numeric(errors="coerce")` so one malformed
+                # candle becomes NaN instead of killing the fetch -- and the feature path
+                # drops it in preprocessing, but base_features is built from the raw
+                # frame and did not. A bad candle inside the window put NaN straight into
+                # the observation, where it compares False to every operator and trips no
+                # `<= 0` guard downstream (#349 was the same trap one path over).
+                base_df = df.copy().dropna(subset=["open", "high", "low", "close"])
                 timestamp_col = self._get_timestamp_column()
                 observations['base_features'] = self._get_numpy_obs(
                     base_df,
