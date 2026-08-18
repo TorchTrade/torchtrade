@@ -13,6 +13,9 @@ from unittest.mock import MagicMock
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.live.shared.futures_base_obs import BaseFuturesObservationClass
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
+from torchtrade.envs.live.bitget.observation import BitgetObservationClass
+from torchtrade.envs.live.bybit.observation import BybitObservationClass
+from torchtrade.envs.live.okx.observation import OKXObservationClass
 from tests.envs.base_exchange_tests import BaseObservationClassTests
 
 
@@ -36,7 +39,6 @@ class TestBinanceObservationClass(BaseObservationClassTests):
     """Binance observation class — common tests inherited from the base."""
 
     def create_observer(self, symbol, timeframes, window_sizes, **kwargs):
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
         client = kwargs.pop("client", None) or _make_binance_client()
         return BinanceObservationClass(
             symbol=symbol, time_frames=timeframes, window_sizes=window_sizes,
@@ -52,14 +54,12 @@ class TestBinanceObservationClass(BaseObservationClassTests):
 
     @pytest.fixture
     def observer_single(self, mock_client):
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
         return BinanceObservationClass(
             symbol="BTCUSDT", time_frames=TimeFrame(15, TimeFrameUnit.Minute),
             window_sizes=10, client=mock_client)
 
     @pytest.fixture
     def observer_multi(self, mock_client):
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
         return BinanceObservationClass(
             symbol="BTCUSDT",
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute),
@@ -83,7 +83,6 @@ class TestBinanceObservationClass(BaseObservationClassTests):
 
     def test_symbol_normalization(self, mock_client):
         """Slash is stripped from the symbol."""
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
         observer = BinanceObservationClass(
             symbol="BTC/USDT", time_frames=TimeFrame(1, TimeFrameUnit.Minute),
             window_sizes=10, client=mock_client)
@@ -125,7 +124,6 @@ class TestBinanceObservationClassIntegration:
     @pytest.mark.skip(reason="Requires live Binance API connection")
     def test_live_data_fetch(self):
         """Test fetching live data from Binance."""
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
         observer = BinanceObservationClass(
             symbol="BTCUSDT",
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute)],
@@ -133,19 +131,6 @@ class TestBinanceObservationClassIntegration:
         observations = observer.get_observations()
         assert "1Minute_10" in observations
         assert "5Minute_10" in observations
-
-
-from torchtrade.envs.live.bitget.observation import BitgetObservationClass
-from torchtrade.envs.live.bybit.observation import BybitObservationClass
-from torchtrade.envs.live.okx.observation import OKXObservationClass
-
-_FUTURES_OBSERVATION_CLASSES = [
-    BinanceObservationClass, BitgetObservationClass,
-    BybitObservationClass, OKXObservationClass,
-]
-# `_dummy_frame` is an extension point, not a re-fork: the venues genuinely return
-# different kline columns, and the base cannot know their dtypes.
-_DESIGNED_OVERRIDES = {"_dummy_frame"}
 
 
 class TestBinanceSharesTheObservationBase:
@@ -174,14 +159,11 @@ class TestBinanceSharesTheObservationBase:
         )
 
     @pytest.mark.parametrize("venue_cls", [
-        pytest.param(c, id=c.__name__) for c in _FUTURES_OBSERVATION_CLASSES
-    ])
+        BinanceObservationClass, BitgetObservationClass,
+        BybitObservationClass, OKXObservationClass,
+    ], ids=lambda c: c.__name__)
     def test_no_venue_reimplements_the_shared_base(self, venue_cls):
         """Derived from the base, not hand-listed, and over every venue.
-
-        A hand-listed denylist of 6 names shipped in this PR's first draft and omitted
-        `get_features` -- the method most likely to be re-forked next, since it reads the
-        dummy frame. A deliberately broken re-fork of it passed every test.
 
         The named subset guards the guard: a discovered set can SHRINK silently (making
         `get_features` a property drops it from a callable filter), and a merely non-empty
@@ -193,7 +175,9 @@ class TestBinanceSharesTheObservationBase:
             and not n.startswith("__")
         }
         assert {"get_features", "get_observations", "_fetch_single_timeframe"} <= shared
-        redeclared = (shared & set(vars(venue_cls))) - _DESIGNED_OVERRIDES
+        # _dummy_frame is an extension point, not a re-fork: the venues return different
+        # kline columns and the base cannot know their dtypes.
+        redeclared = (shared & set(vars(venue_cls))) - {"_dummy_frame"}
         assert not redeclared, f"{venue_cls.__name__} re-forked: {sorted(redeclared)}"
 
     def test_a_dtype_conditional_preprocessing_fn_gets_the_real_dtype(self):

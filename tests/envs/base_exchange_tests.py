@@ -208,23 +208,29 @@ class BaseObservationClassTests(ABC):
     # get_features tests
 
     def test_the_declared_feature_width_matches_the_observation(self):
-        """get_features() counts columns on a SYNTHETIC frame; get_observations() runs the
-        same fn on real data. Nothing cross-checked that they agree.
+        """get_features() counts columns on a SYNTHETIC frame; get_observations() runs
+        the same fn on real data. Nothing cross-checked that they agree.
 
-        They can diverge whenever the synthetic frame differs from the parsed klines in a
-        way the preprocessing fn is sensitive to -- a missing column, or the wrong dtype.
-        That count IS the observation spec for the venue transforms, so a disagreement is
-        a spec/data mismatch that surfaces at check_env_specs, or silently as a wrong
-        width. Measured: it was reachable on binance (#289 review).
+        The fn must READ a dummy-supplied column, or this cannot fail: with default
+        preprocessing the width is a constant 4 whatever the dummy contains, and the
+        first version of this test passed even with `volume` deleted from the dummy
+        frame outright. That width is what the venue transforms size their spec from.
         """
+        def fn(df):
+            df = df.copy()
+            df["feature_range"] = (df["high"] - df["low"]) / df["close"]
+            df["feature_vol"] = df["volume"] / df["volume"].mean()
+            return df.dropna()
+
         observer = self.create_observer(
             symbol="BTC/USD",
             timeframes=TimeFrame(1, TimeFrameUnit.Minute),
             window_sizes=10,
+            feature_preprocessing_fn=fn,
         )
         key = observer.get_keys()[0]
         declared = len(observer.get_features()["observation_features"])
-        assert declared == observer.get_observations()[key].shape[1]
+        assert declared == observer.get_observations()[key].shape[1] == 2
 
     def test_get_features_default_preprocessing(self):
         """Test get_features with default preprocessing."""

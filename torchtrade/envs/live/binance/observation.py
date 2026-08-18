@@ -71,7 +71,7 @@ class BinanceObservationClass(BaseFuturesObservationClass):
         return df.drop(columns=["ignore"])
 
     def _dummy_frame(self, window_size: int) -> pd.DataFrame:
-        """Binance klines carry more than OHLCV, at their real dtypes and magnitudes."""
+        """Binance klines carry more than OHLCV. Dtypes are faithful; magnitudes are not."""
         df = super()._dummy_frame(window_size)
         df["quote_volume"] = np.random.rand(window_size)
         df["trades"] = np.random.randint(1, 100, window_size)  # int64, as _parse_klines makes it

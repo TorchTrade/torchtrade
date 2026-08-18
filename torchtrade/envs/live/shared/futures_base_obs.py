@@ -231,18 +231,21 @@ class BaseFuturesObservationClass(ABC):
     def _dummy_frame(self, window_size: int) -> pd.DataFrame:
         """A frame standing in for this venue's parsed klines, to count feature columns.
 
-        A method rather than a column tuple because DTYPE AND MAGNITUDE MATTER, which is
-        not obvious and was measured the hard way: replacing this with a names-only tuple
-        made binance's `trades` a float in [0, 1) where real klines carry int64 counts in
-        the hundreds. A preprocessing fn branching on either -- `is_integer_dtype(...)`,
-        or a threshold -- then takes a different branch here than on live data, and
-        `get_features()` reports a width the observation does not have. That width IS the
-        spec for `BinanceOHLCVTransform`, so the mismatch reaches `check_env_specs`.
+        A method rather than a column tuple because DTYPE MATTERS: binance's `trades` is
+        int64 in real klines, and a names-only tuple made it a float, so a fn branching
+        on `is_integer_dtype(...)` took a different branch here than on live data.
+        `get_features()` then reported a width the observation did not have -- and that
+        width IS the spec `BinanceOHLCVTransform` builds, so it surfaced at
+        `check_env_specs`.
+
+        MAGNITUDES are NOT faithful and a fn branching on one will still diverge: dummy
+        values are `rand()` in [0, 1) and `trades` averages ~55 against a live ~1500.
+        Unbounded to chase, so it is stated rather than fixed.
 
         Overridable because the venues do not return the same columns: binance klines
         carry quote_volume, trades and the taker-buy fields, and against an OHLCV-only
         frame a fn reading them raises KeyError. The timestamp columns are omitted on
-        every venue -- a fn deriving a time-of-day feature still raises.
+        every venue, so a fn deriving a time-of-day feature raises too.
         """
         return pd.DataFrame({
             col: np.random.rand(window_size)
