@@ -41,15 +41,15 @@ class ReplayObserver:
         )
         self.sampler.reset(random_start=False)
         self.window_sizes = self.sampler.window_sizes
-        # `market_data_{timeframe}_{window}`, composed exactly as the offline envs do
-        # (`core/offline_base.py`). The sampler's raw keys are bare timeframe names, so
-        # replay emitted `market_data_1Minute` where offline and live both emit
-        # `market_data_1Minute_10` -- a policy trained offline could not be fed the
-        # replay env without renaming its in_keys (#278).
+        # `{timeframe}_{window}`, matching what the real observers return -- the env
+        # bases prepend "market_data_" themselves. The sampler's raw keys are bare
+        # timeframe names, so the env built `market_data_1Minute` where offline and live
+        # both produce `market_data_1Minute_10`, and a policy trained offline could not
+        # be fed the replay env without renaming its in_keys (#278). Adding the prefix
+        # HERE instead produced `market_data_market_data_1Minute_10`.
         self._timeframes = self.sampler.get_observation_keys()
         self._obs_keys = [
-            f"market_data_{name}_{ws}"
-            for name, ws in zip(self._timeframes, self.window_sizes)
+            f"{name}_{ws}" for name, ws in zip(self._timeframes, self.window_sizes)
         ]
         self.truncated = False
 
@@ -100,10 +100,11 @@ class ReplayObserver:
         `(window, 5)`, and `check_env_specs` failed with a size mismatch (#278). Offline
         counts the same columns via `get_num_features_per_timeframe`.
         """
-        try:
-            feature_keys = self.sampler.get_feature_keys()
-        except ValueError:
-            feature_keys = []
+        # No `except: []` fallback. Swallowing the per-timeframe-features error declared
+        # a (window, 0) spec against a (window, 2) emission, which is the same mismatch
+        # the filtering caused -- a fail-open guard in the boundary-validation sense.
+        # Raising says which config is unsupported instead of shipping a broken spec.
+        feature_keys = self.sampler.get_feature_keys()
         return {
             "observation_features": list(feature_keys),
             "original_features": ["open", "high", "low", "close", "volume"],
@@ -133,19 +134,22 @@ class ReplayObserver:
         the array in the OBSERVATION, so a policy consuming that key read 90% zeros --
         9 of 10 rows (#278). Real observers fill the whole window.
 
-        Rows before the start of the data stay zero: there is no bar to report, and
-        inventing one would be worse than an obvious gap.
+        Read from the sampler's UNTRUNCATED execution frame. The truncated one starts at
+        min_start_time, so the first `window` steps of every episode were still mostly
+        zeros -- `market_data_*` for the same timeframe and window was full of real bars
+        from step 1 while `base_features` was 9/10 zero. Those bars exist; they were just
+        outside the frame. Rows genuinely before the data begin stay zero.
         """
         ws = self.window_sizes[0]
         base_arr = np.zeros((ws, 4), dtype=np.float32)
         end = int(torch.searchsorted(
-            self.sampler.execute_base_idx,
+            self.sampler.execute_base_full_idx,
             torch.tensor(int(timestamp.value), dtype=torch.long),
             right=True,
         ).item())
         if end <= 0:
             return base_arr
         start = max(0, end - ws)
-        window = self.sampler.execute_base_tensor[start:end, :4].numpy().astype(np.float32)
+        window = self.sampler.execute_base_full_tensor[start:end, :4].numpy().astype(np.float32)
         base_arr[-len(window):] = window
         return base_arr

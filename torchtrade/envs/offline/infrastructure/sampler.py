@@ -314,6 +314,11 @@ class MarketDataObservationSampler:
         execute_base_filled["close"] = execute_base_filled["close"].clip(
             lower=execute_base_filled["low"], upper=execute_base_filled["high"]
         )
+        # Kept untruncated as well: the truncated frame starts at min_start_time, so a
+        # consumer wanting a WINDOW of base bars ending at the first tradable bar has
+        # nothing to look back at. ReplayObserver needs exactly that (#278); the
+        # truncated frame remains what everything else uses.
+        self.execute_base_full_df = execute_base_filled
         self.execute_base_features_df = execute_base_filled[self.min_start_time:]
         if len(self.execute_base_features_df) == 0:
             raise ValueError("No execute_on base features available after min_start_time")
@@ -376,6 +381,12 @@ class MarketDataObservationSampler:
         self.execute_base_tensor = torch.from_numpy(base_arr)  # shape (M, F)
         base_ts_int64 = self.execute_base_features_df.index.as_unit('ns').asi8
         self.execute_base_idx = torch.from_numpy(base_ts_int64).to(torch.long)
+        self.execute_base_full_tensor = torch.from_numpy(
+            self.execute_base_full_df.to_numpy(dtype=np.float32)
+        )
+        self.execute_base_full_idx = torch.from_numpy(
+            self.execute_base_full_df.index.as_unit('ns').asi8
+        ).to(torch.long)
 
         # Validate 1:1 correspondence between exec_times and execute_base_features_df
         # This ensures sequential access can use direct indexing without misalignment
