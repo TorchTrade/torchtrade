@@ -69,10 +69,8 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
      holding_time, leverage, distance_to_liquidation]
 
     Subclasses (per-exchange base envs) must still implement:
-    - _init_trading_clients(): Provider-specific client initialization
-    - _build_observation_specs(): Provider-specific spec construction
-    - _execute_trade_if_needed(): Trade execution logic
-    - _reset(): Provider-specific reset scaffolding
+    - _init_trading_clients(): provider-specific client construction
+    - _execute_trade_if_needed(): trade execution, whose action space differs by env
     """
 
     def _halting(self, read):

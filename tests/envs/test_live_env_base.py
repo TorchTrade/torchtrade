@@ -165,7 +165,7 @@ def test_discovery_covers_every_live_exchange():
 
 
 @pytest.mark.parametrize("method", [
-    "_check_termination", "_sync_action_level_after_reset",
+    "_check_termination", "_sync_action_level_after_reset", "_build_observation_specs",
 ])
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
 def test_no_live_env_overrides_shared_method(env_cls, method):
@@ -205,39 +205,6 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     )
 
 
-# Every live env that defines its own _build_observation_specs -- auto-discovered from LIVE_ENVS
-# (base + SLTP variants collapse to their defining base classes), so a future exchange, or a new
-# non-futures env, is covered without editing this list. This spans both the 4 futures exchanges
-# AND alpaca (spot) -- alpaca declares base_features via the same shared helper too.
-_BASE_FEATURES_SPEC_CLASSES = sorted(
-    {c for c in LIVE_ENVS if "_build_observation_specs" in vars(c)},
-    key=lambda c: c.__module__.split(".")[-2],
-)
-
-
-@pytest.mark.parametrize(
-    "env_cls", _BASE_FEATURES_SPEC_CLASSES, ids=lambda c: c.__module__.split(".")[-2]
-)
-def test_every_live_env_declares_base_features_via_the_shared_helper(env_cls):
-    """Every live env's _build_observation_specs must call the shared _declare_base_features_spec.
-
-    #61 was a class-level defect: base_features is EMITTED by the shared _get_observation but was
-    DECLARED in observation_spec only by okx (3 of 4 futures exchanges forgot), so spec and
-    observation disagreed and a collector pre-allocating from the spec silently dropped it. The
-    helper now lives on TorchTradeLiveEnv (the common ancestor of both the futures base and
-    alpaca), so this guard spans every live env, not just futures. The per-exchange behavioural
-    tests each guard only their own exchange; this catches a FUTURE exchange that forgets the call.
-    AST, not source text (like the guards above), so a comment mentioning the method can't satisfy it.
-    """
-    tree = ast.parse(inspect.getsource(env_cls.__dict__["_build_observation_specs"]).lstrip())
-    called = {
-        node.func.attr for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-    }
-    assert "_declare_base_features_spec" in called, (
-        f"{env_cls.__name__}._build_observation_specs never calls _declare_base_features_spec -- "
-        f"base_features would be emitted but not declared in observation_spec (#61)."
-    )
 
 
 @pytest.mark.parametrize("env_cls", NON_SLTP_ENVS, ids=lambda c: c.__name__)
@@ -3312,3 +3279,138 @@ def test_close_accepts_the_keyword_torchrl_passes_it(owner):
     assert [(n, p.kind, p.default) for n, p in ours.items()] == [
         (n, p.kind, p.default) for n, p in theirs.items()
     ]
+
+
+def test_construction_survives_an_observer_that_cannot_reach_the_exchange():
+    """binance and bitget built the spec from `get_observations()` -- a live kline fetch
+    PER TIMEFRAME, during __init__ -- purely to read `.shape[1]`.
+
+    So an outage made CONSTRUCTION fail rather than the first step, and alpaca did the
+    same. Behavioural rather than structural: the AST form this replaced asserted which
+    method is called by name, which a rename of the bad path escapes, and it parametrized
+    12 envs that all resolve to one function -- 12 copies of one assertion.
+    """
+    from torchtrade.envs.live.binance.env import (
+        BinanceFuturesTorchTradingEnv,
+        BinanceFuturesTradingEnvConfig,
+    )
+
+    observer = MagicMock()
+    observer.get_keys = MagicMock(return_value=["1Minute_10"])
+    observer.get_features = MagicMock(return_value={
+        "observation_features": ["a", "b", "c", "d"], "original_features": []})
+    observer.get_observations = MagicMock(side_effect=ConnectionError("exchange down"))
+
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1000.0, "total_margin_balance": 1000.0,
+        "total_wallet_balance": 1000.0,
+    }
+    trader.get_status.return_value = {"position_status": None}
+    trader.cancel_open_orders.return_value = True
+    trader.close_position.return_value = True
+    trader.get_mark_price.return_value = 100.0
+
+    config = BinanceFuturesTradingEnvConfig(
+        symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10], execute_on="1m",
+    )
+    with patch("time.sleep"), patch.object(
+        BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"
+    ):
+        env = BinanceFuturesTorchTradingEnv(
+            config=config, observer=observer, trader=trader
+        )
+
+    observer.get_observations.assert_not_called()
+    assert env.observation_spec["market_data_1Minute_10"].shape == torch.Size([10, 4])
+    # Behavioural, not "some assignment exists": only alpaca's copy set account_state and
+    # the fold dropped it, and examples/llm/{frontier,local}/live.py read it to label the
+    # observation. The AST form this replaced passed with the labels set to ["MUTANT"].
+    assert env.account_state == type(env).ACCOUNT_STATE
+    # Behavioural, not "some assignment exists": only alpaca's copy set this and the fold
+    # dropped it, and examples/llm/{frontier,local}/live.py read it to label the
+    # observation. An AST form here passed with the labels replaced by ["MUTANT"].
+    assert env.account_state == type(env).ACCOUNT_STATE
+
+
+def test_each_timeframe_declares_its_own_window_size():
+    """The loop pairs `get_keys()` with `config.window_sizes` positionally.
+
+    Collapsing every window to `window_sizes[0]` passed the whole suite bar this test:
+    every other multi-timeframe env test uses uniform sizes, so the pairing was never
+    exercised. This is
+    the shape-corruption class the spec guards exist for -- a policy fed a 20-bar window
+    declared as 10.
+    """
+    from torchtrade.envs.live.binance.env import (
+        BinanceFuturesTorchTradingEnv,
+        BinanceFuturesTradingEnvConfig,
+    )
+
+    observer = MagicMock()
+    observer.get_keys = MagicMock(return_value=["1Minute_10", "1Hour_20"])
+    observer.get_features = MagicMock(return_value={
+        "observation_features": ["a", "b", "c"], "original_features": []})
+
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1000.0, "total_margin_balance": 1000.0,
+        "total_wallet_balance": 1000.0,
+    }
+    trader.get_status.return_value = {"position_status": None}
+    trader.cancel_open_orders.return_value = True
+    trader.close_position.return_value = True
+    trader.get_mark_price.return_value = 100.0
+
+    config = BinanceFuturesTradingEnvConfig(
+        symbol="BTCUSDT", time_frames=["1m", "1h"], window_sizes=[10, 20], execute_on="1m",
+    )
+    with patch("time.sleep"), patch.object(
+        BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"
+    ):
+        env = BinanceFuturesTorchTradingEnv(
+            config=config, observer=observer, trader=trader
+        )
+
+    assert env.observation_spec["market_data_1Minute_10"].shape == torch.Size([10, 3])
+    assert env.observation_spec["market_data_1Hour_20"].shape == torch.Size([20, 3])
+
+
+def test_an_observer_disagreeing_with_the_config_raises_rather_than_guessing():
+    """`zip(..., strict=True)` -- the fail-open case the old index fallback absorbed.
+
+    Every config's __post_init__ normalizes window_sizes to a list as long as time_frames,
+    so a mismatch can only come from an INJECTED observer. The old
+    `window_sizes[i] if i < len(window_sizes) else window_sizes[0]` silently declared the
+    first window for every extra key, which is a spec that quietly lies about its shape.
+    Dropping strict=True failed nothing before this.
+    """
+    from torchtrade.envs.live.binance.env import (
+        BinanceFuturesTorchTradingEnv,
+        BinanceFuturesTradingEnvConfig,
+    )
+
+    observer = MagicMock()
+    observer.get_keys = MagicMock(return_value=["1Minute_10", "1Hour_20"])  # 2 keys...
+    observer.get_features = MagicMock(return_value={
+        "observation_features": ["a", "b"], "original_features": []})
+
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1000.0, "total_margin_balance": 1000.0,
+        "total_wallet_balance": 1000.0,
+    }
+    trader.get_status.return_value = {"position_status": None}
+    trader.cancel_open_orders.return_value = True
+    trader.close_position.return_value = True
+    trader.get_mark_price.return_value = 100.0
+
+    config = BinanceFuturesTradingEnvConfig(  # ...against 1 window
+        symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10], execute_on="1m",
+    )
+    with patch("time.sleep"), patch.object(
+        BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"
+    ), pytest.raises(ValueError, match="zip"):
+        BinanceFuturesTorchTradingEnv(config=config, observer=observer, trader=trader)
+
+

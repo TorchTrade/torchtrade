@@ -1,6 +1,8 @@
 """Tests for BinanceFuturesSLTPTorchTradingEnv."""
 
 import pytest
+
+from tests.envs.base_exchange_tests import mirror_features_on
 import torch
 from torchrl.envs.utils import check_env_specs
 import numpy as np
@@ -32,6 +34,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
             return obs
 
         observer.get_observations = MagicMock(side_effect=mock_observations)
+        mirror_features_on(observer)
         observer.intervals = ["1m"]
         observer.window_sizes = [10]
 
@@ -505,6 +508,7 @@ class TestMultipleSteps:
             "1m_10": np.random.randn(10, 4).astype(np.float32),
             "base_features": np.array([[50000, 50100, 49900, 50050]] * 10, dtype=np.float32),
         })
+        mirror_features_on(mock_observer)
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
@@ -600,6 +604,7 @@ class TestCriticalEdgeCases:
             return obs
 
         mock_observer.get_observations = MagicMock(side_effect=mock_get_observations)
+        mirror_features_on(mock_observer)
         mock_observer.get_keys = MagicMock(return_value=["1m_10"])
 
         mock_trader.get_account_balance = MagicMock(
@@ -738,6 +743,7 @@ class TestCriticalEdgeCases:
             return obs
 
         mock_observer.get_observations = MagicMock(side_effect=mock_obs_zero_price)
+        mirror_features_on(mock_observer)
 
         env.reset()
         action_tuple = ("long", -0.02, 0.03)
@@ -810,6 +816,7 @@ class TestDuplicateActionPrevention:
             return obs
 
         mock_observer.get_observations = MagicMock(side_effect=mock_get_observations)
+        mirror_features_on(mock_observer)
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
@@ -982,6 +989,7 @@ class TestBinanceSLTPNotionalTradeMode:
             return obs
 
         mock_observer.get_observations = MagicMock(side_effect=mock_observations)
+        mirror_features_on(mock_observer)
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
@@ -1069,6 +1077,7 @@ class TestBinanceSLTPNotionalTradeMode:
                 [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
             ),
         })
+        mirror_features_on(mock_observer)
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
@@ -1131,6 +1140,7 @@ class TestBinanceSLTPNotionalTradeMode:
             return obs
 
         mock_observer.get_observations = MagicMock(side_effect=mock_observations)
+        mirror_features_on(mock_observer)
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
@@ -1196,6 +1206,7 @@ class TestBinanceSLTPLockPosition:
                 [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
             ),
         })
+        mirror_features_on(mock_observer)
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 

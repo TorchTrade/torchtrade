@@ -2,6 +2,8 @@
 
 import logging
 import pytest
+
+from tests.envs.base_exchange_tests import mirror_features_on
 import torch
 from torchrl.envs.utils import check_env_specs
 import numpy as np
@@ -33,6 +35,7 @@ class TestBinanceFuturesTorchTradingEnv:
             return obs
 
         observer.get_observations = MagicMock(side_effect=mock_observations)
+        mirror_features_on(observer)
         observer.intervals = ["1m", "5m"]
         observer.window_sizes = [10, 10]
 
@@ -580,6 +583,7 @@ class TestBinanceFractionalPositionResizing:
                 obs["base_timestamps"] = np.arange(10)
             return obs
         observer.get_observations = MagicMock(side_effect=mock_observations)
+        mirror_features_on(observer)
         observer.intervals = ["1m", "5m"]
         observer.window_sizes = [10, 10]
         return observer
@@ -664,6 +668,7 @@ class TestMultipleSteps:
         mock_observer.get_observations = MagicMock(return_value={
             "1m_10": np.random.randn(10, 4).astype(np.float32),
         })
+        mirror_features_on(mock_observer)
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
@@ -738,6 +743,7 @@ class TestBinanceInitCleanup:
         observer.get_observations = MagicMock(return_value={
             "1m_10": np.random.randn(10, 4).astype(np.float32),
         })
+        mirror_features_on(observer)
         return observer
 
     @pytest.fixture

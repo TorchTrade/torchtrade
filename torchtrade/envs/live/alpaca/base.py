@@ -3,11 +3,10 @@
 import logging
 import math
 from abc import abstractmethod
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import torch
 from tensordict import TensorDict, TensorDictBase
-from torchrl.data import Composite, Unbounded
 
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
@@ -161,36 +160,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             api_secret=api_secret,
             paper=self.config.paper,
         )
-
-    def _build_observation_specs(self):
-        """Build observation specs for account state and market data."""
-        # Get feature dimensions from observer
-        num_features = self.observer.get_observations()[
-            self.observer.get_keys()[0]
-        ].shape[1]
-        market_data_names = self.observer.get_keys()
-
-        # Create composite observation spec
-        self.observation_spec = Composite(shape=())
-        self.market_data_key = "market_data"
-        self.account_state_key = "account_state"
-        self.account_state = self.ACCOUNT_STATE
-
-        # Account state spec
-        account_state_spec = Unbounded(shape=(len(self.ACCOUNT_STATE),), dtype=torch.float)
-        self.observation_spec.set(self.account_state_key, account_state_spec)
-
-        # Market data specs (one per timeframe)
-        self.market_data_keys = []
-        window_sizes = self.config.window_sizes if isinstance(self.config.window_sizes, list) else [self.config.window_sizes]
-        for i, market_data_name in enumerate(market_data_names):
-            market_data_key = "market_data_" + market_data_name
-            window_size = window_sizes[i] if i < len(window_sizes) else window_sizes[0]
-            market_data_spec = Unbounded(shape=(window_size, num_features), dtype=torch.float)
-            self.observation_spec.set(market_data_key, market_data_spec)
-            self.market_data_keys.append(market_data_key)
-
-        self._declare_base_features_spec(window_sizes[0])
 
     def _get_observation(self, advance_hold: bool = True) -> TensorDictBase:
         """Get the current observation state.

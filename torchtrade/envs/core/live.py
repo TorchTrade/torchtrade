@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import torch
 from tensordict import TensorDictBase
-from torchrl.data import Unbounded
+from torchrl.data import Composite, Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import (
@@ -253,19 +253,47 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
 
         self.position.current_position = observed
 
-    def _declare_base_features_spec(self, base_window: int) -> None:
-        """Declare the base_features spec (raw OHLC, first timeframe) -- shape (base_window, 4).
+    def _build_observation_specs(self) -> None:
+        """Declare the observation spec without touching the network (#288).
 
-        _get_observation emits base_features when include_base_features is set, so every live
-        env's _build_observation_specs MUST call this or observation_spec disagrees with the
-        emitted observation: check_env_specs fails and a collector pre-allocating from the spec
-        silently drops the key. Shared here alongside the emitter so the spec cannot drift
-        per-exchange -- the exact drift that left 3 of 4 futures exchanges undeclared (#61).
+        The feature count comes from `get_features()`, which runs the preprocessing
+        function over a synthetic frame, rather than from a live kline fetch per
+        timeframe. That the two agree is pinned by
+        `BaseObservationClassTests.test_the_declared_feature_width_matches_the_observation`.
+
+        On TorchTradeLiveEnv, not the futures base -- see `get_account_state` below.
         """
+        num_features = len(self.observer.get_features()["observation_features"])
+        window_sizes = self.config.window_sizes
+
+        self.observation_spec = Composite(shape=())
+        self.account_state_key = "account_state"
+        # examples/llm/{frontier,local}/live.py read this to label the observation.
+        self.account_state = self.ACCOUNT_STATE
+        self.observation_spec.set(
+            self.account_state_key,
+            Unbounded(shape=(len(self.ACCOUNT_STATE),), dtype=torch.float),
+        )
+
+        self.market_data_keys = []
+        # strict=True: every config's __post_init__ normalizes window_sizes to a list as
+        # long as time_frames, so a LENGTH mismatch means an injected observer disagreeing
+        # with the config. It does not catch an observer returning keys in a different
+        # ORDER -- real observers build keys from the same zip, so that stays unreachable.
+        for name, ws in zip(self.observer.get_keys(), window_sizes, strict=True):
+            key = "market_data_" + name
+            self.observation_spec.set(key, Unbounded(shape=(ws, num_features), dtype=torch.float))
+            self.market_data_keys.append(key)
+
+        # _get_observation emits base_features when include_base_features is set, so this
+        # MUST stay in step with it or observation_spec disagrees with the emitted
+        # observation: check_env_specs fails, and a collector pre-allocating from the spec
+        # silently drops the key. That drift left 3 of 4 futures exchanges undeclared (#61)
+        # back when each venue had its own builder; there is one now.
         if self.config.include_base_features:
             self.observation_spec.set(
                 "base_features",
-                Unbounded(shape=(base_window, 4), dtype=torch.float),
+                Unbounded(shape=(window_sizes[0], 4), dtype=torch.float),
             )
 
     def get_account_state(self) -> List[str]:
