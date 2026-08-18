@@ -3,6 +3,7 @@
 from typing import Callable, Dict, List, Optional, Union
 
 import numpy as np
+import torch
 import pandas as pd
 
 from torchtrade.envs.offline.infrastructure.sampler import MarketDataObservationSampler
@@ -39,7 +40,17 @@ class ReplayObserver:
             feature_processing_fn=feature_preprocessing_fn,
         )
         self.sampler.reset(random_start=False)
-        self._obs_keys = self.sampler.get_observation_keys()
+        self.window_sizes = self.sampler.window_sizes
+        # `market_data_{timeframe}_{window}`, composed exactly as the offline envs do
+        # (`core/offline_base.py`). The sampler's raw keys are bare timeframe names, so
+        # replay emitted `market_data_1Minute` where offline and live both emit
+        # `market_data_1Minute_10` -- a policy trained offline could not be fed the
+        # replay env without renaming its in_keys (#278).
+        self._timeframes = self.sampler.get_observation_keys()
+        self._obs_keys = [
+            f"market_data_{name}_{ws}"
+            for name, ws in zip(self._timeframes, self.window_sizes)
+        ]
         self.truncated = False
 
     def get_observations(self, return_base_ohlc: bool = False) -> Dict[str, np.ndarray]:
@@ -64,17 +75,15 @@ class ReplayObserver:
                 "close": base["close"],
             })
 
+        # Re-keyed to the suffixed names, so the dict a policy receives matches the one
+        # offline and live produce.
+        suffix = dict(zip(self._timeframes, self._obs_keys))
         result = {}
         for key, tensor in obs.items():
-            result[key] = tensor.numpy().astype(np.float32)
+            result[suffix.get(key, key)] = tensor.numpy().astype(np.float32)
 
         if return_base_ohlc:
-            # Only the last row is populated — live envs only access [-1, 3] (close price).
-            # Earlier rows are zero-filled to match the expected (window_size, 4) shape.
-            ws = self.sampler.window_sizes[0]
-            base_arr = np.zeros((ws, 4), dtype=np.float32)
-            base_arr[-1] = [base["open"], base["high"], base["low"], base["close"]]
-            result["base_features"] = base_arr
+            result["base_features"] = self._base_window(timestamp)
 
         return result
 
@@ -83,13 +92,20 @@ class ReplayObserver:
         return self._obs_keys
 
     def get_features(self) -> Dict[str, List[str]]:
-        """Get feature column names."""
+        """The columns the sampler ACTUALLY emits, which is what the spec is built from.
+
+        Filtering to names starting with `features_` reported an empty list whenever no
+        `feature_preprocessing_fn` was given -- while the sampler still emitted the five
+        raw OHLCV columns. The declared spec came out `(window, 0)` against an emitted
+        `(window, 5)`, and `check_env_specs` failed with a size mismatch (#278). Offline
+        counts the same columns via `get_num_features_per_timeframe`.
+        """
         try:
             feature_keys = self.sampler.get_feature_keys()
         except ValueError:
             feature_keys = []
         return {
-            "observation_features": [k for k in feature_keys if k.startswith("features_")],
+            "observation_features": list(feature_keys),
             "original_features": ["open", "high", "low", "close", "volume"],
         }
 
@@ -108,3 +124,28 @@ class ReplayObserver:
         self.truncated = False
         if self.executor is not None:
             self.executor.reset()
+
+    def _base_window(self, timestamp) -> np.ndarray:
+        """The last `window` execution bars of OHLC, not just the newest one.
+
+        Only `base_arr[-1]` used to be populated, on the reasoning that live envs read
+        `[-1, 3]`. But `include_base_features=True` declares a `(window, 4)` spec and puts
+        the array in the OBSERVATION, so a policy consuming that key read 90% zeros --
+        9 of 10 rows (#278). Real observers fill the whole window.
+
+        Rows before the start of the data stay zero: there is no bar to report, and
+        inventing one would be worse than an obvious gap.
+        """
+        ws = self.window_sizes[0]
+        base_arr = np.zeros((ws, 4), dtype=np.float32)
+        end = int(torch.searchsorted(
+            self.sampler.execute_base_idx,
+            torch.tensor(int(timestamp.value), dtype=torch.long),
+            right=True,
+        ).item())
+        if end <= 0:
+            return base_arr
+        start = max(0, end - ws)
+        window = self.sampler.execute_base_tensor[start:end, :4].numpy().astype(np.float32)
+        base_arr[-len(window):] = window
+        return base_arr
