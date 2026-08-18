@@ -3147,6 +3147,13 @@ def test_the_shared_defaults_pin_covers_every_hoisted_field():
     assert set(SHARED_DEFAULTS) | {"symbol", "observation_failure_policy"} == hoisted
 
 
+# Every class that defines close(), discovered: a sixth exchange cannot opt out.
+CLOSE_OWNERS = sorted(
+    {c for env in LIVE_ENVS for c in env.__mro__
+     if "close" in c.__dict__ and c.__module__.startswith("torchtrade.")},
+    key=lambda c: c.__name__,
+)
+
 _RESET_LOGGER = TorchTradeFuturesLiveEnv.__module__
 
 
@@ -3193,7 +3200,8 @@ class _ResetStub:
 @pytest.mark.parametrize("kwargs,expected", [
     (dict(cancel_ok=False), "cancel_open_orders failed"),
     (dict(close_ok=False, close_on_reset=True), "close_position failed"),
-], ids=["stale-brackets", "residual-exposure"])
+    (dict(cancel_ok=False, close_ok=False, close_on_reset=True), "close_position failed"),
+], ids=["stale-brackets", "residual-exposure", "both-fail-still-reports-the-second"])
 def test_a_failed_reset_cleanup_is_not_swallowed(caplog, kwargs, expected):
     """binance and bitget discarded both return values; bybit and okx warned (#288).
 
@@ -3223,7 +3231,8 @@ def test_a_clean_reset_is_silent_and_zeroes_the_hold_counter(caplog):
     stub = _ResetStub()
     with caplog.at_level(logging.WARNING, logger=_RESET_LOGGER):
         assert stub._reset(None) is False  # advance_hold=False reached _get_observation
-    assert not caplog.records, [r.message for r in caplog.records]
+    ours = [r for r in caplog.records if r.name == _RESET_LOGGER]
+    assert not ours, [r.message for r in ours]
     assert stub.history_reset_calls == 1
     assert stub.sync_action_level_calls == 1
     assert stub.balance == 1000.0
@@ -3301,20 +3310,25 @@ def test_close_warns_but_never_raises(caplog, kwargs, expect_log, still_cancels)
     with caplog.at_level(logging.WARNING):
         stub.close()
     assert stub.cancelled is still_cancels
+    ours = [r for r in caplog.records if r.name == TorchTradeFuturesLiveEnv.__module__]
     if expect_log is None:
-        assert not caplog.records, [r.message for r in caplog.records]
+        assert not ours, [r.message for r in ours]
     else:
-        assert any(expect_log in r.message for r in caplog.records)
+        assert any(expect_log in r.message for r in ours)
 
 
-def test_close_accepts_the_keyword_torchrl_passes_it():
-    """`TransformedEnv.close` and the collector's shutdown both forward `raise_if_closed`.
+@pytest.mark.parametrize("owner", [
+    pytest.param(c, id=c.__name__) for c in CLOSE_OWNERS
+])
+def test_close_accepts_the_keyword_torchrl_passes_it(owner):
+    """`TransformedEnv.close` forwards `raise_if_closed` unconditionally.
 
-    All four venues had a bare `def close(self)`, so a rollout that closed a wrapped env
-    died with TypeError on the way out. polymarket already carried this fix; the fold is
-    what let it reach the other four at once.
+    Every live env had a bare `def close(self)`, so closing a wrapped env died with
+    TypeError -- and `examples/llm/frontier/live.py:150` does exactly that. Discovered
+    rather than hardcoded: pinning only the class already fixed is how alpaca kept the
+    bug through a PR that fixed the other four.
     """
-    ours = inspect.signature(TorchTradeFuturesLiveEnv.close).parameters
+    ours = inspect.signature(owner.__dict__["close"]).parameters
     theirs = inspect.signature(EnvBase.close).parameters
     assert [(n, p.kind, p.default) for n, p in ours.items()] == [
         (n, p.kind, p.default) for n, p in theirs.items()

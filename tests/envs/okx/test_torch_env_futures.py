@@ -470,52 +470,10 @@ class TestOKXInitCleanup:
         else:
             mock_env_trader.close_position.assert_not_called()
 
-    @pytest.mark.parametrize("cancel_ok,close_ok", [
-        (False, True), (True, False), (False, False),
-    ], ids=["cancel-fails", "close-fails", "both-fail"])
-    def test_reset_logs_warning_on_cleanup_failure(self, caplog, mock_env_observer, mock_env_trader, cancel_ok, close_ok):
-        """reset() must warn AND not raise when cleanup calls return False.
-
-        The name promised a warning and only "not raise" was asserted, so deleting the
-        warning left all six of these green (#288).
-        """
-        from torchtrade.envs.live.okx.env import OKXFuturesTorchTradingEnv, OKXFuturesTradingEnvConfig
-
-        config = OKXFuturesTradingEnvConfig(
-            symbol="BTC-USDT-SWAP", time_frames=["1m"], window_sizes=[10],
-            execute_on="1m", close_position_on_reset=True,
-        )
-        with patch("time.sleep"), \
-             patch.object(OKXFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = OKXFuturesTorchTradingEnv(config=config, observer=mock_env_observer, trader=mock_env_trader)
-
-        mock_env_trader.cancel_open_orders = MagicMock(return_value=cancel_ok)
-        mock_env_trader.close_position = MagicMock(return_value=close_ok)
-        with caplog.at_level(logging.WARNING, logger="torchtrade.envs.live.shared.futures_live_base"):
-            assert env.reset() is not None
-        logged = " ".join(r.message for r in caplog.records)
-        for fragment in ([] if cancel_ok else ["cancel_open_orders failed"]) + (
-                [] if close_ok else ["close_position failed"]):
-            assert fragment in logged, f"{fragment!r} not logged; got {logged!r}"
-
-    def test_close_resilient_when_cancel_raises(self, mock_env_observer, mock_env_trader):
-        """close() must not raise even if cancel_open_orders fails."""
-        from torchtrade.envs.live.okx.env import OKXFuturesTorchTradingEnv, OKXFuturesTradingEnvConfig
-
-        config = OKXFuturesTradingEnvConfig(
-            symbol="BTC-USDT-SWAP", time_frames=["1m"], window_sizes=[10], execute_on="1m",
-        )
-        with patch("time.sleep"), \
-             patch.object(OKXFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = OKXFuturesTorchTradingEnv(config=config, observer=mock_env_observer, trader=mock_env_trader)
-
-        mock_env_trader.cancel_open_orders = MagicMock(side_effect=Exception("API down"))
-        env.close()  # Must not raise
-
-
-class TestOKXObservationSpecsNoNetwork:
-    """Test that _build_observation_specs doesn't make live API calls."""
-
+    # reset()/close() cleanup-failure coverage lives in bybit's copy and in
+    # test_live_env_base.py: all four venues resolve both to the SAME shared function
+    # (test_only_two_resets_derive_the_position), and every mutation of it moved binance,
+    # bybit and okx in exact lockstep -- three copies, one possible failure.
     def test_build_specs_uses_get_features_not_get_observations(self, mock_env_observer, mock_env_trader):
         """_build_observation_specs must use get_features() (dummy data), not get_observations()."""
         from torchtrade.envs.live.okx.env import OKXFuturesTorchTradingEnv, OKXFuturesTradingEnvConfig
