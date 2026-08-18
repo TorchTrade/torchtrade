@@ -451,14 +451,17 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         `examples/llm/frontier/live.py` call `env.close()`; they now exit with the
         position open, which is what the futures envs have always done.
 
-        Keyword-only, matching EnvBase.close: TransformedEnv forwards `raise_if_closed`
-        unconditionally, so a bare `def close(self)` raised TypeError -- and
-        `examples/llm/frontier/live.py:150` closes a wrapped env, so that path crashed.
+        Keyword-only, matching EnvBase.close: TransformedEnv forwards `raise_if_closed`.
         """
-        if not self.trader.cancel_open_orders():
-            logger.warning(
-                "cancel_open_orders failed during close(); orders may remain open"
-            )
+        # Guarded like the futures close(): teardown is where an exception replaces
+        # whatever error you were actually trying to see.
+        try:
+            if not self.trader.cancel_open_orders():
+                logger.warning(
+                    "cancel_open_orders failed during close(); orders may remain open"
+                )
+        except Exception as e:
+            logger.error(f"Failed to cancel open orders on close(): {e}")
         try:
             # The dust rule, not `is not None`: a 1e-12 residual is not a position
             # (invariant 1), and an unknown status must not be reported as a held one.

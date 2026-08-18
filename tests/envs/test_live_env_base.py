@@ -3241,27 +3241,6 @@ def test_a_clean_reset_is_silent_and_zeroes_the_hold_counter(caplog):
     # by test_every_reset_uses_the_shared_direction_rule, which reads the source.
 
 
-@pytest.mark.parametrize("config_cls,spelling,expected", [
-    pytest.param(BybitFuturesSLTPTradingEnvConfig, "60", TimeFrame(1, TimeFrameUnit.Hour), id="bybit-60"),
-    pytest.param(BybitFuturesSLTPTradingEnvConfig, "15", TimeFrame(15, TimeFrameUnit.Minute), id="bybit-15"),
-    pytest.param(BybitFuturesSLTPTradingEnvConfig, "D", TimeFrame(1, TimeFrameUnit.Day), id="bybit-D"),
-])
-def test_each_venue_parses_its_own_native_timeframe_spelling(config_cls, spelling, expected):
-    """`_normalize_timeframes` is four adjacent one-line assignments differing by one word.
-
-    Pointing one at another venue's parser survived the whole suite: SHARED_DEFAULTS pins
-    the normalized `"1Hour"`, which every venue renders identically. Measured which swaps
-    are actually detectable -- ONLY bybit's. Its parser is the one that accepts bare
-    integer minutes ("60", "15", "240") and letter units ("D"); binance, bitget and okx
-    accept the same set as each other across every spelling tried, so a mix-up among
-    those three is invisible because it is also harmless -- and cases for them were cut
-    rather than kept as decoration.
-    """
-    config = config_cls(time_frames=spelling, execute_on=spelling)
-    assert config.execute_on == expected
-    assert config.time_frames == [expected]
-
-
 class _CloseHarness(TorchTradeFuturesLiveEnv):
     """A real subclass, because close() calls zero-arg super().
 

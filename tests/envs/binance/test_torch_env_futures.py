@@ -1,6 +1,5 @@
 """Tests for BinanceFuturesTorchTradingEnv."""
 
-from types import SimpleNamespace
 import logging
 import pytest
 import torch
@@ -297,38 +296,9 @@ class TestBinanceFuturesTorchTradingEnv:
         mock_trader.cancel_open_orders.assert_called_once()
         assert not caplog.records, [r.message for r in caplog.records]
 
-    def test_close_warns_when_walking_away_from_an_open_position(self, env, mock_trader, caplog):
-        """close() deliberately does NOT flatten, so this warning is the only signal.
-
-        Automated closure on cleanup could liquidate an intended position, so the env
-        leaves it -- and binance said nothing about it at all before this (#288).
-        """
-        mock_trader.get_status = MagicMock(
-            return_value={"position_status": SimpleNamespace(qty=0.5)}
-        )
-        with caplog.at_level(logging.WARNING, logger="torchtrade.envs.live.shared.futures_live_base"):
-            env.close()
-        assert any("open position" in r.message for r in caplog.records)
-
-    @pytest.mark.parametrize("cancel_ok,close_ok", [
-        (False, True), (True, False), (False, False),
-    ], ids=["cancel-fails", "close-fails", "both-fail"])
-    def test_reset_logs_warning_on_cleanup_failure(self, env, mock_trader, caplog, cancel_ok, close_ok):
-        """binance discarded both return values; bybit and okx warned (#288).
-
-        A failed cancel leaves live brackets on a position the new episode believes is
-        clean; a failed close leaves exposure the account state will not show.
-        """
-        env.config.close_position_on_reset = True
-        mock_trader.cancel_open_orders = MagicMock(return_value=cancel_ok)
-        mock_trader.close_position = MagicMock(return_value=close_ok)
-        with caplog.at_level(logging.WARNING, logger="torchtrade.envs.live.shared.futures_live_base"):
-            assert env.reset() is not None
-        logged = " ".join(r.message for r in caplog.records)
-        for fragment in ([] if cancel_ok else ["cancel_open_orders failed"]) + (
-                [] if close_ok else ["close_position failed"]):
-            assert fragment in logged, f"{fragment!r} not logged; got {logged!r}"
-
+    # close()/reset() cleanup-failure coverage lives in bybit's copy and in
+    # test_live_env_base.py: all four venues resolve both to the SAME shared function.
+    # Deleting okx's copy was justified by that; keeping binance's would not be.
     def test_reenters_after_external_position_close(self, env, mock_trader):
         """A position closed on the exchange must not leave the guard refusing to re-enter.
 

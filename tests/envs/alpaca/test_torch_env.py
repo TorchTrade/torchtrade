@@ -4,6 +4,7 @@ Unit tests for AlpacaTorchTradingEnv (TorchRL-style environment).
 Tests environment initialization, reset, step, and trading mechanics using mock clients.
 """
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -853,3 +854,42 @@ def test_bankruptcy_baseline_counts_a_position_that_has_not_settled_yet():
         "still held in an unsettled position"
     )
     env.close()
+
+
+class TestAlpacaCleanupIsNotSilentOrFatal:
+    """Alpaca is the venue outside the shared futures base, so it gets these separately.
+
+    #392 gave the four futures venues one `_reset`/`close`; alpaca keeps its own because
+    its `close_position()` raises when already flat. The cancel half has no such excuse,
+    and alpaca had both defects the fold removed from the others: a discarded return
+    value, and an unguarded call on the teardown path.
+    """
+
+    @pytest.fixture
+    def env(self):
+        return AlpacaTorchTradingEnv(
+            config=AlpacaTradingEnvConfig(symbol="BTC/USD", window_sizes=[10]),
+            observer=MockObserver(window_sizes=[10]),
+            trader=MockTrader(initial_cash=10000.0),
+        )
+
+    _LOG = "torchtrade.envs.live.alpaca.base"
+
+    @pytest.mark.parametrize("method", ["reset", "close"])
+    def test_a_discarded_cancel_failure_is_reported(self, env, caplog, method):
+        """Both call sites threw the bool away, so stale orders were invisible."""
+        env.trader.cancel_open_orders = MagicMock(return_value=False)
+        with caplog.at_level(logging.WARNING):
+            getattr(env, method)()
+        ours = [r for r in caplog.records if r.name == self._LOG]
+        assert any("cancel_open_orders failed" in r.message for r in ours), [
+            r.message for r in ours
+        ]
+
+    def test_close_survives_a_cancel_that_raises(self, env, caplog):
+        """close() runs during teardown: a crash here replaces the error you needed."""
+        env.trader.cancel_open_orders = MagicMock(side_effect=RuntimeError("boom"))
+        with caplog.at_level(logging.ERROR):
+            env.close()  # must not raise
+        assert any("Failed to cancel open orders" in r.message
+                   for r in caplog.records if r.name == self._LOG)

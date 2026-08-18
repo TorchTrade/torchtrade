@@ -569,7 +569,9 @@ class TestBybitInitCleanup:
         assert obs is not None
         expected = ([] if cancel_ok else ["cancel_open_orders failed"]) + (
             [] if close_ok else ["close_position failed"])
-        logged = " ".join(r.message for r in caplog.records)
+        # by NAME: caplog.at_level(logger=...) sets that logger's LEVEL, it does not
+        # scope caplog.records -- so a warning moved to another logger still passed.
+        logged = " ".join(r.message for r in caplog.records if r.name == "torchtrade.envs.live.shared.futures_live_base")
         for fragment in expected:
             assert fragment in logged, f"{fragment!r} not logged; got {logged!r}"
         if not expected:
