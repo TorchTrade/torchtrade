@@ -218,7 +218,7 @@ def test_live_env_specs_sample_finite(env_cls):
     """
     env = env_cls.__new__(env_cls)
     env.observer = _StubObserver()
-    # include_base_features=True so the shared _declare_base_features_spec runs: that spec
+    # include_base_features=True so the shared builder declares base_features: that spec
     # has a documented history of drifting per-exchange (#61) and is otherwise unexercised.
     env.config = types.SimpleNamespace(window_sizes=[10, 10], include_base_features=True)
     env_cls._build_observation_specs(env)

@@ -214,15 +214,44 @@ class TestBinanceSharesTheObservationBase:
         assert df["open_time"].is_monotonic_increasing
 
     def test_a_malformed_candle_never_reaches_base_features(self):
-        """`to_numeric(errors="coerce")` turns an unparseable close into NaN by design.
-
-        Measured before the fix: a bad candle INSIDE the window gave
-        `base_features NaN=True` while the feature array stayed clean, because the
-        feature path drops it in preprocessing and base_features was built from the raw
-        frame. Outside the window it never showed. (#395)
-        """
+        """Binance coerces unparseable numbers to NaN so one bad candle cannot kill a
+        fetch. Before the fix that NaN reached base_features, which is built from the
+        raw frame, while the feature path dropped it in preprocessing (#395)."""
         rows = self._klines(60)
-        rows[57][4] = "NOT_A_NUMBER"  # close, inside the last 10
+        rows[57][4] = "NOT_A_NUMBER"  # close, inside the last 5
         obs = self._obs(rows).get_observations(return_base_ohlc=True)
         assert not np.isnan(obs["base_features"]).any()
         assert not np.isnan(obs["1Minute_5"]).any()
+
+    @pytest.mark.parametrize("corrupt", [
+        pytest.param(lambda r: r[57].__setitem__(4, "NOT_A_NUMBER"), id="nan-close"),
+        pytest.param(lambda r: r[57].__setitem__(5, "NOT_A_NUMBER"), id="nan-volume"),
+        pytest.param(lambda r: r[57].__setitem__(7, "NOT_A_NUMBER"), id="nan-quote-volume"),
+        pytest.param(lambda r: r.__setitem__(57, list(r[56])), id="duplicate-bar"),
+    ])
+    def test_base_features_and_market_data_stay_the_same_bars(self, corrupt):
+        """Row i of base_features must be the SAME BAR as row i of market_data.
+
+        The first fix here dropped only the OHLC columns. A NaN in `volume` then removed
+        the bar from the feature window -- whose preprocessing does a bare dropna -- and
+        KEPT it in base_features, so the two arrays described different bars inside one
+        observation, silently:
+
+            base : 23:08 23:09 23:10 23:11 23:12
+            feat : 23:07 23:08 23:09 23:11 23:12
+
+        Worse than the NaN it was fixing, and invisible to a NaN-only assertion. Then a
+        bare dropna desynced on a REPEATED bar, because the feature path drops duplicates
+        too -- so the duplicate case here is the one that caught the second attempt.
+        """
+        rows = self._klines(60)
+        corrupt(rows)
+        observer = self._obs(rows)
+        obs = observer.get_observations(return_base_ohlc=True)
+
+        surviving = observer.feature_preprocessing_fn(
+            observer._fetch_single_timeframe(TimeFrame(1, TimeFrameUnit.Minute), limit=55)
+        )["open_time"].iloc[-5:].values
+        assert list(pd.to_datetime(obs["base_timestamps"]).values) == list(
+            pd.to_datetime(surviving).values
+        )

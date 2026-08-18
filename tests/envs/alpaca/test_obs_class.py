@@ -8,6 +8,7 @@ and stricter assertions live here.
 
 from unittest.mock import MagicMock
 import numpy as np
+import pandas as pd
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
@@ -142,11 +143,6 @@ def test_a_malformed_candle_never_reaches_alpaca_base_features(monkeypatch):
     unguarded on the one venue that had it. Injected at the frame level, since which
     malformed payload produces a NaN is venue-specific.
     """
-    import numpy as np
-    import pandas as pd
-    from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
-    from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-
     observer = AlpacaObservationClass(
         symbol="BTC/USD",
         timeframes=TimeFrame(1, TimeFrameUnit.Minute),
@@ -163,7 +159,8 @@ def test_a_malformed_candle_never_reaches_alpaca_base_features(monkeypatch):
             "volume": np.full(n, 10.0),
             "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
         })
-        df.loc[57, "close"] = np.nan  # inside the last 10, as a coerced parse would leave it
+        df.loc[57, "close"] = np.nan  # inside the last 10, (alpaca's SDK returns floats, so a
+        # gap arrives already NaN rather than via a coerced parse)
         return df
 
     monkeypatch.setattr(observer, "_fetch_single_timeframe", frame_with_a_hole)

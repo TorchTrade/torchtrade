@@ -205,8 +205,6 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     )
 
 
-
-
 @pytest.mark.parametrize("env_cls", NON_SLTP_ENVS, ids=lambda c: c.__name__)
 def test_non_sltp_step_syncs_before_it_trades(env_cls):
     """Every non-SLTP _step reconciles with the exchange BEFORE the duplicate-action guard.
@@ -3326,10 +3324,6 @@ def test_construction_survives_an_observer_that_cannot_reach_the_exchange():
     # Behavioural, not "some assignment exists": only alpaca's copy set account_state and
     # the fold dropped it, and examples/llm/{frontier,local}/live.py read it to label the
     # observation. The AST form this replaced passed with the labels set to ["MUTANT"].
-    assert env.account_state == type(env).ACCOUNT_STATE
-    # Behavioural, not "some assignment exists": only alpaca's copy set this and the fold
-    # dropped it, and examples/llm/{frontier,local}/live.py read it to label the
-    # observation. An AST form here passed with the labels replaced by ["MUTANT"].
     assert env.account_state == type(env).ACCOUNT_STATE
 
 

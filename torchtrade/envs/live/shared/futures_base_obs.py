@@ -280,14 +280,13 @@ class BaseFuturesObservationClass(ABC):
 
             # Store base OHLC features if this is the first timeframe and return_base_ohlc is True
             if return_base_ohlc and timeframe == self.time_frames[0]:
-                # dropna BEFORE slicing, as alpaca's observer already did (#395). The
-                # venues parse klines with `to_numeric(errors="coerce")` so one malformed
-                # candle becomes NaN instead of killing the fetch -- and the feature path
-                # drops it in preprocessing, but base_features is built from the raw
-                # frame and did not. A bad candle inside the window put NaN straight into
-                # the observation, where it compares False to every operator and trips no
-                # `<= 0` guard downstream (#349 was the same trap one path over).
-                base_df = df.copy().dropna(subset=["open", "high", "low", "close"])
+                # Row selection must MATCH _default_preprocessing's, or row i here and
+                # row i of market_data are different bars in the same observation --
+                # which include_base_features hands to the policy together. It drops NaN
+                # AND duplicates, so this does both: dropping only NaN desynced on a
+                # repeated bar, and restricting NaN to OHLC desynced on a NaN volume.
+                # base_features was built from the raw frame and did neither (#395).
+                base_df = df.dropna().drop_duplicates()
                 timestamp_col = self._get_timestamp_column()
                 observations['base_features'] = self._get_numpy_obs(
                     base_df,
