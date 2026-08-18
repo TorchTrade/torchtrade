@@ -13,6 +13,7 @@ from torchtrade.envs.utils.liquidation import (
     stop_precedes_liquidation,
 )
 from torchtrade.envs.utils.sltp_helpers import stop_fill_price
+from torchtrade.envs.core.state import POSITION_DUST_EPS
 
 logger = logging.getLogger(__name__)
 
@@ -179,19 +180,34 @@ class ReplayOrderExecutor:
         elif tp_triggered:
             self._close_at_price(self.tp_price)
 
-    def _close_at_price(self, price: float):
-        """Close position at specified price, updating balance."""
-        pnl = self.position_qty * (price - self.entry_price)
-        notional = abs(self.position_qty * price)
+    def _close_at_price(self, price: float, quantity: Optional[float] = None):
+        """Close `quantity` of the position at `price`, or all of it when None.
+
+        Pro-rata on a partial: the PnL, the fee and the margin released all scale with
+        the closed portion, and the entry price is untouched -- the remainder was opened
+        at that price and its cost basis does not change because part of it was sold.
+        Brackets are only cleared on a FULL close; a partially reduced position still has
+        one, which is exactly what a reduce-only order leaves behind.
+        """
+        closing = self.position_qty if quantity is None else math.copysign(
+            min(abs(quantity), abs(self.position_qty)), self.position_qty
+        )
+        if closing == 0:
+            return
+
+        pnl = closing * (price - self.entry_price)
+        notional = abs(closing * price)
         fee = notional * self.transaction_fee
-        margin_return = abs(self.position_qty * self.entry_price) / self.leverage
+        margin_return = abs(closing * self.entry_price) / self.leverage
 
         self.balance += pnl - fee + margin_return
-        self.position_qty = 0.0
-        self.entry_price = 0.0
-        self.sl_price = 0.0
-        self.tp_price = 0.0
-        self.bracket_status = {"tp_placed": False, "sl_placed": False}
+        self.position_qty -= closing
+        if abs(self.position_qty) <= POSITION_DUST_EPS:
+            self.position_qty = 0.0
+            self.entry_price = 0.0
+            self.sl_price = 0.0
+            self.tp_price = 0.0
+            self.bracket_status = {"tp_placed": False, "sl_placed": False}
 
     def trade(
         self,
@@ -231,9 +247,16 @@ class ReplayOrderExecutor:
         if price <= 0:
             raise RuntimeError("ReplayOrderExecutor.trade() called before advance_bar() set a valid price")
 
-        # Handle reduce_only: close existing position, don't open new one
+        # reduce_only REDUCES BY `quantity`; it does not always flatten. Discarding the
+        # quantity here made every reduce a full close, which diverges from all four live
+        # executors -- they forward the quantity with a reduceOnly flag and honour a
+        # partial (#278). No env passes reduce_only today, so this was latent interface
+        # divergence rather than a live defect.
         if reduce_only:
-            return self.close_position()
+            if self.position_qty == 0:
+                return False
+            self._close_at_price(price, quantity)
+            return True
 
         # Close existing position first (if any) to avoid margin accounting errors
         if self.position_qty != 0:
