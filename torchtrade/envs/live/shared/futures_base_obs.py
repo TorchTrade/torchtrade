@@ -17,7 +17,6 @@ class BaseFuturesObservationClass(ABC):
     only need to implement data fetching and parsing logic.
     """
 
-
     def reset(self) -> None:
         """Rewind to the start of an episode. A live observer has nothing to rewind.
 

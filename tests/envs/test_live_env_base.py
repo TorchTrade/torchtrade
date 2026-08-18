@@ -2604,18 +2604,31 @@ def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():
 
 
 def _calls_observer_reset(func) -> bool:
-    """True if the body really CALLS self.observer.reset() -- AST, not substring.
+    """True if the body has `self.observer.reset()` as an unconditional statement.
 
     A substring check on inspect.getsource passes on a comment: replacing okx's live
-    lines with `# NOTE: self.observer.reset() handled by the caller` left the entire
-    suite green while okx's second episode continued mid-stream (#278 review). The four
+    line with `# NOTE: self.observer.reset() handled by the caller` left the entire
+    suite green while okx's second episode continued mid-stream (#278 review). The five
     older guards in this file already parse; this one had to as well.
+
+    Top-level statements only, not `ast.walk`: walking accepts a call that never runs --
+    `if False:`, a nested def, a line after `return` -- and the point is that the reset
+    HAPPENS, on every reset, before the reads below it.
     """
-    tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+    body = ast.parse(textwrap.dedent(inspect.getsource(func))).body[0].body
+    for stmt in body:
+        # The three shapes a top-level call takes: bare, returned, or assigned. Anything
+        # nested (a branch, an inner def, code after a return) is deliberately excluded.
+        call = None
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            call = stmt.value
+        elif isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Call):
+            call = stmt.value
+        elif isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Call):
+            call = stmt.value
+        if call is None:
             continue
-        f = node.func
+        f = call.func
         if (isinstance(f, ast.Attribute) and f.attr == "reset"
                 and isinstance(f.value, ast.Attribute) and f.value.attr == "observer"
                 and isinstance(f.value.value, ast.Name) and f.value.value.id == "self"):
@@ -2668,3 +2681,46 @@ def test_the_observer_interface_declares_reset():
     # baseline it protects goes with it.
     for cls in (AlpacaObservationClass, BinanceObservationClass, BaseFuturesObservationClass):
         assert cls.reset(None) is None, f"{cls.__name__}.reset must be a no-op"
+
+
+def test_a_live_account_keeps_its_run_level_bankruptcy_baseline():
+    """The yardstick must not chase the account down.
+
+    Rebasing the baseline every episode looks like offline parity and is not: offline
+    resets the BALANCE and the baseline together, so its ratio starts at 1.0 because the
+    account was reset too. A live account persists, so rebasing only the yardstick
+    removes the cross-episode drawdown circuit breaker entirely -- an account halving
+    every episode reached 0.39% of its starting value without ever reporting bankrupt.
+    """
+    from tests.mocks.alpaca import MockObserver, MockTrader
+    from torchtrade.envs.live.alpaca.env import (
+        AlpacaTorchTradingEnv,
+        AlpacaTradingEnvConfig,
+    )
+
+    trader = MockTrader(initial_cash=1000.0)
+    env = AlpacaTorchTradingEnv(
+        config=AlpacaTradingEnvConfig(
+            symbol="BTC/USD", window_sizes=[10], bankrupt_threshold=0.1,
+        ),
+        observer=MockObserver(window_sizes=[10]),
+        trader=trader,
+    )
+    env._wait_for_next_timestamp = lambda: None
+
+    env.reset()
+    assert env.initial_portfolio_value == pytest.approx(1000.0)
+
+    # The account halves each episode. A live observer rewinds nothing, so the baseline
+    # must stay at the equity the RUN started from.
+    for equity in (500.0, 250.0, 125.0, 62.5):
+        trader.cash = equity
+        env.reset()
+        assert env.initial_portfolio_value == pytest.approx(1000.0), (
+            f"baseline rebased to {env.initial_portfolio_value} at equity {equity}; it "
+            f"now chases the account down and bankruptcy can never fire (#278)"
+        )
+
+    assert env._check_termination(62.5) is True, (
+        "62.5 is below 10% of the 1000 this run started with and must terminate"
+    )

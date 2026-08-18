@@ -289,7 +289,6 @@ class MockObserver:
     Provides synthetic observation data without needing a real data client.
     """
 
-
     def reset(self) -> None:
         """No-op, matching the live observers: nothing to rewind (#278)."""
 

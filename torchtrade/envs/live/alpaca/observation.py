@@ -10,11 +10,7 @@ from alpaca.data.historical.crypto import CryptoHistoricalDataClient
 class AlpacaObservationClass:
 
     def reset(self) -> None:
-        """Rewind to the start of an episode; a live observer has nothing to rewind.
-
-        See BaseFuturesObservationClass.reset for why this exists and why it does not
-        touch the bankruptcy baseline (#278).
-        """
+        """No-op; see BaseFuturesObservationClass.reset (#278)."""
 
     def __init__(
         self,

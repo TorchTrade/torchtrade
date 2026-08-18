@@ -354,9 +354,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
-        # Before any read below: ReplayObserver rewinds the sampler AND the simulated
-        # executor here, so the balance/position/price reads that follow must see the
-        # rewound state (#278).
+        # Before any read below -- see the bybit copy for why the order matters (#278).
         self.observer.reset()
         # Cancel all orders
         self.trader.cancel_open_orders()
