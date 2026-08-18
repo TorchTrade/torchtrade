@@ -79,15 +79,21 @@ def test_features_are_reported_when_no_preprocessing_fn_is_given():
     )
 
 
-# The timeframe layout is the axis both base_features bugs lived on, and the original
-# test parametrized only `steps` on a single-timeframe fixture -- so it could not see
-# either. execute_on COARSER than time_frames[0] is deliberately absent: market_data
-# there extends past the window this builds, and asserting a relationship I have not
-# pinned down would be worse than saying so.
+# The timeframe layout is the axis every base_features bug in this PR lived on, and the
+# first version parametrized only `steps` on a single-timeframe fixture where
+# `execute_on == time_frames[0]` -- the one layout on which none of them can appear.
+# Every replay test in the repo uses that layout, which is why they survived.
+M5 = TimeFrame(5, TimeFrameUnit.Minute)
+M15 = TimeFrame(15, TimeFrameUnit.Minute)
 LAYOUTS = [
     pytest.param([TF], [10], TF, id="single-1Min"),
-    pytest.param([TimeFrame(5, TimeFrameUnit.Minute), TF], [6, 10], TF, id="5Min-first"),
-    pytest.param([TimeFrame(15, TimeFrameUnit.Minute), TF], [4, 10], TF, id="15Min-first"),
+    pytest.param([M5, TF], [6, 10], TF, id="5Min-first"),
+    pytest.param([M15, TF], [4, 10], TF, id="15Min-first"),
+    # execute_on COARSER than time_frames[0]: tf0 is labelled by bar START, so looking it
+    # up at the raw execution label returned a window shifted back by
+    # `exec_period/tf0_period - 1` bars. Stale, deterministically.
+    pytest.param([TF], [10], M5, id="exec-coarser"),
+    pytest.param([TF, M5], [10, 6], M5, id="1Min-first-exec-5Min"),
 ]
 
 

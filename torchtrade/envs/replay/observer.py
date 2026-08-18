@@ -148,9 +148,16 @@ class ReplayObserver:
         """
         ws = self.window_sizes[0]
         base_arr = np.zeros((ws, 4), dtype=np.float32)
+        # Through the sampler's own rule, not a re-implemented searchsorted. A frame
+        # FINER than execute_on is labelled by bar start, so looking it up at the raw
+        # execution label returned a window shifted back by `exec_period/tf0_period - 1`
+        # bars -- stale, deterministically, whenever execute_on is coarser than
+        # time_frames[0]. `_search_ts` exists for exactly this and is what every other
+        # lookup in the sampler goes through.
+        lookup = self.sampler._search_ts(self._timeframes[0], int(timestamp.value))
         end = int(torch.searchsorted(
             self.sampler.base_ohlc_idx,
-            torch.tensor(int(timestamp.value), dtype=torch.long),
+            torch.tensor(int(lookup), dtype=torch.long),
             right=True,
         ).item())
         if end <= 0:
