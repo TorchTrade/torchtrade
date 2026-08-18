@@ -280,22 +280,27 @@ def test_position_sync_resolves_to_a_shared_implementation(env_cls):
     )
 
 
-def test_exactly_five_resets_derive_the_position():
-    """One position-deriving _reset per exchange, and the guard below sees all five.
+def test_only_two_resets_derive_the_position():
+    """Was five hand-rolled copies; the four futures ones are now one (#288).
 
-    That guard skips a _reset that only delegates. Move a derivation into a helper and the
-    class starts skipping too -- the guard would then cover less while staying green. A review
-    demonstrated exactly that: the old exact-zero rule went back into okx behind a helper and
-    the suite stayed green, with only the skip count moving.
+    Two of the five silently discarded `cancel_open_orders()` / `close_position()`
+    failures that the other two warned about -- a failed cancel leaves live brackets on a
+    position the new episode believes is clean. That is what five copies buys you, and it
+    is why this counts DERIVATIONS rather than trusting that they agree.
+
+    Counted across every MRO, not just `LIVE_ENVS.__dict__`: a venue that re-forks _reset
+    into an intermediate base would otherwise not show up here.
     """
-    deriving = [
-        c for c in LIVE_ENVS
+    deriving = {
+        c for env in LIVE_ENVS for c in env.__mro__
         if (r := c.__dict__.get("_reset")) is not None
         and "current_position" in inspect.getsource(r)
-    ]
-    assert len(deriving) == 5, (
-        f"expected one position-deriving _reset per exchange, found {len(deriving)}: "
-        f"{[c.__name__ for c in deriving]}"
+    }
+    assert {c.__name__ for c in deriving} == {
+        "AlpacaBaseTorchTradingEnv", "TorchTradeFuturesLiveEnv"
+    }, (
+        f"expected the futures venues to share one _reset and alpaca to keep its own, "
+        f"found {sorted(c.__name__ for c in deriving)}"
     )
 
 
@@ -303,14 +308,14 @@ def test_exactly_five_resets_derive_the_position():
 def test_every_reset_uses_the_shared_direction_rule(env_cls):
     """_reset must derive the position with the SAME dust rule as _step.
 
-    The five resets each hand-rolled an exact-zero check until now: at qty=1e-12 reset
-    reported a phantom position in account_state that the agent does not hold, while _step
-    read it as flat. One rule, or they disagree.
+    At qty=1e-12 a hand-rolled exact-zero check reports a phantom position in
+    account_state that the agent does not hold, while _step reads it as flat.
 
-    Applies to whichever class actually DERIVES the position; the SLTP envs' _reset only
-    delegates to super() and then resets brackets, so it is not one of them.
+    Resolved through the MRO, so a venue that re-forks _reset is caught rather than
+    skipped -- the SLTP envs' own _reset only delegates to super() and resets brackets.
     """
-    reset = env_cls.__dict__.get("_reset")
+    reset = next((c.__dict__["_reset"] for c in env_cls.__mro__ if "_reset" in c.__dict__
+                  and "current_position" in inspect.getsource(c.__dict__["_reset"])), None)
     if reset is None:
         pytest.skip(f"{env_cls.__name__} inherits _reset")
 
@@ -2264,6 +2269,7 @@ def test_every_live_config_validates_its_action_levels(exchange):
     config_cls = next(
         v for k, v in vars(module).items()
         if k.endswith("Config") and hasattr(v, "__dataclass_fields__")
+        and v.__module__ == module.__name__
     )
     with pytest.raises(ValueError):
         config_cls(symbol="BTC/USD", action_levels=[0.0, float("nan"), 1.0])
@@ -2399,8 +2405,12 @@ def _build_env_with(env_cls, module, trader):
         "observation_features": ["a", "b", "c", "d"], "original_features": []})
     observer.intervals, observer.window_sizes = ["1m"], [10]
 
+    # __module__, not just the name: `vars` also carries any config imported into the
+    # module. Both env_sltp modules import their shared base, and without this filter
+    # `next` returns THAT -- a test that silently stops testing the venue (#288).
     config_cls = next(v for k, v in vars(module).items()
-                      if k.endswith("Config") and hasattr(v, "__dataclass_fields__"))
+                      if k.endswith("Config") and hasattr(v, "__dataclass_fields__")
+                      and v.__module__ == module.__name__)
     try:
         config = config_cls(symbol="BTCUSDT", demo=True, time_frames=["1m"],
                             window_sizes=[10], execute_on="1m", leverage=5)
@@ -3132,3 +3142,89 @@ def test_the_shared_defaults_pin_covers_every_hoisted_field():
     """
     hoisted = {f.name for f in dataclasses.fields(BaseFuturesSLTPConfig)}
     assert set(SHARED_DEFAULTS) | {"symbol", "observation_failure_policy"} == hoisted
+
+
+class _ResetStub:
+    """Minimal stand-in for a futures env, so the shared _reset can be driven directly.
+
+    Not a mock: a MagicMock's methods are truthy, which is exactly the failure mode these
+    tests exist to detect -- `if not self.trader.cancel_open_orders()` would never fire.
+    """
+
+    def __init__(self, cancel_ok=True, close_ok=True, close_on_reset=False):
+        outer = self
+
+        class _Trader:
+            def cancel_open_orders(self): return cancel_ok
+            def close_position(self): return close_ok
+            def get_account_balance(self): return {"available_balance": 1000.0}
+            def get_status(self): return {"position_status": None}
+
+        class _Observer:
+            def reset(self): outer.observer_reset_calls += 1
+
+        self.observer_reset_calls = 0
+        self.trader, self.observer = _Trader(), _Observer()
+        self.history = SimpleNamespace(reset=lambda: None)
+        self.position = SimpleNamespace(hold_counter=7, current_position=1)
+        self.config = SimpleNamespace(close_position_on_reset=close_on_reset)
+        self.balance = 0.0
+
+    _reset = TorchTradeFuturesLiveEnv._reset
+    _sync_action_level_after_reset = lambda self: None
+    _get_observation = lambda self, advance_hold=True: advance_hold
+
+
+@pytest.mark.parametrize("kwargs,expected", [
+    (dict(cancel_ok=False), "cancel_open_orders failed"),
+    (dict(close_ok=False, close_on_reset=True), "close_position failed"),
+], ids=["stale-brackets", "residual-exposure"])
+def test_a_failed_reset_cleanup_is_not_swallowed(caplog, kwargs, expected):
+    """binance and bitget discarded both return values; bybit and okx warned (#288).
+
+    A failed cancel leaves live brackets attached to a position the new episode believes
+    is clean; a failed close leaves real exposure the account state will not show.
+    Neither is recoverable here -- the episode has to start -- but silence made them
+    invisible, and the fold had to pick one behaviour for all four venues.
+    """
+    with caplog.at_level(logging.WARNING):
+        _ResetStub(**kwargs)._reset(None)
+    assert any(expected in r.message for r in caplog.records), (
+        f"a failed reset cleanup logged nothing; records={[r.message for r in caplog.records]}"
+    )
+
+
+def test_a_clean_reset_is_silent_and_zeroes_the_hold_counter():
+    """All four venues return True from both calls when flat, so a flat reset must not warn.
+
+    Also pins that the hold counter is zeroed BEFORE the observation is read with
+    advance_hold=False -- a reset that counted its own bar would age a fresh position.
+    """
+    stub = _ResetStub()
+    assert stub._reset(None) is False  # advance_hold=False reached _get_observation
+    assert stub.position.hold_counter == 0
+    assert stub.position.current_position == 0  # dust rule, via position_direction_from_status
+    assert stub.observer_reset_calls == 1
+
+
+@pytest.mark.parametrize("config_cls,spelling,expected", [
+    pytest.param(BybitFuturesSLTPTradingEnvConfig, "60", TimeFrame(1, TimeFrameUnit.Hour), id="bybit-60"),
+    pytest.param(BybitFuturesSLTPTradingEnvConfig, "15", TimeFrame(15, TimeFrameUnit.Minute), id="bybit-15"),
+    pytest.param(BybitFuturesSLTPTradingEnvConfig, "D", TimeFrame(1, TimeFrameUnit.Day), id="bybit-D"),
+    pytest.param(BinanceFuturesSLTPTradingEnvConfig, "1h", TimeFrame(1, TimeFrameUnit.Hour), id="binance-1h"),
+    pytest.param(BitgetFuturesSLTPTradingEnvConfig, "4H", TimeFrame(4, TimeFrameUnit.Hour), id="bitget-4H"),
+    pytest.param(OKXFuturesSLTPTradingEnvConfig, "1D", TimeFrame(1, TimeFrameUnit.Day), id="okx-1D"),
+])
+def test_each_venue_parses_its_own_native_timeframe_spelling(config_cls, spelling, expected):
+    """`_normalize_timeframes` is four adjacent one-line assignments differing by one word.
+
+    Pointing one at another venue's parser survived the whole suite: SHARED_DEFAULTS pins
+    the normalized `"1Hour"`, which every venue renders identically. Measured which swaps
+    are actually detectable -- ONLY bybit's. Its parser is the one that accepts bare
+    integer minutes ("60", "15", "240") and letter units ("D"); binance, bitget and okx
+    accept the same set as each other across every spelling tried, so a mix-up among
+    those three is invisible because it is also harmless.
+    """
+    config = config_cls(time_frames=spelling, execute_on=spelling)
+    assert config.execute_on == expected
+    assert config.time_frames == [expected]
