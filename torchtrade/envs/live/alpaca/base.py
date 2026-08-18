@@ -438,14 +438,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             "Subclasses must implement _calculate_trade_amount()"
         )
 
-    def get_market_data_keys(self) -> List[str]:
-        """Return the list of market data keys."""
-        return self.market_data_keys
-
-    def get_account_state(self) -> List[str]:
-        """Return the list of account state field names."""
-        return self.ACCOUNT_STATE
-
     def close(self):
         """Clean up resources.
 
