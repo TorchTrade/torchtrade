@@ -1,5 +1,7 @@
 import logging
 
+from torchtrade.envs.live.shared.executor_helpers import ExecutorHelpersMixin
+
 from torchtrade.envs.utils.precision import decimals_for_step
 from dataclasses import dataclass
 import math
@@ -63,7 +65,7 @@ class PositionStatus:
     liquidation_price: float
 
 
-class BinanceFuturesOrderClass:
+class BinanceFuturesOrderClass(ExecutorHelpersMixin):
     """
     Order executor for Binance Futures trading.
 
@@ -222,11 +224,8 @@ class BinanceFuturesOrderClass:
             )
 
     def _round_price(self, price: float) -> float:
-        """Round a price to the nearest tick size."""
-        if self._tick_size is not None:
-            rounded = round(price / self._tick_size) * self._tick_size
-            return round(rounded, self._tick_decimals)
-        return price
+        """Round to the cached tick size -- shared, see ExecutorHelpersMixin (#288)."""
+        return self._round_price_by_tick(price)
 
     def round_quantity(self, quantity: float, symbol: Optional[str] = None) -> float:
         """Floor a quantity toward zero to the symbol's LOT_SIZE step.
