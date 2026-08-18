@@ -2868,3 +2868,39 @@ def test_every_live_env_reports_the_same_account_state_layout():
     assert len(layouts) >= 10, f"only {len(layouts)} concrete live envs checked"
     wrong = {n: v for n, v in layouts.items() if v != expected}
     assert not wrong, f"venues disagree with the universal account_state vector: {wrong}"
+
+
+def test_no_futures_env_re_forks_the_trade_info_builder():
+    """Four identical `_create_trade_info` copies (#288).
+
+    MRO owner, not a module allowlist -- `SLTPMixin` sits ahead of the shared base for
+    all four SLTP envs, so a copy there would shadow the hoisted one on every venue at
+    once while a prefix filter stayed green.
+    """
+    from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
+
+    wrong_owner = {
+        c.__name__: next(b for b in c.__mro__ if "_create_trade_info" in b.__dict__).__name__
+        for c in LIVE_ENVS
+        if issubclass(c, TorchTradeFuturesLiveEnv)
+        and next((b for b in c.__mro__ if "_create_trade_info" in b.__dict__), None)
+        is not TorchTradeFuturesLiveEnv
+    }
+    assert not wrong_owner, f"_create_trade_info re-forked on: {wrong_owner}"
+
+
+def test_the_trade_info_defaults_are_the_whole_contract():
+    """A path that did not trade still returns this dict, so a MISSING key reads
+    downstream as an absent fact rather than a default one -- which is what four copies
+    risked drifting on."""
+    from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
+
+    info = TorchTradeFuturesLiveEnv._create_trade_info(None)
+    assert info == {
+        "executed": False, "quantity": 0, "side": None,
+        "success": None, "closed_position": False,
+    }
+    # kwargs override, and do not silently drop a default.
+    overridden = TorchTradeFuturesLiveEnv._create_trade_info(None, executed=True, side="BUY")
+    assert overridden["executed"] is True and overridden["side"] == "BUY"
+    assert overridden["closed_position"] is False and overridden["quantity"] == 0
