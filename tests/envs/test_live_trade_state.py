@@ -290,14 +290,39 @@ class TestBinanceDirectionSwitch:
         assert trader.position_qty == 0.5
         assert len([t for t in trader.trades_executed if t["side"] == "SELL"]) == 0
 
+    def test_a_switch_whose_open_fails_does_not_leave_a_phantom_position(self):
+        """The one path where binance's missing `current_position = 0` survived (#288).
+
+        On a normal close, `_record_position_after_trade` overwrites the cache from
+        `sign(desired_action)` anyway -- so the zeroing binance lacked was invisible.
+        The exception is a direction switch whose CLOSE succeeds and whose OPEN then
+        fails: that early-returns on `executed=False`, leaving the pre-close value
+        standing. binance reported a long against an exchange holding nothing, which is
+        invariant 2 -- the cache outliving exchange truth -- and it is what the shared
+        version fixes.
+        """
+        trader = MockTrader(position_qty=0.5, balance=10000.0)
+        trader.trade_should_raise = True  # the close lands, the re-open does not
+        env = _make_binance_env(trader)
+        env.position.current_position = 1
+
+        env._execute_fractional_action(-1.0)
+
+        assert trader.position_qty == 0.0, "the close itself must have succeeded"
+        assert env.position.current_position == 0, (
+            "the exchange is flat but the env still believes it holds a long"
+        )
+
 
 # ---------------------------------------------------------------------------
-# Bitget-specific tests: _handle_close_action updates current_position
+# _handle_close_action updates current_position -- SHARED by all four venues since
+# #288 hoisted it, so this exercises the base through a bitget instance rather than
+# anything bitget-specific.
 # ---------------------------------------------------------------------------
 
 
-class TestBitgetClosePositionState:
-    """Bitget-specific: _handle_close_action conditionally updates current_position."""
+class TestClosePositionState:
+    """_handle_close_action conditionally updates current_position (shared, #288)."""
 
     @pytest.mark.parametrize("close_should_fail,expected_position", [
         (True, 1),   # Failed close: position unchanged
