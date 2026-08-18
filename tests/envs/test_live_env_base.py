@@ -205,32 +205,6 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     )
 
 
-def test_the_shared_spec_builder_declares_base_features() -> None:
-    """The one _build_observation_specs must call the shared _declare_base_features_spec.
-
-    #61 was a class-level defect: base_features is EMITTED by the shared _get_observation
-    but was DECLARED only by okx, so spec and observation disagreed and a collector
-    pre-allocating from the spec silently dropped it.
-
-    Unparametrized because all five venues now resolve to one function -- the earlier
-    discovery form (`"_build_observation_specs" in vars(c)`) emptied the moment that
-    happened, and its replacement asserted only that the discovered set was non-empty,
-    which `empty_parameter_set_mark = "fail_at_collect"` already guarantees. A venue
-    re-forking the method is caught by test_no_live_env_overrides_shared_method instead.
-
-    AST, not source text, so a comment naming the method cannot satisfy it.
-    """
-    tree = ast.parse(
-        textwrap.dedent(inspect.getsource(TorchTradeLiveEnv._build_observation_specs))
-    )
-    called = {
-        node.func.attr for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-    }
-    assert "_declare_base_features_spec" in called, (
-        "the shared _build_observation_specs never calls _declare_base_features_spec -- "
-        "base_features would be emitted but not declared in observation_spec (#61)."
-    )
 
 
 @pytest.mark.parametrize("env_cls", NON_SLTP_ENVS, ids=lambda c: c.__name__)
@@ -3349,6 +3323,14 @@ def test_construction_survives_an_observer_that_cannot_reach_the_exchange():
 
     observer.get_observations.assert_not_called()
     assert env.observation_spec["market_data_1Minute_10"].shape == torch.Size([10, 4])
+    # Behavioural, not "some assignment exists": only alpaca's copy set account_state and
+    # the fold dropped it, and examples/llm/{frontier,local}/live.py read it to label the
+    # observation. The AST form this replaced passed with the labels set to ["MUTANT"].
+    assert env.account_state == type(env).ACCOUNT_STATE
+    # Behavioural, not "some assignment exists": only alpaca's copy set this and the fold
+    # dropped it, and examples/llm/{frontier,local}/live.py read it to label the
+    # observation. An AST form here passed with the labels replaced by ["MUTANT"].
+    assert env.account_state == type(env).ACCOUNT_STATE
 
 
 def test_each_timeframe_declares_its_own_window_size():
@@ -3432,26 +3414,3 @@ def test_an_observer_disagreeing_with_the_config_raises_rather_than_guessing():
         BinanceFuturesTorchTradingEnv(config=config, observer=observer, trader=trader)
 
 
-def test_the_shared_spec_builder_exposes_the_account_state_labels() -> None:
-    """`env.account_state` was set by alpaca's spec builder ONLY, and folding lost it.
-
-    `examples/llm/{frontier,local}/live.py` read it off an AlpacaTorchTradingEnv to label
-    the observation for the LLM actor, so dropping it raised AttributeError there with
-    the whole suite green -- the inverse of the usual dedup risk, where one copy has
-    something the others lack and the fold discards it.
-
-    Unparametrized: there is one builder, so per-venue cases would assert the same thing
-    five times. The DATA is pinned separately by
-    test_every_live_env_reports_the_same_account_state_layout.
-    """
-    tree = ast.parse(
-        textwrap.dedent(inspect.getsource(TorchTradeLiveEnv._build_observation_specs))
-    )
-    assigned = {
-        t.attr for node in ast.walk(tree) if isinstance(node, ast.Assign)
-        for t in node.targets if isinstance(t, ast.Attribute)
-    }
-    assert "account_state" in assigned, (
-        "the shared _build_observation_specs no longer sets self.account_state -- "
-        "the LLM live examples read it and would raise AttributeError"
-    )

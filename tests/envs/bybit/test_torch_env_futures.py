@@ -602,9 +602,6 @@ class TestBybitInitCleanup:
         env.close()
 
 
-
-
-
 class TestBybitFractionalPositionResizing:
     """Tests for fractional position resizing."""
 

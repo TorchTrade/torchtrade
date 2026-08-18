@@ -31,7 +31,6 @@ import math
 import pathlib
 import types
 
-import numpy as np
 import pytest
 import torch
 from tensordict import TensorDictBase
