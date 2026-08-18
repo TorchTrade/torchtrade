@@ -191,29 +191,6 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
             logger.error(f"{side.capitalize()} trade failed for {self.config.symbol}: quantity={quantity}, error={e}")
             return self._create_trade_info(executed=False, success=False)
 
-    def _handle_close_action(self, current_qty: float) -> Dict:
-        """Handle close position action."""
-        if current_qty == 0:
-            return self._create_trade_info(executed=False)
-
-        try:
-            success = self.trader.close_position()
-        except Exception as e:
-            logger.error(f"Close position failed for {self.config.symbol}: {e}")
-            return self._create_trade_info(executed=False, success=False)
-
-        side = "sell" if current_qty > 0 else "buy"
-
-        if success:
-            self.position.current_position = 0
-
-        return self._create_trade_info(
-            executed=True,
-            quantity=abs(current_qty),
-            side=side,
-            success=success,
-            closed_position=True,
-        )
 
     def _calculate_fractional_position(self, action_value: float, current_price: float) -> tuple[float, float, str]:
         """Calculate target position size from fractional action."""
