@@ -290,7 +290,7 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         Execute a futures trade.
 
         Args:
-            side: "BUY" or "SELL"
+            side: "buy" or "sell" (case-insensitive; upper-cased for the API)
             quantity: Amount to trade in base asset units
             order_type: "market", "limit", "stop_market", "take_profit_market"
             position_side: "LONG", "SHORT", or "BOTH" (for one-way mode)

@@ -622,7 +622,7 @@ class TestBinanceFractionalPositionResizing:
     ])
     def test_fractional_resizing_executes(self, env, first_action, second_action, should_execute):
         """Changing action level within same direction must trigger trade."""
-        trade_executed = {"executed": True, "amount": 0.01, "side": "BUY",
+        trade_executed = {"executed": True, "amount": 0.01, "side": "buy",
                          "success": True, "closed_position": False}
 
         with patch.object(env, '_execute_fractional_action', return_value=trade_executed) as mock_exec:

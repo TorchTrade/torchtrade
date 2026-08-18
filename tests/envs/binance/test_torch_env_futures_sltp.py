@@ -242,7 +242,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
             # Trade should have been called with BUY
             assert mock_trader.trade.called
             call_kwargs = mock_trader.trade.call_args.kwargs
-            assert call_kwargs["side"] == "BUY"
+            assert call_kwargs["side"] == "buy"
             assert "stop_loss" in call_kwargs
             assert "take_profit" in call_kwargs
 
@@ -257,7 +257,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
             # Trade should have been called with SELL
             assert mock_trader.trade.called
             call_kwargs = mock_trader.trade.call_args.kwargs
-            assert call_kwargs["side"] == "SELL"
+            assert call_kwargs["side"] == "sell"
             assert "stop_loss" in call_kwargs
             assert "take_profit" in call_kwargs
 
@@ -899,7 +899,7 @@ class TestDuplicateActionPrevention:
         # Should open new short position
         mock_trader.trade.assert_called_once()
         call_kwargs = mock_trader.trade.call_args.kwargs
-        assert call_kwargs["side"] == "SELL"
+        assert call_kwargs["side"] == "sell"
 
     def test_short_to_long_switches_position(self, env_with_mocks):
         """Test that Short → Long switches position (closes short, opens long)."""
@@ -919,7 +919,7 @@ class TestDuplicateActionPrevention:
         # Should open new long position
         mock_trader.trade.assert_called_once()
         call_kwargs = mock_trader.trade.call_args.kwargs
-        assert call_kwargs["side"] == "BUY"
+        assert call_kwargs["side"] == "buy"
 
     def test_hold_action_with_no_position(self, env_with_mocks):
         """Test that HOLD action does nothing when no position."""
@@ -1018,9 +1018,9 @@ class TestBinanceSLTPNotionalTradeMode:
         return env, mock_trader
 
     @pytest.mark.parametrize("action_tuple,expected_side", [
-        (("long", -0.02, 0.03), "BUY"),
-        (("short", 0.02, -0.03), "SELL"),
-    ], ids=["long-BUY", "short-SELL"])
+        (("long", -0.02, 0.03), "buy"),
+        (("short", 0.02, -0.03), "sell"),
+    ], ids=["long-buy", "short-sell"])
     def test_notional_converts_usd_to_quantity(self, notional_env, action_tuple, expected_side):
         """Notional mode must convert USD to base-asset quantity using current price."""
         env, mock_trader = notional_env

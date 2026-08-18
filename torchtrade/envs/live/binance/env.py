@@ -207,24 +207,6 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
 
         return next_tensordict
 
-    def _execute_market_order(self, side: str, quantity: float) -> Dict:
-        """Execute a market order with error handling."""
-        try:
-            success = self.trader.trade(
-                side=side,
-                quantity=quantity,
-                order_type="market",
-            )
-            return self._create_trade_info(
-                executed=True,
-                quantity=quantity,
-                side=side,
-                success=success,
-            )
-        except Exception as e:
-            logger.error(f"{side} trade failed for {self.config.symbol}: quantity={quantity}, error={e}")
-            return self._create_trade_info(executed=False, success=False)
-
 
     def _get_symbol_info(self) -> Dict:
         """Get exchange symbol information for precision and lot size.
@@ -413,11 +395,11 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
                 return close_info
 
             # Open new position in opposite direction
-            side, amount = ("BUY" if target_qty > 0 else "SELL"), abs(target_qty)
+            side, amount = ("buy" if target_qty > 0 else "sell"), abs(target_qty)
         elif delta > 0:
-            side, amount = "BUY", abs(delta)          # increase, or open long from flat
+            side, amount = "buy", abs(delta)          # increase, or open long from flat
         elif delta < 0:
-            side, amount = "SELL", abs(delta)         # decrease, or open short from flat
+            side, amount = "sell", abs(delta)         # decrease, or open short from flat
         else:
             return self._create_trade_info(executed=False)
 

@@ -180,6 +180,7 @@ def test_no_live_env_overrides_shared_method(env_cls, method):
         "_get_portfolio_value",
         "_create_trade_info",
         "_handle_close_action",
+        "_execute_market_order",
     ],
 )
 @pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
@@ -2940,3 +2941,62 @@ def test_a_close_with_no_position_does_not_report_a_trade():
     env = SimpleNamespace(_create_trade_info=TorchTradeFuturesLiveEnv._create_trade_info.__get__(object()))
     info = TorchTradeFuturesLiveEnv._handle_close_action(env, 0)
     assert info["executed"] is False and info["side"] is None
+
+
+@pytest.mark.parametrize("qty,expected", [(0.5, "buy"), (-0.5, "sell")])
+def test_the_order_side_sent_is_lowercase_and_matches_the_direction(qty, expected):
+    """The VALUE that reaches the trader, not a source-text grep.
+
+    A grep version of this was defeated five ways: single quotes, `"buy".upper()`, a
+    module-level helper (getsource returns only the class block), `futures_live_base`
+    itself -- the very file this hoist moved side construction INTO, excluded from
+    FUTURES_ENVS by construction -- and alpaca, which is in LIVE_ENVS but not
+    FUTURES_ENVS, so a test named "every venue" checked 12 of 16 classes.
+
+    It also could not see the value at all: hardcoding `side="buy"` in the hoisted
+    method, so a short reported "buy", passed the whole suite.
+    """
+    from types import SimpleNamespace
+
+    from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
+
+    sent = {}
+
+    def _trade(**kwargs):
+        sent.update(kwargs)
+        return True
+
+    env = SimpleNamespace(
+        trader=SimpleNamespace(trade=_trade, close_position=lambda: True),
+        config=SimpleNamespace(symbol="BTCUSDT"),
+        position=SimpleNamespace(current_position=0),
+        _create_trade_info=TorchTradeFuturesLiveEnv._create_trade_info.__get__(object()),
+    )
+    side = "buy" if qty > 0 else "sell"
+    info = TorchTradeFuturesLiveEnv._execute_market_order(env, side, abs(qty))
+
+    assert sent["side"] == expected, f"sent {sent['side']!r} to the venue, not {expected!r}"
+    assert sent["side"] == sent["side"].lower(), "every venue sends a lowercase side"
+    assert info["side"] == expected and info["quantity"] == abs(qty)
+
+
+@pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
+def test_no_live_env_builds_an_uppercase_order_side(env_cls):
+    """binance passed "BUY"/"SELL" where its siblings passed "buy"/"sell" (#288).
+
+    Its executor upper-cases whatever it receives, so the venue never saw a difference --
+    it surfaced only as a mixed-case `trade_info["side"]` across exchanges, in the field
+    a preceding slice had just unified. Normalising it is what made the four
+    `_execute_market_order` copies identical enough to hoist.
+    """
+    from torchtrade.envs.live.shared import futures_live_base
+
+    # Every LIVE env, not just the futures ones -- alpaca is in LIVE_ENVS and was not
+    # checked -- plus the shared base module itself, which is where this PR moved side
+    # construction and which no env class's getsource covers.
+    source = inspect.getsource(env_cls) + inspect.getsource(futures_live_base)
+    for upper in ('"BUY"', '"SELL"', "'BUY'", "'SELL'"):
+        assert upper not in source, (
+            f"{env_cls.__name__} builds an uppercase order side {upper}; every venue "
+            f"sends lowercase and the executors normalise"
+        )
