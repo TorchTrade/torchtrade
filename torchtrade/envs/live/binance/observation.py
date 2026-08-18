@@ -1,14 +1,11 @@
 """Observation class for fetching market data from Binance."""
 from typing import Callable, List, Optional, Union
 
-import numpy as np
 import pandas as pd
 
 from torchtrade.envs.live.shared.futures_base_obs import BaseFuturesObservationClass
 from torchtrade.envs.utils.timeframe import TimeFrame, timeframe_to_binance
 
-# Kline layout: [open_time, open, high, low, close, volume, close_time, quote_volume,
-#               trades, taker_buy_base, taker_buy_quote, ignore]
 _KLINE_COLUMNS = [
     "open_time", "open", "high", "low", "close", "volume", "close_time",
     "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore",
@@ -20,12 +17,12 @@ _NUMERIC_COLUMNS = [
 
 
 class BinanceObservationClass(BaseFuturesObservationClass):
-    """Binance market data. The last venue still carrying a parallel copy (#289).
+    """Binance market data via the shared futures observation base (#289)."""
 
-    Four of its nine shared methods were already byte-identical to the base's; what
-    genuinely differs is the API call and the kline layout, which are what the base's
-    hooks are for.
-    """
+    # Binance klines carry more than OHLCV and a preprocessing fn may read it.
+    _DUMMY_COLUMNS = BaseFuturesObservationClass._DUMMY_COLUMNS + (
+        "quote_volume", "trades", "taker_buy_base", "taker_buy_quote",
+    )
 
     def __init__(
         self,
@@ -47,12 +44,8 @@ class BinanceObservationClass(BaseFuturesObservationClass):
 
     def _create_client(self) -> object:
         """Public market data only, so no keys."""
-        try:
-            from binance.client import Client
-        except ImportError:
-            raise ImportError(
-                "python-binance is required. Install with: pip install python-binance"
-            )
+        from binance.client import Client
+
         return Client()
 
     def _validate_timeframe(self, timeframe: TimeFrame) -> None:
@@ -72,21 +65,12 @@ class BinanceObservationClass(BaseFuturesObservationClass):
 
     def _parse_klines(self, raw_klines: list) -> pd.DataFrame:
         df = pd.DataFrame(raw_klines, columns=_KLINE_COLUMNS)
-        # to_numeric with coerce, not astype: a malformed row becomes NaN and is dropped
-        # by preprocessing rather than killing the whole fetch.
+        # to_numeric with coerce, not astype: a malformed row becomes NaN rather than
+        # killing the whole fetch. Preprocessing drops it -- but note base_features is
+        # built from the UNprocessed frame, so a NaN can still reach that one.
         for col in _NUMERIC_COLUMNS:
             df[col] = pd.to_numeric(df[col], errors="coerce")
         df["trades"] = pd.to_numeric(df["trades"], errors="coerce").fillna(0).astype(int)
         df["open_time"] = pd.to_datetime(df["open_time"], unit="ms")
         df["close_time"] = pd.to_datetime(df["close_time"], unit="ms")
         return df.drop(columns=["ignore"])
-
-    def _dummy_frame(self, window_size: int) -> pd.DataFrame:
-        """Binance klines carry more than OHLCV, and a preprocessing fn may read it."""
-        df = super()._dummy_frame(window_size)
-        df["volume"] += 1e-9  # a preprocessing fn that divides by volume must not hit 0
-        df["quote_volume"] = np.random.rand(window_size)
-        df["trades"] = np.random.randint(1, 100, window_size)
-        df["taker_buy_base"] = np.random.rand(window_size)
-        df["taker_buy_quote"] = np.random.rand(window_size)
-        return df

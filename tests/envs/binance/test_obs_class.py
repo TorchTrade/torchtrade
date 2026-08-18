@@ -167,51 +167,65 @@ class TestBinanceSharesTheObservationBase:
                 for i in range(n)]
         return list(reversed(rows)) if descending else rows
 
-    def _obs(self, rows, fn=None, window=5):
+    def _obs(self, rows, fn=None):
         client = MagicMock()
         client.get_klines = MagicMock(return_value=rows)
         return BinanceObservationClass(
             symbol="BTC/USDT",
             time_frames=TimeFrame(1, TimeFrameUnit.Minute),
-            window_sizes=window,
+            window_sizes=5,
             feature_preprocessing_fn=fn,
             client=client,
         )
 
     def test_it_inherits_rather_than_reimplementing(self):
-        """4 of its 9 shared methods were byte-identical to the base's before this."""
-        assert issubclass(BinanceObservationClass, BaseFuturesObservationClass)
-        redeclared = {
-            n for n in ("_default_preprocessing", "_get_numpy_obs", "get_keys", "reset",
-                        "_fetch_single_timeframe", "get_observations")
-            if n in vars(BinanceObservationClass)
-        }
-        assert not redeclared, f"re-forked from the base: {sorted(redeclared)}"
+        """Derived from the base, not hand-listed.
 
-    def test_a_preprocessing_fn_may_read_binance_only_kline_columns(self):
-        """`quote_volume`/`trades`/`taker_buy_*` are in binance klines but not OHLCV.
-
-        get_features() counts columns against a DUMMY frame, so an OHLCV-only dummy
-        would raise KeyError for exactly the functions that use what binance returns --
-        the one behaviour that could not survive inheriting the base unchanged.
+        A hand-listed denylist of 6 names shipped in this PR's first draft and omitted
+        `get_features` -- the method most likely to be re-forked next, since it is the
+        one that reads _DUMMY_COLUMNS. A deliberately broken re-fork of it passed every
+        test. Reading the base's own surface cannot develop that blind spot.
         """
-        def fn(df):
-            df = df.copy()
-            df["feature_qv"] = df["quote_volume"] / df["volume"]
-            df["feature_trades"] = df["trades"] / 100.0
-            return df.dropna()
+        shared = {
+            n for n, v in vars(BaseFuturesObservationClass).items()
+            if callable(v) and not getattr(v, "__isabstractmethod__", False)
+            and not n.startswith("__")
+        }
+        assert shared, "discovery found nothing -- the guard would pass vacuously"
+        assert not (shared & set(vars(BinanceObservationClass))), (
+            f"re-forked from the base: {sorted(shared & set(vars(BinanceObservationClass)))}"
+        )
 
+    @pytest.mark.parametrize("fn,expected", [
+        pytest.param(None, 4, id="default-preprocessing"),
+        pytest.param(
+            lambda df: df.assign(feature_r=df["close"] / df["open"]), 1, id="ohlcv-only"
+        ),
+        pytest.param(
+            lambda df: df.assign(
+                feature_qv=df["quote_volume"] / df["volume"],
+                feature_t=df["trades"] / 100.0,
+            ), 2, id="binance-only-columns"),
+    ])
+    def test_the_feature_count_matches_the_data_it_describes(self, fn, expected):
+        """get_features() counts columns on a SYNTHETIC frame; get_observations() runs
+        the same fn on real data. Nothing anywhere cross-checked that they agree.
+
+        They can diverge: the synthetic frame carries only `_DUMMY_COLUMNS`, so a fn
+        reading anything else raises there while working fine on real data -- or, worse,
+        silently reports a width the observation does not have. That count IS the
+        observation spec, so a disagreement is a spec/data mismatch reaching the policy.
+        """
         obs = self._obs(self._klines(60), fn=fn)
-        assert obs.get_features()["observation_features"] == ["feature_qv", "feature_trades"]
-        # and the same columns survive an actual fetch, not just the dummy
-        assert obs.get_observations()["1Minute_5"].shape == (5, 2)
+        declared = len(obs.get_features()["observation_features"])
+        actual = obs.get_observations()["1Minute_5"].shape[1]
+        assert declared == actual == expected
 
     def test_klines_are_sorted_even_when_the_response_is_reversed(self):
         """The base sorts; binance's copy did not, so it was the one venue unprotected.
 
         Binance returns ascending today, so nothing bit -- but a reversed response
-        produced TIME-REVERSED observations with no error, which is a policy reading
-        the future as the past.
+        produced TIME-REVERSED observations with no error.
         """
         df = self._obs(self._klines(20, descending=True))._fetch_single_timeframe(
             TimeFrame(1, TimeFrameUnit.Minute), limit=20
@@ -219,7 +233,11 @@ class TestBinanceSharesTheObservationBase:
         assert df["open_time"].is_monotonic_increasing
 
     def test_an_empty_response_says_so(self):
-        """It used to surface as `IndexError: single positional indexer is out-of-bounds`
-        from inside pandas, naming neither the symbol nor the timeframe."""
+        """It used to return a zero-length observation, silently.
+
+        Measured against a pre-PR worktree: `get_observations()` handed back
+        `{'1Minute_5': (0, 4)}` and no error at all, so an outage reached the policy as
+        an empty array rather than a stop. Louder than an exception would have been.
+        """
         with pytest.raises(RuntimeError, match="BTCUSDT.*1Minute"):
             self._obs([])._fetch_single_timeframe(TimeFrame(1, TimeFrameUnit.Minute), limit=5)
