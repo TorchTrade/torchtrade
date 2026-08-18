@@ -83,7 +83,7 @@ class ReplayObserver:
             result[suffix.get(key, key)] = tensor.numpy().astype(np.float32)
 
         if return_base_ohlc:
-            result["base_features"] = self._base_window(timestamp)
+            result["base_features"] = self._base_window(timestamp, base)
 
         return result
 
@@ -126,7 +126,7 @@ class ReplayObserver:
         if self.executor is not None:
             self.executor.reset()
 
-    def _base_window(self, timestamp) -> np.ndarray:
+    def _base_window(self, timestamp, current) -> np.ndarray:
         """The last `window` execution bars of OHLC, not just the newest one.
 
         Only `base_arr[-1]` used to be populated, on the reasoning that live envs read
@@ -158,4 +158,14 @@ class ReplayObserver:
         start = max(0, end - ws)
         window = self.sampler.base_ohlc_tensor[start:end].numpy().astype(np.float32)
         base_arr[-len(window):] = window
+
+        # The last row is the FORMING bar, as live's is: its close is the latest trade,
+        # not the last completed tf0 close. `base_features[-1, 3]` is the entry and
+        # bracket price for three SLTP envs (`*/env_sltp.py: current_price = float(
+        # obs["base_features"][-1, 3])`), so leaving it at the last CLOSED tf0 bar priced
+        # brackets off a stale number -- measured at -1.94%/+3.07% against a configured
+        # -2%/+3% on a [15Min, 1Min] layout. High and low extend to cover the trade.
+        base_arr[-1, 1] = max(base_arr[-1, 1], current["high"])
+        base_arr[-1, 2] = min(base_arr[-1, 2], current["low"])
+        base_arr[-1, 3] = current["close"]
         return base_arr

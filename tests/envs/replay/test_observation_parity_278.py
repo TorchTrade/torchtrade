@@ -6,6 +6,7 @@ import pytest
 
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 from torchtrade.envs.replay.observer import ReplayObserver
+from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
 from torchtrade.envs.utils import TimeFrame, TimeFrameUnit
 
 TF = TimeFrame(1, TimeFrameUnit.Minute)
@@ -105,15 +106,28 @@ def test_base_features_is_the_first_timeframes_bars(time_frames, window_sizes, e
     count, so neither a zero-padding regime nor a wrong-timeframe window can be written
     down as expected.
     """
+    executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
     observer = ReplayObserver(df=_df(1200), time_frames=time_frames,
-                              window_sizes=window_sizes, execute_on=execute_on)
+                              window_sizes=window_sizes, execute_on=execute_on,
+                              executor=executor)
     for _ in range(steps):
         obs = observer.get_observations(return_base_ohlc=True)
     base, market = obs["base_features"], obs[observer.get_keys()[0]]
 
     assert base.shape == (window_sizes[0], 4)
     assert int((base == 0).all(axis=1).sum()) == int((market == 0).all(axis=1).sum())
-    assert np.allclose(base[:, 3], market[:, 3], atol=1e-3), (
-        f"base_features closes {base[:, 3]} are not {time_frames[0]}'s bars "
-        f"{market[:, 3]} -- wrong timeframe or shifted by the end-time relabel"
+    # All but the last row are completed tf0 bars and must match exactly.
+    assert np.allclose(base[:-1, 3], market[:-1, 3], atol=1e-3), (
+        f"base_features closes {base[:-1, 3]} are not {time_frames[0]}'s bars "
+        f"{market[:-1, 3]} -- wrong timeframe or shifted by the end-time relabel"
+    )
+    # The last row is the FORMING bar, as live's is: its close is the latest trade.
+    # `base_features[-1, 3]` prices entries and BOTH brackets in three SLTP envs
+    # (`*/env_sltp.py: current_price = float(obs["base_features"][-1, 3])`), so leaving
+    # it at the last CLOSED tf0 close sizes and brackets off a stale number -- measured
+    # at -1.94%/+3.07% against a configured -2%/+3%. Asserted against the executor,
+    # which is what the venue would actually fill at.
+    assert base[-1, 3] == pytest.approx(executor.current_price, abs=1e-3), (
+        f"base_features[-1, 3] is {base[-1, 3]}, not the execution price "
+        f"{executor.current_price} -- entries and brackets would price off a stale bar"
     )

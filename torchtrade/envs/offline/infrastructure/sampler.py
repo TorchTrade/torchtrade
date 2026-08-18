@@ -200,7 +200,7 @@ class MarketDataObservationSampler:
             # ending "now" included a bar that had not closed yet -- lookahead bias, in
             # the observation, which is the whole reason that relabel exists (#320).
             if tf == time_frames[0]:
-                self.base_ohlc_df = resampled[["open", "high", "low", "close"]].copy()
+                base_ohlc_df = resampled[["open", "high", "low", "close"]].copy()
 
             if proc_fn is not None:
                 resampled = proc_fn(resampled)
@@ -388,11 +388,11 @@ class MarketDataObservationSampler:
         self.execute_base_tensor = torch.from_numpy(base_arr)  # shape (M, F)
         base_ts_int64 = self.execute_base_features_df.index.as_unit('ns').asi8
         self.execute_base_idx = torch.from_numpy(base_ts_int64).to(torch.long)
-        self.base_ohlc_tensor = torch.from_numpy(
-            self.base_ohlc_df.to_numpy(dtype=np.float32)
-        )
+        # Tensor and index only; the frame itself is not retained -- keeping it cost
+        # 40 MB per sampler on a 1M-bar input for a single read.
+        self.base_ohlc_tensor = torch.from_numpy(base_ohlc_df.to_numpy(dtype=np.float32))
         self.base_ohlc_idx = torch.from_numpy(
-            self.base_ohlc_df.index.as_unit("ns").asi8
+            base_ohlc_df.index.as_unit("ns").asi8
         ).to(torch.long)
 
         # Validate 1:1 correspondence between exec_times and execute_base_features_df
