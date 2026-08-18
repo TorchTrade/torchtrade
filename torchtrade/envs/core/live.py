@@ -1,5 +1,6 @@
 """Base class for live trading environments."""
 
+from typing import List
 import logging
 import math
 import time
@@ -266,6 +267,20 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 "base_features",
                 Unbounded(shape=(base_window, 4), dtype=torch.float),
             )
+
+    def get_account_state(self) -> List[str]:
+        """The account-state field names. Four byte-identical copies (#288).
+
+        Each exchange still owns its ACCOUNT_STATE list -- what was duplicated was the
+        accessor, not the data. On TorchTradeLiveEnv rather than the futures base so all
+        FIVE venues share it: hoisting to the futures base left alpaca holding the only
+        copies, which turns "four identical copies" into two rather than one (#288).
+        """
+        return self.ACCOUNT_STATE
+
+    def get_market_data_keys(self) -> List[str]:
+        """The market-data keys. Four byte-identical copies (#288)."""
+        return self.market_data_keys
 
     def _capture_bankruptcy_baseline(self) -> None:
         """Record the equity an episode starts from, or refuse to start (#345).

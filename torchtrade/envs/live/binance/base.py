@@ -1,7 +1,7 @@
 """Base class for Binance live trading environments."""
 
 from abc import abstractmethod
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import torch
 from tensordict import TensorDictBase

@@ -2811,42 +2811,60 @@ def test_the_bar_wait_derives_from_the_timeframe_not_a_string_alias():
     assert not regrown, f"the unit alias table is regrowing in the wait path: {regrown}"
 
 
-def test_no_futures_env_re_forks_the_shared_accessors():
-    """`get_account_state` / `get_market_data_keys` were four byte-identical copies.
+def test_no_live_env_re_forks_the_shared_accessors():
+    """`get_account_state` / `get_market_data_keys` were FIVE byte-identical copies.
 
     One-line returns, so the copies were harmless in themselves -- but this repo has
     shipped a fix landing on some exchanges and not others three times (lot size #271,
     full_done_spec #272, hedge-mode surface), and a copy that has not drifted YET is
     still a copy (#288).
+
+    Asserts the MRO OWNER, not a module allowlist. The first version filtered on
+    `torchtrade.envs.live.*`, which missed `SLTPMixin` -- and that is the one place a
+    re-fork actually wins: all four SLTP envs are `class X(SLTPMixin, XBase)`, so the
+    mixin precedes the shared base and a method defined there shadows the hoisted one on
+    every venue at once, with the guard staying green.
     """
-    from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
+    from torchtrade.envs.core.live import TorchTradeLiveEnv
 
     for name in ("get_account_state", "get_market_data_keys"):
-        offenders = [
-            c.__name__ for c in LIVE_ENVS
-            if issubclass(c, TorchTradeFuturesLiveEnv)
-            for base in c.__mro__
-            if base.__module__.startswith("torchtrade.envs.live.")
-            and not base.__module__.startswith("torchtrade.envs.live.shared")
-            and name in base.__dict__
-        ]
-        assert not offenders, f"{name} re-forked on {sorted(set(offenders))}"
+        wrong_owner = {
+            c.__name__: next(b for b in c.__mro__ if name in b.__dict__).__name__
+            for c in LIVE_ENVS
+            if next((b for b in c.__mro__ if name in b.__dict__), None)
+            is not TorchTradeLiveEnv
+        }
+        assert not wrong_owner, (
+            f"{name} does not resolve to TorchTradeLiveEnv on: {wrong_owner}"
+        )
 
 
-def test_every_futures_env_reports_the_same_account_state_layout():
+def test_every_live_env_reports_the_same_account_state_layout():
     """The accessor is shared; the DATA still lives per exchange, so pin it.
 
-    `account_state` is the observation vector a policy consumes, and offline/live parity
-    depends on all venues agreeing on its order. Hoisting the accessor would otherwise
-    hide a divergence in what it returns.
+    Every live env, not just the futures ones -- CLAUDE.md specifies this 6-element
+    vector as universal, and the first version's `issubclass(..., FuturesLiveEnv)` filter
+    excluded alpaca entirely, so replacing its ACCOUNT_STATE with ['a','b','c'] passed.
+
+    The NAMES are pinned, not just agreement: renaming a field consistently across all
+    venues satisfied "they all match" while breaking every consumer that indexes
+    account_state by meaning. And no `hasattr` filter -- that was fail-open, dropping a
+    class that lost the attribute instead of failing it.
     """
+    expected = (
+        "exposure_pct", "position_direction", "unrealized_pnlpct",
+        "holding_time", "leverage", "distance_to_liquidation",
+    )
+    from torchtrade.envs.core.live import TorchTradeLiveEnv
     from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 
+    # Excluded BY IDENTITY, not by `hasattr`: the shared bases legitimately have no
+    # ACCOUNT_STATE, but a hasattr filter would also silently drop a concrete venue that
+    # LOST it -- and get_account_state() would then raise on every step.
+    abstract = {TorchTradeLiveEnv, TorchTradeFuturesLiveEnv}
     layouts = {
-        c.__name__: tuple(c.ACCOUNT_STATE)
-        for c in LIVE_ENVS if issubclass(c, TorchTradeFuturesLiveEnv)
-        and hasattr(c, "ACCOUNT_STATE")
+        c.__name__: tuple(c.ACCOUNT_STATE) for c in LIVE_ENVS if c not in abstract
     }
-    assert layouts, "no futures env exposed ACCOUNT_STATE"
-    assert len(set(layouts.values())) == 1, f"venues disagree on account_state: {layouts}"
-    assert len(next(iter(layouts.values()))) == 6, "the universal vector is 6 elements"
+    assert len(layouts) >= 10, f"only {len(layouts)} concrete live envs checked"
+    wrong = {n: v for n, v in layouts.items() if v != expected}
+    assert not wrong, f"venues disagree with the universal account_state vector: {wrong}"
