@@ -1,7 +1,10 @@
 """Order executor for Bybit Futures trading using pybit."""
 import logging
 
-from torchtrade.envs.live.shared.executor_helpers import ExecutorHelpersMixin
+from torchtrade.envs.live.shared.executor_helpers import (
+    ExecutorHelpersMixin,
+    TickSizeMixin,
+)
 
 from torchtrade.envs.utils.precision import decimals_for_step
 from dataclasses import dataclass
@@ -65,7 +68,7 @@ class PositionStatus:
     liquidation_price: float
 
 
-class BybitFuturesOrderClass(ExecutorHelpersMixin):
+class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
     """
     Order executor for Bybit Futures trading using pybit.
 
@@ -165,13 +168,6 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin):
                 }
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
-
-    def _format_price(self, price: float) -> str:
-        """Round price to tick size and format as deterministic string."""
-        rounded = self._round_price(price)
-        if self._tick_size is not None:
-            return f"{rounded:.{self._tick_decimals}f}"
-        return str(rounded)
 
 
     def _setup_futures_account(self):

@@ -1,7 +1,10 @@
 """Order executor for OKX Futures trading using python-okx."""
 import logging
 
-from torchtrade.envs.live.shared.executor_helpers import ExecutorHelpersMixin
+from torchtrade.envs.live.shared.executor_helpers import (
+    ExecutorHelpersMixin,
+    TickSizeMixin,
+)
 
 from torchtrade.envs.utils.precision import decimals_for_step
 import math
@@ -62,7 +65,7 @@ class PositionStatus:
     liquidation_price: float
 
 
-class OKXFuturesOrderClass(ExecutorHelpersMixin):
+class OKXFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
     """
     Order executor for OKX Futures trading using python-okx.
 
@@ -185,13 +188,6 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin):
                 self._lot_size_cache = {"min_qty": min_qty, "qty_step": qty_step}
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
-
-    def _format_price(self, price: float) -> str:
-        """Round price to tick size and format as deterministic string."""
-        rounded = self._round_price(price)
-        if self._tick_size is not None:
-            return f"{rounded:.{self._tick_decimals}f}"
-        return str(rounded)
 
     def _format_size(self, qty: float) -> str:
         """Quantize quantity to lot size step, enforce minimum, and format as string."""
