@@ -727,8 +727,11 @@ class TestAlpacaTorchTradingEnvClose:
 
         env.close()
 
-        # After close, position should be closed
-        assert env.trader.position_qty == 0.0
+        # close() cancels orders and LEAVES the position, as all four futures envs do
+        # (#289). Flattening on shutdown made close_position_on_init=False pointless --
+        # the position it preserved was market-closed the moment the process exited.
+        # Call trader.close_position() explicitly if you want it flat.
+        assert env.trader.position_qty != 0.0
 
 
 class TestAlpacaTorchTradingEnvMultipleEpisodes:
@@ -811,7 +814,7 @@ class TestAlpacaTorchTradingEnvSeed:
 def test_bankruptcy_baseline_counts_a_position_that_has_not_settled_yet():
     """__init__ closes positions, then pins the baseline -- but the close does not block.
 
-    close_all_positions() submits market orders and returns. Reading account.cash at that
+    close_position() submits a market order and returns. Reading account.cash at that
     instant excludes whatever is still tied up in the unsettled position, so an env
     constructed holding 8765 of BTC against 1234 cash pinned its baseline at 1234 rather
     than 9999, and _check_termination then fired an order of magnitude too low -- on the
@@ -822,8 +825,11 @@ def test_bankruptcy_baseline_counts_a_position_that_has_not_settled_yet():
     different measurement, which is why settlement timing could change it at all.
     """
     class UnsettledTrader(MockTrader):
-        def close_all_positions(self):
-            return {}  # submitted, not filled -- the position is still open
+        # close_position, not close_all_positions: init is symbol-scoped now (#289), and
+        # this fixture carries the whole test, so stubbing the call init no longer makes
+        # would silently let the close settle. The self-check below catches exactly that.
+        def close_position(self, qty=None):
+            return True  # submitted, not filled -- the position is still open
 
     # 1234 + 8765, chosen so the expected 9999 collides with nothing: MockTrader
     # defaults initial_cash to 10000, so an expected 10000 would pass against

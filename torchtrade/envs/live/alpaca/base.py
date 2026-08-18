@@ -99,10 +99,20 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.execute_on = config.execute_on
 
         # Reset settings
-        self.trader.close_all_positions()
+        # Cancel BEFORE closing, as all four futures envs do. The old order was
+        # close-then-cancel, and cancel_open_orders() falls through to the account-wide
+        # cancel-all -- so it cancelled the market close it had just submitted, which
+        # close_all_positions() does not block on. Outside RTH the close could not fill
+        # first, and the init flatten was silently reverted (#289).
         self.trader.cancel_open_orders()
+        if config.close_position_on_init:
+            # close_position(), not close_all_positions(): the account-wide call iterates
+            # get_all_positions() over EVERY symbol, and this flag defaults to True -- so
+            # merely constructing an env flattened unrelated holdings. All four futures
+            # envs are symbol-scoped at init too (#289).
+            self.trader.close_position()
 
-        # The env's own measure, not account.cash. close_all_positions() above submits
+        # The env's own measure, not account.cash. The close above (when enabled) submits
         # market orders and does not block, so cash at this instant excludes whatever is
         # still tied up in an unsettled position: constructed holding $9k of BTC against
         # $1k cash, the baseline pinned at 1000 and _check_termination then fired below
@@ -357,6 +367,24 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.observer.reset()
         # Cancel all orders
         self.trader.cancel_open_orders()
+        if self.config.close_position_on_reset:
+            # close_position(), not close_all_positions(): the latter iterates
+            # get_all_positions() over the WHOLE account, so an opt-in reset flatten
+            # would market-close a second env's symbol or a manual holding at every
+            # episode boundary. The four futures envs are symbol-scoped (#289).
+            closed = self.trader.close_position()
+            # Re-read rather than trusting the bool: alpaca's close_position() wraps a
+            # client call that RAISES when the symbol is already flat (code 40410000),
+            # so it returns False for the state we wanted. Warning on that would fire at
+            # every episode boundary and train the operator to ignore the real one.
+            # bybit returns True when flat, which is why the copied pattern misfired.
+            if not closed and position_direction_from_status(
+                self.trader.get_status().get("position_status")
+            ) != 0:
+                logger.warning(
+                    "close_position_on_reset failed for %s; the episode starts with a "
+                    "position it asked to be rid of", self.config.symbol,
+                )
 
         # Reset history tracking
         self.history.reset()
@@ -419,9 +447,31 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         return self.ACCOUNT_STATE
 
     def close(self):
-        """Clean up resources."""
+        """Clean up resources.
+
+        Cancels orders; does NOT flatten. All four futures envs only warn here and tell
+        the caller to `close_position()` first, and flattening unconditionally on
+        shutdown made `close_position_on_init=False` pointless -- the position it was
+        meant to preserve was market-closed the moment the process exited cleanly (#289).
+        `examples/rule_based/live.py`, `examples/llm/local/live.py` and
+        `examples/llm/frontier/live.py` call `env.close()`; they now exit with the
+        position open, which is what the futures envs have always done.
+        """
         self.trader.cancel_open_orders()
-        self.trader.close_all_positions()
+        try:
+            # The dust rule, not `is not None`: a 1e-12 residual is not a position
+            # (invariant 1), and an unknown status must not be reported as a held one.
+            # Guarded because this is a network read on the shutdown path.
+            held = position_direction_from_status(
+                self.trader.get_status().get("position_status")
+            )
+        except Exception:
+            held = 0
+        if held != 0:
+            logger.warning(
+                "%s still holds a position at close(); call trader.close_position() "
+                "first if you want it flattened", self.config.symbol,
+            )
 
     def _get_current_price(self, position_status=None) -> float:
         """Get current market price with fallback chain.

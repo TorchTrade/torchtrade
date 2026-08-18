@@ -26,6 +26,11 @@ class AlpacaTradingEnvConfig:
     done_on_bankruptcy: bool = True
     bankrupt_threshold: float = 0.1  # 10% of initial balance
     paper: bool = True
+    # Parity with the four futures exchanges (#289): alpaca hardcoded the init close and
+    # offered no reset close at all, so a restart had no escape hatch for a stale
+    # position. Defaults reproduce the previous behaviour exactly.
+    close_position_on_init: bool = True
+    close_position_on_reset: bool = False
     trade_mode: TradeMode = "notional"
     seed: Optional[int] = 42
     include_base_features: bool = False # Includes base features such as timestamps and ohlc to the tensordict
