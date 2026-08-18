@@ -507,3 +507,47 @@ class TestBitgetLotSize:
         mock_ccxt_client.amount_to_precision = MagicMock(side_effect=Exception("boom"))
         # qty_step=0.0001 -> 0.00037 floors to 0.0003
         assert order_executor._round_amount(0.00037) == pytest.approx(0.0003)
+
+
+class TestBitgetCancelReportsFailure:
+    """bitget was the only venue whose cancel_open_orders could not report failure (#288)."""
+
+    @pytest.fixture
+    def order_executor(self, mock_ccxt_client):
+        from torchtrade.envs.live.bitget.order_executor import (
+            BitgetFuturesOrderClass, MarginMode, PositionMode,
+        )
+        with patch('torchtrade.envs.live.bitget.order_executor.ccxt.bitget', return_value=mock_ccxt_client):
+            return BitgetFuturesOrderClass(
+                symbol="BTC/USDT:USDT", trade_mode="quantity", demo=True, leverage=10,
+                margin_mode=MarginMode.ISOLATED, position_mode=PositionMode.ONE_WAY,
+                api_key="k", api_secret="s", passphrase="p",
+            )
+
+    @pytest.mark.parametrize("failures,expected", [
+        (0, True),   # nothing failed
+        (1, False),  # one of two failed -- brackets remain
+        (2, False),  # everything failed
+    ], ids=["all-cancelled", "one-failed", "all-failed"])
+    def test_a_failed_cancel_is_reported_not_just_logged(
+        self, order_executor, mock_ccxt_client, failures, expected
+    ):
+        """It logged each failure, then returned True regardless.
+
+        The three other venues return False, so `_reset`'s "proceeding with potentially
+        stale orders" warning could fire for them and never for bitget -- live SL/TP
+        brackets left attached to a position the new episode believes is clean, with the
+        one signal that would have said so hard-wired to success.
+        """
+        orders = [{"id": "a"}, {"id": "b"}]
+        order_executor.get_open_orders = MagicMock(return_value=orders)
+        calls = {"n": 0}
+
+        def cancel(order_id, symbol):
+            calls["n"] += 1
+            if calls["n"] <= failures:
+                raise RuntimeError("venue refused")
+
+        mock_ccxt_client.cancel_order = MagicMock(side_effect=cancel)
+        assert order_executor.cancel_open_orders() is expected
+        assert calls["n"] == len(orders), "a failed cancel must not abort the remaining ones"

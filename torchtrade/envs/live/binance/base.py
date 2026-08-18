@@ -1,22 +1,17 @@
 """Base class for Binance live trading environments."""
 
-from abc import abstractmethod
 from typing import Callable, Optional
 
 import torch
-from tensordict import TensorDictBase
 from torchrl.data import Composite, Unbounded
 
-from torchtrade.envs.utils.timeframe import timeframe_to_seconds
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 from torchtrade.envs.core.state import (
     HistoryTracker,
     PositionState,
-    position_direction_from_status,
 )
-
 
 class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     """
@@ -173,63 +168,3 @@ class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
             self.market_data_keys.append(market_data_key)
 
         self._declare_base_features_spec(window_sizes[0])
-
-    def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
-        """Reset the environment."""
-        # Before any read below -- see the bybit copy for why the order matters (#278).
-        self.observer.reset()
-        # Cancel all orders
-        self.trader.cancel_open_orders()
-
-        # Reset history tracking
-        self.history.reset()
-
-        if self.config.close_position_on_reset:
-            self.trader.close_position()
-
-        # Get current state
-        balance = self.trader.get_account_balance()
-        self.balance = balance.get("available_balance", 0)
-
-        status = self.trader.get_status()
-        position_status = status.get("position_status")
-        self.position.hold_counter = 0
-
-        self.position.current_position = position_direction_from_status(position_status)
-
-        self._sync_action_level_after_reset()
-
-        # Get initial observation. advance_hold=False: hold_counter was just zeroed
-        # above; a reset must never itself count a bar (see advance_hold docstring).
-        return self._get_observation(advance_hold=False)
-
-    @abstractmethod
-    def _execute_trade_if_needed(self, action) -> dict:
-        """
-        Execute trade if position change is needed.
-
-        Must be implemented by subclasses as trade logic differs by action space.
-
-        Args:
-            action: Action to execute (format varies by subclass)
-
-        Returns:
-            Dict with trade execution details
-        """
-        raise NotImplementedError(
-            "Subclasses must implement _execute_trade_if_needed()"
-        )
-
-    def close(self):
-        """Clean up resources.
-
-        Note: This method cancels open orders but does NOT automatically close
-        positions. Closing positions is intentionally left to manual intervention
-        to prevent accidental liquidation of intended positions, especially in
-        live trading scenarios where automated position closure could result in
-        unexpected losses or interrupt longer-term trading strategies.
-
-        If you need to close positions on environment cleanup, call
-        `env.trader.close_position()` explicitly before `env.close()`.
-        """
-        self.trader.cancel_open_orders()

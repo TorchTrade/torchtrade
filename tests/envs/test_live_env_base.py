@@ -20,6 +20,7 @@ import math
 from types import SimpleNamespace
 
 import pytest
+from torchrl.envs.common import EnvBase
 from unittest.mock import MagicMock, patch
 
 import logging
@@ -56,9 +57,14 @@ def _subclasses(cls):
 
 
 # Discovered, not hand-listed: a hand-listed exchange #6 would silently escape the guard.
-# __subclasses__() is a live registry, so do NOT define a TorchTradeLiveEnv subclass in any
-# test module -- it would land in here, import-order dependent.
-LIVE_ENVS = sorted(_subclasses(TorchTradeLiveEnv), key=lambda c: c.__name__)
+# __subclasses__() is a live registry, so the package filter is load-bearing: a test
+# harness that subclasses a live base to drive one method in isolation would otherwise
+# land in here, import-order dependent, and be asked for specs it never had. That was a
+# comment asking test authors to remember; it is now a condition.
+LIVE_ENVS = sorted(
+    (c for c in _subclasses(TorchTradeLiveEnv) if c.__module__.startswith("torchtrade.")),
+    key=lambda c: c.__name__,
+)
 
 # The plain envs (env.py). The SLTP ones get their sync from SLTPMixin instead.
 NON_SLTP_ENVS = [c for c in LIVE_ENVS if c.__module__.endswith(".env")]
@@ -280,22 +286,28 @@ def test_position_sync_resolves_to_a_shared_implementation(env_cls):
     )
 
 
-def test_exactly_five_resets_derive_the_position():
-    """One position-deriving _reset per exchange, and the guard below sees all five.
+def test_only_two_resets_derive_the_position():
+    """Was five hand-rolled copies; the four futures ones are now one (#288).
 
-    That guard skips a _reset that only delegates. Move a derivation into a helper and the
-    class starts skipping too -- the guard would then cover less while staying green. A review
-    demonstrated exactly that: the old exact-zero rule went back into okx behind a helper and
-    the suite stayed green, with only the skip count moving.
+    Two of the five silently discarded `cancel_open_orders()` / `close_position()`
+    failures that the other two warned about -- a failed cancel leaves live brackets on a
+    position the new episode believes is clean. That is what five copies buys you, and it
+    is why this counts DERIVATIONS rather than trusting that they agree.
+
+    LIVE_ENVS already recurses through __subclasses__, so intermediate bases are in it --
+    an MRO walk here adds only EnvBase, Module and object. Measured, after writing the
+    opposite in a docstring.
     """
-    deriving = [
+    deriving = {
         c for c in LIVE_ENVS
         if (r := c.__dict__.get("_reset")) is not None
         and "current_position" in inspect.getsource(r)
-    ]
-    assert len(deriving) == 5, (
-        f"expected one position-deriving _reset per exchange, found {len(deriving)}: "
-        f"{[c.__name__ for c in deriving]}"
+    }
+    assert {c.__name__ for c in deriving} == {
+        "AlpacaBaseTorchTradingEnv", "TorchTradeFuturesLiveEnv"
+    }, (
+        f"expected the futures venues to share one _reset and alpaca to keep its own, "
+        f"found {sorted(c.__name__ for c in deriving)}"
     )
 
 
@@ -303,22 +315,18 @@ def test_exactly_five_resets_derive_the_position():
 def test_every_reset_uses_the_shared_direction_rule(env_cls):
     """_reset must derive the position with the SAME dust rule as _step.
 
-    The five resets each hand-rolled an exact-zero check until now: at qty=1e-12 reset
-    reported a phantom position in account_state that the agent does not hold, while _step
-    read it as flat. One rule, or they disagree.
+    At qty=1e-12 a hand-rolled exact-zero check reports a phantom position in
+    account_state that the agent does not hold, while _step reads it as flat.
 
-    Applies to whichever class actually DERIVES the position; the SLTP envs' _reset only
-    delegates to super() and then resets brackets, so it is not one of them.
+    Resolved through the MRO, so a venue that re-forks _reset is caught rather than
+    skipped -- the SLTP envs' own _reset only delegates to super() and resets brackets.
     """
-    reset = env_cls.__dict__.get("_reset")
+    reset = next((c.__dict__["_reset"] for c in env_cls.__mro__ if "_reset" in c.__dict__
+                  and "current_position" in inspect.getsource(c.__dict__["_reset"])), None)
     if reset is None:
         pytest.skip(f"{env_cls.__name__} inherits _reset")
 
-    source = inspect.getsource(reset).lstrip()
-    if "current_position" not in source:
-        pytest.skip(f"{env_cls.__name__}._reset delegates the position derivation")
-
-    tree = ast.parse(source)
+    tree = ast.parse(inspect.getsource(reset).lstrip())
     called = {n.func.id for n in ast.walk(tree)
               if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
     assert "position_direction_from_status" in called, (
@@ -2264,6 +2272,7 @@ def test_every_live_config_validates_its_action_levels(exchange):
     config_cls = next(
         v for k, v in vars(module).items()
         if k.endswith("Config") and hasattr(v, "__dataclass_fields__")
+        and v.__module__ == module.__name__
     )
     with pytest.raises(ValueError):
         config_cls(symbol="BTC/USD", action_levels=[0.0, float("nan"), 1.0])
@@ -2399,8 +2408,12 @@ def _build_env_with(env_cls, module, trader):
         "observation_features": ["a", "b", "c", "d"], "original_features": []})
     observer.intervals, observer.window_sizes = ["1m"], [10]
 
+    # __module__, not just the name: `vars` also carries any config imported into the
+    # module. Both env_sltp modules import their shared base, and without this filter
+    # `next` returns THAT -- a test that silently stops testing the venue (#288).
     config_cls = next(v for k, v in vars(module).items()
-                      if k.endswith("Config") and hasattr(v, "__dataclass_fields__"))
+                      if k.endswith("Config") and hasattr(v, "__dataclass_fields__")
+                      and v.__module__ == module.__name__)
     try:
         config = config_cls(symbol="BTCUSDT", demo=True, time_frames=["1m"],
                             window_sizes=[10], execute_on="1m", leverage=5)
@@ -3132,3 +3145,170 @@ def test_the_shared_defaults_pin_covers_every_hoisted_field():
     """
     hoisted = {f.name for f in dataclasses.fields(BaseFuturesSLTPConfig)}
     assert set(SHARED_DEFAULTS) | {"symbol", "observation_failure_policy"} == hoisted
+
+
+# Every class that defines close(), discovered: a sixth exchange cannot opt out.
+CLOSE_OWNERS = sorted(
+    {c for env in LIVE_ENVS for c in env.__mro__
+     if "close" in c.__dict__ and c.__module__.startswith("torchtrade.")},
+    key=lambda c: c.__name__,
+)
+
+_RESET_LOGGER = TorchTradeFuturesLiveEnv.__module__
+
+
+class _ResetStub:
+    """Minimal stand-in for a futures env, so the shared _reset can be driven directly.
+
+    Not a mock: a MagicMock's methods are truthy, which is exactly the failure mode these
+    tests exist to detect -- `if not self.trader.cancel_open_orders()` would never fire.
+    """
+
+    def __init__(self, cancel_ok=True, close_ok=True, close_on_reset=False):
+        outer = self
+
+        class _Trader:
+            def cancel_open_orders(self): return cancel_ok
+            def close_position(self): return close_ok
+            def get_account_balance(self): return {"available_balance": 1000.0}
+            def get_status(self): return {"position_status": None}
+
+        class _Observer:
+            def reset(self): pass
+
+        self.history_reset_calls = 0
+        self.sync_action_level_calls = 0
+        self.trader, self.observer = _Trader(), _Observer()
+        self.history = SimpleNamespace(reset=lambda: setattr(
+            outer, "history_reset_calls", outer.history_reset_calls + 1))
+        self.position = SimpleNamespace(hold_counter=7, current_position=1)
+        self.config = SimpleNamespace(close_position_on_reset=close_on_reset)
+        self.balance = 0.0
+
+    _reset = TorchTradeFuturesLiveEnv._reset
+
+    def _sync_action_level_after_reset(self):
+        # Load-bearing for binance and bitget: their duplicate-action guard compares
+        # against current_action_level, so dropping this call makes _reset silently
+        # refuse the first trade of the episode. Its only other cover was an incidental
+        # assertion in one bitget test.
+        self.sync_action_level_calls += 1
+
+    _get_observation = lambda self, advance_hold=True: advance_hold
+
+
+@pytest.mark.parametrize("kwargs,expected", [
+    (dict(cancel_ok=False), "cancel_open_orders failed"),
+    (dict(close_ok=False, close_on_reset=True), "close_position failed"),
+    (dict(cancel_ok=False, close_ok=False, close_on_reset=True), "close_position failed"),
+], ids=["stale-brackets", "residual-exposure", "both-fail-still-reports-the-second"])
+def test_a_failed_reset_cleanup_is_not_swallowed(caplog, kwargs, expected):
+    """binance and bitget discarded both return values; bybit and okx warned (#288).
+
+    A failed cancel leaves live brackets attached to a position the new episode believes
+    is clean; a failed close leaves real exposure the account state will not show.
+    Neither is recoverable here -- the episode has to start -- but silence made them
+    invisible, and the fold had to pick one behaviour for all four venues.
+    """
+    with caplog.at_level(logging.WARNING, logger=_RESET_LOGGER):
+        _ResetStub(**kwargs)._reset(None)
+    assert any(expected in r.message for r in caplog.records), (
+        f"a failed reset cleanup logged nothing; records={[r.message for r in caplog.records]}"
+    )
+
+
+def test_a_clean_reset_is_silent_and_zeroes_the_hold_counter(caplog):
+    """All four venues return True from both calls when flat, so a flat reset must not warn.
+
+    The silence is the point, not a detail: warnings that fire on every episode start are
+    noise that hides the one that matters. Nothing pinned it, and "warn unconditionally"
+    survived the whole live suite.
+
+    Also pins that the hold counter is zeroed BEFORE the observation is read with
+    advance_hold=False -- a reset that counted its own bar would age a fresh position --
+    and that the four single lines the fold created still run at all.
+    """
+    stub = _ResetStub()
+    with caplog.at_level(logging.WARNING, logger=_RESET_LOGGER):
+        assert stub._reset(None) is False  # advance_hold=False reached _get_observation
+    ours = [r for r in caplog.records if r.name == _RESET_LOGGER]
+    assert not ours, [r.message for r in ours]
+    assert stub.history_reset_calls == 1
+    assert stub.sync_action_level_calls == 1
+    assert stub.balance == 1000.0
+    assert stub.position.hold_counter == 0
+    assert stub.position.current_position == 0  # flat; the dust rule itself is pinned
+    # by test_every_reset_uses_the_shared_direction_rule, which reads the source.
+
+
+class _CloseHarness(TorchTradeFuturesLiveEnv):
+    """A real subclass, because close() calls zero-arg super().
+
+    Built with object.__new__ so EnvBase.__init__ (specs, device, batch size) is skipped
+    -- close() reads nothing but `self.trader`. See _ResetStub on why not a MagicMock.
+    """
+
+    def _init_trading_clients(self, *a, **k): raise NotImplementedError
+    def _step(self, tensordict): raise NotImplementedError
+    def _execute_trade_if_needed(self, action): raise NotImplementedError
+
+    @classmethod
+    def build(cls, direction=0, cancel_raises=False, status_raises=False):
+        self = object.__new__(cls)
+        self.cancelled = False
+
+        class _Trader:
+            def get_status(_):
+                if status_raises: raise RuntimeError("exchange down")
+                return {"position_status": SimpleNamespace(qty=direction)}
+            def cancel_open_orders(_):
+                if cancel_raises: raise RuntimeError("cancel blew up")
+                self.cancelled = True
+
+        self.trader = _Trader()
+        return self
+
+
+@pytest.mark.parametrize("kwargs,expect_log,still_cancels", [
+    (dict(direction=1), "Closing environment with open position", True),
+    (dict(direction=0), None, True),
+    (dict(status_raises=True), None, True),
+    (dict(direction=1, cancel_raises=True), "Failed to cancel open orders", False),
+], ids=["open-position-warns", "flat-is-silent", "status-failure-still-cleans-up", "cancel-failure-is-logged"])
+def test_close_warns_but_never_raises(caplog, kwargs, expect_log, still_cancels):
+    """close() was three different versions; binance's warned about nothing (#288).
+
+    It deliberately does not close positions -- automated closure on cleanup could
+    liquidate an intended position -- so the warning is the ONLY signal that you are
+    walking away from live exposure. Nothing tested it on any venue.
+
+    It must also never raise: close() runs during teardown, where an exception replaces
+    whatever error you were actually trying to see.
+    """
+    stub = _CloseHarness.build(**kwargs)
+    with caplog.at_level(logging.WARNING):
+        stub.close()
+    assert stub.cancelled is still_cancels
+    ours = [r for r in caplog.records if r.name == TorchTradeFuturesLiveEnv.__module__]
+    if expect_log is None:
+        assert not ours, [r.message for r in ours]
+    else:
+        assert any(expect_log in r.message for r in ours)
+
+
+@pytest.mark.parametrize("owner", [
+    pytest.param(c, id=c.__name__) for c in CLOSE_OWNERS
+])
+def test_close_accepts_the_keyword_torchrl_passes_it(owner):
+    """`TransformedEnv.close` forwards `raise_if_closed` unconditionally.
+
+    Every live env had a bare `def close(self)`, so closing a wrapped env died with
+    TypeError -- and `examples/llm/frontier/live.py:150` does exactly that. Discovered
+    rather than hardcoded: pinning only the class already fixed is how alpaca kept the
+    bug through a PR that fixed the other four.
+    """
+    ours = inspect.signature(owner.__dict__["close"]).parameters
+    theirs = inspect.signature(EnvBase.close).parameters
+    assert [(n, p.kind, p.default) for n, p in ours.items()] == [
+        (n, p.kind, p.default) for n, p in theirs.items()
+    ]

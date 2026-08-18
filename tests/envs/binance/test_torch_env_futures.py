@@ -1,5 +1,6 @@
 """Tests for BinanceFuturesTorchTradingEnv."""
 
+import logging
 import pytest
 import torch
 from torchrl.envs.utils import check_env_specs
@@ -282,11 +283,22 @@ class TestBinanceFuturesTorchTradingEnv:
             next_td = env.step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
             assert next_td["next"]["done"].item() is expected_done
 
-    def test_close_method(self, env, mock_trader):
-        """Test environment close method."""
-        env.close()
-        mock_trader.cancel_open_orders.assert_called()
+    def test_close_method(self, env, mock_trader, caplog):
+        """close() cancels orders, warns about an open position, and never raises.
 
+        `assert_called()` here was satisfied by __init__, which cancels too -- so a
+        close() that did nothing at all passed. Reset the mock first (#288).
+        """
+        mock_trader.cancel_open_orders.reset_mock()
+        mock_trader.get_status = MagicMock(return_value={"position_status": None})
+        with caplog.at_level(logging.WARNING, logger="torchtrade.envs.live.shared.futures_live_base"):
+            env.close()
+        mock_trader.cancel_open_orders.assert_called_once()
+        assert not caplog.records, [r.message for r in caplog.records]
+
+    # close()/reset() cleanup-failure coverage lives in bybit's copy and in
+    # test_live_env_base.py: all four venues resolve both to the SAME shared function.
+    # Deleting okx's copy was justified by that; keeping binance's would not be.
     def test_reenters_after_external_position_close(self, env, mock_trader):
         """A position closed on the exchange must not leave the guard refusing to re-enter.
 

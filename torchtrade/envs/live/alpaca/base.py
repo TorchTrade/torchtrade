@@ -365,8 +365,10 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         """Reset the environment."""
         # Before any read below -- see the bybit copy for why the order matters (#278).
         self.observer.reset()
-        # Cancel all orders
-        self.trader.cancel_open_orders()
+        if not self.trader.cancel_open_orders():
+            logger.warning(
+                "cancel_open_orders failed during reset; proceeding with potentially stale orders"
+            )
         if self.config.close_position_on_reset:
             # close_position(), not close_all_positions(): the latter iterates
             # get_all_positions() over the WHOLE account, so an opt-in reset flatten
@@ -438,7 +440,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
             "Subclasses must implement _calculate_trade_amount()"
         )
 
-    def close(self):
+    def close(self, *, raise_if_closed: bool = True):
         """Clean up resources.
 
         Cancels orders; does NOT flatten. All four futures envs only warn here and tell
@@ -448,8 +450,18 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         `examples/rule_based/live.py`, `examples/llm/local/live.py` and
         `examples/llm/frontier/live.py` call `env.close()`; they now exit with the
         position open, which is what the futures envs have always done.
+
+        Keyword-only, matching EnvBase.close: TransformedEnv forwards `raise_if_closed`.
         """
-        self.trader.cancel_open_orders()
+        # Guarded like the futures close(): teardown is where an exception replaces
+        # whatever error you were actually trying to see.
+        try:
+            if not self.trader.cancel_open_orders():
+                logger.warning(
+                    "cancel_open_orders failed during close(); orders may remain open"
+                )
+        except Exception as e:
+            logger.error(f"Failed to cancel open orders on close(): {e}")
         try:
             # The dust rule, not `is not None`: a 1e-12 residual is not a position
             # (invariant 1), and an unknown status must not be reported as a held one.
@@ -464,6 +476,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
                 "%s still holds a position at close(); call trader.close_position() "
                 "first if you want it flattened", self.config.symbol,
             )
+        super().close(raise_if_closed=raise_if_closed)
 
     def _get_current_price(self, position_status=None) -> float:
         """Get current market price with fallback chain.

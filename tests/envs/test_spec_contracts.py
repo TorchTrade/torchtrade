@@ -191,9 +191,16 @@ class _StubObserver:
 
 def _concrete_live_envs():
     """Discovered, not hand-listed, so exchange #6 cannot skip this by being forgotten.
-    Abstract bases are dropped -- EnvBase.__new__ rejects them."""
+
+    Abstract bases are dropped -- EnvBase.__new__ rejects them -- and so is anything
+    defined outside the package: a test harness that subclasses a live base to drive one
+    method would otherwise be discovered as an eleventh exchange and asked for specs it
+    was never built to have.
+    """
     return sorted(
-        (c for c in set(_subclasses(TorchTradeLiveEnv)) if not getattr(c, "__abstractmethods__", None)),
+        (c for c in set(_subclasses(TorchTradeLiveEnv))
+         if not getattr(c, "__abstractmethods__", None)
+         and c.__module__.startswith("torchtrade.")),
         key=lambda c: c.__name__,
     )
 
