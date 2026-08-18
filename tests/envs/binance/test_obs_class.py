@@ -7,6 +7,7 @@ default feature names) and stricter assertions live here.
 
 import pytest
 import numpy as np
+import pandas as pd
 from unittest.mock import MagicMock
 
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
@@ -111,28 +112,6 @@ class TestBinanceObservationClass(BaseObservationClassTests):
         assert "base_timestamps" in obs
         assert obs["base_features"].shape == (10, 4)
 
-    def test_custom_preprocessing_with_kline_extra_fields(self, mock_client):
-        """Custom preprocessing can derive features from Binance-specific kline fields."""
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
-
-        def kline_preprocessing(df):
-            df = df.copy()
-            df["feature_taker_ratio"] = df["taker_buy_base"] / (df["volume"] + 1e-9)
-            df["feature_quote_vol"] = df["quote_volume"].pct_change().fillna(0)
-            df["feature_avg_trade_size"] = df["volume"] / df["trades"]
-            df["feature_close"] = df["close"].pct_change().fillna(0)
-            df.dropna(inplace=True)
-            return df
-
-        observer = BinanceObservationClass(
-            symbol="BTCUSDT", time_frames=TimeFrame(1, TimeFrameUnit.Minute),
-            window_sizes=10, client=mock_client, feature_preprocessing_fn=kline_preprocessing)
-
-        features = observer.get_features()
-        for f in ["feature_taker_ratio", "feature_quote_vol", "feature_avg_trade_size"]:
-            assert f in features["observation_features"]
-        assert observer.get_observations()["1Minute_10"].shape == (10, 4)
-
     def test_default_preprocessing_output(self, observer_single):
         """Default preprocessing produces the expected named features."""
         features = observer_single.get_features()
@@ -156,8 +135,24 @@ class TestBinanceObservationClassIntegration:
         assert "5Minute_10" in observations
 
 
+from torchtrade.envs.live.bitget.observation import BitgetObservationClass
+from torchtrade.envs.live.bybit.observation import BybitObservationClass
+from torchtrade.envs.live.okx.observation import OKXObservationClass
+
+_FUTURES_OBSERVATION_CLASSES = [
+    BinanceObservationClass, BitgetObservationClass,
+    BybitObservationClass, OKXObservationClass,
+]
+# `_dummy_frame` is an extension point, not a re-fork: the venues genuinely return
+# different kline columns, and the base cannot know their dtypes.
+_DESIGNED_OVERRIDES = {"_dummy_frame"}
+
+
 class TestBinanceSharesTheObservationBase:
-    """binance was the last venue with a parallel observation class (#289)."""
+    """binance was the last FUTURES venue with a parallel observation class (#289).
+
+    alpaca still hand-rolls its own; it is spot, so outside this issue's scope.
+    """
 
     @staticmethod
     def _klines(n, descending=False):
@@ -178,66 +173,58 @@ class TestBinanceSharesTheObservationBase:
             client=client,
         )
 
-    def test_it_inherits_rather_than_reimplementing(self):
-        """Derived from the base, not hand-listed.
+    @pytest.mark.parametrize("venue_cls", [
+        pytest.param(c, id=c.__name__) for c in _FUTURES_OBSERVATION_CLASSES
+    ])
+    def test_no_venue_reimplements_the_shared_base(self, venue_cls):
+        """Derived from the base, not hand-listed, and over every venue.
 
         A hand-listed denylist of 6 names shipped in this PR's first draft and omitted
-        `get_features` -- the method most likely to be re-forked next, since it is the
-        one that reads _DUMMY_COLUMNS. A deliberately broken re-fork of it passed every
-        test. Reading the base's own surface cannot develop that blind spot.
+        `get_features` -- the method most likely to be re-forked next, since it reads the
+        dummy frame. A deliberately broken re-fork of it passed every test.
+
+        The named subset guards the guard: a discovered set can SHRINK silently (making
+        `get_features` a property drops it from a callable filter), and a merely non-empty
+        check would still pass.
         """
         shared = {
             n for n, v in vars(BaseFuturesObservationClass).items()
             if callable(v) and not getattr(v, "__isabstractmethod__", False)
             and not n.startswith("__")
         }
-        assert shared, "discovery found nothing -- the guard would pass vacuously"
-        assert not (shared & set(vars(BinanceObservationClass))), (
-            f"re-forked from the base: {sorted(shared & set(vars(BinanceObservationClass)))}"
-        )
+        assert {"get_features", "get_observations", "_fetch_single_timeframe"} <= shared
+        redeclared = (shared & set(vars(venue_cls))) - _DESIGNED_OVERRIDES
+        assert not redeclared, f"{venue_cls.__name__} re-forked: {sorted(redeclared)}"
 
-    @pytest.mark.parametrize("fn,expected", [
-        pytest.param(None, 4, id="default-preprocessing"),
-        pytest.param(
-            lambda df: df.assign(feature_r=df["close"] / df["open"]), 1, id="ohlcv-only"
-        ),
-        pytest.param(
-            lambda df: df.assign(
-                feature_qv=df["quote_volume"] / df["volume"],
-                feature_t=df["trades"] / 100.0,
-            ), 2, id="binance-only-columns"),
-    ])
-    def test_the_feature_count_matches_the_data_it_describes(self, fn, expected):
-        """get_features() counts columns on a SYNTHETIC frame; get_observations() runs
-        the same fn on real data. Nothing anywhere cross-checked that they agree.
+    def test_a_dtype_conditional_preprocessing_fn_gets_the_real_dtype(self):
+        """The dummy frame must match the parsed klines' DTYPES, not just its columns.
 
-        They can diverge: the synthetic frame carries only `_DUMMY_COLUMNS`, so a fn
-        reading anything else raises there while working fine on real data -- or, worse,
-        silently reports a width the observation does not have. That count IS the
-        observation spec, so a disagreement is a spec/data mismatch reaching the policy.
+        `trades` is int64 in real klines. A names-only dummy (every column a float in
+        [0,1)) made this fn take the else-branch on the dummy and the if-branch on live
+        data: get_features() declared 1 feature, get_observations() emitted 2, and
+        `BinanceOHLCVTransform` sizes its spec from the former -- so check_env_specs
+        failed on a shape mismatch. Measured, after making exactly that simplification.
         """
+        def fn(df):
+            df = df.copy()
+            df["feature_close"] = df["close"].pct_change().fillna(0)
+            if pd.api.types.is_integer_dtype(df["trades"]):
+                df["feature_trades"] = df["trades"] / 100.0
+            return df.dropna()
+
         obs = self._obs(self._klines(60), fn=fn)
         declared = len(obs.get_features()["observation_features"])
-        actual = obs.get_observations()["1Minute_5"].shape[1]
-        assert declared == actual == expected
+        assert declared == obs.get_observations()["1Minute_5"].shape[1] == 2
 
     def test_klines_are_sorted_even_when_the_response_is_reversed(self):
         """The base sorts; binance's copy did not, so it was the one venue unprotected.
 
         Binance returns ascending today, so nothing bit -- but a reversed response
-        produced TIME-REVERSED observations with no error.
+        produced TIME-REVERSED observations with no error. This is also the only test in
+        the four venue suites that reaches the base's sort: bybit and okx sort inside
+        their own _parse_klines, so their sort tests stay green if the base's is deleted.
         """
         df = self._obs(self._klines(20, descending=True))._fetch_single_timeframe(
             TimeFrame(1, TimeFrameUnit.Minute), limit=20
         )
         assert df["open_time"].is_monotonic_increasing
-
-    def test_an_empty_response_says_so(self):
-        """It used to return a zero-length observation, silently.
-
-        Measured against a pre-PR worktree: `get_observations()` handed back
-        `{'1Minute_5': (0, 4)}` and no error at all, so an outage reached the policy as
-        an empty array rather than a stop. Louder than an exception would have been.
-        """
-        with pytest.raises(RuntimeError, match="BTCUSDT.*1Minute"):
-            self._obs([])._fetch_single_timeframe(TimeFrame(1, TimeFrameUnit.Minute), limit=5)

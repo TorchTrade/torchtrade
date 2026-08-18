@@ -228,19 +228,30 @@ class BaseFuturesObservationClass(ABC):
             for tf, ws in zip(self.time_frames, self.window_sizes)
         ]
 
-    # Columns get_features() puts in front of the user's preprocessing fn. Overridable
-    # because the venues do not return the same set: binance klines carry quote_volume,
-    # trades and the taker-buy fields, and a preprocessing fn is free to read them --
-    # against an OHLCV-only frame those functions raise KeyError. Not the full parsed
-    # schema: the timestamp columns are omitted here on every venue.
-    _DUMMY_COLUMNS = ("open", "high", "low", "close", "volume")
+    def _dummy_frame(self, window_size: int) -> pd.DataFrame:
+        """A frame standing in for this venue's parsed klines, to count feature columns.
+
+        A method rather than a column tuple because DTYPE AND MAGNITUDE MATTER, which is
+        not obvious and was measured the hard way: replacing this with a names-only tuple
+        made binance's `trades` a float in [0, 1) where real klines carry int64 counts in
+        the hundreds. A preprocessing fn branching on either -- `is_integer_dtype(...)`,
+        or a threshold -- then takes a different branch here than on live data, and
+        `get_features()` reports a width the observation does not have. That width IS the
+        spec for `BinanceOHLCVTransform`, so the mismatch reaches `check_env_specs`.
+
+        Overridable because the venues do not return the same columns: binance klines
+        carry quote_volume, trades and the taker-buy fields, and against an OHLCV-only
+        frame a fn reading them raises KeyError. The timestamp columns are omitted on
+        every venue -- a fn deriving a time-of-day feature still raises.
+        """
+        return pd.DataFrame({
+            col: np.random.rand(window_size)
+            for col in ("open", "high", "low", "close", "volume")
+        })
 
     def get_features(self) -> Dict[str, List[str]]:
         """Returns a dictionary with the observation features and the original features."""
-        dummy = pd.DataFrame({
-            c: np.random.rand(self.window_sizes[0]) for c in self._DUMMY_COLUMNS
-        })
-        dummy_df = self.feature_preprocessing_fn(dummy)
+        dummy_df = self.feature_preprocessing_fn(self._dummy_frame(self.window_sizes[0]))
         observation_features = [f for f in dummy_df.columns if "feature" in f]
         original_features = [f for f in dummy_df.columns if "feature" not in f]
         return {"observation_features": observation_features, "original_features": original_features}

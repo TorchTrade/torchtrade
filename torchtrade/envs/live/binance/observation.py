@@ -1,6 +1,7 @@
 """Observation class for fetching market data from Binance."""
 from typing import Callable, List, Optional, Union
 
+import numpy as np
 import pandas as pd
 
 from torchtrade.envs.live.shared.futures_base_obs import BaseFuturesObservationClass
@@ -18,11 +19,6 @@ _NUMERIC_COLUMNS = [
 
 class BinanceObservationClass(BaseFuturesObservationClass):
     """Binance market data via the shared futures observation base (#289)."""
-
-    # Binance klines carry more than OHLCV and a preprocessing fn may read it.
-    _DUMMY_COLUMNS = BaseFuturesObservationClass._DUMMY_COLUMNS + (
-        "quote_volume", "trades", "taker_buy_base", "taker_buy_quote",
-    )
 
     def __init__(
         self,
@@ -55,7 +51,7 @@ class BinanceObservationClass(BaseFuturesObservationClass):
         return timeframe_to_binance(timeframe)
 
     def _get_default_lookback(self) -> int:
-        return 500  # binance's own per-request limit
+        return 500  # binance's kline default page size (its max is 1000)
 
     def _get_timestamp_column(self) -> str:
         return "open_time"
@@ -66,11 +62,19 @@ class BinanceObservationClass(BaseFuturesObservationClass):
     def _parse_klines(self, raw_klines: list) -> pd.DataFrame:
         df = pd.DataFrame(raw_klines, columns=_KLINE_COLUMNS)
         # to_numeric with coerce, not astype: a malformed row becomes NaN rather than
-        # killing the whole fetch. Preprocessing drops it -- but note base_features is
-        # built from the UNprocessed frame, so a NaN can still reach that one.
+        # killing the whole fetch, and preprocessing drops it.
         for col in _NUMERIC_COLUMNS:
             df[col] = pd.to_numeric(df[col], errors="coerce")
         df["trades"] = pd.to_numeric(df["trades"], errors="coerce").fillna(0).astype(int)
         df["open_time"] = pd.to_datetime(df["open_time"], unit="ms")
         df["close_time"] = pd.to_datetime(df["close_time"], unit="ms")
         return df.drop(columns=["ignore"])
+
+    def _dummy_frame(self, window_size: int) -> pd.DataFrame:
+        """Binance klines carry more than OHLCV, at their real dtypes and magnitudes."""
+        df = super()._dummy_frame(window_size)
+        df["quote_volume"] = np.random.rand(window_size)
+        df["trades"] = np.random.randint(1, 100, window_size)  # int64, as _parse_klines makes it
+        df["taker_buy_base"] = np.random.rand(window_size)
+        df["taker_buy_quote"] = np.random.rand(window_size)
+        return df

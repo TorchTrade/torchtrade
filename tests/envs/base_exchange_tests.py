@@ -207,6 +207,25 @@ class BaseObservationClassTests(ABC):
 
     # get_features tests
 
+    def test_the_declared_feature_width_matches_the_observation(self):
+        """get_features() counts columns on a SYNTHETIC frame; get_observations() runs the
+        same fn on real data. Nothing cross-checked that they agree.
+
+        They can diverge whenever the synthetic frame differs from the parsed klines in a
+        way the preprocessing fn is sensitive to -- a missing column, or the wrong dtype.
+        That count IS the observation spec for the venue transforms, so a disagreement is
+        a spec/data mismatch that surfaces at check_env_specs, or silently as a wrong
+        width. Measured: it was reachable on binance (#289 review).
+        """
+        observer = self.create_observer(
+            symbol="BTC/USD",
+            timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=10,
+        )
+        key = observer.get_keys()[0]
+        declared = len(observer.get_features()["observation_features"])
+        assert declared == observer.get_observations()[key].shape[1]
+
     def test_get_features_default_preprocessing(self):
         """Test get_features with default preprocessing."""
         observer = self.create_observer(
