@@ -9,6 +9,7 @@ import torch
 logger = logging.getLogger(__name__)
 from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.core.common import validate_trade_mode, validate_position_sizing
 from torchtrade.envs.live.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass, TradeMode
@@ -52,14 +53,16 @@ class AlpacaSLTPTradingEnvConfig:
     include_base_features: bool = False
 
     def __post_init__(self):
-        from torchtrade.envs.core.common import validate_trade_mode
         self.trade_mode = validate_trade_mode(self.trade_mode)
-        if self.trade_mode == "fractional":
-            if not (0 < self.position_fraction <= 1.0):
-                raise ValueError(f"position_fraction must be in (0, 1.0], got {self.position_fraction}")
-        elif self.trade_mode == "notional":
-            if self.quantity_per_trade <= 0:
-                raise ValueError(f"quantity_per_trade must be positive, got {self.quantity_per_trade}")
+        if self.trade_mode == "quantity":
+            raise ValueError(
+                "trade_mode='quantity' is not supported for Alpaca SLTP -- its bracket "
+                "order API takes dollar amounts. Use 'notional' or 'fractional'. "
+                "(_calculate_trade_amount raised this one trade later, mid-episode.)"
+            )
+        validate_position_sizing(
+            self.trade_mode, self.position_fraction, self.quantity_per_trade
+        )
         self.execute_on, self.time_frames, self.window_sizes = normalize_alpaca_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )

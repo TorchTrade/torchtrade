@@ -122,10 +122,12 @@ def test_every_futures_step_reads_state_through_the_halting_helper(exchange, mod
 @pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
 @pytest.mark.parametrize("module", ["env", "env_sltp"])
 def test_every_futures_config_coerces_its_failure_policy(exchange, module):
-    """Eight dataclasses each declare the field and coerce it in __post_init__.
+    """A bad policy string must be rejected at the boundary, not in production.
 
-    A copy-pasted config missing the coercion would accept a bad string and only fail in
-    production -- the opposite of validating at the boundary.
+    The `__module__` filter matches the env_cls discovery above and is load-bearing: the
+    SLTP configs now import their shared base into the module namespace, and without it
+    `next()` returns that base for all four venues -- so this test silently stopped
+    exercising the subclass coercion it exists to pin (#288 review).
     """
     import importlib
     import inspect
@@ -133,7 +135,8 @@ def test_every_futures_config_coerces_its_failure_policy(exchange, module):
     ns = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}").__dict__
     cfg_cls = next(v for k, v in ns.items()
                    if inspect.isclass(v) and k.endswith("Config")
-                   and hasattr(v, "observation_failure_policy"))
+                   and hasattr(v, "observation_failure_policy")
+                   and v.__module__.endswith(module))
 
     assert cfg_cls().observation_failure_policy is ObservationFailurePolicy.HALT
     assert cfg_cls(observation_failure_policy="flatten").observation_failure_policy is (
