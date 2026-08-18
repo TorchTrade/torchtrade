@@ -8,7 +8,10 @@ default feature names) and stricter assertions live here.
 import pytest
 import numpy as np
 from unittest.mock import MagicMock
+
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.live.shared.futures_base_obs import BaseFuturesObservationClass
+from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from tests.envs.base_exchange_tests import BaseObservationClassTests
 
 
@@ -151,3 +154,72 @@ class TestBinanceObservationClassIntegration:
         observations = observer.get_observations()
         assert "1Minute_10" in observations
         assert "5Minute_10" in observations
+
+
+class TestBinanceSharesTheObservationBase:
+    """binance was the last venue with a parallel observation class (#289)."""
+
+    @staticmethod
+    def _klines(n, descending=False):
+        base = 1700000000000
+        rows = [[base + i * 60000, "100", "101", "99", "100.5", "10",
+                 base + (i + 1) * 60000 - 1, "1000", "50", "5", "500", "0"]
+                for i in range(n)]
+        return list(reversed(rows)) if descending else rows
+
+    def _obs(self, rows, fn=None, window=5):
+        client = MagicMock()
+        client.get_klines = MagicMock(return_value=rows)
+        return BinanceObservationClass(
+            symbol="BTC/USDT",
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=window,
+            feature_preprocessing_fn=fn,
+            client=client,
+        )
+
+    def test_it_inherits_rather_than_reimplementing(self):
+        """4 of its 9 shared methods were byte-identical to the base's before this."""
+        assert issubclass(BinanceObservationClass, BaseFuturesObservationClass)
+        redeclared = {
+            n for n in ("_default_preprocessing", "_get_numpy_obs", "get_keys", "reset",
+                        "_fetch_single_timeframe", "get_observations")
+            if n in vars(BinanceObservationClass)
+        }
+        assert not redeclared, f"re-forked from the base: {sorted(redeclared)}"
+
+    def test_a_preprocessing_fn_may_read_binance_only_kline_columns(self):
+        """`quote_volume`/`trades`/`taker_buy_*` are in binance klines but not OHLCV.
+
+        get_features() counts columns against a DUMMY frame, so an OHLCV-only dummy
+        would raise KeyError for exactly the functions that use what binance returns --
+        the one behaviour that could not survive inheriting the base unchanged.
+        """
+        def fn(df):
+            df = df.copy()
+            df["feature_qv"] = df["quote_volume"] / df["volume"]
+            df["feature_trades"] = df["trades"] / 100.0
+            return df.dropna()
+
+        obs = self._obs(self._klines(60), fn=fn)
+        assert obs.get_features()["observation_features"] == ["feature_qv", "feature_trades"]
+        # and the same columns survive an actual fetch, not just the dummy
+        assert obs.get_observations()["1Minute_5"].shape == (5, 2)
+
+    def test_klines_are_sorted_even_when_the_response_is_reversed(self):
+        """The base sorts; binance's copy did not, so it was the one venue unprotected.
+
+        Binance returns ascending today, so nothing bit -- but a reversed response
+        produced TIME-REVERSED observations with no error, which is a policy reading
+        the future as the past.
+        """
+        df = self._obs(self._klines(20, descending=True))._fetch_single_timeframe(
+            TimeFrame(1, TimeFrameUnit.Minute), limit=20
+        )
+        assert df["open_time"].is_monotonic_increasing
+
+    def test_an_empty_response_says_so(self):
+        """It used to surface as `IndexError: single positional indexer is out-of-bounds`
+        from inside pandas, naming neither the symbol nor the timeframe."""
+        with pytest.raises(RuntimeError, match="BTCUSDT.*1Minute"):
+            self._obs([])._fetch_single_timeframe(TimeFrame(1, TimeFrameUnit.Minute), limit=5)

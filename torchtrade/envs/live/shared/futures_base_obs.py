@@ -228,18 +228,23 @@ class BaseFuturesObservationClass(ABC):
             for tf, ws in zip(self.time_frames, self.window_sizes)
         ]
 
+    def _dummy_frame(self, window_size: int) -> pd.DataFrame:
+        """A frame shaped like this venue's parsed klines, for counting feature columns.
+
+        Overridable because the venues do not all return the same columns: binance klines
+        carry `quote_volume`, `trades` and the taker-buy fields, and a user's
+        `feature_preprocessing_fn` is free to read them. Counting features against an
+        OHLCV-only frame would raise KeyError for exactly those functions -- so the shape
+        is a venue fact, not a shared one.
+        """
+        return pd.DataFrame({
+            col: np.random.rand(window_size)
+            for col in ("open", "high", "low", "close", "volume")
+        })
+
     def get_features(self) -> Dict[str, List[str]]:
         """Returns a dictionary with the observation features and the original features."""
-        def get_dummy_data(window_size: int):
-            df = pd.DataFrame()
-            df["open"] = np.random.rand(window_size)
-            df["high"] = np.random.rand(window_size)
-            df["low"] = np.random.rand(window_size)
-            df["close"] = np.random.rand(window_size)
-            df["volume"] = np.random.rand(window_size)
-            return df
-
-        dummy_df = self.feature_preprocessing_fn(get_dummy_data(self.window_sizes[0]))
+        dummy_df = self.feature_preprocessing_fn(self._dummy_frame(self.window_sizes[0]))
         observation_features = [f for f in dummy_df.columns if "feature" in f]
         original_features = [f for f in dummy_df.columns if "feature" not in f]
         return {"observation_features": observation_features, "original_features": original_features}
