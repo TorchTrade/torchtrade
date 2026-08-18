@@ -3432,16 +3432,18 @@ def test_an_observer_disagreeing_with_the_config_raises_rather_than_guessing():
         BinanceFuturesTorchTradingEnv(config=config, observer=observer, trader=trader)
 
 
-@pytest.mark.parametrize("env_cls", NON_SLTP_ENVS, ids=lambda c: c.__name__)
-def test_every_live_env_exposes_the_account_state_labels(env_cls):
-    """`env.account_state` -- set by alpaca's spec builder only, and folding lost it.
+def test_the_shared_spec_builder_exposes_the_account_state_labels() -> None:
+    """`env.account_state` was set by alpaca's spec builder ONLY, and folding lost it.
 
     `examples/llm/{frontier,local}/live.py` read it off an AlpacaTorchTradingEnv to label
     the observation for the LLM actor, so dropping it raised AttributeError there with
-    the whole suite green. Pinned for all five now, not just the venue that happened to
-    have it.
+    the whole suite green -- the inverse of the usual dedup risk, where one copy has
+    something the others lack and the fold discards it.
+
+    Unparametrized: there is one builder, so per-venue cases would assert the same thing
+    five times. The DATA is pinned separately by
+    test_every_live_env_reports_the_same_account_state_layout.
     """
-    assert env_cls.ACCOUNT_STATE, f"{env_cls.__name__} declares no ACCOUNT_STATE"
     tree = ast.parse(
         textwrap.dedent(inspect.getsource(TorchTradeLiveEnv._build_observation_specs))
     )
