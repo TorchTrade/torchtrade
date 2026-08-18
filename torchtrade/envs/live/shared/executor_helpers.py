@@ -51,3 +51,16 @@ class ExecutorHelpersMixin:
             rounded = round(price / self._tick_size) * self._tick_size
             return round(rounded, self._tick_decimals)
         return price
+
+    def _format_price(self, price: float) -> str:
+        """Tick-rounded price as a deterministic string. Two verbatim copies (bybit, okx).
+
+        A string, not a float, because the venues parse the wire value and `repr` of a
+        rounded float can carry more digits than the tick allows -- which the venue then
+        rejects or silently re-rounds. The `_tick_size is None` fallback keeps `str()`
+        rather than inventing a precision the venue never reported.
+        """
+        rounded = self._round_price(price)
+        if self._tick_size is not None:
+            return f"{rounded:.{self._tick_decimals}f}"
+        return str(rounded)

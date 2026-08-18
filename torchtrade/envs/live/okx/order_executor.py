@@ -186,13 +186,6 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin):
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
 
-    def _format_price(self, price: float) -> str:
-        """Round price to tick size and format as deterministic string."""
-        rounded = self._round_price(price)
-        if self._tick_size is not None:
-            return f"{rounded:.{self._tick_decimals}f}"
-        return str(rounded)
-
     def _format_size(self, qty: float) -> str:
         """Quantize quantity to lot size step, enforce minimum, and format as string."""
         lot = self.get_lot_size()

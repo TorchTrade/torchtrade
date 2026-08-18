@@ -61,6 +61,15 @@ def test_no_executor_re_implements_the_pnl_rule_INLINE(cls):
         )
 
 
+@pytest.mark.parametrize("cls", [BybitFuturesOrderClass, OKXFuturesOrderClass],
+                         ids=lambda c: c.__name__)
+def test_price_formatting_goes_through_the_shared_helper(cls):
+    """Two verbatim copies. It emits a STRING because the venues parse the wire value and
+    `repr` of a rounded float can carry more digits than the tick allows -- so a drifted
+    copy is a rejected or silently re-rounded order, not a cosmetic difference."""
+    assert cls._format_price is ExecutorHelpersMixin._format_price
+
+
 def test_bitget_keeps_its_ccxt_rounding():
     """Pinned so a later dedup pass does not 'finish the job' by folding it in."""
     assert "price_to_precision" in inspect.getsource(BitgetFuturesOrderClass._round_price)
