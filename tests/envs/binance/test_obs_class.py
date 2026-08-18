@@ -7,8 +7,15 @@ default feature names) and stricter assertions live here.
 
 import pytest
 import numpy as np
+import pandas as pd
 from unittest.mock import MagicMock
+
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.live.shared.futures_base_obs import BaseFuturesObservationClass
+from torchtrade.envs.live.binance.observation import BinanceObservationClass
+from torchtrade.envs.live.bitget.observation import BitgetObservationClass
+from torchtrade.envs.live.bybit.observation import BybitObservationClass
+from torchtrade.envs.live.okx.observation import OKXObservationClass
 from tests.envs.base_exchange_tests import BaseObservationClassTests
 
 
@@ -32,7 +39,6 @@ class TestBinanceObservationClass(BaseObservationClassTests):
     """Binance observation class — common tests inherited from the base."""
 
     def create_observer(self, symbol, timeframes, window_sizes, **kwargs):
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
         client = kwargs.pop("client", None) or _make_binance_client()
         return BinanceObservationClass(
             symbol=symbol, time_frames=timeframes, window_sizes=window_sizes,
@@ -48,14 +54,12 @@ class TestBinanceObservationClass(BaseObservationClassTests):
 
     @pytest.fixture
     def observer_single(self, mock_client):
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
         return BinanceObservationClass(
             symbol="BTCUSDT", time_frames=TimeFrame(15, TimeFrameUnit.Minute),
             window_sizes=10, client=mock_client)
 
     @pytest.fixture
     def observer_multi(self, mock_client):
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
         return BinanceObservationClass(
             symbol="BTCUSDT",
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute),
@@ -79,7 +83,6 @@ class TestBinanceObservationClass(BaseObservationClassTests):
 
     def test_symbol_normalization(self, mock_client):
         """Slash is stripped from the symbol."""
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
         observer = BinanceObservationClass(
             symbol="BTC/USDT", time_frames=TimeFrame(1, TimeFrameUnit.Minute),
             window_sizes=10, client=mock_client)
@@ -108,28 +111,6 @@ class TestBinanceObservationClass(BaseObservationClassTests):
         assert "base_timestamps" in obs
         assert obs["base_features"].shape == (10, 4)
 
-    def test_custom_preprocessing_with_kline_extra_fields(self, mock_client):
-        """Custom preprocessing can derive features from Binance-specific kline fields."""
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
-
-        def kline_preprocessing(df):
-            df = df.copy()
-            df["feature_taker_ratio"] = df["taker_buy_base"] / (df["volume"] + 1e-9)
-            df["feature_quote_vol"] = df["quote_volume"].pct_change().fillna(0)
-            df["feature_avg_trade_size"] = df["volume"] / df["trades"]
-            df["feature_close"] = df["close"].pct_change().fillna(0)
-            df.dropna(inplace=True)
-            return df
-
-        observer = BinanceObservationClass(
-            symbol="BTCUSDT", time_frames=TimeFrame(1, TimeFrameUnit.Minute),
-            window_sizes=10, client=mock_client, feature_preprocessing_fn=kline_preprocessing)
-
-        features = observer.get_features()
-        for f in ["feature_taker_ratio", "feature_quote_vol", "feature_avg_trade_size"]:
-            assert f in features["observation_features"]
-        assert observer.get_observations()["1Minute_10"].shape == (10, 4)
-
     def test_default_preprocessing_output(self, observer_single):
         """Default preprocessing produces the expected named features."""
         features = observer_single.get_features()
@@ -143,7 +124,6 @@ class TestBinanceObservationClassIntegration:
     @pytest.mark.skip(reason="Requires live Binance API connection")
     def test_live_data_fetch(self):
         """Test fetching live data from Binance."""
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
         observer = BinanceObservationClass(
             symbol="BTCUSDT",
             time_frames=[TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute)],
@@ -151,3 +131,84 @@ class TestBinanceObservationClassIntegration:
         observations = observer.get_observations()
         assert "1Minute_10" in observations
         assert "5Minute_10" in observations
+
+
+class TestBinanceSharesTheObservationBase:
+    """binance was the last FUTURES venue with a parallel observation class (#289).
+
+    alpaca still hand-rolls its own; it is spot, so outside this issue's scope.
+    """
+
+    @staticmethod
+    def _klines(n, descending=False):
+        base = 1700000000000
+        rows = [[base + i * 60000, "100", "101", "99", "100.5", "10",
+                 base + (i + 1) * 60000 - 1, "1000", "50", "5", "500", "0"]
+                for i in range(n)]
+        return list(reversed(rows)) if descending else rows
+
+    def _obs(self, rows, fn=None):
+        client = MagicMock()
+        client.get_klines = MagicMock(return_value=rows)
+        return BinanceObservationClass(
+            symbol="BTC/USDT",
+            time_frames=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=5,
+            feature_preprocessing_fn=fn,
+            client=client,
+        )
+
+    @pytest.mark.parametrize("venue_cls", [
+        BinanceObservationClass, BitgetObservationClass,
+        BybitObservationClass, OKXObservationClass,
+    ], ids=lambda c: c.__name__)
+    def test_no_venue_reimplements_the_shared_base(self, venue_cls):
+        """Derived from the base, not hand-listed, and over every venue.
+
+        The named subset guards the guard: a discovered set can SHRINK silently (making
+        `get_features` a property drops it from a callable filter), and a merely non-empty
+        check would still pass.
+        """
+        shared = {
+            n for n, v in vars(BaseFuturesObservationClass).items()
+            if callable(v) and not getattr(v, "__isabstractmethod__", False)
+            and not n.startswith("__")
+        }
+        assert {"get_features", "get_observations", "_fetch_single_timeframe"} <= shared
+        # _dummy_frame is an extension point, not a re-fork: the venues return different
+        # kline columns and the base cannot know their dtypes.
+        redeclared = (shared & set(vars(venue_cls))) - {"_dummy_frame"}
+        assert not redeclared, f"{venue_cls.__name__} re-forked: {sorted(redeclared)}"
+
+    def test_a_dtype_conditional_preprocessing_fn_gets_the_real_dtype(self):
+        """The dummy frame must match the parsed klines' DTYPES, not just its columns.
+
+        `trades` is int64 in real klines. A names-only dummy (every column a float in
+        [0,1)) made this fn take the else-branch on the dummy and the if-branch on live
+        data: get_features() declared 1 feature, get_observations() emitted 2, and
+        `BinanceOHLCVTransform` sizes its spec from the former -- so check_env_specs
+        failed on a shape mismatch. Measured, after making exactly that simplification.
+        """
+        def fn(df):
+            df = df.copy()
+            df["feature_close"] = df["close"].pct_change().fillna(0)
+            if pd.api.types.is_integer_dtype(df["trades"]):
+                df["feature_trades"] = df["trades"] / 100.0
+            return df.dropna()
+
+        obs = self._obs(self._klines(60), fn=fn)
+        declared = len(obs.get_features()["observation_features"])
+        assert declared == obs.get_observations()["1Minute_5"].shape[1] == 2
+
+    def test_klines_are_sorted_even_when_the_response_is_reversed(self):
+        """The base sorts; binance's copy did not, so it was the one venue unprotected.
+
+        Binance returns ascending today, so nothing bit -- but a reversed response
+        produced TIME-REVERSED observations with no error. This is also the only test in
+        the four venue suites that reaches the base's sort: bybit and okx sort inside
+        their own _parse_klines, so their sort tests stay green if the base's is deleted.
+        """
+        df = self._obs(self._klines(20, descending=True))._fetch_single_timeframe(
+            TimeFrame(1, TimeFrameUnit.Minute), limit=20
+        )
+        assert df["open_time"].is_monotonic_increasing
