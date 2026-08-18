@@ -1020,7 +1020,7 @@ class TestBinanceSLTPNotionalTradeMode:
     @pytest.mark.parametrize("action_tuple,expected_side", [
         (("long", -0.02, 0.03), "buy"),
         (("short", 0.02, -0.03), "sell"),
-    ], ids=["long-BUY", "short-SELL"])
+    ], ids=["long-buy", "short-sell"])
     def test_notional_converts_usd_to_quantity(self, notional_env, action_tuple, expected_side):
         """Notional mode must convert USD to base-asset quantity using current price."""
         env, mock_trader = notional_env

@@ -1,7 +1,6 @@
 import math
 from dataclasses import dataclass
 from typing import List, Optional, Union, Callable, Dict
-import logging
 
 import torch
 from tensordict import TensorDictBase
@@ -24,8 +23,6 @@ from torchtrade.envs.utils.fractional_sizing import (
     PositionCalculationParams,
 )
 
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
