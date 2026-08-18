@@ -7,12 +7,7 @@ modes, and folding them together to make the file shorter would be the same mist
 leaving four copies of something that is one rule.
 """
 
-import logging
-
 from torchtrade.envs.core.state import POSITION_DUST_EPS
-
-logger = logging.getLogger(__name__)
-
 
 class ExecutorHelpersMixin:
     """Shared executor helpers. Mixed in ahead of the exchange class."""
@@ -28,8 +23,13 @@ class ExecutorHelpersMixin:
         reward function sees.
 
         Direction goes through the dust rule rather than `qty > 0`: a float residual
-        left by a full close is not a short, and reporting a PnL against one puts a
-        phantom position's number in the observation (invariant 1).
+        left by a full close is not a short, and the copies reported -10% against one.
+
+        Defence in depth, not a live bug fix -- `futures_live_base._get_account_state`
+        already hard-sets this to 0.0 when the direction is dust, so nothing downstream
+        currently sees the wrong number. The earlier claim that it reached the
+        observation was wrong. It is still worth having: canonicalising `qty > 0` into a
+        SHARED helper would hand the next caller the bug pre-approved.
         """
         if entry_price <= 0:
             return 0.0
@@ -39,10 +39,13 @@ class ExecutorHelpersMixin:
             return (entry_price - mark_price) / entry_price
         return 0.0
 
-    def _round_price_by_tick(self, price: float) -> float:
+    def _round_price(self, price: float) -> float:
         """Round to the cached tick size. Three verbatim copies (binance, bybit, okx).
 
-        bitget deliberately does not use this -- it rounds through CCXT.
+        bitget OVERRIDES this with CCXT's `price_to_precision`: a different mechanism
+        with a different failure mode, not a copy to be collapsed. It is the only class
+        here without `_tick_size`, so inheriting this unusably is the point -- the
+        override is what makes it work, and removing the override breaks loudly.
         """
         if self._tick_size is not None:
             rounded = round(price / self._tick_size) * self._tick_size

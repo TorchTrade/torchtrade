@@ -33,10 +33,32 @@ def test_no_executor_re_forks_the_shared_pnl(cls):
                                  OKXFuturesOrderClass], ids=lambda c: c.__name__)
 def test_tick_rounding_goes_through_the_shared_helper(cls):
     """These three had byte-identical tick arithmetic. bitget is deliberately absent --
-    it rounds through CCXT's `price_to_precision`, a different mechanism with a different
+    it OVERRIDES with CCXT's `price_to_precision`, a different mechanism with a different
     failure mode, and collapsing it in to shorten the file would be the opposite error.
     """
-    assert "_round_price_by_tick" in inspect.getsource(cls._round_price)
+    assert cls._round_price is ExecutorHelpersMixin._round_price
+
+
+@pytest.mark.parametrize("cls", EXECUTORS, ids=lambda c: c.__name__)
+def test_no_executor_re_implements_the_pnl_rule_INLINE(cls):
+    """By RULE, not by name -- the name check alone certified the one that was wrong.
+
+    Binance never had a method called `_calculate_unrealized_pnl_pct`; it had the same
+    arithmetic inlined in `get_status`, still branching on `qty > 0`. So
+    `"_calculate_unrealized_pnl_pct" not in cls.__dict__` passed VACUOUSLY on the single
+    exchange still carrying the dust bug, and the dust parametrization below calls the
+    mixin directly and never touches an executor. The guard certified the miss.
+
+    A re-inlined copy is spelled `(mark_price - entry_price) / entry_price` or its short
+    counterpart; anything computing that outside the mixin is a fourth copy.
+    """
+    source = inspect.getsource(cls)
+    for expression in ("(mark_price - entry_price) / entry_price",
+                       "(entry_price - mark_price) / entry_price"):
+        assert expression not in source, (
+            f"{cls.__name__} recomputes the PnL rule inline instead of calling the "
+            f"shared helper -- a copy that is not a method is still a copy"
+        )
 
 
 def test_bitget_keeps_its_ccxt_rounding():

@@ -223,10 +223,6 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin):
                 f"this venue, or the payload changed shape."
             )
 
-    def _round_price(self, price: float) -> float:
-        """Round to the cached tick size -- shared, see ExecutorHelpersMixin (#288)."""
-        return self._round_price_by_tick(price)
-
     def round_quantity(self, quantity: float, symbol: Optional[str] = None) -> float:
         """Floor a quantity toward zero to the symbol's LOT_SIZE step.
 
@@ -427,14 +423,9 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin):
                     mark_price = float(pos["markPrice"])
                     unrealized_pnl = float(pos["unRealizedProfit"])
 
-                    # Calculate unrealized PnL percentage
-                    if entry_price > 0:
-                        if qty > 0:  # Long
-                            unrealized_pnl_pct = (mark_price - entry_price) / entry_price
-                        else:  # Short
-                            unrealized_pnl_pct = (entry_price - mark_price) / entry_price
-                    else:
-                        unrealized_pnl_pct = 0.0
+                    unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(
+                        qty, entry_price, mark_price
+                    )
 
                     status["position_status"] = PositionStatus(
                         qty=qty,

@@ -186,10 +186,6 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin):
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
 
-    def _round_price(self, price: float) -> float:
-        """Round to the cached tick size -- shared, see ExecutorHelpersMixin (#288)."""
-        return self._round_price_by_tick(price)
-
     def _format_price(self, price: float) -> str:
         """Round price to tick size and format as deterministic string."""
         rounded = self._round_price(price)
