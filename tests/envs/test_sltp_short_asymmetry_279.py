@@ -1,58 +1,73 @@
-"""The short/long geometry asymmetry is stated out loud, not fixed (#279)."""
+"""Short action k is not the mirror of long action k, and it never is (#279)."""
 
 import pytest
 
 from torchtrade.envs.utils import create_sltp_action_map
+from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
+
+ENTRY = 100.0
 
 
-def test_the_asymmetry_is_real_and_no_short_action_has_the_tight_stop():
-    """Pins the behaviour the warning describes, so the eventual fix has a baseline.
-
-    Shorts reuse the OPPOSITE list's magnitudes: long action k risks 2.5% to make 5%,
-    the mirrored short risks 5% to make 2.5%, and no short action anywhere in the space
-    has a 2.5% stop. A policy that learned "tight stop, wide target" gets the opposite
-    geometry the moment it goes short.
-    """
-    action_map = create_sltp_action_map(
-        [-0.025, -0.05, -0.1], [0.05, 0.1, 0.2], include_short_positions=True
-    )
-    shorts = [v for v in action_map.values() if v[0] == "short"]
-    longs = [v for v in action_map.values() if v[0] == "long"]
-
-    assert longs[0][1:] == (-0.025, 0.05), "long k risks 2.5% to make 5%"
-    assert shorts[0][1:] == (0.05, -0.025), "short k risks 5% to make 2.5% -- inverted"
-    assert not any(abs(sl) == pytest.approx(0.025) for _, sl, _ in shorts), (
-        "no short action has the tightest stop the long side offers"
-    )
+def _geometry(side, sl_pct, tp_pct):
+    """Effective (risk %, reward %) at a real entry, through the real bracket helper."""
+    sl_price, tp_price = calculate_bracket_prices(side, ENTRY, sl_pct, tp_pct)
+    return (abs(sl_price - ENTRY) / ENTRY, abs(tp_price - ENTRY) / ENTRY)
 
 
-@pytest.mark.parametrize("stoploss,takeprofit,shorts,expect_warning", [
-    ([-0.025, -0.05], [0.05, 0.1], True, True),    # magnitudes differ -> warn
-    ([-0.05, -0.1], [0.05, 0.1], True, False),     # mirrored -> silent
-    ([-0.05], [0.05], True, False),                # single mirrored pair -> silent
-    ([-0.025, -0.05], [0.05, 0.1], False, False),  # long-only: no short to mismatch
+@pytest.mark.parametrize("stoploss,takeprofit", [
+    ([-0.025, -0.05, -0.1], [0.05, 0.1, 0.2]),
+    # Symmetric-LOOKING, and still inverted. An earlier version of this test asserted
+    # this case was fine, because it compared magnitude SETS -- which are equal here --
+    # rather than pairing index against index. Long k=1 risks 5% to make 10%; short k=1
+    # risks 10% to make 5%.
+    ([-0.05, -0.1], [0.05, 0.1]),
+    ([-0.01, -0.02, -0.03], [0.01, 0.02, 0.03]),
 ])
-def test_the_warning_fires_exactly_when_the_geometry_is_not_mirrored(
-    stoploss, takeprofit, shorts, expect_warning, caplog
-):
-    """A warning on every construction would be noise, and one that never fires is
-    decoration. It keys on the magnitude SETS, so `(-0.05, -0.1)` against `(0.05, 0.1)`
-    is silent -- there the swap really does mirror.
+def test_short_k_has_the_risk_and_reward_of_long_k_exchanged(stoploss, takeprofit):
+    """Measured through calculate_bracket_prices, not by reading the tuple.
+
+    The tuple is `("short", tp, sl)`, and nothing downstream negates it -- the short
+    bracket helper applies `entry * (1 + pct)` directly -- so the swap survives all the
+    way to the prices the venue receives.
     """
-    with caplog.at_level("WARNING"):
-        create_sltp_action_map(stoploss, takeprofit, include_short_positions=shorts)
+    action_map = create_sltp_action_map(stoploss, takeprofit, include_short_positions=True)
+    longs = [v for v in action_map.values() if v[0] == "long"]
+    shorts = [v for v in action_map.values() if v[0] == "short"]
 
-    fired = any("#279" in record.message for record in caplog.records)
-    assert fired is expect_warning
+    for k, (long_action, short_action) in enumerate(zip(longs, shorts)):
+        long_risk, long_reward = _geometry(*long_action)
+        short_risk, short_reward = _geometry(*short_action)
+        assert (short_risk, short_reward) == pytest.approx((long_reward, long_risk)), (
+            f"action {k}: long is {long_risk:.4f}/{long_reward:.4f}, short is "
+            f"{short_risk:.4f}/{short_reward:.4f} -- expected the exchange of the long's"
+        )
 
 
-def test_the_action_space_size_is_unchanged_by_the_warning():
-    """The warning must not alter the map -- a checkpoint's action indices still mean
-    what they meant. That is also why this is a warning and not a fix: mirroring the
-    magnitudes keeps the SIZE identical while changing what every short index means, so
-    a trained model would load without complaint and trade a different strategy.
-    """
+def test_no_short_action_offers_the_tightest_long_stop():
+    """The consequence that matters: a geometry available to longs is unreachable short."""
     action_map = create_sltp_action_map(
         [-0.025, -0.05, -0.1], [0.05, 0.1, 0.2], include_short_positions=True
     )
-    assert len(action_map) == 1 + 2 * 3 * 3
+    long_stops = {round(_geometry(*v)[0], 6) for v in action_map.values() if v[0] == "long"}
+    short_stops = {round(_geometry(*v)[0], 6) for v in action_map.values() if v[0] == "short"}
+
+    assert 0.025 in long_stops and 0.025 not in short_stops
+    assert long_stops == {0.025, 0.05, 0.1}
+    assert short_stops == {0.05, 0.1, 0.2}
+
+
+def test_mirroring_the_magnitudes_would_not_change_the_action_space_size():
+    """Why #279 is a decision and not a patch: the size contract is identical, so a
+    trained checkpoint loads without complaint and trades a different strategy."""
+    stoploss, takeprofit = [-0.025, -0.05, -0.1], [0.05, 0.1, 0.2]
+    current = create_sltp_action_map(stoploss, takeprofit, include_short_positions=True)
+    mirrored_size = 1 + 2 * len(stoploss) * len(takeprofit)
+
+    assert len(current) == mirrored_size == 19
+
+
+def test_an_empty_level_list_still_builds_a_hold_only_map():
+    """A warning helper briefly turned this working config into a ValueError."""
+    assert create_sltp_action_map([], [0.05], include_short_positions=True) == {
+        0: (None, None, None)
+    }

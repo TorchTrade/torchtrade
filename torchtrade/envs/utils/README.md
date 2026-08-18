@@ -56,6 +56,28 @@ Neither is a BUY/SELL/HOLD map. Index 0 is the flat/no-bracket action; the long 
 `len(sl) * len(tp)` entries, and `create_sltp_action_map(..., include_short_positions=True)`
 adds that many again for the short side.
 
+**Short action k is not the mirror of long action k.** The sign swap is necessary — a
+short's stop sits above entry — but it reuses the *opposite* list's magnitudes, so risk
+and reward are exchanged. With `stoploss_levels=(-0.025, -0.05, -0.1)` and
+`takeprofit_levels=(0.05, 0.1, 0.2)`:
+
+| k | long risk / reward | short risk / reward |
+|---|---|---|
+| 0 | 2.5% / 5% | 5% / 2.5% |
+| 2 | 2.5% / 20% | 20% / 2.5% |
+
+Long stops are {2.5, 5, 10}%; short stops are {5, 10, 20}%. **No short action has a 2.5%
+stop.** A policy that learned "tight stop, wide target" gets the opposite geometry the
+moment it goes short.
+
+This holds whenever the two magnitude lists differ element-wise — including
+symmetric-looking pairs like `(-0.05, -0.1)` against `(0.05, 0.1)`, where long k=1 risks
+5% to make 10% and short k=1 risks 10% to make 5%. It is a property of the construction,
+not of unlucky inputs. Whether to mirror the magnitudes instead is
+[#279](https://github.com/TorchTrade/torchtrade/issues/279), deliberately open: the fix
+leaves the action-space size unchanged while changing what every short index means, so a
+trained checkpoint would load without complaint and trade a different strategy.
+
 **Example:**
 ```python
 from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map

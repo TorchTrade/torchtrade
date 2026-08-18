@@ -1,11 +1,7 @@
 """Shared action map utilities for SLTP (Stop-Loss/Take-Profit) environments."""
 
-import logging
 from itertools import product
 from typing import Dict, List, Optional, Tuple
-
-
-logger = logging.getLogger(__name__)
 
 
 def create_sltp_action_map(
@@ -57,8 +53,36 @@ def create_sltp_action_map(
         ('short', 0.03, -0.02)
 
     Note:
-        For short positions, SL must be above entry (positive %) and TP below entry (negative %),
-        so we swap the takeprofit_levels -> stop_loss and stoploss_levels -> take_profit.
+        For short positions, SL must be above entry (positive %) and TP below entry
+        (negative %), so we swap: takeprofit_levels -> stop_loss and stoploss_levels ->
+        take_profit.
+
+    Warning:
+        That swap reuses the opposite list's MAGNITUDES, so short action k is not the
+        mirror of long action k -- it is the mirror with risk and reward exchanged.
+        With ``stoploss_levels=(-0.025, -0.05, -0.1)`` and
+        ``takeprofit_levels=(0.05, 0.1, 0.2)`` at entry 100:
+
+        ===  ==================  ==================
+        k    long (risk/reward)  short (risk/reward)
+        ===  ==================  ==================
+        0    2.5% / 5%           5% / 2.5%
+        2    2.5% / 20%          20% / 2.5%
+        ===  ==================  ==================
+
+        Long stops are {2.5, 5, 10}% and short stops are {5, 10, 20}%: there is no short
+        action with a 2.5% stop anywhere in the space. A policy that learned "tight stop,
+        wide target" gets the opposite geometry the moment it goes short.
+
+        This holds for EVERY configuration where the two magnitude lists differ
+        element-wise -- including symmetric-looking ones like ``(-0.05, -0.1)`` against
+        ``(0.05, 0.1)``, where long k=1 risks 5% to make 10% and short k=1 risks 10% to
+        make 5%. It is a property of the construction, not of unlucky inputs.
+
+        Whether to mirror the magnitudes instead is #279, and it is deliberately open:
+        the fix leaves the action-space SIZE unchanged (19 actions either way) while
+        changing what every short index MEANS, so a trained checkpoint would load without
+        complaint and trade a different strategy.
     """
     action_map = {}
     idx = 0
@@ -86,42 +110,7 @@ def create_sltp_action_map(
             action_map[idx] = ("short", tp, sl)
             idx += 1
 
-        _warn_if_short_geometry_is_not_mirrored(stoploss_levels, takeprofit_levels)
-
     return action_map
-
-
-def _warn_if_short_geometry_is_not_mirrored(
-    stoploss_levels: List[float], takeprofit_levels: List[float]
-) -> None:
-    """Say out loud that a short action is not the mirror of the long one (#279).
-
-    The sign swap above is necessary -- a short's stop sits ABOVE entry -- but it reuses
-    the opposite list's MAGNITUDES. With `stoploss_levels=(-0.025, -0.05, -0.1)` and
-    `takeprofit_levels=(0.05, 0.1, 0.2)`, long action k risks 2.5% to make 5% while the
-    mirrored short risks 5% to make 2.5%, and no short action anywhere in the space has a
-    2.5% stop. A policy that learned "tight stop, wide target" gets the opposite geometry
-    the moment it goes short.
-
-    A warning rather than a fix, deliberately: mirroring the magnitudes would keep the
-    action-space SIZE identical while changing what every short index means, so a trained
-    checkpoint would load without complaint and trade a different strategy. That is a
-    decision about existing models, not a patch. Until it is made, this at least stops
-    the asymmetry being invisible.
-    """
-    risks = sorted({round(abs(level), 10) for level in stoploss_levels})
-    rewards = sorted({round(abs(level), 10) for level in takeprofit_levels})
-    if risks == rewards:
-        return
-
-    logger.warning(
-        "SLTP short actions are not the mirror of the long ones (#279): shorts draw "
-        "their stop magnitudes from takeprofit_levels %s and their target magnitudes "
-        "from stoploss_levels %s, so long action k and short action k have inverted "
-        "risk/reward. No short action has a %s%% stop. Pass matching magnitudes if you "
-        "want symmetric geometry.",
-        rewards, risks, min(risks) * 100,
-    )
 
 
 def create_alpaca_sltp_action_map(
