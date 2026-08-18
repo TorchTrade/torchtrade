@@ -16,15 +16,31 @@ VARIANTS = [
 
 
 class _CountingTrader(MockTrader):
-    """Counts the flatten calls, since that is the behaviour under test."""
+    """Records the flatten/cancel calls in ORDER, since order is part of the contract."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.close_all_calls = 0
+        self.calls = []
+
+    @property
+    def close_all_calls(self):
+        return self.calls.count("close_all_positions")
+
+    @property
+    def close_symbol_calls(self):
+        return self.calls.count("close_position")
 
     def close_all_positions(self):
-        self.close_all_calls += 1
+        self.calls.append("close_all_positions")
         return super().close_all_positions()
+
+    def close_position(self, *args, **kwargs):
+        self.calls.append("close_position")
+        return super().close_position(*args, **kwargs)
+
+    def cancel_open_orders(self, *args, **kwargs):
+        self.calls.append("cancel_open_orders")
+        return super().cancel_open_orders(*args, **kwargs)
 
 
 def _build(Env, Cfg, **flags):
@@ -57,7 +73,42 @@ def test_close_position_on_reset_is_honoured(Env, Cfg, on_reset, expected_after_
     assert trader.close_all_calls == 0, "init must not have flattened"
 
     env.reset()
-    assert trader.close_all_calls == expected_after_reset
+    assert trader.close_symbol_calls == expected_after_reset, (
+        "the reset flatten must be SYMBOL-scoped: close_all_positions() iterates the "
+        "whole account, so an opt-in reset would flatten a second env's symbol or a "
+        "manual holding at every episode boundary"
+    )
+    assert trader.close_all_calls == 0, "reset must not touch the whole account"
+
+
+@pytest.mark.parametrize("Env,Cfg", VARIANTS)
+def test_orders_are_cancelled_before_anything_is_closed(Env, Cfg):
+    """Cancel first, at BOTH sites, as all four futures envs do.
+
+    `cancel_open_orders()` falls through to the account-wide cancel-all, and
+    `close_all_positions()` submits market closes without blocking -- so close-then-cancel
+    cancelled the close it had just submitted. Outside RTH it could not fill first, and
+    the flatten was silently reverted. No test pinned the ordering, so a mutation
+    restoring it survived.
+    """
+    env, trader = _build(Env, Cfg, close_position_on_init=True,
+                         close_position_on_reset=True)
+
+    def _assert_cancel_first(calls, where):
+        flattens = [i for i, c in enumerate(calls) if c.startswith("close_")]
+        cancels = [i for i, c in enumerate(calls) if c == "cancel_open_orders"]
+        assert cancels and flattens, f"expected both at {where}: {calls}"
+        assert min(cancels) < min(flattens), (
+            f"at {where} a close was submitted before the cancel-all that revokes it: "
+            f"{calls}"
+        )
+
+    # BOTH sites. The first version of this test cleared the log before reset, so it
+    # only ever saw the reset ordering -- and the init ordering was the broken one.
+    _assert_cancel_first(list(trader.calls), "__init__")
+    trader.calls.clear()
+    env.reset()
+    _assert_cancel_first(list(trader.calls), "_reset")
 
 
 @pytest.mark.parametrize("Env,Cfg", VARIANTS)
@@ -66,3 +117,19 @@ def test_the_defaults_reproduce_the_previous_behaviour(Env, Cfg):
     so no existing config changes meaning."""
     config = Cfg(symbol="BTC/USD", window_sizes=[10])
     assert (config.close_position_on_init, config.close_position_on_reset) == (True, False)
+
+
+@pytest.mark.parametrize("Env,Cfg", VARIANTS)
+def test_close_does_not_flatten_the_account(Env, Cfg):
+    """It did, unconditionally, which made `close_position_on_init=False` pointless --
+    the position it preserved was market-closed the moment the process exited cleanly.
+    The four futures envs only warn here. `examples/online_rl/` calls env.close()."""
+    env, trader = _build(Env, Cfg, close_position_on_init=False)
+    trader.calls.clear()
+
+    env.close()
+
+    assert trader.close_all_calls == 0 and trader.close_symbol_calls == 0, (
+        f"close() flattened the account: {trader.calls}"
+    )
+    assert "cancel_open_orders" in trader.calls, "close() must still cancel orders"

@@ -23,7 +23,9 @@ from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTrading
 # and `execute_on`. There is no `timeframe` or `initial_cash` -- a live account's cash
 # comes from the broker.
 config = AlpacaTradingEnvConfig(
-    paper=True,  # Paper trading
+    paper=True,
+    close_position_on_init=True,
+    close_position_on_reset=False,  # Paper trading
     symbol="AAPL",
     time_frames=["1Min"],
     window_sizes=[10],
@@ -58,6 +60,8 @@ config = AlpacaTradingEnvConfig(
     done_on_bankruptcy=True,
     bankrupt_threshold=0.1,
     paper=True,
+    close_position_on_init=True,
+    close_position_on_reset=False,
     trade_mode='notional',
     seed=42,
     include_base_features=False,
@@ -104,6 +108,8 @@ from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTrading
 # Load keys from environment
 config = AlpacaTradingEnvConfig(
     paper=True,
+    close_position_on_init=True,
+    close_position_on_reset=False,
     symbol="SPY",
     time_frames=["1Min"],
     window_sizes=[10],
@@ -144,6 +150,8 @@ from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv, Alpa
 # (stoploss, takeprofit) pair, so a single number could not describe it.
 config = AlpacaSLTPTradingEnvConfig(
     paper=True,
+    close_position_on_init=True,
+    close_position_on_reset=False,
     symbol="AAPL",
     time_frames=["1Min"],
     window_sizes=[10],

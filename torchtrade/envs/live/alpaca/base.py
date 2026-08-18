@@ -99,9 +99,14 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         self.execute_on = config.execute_on
 
         # Reset settings
+        # Cancel BEFORE closing, as all four futures envs do. The old order was
+        # close-then-cancel, and cancel_open_orders() falls through to the account-wide
+        # cancel-all -- so it cancelled the market close it had just submitted, which
+        # close_all_positions() does not block on. Outside RTH the close could not fill
+        # first, and the init flatten was silently reverted (#289).
+        self.trader.cancel_open_orders()
         if config.close_position_on_init:
             self.trader.close_all_positions()
-        self.trader.cancel_open_orders()
 
         # The env's own measure, not account.cash. close_all_positions() above submits
         # market orders and does not block, so cash at this instant excludes whatever is
@@ -359,7 +364,15 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         # Cancel all orders
         self.trader.cancel_open_orders()
         if self.config.close_position_on_reset:
-            self.trader.close_all_positions()
+            # close_position(), not close_all_positions(): the latter iterates
+            # get_all_positions() over the WHOLE account, so an opt-in reset flatten
+            # would market-close a second env's symbol or a manual holding at every
+            # episode boundary. The four futures envs are symbol-scoped (#289).
+            if not self.trader.close_position():
+                logger.warning(
+                    "close_position_on_reset failed for %s; the episode starts with a "
+                    "position it asked to be rid of", self.config.symbol,
+                )
 
         # Reset history tracking
         self.history.reset()
@@ -422,9 +435,20 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         return self.ACCOUNT_STATE
 
     def close(self):
-        """Clean up resources."""
+        """Clean up resources.
+
+        Cancels orders; does NOT flatten. All four futures envs only warn here and tell
+        the caller to `close_position()` first, and flattening unconditionally on
+        shutdown made `close_position_on_init=False` pointless -- the position it was
+        meant to preserve was market-closed the moment the process exited cleanly (#289).
+        The training loops in `examples/online_rl/` call `env.close()`.
+        """
         self.trader.cancel_open_orders()
-        self.trader.close_all_positions()
+        if self.trader.get_status().get("position_status") is not None:
+            logger.warning(
+                "%s still holds a position at close(); call trader.close_position() "
+                "first if you want it flattened", self.config.symbol,
+            )
 
     def _get_current_price(self, position_status=None) -> float:
         """Get current market price with fallback chain.

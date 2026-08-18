@@ -341,8 +341,11 @@ class TestAlpacaSLTPTradingEnvClose:
 
         env.close()
 
-        # After close, position should be closed
-        assert env.trader.position_qty == 0.0
+        # close() cancels orders and LEAVES the position, as all four futures envs do
+        # (#289). Flattening on shutdown made close_position_on_init=False pointless --
+        # the position it preserved was market-closed the moment the process exited.
+        # Call trader.close_position() explicitly if you want it flat.
+        assert env.trader.position_qty != 0.0
 
 
 @pytest.mark.parametrize("sltp", [True, False], ids=["sltp", "plain"])
