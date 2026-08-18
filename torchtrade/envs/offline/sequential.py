@@ -69,6 +69,12 @@ class SequentialTradingEnvConfig:
 
     # Environment settings
     seed: Optional[int] = 42
+    # Declared and NEVER READ by any offline env (#289). Kept because hydra configs in
+    # examples/ pass it, so removing it turns working configs into a TypeError -- but
+    # __post_init__ rejects True, because silently ignoring a flag a user deliberately
+    # set is the failure this repo's boundary-validation rule exists to prevent. The
+    # LIVE envs have a real one that core/live.py reads; the offline envs emit no
+    # base_features at all.
     include_base_features: bool = False
     max_traj_length: Optional[int] = None
     random_start: bool = True
@@ -85,6 +91,14 @@ class SequentialTradingEnvConfig:
 
     def __post_init__(self):
         """Validate configuration and normalize timeframes."""
+        if self.include_base_features:
+            raise ValueError(
+                "include_base_features=True is not implemented for the offline "
+                "environments: they emit no base_features key, and nothing reads this "
+                "flag (#289). It defaulted to False and silently did nothing, so a "
+                "policy expecting that observation would have trained without it. Use "
+                "the live/replay envs, which do implement it, or leave this False."
+            )
         # Normalize timeframe configuration
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
