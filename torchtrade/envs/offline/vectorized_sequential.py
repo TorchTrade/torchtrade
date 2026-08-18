@@ -16,8 +16,6 @@ from typing import Callable, List, Optional, Tuple, Union
 
 import pandas as pd
 import torch
-
-from torchtrade.envs.core.default_rewards import batched_log_return_reward
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
@@ -31,6 +29,7 @@ from torchtrade.envs.utils.fractional_sizing import (
     POSITION_TOLERANCE_NOTIONAL,
 )
 
+from torchtrade.envs.core.default_rewards import batched_log_return_reward
 from torchtrade.envs.core.common_types import MarginType
 from torchtrade.envs.utils.liquidation import DEFAULT_MAINTENANCE_MARGIN_RATE, require_fee_fits_maintenance
 
@@ -555,23 +554,11 @@ class VectorizedSequentialTradingEnv(EnvBase):
 
         # Rewards: log(new_pv / old_pv), matching log_return_reward exactly.
         old_pvs = self._portfolio_values
-        # A non-positive OLD value is a calculation error: the previous step's PV was
-        # checked and the termination above now ends any lane that reaches zero, so this
-        # is unreachable in normal operation and an assertion rather than a new crash
-        # mode. It matches `log_return_reward`, which raises on the same input.
-        #
-        # It is deliberately NOT the clamp it replaced: `old_pvs.clamp(min=1e-10)` made a
-        # broken accumulator survivable and silent. But the clamp was not producing the
-        # fabricated positive reward an earlier version of this comment claimed -- once
-        # PV reaches 0 the lane's new_pv is 0 too, so the -10.0 branch overrode it. The
-        # real defect was the termination predicate above.
-        if (old_pvs <= 0).any():
-            broken = torch.nonzero(old_pvs <= 0).flatten().tolist()
-            raise ValueError(
-                f"Invalid previous portfolio value in envs {broken}: "
-                f"{old_pvs[old_pvs <= 0].tolist()}. Portfolio value must be positive; "
-                f"this indicates a calculation error."
-            )
+        # The precondition lives in the reward function, not here. Keeping a copy
+        # inline preempted a custom reward that deliberately tolerates a non-positive
+        # old PV -- and the SLTP twin had already dropped it, so the divergence this
+        # change exists to remove had simply moved from the arithmetic to the guard
+        # (#289).
         rewards = self.reward_function(old_pvs, new_pvs)
 
         # Update stored portfolio values

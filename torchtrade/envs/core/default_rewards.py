@@ -5,6 +5,7 @@ the history tracker interface. Users can use these as-is or create their own.
 """
 
 import numpy as np
+import torch
 
 
 def log_return_reward(history) -> float:
@@ -140,8 +141,6 @@ def batched_log_return_reward(old_pvs, new_pvs):
     an assertion rather than a crash mode. `new_pv <= 0` IS reachable -- it is
     bankruptcy -- and reports -10.0 on both paths.
     """
-    import torch
-
     if (old_pvs <= 0).any():
         broken = torch.nonzero(old_pvs <= 0).flatten().tolist()
         raise ValueError(
