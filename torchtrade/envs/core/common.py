@@ -22,6 +22,24 @@ Position sizing mode for trading environments.
 """
 
 
+def validate_position_sizing(
+    trade_mode: str, position_fraction: float, quantity_per_trade: float
+) -> None:
+    """Reject a sizing config that would produce a zero, negative or >100% position.
+
+    Was seven copies. Six agreed; alpaca's `elif` read `== "notional"` and so never
+    checked `quantity_per_trade` in "quantity" mode -- which `alpaca/env_sltp.py` sizes
+    every trade from. A zero there is a silent no-op order, a negative one is a reversed
+    order, and both passed construction.
+    """
+    if trade_mode == "fractional":
+        if not (0 < position_fraction <= 1.0):
+            raise ValueError(f"position_fraction must be in (0, 1.0], got {position_fraction}")
+    elif trade_mode in ("notional", "quantity"):
+        if quantity_per_trade <= 0:
+            raise ValueError(f"quantity_per_trade must be positive, got {quantity_per_trade}")
+
+
 def validate_trade_mode(trade_mode: str) -> str:
     """
     Validate trade_mode configuration parameter.

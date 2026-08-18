@@ -3003,6 +3003,7 @@ def test_no_live_env_builds_an_uppercase_order_side(env_cls):
         )
 
 
+from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.live.binance import BinanceFuturesSLTPTradingEnvConfig
 from torchtrade.envs.live.bitget import BitgetFuturesSLTPTradingEnvConfig
 from torchtrade.envs.live.bybit import BybitFuturesSLTPTradingEnvConfig
@@ -3019,8 +3020,13 @@ SLTP_CONFIGS = [
     ]
 ]
 
+# Reproduced from main before the extraction. One literal now sets each of these for four
+# live venues, so a typo moves all four at once: mutating bankrupt_threshold 0.1 -> 0.5
+# (a 5x move in every venue's force-close point) passed 1432 tests before this pin.
 SHARED_DEFAULTS = {
-    "window_sizes": [10],  # __post_init__ normalizes the scalar
+    "time_frames": [TimeFrame(1, TimeFrameUnit.Hour)],
+    "execute_on": TimeFrame(1, TimeFrameUnit.Hour),
+    "window_sizes": [10],
     "leverage": 1,
     "quantity_per_trade": 0.001,
     "trade_mode": "quantity",
@@ -3045,12 +3051,20 @@ SHARED_DEFAULTS = {
 def test_every_sltp_config_inherits_the_shared_fields(config_cls):
     """A subclass re-declaring a shared field silently shadows the base default (#288)."""
     assert issubclass(config_cls, BaseFuturesSLTPConfig)
-    own = {a for a in vars(config_cls).get("__annotations__", {})}
-    shared = {f.name for f in dataclasses.fields(BaseFuturesSLTPConfig)}
-    assert not (own & shared), (
-        f"{config_cls.__name__} re-declares shared fields {sorted(own & shared)}; a "
-        f"redeclaration silently shadows the base default"
+    own = set(vars(config_cls).get("__annotations__", {}))
+    assert not (own & set(SHARED_DEFAULTS)), (
+        f"{config_cls.__name__} re-declares {sorted(own & set(SHARED_DEFAULTS))}; a "
+        f"redeclaration with the same value today silently stops tracking the base "
+        f"tomorrow. Only `symbol` is meant to be overridden, and it is not in "
+        f"SHARED_DEFAULTS because its value legitimately differs per venue."
     )
+
+
+@pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
+def test_hoisting_a_default_did_not_change_it(config_cls):
+    """Values the four venues agreed on before the hoist, and must still agree on."""
+    config = config_cls()
+    assert {f: getattr(config, f) for f in SHARED_DEFAULTS} == SHARED_DEFAULTS
 
 
 @pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
@@ -3061,18 +3075,17 @@ def test_the_venue_specific_margin_surface_is_untouched(config_cls):
     """
     names = {f.name for f in dataclasses.fields(config_cls)}
     assert ("margin_type" in names) ^ ("margin_mode" in names), (
-        f"{config_cls.__name__} should carry exactly one margin field; has {names & {'margin_type', 'margin_mode'}}"
+        f"{config_cls.__name__} should carry exactly one margin field"
     )
 
 
 @pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
-@pytest.mark.parametrize("field,expected", sorted(SHARED_DEFAULTS.items()))
-def test_hoisting_a_default_did_not_change_it(config_cls, field, expected):
-    """One literal now sets a value for four live venues; a typo moves all four at once.
+def test_no_venue_reopens_the_forgot_super_footgun(config_cls):
+    """The base owns the whole __post_init__; the venue difference is one callable.
 
-    Before the hoist, only binance had a bare-default test, covering 5 of these 19 -- and
-    the bracket levels only by LENGTH. Mutating `bankrupt_threshold` 0.1 -> 0.5 in the
-    base passed 1432 tests (#288 review): every venue's force-close point moves 5x with
-    nothing objecting. These are the values reproduced from main before the extraction.
+    A subclass that reintroduces its own __post_init__ has to remember super(), and
+    forgetting it skips trade_mode/position-sizing validation AND leaves timeframes
+    unnormalised. Structurally impossible while nobody overrides it -- so pin that.
     """
-    assert getattr(config_cls(), field) == expected
+    assert "__post_init__" not in vars(config_cls)
+    assert callable(config_cls._normalize_timeframes)

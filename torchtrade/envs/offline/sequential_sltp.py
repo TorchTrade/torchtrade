@@ -26,7 +26,7 @@ from torchtrade.envs.offline.sequential import (
     SequentialTradingEnv,
     SequentialTradingEnvConfig,
 )
-from torchtrade.envs.core.common import TradeMode, validate_trade_mode
+from torchtrade.envs.core.common import TradeMode, validate_trade_mode, validate_position_sizing
 from torchtrade.envs.core.state import (
     advance_hold_counter_from_size,
     binarize_action_type,
@@ -70,16 +70,9 @@ class SequentialTradingEnvSLTPConfig(SequentialTradingEnvConfig):
         self.trade_mode = validate_trade_mode(self.trade_mode)
 
         # Validate sizing parameters
-        if self.trade_mode == "fractional":
-            if not (0 < self.position_fraction <= 1.0):
-                raise ValueError(
-                    f"position_fraction must be in (0, 1.0], got {self.position_fraction}"
-                )
-        elif self.trade_mode in ("notional", "quantity"):
-            if self.quantity_per_trade <= 0:
-                raise ValueError(
-                    f"quantity_per_trade must be positive, got {self.quantity_per_trade}"
-                )
+        validate_position_sizing(
+            self.trade_mode, self.position_fraction, self.quantity_per_trade
+        )
 
         # Convert to lists if needed
         if not isinstance(self.stoploss_levels, list):

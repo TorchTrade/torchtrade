@@ -20,6 +20,7 @@ from torchtrade.envs.live.okx.order_executor import (
     MarginMode,
     PositionMode,
 )
+from torchtrade.envs.live.okx.utils import normalize_okx_timeframe_config
 from torchtrade.envs.live.okx.base import OKXBaseTorchTradingEnv
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
@@ -37,30 +38,12 @@ class OKXFuturesSLTPTradingEnvConfig(BaseFuturesSLTPConfig):
     """
     symbol: str = "BTC-USDT-SWAP"
 
-    # Timeframes and windows
-    time_frames: Union[List[Union[str, "TimeFrame"]], Union[str, "TimeFrame"]] = "1Hour"
-    execute_on: Union[str, "TimeFrame"] = "1Hour"
 
     # Trading parameters
     margin_mode: MarginMode = MarginMode.ISOLATED
     position_mode: PositionMode = PositionMode.NET
 
-    def __post_init__(self):
-        from torchtrade.envs.live.okx.utils import normalize_okx_timeframe_config
-        from torchtrade.envs.core.common import validate_trade_mode
-
-        super().__post_init__()
-
-        self.trade_mode = validate_trade_mode(self.trade_mode)
-        if self.trade_mode == "fractional":
-            if not (0 < self.position_fraction <= 1.0):
-                raise ValueError(f"position_fraction must be in (0, 1.0], got {self.position_fraction}")
-        elif self.trade_mode in ("notional", "quantity"):
-            if self.quantity_per_trade <= 0:
-                raise ValueError(f"quantity_per_trade must be positive, got {self.quantity_per_trade}")
-        self.execute_on, self.time_frames, self.window_sizes = normalize_okx_timeframe_config(
-            self.execute_on, self.time_frames, self.window_sizes
-        )
+    _normalize_timeframes = staticmethod(normalize_okx_timeframe_config)
 
 
 class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
