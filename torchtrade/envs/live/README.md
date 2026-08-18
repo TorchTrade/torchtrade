@@ -140,9 +140,9 @@ The non-SLTP live environments share these base parameters:
 #   include_base_features
 #
 # Futures configs add: leverage, margin_type/margin_mode, demo,
-#   observation_failure_policy (close_position_on_init/_on_reset are on every
-#   exchange including alpaca)
-# Alpaca adds: paper, trade_mode (and shares close_position_on_init/_on_reset)
+#   observation_failure_policy; close_position_on_init/_on_reset are on the
+#   futures envs and alpaca, but not polymarket
+# Alpaca adds: paper, trade_mode; it also has close_position_on_init/_on_reset
 #
 # Credentials are CONSTRUCTOR arguments on every exchange, never config fields.
 # See the per-exchange READMEs for the exact field list.

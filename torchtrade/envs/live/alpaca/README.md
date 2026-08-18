@@ -25,7 +25,7 @@ from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTrading
 config = AlpacaTradingEnvConfig(
     paper=True,
     close_position_on_init=True,
-    close_position_on_reset=False,  # Paper trading
+    close_position_on_reset=False,
     symbol="AAPL",
     time_frames=["1Min"],
     window_sizes=[10],

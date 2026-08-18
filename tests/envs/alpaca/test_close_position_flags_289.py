@@ -60,7 +60,11 @@ def test_close_position_on_init_is_honoured(Env, Cfg, on_init, expected):
     """It was hardcoded, so there was no way to keep a position across a restart --
     the four futures exchanges have had this switch all along."""
     _, trader = _build(Env, Cfg, close_position_on_init=on_init)
-    assert trader.close_all_calls == expected
+    assert trader.close_symbol_calls == expected, (
+        "the init flatten must be SYMBOL-scoped too: this flag defaults to True, so an "
+        "account-wide call means merely constructing an env flattens unrelated holdings"
+    )
+    assert trader.close_all_calls == 0, "init must not touch the whole account"
 
 
 @pytest.mark.parametrize("Env,Cfg", VARIANTS)
@@ -133,3 +137,34 @@ def test_close_does_not_flatten_the_account(Env, Cfg):
         f"close() flattened the account: {trader.calls}"
     )
     assert "cancel_open_orders" in trader.calls, "close() must still cancel orders"
+
+
+@pytest.mark.parametrize("Env,Cfg", VARIANTS)
+def test_a_flat_account_does_not_warn_that_the_reset_flatten_failed(Env, Cfg, caplog):
+    """On alpaca, `close_position()` returns False for the state we WANTED.
+
+    It wraps a client call that raises when the symbol is already flat (code 40410000),
+    so a bare `if not closed` warns on every reset of a flat account -- training the
+    operator to ignore the one warning that is real. bybit returns True when flat, which
+    is why the copied pattern misfired. The check re-reads the status instead.
+    """
+    class _FlatTrader(_CountingTrader):
+        def close_position(self, *args, **kwargs):
+            super().close_position(*args, **kwargs)
+            return False  # alpaca's wrapper does this when the symbol is already flat
+
+    trader = _FlatTrader(initial_cash=10000.0)
+    env = Env(
+        config=Cfg(symbol="BTC/USD", window_sizes=[10],
+                   close_position_on_init=False, close_position_on_reset=True),
+        observer=MockObserver(window_sizes=[10]),
+        trader=trader,
+    )
+    env._wait_for_next_timestamp = lambda: None
+
+    with caplog.at_level("WARNING"):
+        env.reset()
+
+    assert not [r for r in caplog.records if "close_position_on_reset failed" in r.getMessage()], (
+        "warned that the flatten failed on an account that is already flat"
+    )
