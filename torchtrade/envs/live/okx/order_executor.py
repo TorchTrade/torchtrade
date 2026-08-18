@@ -1,6 +1,8 @@
 """Order executor for OKX Futures trading using python-okx."""
 import logging
 
+from torchtrade.envs.live.shared.executor_helpers import ExecutorHelpersMixin
+
 from torchtrade.envs.utils.precision import decimals_for_step
 import math
 from dataclasses import dataclass
@@ -60,7 +62,7 @@ class PositionStatus:
     liquidation_price: float
 
 
-class OKXFuturesOrderClass:
+class OKXFuturesOrderClass(ExecutorHelpersMixin):
     """
     Order executor for OKX Futures trading using python-okx.
 
@@ -184,13 +186,6 @@ class OKXFuturesOrderClass:
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
 
-    def _round_price(self, price: float) -> float:
-        """Round a price to the nearest tick size."""
-        if self._tick_size is not None:
-            rounded = round(price / self._tick_size) * self._tick_size
-            return round(rounded, self._tick_decimals)
-        return price
-
     def _format_price(self, price: float) -> str:
         """Round price to tick size and format as deterministic string."""
         rounded = self._round_price(price)
@@ -210,14 +205,6 @@ class OKXFuturesOrderClass:
         # can produce scientific notation for small steps (e.g. 1e-05 → decimals=0)
         return f"{quantized:.{self._lot_size_decimals}f}"
 
-    def _calculate_unrealized_pnl_pct(self, qty: float, entry_price: float, mark_price: float) -> float:
-        """Calculate unrealized PnL percentage."""
-        if entry_price <= 0:
-            return 0.0
-        if qty > 0:
-            return (mark_price - entry_price) / entry_price
-        else:
-            return (entry_price - mark_price) / entry_price
 
     def _setup_futures_account(self):
         """Configure futures account settings."""

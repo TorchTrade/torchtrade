@@ -1,4 +1,6 @@
 import logging
+
+from torchtrade.envs.live.shared.executor_helpers import ExecutorHelpersMixin
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Union
@@ -74,7 +76,7 @@ class PositionStatus:
     liquidation_price: float
 
 
-class BitgetFuturesOrderClass:
+class BitgetFuturesOrderClass(ExecutorHelpersMixin):
     """
     Order executor for Bitget Futures trading.
 
@@ -236,24 +238,6 @@ class BitgetFuturesOrderClass:
             logger.warning(f"amount_to_precision failed for {self.symbol}, flooring to lot step {step}: {e}")
             return (amount // step) * step
 
-    def _calculate_unrealized_pnl_pct(self, qty: float, entry_price: float, mark_price: float) -> float:
-        """Calculate unrealized PnL percentage.
-
-        Args:
-            qty: Position quantity (positive for long, negative for short)
-            entry_price: Entry price
-            mark_price: Current mark price
-
-        Returns:
-            Unrealized PnL percentage
-        """
-        if entry_price <= 0:
-            return 0.0
-
-        if qty > 0:
-            return (mark_price - entry_price) / entry_price
-        else:
-            return (entry_price - mark_price) / entry_price
 
     def _get_opposite_side(self, side: str) -> str:
         """Get the opposite trading side.

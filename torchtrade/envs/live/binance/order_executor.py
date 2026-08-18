@@ -1,5 +1,7 @@
 import logging
 
+from torchtrade.envs.live.shared.executor_helpers import ExecutorHelpersMixin
+
 from torchtrade.envs.utils.precision import decimals_for_step
 from dataclasses import dataclass
 import math
@@ -63,7 +65,7 @@ class PositionStatus:
     liquidation_price: float
 
 
-class BinanceFuturesOrderClass:
+class BinanceFuturesOrderClass(ExecutorHelpersMixin):
     """
     Order executor for Binance Futures trading.
 
@@ -220,13 +222,6 @@ class BinanceFuturesOrderClass:
                 f"binance returned no LOT_SIZE for {self.symbol}: not a futures symbol on "
                 f"this venue, or the payload changed shape."
             )
-
-    def _round_price(self, price: float) -> float:
-        """Round a price to the nearest tick size."""
-        if self._tick_size is not None:
-            rounded = round(price / self._tick_size) * self._tick_size
-            return round(rounded, self._tick_decimals)
-        return price
 
     def round_quantity(self, quantity: float, symbol: Optional[str] = None) -> float:
         """Floor a quantity toward zero to the symbol's LOT_SIZE step.
@@ -428,14 +423,9 @@ class BinanceFuturesOrderClass:
                     mark_price = float(pos["markPrice"])
                     unrealized_pnl = float(pos["unRealizedProfit"])
 
-                    # Calculate unrealized PnL percentage
-                    if entry_price > 0:
-                        if qty > 0:  # Long
-                            unrealized_pnl_pct = (mark_price - entry_price) / entry_price
-                        else:  # Short
-                            unrealized_pnl_pct = (entry_price - mark_price) / entry_price
-                    else:
-                        unrealized_pnl_pct = 0.0
+                    unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(
+                        qty, entry_price, mark_price
+                    )
 
                     status["position_status"] = PositionStatus(
                         qty=qty,
