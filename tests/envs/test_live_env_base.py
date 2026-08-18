@@ -11,6 +11,7 @@ an exchange that did not answer must not read as either.
 """
 
 import ast
+import dataclasses
 import pathlib
 import re
 import inspect
@@ -3000,3 +3001,58 @@ def test_no_live_env_builds_an_uppercase_order_side(env_cls):
             f"{env_cls.__name__} builds an uppercase order side {upper}; every venue "
             f"sends lowercase and the executors normalise"
         )
+
+
+SLTP_CONFIGS = [
+    pytest.param(c, id=c.__name__)
+    for c in [
+        __import__("torchtrade.envs.live.binance", fromlist=["x"]).BinanceFuturesSLTPTradingEnvConfig,
+        __import__("torchtrade.envs.live.bitget", fromlist=["x"]).BitgetFuturesSLTPTradingEnvConfig,
+        __import__("torchtrade.envs.live.bybit", fromlist=["x"]).BybitFuturesSLTPTradingEnvConfig,
+        __import__("torchtrade.envs.live.okx", fromlist=["x"]).OKXFuturesSLTPTradingEnvConfig,
+    ]
+]
+
+
+@pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
+def test_every_sltp_config_inherits_the_shared_fields(config_cls):
+    """19 fields were declared identically -- name, type AND default -- in all four (#288).
+
+    ~80 declarations for 19 facts. The issue's "70-line config repeated 4x" is the one
+    figure in it that measurement did not shrink.
+    """
+    from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
+
+    assert issubclass(config_cls, BaseFuturesSLTPConfig)
+    own = {a for a in vars(config_cls).get("__annotations__", {})}
+    shared = {f.name for f in dataclasses.fields(BaseFuturesSLTPConfig)}
+    assert not (own & shared), (
+        f"{config_cls.__name__} re-declares shared fields {sorted(own & shared)}; a "
+        f"redeclaration silently shadows the base default"
+    )
+
+
+@pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
+@pytest.mark.parametrize("policy", ["halt", "flatten"])
+def test_a_string_failure_policy_is_coerced_on_every_sltp_config(config_cls, policy):
+    """`'halt' == ObservationFailurePolicy.HALT` is False, so a hydra-loaded string would
+    silently take the wrong branch. The coercion is in the base now, and each subclass's
+    own __post_init__ must call super() -- forgetting that is the failure this pins."""
+    from torchtrade.envs.core.live import ObservationFailurePolicy
+
+    config = config_cls(observation_failure_policy=policy)
+    assert config.observation_failure_policy is ObservationFailurePolicy(policy)
+
+
+@pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
+def test_the_venue_specific_margin_surface_is_untouched(config_cls):
+    """binance uses `margin_type: MarginType`, the other three `margin_mode: MarginMode`.
+
+    That naming split is #289's, not this extraction's: whichever name wins changes one
+    venue's public API, and burying that in a config merge is how a behaviour change
+    ships wearing a refactor's clothes. Pinned so the next dedup pass does not "tidy" it.
+    """
+    names = {f.name for f in dataclasses.fields(config_cls)}
+    assert ("margin_type" in names) ^ ("margin_mode" in names), (
+        f"{config_cls.__name__} should carry exactly one margin field; has {names & {'margin_type', 'margin_mode'}}"
+    )

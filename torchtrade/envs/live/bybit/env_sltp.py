@@ -5,6 +5,7 @@ from torchtrade.envs.utils.fractional_sizing import (
 )
 from torchtrade.envs.live.bybit.order_executor import TAKER_FEE
 import math
+from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
 import logging
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class BybitFuturesSLTPTradingEnvConfig:
+class BybitFuturesSLTPTradingEnvConfig(BaseFuturesSLTPConfig):
     """Configuration for Bybit Futures SLTP Trading Environment.
 
     Uses a combinatorial action space where each action represents a
@@ -42,46 +43,27 @@ class BybitFuturesSLTPTradingEnvConfig:
 
     # Timeframes and windows
     time_frames: Union[List[Union[str, "TimeFrame"]], Union[str, "TimeFrame"]] = "1Hour"
-    window_sizes: Union[List[int], int] = 10
     execute_on: Union[str, "TimeFrame"] = "1Hour"
 
     # Trading parameters
-    leverage: int = 1
     margin_mode: MarginMode = MarginMode.ISOLATED
     position_mode: PositionMode = PositionMode.ONE_WAY
-    quantity_per_trade: float = 0.001
-    trade_mode: TradeMode = "quantity"
-    position_fraction: float = 1.0  # Used when trade_mode="fractional"
-    lock_position_until_sltp: bool = False  # If True, ignore actions while in position
 
     # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
-    stoploss_levels: Tuple[float, ...] = (-0.025, -0.05, -0.1)
     # Take profit levels as percentages (positive values, e.g., 0.05 = 5%)
-    takeprofit_levels: Tuple[float, ...] = (0.05, 0.1, 0.2)
     # Include short positions in action space
-    include_short_positions: bool = True
     # Include HOLD action (index 0)
-    include_hold_action: bool = True
     # Include CLOSE action for manual position exit
-    include_close_action: bool = False
 
     # Termination settings
-    done_on_bankruptcy: bool = True
-    bankrupt_threshold: float = 0.1
 
     # Environment settings
-    demo: bool = True
-    seed: Optional[int] = 42
-    include_base_features: bool = False
-    close_position_on_init: bool = True
-    close_position_on_reset: bool = False
-    observation_failure_policy: ObservationFailurePolicy | str = ObservationFailurePolicy.HALT
 
     def __post_init__(self):
         from torchtrade.envs.live.bybit.utils import normalize_bybit_timeframe_config
         from torchtrade.envs.core.common import validate_trade_mode
 
-        self.observation_failure_policy = ObservationFailurePolicy(self.observation_failure_policy)
+        super().__post_init__()
 
         self.trade_mode = validate_trade_mode(self.trade_mode)
         if self.trade_mode == "fractional":

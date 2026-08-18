@@ -4,6 +4,7 @@ from torchtrade.envs.utils.fractional_sizing import (
 )
 from torchtrade.envs.live.binance.order_executor import TAKER_FEE
 import math
+from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
 import logging
@@ -30,7 +31,7 @@ from torchtrade.envs.core.live import (
 
 
 @dataclass
-class BinanceFuturesSLTPTradingEnvConfig:
+class BinanceFuturesSLTPTradingEnvConfig(BaseFuturesSLTPConfig):
     """Configuration for Binance Futures SLTP Trading Environment.
 
     This environment uses a combinatorial action space where each action
@@ -41,46 +42,27 @@ class BinanceFuturesSLTPTradingEnvConfig:
 
     # Timeframes and windows
     time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Hour"
-    window_sizes: Union[List[int], int] = 10
     execute_on: Union[str, TimeFrame] = "1Hour"  # Timeframe for trade execution timing
 
     # Trading parameters
-    leverage: int = 1  # Leverage (1-125)
     margin_type: MarginType = MarginType.ISOLATED
-    quantity_per_trade: float = 0.001  # Base quantity per trade
-    trade_mode: TradeMode = "quantity"
-    position_fraction: float = 1.0  # Used when trade_mode="fractional"
-    lock_position_until_sltp: bool = False  # If True, ignore actions while in position
 
     # Stop loss levels as percentages (negative values, e.g., -0.025 = -2.5%)
-    stoploss_levels: Tuple[float, ...] = (-0.025, -0.05, -0.1)
     # Take profit levels as percentages (positive values, e.g., 0.05 = 5%)
-    takeprofit_levels: Tuple[float, ...] = (0.05, 0.1, 0.2)
     # Include short positions in action space
-    include_short_positions: bool = True
     # Include HOLD action (index 0) in action space
-    include_hold_action: bool = True
     # Include CLOSE action for manual position exit (default: False for SLTP)
-    include_close_action: bool = False
 
     # Termination settings
-    done_on_bankruptcy: bool = True
-    bankrupt_threshold: float = 0.1  # 10% of initial balance
 
     # Environment settings
-    demo: bool = True  # Use demo/testnet for paper trading
-    seed: Optional[int] = 42
-    include_base_features: bool = False
-    close_position_on_init: bool = True
-    close_position_on_reset: bool = False
-    observation_failure_policy: ObservationFailurePolicy | str = ObservationFailurePolicy.HALT
 
     def __post_init__(self):
         """Normalize timeframe configuration and validate trade_mode."""
         from torchtrade.envs.live.binance.utils import normalize_binance_timeframe_config
         from torchtrade.envs.core.common import validate_trade_mode
 
-        self.observation_failure_policy = ObservationFailurePolicy(self.observation_failure_policy)
+        super().__post_init__()
 
         self.trade_mode = validate_trade_mode(self.trade_mode)
         if self.trade_mode == "fractional":
