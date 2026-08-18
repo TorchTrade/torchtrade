@@ -5,10 +5,11 @@ import pytest
 from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
 
 
-def _opened(qty=1.0, price=100.0, leverage=5):
-    executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=leverage)
+def _opened(qty=1.0, price=100.0, leverage=5, fee=0.0, side="BUY"):
+    executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=leverage,
+                                   transaction_fee=fee)
     executor.advance_bar({"open": price, "high": price + 1, "low": price - 1, "close": price})
-    executor.trade("BUY", qty)
+    executor.trade(side, qty)
     return executor
 
 
@@ -40,22 +41,55 @@ def test_a_partial_reduce_keeps_the_entry_price_and_the_brackets():
     assert (executor.sl_price, executor.tp_price) == (98.0, 103.0)
 
 
-def test_a_partial_reduce_books_pnl_fee_and_margin_pro_rata():
-    """Booking the whole position's PnL on a partial close would credit profit on units
-    still held -- and releasing all the margin would let the remainder be levered past
-    the account."""
-    executor = _opened(qty=1.0, price=100.0, leverage=5)
+@pytest.mark.parametrize("open_side,reduce_side,direction", [
+    ("BUY", "SELL", 1),    # long
+    ("SELL", "BUY", -1),   # short: the classic place a PnL sign flips
+])
+def test_a_partial_reduce_books_pnl_fee_and_margin_against_the_right_bases(
+    open_side, reduce_side, direction,
+):
+    """The FEE is charged on the closed notional at the FILL price, and the margin is
+    released at the ENTRY price. Both must be asserted absolutely.
+
+    The first version compared a 0.25 reduce against the remaining 0.75 and asserted only
+    that the second was three times the first. That is pure linearity, which holds for
+    ANY basis that scales with the closed quantity -- corrupting the fee basis to entry
+    price AND the margin basis to fill price left all seven tests passing. It also never
+    set `transaction_fee`, which defaults to 0.0, so the word "fee" in its name was
+    untested.
+    """
+    entry, fill, qty, closed, leverage, fee = 100.0, 110.0, 1.0, 0.25, 5, 0.0004
+    executor = _opened(qty=qty, price=entry, leverage=leverage, fee=fee, side=open_side)
     balance_before = executor.balance
-    executor.advance_bar({"open": 110.0, "high": 111.0, "low": 109.0, "close": 110.0})
+    executor.advance_bar({"open": fill, "high": fill + 1, "low": fill - 1, "close": fill})
 
-    executor.trade("SELL", 0.25, reduce_only=True)
-    quarter = executor.balance - balance_before
+    executor.trade(reduce_side, closed, reduce_only=True)
 
-    executor.trade("SELL", 0.75, reduce_only=True)
-    remaining_three_quarters = executor.balance - balance_before - quarter
+    expected = (
+        direction * closed * (fill - entry)     # PnL on the closed portion only
+        - closed * fill * fee                   # fee on the FILL notional, not entry
+        + closed * entry / leverage             # margin released at ENTRY, not fill
+    )
+    assert executor.balance - balance_before == pytest.approx(expected, rel=1e-9)
+    assert executor.position_qty == pytest.approx(direction * (qty - closed))
 
-    assert remaining_three_quarters == pytest.approx(quarter * 3, rel=1e-6)
-    assert executor.position_qty == 0.0
+
+@pytest.mark.parametrize("open_side,bad_reduce_side", [("BUY", "BUY"), ("SELL", "SELL")])
+def test_a_same_direction_reduce_only_is_rejected(open_side, bad_reduce_side):
+    """`side` must OPPOSE the position, as it does on every venue: bybit routes a BUY
+    reduceOnly to the short leg, okx sets `posSide = "short" if buy else "long"`, and
+    both binance and bybit build a close side as the inverse of the held one. In one-way
+    mode the venue rejects a same-direction reduceOnly outright.
+
+    Deriving the direction from the POSITION instead accepted the nonsense order and
+    quietly applied it to the other side -- the same divergence this fix exists to
+    remove, one argument over.
+    """
+    executor = _opened(side=open_side)
+    before = executor.position_qty
+
+    assert executor.trade(bad_reduce_side, 0.25, reduce_only=True) is False
+    assert executor.position_qty == pytest.approx(before)
 
 
 def test_reduce_only_on_a_flat_account_is_a_no_op():

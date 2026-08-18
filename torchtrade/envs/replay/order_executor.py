@@ -255,6 +255,21 @@ class ReplayOrderExecutor:
         if reduce_only:
             if self.position_qty == 0:
                 return False
+            # `side` is load-bearing on every venue and must OPPOSE the position: bybit
+            # routes a BUY reduceOnly to the short leg (`positionIdx = 2 if Buy else 1`),
+            # okx sets `posSide = "short" if buy else "long"`, and binance/bybit build
+            # their close side as the inverse of the held one. In one-way mode the venue
+            # REJECTS a same-direction reduceOnly outright. Deriving the direction from
+            # the position instead would accept a nonsense order and quietly apply it --
+            # the same divergence this branch exists to remove, one argument over.
+            reducing_long = side.upper() in ("SELL", "ASK")
+            if reducing_long != (self.position_qty > 0):
+                logger.warning(
+                    "%s reduce_only on a %s position is rejected by the venues in one-way "
+                    "mode; refusing it here too",
+                    side, "long" if self.position_qty > 0 else "short",
+                )
+                return False
             self._close_at_price(price, quantity)
             return True
 
