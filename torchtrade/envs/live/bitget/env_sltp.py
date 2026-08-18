@@ -6,7 +6,7 @@ from torchtrade.envs.live.bitget.order_executor import TAKER_FEE
 import math
 from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union, Callable
+from typing import Dict, Optional, Tuple, Callable
 import logging
 
 import torch
@@ -37,7 +37,6 @@ class BitgetFuturesSLTPTradingEnvConfig(BaseFuturesSLTPConfig):
     Supports both long and short positions with stop-loss/take-profit.
     """
     symbol: str = "BTC/USDT:USDT"  # CCXT perpetual swap format
-
 
     # Trading parameters
     product_type: str = "USDT-FUTURES"  # V2 API: USDT-FUTURES, COIN-FUTURES, USDC-FUTURES

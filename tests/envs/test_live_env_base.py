@@ -3004,6 +3004,11 @@ def test_no_live_env_builds_an_uppercase_order_side(env_cls):
 
 
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.live.alpaca import AlpacaSLTPTradingEnvConfig
+from torchtrade.envs.offline.sequential_sltp import SequentialTradingEnvSLTPConfig
+from torchtrade.envs.offline.vectorized_sequential_sltp import (
+    VectorizedSequentialTradingEnvSLTPConfig,
+)
 from torchtrade.envs.live.binance import BinanceFuturesSLTPTradingEnvConfig
 from torchtrade.envs.live.bitget import BitgetFuturesSLTPTradingEnvConfig
 from torchtrade.envs.live.bybit import BybitFuturesSLTPTradingEnvConfig
@@ -3067,25 +3072,63 @@ def test_hoisting_a_default_did_not_change_it(config_cls):
     assert {f: getattr(config, f) for f in SHARED_DEFAULTS} == SHARED_DEFAULTS
 
 
-@pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
-def test_the_venue_specific_margin_surface_is_untouched(config_cls):
-    """binance uses `margin_type`, the other three `margin_mode`.
+@pytest.mark.parametrize("config_cls,margin_field", [
+    pytest.param(c, m, id=c.__name__) for c, m in [
+        (BinanceFuturesSLTPTradingEnvConfig, "margin_type"),
+        (BitgetFuturesSLTPTradingEnvConfig, "margin_mode"),
+        (BybitFuturesSLTPTradingEnvConfig, "margin_mode"),
+        (OKXFuturesSLTPTradingEnvConfig, "margin_mode"),
+    ]
+])
+def test_the_venue_specific_margin_surface_is_untouched(config_cls, margin_field):
+    """Named per venue, not `margin_type XOR margin_mode`.
 
-    Renaming either changes a venue's public API, so it is #289's call, not a dedup pass's.
+    The XOR form passed when binance's `margin_type` was renamed to `margin_mode` -- the
+    exact unification it existed to prevent, since renaming changes a venue's public API
+    and is #289's call. Symmetric assertions cannot catch a swap.
     """
-    names = {f.name for f in dataclasses.fields(config_cls)}
-    assert ("margin_type" in names) ^ ("margin_mode" in names), (
-        f"{config_cls.__name__} should carry exactly one margin field"
-    )
+    assert margin_field in {f.name for f in dataclasses.fields(config_cls)}
 
 
-@pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
-def test_no_venue_reopens_the_forgot_super_footgun(config_cls):
-    """The base owns the whole __post_init__; the venue difference is one callable.
+SIZING_CONFIGS = SLTP_CONFIGS + [
+    pytest.param(c, id=c.__name__) for c in [
+        AlpacaSLTPTradingEnvConfig,
+        SequentialTradingEnvSLTPConfig,
+        VectorizedSequentialTradingEnvSLTPConfig,
+    ]
+]
 
-    A subclass that reintroduces its own __post_init__ has to remember super(), and
-    forgetting it skips trade_mode/position-sizing validation AND leaves timeframes
-    unnormalised. Structurally impossible while nobody overrides it -- so pin that.
+
+@pytest.mark.parametrize("config_cls", SIZING_CONFIGS)
+@pytest.mark.parametrize("kwargs,match", [
+    (dict(trade_mode="fractional", position_fraction=0.0), "position_fraction"),
+    (dict(trade_mode="fractional", position_fraction=1.5), "position_fraction"),
+    (dict(trade_mode="notional", quantity_per_trade=0), "quantity_per_trade"),
+    (dict(trade_mode="notional", quantity_per_trade=-1), "quantity_per_trade"),
+])
+def test_a_sizing_config_that_cannot_trade_is_rejected(config_cls, kwargs, match):
+    """All seven callers of validate_position_sizing, including both offline SLTP envs.
+
+    Deleting the validator's body outright failed ZERO tests before this. That matters
+    most offline: `SequentialTradingEnvSLTP` with `quantity_per_trade=0` runs 20 buy
+    actions as silent no-ops, `account_state` flat throughout and reward sum exactly
+    0.0 -- a training run that burns compute on a degenerate signal and never says so.
+
+    It is also what catches a venue re-forking `__post_init__` without `super()`, which
+    a structural "no subclass defines __post_init__" assertion cannot distinguish from a
+    correct override that calls super() and adds venue logic.
     """
-    assert "__post_init__" not in vars(config_cls)
-    assert callable(config_cls._normalize_timeframes)
+    with pytest.raises(ValueError, match=match):
+        config_cls(**kwargs)
+
+
+def test_the_shared_defaults_pin_covers_every_hoisted_field():
+    """SHARED_DEFAULTS backs two guards, and is hand-maintained.
+
+    Hoist a field into the base and forget to list it here and it is unpinned on BOTH
+    axes at once -- silent default drift and silent subclass shadowing. The two
+    exclusions are deliberate: `symbol` legitimately differs per venue, and
+    `observation_failure_policy` is covered by test_live_observation_failsafe.py.
+    """
+    hoisted = {f.name for f in dataclasses.fields(BaseFuturesSLTPConfig)}
+    assert set(SHARED_DEFAULTS) | {"symbol", "observation_failure_policy"} == hoisted

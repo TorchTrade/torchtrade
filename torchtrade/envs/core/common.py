@@ -27,10 +27,10 @@ def validate_position_sizing(
 ) -> None:
     """Reject a sizing config that would produce a zero, negative or >100% position.
 
-    Was seven copies. Six agreed; alpaca's `elif` read `== "notional"` and so never
-    checked `quantity_per_trade` in "quantity" mode -- which `alpaca/env_sltp.py` sizes
-    every trade from. A zero there is a silent no-op order, a negative one is a reversed
-    order, and both passed construction.
+    Was seven copies. Six agreed; alpaca's `elif` read `== "notional"`, so in "quantity"
+    mode it validated nothing. Not a money bug -- alpaca SLTP raises NotImplementedError
+    for that mode at the first trade -- but it failed one trade late instead of at
+    construction, which is the boundary this function exists to hold.
     """
     if trade_mode == "fractional":
         if not (0 < position_fraction <= 1.0):

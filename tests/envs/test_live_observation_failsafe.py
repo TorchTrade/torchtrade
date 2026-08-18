@@ -138,10 +138,6 @@ def test_every_futures_config_coerces_its_failure_policy(exchange, module):
                    and hasattr(v, "observation_failure_policy")
                    and v.__module__.endswith(module))
 
-    assert cfg_cls.__module__.endswith(module), (
-        f"discovery resolved to {cfg_cls.__module__}.{cfg_cls.__name__}, not the venue "
-        f"config -- without the __module__ filter it returns the imported shared base"
-    )
     assert cfg_cls().observation_failure_policy is ObservationFailurePolicy.HALT
     assert cfg_cls(observation_failure_policy="flatten").observation_failure_policy is (
         ObservationFailurePolicy.FLATTEN

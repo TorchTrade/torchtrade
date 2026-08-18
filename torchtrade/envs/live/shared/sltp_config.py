@@ -14,19 +14,17 @@ from torchtrade.envs.utils.timeframe import TimeFrame
 
 @dataclass
 class BaseFuturesSLTPConfig:
-    """Fields the four SLTP configs declared identically, name, type AND default.
+    """Fields the four venue SLTP configs declared identically, name, type and default.
 
-    Each exchange still owns what genuinely differs: `symbol`, and the margin surface,
-    which differs in NAME -- binance calls it `margin_type: MarginType`, the other three
-    `margin_mode: MarginMode`, and bitget adds `product_type`. That naming split is
-    #289's call, since whichever name wins changes one venue's public API.
+    Each venue keeps only its margin surface, and overrides `symbol`'s default. `symbol`
+    itself lives here so it stays parameter #1, as it was before the extraction.
     """
 
     symbol: str = "BTCUSDT"
     time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Hour"
     window_sizes: Union[List[int], int] = 10
     execute_on: Union[str, TimeFrame] = "1Hour"  # timeframe that gates trade execution
-    leverage: int = 1  # max is venue-specific (binance 125, others differ)
+    leverage: int = 1  # 1-125
     quantity_per_trade: float = 0.001  # used when trade_mode is "quantity"/"notional"
     trade_mode: TradeMode = "quantity"
     position_fraction: float = 1.0  # used when trade_mode="fractional"
@@ -47,18 +45,12 @@ class BaseFuturesSLTPConfig:
         ObservationFailurePolicy.HALT
     )
 
-    # Each subclass sets this to its venue normalizer. All four are a partial of the SAME
-    # normalize_timeframe_config differing only in parse_fn, so the venue difference is
-    # one callable. staticmethod so pointing it at a plain function would not bind it.
+    # Each subclass sets this to its venue normalizer -- all four are a partial of the
+    # same normalize_timeframe_config, differing only in parse_fn.
     _normalize_timeframes = None
 
     def __post_init__(self):
-        """Validate at the boundary, so nothing downstream has to guard.
-
-        The failure-policy coercion is here to REJECT an invalid string at construction.
-        It is not needed for comparisons -- ObservationFailurePolicy subclasses str, so
-        `"halt" == ObservationFailurePolicy.HALT` is already True.
-        """
+        """Validate at the boundary, so nothing downstream has to guard."""
         self.observation_failure_policy = ObservationFailurePolicy(
             self.observation_failure_policy
         )

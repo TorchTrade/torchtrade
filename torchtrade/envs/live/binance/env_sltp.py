@@ -6,7 +6,7 @@ from torchtrade.envs.live.binance.order_executor import TAKER_FEE
 import math
 from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union, Callable
+from typing import Dict, Optional, Tuple, Callable
 import logging
 
 import torch
@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.utils.timeframe import TimeFrame
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
     BinanceFuturesOrderClass,
@@ -35,8 +34,6 @@ class BinanceFuturesSLTPTradingEnvConfig(BaseFuturesSLTPConfig):
     represents a (side, stop_loss_pct, take_profit_pct) tuple for bracket orders.
     Supports both long and short positions with stop-loss/take-profit.
     """
-    symbol: str = "BTCUSDT"
-
 
     # Trading parameters
     margin_type: MarginType = MarginType.ISOLATED

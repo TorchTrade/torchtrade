@@ -7,7 +7,7 @@ from torchtrade.envs.live.bybit.order_executor import TAKER_FEE
 import math
 from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union, Callable
+from typing import Dict, Optional, Tuple, Callable
 import logging
 
 import torch
@@ -36,8 +36,6 @@ class BybitFuturesSLTPTradingEnvConfig(BaseFuturesSLTPConfig):
     Uses a combinatorial action space where each action represents a
     (side, stop_loss_pct, take_profit_pct) tuple for bracket orders.
     """
-    symbol: str = "BTCUSDT"
-
 
     # Trading parameters
     margin_mode: MarginMode = MarginMode.ISOLATED
