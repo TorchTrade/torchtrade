@@ -224,10 +224,9 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         So flat rows do fetch, but NEVER fatally. The first version of this fix called
         `_current_mark_price()` inside the halt wrapper, where a non-positive or missing
-        mark raises -- and under FLATTEN that emergency-closes a real position (bybit and
-        okx raise RuntimeError, which `_halting` does not even catch). A price that only
-        labels a history row is not worth a market order, so an unavailable mark returns
-        None and the caller records the pre-trade price instead.
+        mark raises -- and under FLATTEN that emergency-closes a real position. A price
+        that only labels a history row is not worth a market order, so an unavailable
+        mark returns None and the caller records the pre-trade price instead.
         """
         def read():
             self._last_observed_mark = None
@@ -260,7 +259,19 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         Every venue reads its mark as `float(pos.get("markPrice") or entry_price)`, which
         is 0.0 when both fields are blank.
         """
-        price = position_status.mark_price if position_status else self.trader.get_mark_price()
+        if position_status:
+            price = position_status.mark_price
+        else:
+            try:
+                price = self.trader.get_mark_price()
+            except Exception as error:
+                # `_halting` catches (PositionUnknownError, ValueError) and deliberately
+                # not RuntimeError, which adapters use for timeouts -- so the wrapped and
+                # the raw venue errors both escaped it and the policy was bypassed (#394).
+                # Broad on purpose: any tuple fails open the first time an SDK adds a type.
+                raise ValueError(
+                    f"could not read the mark price for {self.config.symbol}: {error}"
+                ) from error
         if not math.isfinite(price) or price <= 0:
             raise ValueError(f"venue reported an unusable mark price ({price})")
         return price

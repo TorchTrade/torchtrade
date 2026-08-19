@@ -306,14 +306,22 @@ class BaseFuturesObservationClass(ABC):
 
             processed_df = self.feature_preprocessing_fn(df)
 
-            # An empty observation is never valid, whatever the preprocessing fn is.
-            # The stale-bar check below cannot see this case -- there is no last row to
-            # compare -- so without it a total outage returned a silent (0, n) array and
-            # `base_features[-1, 3]` raised IndexError from inside the trade path.
-            if processed_df.empty:
+            # A short frame is a silent shape corruption, not an error: `iloc[-w:]` just
+            # returns fewer rows, and reset() and rollout() both succeed on it (#400).
+            #
+            # Know what this costs before widening it. Under the DEFAULT policy (HALT)
+            # it raises and leaves the position alone. Under FLATTEN it market-closes an
+            # open position -- measured -- and the `+50` fetch buffer is a fixed CANDLE
+            # count, so on a 1m leg 50 bad candles is ~50 MINUTES of degraded feed, not
+            # an outage. In a multi-timeframe stack the finest leg decides, since any one
+            # short leg halts the read. That is opt-in, not free: FLATTEN means "if I
+            # cannot see the market, get flat", and a window short of its spec is not a
+            # market view. A config that can never fill the window raises in `_reset`,
+            # which is not halt-wrapped, so it surfaces flat with nothing to close.
+            if len(processed_df) < window_size:
                 raise ValueError(
-                    f"no usable candles for {self.symbol} on "
-                    f"{timeframe.obs_key_freq()} after preprocessing"
+                    f"only {len(processed_df)} usable candles for {self.symbol} on "
+                    f"{timeframe.obs_key_freq()} after preprocessing, need {window_size}"
                 )
 
             # Sliced from the SAME frame as the market data, so row i of each is the

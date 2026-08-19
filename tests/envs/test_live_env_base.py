@@ -188,6 +188,10 @@ def test_no_live_env_overrides_shared_method(env_cls, method):
         "_create_trade_info",
         "_handle_close_action",
         "_execute_market_order",
+        # Re-forking either reopens #394 on that venue alone: `_current_mark_price` is
+        # what converts a failed fetch into a type `_halting` catches.
+        "_current_mark_price",
+        "_halting",
     ],
 )
 @pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
@@ -1862,6 +1866,28 @@ def test_an_unusable_mark_price_cannot_size_a_trade(source, price):
         TorchTradeFuturesLiveEnv._current_mark_price(env, position_status)
 
 
+@pytest.mark.parametrize("venue_error", [
+    pytest.param(RuntimeError("venue unreachable"), id="wrapped"),
+    pytest.param(ConnectionError("socket closed"), id="raw-sdk"),
+    pytest.param(KeyError("markPrice"), id="malformed-payload"),
+])
+def test_a_mark_price_that_cannot_be_read_raises_what_halting_catches(venue_error):
+    """#394: the mark-price fetch raised types `_halting` misses, bypassing the policy.
+
+    `_halting` catches (PositionUnknownError, ValueError) and deliberately not
+    RuntimeError, which adapters use for timeouts. Failing to READ the mark is the same
+    event as reading an unusable one above, so it must raise the same way. The three
+    shapes are three exception families: narrowing the catch to RuntimeError lets two
+    escape, to (RuntimeError, OSError) lets one.
+    """
+    env = SimpleNamespace(
+        trader=SimpleNamespace(get_mark_price=MagicMock(side_effect=venue_error)),
+        config=SimpleNamespace(symbol="BTCUSDT"),
+    )
+    with pytest.raises(ValueError, match="could not read the mark price"):
+        TorchTradeFuturesLiveEnv._current_mark_price(env, None)
+
+
 @pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
 @pytest.mark.parametrize("module", ["env", "env_sltp"])
 def test_no_futures_env_reads_the_mark_price_unvalidated(exchange, module):
@@ -2560,6 +2586,87 @@ def test_a_reset_on_an_unreadable_position_still_raises_the_bare_exception():
 
     with pytest.raises(PositionUnknownError):
         position_direction_from_status(POSITION_UNKNOWN)
+
+
+def test_an_open_position_never_re_fetches_the_mark_in_the_halt_wrapped_read():
+    """The one fact that makes #394's escalation safe, and nothing pinned it.
+
+    `_current_mark_price` converts ANY fetch failure into a ValueError so `_halting`
+    catches it -- which under FLATTEN means a market close. That is only acceptable
+    because the sole halt-wrapped caller passes `position_status`, so with a position
+    open it reads `position_status.mark_price` and never calls the venue at all.
+
+    Drop the `if position_status:` branch and the suite stays green while a read timeout
+    starts market-closing real positions. Five OTHER call sites do fetch with a position
+    open; they are outside `_halting`, so they crash rather than trade.
+    """
+    from torchtrade.envs.live.binance import env as binance_env
+
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1000.0, "total_margin_balance": 1000.0,
+        "total_wallet_balance": 1000.0}
+    trader.cancel_open_orders.return_value = True
+    trader.close_position.return_value = True
+    trader.get_mark_price.side_effect = ConnectionError("venue unreachable")
+    trader.get_status.return_value = {"position_status": SimpleNamespace(
+        mark_price=50000.0, qty=0.5, side="long", entry_price=49000.0,
+        unrealized_pnl=500.0, leverage=5.0, liquidation_price=40000.0)}
+
+    env = _build_env_with(binance_env.BinanceFuturesTorchTradingEnv, binance_env, trader)
+    assert env is not None
+    trader.get_mark_price.reset_mock()
+
+    env._acquire_pre_trade_state()
+    trader.get_mark_price.assert_not_called()
+
+
+@pytest.mark.parametrize("flat_at_reset", [True, False],
+                         ids=["reset-is-not-halt-wrapped", "step-flattens-a-real-position"])
+def test_what_a_short_observation_costs_under_flatten(flat_at_reset):
+    """#400's raise is cheap at reset and expensive mid-episode. Pin both.
+
+    `_reset` calls `_get_observation` UNWRAPPED (`futures_live_base.py:568`), so a config
+    that can never fill its window surfaces as a bare ValueError while flat -- that is the
+    half that makes the escalation acceptable, and nothing drove it before.
+
+    `_acquire_post_bar_state` does wrap it, so the SAME raise mid-episode market-closes an
+    open position under FLATTEN. That cost is opt-in (HALT is the default and leaves the
+    position alone), but it must not become opt-out by accident: the `+50` fetch buffer is
+    a fixed candle count, so on a 1m leg it is ~50 minutes of bad feed, not an outage.
+    """
+    from torchtrade.envs.live.binance import env as binance_env
+
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1000.0, "total_margin_balance": 1000.0,
+        "total_wallet_balance": 1000.0}
+    trader.get_mark_price.return_value = 50000.0
+    trader.cancel_open_orders.return_value = True
+    trader.close_position.return_value = True
+    trader.get_status.return_value = {"position_status": None}
+
+    env = _build_env_with(binance_env.BinanceFuturesTorchTradingEnv, binance_env, trader)
+    assert env is not None
+    env.config.observation_failure_policy = ObservationFailurePolicy.FLATTEN
+
+    # The observer now returns a window SHORT of the declared (10, 4) spec.
+    env.observer.get_observations.side_effect = lambda return_base_ohlc=False: (_ for _ in ()
+        ).throw(ValueError("only 4 usable candles for BTCUSDT on 1m, need 10"))
+
+    trader.close_position.reset_mock()
+    if flat_at_reset:
+        with pytest.raises(ValueError) as excinfo:
+            env.reset()
+        assert not isinstance(excinfo.value, LiveObservationHalt), (
+            "reset must NOT route through _halting: a metadata gap would then "
+            "market-flatten on every episode start"
+        )
+        assert trader.close_position.call_count == 0
+    else:
+        with pytest.raises(LiveObservationHalt):
+            env._acquire_post_bar_state()
+        assert trader.close_position.call_count == 1
 
 
 def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():
@@ -3406,5 +3513,3 @@ def test_an_observer_disagreeing_with_the_config_raises_rather_than_guessing():
         BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"
     ), pytest.raises(ValueError, match="zip"):
         BinanceFuturesTorchTradingEnv(config=config, observer=observer, trader=trader)
-
-

@@ -176,14 +176,14 @@ class AlpacaObservationClass:
             
             processed_df = self.feature_preprocessing_fn(df)
 
-            # An empty observation is never valid, whatever the preprocessing fn is.
-            # The stale-bar check below cannot see this case -- there is no last row to
-            # compare -- so without it a total outage returned a silent (0, n) array and
-            # `base_features[-1, 3]` raised IndexError from inside the trade path.
-            if processed_df.empty:
+            # A short frame is a silent shape corruption, not an error: `iloc[-w:]` just
+            # returns fewer rows, and reset() and rollout() both succeed on it (#400).
+            # Alpaca has no ObservationFailurePolicy, so this ends the step rather than
+            # flattening, and a config that can never fill the window raises at reset().
+            if len(processed_df) < window_size:
                 raise ValueError(
-                    f"no usable candles for {self.symbol} on "
-                    f"{timeframe.obs_key_freq()} after preprocessing"
+                    f"only {len(processed_df)} usable candles for {self.symbol} on "
+                    f"{timeframe.obs_key_freq()} after preprocessing, need {window_size}"
                 )
 
             # Sliced from the SAME frame as the market data, so row i of each is the
@@ -193,10 +193,10 @@ class AlpacaObservationClass:
                 # each guarded by isfinite and `<= 0`. If the newest bar was dropped,
                 # `[-1]` is the PREVIOUS bar and those guards pass on a stale price.
                 #
-                # Here, not per-timeframe: raising in the general read runs under
-                # `_halting`, where FLATTEN emergency-closes a real position -- the
-                # lesson `futures_live_base._current_mark_price` already records. Only
-                # the default fn: a custom one may resample or trim the forming bar.
+                # Here, not per-timeframe. Alpaca has no ObservationFailurePolicy, so
+                # this ends the step rather than flattening -- the futures copy of this
+                # guard carries that cost, see `futures_base_obs`. Only the default fn:
+                # a custom one may resample or trim the forming bar.
                 if self.feature_preprocessing_fn == self._default_preprocessing:
                     _kept = _timestamps_of(processed_df, 'timestamp')
                     _fetched = _timestamps_of(df, 'timestamp')
