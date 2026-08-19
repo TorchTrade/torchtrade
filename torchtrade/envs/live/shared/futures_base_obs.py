@@ -177,6 +177,14 @@ class BaseFuturesObservationClass(ABC):
         df["feature_high"] = df["high"] / df["close"]
         df["feature_low"] = df["low"] / df["close"]
         df.dropna(inplace=True)
+        # dropna removes NaN but NOT inf, and `close.pct_change()` off a zero close is
+        # inf -- which then reaches the policy's observation tensor. inf compares False
+        # to every ordering operator, so no `<= 0` or range guard downstream catches it,
+        # and unlike NaN it propagates through arithmetic without looking wrong (#398,
+        # the same family as #349). Additive: this can only drop more rows, never fewer.
+        numeric = df.select_dtypes(include=[np.number])
+        if not numeric.empty:
+            df = df[np.isfinite(numeric).all(axis=1)]
         return df
 
     def _get_numpy_obs(self, df: pd.DataFrame, columns: List[str] = None) -> np.ndarray:

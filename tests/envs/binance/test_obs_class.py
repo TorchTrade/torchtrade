@@ -269,10 +269,10 @@ class TestBinanceSharesTheObservationBase:
         # re-uses the same preprocessing fn, so deleting its final dropna lets NaN into
         # both and the timestamps still agree. base_features must also be usable.
         #
-        # Only base_features: market_data still carries `inf` for the bar AFTER a
-        # zero-priced one, because pct_change off a zero close is inf and dropna does not
-        # remove it. Pre-existing and true on main too -- filed separately, not this fix.
         assert np.isfinite(obs["base_features"]).all()
+        # market_data too, since #398: pct_change off a zero close was inf, and dropna
+        # removed NaN but not inf, so the bar AFTER a zero-priced one carried it through.
+        assert np.isfinite(obs["1Minute_5"]).all()
 
     def test_a_custom_preprocessing_fn_keeps_base_features_aligned(self):
         """The whole point of slicing the processed frame: it holds for ANY fn.

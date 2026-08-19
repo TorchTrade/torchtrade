@@ -246,3 +246,40 @@ def test_alpaca_refuses_a_fn_that_loses_the_timestamp_entirely():
     )
     with _pytest.raises(KeyError, match="timestamp"):
         observer.get_observations(return_base_ohlc=True)
+
+
+def test_alpaca_drops_a_zero_priced_bar_rather_than_emitting_inf():
+    """`close.pct_change()` off a zero close is inf, and dropna does not remove it.
+
+    The shared harness assertion cannot catch this on its own: every mock client returns
+    clean candles, so the invariant holds there whether or not the filter exists. The
+    zero-priced bar has to be injected (#398).
+    """
+    import numpy as np
+    import pandas as pd
+    from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
+    from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+    observer = AlpacaObservationClass(
+        symbol="BTC/USD",
+        timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+        window_sizes=5,
+        client=MagicMock(),
+    )
+    n = 60
+    close = np.linspace(100.0, 130.0, n)
+    close[54] = 0.0  # a halted/malformed candle, inside the window
+    frame = pd.DataFrame(
+        {"open": np.full(n, 100.0), "high": np.full(n, 101.0),
+         "low": np.full(n, 99.0), "close": close, "volume": np.full(n, 10.0)},
+        index=pd.MultiIndex.from_arrays(
+            [["BTC/USD"] * n, pd.date_range("2024-01-01", periods=n, freq="1min")],
+            names=["symbol", "timestamp"],
+        ),
+    )
+    observer._fetch_single_timeframe = lambda timeframe: frame
+
+    observations = observer.get_observations(return_base_ohlc=True)
+    for key, array in observations.items():
+        if np.asarray(array).dtype.kind in "fi":
+            assert np.isfinite(array).all(), f"{key} carries a non-finite value"
