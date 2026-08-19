@@ -805,29 +805,37 @@ size, exposure and liquidation distance the env has just admitted it cannot veri
 
 So the env **halts**: it raises `LiveObservationHalt` and produces no transition.
 
-**Which reads this covers.** The post-bar state read — the portfolio value and
-observation taken after the bar closes — and the pre-trade state read. Both include the
-observation itself, so one the env refuses to emit (a stale last bar, or one shorter than
-its declared spec) engages the policy like any other unreadable state.
+**Which reads this covers.** Two reads. The **post-bar** read — the portfolio value and
+observation taken after the bar closes — is the only one that carries the observation, so
+an observation the env refuses to emit (a stale last bar, or one shorter than its declared
+spec) engages the policy here and nowhere else. Note the cost under `flatten`: the fetch
+buffer is a fixed candle count, so on a 1-minute timeframe a refused window can mean ~50
+minutes of bad feed, not an outage, and in a multi-timeframe stack the finest timeframe
+decides.
 
-The pre-trade read also covers the mark price: a fetch that fails now raises `ValueError`
-rather than the venue's own type, so `ObservationFailurePolicy` is consulted (#394).
-Before that fix the raw exception escaped and the policy was silently bypassed.
+The **pre-trade** read covers the position status and the mark price. A mark-price fetch
+that fails now raises `ValueError` rather than the venue's own type, so the policy is
+consulted (#394). Before that fix the wrapped `RuntimeError` and the raw SDK exception
+both escaped it — though a non-numeric payload already raised `ValueError` from `float()`
+and was caught, which is why the bypass was intermittent rather than total.
 
-Every *other* venue read still raises its original exception with no latch and no
+`_reset()` reads the observation *outside* the halt, deliberately — routing it through
+would market-flatten on every episode start for an account whose metadata is always blank
+(a Bybit portfolio-margin account blanks `liqPrice`). A reset failure raises bare.
+
+Every *other* venue read also raises its original exception, with no latch and no
 emergency flatten:
 
 | read | raises |
 |---|---|
 | position read at the top of `_step()` (position sync, duplicate-action guard) | `PositionUnknownError` |
-| the initial read inside `_reset()` | `ValueError` |
+| the initial read inside `_reset()` | `ValueError`, or `PositionUnknownError` if the position is the unreadable part |
 | `_current_mark_price()` at the **sizing** call sites in `_execute_fractional_action` / `_execute_trade_if_needed` | `ValueError` |
 | the sizing balance / portfolio checks | `ValueError` |
 | the candle close that prices SL/TP brackets | `ValueError` |
 
 So `except LiveObservationHalt` covers the two state reads and nothing else. Catch
-`ValueError` and `PositionUnknownError` too if you need the sizing paths. Alpaca and
-Polymarket do not route through this path at all. Closing the rest of the gap is #355.
+`ValueError` and `PositionUnknownError` too if you need the sizing paths.
 
 ```python
 from torchtrade.envs.core.live import LiveObservationHalt
@@ -866,4 +874,4 @@ raises the same way. Escalating it is safe because the only halt-wrapped caller 
 the fetch solely when the account is flat. Retry and staleness handling are tracked
 in #295.
 
-Alpaca and Polymarket do not route through this path at all (#355).
+Alpaca and Polymarket do not route through this path at all.

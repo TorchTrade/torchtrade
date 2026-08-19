@@ -188,6 +188,10 @@ def test_no_live_env_overrides_shared_method(env_cls, method):
         "_create_trade_info",
         "_handle_close_action",
         "_execute_market_order",
+        # Re-forking either reopens #394 on that venue alone: `_current_mark_price` is
+        # what converts a failed fetch into a type `_halting` catches.
+        "_current_mark_price",
+        "_halting",
     ],
 )
 @pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
@@ -2584,6 +2588,87 @@ def test_a_reset_on_an_unreadable_position_still_raises_the_bare_exception():
         position_direction_from_status(POSITION_UNKNOWN)
 
 
+def test_an_open_position_never_re_fetches_the_mark_in_the_halt_wrapped_read():
+    """The one fact that makes #394's escalation safe, and nothing pinned it.
+
+    `_current_mark_price` converts ANY fetch failure into a ValueError so `_halting`
+    catches it -- which under FLATTEN means a market close. That is only acceptable
+    because the sole halt-wrapped caller passes `position_status`, so with a position
+    open it reads `position_status.mark_price` and never calls the venue at all.
+
+    Drop the `if position_status:` branch and the suite stays green while a read timeout
+    starts market-closing real positions. Five OTHER call sites do fetch with a position
+    open; they are outside `_halting`, so they crash rather than trade.
+    """
+    from torchtrade.envs.live.binance import env as binance_env
+
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1000.0, "total_margin_balance": 1000.0,
+        "total_wallet_balance": 1000.0}
+    trader.cancel_open_orders.return_value = True
+    trader.close_position.return_value = True
+    trader.get_mark_price.side_effect = ConnectionError("venue unreachable")
+    trader.get_status.return_value = {"position_status": SimpleNamespace(
+        mark_price=50000.0, qty=0.5, side="long", entry_price=49000.0,
+        unrealized_pnl=500.0, leverage=5.0, liquidation_price=40000.0)}
+
+    env = _build_env_with(binance_env.BinanceFuturesTorchTradingEnv, binance_env, trader)
+    assert env is not None
+    trader.get_mark_price.reset_mock()
+
+    env._acquire_pre_trade_state()
+    trader.get_mark_price.assert_not_called()
+
+
+@pytest.mark.parametrize("flat_at_reset", [True, False],
+                         ids=["reset-is-not-halt-wrapped", "step-flattens-a-real-position"])
+def test_what_a_short_observation_costs_under_flatten(flat_at_reset):
+    """#400's raise is cheap at reset and expensive mid-episode. Pin both.
+
+    `_reset` calls `_get_observation` UNWRAPPED (`futures_live_base.py:568`), so a config
+    that can never fill its window surfaces as a bare ValueError while flat -- that is the
+    half that makes the escalation acceptable, and nothing drove it before.
+
+    `_acquire_post_bar_state` does wrap it, so the SAME raise mid-episode market-closes an
+    open position under FLATTEN. That cost is opt-in (HALT is the default and leaves the
+    position alone), but it must not become opt-out by accident: the `+50` fetch buffer is
+    a fixed candle count, so on a 1m leg it is ~50 minutes of bad feed, not an outage.
+    """
+    from torchtrade.envs.live.binance import env as binance_env
+
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1000.0, "total_margin_balance": 1000.0,
+        "total_wallet_balance": 1000.0}
+    trader.get_mark_price.return_value = 50000.0
+    trader.cancel_open_orders.return_value = True
+    trader.close_position.return_value = True
+    trader.get_status.return_value = {"position_status": None}
+
+    env = _build_env_with(binance_env.BinanceFuturesTorchTradingEnv, binance_env, trader)
+    assert env is not None
+    env.config.observation_failure_policy = ObservationFailurePolicy.FLATTEN
+
+    # The observer now returns a window SHORT of the declared (10, 4) spec.
+    env.observer.get_observations.side_effect = lambda return_base_ohlc=False: (_ for _ in ()
+        ).throw(ValueError("only 4 usable candles for BTCUSDT on 1m, need 10"))
+
+    trader.close_position.reset_mock()
+    if flat_at_reset:
+        with pytest.raises(ValueError) as excinfo:
+            env.reset()
+        assert not isinstance(excinfo.value, LiveObservationHalt), (
+            "reset must NOT route through _halting: a metadata gap would then "
+            "market-flatten on every episode start"
+        )
+        assert trader.close_position.call_count == 0
+    else:
+        with pytest.raises(LiveObservationHalt):
+            env._acquire_post_bar_state()
+        assert trader.close_position.call_count == 1
+
+
 def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():
     """Eight sites unpack one 4-tuple, and only okx would notice a swap.
 
@@ -2837,23 +2922,15 @@ def test_no_live_env_re_forks_the_shared_accessors():
     """
     from torchtrade.envs.core.live import TorchTradeLiveEnv
 
-    shared = [
-        ("get_account_state", LIVE_ENVS, TorchTradeLiveEnv),
-        ("get_market_data_keys", LIVE_ENVS, TorchTradeLiveEnv),
-        # A venue that re-forks these keeps the #394 bypass: `_current_mark_price` is
-        # what converts a fetch failure into a type `_halting` catches, and the sibling
-        # source grep only reads env.py / env_sltp.py.
-        ("_current_mark_price", FUTURES_ENVS, TorchTradeFuturesLiveEnv),
-        ("_halting", FUTURES_ENVS, TorchTradeFuturesLiveEnv),
-    ]
-    for name, envs, owner in shared:
+    for name in ("get_account_state", "get_market_data_keys"):
         wrong_owner = {
             c.__name__: next(b for b in c.__mro__ if name in b.__dict__).__name__
-            for c in envs
-            if next((b for b in c.__mro__ if name in b.__dict__), None) is not owner
+            for c in LIVE_ENVS
+            if next((b for b in c.__mro__ if name in b.__dict__), None)
+            is not TorchTradeLiveEnv
         }
         assert not wrong_owner, (
-            f"{name} does not resolve to {owner.__name__} on: {wrong_owner}"
+            f"{name} does not resolve to TorchTradeLiveEnv on: {wrong_owner}"
         )
 
 
