@@ -26,14 +26,13 @@ from torchtrade.envs.offline.sequential import (
     SequentialTradingEnv,
     SequentialTradingEnvConfig,
 )
-from torchtrade.envs.core.common import TradeMode, validate_trade_mode, validate_position_sizing
+from torchtrade.envs.core.common import TradeMode, validate_trade_mode, validate_position_sizing, validate_sltp_levels
 from torchtrade.envs.core.state import (
     advance_hold_counter_from_size,
     binarize_action_type,
 )
 from torchtrade.envs.utils.sltp_helpers import (
-    calculate_long_bracket_prices,
-    calculate_short_bracket_prices,
+    calculate_bracket_prices,
     stop_fill_price,
 )
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
@@ -81,16 +80,7 @@ class SequentialTradingEnvSLTPConfig(SequentialTradingEnvConfig):
             self.takeprofit_levels = list(self.takeprofit_levels)
 
         # Validate SL/TP levels
-        for sl in self.stoploss_levels:
-            if sl >= 0:
-                raise ValueError(
-                    f"Stop-loss levels must be negative (e.g., -0.05 for 5% loss), got {sl}"
-                )
-        for tp in self.takeprofit_levels:
-            if tp <= 0:
-                raise ValueError(
-                    f"Take-profit levels must be positive (e.g., 0.1 for 10% profit), got {tp}"
-                )
+        validate_sltp_levels(self.stoploss_levels, self.takeprofit_levels)
 
 
 class SequentialTradingEnvSLTP(SequentialTradingEnv):
@@ -152,12 +142,12 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         self.include_close_action = config.include_close_action
 
         # Build action map for SLTP
-        self.action_map = self._build_action_map(
-            config.stoploss_levels,
-            config.takeprofit_levels,
-            config.include_hold_action,
-            config.include_close_action,
-            allow_short=(config.leverage > 1),  # Futures mode: leverage > 1
+        self.action_map = create_sltp_action_map(
+            stoploss_levels=config.stoploss_levels,
+            takeprofit_levels=config.takeprofit_levels,
+            include_short_positions=(config.leverage > 1),  # Futures mode
+            include_hold_action=config.include_hold_action,
+            include_close_action=config.include_close_action,
         )
 
         # Temporarily set action_levels to a dummy list for parent initialization
@@ -185,27 +175,6 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
 
         # Convert action_map to tuple for O(1) indexed lookup (performance optimization)
         self._action_tuple = tuple(self.action_map[i] for i in range(len(self.action_map)))
-
-    def _build_action_map(
-        self,
-        stoploss_levels: List[float],
-        takeprofit_levels: List[float],
-        include_hold_action: bool,
-        include_close_action: bool,
-        allow_short: bool,
-    ) -> Dict[int, Tuple]:
-        """Build action map for SLTP environment.
-
-        Delegates to the shared create_sltp_action_map to ensure consistent
-        SL/TP swapping for short positions across live and offline environments.
-        """
-        return create_sltp_action_map(
-            stoploss_levels=stoploss_levels,
-            takeprofit_levels=takeprofit_levels,
-            include_short_positions=allow_short,
-            include_hold_action=include_hold_action,
-            include_close_action=include_close_action,
-        )
 
     def _reset_position_state(self):
         """Reset position tracking state including SLTP-specific state."""
@@ -607,15 +576,9 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         # Calculate liquidation price (futures only)
         self.liquidation_price = self._calculate_liquidation_price(execution_price, self.position.position_size)
 
-        # Set SLTP brackets using helper functions
-        if side == "long":
-            self.stop_loss, self.take_profit = calculate_long_bracket_prices(
-                execution_price, sl_pct, tp_pct
-            )
-        else:  # short
-            self.stop_loss, self.take_profit = calculate_short_bracket_prices(
-                execution_price, sl_pct, tp_pct
-            )
+        self.stop_loss, self.take_profit = calculate_bracket_prices(
+            side, execution_price, sl_pct, tp_pct
+        )
 
         return {"executed": True, "side": side, "fee_paid": fee, "liquidated": False}
 

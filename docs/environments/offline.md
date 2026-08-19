@@ -191,11 +191,17 @@ Extends `SequentialTradingEnv` with **bracket order risk management**. Supports 
 
 ### Configuration
 
+Short actions **mirror** their long counterpart: action *k* short carries the same risk
+and reward as action *k* long, with the stop above entry and the target below. Before
+#279 the levels were swapped rather than negated, so short *k* carried long *k*'s risk
+and reward exchanged. The action-space size is unchanged either way, so a checkpoint
+trained before that fix loads without complaint. **Retrain rather than reload.**
+
 ```python
 from torchtrade.envs.offline import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
 
 config = SequentialTradingEnvSLTPConfig(
-    stoploss_levels=[-0.02, -0.05],
+    stoploss_levels=[-0.02, -0.05],   # magnitudes apply to BOTH directions
     takeprofit_levels=[0.05, 0.10],
     include_hold_action=True,
 

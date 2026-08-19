@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple, Union
 from torchtrade.envs.core.common import (
     TradeMode,
     validate_position_sizing,
+    validate_sltp_levels,
     validate_trade_mode,
 )
 from torchtrade.envs.core.live import ObservationFailurePolicy
@@ -55,6 +56,7 @@ class BaseFuturesSLTPConfig:
             self.observation_failure_policy
         )
         self.trade_mode = validate_trade_mode(self.trade_mode)
+        validate_sltp_levels(self.stoploss_levels, self.takeprofit_levels)
         validate_position_sizing(
             self.trade_mode, self.position_fraction, self.quantity_per_trade
         )

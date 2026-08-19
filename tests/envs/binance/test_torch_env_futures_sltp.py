@@ -159,7 +159,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
 
     def test_action_map_short_actions(self, env):
         """Test action map short actions."""
-        # Actions 5-8 should be SHORT with flipped SL/TP
+        # Actions 5-8 should be SHORT, with SL/TP negated (#279)
         for i in range(5, 9):
             side, sl, tp = env.action_map[i]
             assert side == "short"
@@ -286,9 +286,9 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            # Action 5: SHORT with flipped SL/TP
-            # For short: SL above entry, TP below entry
-            action_tuple = ("short", 0.03, -0.02)  # Note: already flipped in action_map
+            # A short tuple as the action map emits it: SL above entry, TP below,
+            # already signed against the position (negated from the levels, #279).
+            action_tuple = ("short", 0.03, -0.02)
             trade_info = env._execute_trade_if_needed(action_tuple)
 
             if trade_info["executed"]:
@@ -472,23 +472,6 @@ class TestCombinatoryActionMap:
         assert side == "long"
         assert sl == -0.02
         assert tp == 0.03
-
-    def test_action_map_short_sign_flip(self):
-        """Test that short actions have flipped signs."""
-        from torchtrade.envs.utils.action_maps import create_sltp_action_map as combinatory_action_map
-
-        action_map = combinatory_action_map(
-            stoploss_levels=[-0.02],
-            takeprofit_levels=[0.03],
-            include_short_positions=True
-        )
-
-        # Action 2 should be the short action
-        side, sl, tp = action_map[2]
-        assert side == "short"
-        # For shorts: SL is above entry (positive), TP is below entry (negative)
-        assert sl == 0.03  # From takeprofit_levels (positive values become SL for shorts)
-        assert tp == -0.02  # From stoploss_levels (negative values become TP for shorts)
 
 
 class TestMultipleSteps:

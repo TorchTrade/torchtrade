@@ -56,30 +56,16 @@ Neither is a BUY/SELL/HOLD map. Index 0 is the flat/no-bracket action; the long 
 `len(sl) * len(tp)` entries, and `create_sltp_action_map(..., include_short_positions=True)`
 adds that many again for the short side.
 
-**A short action is never the mirror of its long counterpart** — it is the mirror with
-risk and reward exchanged. This is unconditional: both halves iterate the same
-`product(stoploss_levels, takeprofit_levels)`, so the *n*th long and the *n*th short
-always carry the same magnitude pair the other way round. It is only *invisible* when
-every magnitude is equal.
-
-With `stoploss_levels=(-0.025, -0.05, -0.1)` and `takeprofit_levels=(0.05, 0.1, 0.2)` at
-entry 100 — note the map index, since index 0 is HOLD and the short block starts at 10:
-
-| action | tuple | risk / reward |
-|---|---|---|
-| 1 (1st long) | `(-0.025, 0.05)` | 2.5% / 5% |
-| 10 (1st short) | `(0.05, -0.025)` | **5% / 2.5%** |
-| 3 (3rd long) | `(-0.025, 0.2)` | 2.5% / 20% |
-| 12 (3rd short) | `(0.2, -0.025)` | **20% / 2.5%** |
-
-Long stops are {2.5, 5, 10}%; short stops are {5, 10, 20}%. **No short action has a 2.5%
-stop.** A policy that learned "tight stop, wide target" gets the opposite geometry the
-moment it goes short.
-
-Whether to mirror the magnitudes instead is
-[#279](https://github.com/TorchTrade/torchtrade/issues/279), deliberately open: the fix
-leaves the action-space size unchanged while changing what every short index means, so a
-trained checkpoint would load without complaint and trade a different strategy.
+**Short action *k* mirrors long action *k***: the levels are negated, so the stop sits
+above entry and the target below with the same magnitudes. Until
+[#279](https://github.com/TorchTrade/torchtrade/issues/279) the two lists were *swapped*
+instead, which got the sides right and the magnitudes wrong — short *k* carried long
+*k*'s risk and reward exchanged. With `stoploss_levels=(-0.025, -0.05, -0.1)` and
+`takeprofit_levels=(0.05, 0.1, 0.2)`, long stops were {2.5, 5, 10}% while short stops
+were {5, 10, 20}% and no short action had a 2.5% stop. The action-space size is unchanged
+either way, so a checkpoint trained before that fix loads without complaint and trades a
+different strategy. Retrain — equal magnitude *sets* are not an exemption, since the same
+tuples land at permuted indices and the index is what the policy emits.
 
 **Example:**
 ```python

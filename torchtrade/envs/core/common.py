@@ -40,6 +40,28 @@ def validate_position_sizing(
             raise ValueError(f"quantity_per_trade must be positive, got {quantity_per_trade}")
 
 
+def validate_sltp_levels(stoploss_levels, takeprofit_levels) -> None:
+    """Reject SL/TP levels whose sign would invert the bracket.
+
+    The action map NEGATES these for shorts (#279), so the sign convention is what puts
+    each leg on the correct side of entry. A positive stop level silently places a LONG's
+    stop above entry -- an inverted bracket that exits on a favourable move.
+
+    Both offline SLTP envs already raised here; the four live futures configs and alpaca's
+    did not, and they are the ones passing include_short_positions=True.
+    """
+    for sl in stoploss_levels:
+        if sl >= 0:
+            raise ValueError(
+                f"Stop-loss levels must be negative (e.g., -0.05 for 5% loss), got {sl}"
+            )
+    for tp in takeprofit_levels:
+        if tp <= 0:
+            raise ValueError(
+                f"Take-profit levels must be positive (e.g., 0.1 for 10% profit), got {tp}"
+            )
+
+
 def validate_trade_mode(trade_mode: str) -> str:
     """
     Validate trade_mode configuration parameter.

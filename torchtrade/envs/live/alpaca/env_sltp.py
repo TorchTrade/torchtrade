@@ -9,7 +9,11 @@ import torch
 logger = logging.getLogger(__name__)
 from torchtrade.envs.core.state import position_qty_from_status
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-from torchtrade.envs.core.common import validate_trade_mode, validate_position_sizing
+from torchtrade.envs.core.common import (
+    validate_position_sizing,
+    validate_sltp_levels,
+    validate_trade_mode,
+)
 from torchtrade.envs.live.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass, TradeMode
@@ -54,6 +58,7 @@ class AlpacaSLTPTradingEnvConfig:
 
     def __post_init__(self):
         self.trade_mode = validate_trade_mode(self.trade_mode)
+        validate_sltp_levels(self.stoploss_levels, self.takeprofit_levels)
         if self.trade_mode == "quantity":
             raise ValueError(
                 "trade_mode='quantity' is not supported for Alpaca SLTP -- its bracket "

@@ -604,11 +604,15 @@ class TestSLTPScalarVecEquivalencePriority:
             ("long", [-0.15], [0.50], 84.0, None, None, "liquidation"),    # stop 85, beyond
             ("long", [-0.05], [0.50], 85.0, None, 85.0, "liquidation"),    # gapped past it
             ("long", [-0.50], [0.10], 88.0, 112.0, None, "liquidation"),   # take-profit loses
-            # 10x SHORT at 100, liquidation 109.6. Every short branch is separate code,
-            # and a vec-only short regression is what this file exists to catch.
-            ("short", [-0.50], [0.05], None, 112.0, None, "sltp_sl"),      # stop 105, inside
-            ("short", [-0.50], [0.15], None, 116.0, None, "liquidation"),  # stop 115, beyond
-            ("short", [-0.50], [0.05], None, 115.0, 115.0, "liquidation"), # gapped past it
+            # 10x SHORT at 100, liquidation 109.6. Every short branch is separate code.
+            # Since #279 a short negates its levels, so these mirror the long rows.
+            # Only the FIRST row discriminates that fix: reintroduce the swap and the
+            # other two still pass, because liquidation fires wherever the wrongly moved
+            # stop lands. They earn their place on exit-PRIORITY parity (#298, #300),
+            # which is this file's subject -- not on #279.
+            ("short", [-0.05], [0.50], None, 112.0, None, "sltp_sl"),      # stop 105, inside
+            ("short", [-0.15], [0.50], None, 116.0, None, "liquidation"),  # stop 115, beyond
+            ("short", [-0.05], [0.50], None, 115.0, 115.0, "liquidation"), # gapped past it
         ],
         ids=["long-stop-inside", "long-stop-beyond", "long-gapped", "long-take-profit",
              "short-stop-inside", "short-stop-beyond", "short-gapped"],
