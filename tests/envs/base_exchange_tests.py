@@ -194,6 +194,7 @@ class BaseObservationClassTests(ABC):
         assert "base_features" in observations
         assert observations["base_features"].shape[1] == 4  # OHLC
 
+
     def test_observations_are_float32(self):
         """Test that observations are float32."""
         observer = self.create_observer(

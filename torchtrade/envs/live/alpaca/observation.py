@@ -81,6 +81,10 @@ class AlpacaObservationClass:
         df["feature_high"] = df["high"] / df["close"]
         df["feature_low"] = df["low"] / df["close"]
         df.dropna(inplace=True)
+        # dropna removes NaN but NOT inf, and a zero close produces it twice over:
+        # `open/close` on the zero bar itself, and `close.pct_change()` on the next one.
+        # inf then reaches the policy's observation tensor (#398).
+        df = df[np.isfinite(df.select_dtypes(include=[np.number])).all(axis=1)]
         return df
 
     def _get_numpy_obs(self, df: pd.DataFrame, columns: List[str] = None) -> np.ndarray:
@@ -172,9 +176,37 @@ class AlpacaObservationClass:
             
             processed_df = self.feature_preprocessing_fn(df)
 
+            # An empty observation is never valid, whatever the preprocessing fn is.
+            # The stale-bar check below cannot see this case -- there is no last row to
+            # compare -- so without it a total outage returned a silent (0, n) array and
+            # `base_features[-1, 3]` raised IndexError from inside the trade path.
+            if processed_df.empty:
+                raise ValueError(
+                    f"no usable candles for {self.symbol} on "
+                    f"{timeframe.obs_key_freq()} after preprocessing"
+                )
+
             # Sliced from the SAME frame as the market data, so row i of each is the
             # same bar by construction (#395). Windowed to the (window, 4) spec (#69).
             if return_base_ohlc and timeframe == self.timeframes[0]:
+                # `base_features[-1, 3]` is the current price at three SLTP call sites,
+                # each guarded by isfinite and `<= 0`. If the newest bar was dropped,
+                # `[-1]` is the PREVIOUS bar and those guards pass on a stale price.
+                #
+                # Here, not per-timeframe: raising in the general read runs under
+                # `_halting`, where FLATTEN emergency-closes a real position -- the
+                # lesson `futures_live_base._current_mark_price` already records. Only
+                # the default fn: a custom one may resample or trim the forming bar.
+                if self.feature_preprocessing_fn == self._default_preprocessing:
+                    _kept = _timestamps_of(processed_df, 'timestamp')
+                    _fetched = _timestamps_of(df, 'timestamp')
+                    if len(_fetched) and _kept[-1] != _fetched[-1]:
+                        raise ValueError(
+                            f"most recent candle for {self.symbol} on "
+                            f"{timeframe.obs_key_freq()} did not survive preprocessing; "
+                            f"refusing an observation whose last bar is stale"
+                        )
+
                 observations['base_features'] = self._get_numpy_obs(
                     processed_df,
                     columns=['open', 'high', 'low', 'close']
