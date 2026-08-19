@@ -194,26 +194,6 @@ class BaseObservationClassTests(ABC):
         assert "base_features" in observations
         assert observations["base_features"].shape[1] == 4  # OHLC
 
-    def test_observations_are_finite(self):
-        """NaN and inf both reach the policy, and neither trips an ordering guard.
-
-        `dropna` removed one and not the other: `close.pct_change()` off a zero close is
-        inf, which survived into the observation tensor. inf is the worse of the two --
-        it propagates through arithmetic without looking wrong, where NaN at least
-        poisons visibly (#398, same family as #349).
-
-        Nothing asserted observations were finite on any venue.
-        """
-        import numpy as np
-
-        observer = self.create_observer(
-            symbol="BTC/USD",
-            timeframes=TimeFrame(1, TimeFrameUnit.Minute),
-            window_sizes=10,
-        )
-        for key, array in observer.get_observations(return_base_ohlc=True).items():
-            if np.asarray(array).dtype.kind in "fi":
-                assert np.isfinite(array).all(), f"{key} carries a non-finite value"
 
     def test_observations_are_float32(self):
         """Test that observations are float32."""

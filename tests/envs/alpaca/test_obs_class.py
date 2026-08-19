@@ -179,11 +179,6 @@ def test_alpaca_base_features_survive_a_fn_that_leaves_the_timestamp_in_the_inde
     Rows still come from the processed frame, so alignment is unaffected -- only where
     the timestamps are read from changes.
     """
-    import numpy as np
-    import pandas as pd
-    from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
-    from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-
     def keeps_the_multiindex(df):
         df = df.copy()
         df["feature_close"] = df["close"].pct_change().fillna(0)
@@ -255,11 +250,6 @@ def test_alpaca_drops_a_zero_priced_bar_rather_than_emitting_inf():
     clean candles, so the invariant holds there whether or not the filter exists. The
     zero-priced bar has to be injected (#398).
     """
-    import numpy as np
-    import pandas as pd
-    from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
-    from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
-
     observer = AlpacaObservationClass(
         symbol="BTC/USD",
         timeframes=TimeFrame(1, TimeFrameUnit.Minute),

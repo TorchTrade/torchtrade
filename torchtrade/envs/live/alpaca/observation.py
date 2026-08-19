@@ -81,11 +81,10 @@ class AlpacaObservationClass:
         df["feature_high"] = df["high"] / df["close"]
         df["feature_low"] = df["low"] / df["close"]
         df.dropna(inplace=True)
-        # dropna removes NaN but NOT inf, and `close.pct_change()` off a zero close is
-        # inf, which then reaches the policy's observation tensor (#398). Additive.
-        numeric = df.select_dtypes(include=[np.number])
-        if not numeric.empty:
-            df = df[np.isfinite(numeric).all(axis=1)]
+        # dropna removes NaN but NOT inf, and a zero close produces it twice over:
+        # `open/close` on the zero bar itself, and `close.pct_change()` on the next one.
+        # inf then reaches the policy's observation tensor (#398).
+        df = df[np.isfinite(df.select_dtypes(include=[np.number])).all(axis=1)]
         return df
 
     def _get_numpy_obs(self, df: pd.DataFrame, columns: List[str] = None) -> np.ndarray:
@@ -176,6 +175,20 @@ class AlpacaObservationClass:
             df = self._fetch_single_timeframe(timeframe)
             
             processed_df = self.feature_preprocessing_fn(df)
+
+            # The most recent bar is the one the SLTP envs read as the current price
+            # (`base_features[-1, 3]`). If it was dropped, `[-1]` silently becomes the
+            # PREVIOUS bar and the `<= 0` / isfinite guard at those call sites passes on
+            # a stale price -- measured: main refused at 0.0, dropping made it trade at
+            # the prior close. Older bars may be dropped; this one may not (#398).
+            _kept = _timestamps_of(processed_df, 'timestamp')
+            _fetched = _timestamps_of(df, 'timestamp')
+            if len(_kept) and len(_fetched) and _kept[-1] != _fetched[-1]:
+                raise ValueError(
+                    f"most recent candle for {self.symbol} on "
+                    f"{timeframe.obs_key_freq()} is unusable (non-finite or duplicate); "
+                    f"refusing to serve an observation whose last bar is stale"
+                )
 
             # Sliced from the SAME frame as the market data, so row i of each is the
             # same bar by construction (#395). Windowed to the (window, 4) spec (#69).

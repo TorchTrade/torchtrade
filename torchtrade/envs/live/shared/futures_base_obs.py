@@ -177,15 +177,31 @@ class BaseFuturesObservationClass(ABC):
         df["feature_high"] = df["high"] / df["close"]
         df["feature_low"] = df["low"] / df["close"]
         df.dropna(inplace=True)
-        # dropna removes NaN but NOT inf, and `close.pct_change()` off a zero close is
-        # inf -- which then reaches the policy's observation tensor. inf compares False
-        # to every ordering operator, so no `<= 0` or range guard downstream catches it,
-        # and unlike NaN it propagates through arithmetic without looking wrong (#398,
-        # the same family as #349). Additive: this can only drop more rows, never fewer.
-        numeric = df.select_dtypes(include=[np.number])
-        if not numeric.empty:
-            df = df[np.isfinite(numeric).all(axis=1)]
+        # dropna removes NaN but NOT inf, and a zero close produces it twice over:
+        # `open/close` on the zero bar itself, and `close.pct_change()` on the next one.
+        # inf then reaches the policy's observation tensor (#398).
+        df = df[np.isfinite(df.select_dtypes(include=[np.number])).all(axis=1)]
         return df
+
+    @staticmethod
+    def _timestamps_of(df: pd.DataFrame, column: str) -> np.ndarray:
+        """Timestamps for `df`'s rows, from the column or the index.
+
+        `feature_preprocessing_fn` is public and may return the timestamp either way. The
+        alpaca observer got this in #397; the futures half was lost before that commit
+        landed, so reading the column unconditionally still raised KeyError here for a fn
+        that sets it as an index.
+        """
+        if column in df.columns:
+            return df[column].values
+        if column in (df.index.names or []):
+            return df.index.get_level_values(column).values
+        # Not a silent `df.index.values`: that hands back positions as timestamps for a
+        # frame whose OHLC came from real bars. Validate at the boundary.
+        raise KeyError(
+            f"feature_preprocessing_fn returned a frame with no {column!r} column or "
+            f"index level; base_features cannot be timestamped"
+        )
 
     def _get_numpy_obs(self, df: pd.DataFrame, columns: List[str] = None) -> np.ndarray:
         """Convert specified columns to numpy array."""
@@ -290,6 +306,20 @@ class BaseFuturesObservationClass(ABC):
 
             processed_df = self.feature_preprocessing_fn(df)
 
+            # The most recent bar is the one the SLTP envs read as the current price
+            # (`base_features[-1, 3]`). If it was dropped, `[-1]` silently becomes the
+            # PREVIOUS bar and the `<= 0` / isfinite guard at those call sites passes on
+            # a stale price -- measured: main refused at 0.0, dropping made it trade at
+            # the prior close. Older bars may be dropped; this one may not (#398).
+            _kept = self._timestamps_of(processed_df, self._get_timestamp_column())
+            _fetched = self._timestamps_of(df, self._get_timestamp_column())
+            if len(_kept) and len(_fetched) and _kept[-1] != _fetched[-1]:
+                raise ValueError(
+                    f"most recent candle for {self.symbol} on "
+                    f"{timeframe.obs_key_freq()} is unusable (non-finite or duplicate); "
+                    f"refusing to serve an observation whose last bar is stale"
+                )
+
             # Sliced from the SAME frame as the market data, so row i of each is the
             # same bar by construction -- for a custom preprocessing fn too. Do NOT
             # re-derive the row selection here: every partial copy of it desynced (#395).
@@ -298,9 +328,9 @@ class BaseFuturesObservationClass(ABC):
                     processed_df,
                     columns=['open', 'high', 'low', 'close']
                 )[-window_size:]
-                observations['base_timestamps'] = processed_df[
-                    self._get_timestamp_column()
-                ].values[-window_size:]
+                observations['base_timestamps'] = self._timestamps_of(
+                    processed_df, self._get_timestamp_column()
+                )[-window_size:]
 
             # Apply window size
             processed_df = processed_df.iloc[-window_size:]

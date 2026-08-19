@@ -314,3 +314,40 @@ class TestBinanceSharesTheObservationBase:
             f"{venue_cls.__name__} re-forks get_observations -- it would not inherit the "
             f"base_features/market_data row alignment (#395)"
         )
+
+    def test_a_stale_last_bar_is_refused_not_silently_backfilled(self):
+        """`base_features[-1, 3]` is the current price at three SLTP call sites.
+
+        Dropping a non-finite bar makes `[-1]` the PREVIOUS bar, so the isfinite/`<= 0`
+        guard there passes on a stale price. Measured: main read 0.0 and REFUSED, this
+        branch read 158.5 (the prior close) and would have TRADED. Older bars may be
+        dropped; the most recent one may not be (#398).
+        """
+        rows = self._klines(60)
+        rows[59][4] = "0"  # the most recent candle is unusable
+        with pytest.raises(ValueError, match="most recent candle"):
+            self._obs(rows).get_observations(return_base_ohlc=True)
+
+    def test_a_fn_that_moves_the_timestamp_into_the_index_still_works(self):
+        """`_timestamps_of` on the futures base -- alpaca got this in #397, the futures
+        half was lost before that commit landed, so reading the column unconditionally
+        still raised KeyError here for a fn that sets it as an index.
+        """
+        def fn(df):
+            df = df.copy()
+            df["feature_close"] = df["close"].pct_change().fillna(0)
+            return df.dropna().set_index("open_time")
+
+        obs = self._obs(self._klines(60), fn=fn).get_observations(return_base_ohlc=True)
+        assert obs["base_features"].shape == (5, 4)
+        assert len(obs["base_timestamps"]) == 5
+
+    def test_a_fn_that_loses_the_timestamp_entirely_is_refused(self):
+        """Neither column nor index level: raise rather than pass positions off as times."""
+        def fn(df):
+            df = df.copy()
+            df["feature_close"] = df["close"].pct_change().fillna(0)
+            return df.dropna().reset_index(drop=True).drop(columns=["open_time"])
+
+        with pytest.raises(KeyError, match="open_time"):
+            self._obs(self._klines(60), fn=fn).get_observations(return_base_ohlc=True)
