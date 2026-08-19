@@ -33,8 +33,7 @@ from torchtrade.envs.core.state import (
     binarize_action_type,
 )
 from torchtrade.envs.utils.sltp_helpers import (
-    calculate_long_bracket_prices,
-    calculate_short_bracket_prices,
+    calculate_bracket_prices,
     stop_fill_price,
 )
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
@@ -578,15 +577,9 @@ class SequentialTradingEnvSLTP(SequentialTradingEnv):
         # Calculate liquidation price (futures only)
         self.liquidation_price = self._calculate_liquidation_price(execution_price, self.position.position_size)
 
-        # Set SLTP brackets using helper functions
-        if side == "long":
-            self.stop_loss, self.take_profit = calculate_long_bracket_prices(
-                execution_price, sl_pct, tp_pct
-            )
-        else:  # short
-            self.stop_loss, self.take_profit = calculate_short_bracket_prices(
-                execution_price, sl_pct, tp_pct
-            )
+        self.stop_loss, self.take_profit = calculate_bracket_prices(
+            side, execution_price, sl_pct, tp_pct
+        )
 
         return {"executed": True, "side": side, "fee_paid": fee, "liquidated": False}
 

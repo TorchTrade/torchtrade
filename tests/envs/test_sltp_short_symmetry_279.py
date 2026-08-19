@@ -73,6 +73,19 @@ def test_an_empty_level_list_still_builds_a_hold_only_map():
     }
 
 
+@pytest.mark.parametrize("side", ["Long", "flat", "", None], ids=str)
+def test_a_side_the_bracket_calculator_does_not_know_is_refused(side):
+    """One formula now serves both sides, so `side` only guards the caller's intent.
+
+    The percentages arrive already oriented against the position, so passing "flat" or a
+    miscapitalised "Long" would price a bracket off the OTHER direction's numbers and
+    return silently. Nothing exercised this: collapsing the two per-side functions left
+    the check as the only thing `side` still does, and deleting it kept 861 tests green.
+    """
+    with pytest.raises(ValueError, match="Invalid side"):
+        calculate_bracket_prices(side, 100.0, -0.02, 0.05)
+
+
 LIVE_SLTP_KWARGS = dict(symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10],
                         execute_on="1m")
 ALPACA_SLTP_KWARGS = dict(symbol="BTC/USD", time_frames=["1m"], window_sizes=[10],
@@ -107,7 +120,11 @@ def _sltp_configs():
     (dict(stoploss_levels=[0.02], takeprofit_levels=[0.05]), "must be negative"),
     (dict(stoploss_levels=[-0.02], takeprofit_levels=[-0.05]), "must be positive"),
 ], ids=["positive-stoploss", "negative-takeprofit"])
-def test_every_sltp_config_rejects_levels_that_would_invert_the_bracket(levels, message):
+@pytest.mark.parametrize("config_cls,extra", _sltp_configs(),
+                         ids=lambda v: v.__name__ if isinstance(v, type) else "")
+def test_every_sltp_config_rejects_levels_that_would_invert_the_bracket(
+    config_cls, extra, levels, message
+):
     """The sign convention is what the negation rests on, so it is validated, not assumed.
 
     `("short", -sl, -tp)` puts each leg on the correct side of entry only because stops
@@ -115,7 +132,10 @@ def test_every_sltp_config_rejects_levels_that_would_invert_the_bracket(levels, 
     too -- a stop ABOVE entry, exiting on a favourable move. Both offline envs raised
     here already; the four live futures configs and alpaca's did not, and they are the
     ones that pass include_short_positions=True.
+
+    Parametrized over the configs rather than looping: a loop stops at the first failure
+    and names no venue, and the first version of this list silently omitted alpaca --
+    mutating alpaca's guard left every case green.
     """
-    for config_cls, extra in _sltp_configs():
-        with pytest.raises(ValueError, match=message):
-            config_cls(**extra, **levels)
+    with pytest.raises(ValueError, match=message):
+        config_cls(**extra, **levels)
