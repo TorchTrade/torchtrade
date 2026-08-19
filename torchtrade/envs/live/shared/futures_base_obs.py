@@ -306,24 +306,38 @@ class BaseFuturesObservationClass(ABC):
 
             processed_df = self.feature_preprocessing_fn(df)
 
-            # The most recent bar is the one the SLTP envs read as the current price
-            # (`base_features[-1, 3]`). If it was dropped, `[-1]` silently becomes the
-            # PREVIOUS bar and the `<= 0` / isfinite guard at those call sites passes on
-            # a stale price -- measured: main refused at 0.0, dropping made it trade at
-            # the prior close. Older bars may be dropped; this one may not (#398).
-            _kept = self._timestamps_of(processed_df, self._get_timestamp_column())
-            _fetched = self._timestamps_of(df, self._get_timestamp_column())
-            if len(_kept) and len(_fetched) and _kept[-1] != _fetched[-1]:
+            # An empty observation is never valid, whatever the preprocessing fn is.
+            # The stale-bar check below cannot see this case -- there is no last row to
+            # compare -- so without it a total outage returned a silent (0, n) array and
+            # `base_features[-1, 3]` raised IndexError from inside the trade path.
+            if processed_df.empty:
                 raise ValueError(
-                    f"most recent candle for {self.symbol} on "
-                    f"{timeframe.obs_key_freq()} is unusable (non-finite or duplicate); "
-                    f"refusing to serve an observation whose last bar is stale"
+                    f"no usable candles for {self.symbol} on "
+                    f"{timeframe.obs_key_freq()} after preprocessing"
                 )
 
             # Sliced from the SAME frame as the market data, so row i of each is the
             # same bar by construction -- for a custom preprocessing fn too. Do NOT
             # re-derive the row selection here: every partial copy of it desynced (#395).
             if return_base_ohlc and timeframe == self.time_frames[0]:
+                # `base_features[-1, 3]` is the current price at three SLTP call sites,
+                # each guarded by isfinite and `<= 0`. If the newest bar was dropped,
+                # `[-1]` is the PREVIOUS bar and those guards pass on a stale price.
+                #
+                # Here, not per-timeframe: raising in the general read runs under
+                # `_halting`, where FLATTEN emergency-closes a real position -- the
+                # lesson `futures_live_base._current_mark_price` already records. Only
+                # the default fn: a custom one may resample or trim the forming bar.
+                if self.feature_preprocessing_fn == self._default_preprocessing:
+                    _kept = self._timestamps_of(processed_df, self._get_timestamp_column())
+                    _fetched = self._timestamps_of(df, self._get_timestamp_column())
+                    if len(_fetched) and _kept[-1] != _fetched[-1]:
+                        raise ValueError(
+                            f"most recent candle for {self.symbol} on "
+                            f"{timeframe.obs_key_freq()} did not survive preprocessing; "
+                            f"refusing an observation whose last bar is stale"
+                        )
+
                 observations['base_features'] = self._get_numpy_obs(
                     processed_df,
                     columns=['open', 'high', 'low', 'close']

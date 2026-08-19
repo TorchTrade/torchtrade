@@ -133,6 +133,13 @@ class TestBinanceObservationClassIntegration:
         assert "5Minute_10" in observations
 
 
+def _basic_features(df):
+    """Minimal stand-in for a user's preprocessing fn: adds a feature, drops nothing else."""
+    df = df.copy()
+    df["feature_close"] = df["close"].pct_change().fillna(0)
+    return df.dropna()
+
+
 class TestBinanceSharesTheObservationBase:
     """binance was the last FUTURES venue with a parallel observation class (#289).
 
@@ -213,15 +220,6 @@ class TestBinanceSharesTheObservationBase:
         )
         assert df["open_time"].is_monotonic_increasing
 
-    def test_a_malformed_candle_never_reaches_base_features(self):
-        """Binance coerces unparseable numbers to NaN so one bad candle cannot kill a
-        fetch. Before the fix that NaN reached base_features, which is built from the
-        raw frame, while the feature path dropped it in preprocessing (#395)."""
-        rows = self._klines(60)
-        rows[57][4] = "NOT_A_NUMBER"  # close, inside the last 5
-        obs = self._obs(rows).get_observations(return_base_ohlc=True)
-        assert not np.isnan(obs["base_features"]).any()
-        assert not np.isnan(obs["1Minute_5"]).any()
 
     @pytest.mark.parametrize("corrupt", [
         pytest.param(lambda r: r[57].__setitem__(4, "NOT_A_NUMBER"), id="nan-close"),
@@ -320,7 +318,7 @@ class TestBinanceSharesTheObservationBase:
 
         Dropping a non-finite bar makes `[-1]` the PREVIOUS bar, so the isfinite/`<= 0`
         guard there passes on a stale price. Measured: main read 0.0 and REFUSED, this
-        branch read 158.5 (the prior close) and would have TRADED. Older bars may be
+        branch read the prior close and would have TRADED. Older bars may be
         dropped; the most recent one may not be (#398).
         """
         rows = self._klines(60)
@@ -351,3 +349,36 @@ class TestBinanceSharesTheObservationBase:
 
         with pytest.raises(KeyError, match="open_time"):
             self._obs(self._klines(60), fn=fn).get_observations(return_base_ohlc=True)
+
+    @pytest.mark.parametrize("fn,label", [
+        pytest.param(
+            lambda df: _basic_features(df).iloc[:-1], "trims the forming last bar",
+            id="trims-the-forming-bar",
+        ),
+        pytest.param(
+            lambda df: _basic_features(df).set_index("open_time")
+            .resample("5min").last().dropna().reset_index(),
+            "resamples to a coarser timeframe", id="resamples",
+        ),
+    ])
+    def test_a_custom_fn_may_change_what_the_last_bar_is(self, fn, label):
+        """The stale-bar refusal is scoped to the DEFAULT preprocessing, deliberately.
+
+        Its premise -- the last processed row is the last fetched row -- is only a
+        promise the default makes. Trimming a still-forming candle and resampling to a
+        coarser timeframe are both documented uses of `feature_preprocessing_fn`, and
+        guarding them raised on EVERY call, permanently (#398 review).
+        """
+        obs = self._obs(self._klines(60), fn=fn).get_observations(return_base_ohlc=True)
+        assert obs["base_features"].shape[0] > 0
+
+    def test_an_observation_with_no_usable_candles_is_refused(self):
+        """The stale-bar check cannot see this -- there is no last row to compare.
+
+        Without a separate check a total outage returned a silent (0, n) array, and
+        `base_features[-1, 3]` then raised IndexError from inside the trade path.
+        """
+        with pytest.raises(ValueError, match="no usable candles"):
+            self._obs(
+                self._klines(60), fn=lambda df: _basic_features(df).iloc[0:0]
+            ).get_observations(return_base_ohlc=True)

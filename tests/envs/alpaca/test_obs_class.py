@@ -6,6 +6,7 @@ Only Alpaca-specific tests (client injection, data integrity, feature semantics)
 and stricter assertions live here.
 """
 
+import pytest
 from unittest.mock import MagicMock
 import numpy as np
 import pandas as pd
@@ -273,3 +274,37 @@ def test_alpaca_drops_a_zero_priced_bar_rather_than_emitting_inf():
     for key, array in observations.items():
         if np.asarray(array).dtype.kind in "fi":
             assert np.isfinite(array).all(), f"{key} carries a non-finite value"
+
+
+def test_alpaca_refuses_a_stale_last_bar():
+    """Alpaca has its own copy of the guard, and removing it whole failed zero tests.
+
+    The zero-bar test above injects at index 54 with window 5 -- outside the retained
+    window -- so it never exercises the case where the LAST row is the one dropped. That
+    is the case that matters: `base_features[-1, 3]` is the live price at
+    `alpaca/env_sltp.py:275`, and a stale one passes its isfinite/`<= 0` guard (#398).
+    """
+    import numpy as np
+    import pandas as pd
+    from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
+    from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+    observer = AlpacaObservationClass(
+        symbol="BTC/USD",
+        timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+        window_sizes=5,
+        client=MagicMock(),
+    )
+    n = 60
+    close = np.linspace(100.0, 130.0, n)
+    close[-1] = 0.0  # the most recent candle is unusable
+    observer._fetch_single_timeframe = lambda timeframe: pd.DataFrame(
+        {"open": np.full(n, 100.0), "high": np.full(n, 101.0),
+         "low": np.full(n, 99.0), "close": close, "volume": np.full(n, 10.0)},
+        index=pd.MultiIndex.from_arrays(
+            [["BTC/USD"] * n, pd.date_range("2024-01-01", periods=n, freq="1min")],
+            names=["symbol", "timestamp"],
+        ),
+    )
+    with pytest.raises(ValueError, match="most recent candle"):
+        observer.get_observations(return_base_ohlc=True)
