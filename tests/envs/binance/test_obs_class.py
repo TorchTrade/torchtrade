@@ -265,3 +265,52 @@ class TestBinanceSharesTheObservationBase:
         assert list(pd.to_datetime(obs["base_timestamps"]).values) == list(
             pd.to_datetime(surviving).values
         )
+        # Alignment alone is satisfiable by two equally-wrong arrays: the reference above
+        # re-uses the same preprocessing fn, so deleting its final dropna lets NaN into
+        # both and the timestamps still agree. base_features must also be usable.
+        #
+        # Only base_features: market_data still carries `inf` for the bar AFTER a
+        # zero-priced one, because pct_change off a zero close is inf and dropna does not
+        # remove it. Pre-existing and true on main too -- filed separately, not this fix.
+        assert np.isfinite(obs["base_features"]).all()
+
+    def test_a_custom_preprocessing_fn_keeps_base_features_aligned(self):
+        """The whole point of slicing the processed frame: it holds for ANY fn.
+
+        Every other case here uses the default preprocessing, so the claim that a custom
+        fn is covered was the one thing untested -- and it is what caught a real
+        regression: reading the timestamp as a COLUMN broke a fn that leaves it in the
+        index, which is how alpaca's SDK hands it back.
+        """
+        def fn(df):
+            df = df.copy()
+            df["feature_range"] = (df["high"] - df["low"]) / df["close"]
+            return df[df["volume"] > 0].dropna()  # a row filter the default never does
+
+        rows = self._klines(60)
+        rows[57][5] = "0"  # volume 0 -> this fn drops the bar, the default would not
+        observer = self._obs(rows, fn=fn)
+        obs = observer.get_observations(return_base_ohlc=True)
+
+        surviving = fn(observer._fetch_single_timeframe(
+            TimeFrame(1, TimeFrameUnit.Minute), limit=55
+        ))["open_time"].iloc[-5:].values
+        assert list(pd.to_datetime(obs["base_timestamps"]).values) == list(
+            pd.to_datetime(surviving).values
+        )
+
+    @pytest.mark.parametrize("venue_cls", [
+        BinanceObservationClass, BitgetObservationClass,
+        BybitObservationClass, OKXObservationClass,
+    ], ids=lambda c: c.__name__)
+    def test_no_venue_reforks_get_observations(self, venue_cls):
+        """The #395 fix lives in the base's get_observations, inherited by all four.
+
+        The env layer has `test_no_futures_env_reforks_the_shared_observation`; the
+        OBSERVATION layer had no equivalent, so a venue re-forking this method would
+        silently stop inheriting the fix and nothing would notice.
+        """
+        assert "get_observations" not in vars(venue_cls), (
+            f"{venue_cls.__name__} re-forks get_observations -- it would not inherit the "
+            f"base_features/market_data row alignment (#395)"
+        )

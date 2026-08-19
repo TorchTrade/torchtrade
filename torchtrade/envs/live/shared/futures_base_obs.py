@@ -264,8 +264,10 @@ class BaseFuturesObservationClass(ABC):
         Fetch and process observations for all specified timeframes and window sizes.
 
         Args:
-            return_base_ohlc: If True, includes the raw OHLC data from the first timeframe
-                            in the observations dictionary under the 'base_features' key.
+            return_base_ohlc: If True, adds 'base_features' -- the preprocessing fn's
+                            open/high/low/close for the first timeframe, sliced to the same
+                            rows as the market data. A fn that drops or rescales those
+                            columns changes what the SLTP envs read as the current price.
 
         Returns:
             Dictionary with keys formatted as '{timeframe}_{window_size}' and numpy array values.
@@ -280,13 +282,9 @@ class BaseFuturesObservationClass(ABC):
 
             processed_df = self.feature_preprocessing_fn(df)
 
-            # base_features is sliced from the SAME frame as the market data, so row i of
-            # each is the same bar by construction. Re-deriving the row selection here is
-            # what #395 kept getting wrong: the rule is dropna -> drop_duplicates -> build
-            # features -> dropna, and three successive attempts each matched only part of
-            # it (a 0/0 bar survives the first dropna and dies at the last). Slicing the
-            # processed frame also makes the guarantee hold for a CUSTOM preprocessing fn,
-            # which no copy of the rule ever could.
+            # Sliced from the SAME frame as the market data, so row i of each is the
+            # same bar by construction -- for a custom preprocessing fn too. Do NOT
+            # re-derive the row selection here: every partial copy of it desynced (#395).
             if return_base_ohlc and timeframe == self.time_frames[0]:
                 observations['base_features'] = self._get_numpy_obs(
                     processed_df,
