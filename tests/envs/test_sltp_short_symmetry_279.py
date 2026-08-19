@@ -4,6 +4,9 @@ import pytest
 
 from torchtrade.envs.utils import create_sltp_action_map
 from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
+from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTradingEnvConfig
+from torchtrade.envs.live.bybit.env_sltp import BybitFuturesSLTPTradingEnvConfig
+from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTradingEnvConfig
 
 ENTRY = 100.0
 
@@ -118,21 +121,22 @@ def _sltp_configs():
     ]
 
 
-@pytest.mark.parametrize("venue", ["bitget", "bybit", "okx"])
-def test_no_futures_sltp_config_reforks_the_level_guard(venue):
+REFORKABLE_FUTURES_CONFIGS = [BitgetFuturesSLTPTradingEnvConfig,
+                              BybitFuturesSLTPTradingEnvConfig,
+                              OKXFuturesSLTPTradingEnvConfig]
+
+
+@pytest.mark.parametrize("config_cls", REFORKABLE_FUTURES_CONFIGS,
+                         ids=lambda c: c.__name__)
+def test_no_futures_sltp_config_reforks_the_level_guard(config_cls):
     """The three venues the parametrization above drops, held by identity instead.
 
     They are covered only because they inherit `BaseFuturesSLTPConfig.__post_init__`. A
     venue that declares its own would silently stop validating its levels while every
     other test stayed green -- the re-fork shape this repo has shipped three times.
     """
-    import importlib
     from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 
-    module = importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp")
-    config_cls = next(v for k, v in vars(module).items()
-                      if k.endswith("Config") and hasattr(v, "__dataclass_fields__")
-                      and v.__module__ == module.__name__)
     assert config_cls.__post_init__ is BaseFuturesSLTPConfig.__post_init__, (
         f"{config_cls.__name__} re-forks __post_init__, so validate_sltp_levels no "
         f"longer provably runs for it"
