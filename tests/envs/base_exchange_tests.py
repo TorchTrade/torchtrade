@@ -320,6 +320,36 @@ class BaseObservationClassTests(ABC):
         with pytest.raises(ValueError, match="usable candles"):
             observer.get_observations(return_base_ohlc=True)
 
+    def test_this_venue_does_not_re_fork_the_shared_window_logic(self):
+        """One `get_observations`, for all five venues (#288).
+
+        Alpaca kept a byte-for-byte parallel copy of the window logic until this landed,
+        and each of the last three fixes to it -- row alignment (#395), the stale last bar
+        (#399), the short window (#400) -- had to be pasted into both. A re-fork puts that
+        back, and every behavioural test still passes on the day it happens, because both
+        copies are correct at birth.
+
+        `_dummy_frame` is an extension point, not a re-fork: venues return different
+        columns and the base cannot know their dtypes.
+        """
+        from torchtrade.envs.live.shared.base_obs import BaseObservationClass
+
+        venue_cls = type(self.create_observer(
+            symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=5,
+        ))
+        shared = {
+            n for n, v in vars(BaseObservationClass).items()
+            if callable(v) and not getattr(v, "__isabstractmethod__", False)
+            and not n.startswith("__")
+        }
+        assert {"get_observations", "_default_preprocessing", "get_features"} <= shared
+        redeclared = (shared & set(vars(venue_cls))) - {"_dummy_frame"}
+        assert not redeclared, (
+            f"{venue_cls.__name__} re-forks {sorted(redeclared)} instead of sharing "
+            f"BaseObservationClass's"
+        )
+
     # Edge cases
 
     def test_window_size_one(self):

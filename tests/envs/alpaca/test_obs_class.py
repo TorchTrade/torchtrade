@@ -151,7 +151,7 @@ def test_a_malformed_candle_never_reaches_alpaca_base_features(monkeypatch):
         client=MagicMock(),
     )
 
-    def frame_with_a_hole(timeframe):
+    def frame_with_a_hole(timeframe, limit=None):
         n = 60
         df = pd.DataFrame({
             "symbol": ["BTC/USD"] * n,  # alpaca's default preprocessing drops this column
@@ -202,7 +202,7 @@ def test_alpaca_base_features_survive_a_fn_that_leaves_the_timestamp_in_the_inde
             [["BTC/USD"] * n, stamps], names=["symbol", "timestamp"]
         ),
     )
-    observer._fetch_single_timeframe = lambda timeframe: frame
+    observer._fetch_single_timeframe = lambda timeframe, limit=None: frame
 
     observations = observer.get_observations(return_base_ohlc=True)
     assert observations["base_features"].shape == (10, 4)
@@ -231,7 +231,7 @@ def test_alpaca_refuses_a_fn_that_loses_the_timestamp_entirely():
         client=MagicMock(),
     )
     n = 60
-    observer._fetch_single_timeframe = lambda timeframe: pd.DataFrame(
+    observer._fetch_single_timeframe = lambda timeframe, limit=None: pd.DataFrame(
         {"open": np.full(n, 100.0), "high": np.full(n, 101.0),
          "low": np.full(n, 99.0), "close": np.full(n, 100.5),
          "volume": np.full(n, 10.0)},
@@ -268,7 +268,7 @@ def test_alpaca_drops_a_zero_priced_bar_rather_than_emitting_inf():
             names=["symbol", "timestamp"],
         ),
     )
-    observer._fetch_single_timeframe = lambda timeframe: frame
+    observer._fetch_single_timeframe = lambda timeframe, limit=None: frame
 
     observations = observer.get_observations(return_base_ohlc=True)
     for key, array in observations.items():
@@ -298,7 +298,7 @@ def test_alpaca_refuses_a_stale_last_bar():
     n = 60
     close = np.linspace(100.0, 130.0, n)
     close[-1] = 0.0  # the most recent candle is unusable
-    observer._fetch_single_timeframe = lambda timeframe: pd.DataFrame(
+    observer._fetch_single_timeframe = lambda timeframe, limit=None: pd.DataFrame(
         {"open": np.full(n, 100.0), "high": np.full(n, 101.0),
          "low": np.full(n, 99.0), "close": close, "volume": np.full(n, 10.0)},
         index=pd.MultiIndex.from_arrays(

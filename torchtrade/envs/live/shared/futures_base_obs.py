@@ -1,103 +1,21 @@
 """Base observation class for futures exchanges."""
 
-from abc import ABC, abstractmethod
-from typing import List, Union, Callable, Dict, Optional
-import numpy as np
+from abc import abstractmethod
+
 import pandas as pd
 
+from torchtrade.envs.live.shared.base_obs import BaseObservationClass
 from torchtrade.envs.utils.timeframe import TimeFrame
 
 
-class BaseFuturesObservationClass(ABC):
+class BaseFuturesObservationClass(BaseObservationClass):
     """
-    Base observation class for fetching market data from futures exchanges.
+    Market data from a futures exchange's kline endpoint.
 
-    Provides common functionality for multi-timeframe observations with custom
-    feature preprocessing. Provider-specific implementations (Bitget, Binance, etc.)
-    only need to implement data fetching and parsing logic.
+    The window logic lives in `BaseObservationClass`; what is left here is the shape of a
+    kline API -- fetch a raw list, parse it, name the interval -- which the four futures
+    venues share and alpaca does not have at all.
     """
-
-    def reset(self) -> None:
-        """Rewind to the start of an episode. A live observer has nothing to rewind.
-
-        Declared so the envs can call it unconditionally (#278): ReplayObserver overrides
-        it to rewind the sampler and the simulated executor, and before this existed
-        nothing but a test ever called it -- so under a collector, episode 2 continued
-        mid-stream with episode 1's balance and an inherited position whose brackets had
-        been cancelled. A `hasattr` guard at the call site would be fail-open: an observer
-        that renamed the method would silently stop rewinding.
-
-        The bankruptcy baseline is deliberately NOT re-captured here. Rebasing it per
-        episode removes the cross-episode drawdown circuit breaker on a live account,
-        which persists between episodes -- and on replay it is a no-op, because the
-        executor rewinds to the same initial_balance every time.
-        """
-
-    def __init__(
-        self,
-        symbol: str,
-        time_frames: Union[List[TimeFrame], TimeFrame],
-        window_sizes: Union[List[int], int] = 10,
-        feature_preprocessing_fn: Optional[Callable] = None,
-        client: Optional[object] = None,
-        demo: bool = True,
-    ):
-        """
-        Initialize the observation class.
-
-        Args:
-            symbol: Trading symbol (e.g., "BTCUSDT")
-            time_frames: Single TimeFrame or list of TimeFrame objects
-            window_sizes: Single integer or list of integers specifying window sizes.
-                         If a list is provided, it must have the same length as time_frames.
-            feature_preprocessing_fn: Optional custom preprocessing function that takes a DataFrame
-                                     and returns a DataFrame with feature columns
-            client: Optional pre-configured client for dependency injection (useful for testing)
-            demo: Whether to use demo/testnet environment (default: True)
-        """
-        # Store symbol as-is (provider-specific normalization happens in subclasses)
-        self.symbol = symbol
-
-        # Normalize time_frames and window_sizes to lists
-        self.time_frames = [time_frames] if isinstance(time_frames, TimeFrame) else time_frames
-        self.window_sizes = [window_sizes] if isinstance(window_sizes, int) else window_sizes
-        self.demo = demo
-
-        # Validate time_frames
-        for tf in self.time_frames:
-            self._validate_timeframe(tf)
-
-        # Validate that time_frames and window_sizes have matching lengths
-        if len(self.time_frames) != len(self.window_sizes):
-            raise ValueError("time_frames and window_sizes must have the same length")
-
-        self.feature_preprocessing_fn = feature_preprocessing_fn or self._default_preprocessing
-
-        # Initialize client (provider-specific)
-        self.client = client if client is not None else self._create_client()
-
-    @abstractmethod
-    def _create_client(self) -> object:
-        """
-        Create provider-specific API client.
-
-        Returns:
-            Initialized API client for the provider
-        """
-        pass
-
-    @abstractmethod
-    def _validate_timeframe(self, timeframe: TimeFrame) -> None:
-        """
-        Validate that a timeframe is supported by this provider.
-
-        Args:
-            timeframe: TimeFrame object to validate
-
-        Raises:
-            ValueError: If timeframe is not supported
-        """
-        pass
 
     @abstractmethod
     def _fetch_klines(self, symbol: str, interval: str, limit: int) -> list:
@@ -113,7 +31,6 @@ class BaseFuturesObservationClass(ABC):
             Raw kline data from the API
         """
         pass
-
     @abstractmethod
     def _parse_klines(self, raw_klines: list) -> pd.DataFrame:
         """
@@ -134,7 +51,6 @@ class BaseFuturesObservationClass(ABC):
             DataFrame with standardized OHLCV columns
         """
         pass
-
     @abstractmethod
     def _convert_timeframe(self, timeframe: TimeFrame) -> str:
         """
@@ -147,69 +63,10 @@ class BaseFuturesObservationClass(ABC):
             Provider-specific interval string (e.g., "1H" for Bitget, "1h" for Binance)
         """
         pass
-
     @abstractmethod
     def _get_default_lookback(self) -> int:
         """Get the default number of candles to fetch."""
         pass
-
-    @abstractmethod
-    def _get_timestamp_column(self) -> str:
-        """
-        Get the name of the primary timestamp column for base observations.
-
-        Returns:
-            Column name (e.g., "timestamp" for Bitget, "open_time" for Binance)
-        """
-        pass
-
-    # Common methods (shared across all providers)
-
-    def _default_preprocessing(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Default preprocessing function if none is provided."""
-        df = df.copy()
-        df.dropna(inplace=True)
-        df.drop_duplicates(inplace=True)
-
-        # Generating base features (normalized)
-        df["feature_close"] = df["close"].pct_change().fillna(0)
-        df["feature_open"] = df["open"] / df["close"]
-        df["feature_high"] = df["high"] / df["close"]
-        df["feature_low"] = df["low"] / df["close"]
-        df.dropna(inplace=True)
-        # dropna removes NaN but NOT inf, and a zero close produces it twice over:
-        # `open/close` on the zero bar itself, and `close.pct_change()` on the next one.
-        # inf then reaches the policy's observation tensor (#398).
-        df = df[np.isfinite(df.select_dtypes(include=[np.number])).all(axis=1)]
-        return df
-
-    @staticmethod
-    def _timestamps_of(df: pd.DataFrame, column: str) -> np.ndarray:
-        """Timestamps for `df`'s rows, from the column or the index.
-
-        `feature_preprocessing_fn` is public and may return the timestamp either way. The
-        alpaca observer got this in #397; the futures half was lost before that commit
-        landed, so reading the column unconditionally still raised KeyError here for a fn
-        that sets it as an index.
-        """
-        if column in df.columns:
-            return df[column].values
-        if column in (df.index.names or []):
-            return df.index.get_level_values(column).values
-        # Not a silent `df.index.values`: that hands back positions as timestamps for a
-        # frame whose OHLC came from real bars. Validate at the boundary.
-        raise KeyError(
-            f"feature_preprocessing_fn returned a frame with no {column!r} column or "
-            f"index level; base_features cannot be timestamped"
-        )
-
-    def _get_numpy_obs(self, df: pd.DataFrame, columns: List[str] = None) -> np.ndarray:
-        """Convert specified columns to numpy array."""
-        if columns is None:
-            columns = [col for col in df.columns if "feature" in col]
-        if not columns:
-            raise ValueError(f"No columns found in preprocessed DataFrame matching: {columns}")
-        return np.array(df[columns], dtype=np.float32)
 
     def _fetch_single_timeframe(self, timeframe: TimeFrame, limit: int = None) -> pd.DataFrame:
         """Fetch and preprocess data for a single timeframe."""
@@ -239,123 +96,6 @@ class BaseFuturesObservationClass(ABC):
         except Exception as e:
             raise RuntimeError(f"Failed to fetch candles for {self.symbol} on {timeframe.obs_key_freq()}: {str(e)}")
 
-    def get_keys(self) -> List[str]:
-        """
-        Get the list of keys that will be present in the observations dictionary.
-
-        Returns:
-            List of strings formatted as '{timeframe}_{window_size}'
-            (e.g., '5Minute_10', '1Hour_20')
-        """
-        return [
-            f"{tf.obs_key_freq()}_{ws}"
-            for tf, ws in zip(self.time_frames, self.window_sizes)
-        ]
-
-    def _dummy_frame(self, window_size: int) -> pd.DataFrame:
-        """A frame standing in for this venue's parsed klines, to count feature columns.
-
-        A method rather than a column tuple because DTYPE MATTERS: binance's `trades` is
-        int64 in real klines, and a names-only tuple made it a float, so a fn branching
-        on `is_integer_dtype(...)` took a different branch here than on live data.
-        `get_features()` then reported a width the observation did not have -- and that
-        width IS the spec `BinanceOHLCVTransform` builds, so it surfaced at
-        `check_env_specs`.
-
-        MAGNITUDES are NOT faithful and a fn branching on one will still diverge: dummy
-        values are `rand()` in [0, 1) and `trades` averages ~55 against a live ~1500.
-        Unbounded to chase, so it is stated rather than fixed.
-
-        Overridable because the venues do not return the same columns: binance klines
-        carry quote_volume, trades and the taker-buy fields, and against an OHLCV-only
-        frame a fn reading them raises KeyError. The timestamp columns are omitted on
-        every venue, so a fn deriving a time-of-day feature raises too.
-        """
-        return pd.DataFrame({
-            col: np.random.rand(window_size)
-            for col in ("open", "high", "low", "close", "volume")
-        })
-
-    def get_features(self) -> Dict[str, List[str]]:
-        """Returns a dictionary with the observation features and the original features."""
-        dummy_df = self.feature_preprocessing_fn(self._dummy_frame(self.window_sizes[0]))
-        observation_features = [f for f in dummy_df.columns if "feature" in f]
-        original_features = [f for f in dummy_df.columns if "feature" not in f]
-        return {"observation_features": observation_features, "original_features": original_features}
-
-    def get_observations(self, return_base_ohlc: bool = False) -> Dict[str, np.ndarray]:
-        """
-        Fetch and process observations for all specified timeframes and window sizes.
-
-        Args:
-            return_base_ohlc: If True, adds 'base_features' -- the preprocessing fn's
-                            open/high/low/close for the first timeframe, sliced to the same
-                            rows as the market data. A fn that drops or rescales those
-                            columns changes what the SLTP envs read as the current price.
-
-        Returns:
-            Dictionary with keys formatted as '{timeframe}_{window_size}' and numpy array values.
-            If return_base_ohlc is True, includes 'base_features' and 'base_timestamps' keys.
-        """
-        observations = {}
-
-        for timeframe, window_size in zip(self.time_frames, self.window_sizes):
-            key = f"{timeframe.obs_key_freq()}_{window_size}"
-            # Fetch extra data for preprocessing (rolling windows may need more)
-            df = self._fetch_single_timeframe(timeframe, limit=window_size + 50)
-
-            processed_df = self.feature_preprocessing_fn(df)
-
-            # A short frame is a silent shape corruption, not an error: `iloc[-w:]` just
-            # returns fewer rows, and reset() and rollout() both succeed on it (#400).
-            #
-            # Know what this costs before widening it. Under the DEFAULT policy (HALT)
-            # it raises and leaves the position alone. Under FLATTEN it market-closes an
-            # open position -- measured -- and the `+50` fetch buffer is a fixed CANDLE
-            # count, so on a 1m leg 50 bad candles is ~50 MINUTES of degraded feed, not
-            # an outage. In a multi-timeframe stack the finest leg decides, since any one
-            # short leg halts the read. That is opt-in, not free: FLATTEN means "if I
-            # cannot see the market, get flat", and a window short of its spec is not a
-            # market view. A config that can never fill the window raises in `_reset`,
-            # which is not halt-wrapped, so it surfaces flat with nothing to close.
-            if len(processed_df) < window_size:
-                raise ValueError(
-                    f"only {len(processed_df)} usable candles for {self.symbol} on "
-                    f"{timeframe.obs_key_freq()} after preprocessing, need {window_size}"
-                )
-
-            # Sliced from the SAME frame as the market data, so row i of each is the
-            # same bar by construction -- for a custom preprocessing fn too. Do NOT
-            # re-derive the row selection here: every partial copy of it desynced (#395).
-            if return_base_ohlc and timeframe == self.time_frames[0]:
-                # `base_features[-1, 3]` is the current price at three SLTP call sites,
-                # each guarded by isfinite and `<= 0`. If the newest bar was dropped,
-                # `[-1]` is the PREVIOUS bar and those guards pass on a stale price.
-                #
-                # Here, not per-timeframe: raising in the general read runs under
-                # `_halting`, where FLATTEN emergency-closes a real position -- the
-                # lesson `futures_live_base._current_mark_price` already records. Only
-                # the default fn: a custom one may resample or trim the forming bar.
-                if self.feature_preprocessing_fn == self._default_preprocessing:
-                    _kept = self._timestamps_of(processed_df, self._get_timestamp_column())
-                    _fetched = self._timestamps_of(df, self._get_timestamp_column())
-                    if len(_fetched) and _kept[-1] != _fetched[-1]:
-                        raise ValueError(
-                            f"most recent candle for {self.symbol} on "
-                            f"{timeframe.obs_key_freq()} did not survive preprocessing; "
-                            f"refusing an observation whose last bar is stale"
-                        )
-
-                observations['base_features'] = self._get_numpy_obs(
-                    processed_df,
-                    columns=['open', 'high', 'low', 'close']
-                )[-window_size:]
-                observations['base_timestamps'] = self._timestamps_of(
-                    processed_df, self._get_timestamp_column()
-                )[-window_size:]
-
-            # Apply window size
-            processed_df = processed_df.iloc[-window_size:]
-            observations[key] = self._get_numpy_obs(processed_df)
-
-        return observations
+    def _normalise_frame(self, df: pd.DataFrame) -> pd.DataFrame:
+        """`_parse_klines` already returns a plain frame, so a copy is the whole job."""
+        return df.copy()
