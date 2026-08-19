@@ -22,6 +22,7 @@ from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
 from torchtrade.envs.core.common import TradeMode, validate_trade_mode, validate_position_sizing
+from torchtrade.envs.core.common import validate_sltp_levels
 from torchtrade.envs.offline.vectorized_sequential import (
     MONEY_DTYPE,
     VectorizedSequentialTradingEnv,
@@ -64,16 +65,7 @@ class VectorizedSequentialTradingEnvSLTPConfig(VectorizedSequentialTradingEnvCon
 
         super().__post_init__()
 
-        for sl in self.stoploss_levels:
-            if sl >= 0:
-                raise ValueError(
-                    f"Stop-loss levels must be negative (e.g., -0.05 for 5% loss), got {sl}"
-                )
-        for tp in self.takeprofit_levels:
-            if tp <= 0:
-                raise ValueError(
-                    f"Take-profit levels must be positive (e.g., 0.1 for 10% profit), got {tp}"
-                )
+        validate_sltp_levels(self.stoploss_levels, self.takeprofit_levels)
 
 
 class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):

@@ -26,7 +26,7 @@ def create_sltp_action_map(
     Args:
         stoploss_levels: List of stop-loss percentages (typically negative, e.g., -0.02 = -2%)
         takeprofit_levels: List of take-profit percentages (typically positive, e.g., 0.05 = 5%)
-        include_short_positions: If True, include short position actions with swapped SL/TP
+        include_short_positions: If True, include short position actions, with SL/TP negated
         include_hold_action: If True, action 0 = HOLD (default: True)
         include_close_action: If True, add CLOSE action to exit positions (default: False for SLTP)
 
@@ -49,27 +49,18 @@ def create_sltp_action_map(
         ('close', None, None)
         >>> action_map[2]  # Long
         ('long', -0.02, 0.03)
-        >>> action_map[3]  # Short (SL/TP swapped)
-        ('short', 0.03, -0.02)
+        >>> action_map[3]  # Short: levels negated, so it mirrors action_map[2]
+        ('short', 0.02, -0.03)
 
     Note:
         For short positions SL must be above entry (positive %) and TP below entry
         (negative %), so the levels are NEGATED: ``-sl`` becomes the stop and ``-tp`` the
         target. Short action k is then the exact mirror of long action k.
 
-        It used to SWAP the two lists instead. That puts the sides right and the
-        magnitudes wrong, because both halves iterate the same
-        ``product(stoploss_levels, takeprofit_levels)`` -- so the nth short carried the
-        nth long's risk and reward exchanged, unconditionally, and visibly only when the
-        magnitudes differed. With ``stoploss_levels=(-0.025, -0.05, -0.1)`` and
-        ``takeprofit_levels=(0.05, 0.1, 0.2)`` long stops were {2.5, 5, 10}% while short
-        stops were {5, 10, 20}%: no short action had a 2.5% stop anywhere in the space,
-        so a policy that learned "tight stop, wide target" got the opposite geometry the
-        moment it went short (#279).
-
-        The action-space SIZE is unchanged (19 actions either way) and only short indices
-        change MEANING, so an SLTP checkpoint trained before this loads without complaint
-        and trades a different strategy. Retrain rather than reload.
+        This SWAPPED the two lists until #279, which got the sides right and the
+        magnitudes wrong. Only short indices changed meaning and the action-space size
+        did not, so a checkpoint trained before that fix loads without complaint and
+        trades a different strategy. Retrain rather than reload.
     """
     action_map = {}
     idx = 0

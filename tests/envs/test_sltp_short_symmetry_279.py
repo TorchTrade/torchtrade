@@ -71,3 +71,51 @@ def test_an_empty_level_list_still_builds_a_hold_only_map():
     assert create_sltp_action_map([], [0.05], include_short_positions=True) == {
         0: (None, None, None)
     }
+
+
+LIVE_SLTP_KWARGS = dict(symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10],
+                        execute_on="1m")
+ALPACA_SLTP_KWARGS = dict(symbol="BTC/USD", time_frames=["1m"], window_sizes=[10],
+                          execute_on="1m")
+
+
+def _sltp_configs():
+    """Every config that feeds create_sltp_action_map, offline and live."""
+    from torchtrade.envs.offline import SequentialTradingEnvSLTPConfig
+    from torchtrade.envs.offline.vectorized_sequential_sltp import (
+        VectorizedSequentialTradingEnvSLTPConfig)
+    from torchtrade.envs.live.binance.env_sltp import BinanceFuturesSLTPTradingEnvConfig
+    from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTradingEnvConfig
+    from torchtrade.envs.live.bybit.env_sltp import BybitFuturesSLTPTradingEnvConfig
+    from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTradingEnvConfig
+    from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTradingEnvConfig
+    return [
+        (SequentialTradingEnvSLTPConfig, {}),
+        (VectorizedSequentialTradingEnvSLTPConfig, {}),
+        (BinanceFuturesSLTPTradingEnvConfig, LIVE_SLTP_KWARGS),
+        (BitgetFuturesSLTPTradingEnvConfig, LIVE_SLTP_KWARGS),
+        (BybitFuturesSLTPTradingEnvConfig, LIVE_SLTP_KWARGS),
+        (OKXFuturesSLTPTradingEnvConfig, LIVE_SLTP_KWARGS),
+        # Long-only, so it never reaches the negation -- but a positive stop level
+        # inverts its LONG bracket just the same, and its guard was the one the first
+        # version of this list forgot, which the mutation caught.
+        (AlpacaSLTPTradingEnvConfig, ALPACA_SLTP_KWARGS),
+    ]
+
+
+@pytest.mark.parametrize("levels,message", [
+    (dict(stoploss_levels=[0.02], takeprofit_levels=[0.05]), "must be negative"),
+    (dict(stoploss_levels=[-0.02], takeprofit_levels=[-0.05]), "must be positive"),
+], ids=["positive-stoploss", "negative-takeprofit"])
+def test_every_sltp_config_rejects_levels_that_would_invert_the_bracket(levels, message):
+    """The sign convention is what the negation rests on, so it is validated, not assumed.
+
+    `("short", -sl, -tp)` puts each leg on the correct side of entry only because stops
+    are negative and targets positive. A positive stop level inverts the LONG bracket
+    too -- a stop ABOVE entry, exiting on a favourable move. Both offline envs raised
+    here already; the four live futures configs and alpaca's did not, and they are the
+    ones that pass include_short_positions=True.
+    """
+    for config_cls, extra in _sltp_configs():
+        with pytest.raises(ValueError, match=message):
+            config_cls(**extra, **levels)

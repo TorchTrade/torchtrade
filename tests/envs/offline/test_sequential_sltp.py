@@ -1370,8 +1370,8 @@ class TestLiquidationVsBracketOnADoubleBreachBar:
         low = wick_low if wick_low is not None else 100.0
         high = wick_high if wick_high is not None else 100.0
         # action[1] is the stop pct the action map hands the bracket calculator, already
-        # signed per side (negative long, positive short) -- not stoploss_levels[0], which
-        # the map SWAPS with the take-profit for shorts.
+        # signed per side (negative long, positive short) -- not stoploss_levels[0],
+        # which the map NEGATES for shorts.
         price = 100.0 * (1 + action[1]) if stop_wins else getattr(env, armed)
         assert low <= price <= high, (
             f"{armed}={price} sits outside the bar [{low}, {high}] -- this row no "
