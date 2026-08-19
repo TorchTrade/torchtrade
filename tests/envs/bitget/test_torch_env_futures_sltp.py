@@ -173,7 +173,7 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
 
     def test_action_map_short_actions(self, env):
         """Test action map short actions."""
-        # Actions 5-8 should be SHORT with flipped SL/TP
+        # Actions 5-8 should be SHORT, with SL/TP negated (#279)
         for i in range(5, 9):
             side, sl, tp = env.action_map[i]
             assert side == "short"

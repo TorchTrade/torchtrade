@@ -286,9 +286,9 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            # Action 5: SHORT with flipped SL/TP
-            # For short: SL above entry, TP below entry
-            action_tuple = ("short", 0.03, -0.02)  # Note: already flipped in action_map
+            # A short tuple as the action map emits it: SL above entry, TP below,
+            # already signed against the position (negated from the levels, #279).
+            action_tuple = ("short", 0.03, -0.02)
             trade_info = env._execute_trade_if_needed(action_tuple)
 
             if trade_info["executed"]:

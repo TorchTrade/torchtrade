@@ -21,8 +21,7 @@ import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
-from torchtrade.envs.core.common import TradeMode, validate_trade_mode, validate_position_sizing
-from torchtrade.envs.core.common import validate_sltp_levels
+from torchtrade.envs.core.common import TradeMode, validate_trade_mode, validate_position_sizing, validate_sltp_levels
 from torchtrade.envs.offline.vectorized_sequential import (
     MONEY_DTYPE,
     VectorizedSequentialTradingEnv,

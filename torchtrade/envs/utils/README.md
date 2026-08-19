@@ -63,9 +63,9 @@ instead, which got the sides right and the magnitudes wrong — short *k* carrie
 *k*'s risk and reward exchanged. With `stoploss_levels=(-0.025, -0.05, -0.1)` and
 `takeprofit_levels=(0.05, 0.1, 0.2)`, long stops were {2.5, 5, 10}% while short stops
 were {5, 10, 20}% and no short action had a 2.5% stop. The action-space size is unchanged
-either way, so a checkpoint trained before that fix loads without complaint — and where
-the two magnitudes differ, it then trades a different strategy. Where every pair has
-`tp == -sl` the maps are identical, as they are for any long-only config.
+either way, so a checkpoint trained before that fix loads without complaint and trades a
+different strategy. Retrain — equal magnitude *sets* are not an exemption, since the same
+tuples land at permuted indices and the index is what the policy emits.
 
 **Example:**
 ```python

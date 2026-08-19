@@ -26,8 +26,7 @@ from torchtrade.envs.offline.sequential import (
     SequentialTradingEnv,
     SequentialTradingEnvConfig,
 )
-from torchtrade.envs.core.common import TradeMode, validate_trade_mode, validate_position_sizing
-from torchtrade.envs.core.common import validate_sltp_levels
+from torchtrade.envs.core.common import TradeMode, validate_trade_mode, validate_position_sizing, validate_sltp_levels
 from torchtrade.envs.core.state import (
     advance_hold_counter_from_size,
     binarize_action_type,

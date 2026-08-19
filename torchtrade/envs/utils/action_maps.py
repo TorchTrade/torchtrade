@@ -59,10 +59,11 @@ def create_sltp_action_map(
 
         This SWAPPED the two lists until #279, which got the sides right and the
         magnitudes wrong. The action-space size never changed, so a checkpoint trained
-        before that fix loads without complaint -- and where the stop and target
-        magnitudes DIFFER it then trades a different strategy. Where every pair has
-        ``tp == -sl`` the two maps are identical, as they are for any long-only config.
-        Retrain unless you can show your levels fall in that identical case.
+        before that fix loads without complaint and trades a different strategy.
+        Retrain. Equal magnitude SETS are not an exemption: with two levels each way the
+        old and new maps hold the same four short tuples at PERMUTED indices, and the
+        index is what the policy emits. Only a long-only config, or a single stop and
+        target of equal size, leaves the map untouched.
     """
     action_map = {}
     idx = 0

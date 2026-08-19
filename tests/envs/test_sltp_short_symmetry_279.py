@@ -80,7 +80,8 @@ def test_a_side_the_bracket_calculator_does_not_know_is_refused(side):
     The percentages arrive already oriented against the position, so passing "flat" or a
     miscapitalised "Long" would price a bracket off the OTHER direction's numbers and
     return silently. Nothing exercised this: collapsing the two per-side functions left
-    the check as the only thing `side` still does, and deleting it kept 861 tests green.
+    the check as the only thing `side` still does, and deleting it left the other 3974
+    tests green.
     """
     with pytest.raises(ValueError, match="Invalid side"):
         calculate_bracket_prices(side, 100.0, -0.02, 0.05)
@@ -93,27 +94,49 @@ ALPACA_SLTP_KWARGS = dict(symbol="BTC/USD", time_frames=["1m"], window_sizes=[10
 
 
 def _sltp_configs():
-    """Every config that feeds create_sltp_action_map, offline and live."""
+    """The DISTINCT __post_init__ implementations that guard the levels.
+
+    Binance/Bitget/Bybit/OKX all inherit `BaseFuturesSLTPConfig.__post_init__` unchanged,
+    so running four of them is the same bytecode relabelled four times. Binance stands in
+    for the shared base; `test_no_futures_sltp_config_reforks_the_level_guard` below is
+    what keeps the other three honest, and it costs an identity check rather than a
+    construction.
+    """
     from torchtrade.envs.offline import SequentialTradingEnvSLTPConfig
     from torchtrade.envs.offline.vectorized_sequential_sltp import (
         VectorizedSequentialTradingEnvSLTPConfig)
     from torchtrade.envs.live.binance.env_sltp import BinanceFuturesSLTPTradingEnvConfig
-    from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTradingEnvConfig
-    from torchtrade.envs.live.bybit.env_sltp import BybitFuturesSLTPTradingEnvConfig
-    from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTradingEnvConfig
     from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTradingEnvConfig
     return [
         (SequentialTradingEnvSLTPConfig, {}),
         (VectorizedSequentialTradingEnvSLTPConfig, {}),
         (BinanceFuturesSLTPTradingEnvConfig, LIVE_SLTP_KWARGS),
-        (BitgetFuturesSLTPTradingEnvConfig, LIVE_SLTP_KWARGS),
-        (BybitFuturesSLTPTradingEnvConfig, LIVE_SLTP_KWARGS),
-        (OKXFuturesSLTPTradingEnvConfig, LIVE_SLTP_KWARGS),
         # Long-only, so it never reaches the negation -- but a positive stop level
         # inverts its LONG bracket just the same, and its guard was the one the first
         # version of this list forgot, which the mutation caught.
         (AlpacaSLTPTradingEnvConfig, ALPACA_SLTP_KWARGS),
     ]
+
+
+@pytest.mark.parametrize("venue", ["bitget", "bybit", "okx"])
+def test_no_futures_sltp_config_reforks_the_level_guard(venue):
+    """The three venues the parametrization above drops, held by identity instead.
+
+    They are covered only because they inherit `BaseFuturesSLTPConfig.__post_init__`. A
+    venue that declares its own would silently stop validating its levels while every
+    other test stayed green -- the re-fork shape this repo has shipped three times.
+    """
+    import importlib
+    from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
+
+    module = importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp")
+    config_cls = next(v for k, v in vars(module).items()
+                      if k.endswith("Config") and hasattr(v, "__dataclass_fields__")
+                      and v.__module__ == module.__name__)
+    assert config_cls.__post_init__ is BaseFuturesSLTPConfig.__post_init__, (
+        f"{config_cls.__name__} re-forks __post_init__, so validate_sltp_levels no "
+        f"longer provably runs for it"
+    )
 
 
 @pytest.mark.parametrize("levels,message", [
