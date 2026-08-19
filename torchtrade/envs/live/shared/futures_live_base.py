@@ -260,7 +260,22 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         Every venue reads its mark as `float(pos.get("markPrice") or entry_price)`, which
         is 0.0 when both fields are blank.
         """
-        price = position_status.mark_price if position_status else self.trader.get_mark_price()
+        if position_status:
+            price = position_status.mark_price
+        else:
+            try:
+                price = self.trader.get_mark_price()
+            except Exception as error:
+                # ValueError, not the venue's own type: `_halting` catches
+                # (PositionUnknownError, ValueError) and deliberately NOT RuntimeError,
+                # which adapters use for timeouts. binance and bitget wrap this in
+                # RuntimeError and bybit and okx do not wrap it at all, so the raw type
+                # escaped and ObservationFailurePolicy was never consulted -- measured
+                # BYPASSED under both HALT and FLATTEN (#394). Failing to READ the mark
+                # is the same event as reading an unusable one, so it raises the same way.
+                raise ValueError(
+                    f"could not read the mark price for {self.config.symbol}: {error}"
+                ) from error
         if not math.isfinite(price) or price <= 0:
             raise ValueError(f"venue reported an unusable mark price ({price})")
         return price

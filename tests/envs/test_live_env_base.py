@@ -3408,3 +3408,63 @@ def test_an_observer_disagreeing_with_the_config_raises_rather_than_guessing():
         BinanceFuturesTorchTradingEnv(config=config, observer=observer, trader=trader)
 
 
+
+
+@pytest.mark.parametrize("venue_error", [
+    pytest.param(RuntimeError("venue unreachable"), id="wrapped-RuntimeError"),
+    pytest.param(ConnectionError("socket closed"), id="raw-sdk-exception"),
+    pytest.param(KeyError("markPrice"), id="malformed-payload"),
+], )
+@pytest.mark.parametrize("policy", ["halt", "flatten"])
+def test_a_mark_price_that_cannot_be_read_engages_the_failure_policy(venue_error, policy):
+    """`_halting` catches (PositionUnknownError, ValueError), deliberately NOT RuntimeError.
+
+    binance and bitget wrap a mark-price fetch failure in RuntimeError; bybit and okx do
+    not wrap it at all. Either way the raw type escaped `_halting`, so
+    ObservationFailurePolicy was never consulted -- measured BYPASSED under both HALT and
+    FLATTEN on a FLAT account, which is the only branch that re-fetches the mark (#394).
+
+    Flat is also why converting it is safe: FLATTEN has nothing to close, and HALT gets
+    the structured signal orchestration is built to catch.
+    """
+    from torchtrade.envs.core.live import LiveObservationHalt, ObservationFailurePolicy
+    from torchtrade.envs.live.binance.env import (
+        BinanceFuturesTorchTradingEnv,
+        BinanceFuturesTradingEnvConfig,
+    )
+
+    observer = MagicMock()
+    observer.get_keys.return_value = ["1Minute_10"]
+    observer.get_features.return_value = {
+        "observation_features": ["a", "b", "c", "d"], "original_features": []}
+    observer.get_observations.return_value = {
+        "1Minute_10": np.zeros((10, 4), dtype=np.float32)}
+    observer.reset.return_value = None
+
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1000.0, "total_margin_balance": 1000.0,
+        "total_wallet_balance": 1000.0,
+    }
+    trader.get_status.return_value = {"position_status": None}  # flat
+    trader.cancel_open_orders.return_value = True
+    trader.close_position.return_value = True
+    trader.get_mark_price.side_effect = venue_error
+
+    config = BinanceFuturesTradingEnvConfig(
+        symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10], execute_on="1m",
+        observation_failure_policy=policy,
+    )
+    with patch("time.sleep"), patch.object(
+        BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"
+    ):
+        env = BinanceFuturesTorchTradingEnv(
+            config=config, observer=observer, trader=trader
+        )
+
+    td = env.reset()
+    td["action"] = torch.tensor(1)
+    with pytest.raises(LiveObservationHalt):
+        env.step(td)
+    if config.observation_failure_policy is ObservationFailurePolicy.FLATTEN:
+        trader.close_position.assert_called()
