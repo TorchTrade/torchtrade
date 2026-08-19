@@ -278,23 +278,24 @@ class BaseFuturesObservationClass(ABC):
             # Fetch extra data for preprocessing (rolling windows may need more)
             df = self._fetch_single_timeframe(timeframe, limit=window_size + 50)
 
-            # Store base OHLC features if this is the first timeframe and return_base_ohlc is True
+            processed_df = self.feature_preprocessing_fn(df)
+
+            # base_features is sliced from the SAME frame as the market data, so row i of
+            # each is the same bar by construction. Re-deriving the row selection here is
+            # what #395 kept getting wrong: the rule is dropna -> drop_duplicates -> build
+            # features -> dropna, and three successive attempts each matched only part of
+            # it (a 0/0 bar survives the first dropna and dies at the last). Slicing the
+            # processed frame also makes the guarantee hold for a CUSTOM preprocessing fn,
+            # which no copy of the rule ever could.
             if return_base_ohlc and timeframe == self.time_frames[0]:
-                # Row selection must MATCH _default_preprocessing's, or row i here and
-                # row i of market_data are different bars in the same observation --
-                # which include_base_features hands to the policy together. It drops NaN
-                # AND duplicates, so this does both: dropping only NaN desynced on a
-                # repeated bar, and restricting NaN to OHLC desynced on a NaN volume.
-                # base_features was built from the raw frame and did neither (#395).
-                base_df = df.dropna().drop_duplicates()
-                timestamp_col = self._get_timestamp_column()
                 observations['base_features'] = self._get_numpy_obs(
-                    base_df,
+                    processed_df,
                     columns=['open', 'high', 'low', 'close']
                 )[-window_size:]
-                observations['base_timestamps'] = base_df[timestamp_col].values[-window_size:]
+                observations['base_timestamps'] = processed_df[
+                    self._get_timestamp_column()
+                ].values[-window_size:]
 
-            processed_df = self.feature_preprocessing_fn(df)
             # Apply window size
             processed_df = processed_df.iloc[-window_size:]
             observations[key] = self._get_numpy_obs(processed_df)

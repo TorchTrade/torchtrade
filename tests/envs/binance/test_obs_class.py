@@ -228,6 +228,10 @@ class TestBinanceSharesTheObservationBase:
         pytest.param(lambda r: r[57].__setitem__(5, "NOT_A_NUMBER"), id="nan-volume"),
         pytest.param(lambda r: r[57].__setitem__(7, "NOT_A_NUMBER"), id="nan-quote-volume"),
         pytest.param(lambda r: r.__setitem__(57, list(r[56])), id="duplicate-bar"),
+        pytest.param(
+            lambda r: (r[57].__setitem__(1, "0"), r[57].__setitem__(4, "0")),
+            id="zero-priced-bar",
+        ),
     ])
     def test_base_features_and_market_data_stay_the_same_bars(self, corrupt):
         """Row i of base_features must be the SAME BAR as row i of market_data.
@@ -241,8 +245,14 @@ class TestBinanceSharesTheObservationBase:
             feat : 23:07 23:08 23:09 23:11 23:12
 
         Worse than the NaN it was fixing, and invisible to a NaN-only assertion. Then a
-        bare dropna desynced on a REPEATED bar, because the feature path drops duplicates
-        too -- so the duplicate case here is the one that caught the second attempt.
+        bare dropna desynced on a REPEATED bar; then dropna+drop_duplicates desynced on a
+        ZERO-PRICED bar, whose 0/0 feature is removed by the dropna that runs AFTER the
+        features are built. Three attempts, each matching part of the rule.
+
+        base_features is now sliced from the frame the preprocessing fn returned, so this
+        holds by construction rather than by copying the rule -- including for a custom
+        fn, which no copy could ever cover. Each parametrized case is one attempt's
+        counterexample.
         """
         rows = self._klines(60)
         corrupt(rows)

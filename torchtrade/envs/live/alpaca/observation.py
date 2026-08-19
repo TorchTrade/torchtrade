@@ -153,20 +153,22 @@ class AlpacaObservationClass:
             key = f"{timeframe.obs_key_freq()}_{window_size}"
             df = self._fetch_single_timeframe(timeframe)
             
-            # Store base OHLC features if this is the first timeframe and return_base_ohlc is True
+            processed_df = self.feature_preprocessing_fn(df)
+
+            # Sliced from the SAME frame as the market data, so row i of each is the same
+            # bar by construction, for a custom preprocessing fn as much as the default.
+            # Alpaca re-derived the row selection here and, like the futures base, got it
+            # incompletely: dropna + drop_duplicates, missing the dropna that runs AFTER
+            # features are built (#395). Windowed to match the (window, 4) spec (#69).
             if return_base_ohlc and timeframe == self.timeframes[0]:
-                base_df = df.reset_index()
-                base_df.dropna(inplace=True)
-                base_df.drop_duplicates(inplace=True)
-                # Window base_features to the first timeframe's window, matching the futures
-                # observer (futures_base_obs.py) -- the env declares a (window, 4) spec, so an
-                # unwindowed emission (the full lookback) would disagree with it (#69).
                 observations['base_features'] = self._get_numpy_obs(
-                    base_df,
+                    processed_df,
                     columns=['open', 'high', 'low', 'close']
                 )[-window_size:]
-                observations['base_timestamps'] = base_df['timestamp'].values[-window_size:]
-            processed_df = self.feature_preprocessing_fn(df)
+                observations['base_timestamps'] = processed_df[
+                    'timestamp'
+                ].values[-window_size:]
+
             # apply window size
             processed_df = processed_df.iloc[-window_size:]
             observations[key] = self._get_numpy_obs(processed_df)
