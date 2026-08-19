@@ -3127,9 +3127,23 @@ classify, a non-finite price or equity — there is no truthful observation to e
 emitting a plausible one is worse than emitting none: the policy would act on a position
 size, exposure and liquidation distance the env has just admitted it cannot verify.</p>
 <p>So the env <strong>halts</strong>: it raises <code>LiveObservationHalt</code> and produces no transition.</p>
-<p><strong>Which reads this covers.</strong> Only the post-bar state read — the portfolio value and
-observation taken after the bar closes. Every <em>other</em> venue read raises its original
-exception with no latch and no emergency flatten:</p>
+<p><strong>Which reads this covers.</strong> Two reads. The <strong>post-bar</strong> read — the portfolio value and
+observation taken after the bar closes — is the only one that carries the observation, so
+an observation the env refuses to emit (a stale last bar, or one shorter than its declared
+spec) engages the policy here and nowhere else. Note the cost under <code>flatten</code>: the fetch
+buffer is a fixed candle count, so on a 1-minute timeframe a refused window can mean ~50
+minutes of bad feed, not an outage, and in a multi-timeframe stack the finest timeframe
+decides.</p>
+<p>The <strong>pre-trade</strong> read covers the position status and the mark price. A mark-price fetch
+that fails now raises <code>ValueError</code> rather than the venue's own type, so the policy is
+consulted (#394). Before that fix the wrapped <code>RuntimeError</code> and the raw SDK exception
+both escaped it — though a non-numeric payload already raised <code>ValueError</code> from <code>float()</code>
+and was caught, which is why the bypass was intermittent rather than total.</p>
+<p><code>_reset()</code> reads the observation <em>outside</em> the halt, deliberately — routing it through
+would market-flatten on every episode start for an account whose metadata is always blank
+(a Bybit portfolio-margin account blanks <code>liqPrice</code>). A reset failure raises bare.</p>
+<p>Every <em>other</em> venue read also raises its original exception, with no latch and no
+emergency flatten:</p>
 <table>
 <thead>
 <tr>
@@ -3144,10 +3158,10 @@ exception with no latch and no emergency flatten:</p>
 </tr>
 <tr>
 <td>the initial read inside <code>_reset()</code></td>
-<td><code>ValueError</code></td>
+<td><code>ValueError</code>, or <code>PositionUnknownError</code> if the position is the unreadable part</td>
 </tr>
 <tr>
-<td><code>_current_mark_price()</code>, called at the top of every futures <code>_step()</code></td>
+<td><code>_current_mark_price()</code> at the <strong>sizing</strong> call sites in <code>_execute_fractional_action</code> / <code>_execute_trade_if_needed</code></td>
 <td><code>ValueError</code></td>
 </tr>
 <tr>
@@ -3160,10 +3174,8 @@ exception with no latch and no emergency flatten:</p>
 </tr>
 </tbody>
 </table>
-<p>So <code>except LiveObservationHalt</code> alone does <strong>not</strong> give you a policy-driven emergency
-close on an unreadable price or balance — it catches the post-bar read and nothing else.
-Catch <code>ValueError</code> and <code>PositionUnknownError</code> too if you need to cover those. Alpaca and
-Polymarket do not route through this path at all. Closing the gap is #355.</p>
+<p>So <code>except LiveObservationHalt</code> covers the two state reads and nothing else. Catch
+<code>ValueError</code> and <code>PositionUnknownError</code> too if you need the sizing paths.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.core.live</span><span class="w"> </span><span class="kn">import</span> <span class="n">LiveObservationHalt</span>
 </span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>
 </span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="k">try</span><span class="p">:</span>
@@ -3197,12 +3209,17 @@ the position is gone — confirming that would need the read that just failed. T
 as requiring an operator to check the account.</p>
 <h3 id="what-does-not-halt">What does not halt<a class="headerlink" href="#what-does-not-halt" title="Permanent link">&para;</a></h3>
 <p>Only failures that mean <em>the venue told us something impossible about our own money</em> are
-terminal. A transient error is not: every adapter wraps arbitrary failures in
-<code>RuntimeError("Failed to get account balance: ...")</code>, so treating that as terminal would
-end an episode — and under <code>flatten</code>, close a live position — on a read timeout. Those
-propagate unchanged, as do configuration errors such as a missing feature key. Retry and
-staleness handling are tracked in #295.</p>
-<p>Alpaca and Polymarket do not route through this path at all (#355).</p>
+terminal. A transient error is generally not: adapters wrap arbitrary failures in
+<code>RuntimeError("Failed to get account balance: ...")</code>, and treating every one of those as
+terminal would end an episode — and under <code>flatten</code>, close a live position — on a read
+timeout. Those propagate unchanged, as do configuration errors such as a missing feature
+key.</p>
+<p>The mark-price read is the deliberate exception (#394): there a failed read is
+indistinguishable from reading an unusable price, which was already terminal, so it
+raises the same way. Escalating it is safe because the only halt-wrapped caller reaches
+the fetch solely when the account is flat. Retry and staleness handling are tracked
+in #295.</p>
+<p>Alpaca and Polymarket do not route through this path at all.</p>
 
 
 
