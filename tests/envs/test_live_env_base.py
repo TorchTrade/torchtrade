@@ -3386,6 +3386,31 @@ def test_close_accepts_the_keyword_torchrl_passes_it(owner):
     ]
 
 
+def _position_side_free_executors():
+    from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+    from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
+    from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
+    return [BinanceFuturesOrderClass, BitgetFuturesOrderClass, ReplayOrderExecutor]
+
+
+@pytest.mark.parametrize("executor", _position_side_free_executors(),
+                         ids=lambda c: c.__name__)
+def test_the_executor_trade_surface_advertises_nothing_it_cannot_do(executor):
+    """`position_side` sat on these and nothing ever set it (#289).
+
+    A parameter with a default is invisible to every call site that omits it, so a dead
+    one cannot fail a test -- it took an AST scan of the repo to find, not a red suite.
+    Hedge mode IS implemented, but through a venue-level `position_mode` config (bybit
+    `order_executor.py:274`, bitget `:305`); this was a second, per-call surface for it,
+    and binance and replay have no position-mode concept at all.
+    """
+    assert list(inspect.signature(executor.close_position).parameters) == ["self"]
+    assert "position_side" not in inspect.signature(executor.trade).parameters, (
+        f"{executor.__name__}.trade advertises position_side again; it is driven by the "
+        f"venue-level position_mode config, and these three have no such config"
+    )
+
+
 def test_construction_survives_an_observer_that_cannot_reach_the_exchange():
     """binance and bitget built the spec from `get_observations()` -- a live kline fetch
     PER TIMEFRAME, during __init__ -- purely to read `.shape[1]`.

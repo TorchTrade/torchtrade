@@ -320,7 +320,6 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 "quantity": self._format_quantity(quantity),
             }
 
-
             # Add reduce only flag
             if reduce_only:
                 order_params["reduceOnly"] = "true"
@@ -538,7 +537,6 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 "quantity": self._format_quantity(qty, reduce_only=True),
                 "reduceOnly": "true",
             }
-
 
             self.client.futures_create_order(**order_params)
             # The submitted size, not the requested one: this PR exists because the

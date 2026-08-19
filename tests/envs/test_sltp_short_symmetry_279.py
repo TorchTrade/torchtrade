@@ -7,6 +7,14 @@ from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
 
 ENTRY = 100.0
 
+from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTradingEnvConfig
+from torchtrade.envs.live.bybit.env_sltp import BybitFuturesSLTPTradingEnvConfig
+from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTradingEnvConfig
+
+REFORKABLE_FUTURES_CONFIGS = [BitgetFuturesSLTPTradingEnvConfig,
+                              BybitFuturesSLTPTradingEnvConfig,
+                              OKXFuturesSLTPTradingEnvConfig]
+
 
 def _geometry(side, sl_pct, tp_pct):
     """Effective (risk %, reward %) at a real entry, through the real bracket helper.
@@ -118,15 +126,7 @@ def _sltp_configs():
     ]
 
 
-def _reforkable_futures_configs():
-    from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTradingEnvConfig
-    from torchtrade.envs.live.bybit.env_sltp import BybitFuturesSLTPTradingEnvConfig
-    from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTradingEnvConfig
-    return [BitgetFuturesSLTPTradingEnvConfig, BybitFuturesSLTPTradingEnvConfig,
-            OKXFuturesSLTPTradingEnvConfig]
-
-
-@pytest.mark.parametrize("config_cls", _reforkable_futures_configs(),
+@pytest.mark.parametrize("config_cls", REFORKABLE_FUTURES_CONFIGS,
                          ids=lambda c: c.__name__)
 def test_no_futures_sltp_config_reforks_the_level_guard(config_cls):
     """The three venues the parametrization above drops, held by identity instead.
@@ -134,10 +134,6 @@ def test_no_futures_sltp_config_reforks_the_level_guard(config_cls):
     They are covered only because they inherit `BaseFuturesSLTPConfig.__post_init__`. A
     venue that declares its own would silently stop validating its levels while every
     other test stayed green -- the re-fork shape this repo has shipped three times.
-
-    Imported by name rather than resolved at runtime: a namespace scan re-targets
-    silently when an import lands in the module, and building the name from the venue
-    string needs a special case for OKX. Neither can go wrong if the class is the param.
     """
     from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 
