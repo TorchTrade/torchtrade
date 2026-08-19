@@ -4,16 +4,11 @@ import pytest
 
 from torchtrade.envs.utils import create_sltp_action_map
 from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
-
-ENTRY = 100.0
-
 from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTradingEnvConfig
 from torchtrade.envs.live.bybit.env_sltp import BybitFuturesSLTPTradingEnvConfig
 from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTradingEnvConfig
 
-REFORKABLE_FUTURES_CONFIGS = [BitgetFuturesSLTPTradingEnvConfig,
-                              BybitFuturesSLTPTradingEnvConfig,
-                              OKXFuturesSLTPTradingEnvConfig]
+ENTRY = 100.0
 
 
 def _geometry(side, sl_pct, tp_pct):
@@ -88,7 +83,7 @@ def test_a_side_the_bracket_calculator_does_not_know_is_refused(side):
     The percentages arrive already oriented against the position, so passing "flat" or a
     miscapitalised "Long" would price a bracket off the OTHER direction's numbers and
     return silently. Nothing exercised this: collapsing the two per-side functions left
-    the check as the only thing `side` still does, and deleting it left the other 3971
+    the check as the only thing `side` still does, and deleting it left the other 3974
     tests green.
     """
     with pytest.raises(ValueError, match="Invalid side"):
@@ -124,6 +119,11 @@ def _sltp_configs():
         # version of this list forgot, which the mutation caught.
         (AlpacaSLTPTradingEnvConfig, ALPACA_SLTP_KWARGS),
     ]
+
+
+REFORKABLE_FUTURES_CONFIGS = [BitgetFuturesSLTPTradingEnvConfig,
+                              BybitFuturesSLTPTradingEnvConfig,
+                              OKXFuturesSLTPTradingEnvConfig]
 
 
 @pytest.mark.parametrize("config_cls", REFORKABLE_FUTURES_CONFIGS,

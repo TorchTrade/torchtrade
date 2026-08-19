@@ -8,6 +8,7 @@ from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
 from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
 from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
+from torchtrade.envs.replay.order_executor import ReplayOrderExecutor
 from torchtrade.envs.live.shared.executor_helpers import (
     ExecutorHelpersMixin,
     TickSizeMixin,
@@ -15,6 +16,10 @@ from torchtrade.envs.live.shared.executor_helpers import (
 
 EXECUTORS = [BinanceFuturesOrderClass, BitgetFuturesOrderClass,
              BybitFuturesOrderClass, OKXFuturesOrderClass]
+
+# The three that carried the dead `position_side` (#289). bybit and okx never had it.
+POSITION_SIDE_FREE = [BinanceFuturesOrderClass, BitgetFuturesOrderClass,
+                      ReplayOrderExecutor]
 
 
 @pytest.mark.parametrize("cls", EXECUTORS, ids=lambda c: c.__name__)
@@ -123,3 +128,18 @@ def test_unrealized_pnl_is_signed_by_direction_and_ignores_dust(qty, expected):
 
 def test_a_zero_entry_price_reports_no_pnl_rather_than_dividing_by_it():
     assert ExecutorHelpersMixin()._calculate_unrealized_pnl_pct(1.0, 0.0, 110.0) == 0.0
+
+
+@pytest.mark.parametrize("executor", POSITION_SIDE_FREE, ids=lambda c: c.__name__)
+def test_the_executor_trade_surface_advertises_nothing_it_cannot_do(executor):
+    """`position_side` sat on these and nothing ever set it (#289).
+
+    Hedge mode IS implemented, but through a venue-level `position_mode` config (bybit,
+    bitget); this was a second, per-call surface for it, and binance and replay have no
+    position-mode concept at all.
+    """
+    assert list(inspect.signature(executor.close_position).parameters) == ["self"]
+    assert "position_side" not in inspect.signature(executor.trade).parameters, (
+        f"{executor.__name__}.trade advertises position_side again; it is driven by the "
+        f"venue-level position_mode config, and these three have no such config"
+    )
