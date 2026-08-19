@@ -7,6 +7,23 @@ from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, timeframe_
 from alpaca.data.requests import CryptoBarsRequest
 from alpaca.data.historical.crypto import CryptoHistoricalDataClient
 
+def _timestamps_of(df, column):
+    """Timestamps for `df`'s rows, from the column or the index.
+
+    `feature_preprocessing_fn` is public and may leave the timestamp in the index --
+    alpaca's SDK returns a (symbol, timestamp) MultiIndex and a custom fn need not call
+    reset_index. Reading the column unconditionally regressed that path to a KeyError.
+    """
+    if column in df.columns:
+        return df[column].values
+    if column in (df.index.names or []):
+        return df.index.get_level_values(column).values
+    raise KeyError(
+        f"feature_preprocessing_fn returned a frame with no {column!r} column or index "
+        f"level; base_features cannot be timestamped"
+    )
+
+
 class AlpacaObservationClass:
 
     def reset(self) -> None:
@@ -153,20 +170,19 @@ class AlpacaObservationClass:
             key = f"{timeframe.obs_key_freq()}_{window_size}"
             df = self._fetch_single_timeframe(timeframe)
             
-            # Store base OHLC features if this is the first timeframe and return_base_ohlc is True
+            processed_df = self.feature_preprocessing_fn(df)
+
+            # Sliced from the SAME frame as the market data, so row i of each is the
+            # same bar by construction (#395). Windowed to the (window, 4) spec (#69).
             if return_base_ohlc and timeframe == self.timeframes[0]:
-                base_df = df.reset_index()
-                base_df.dropna(inplace=True)
-                base_df.drop_duplicates(inplace=True)
-                # Window base_features to the first timeframe's window, matching the futures
-                # observer (futures_base_obs.py) -- the env declares a (window, 4) spec, so an
-                # unwindowed emission (the full lookback) would disagree with it (#69).
                 observations['base_features'] = self._get_numpy_obs(
-                    base_df,
+                    processed_df,
                     columns=['open', 'high', 'low', 'close']
                 )[-window_size:]
-                observations['base_timestamps'] = base_df['timestamp'].values[-window_size:]
-            processed_df = self.feature_preprocessing_fn(df)
+                observations['base_timestamps'] = _timestamps_of(
+                    processed_df, 'timestamp'
+                )[-window_size:]
+
             # apply window size
             processed_df = processed_df.iloc[-window_size:]
             observations[key] = self._get_numpy_obs(processed_df)

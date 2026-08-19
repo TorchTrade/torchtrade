@@ -6,7 +6,9 @@ Only Alpaca-specific tests (client injection, data integrity, feature semantics)
 and stricter assertions live here.
 """
 
+from unittest.mock import MagicMock
 import numpy as np
+import pandas as pd
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
@@ -131,3 +133,116 @@ class TestAlpacaObservationClass(BaseObservationClassTests):
         timestamps = obs.get_observations(return_base_ohlc=True)["base_timestamps"]
         for i in range(len(timestamps) - 1):
             assert timestamps[i] < timestamps[i + 1]
+
+
+def test_a_malformed_candle_never_reaches_alpaca_base_features(monkeypatch):
+    """Alpaca already dropped NaN before slicing base_features; nothing tested it.
+
+    Deleting that dropna failed zero tests, because every mock client returns clean
+    candles -- so the protection that the futures base was missing (#395) was itself
+    unguarded on the one venue that had it. Injected at the frame level, since which
+    malformed payload produces a NaN is venue-specific.
+    """
+    observer = AlpacaObservationClass(
+        symbol="BTC/USD",
+        timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+        window_sizes=10,
+        client=MagicMock(),
+    )
+
+    def frame_with_a_hole(timeframe):
+        n = 60
+        df = pd.DataFrame({
+            "symbol": ["BTC/USD"] * n,  # alpaca's default preprocessing drops this column
+            "open": np.full(n, 100.0), "high": np.full(n, 101.0),
+            "low": np.full(n, 99.0), "close": np.full(n, 100.5),
+            "volume": np.full(n, 10.0),
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        })
+        df.loc[57, "close"] = np.nan  # inside the last 10, (alpaca's SDK returns floats, so a
+        # gap arrives already NaN rather than via a coerced parse)
+        return df
+
+    monkeypatch.setattr(observer, "_fetch_single_timeframe", frame_with_a_hole)
+    observations = observer.get_observations(return_base_ohlc=True)
+    assert not np.isnan(observations["base_features"]).any()
+
+
+def test_alpaca_base_features_survive_a_fn_that_leaves_the_timestamp_in_the_index():
+    """Alpaca's SDK returns a (symbol, timestamp) MultiIndex.
+
+    The default preprocessing calls reset_index, but `feature_preprocessing_fn` is a
+    public constructor argument and a custom fn need not. Main handled this because it
+    did its own `df.reset_index()`; slicing the processed frame instead read `timestamp`
+    as a COLUMN and regressed that path to a KeyError (#395 review).
+
+    Rows still come from the processed frame, so alignment is unaffected -- only where
+    the timestamps are read from changes.
+    """
+    import numpy as np
+    import pandas as pd
+    from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
+    from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+    def keeps_the_multiindex(df):
+        df = df.copy()
+        df["feature_close"] = df["close"].pct_change().fillna(0)
+        return df.dropna()
+
+    observer = AlpacaObservationClass(
+        symbol="BTC/USD",
+        timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+        window_sizes=10,
+        feature_preprocessing_fn=keeps_the_multiindex,
+        client=MagicMock(),
+    )
+    n = 60
+    stamps = pd.date_range("2024-01-01", periods=n, freq="1min")
+    frame = pd.DataFrame(
+        {"open": np.full(n, 100.0), "high": np.full(n, 101.0),
+         "low": np.full(n, 99.0), "close": np.linspace(100.0, 130.0, n),
+         "volume": np.full(n, 10.0)},
+        index=pd.MultiIndex.from_arrays(
+            [["BTC/USD"] * n, stamps], names=["symbol", "timestamp"]
+        ),
+    )
+    observer._fetch_single_timeframe = lambda timeframe: frame
+
+    observations = observer.get_observations(return_base_ohlc=True)
+    assert observations["base_features"].shape == (10, 4)
+    assert list(pd.to_datetime(observations["base_timestamps"])) == list(stamps[-10:])
+
+
+def test_alpaca_refuses_a_fn_that_loses_the_timestamp_entirely():
+    """Neither a column nor an index level: raise, do not invent positions as times.
+
+    Falling back to `df.index.values` would hand back 0..n for a frame whose OHLC came
+    from real bars -- a spec-shaped lie. Validate at the boundary (invariant 4).
+    """
+    import numpy as np
+    import pandas as pd
+    import pytest as _pytest
+    from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
+    from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+    observer = AlpacaObservationClass(
+        symbol="BTC/USD",
+        timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+        window_sizes=10,
+        feature_preprocessing_fn=lambda df: df.reset_index(drop=True).assign(
+            feature_close=0.0
+        ),
+        client=MagicMock(),
+    )
+    n = 60
+    observer._fetch_single_timeframe = lambda timeframe: pd.DataFrame(
+        {"open": np.full(n, 100.0), "high": np.full(n, 101.0),
+         "low": np.full(n, 99.0), "close": np.full(n, 100.5),
+         "volume": np.full(n, 10.0)},
+        index=pd.MultiIndex.from_arrays(
+            [["BTC/USD"] * n, pd.date_range("2024-01-01", periods=n, freq="1min")],
+            names=["symbol", "timestamp"],
+        ),
+    )
+    with _pytest.raises(KeyError, match="timestamp"):
+        observer.get_observations(return_base_ohlc=True)

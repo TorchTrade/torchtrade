@@ -264,8 +264,10 @@ class BaseFuturesObservationClass(ABC):
         Fetch and process observations for all specified timeframes and window sizes.
 
         Args:
-            return_base_ohlc: If True, includes the raw OHLC data from the first timeframe
-                            in the observations dictionary under the 'base_features' key.
+            return_base_ohlc: If True, adds 'base_features' -- the preprocessing fn's
+                            open/high/low/close for the first timeframe, sliced to the same
+                            rows as the market data. A fn that drops or rescales those
+                            columns changes what the SLTP envs read as the current price.
 
         Returns:
             Dictionary with keys formatted as '{timeframe}_{window_size}' and numpy array values.
@@ -278,17 +280,20 @@ class BaseFuturesObservationClass(ABC):
             # Fetch extra data for preprocessing (rolling windows may need more)
             df = self._fetch_single_timeframe(timeframe, limit=window_size + 50)
 
-            # Store base OHLC features if this is the first timeframe and return_base_ohlc is True
+            processed_df = self.feature_preprocessing_fn(df)
+
+            # Sliced from the SAME frame as the market data, so row i of each is the
+            # same bar by construction -- for a custom preprocessing fn too. Do NOT
+            # re-derive the row selection here: every partial copy of it desynced (#395).
             if return_base_ohlc and timeframe == self.time_frames[0]:
-                base_df = df.copy()
-                timestamp_col = self._get_timestamp_column()
                 observations['base_features'] = self._get_numpy_obs(
-                    base_df,
+                    processed_df,
                     columns=['open', 'high', 'low', 'close']
                 )[-window_size:]
-                observations['base_timestamps'] = base_df[timestamp_col].values[-window_size:]
+                observations['base_timestamps'] = processed_df[
+                    self._get_timestamp_column()
+                ].values[-window_size:]
 
-            processed_df = self.feature_preprocessing_fn(df)
             # Apply window size
             processed_df = processed_df.iloc[-window_size:]
             observations[key] = self._get_numpy_obs(processed_df)

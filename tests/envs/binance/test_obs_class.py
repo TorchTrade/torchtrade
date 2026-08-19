@@ -212,3 +212,105 @@ class TestBinanceSharesTheObservationBase:
             TimeFrame(1, TimeFrameUnit.Minute), limit=20
         )
         assert df["open_time"].is_monotonic_increasing
+
+    def test_a_malformed_candle_never_reaches_base_features(self):
+        """Binance coerces unparseable numbers to NaN so one bad candle cannot kill a
+        fetch. Before the fix that NaN reached base_features, which is built from the
+        raw frame, while the feature path dropped it in preprocessing (#395)."""
+        rows = self._klines(60)
+        rows[57][4] = "NOT_A_NUMBER"  # close, inside the last 5
+        obs = self._obs(rows).get_observations(return_base_ohlc=True)
+        assert not np.isnan(obs["base_features"]).any()
+        assert not np.isnan(obs["1Minute_5"]).any()
+
+    @pytest.mark.parametrize("corrupt", [
+        pytest.param(lambda r: r[57].__setitem__(4, "NOT_A_NUMBER"), id="nan-close"),
+        pytest.param(lambda r: r[57].__setitem__(5, "NOT_A_NUMBER"), id="nan-volume"),
+        pytest.param(lambda r: r[57].__setitem__(7, "NOT_A_NUMBER"), id="nan-quote-volume"),
+        pytest.param(lambda r: r.__setitem__(57, list(r[56])), id="duplicate-bar"),
+        pytest.param(
+            lambda r: (r[57].__setitem__(1, "0"), r[57].__setitem__(4, "0")),
+            id="zero-priced-bar",
+        ),
+    ])
+    def test_base_features_and_market_data_stay_the_same_bars(self, corrupt):
+        """Row i of base_features must be the SAME BAR as row i of market_data.
+
+        The first fix here dropped only the OHLC columns. A NaN in `volume` then removed
+        the bar from the feature window -- whose preprocessing does a bare dropna -- and
+        KEPT it in base_features, so the two arrays described different bars inside one
+        observation, silently:
+
+            base : 23:08 23:09 23:10 23:11 23:12
+            feat : 23:07 23:08 23:09 23:11 23:12
+
+        Worse than the NaN it was fixing, and invisible to a NaN-only assertion. Then a
+        bare dropna desynced on a REPEATED bar; then dropna+drop_duplicates desynced on a
+        ZERO-PRICED bar, whose 0/0 feature is removed by the dropna that runs AFTER the
+        features are built. Three attempts, each matching part of the rule.
+
+        base_features is now sliced from the frame the preprocessing fn returned, so this
+        holds by construction rather than by copying the rule -- including for a custom
+        fn, which no copy could ever cover. Each parametrized case is one attempt's
+        counterexample.
+        """
+        rows = self._klines(60)
+        corrupt(rows)
+        observer = self._obs(rows)
+        obs = observer.get_observations(return_base_ohlc=True)
+
+        surviving = observer.feature_preprocessing_fn(
+            observer._fetch_single_timeframe(TimeFrame(1, TimeFrameUnit.Minute), limit=55)
+        )["open_time"].iloc[-5:].values
+        assert list(pd.to_datetime(obs["base_timestamps"]).values) == list(
+            pd.to_datetime(surviving).values
+        )
+        # Alignment alone is satisfiable by two equally-wrong arrays: the reference above
+        # re-uses the same preprocessing fn, so deleting its final dropna lets NaN into
+        # both and the timestamps still agree. base_features must also be usable.
+        #
+        # Only base_features: market_data still carries `inf` for the bar AFTER a
+        # zero-priced one, because pct_change off a zero close is inf and dropna does not
+        # remove it. Pre-existing and true on main too -- filed separately, not this fix.
+        assert np.isfinite(obs["base_features"]).all()
+
+    def test_a_custom_preprocessing_fn_keeps_base_features_aligned(self):
+        """The whole point of slicing the processed frame: it holds for ANY fn.
+
+        Every other case here uses the default preprocessing, so the claim that a custom
+        fn is covered was the one thing untested -- and it is what caught a real
+        regression: reading the timestamp as a COLUMN broke a fn that leaves it in the
+        index, which is how alpaca's SDK hands it back.
+        """
+        def fn(df):
+            df = df.copy()
+            df["feature_range"] = (df["high"] - df["low"]) / df["close"]
+            return df[df["volume"] > 0].dropna()  # a row filter the default never does
+
+        rows = self._klines(60)
+        rows[57][5] = "0"  # volume 0 -> this fn drops the bar, the default would not
+        observer = self._obs(rows, fn=fn)
+        obs = observer.get_observations(return_base_ohlc=True)
+
+        surviving = fn(observer._fetch_single_timeframe(
+            TimeFrame(1, TimeFrameUnit.Minute), limit=55
+        ))["open_time"].iloc[-5:].values
+        assert list(pd.to_datetime(obs["base_timestamps"]).values) == list(
+            pd.to_datetime(surviving).values
+        )
+
+    @pytest.mark.parametrize("venue_cls", [
+        BinanceObservationClass, BitgetObservationClass,
+        BybitObservationClass, OKXObservationClass,
+    ], ids=lambda c: c.__name__)
+    def test_no_venue_reforks_get_observations(self, venue_cls):
+        """The #395 fix lives in the base's get_observations, inherited by all four.
+
+        The env layer has `test_no_futures_env_reforks_the_shared_observation`; the
+        OBSERVATION layer had no equivalent, so a venue re-forking this method would
+        silently stop inheriting the fix and nothing would notice.
+        """
+        assert "get_observations" not in vars(venue_cls), (
+            f"{venue_cls.__name__} re-forks get_observations -- it would not inherit the "
+            f"base_features/market_data row alignment (#395)"
+        )
