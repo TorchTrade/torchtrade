@@ -380,7 +380,6 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
         side: str,
         quantity: float,
         order_type: str = "market",
-        position_side: Optional[str] = None,
         limit_price: Optional[float] = None,
         stop_price: Optional[float] = None,
         take_profit: Optional[float] = None,
@@ -395,7 +394,6 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
             side: "buy" or "sell"
             quantity: Amount to trade in base asset units
             order_type: "market", "limit", "stop"
-            position_side: Optional position side for hedge mode
             limit_price: Required for limit orders
             stop_price: Required for stop orders
             take_profit: Take profit price (creates separate TP order)
@@ -735,12 +733,11 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
             logger.error(f"Error cancelling open orders: {str(e)}")
             return False
 
-    def close_position(self, position_side: Optional[str] = None) -> bool:
+    def close_position(self) -> bool:
         """
         Close the current position using CCXT.
 
         Args:
-            position_side: Optional position side for hedge mode
 
         Returns:
             bool: True if position was closed successfully

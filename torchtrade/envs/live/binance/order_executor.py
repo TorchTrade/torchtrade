@@ -278,7 +278,6 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         side: str,
         quantity: float,
         order_type: str = "market",
-        position_side: str = "BOTH",
         limit_price: Optional[float] = None,
         stop_price: Optional[float] = None,
         take_profit: Optional[float] = None,
@@ -293,7 +292,6 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
             side: "buy" or "sell" (case-insensitive; upper-cased for the API)
             quantity: Amount to trade in base asset units
             order_type: "market", "limit", "stop_market", "take_profit_market"
-            position_side: "LONG", "SHORT", or "BOTH" (for one-way mode)
             limit_price: Required for limit orders
             stop_price: Required for stop orders
             take_profit: Take profit price (creates separate TP order)
@@ -323,8 +321,6 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
             }
 
             # Add position side for hedge mode
-            if position_side != "BOTH":
-                order_params["positionSide"] = position_side
 
             # Add reduce only flag
             if reduce_only:
@@ -367,8 +363,6 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                     "quantity": self._format_quantity(quantity),
                     "reduceOnly": "true",
                 }
-                if position_side != "BOTH":
-                    tp_params["positionSide"] = position_side
                 self.client.futures_create_order(**tp_params)
                 self.bracket_status["tp_placed"] = True
             except Exception as e:
@@ -384,8 +378,6 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                     "quantity": self._format_quantity(quantity),
                     "reduceOnly": "true",
                 }
-                if position_side != "BOTH":
-                    sl_params["positionSide"] = position_side
                 self.client.futures_create_order(**sl_params)
                 self.bracket_status["sl_placed"] = True
             except Exception as e:
@@ -521,12 +513,11 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
             logger.error(f"Error cancelling open orders: {str(e)}")
             return False
 
-    def close_position(self, position_side: str = "BOTH") -> bool:
+    def close_position(self) -> bool:
         """
         Close the current position.
 
         Args:
-            position_side: "LONG", "SHORT", or "BOTH"
 
         Returns:
             bool: True if position was closed successfully
@@ -551,8 +542,6 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 "reduceOnly": "true",
             }
 
-            if position_side != "BOTH":
-                order_params["positionSide"] = position_side
 
             self.client.futures_create_order(**order_params)
             # The submitted size, not the requested one: this PR exists because the

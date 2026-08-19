@@ -8,12 +8,7 @@ def calculate_bracket_prices(side: str, entry_price: float, sl_pct: float, tp_pc
 
     One formula for both sides: the action map hands over percentages already oriented
     against the position (long -0.02/+0.05, short +0.02/-0.05), so `entry * (1 + pct)`
-    puts each leg on the correct side without a per-side branch. There were two
-    byte-identical functions here whose only job was to document the SWAP the map used
-    to apply to shorts; #279 negates instead, so the pair had nothing left to say.
-
-    `side` is still validated -- a typo would otherwise price a bracket off percentages
-    meant for the other direction.
+    puts each leg on the correct side without a per-side branch.
 
     Args:
         side: Position side ("long" or "short")

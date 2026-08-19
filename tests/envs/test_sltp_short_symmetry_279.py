@@ -80,7 +80,7 @@ def test_a_side_the_bracket_calculator_does_not_know_is_refused(side):
     The percentages arrive already oriented against the position, so passing "flat" or a
     miscapitalised "Long" would price a bracket off the OTHER direction's numbers and
     return silently. Nothing exercised this: collapsing the two per-side functions left
-    the check as the only thing `side` still does, and deleting it left the other 3974
+    the check as the only thing `side` still does, and deleting it left the other 3971
     tests green.
     """
     with pytest.raises(ValueError, match="Invalid side"):
@@ -129,10 +129,12 @@ def test_no_futures_sltp_config_reforks_the_level_guard(venue):
     import importlib
     from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 
+    # getattr by exact name, not a `next(...)` scan of the namespace: a scan silently
+    # re-targets when an import lands in the module, which is how a guard here stopped
+    # testing its subject once already.
     module = importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp")
-    config_cls = next(v for k, v in vars(module).items()
-                      if k.endswith("Config") and hasattr(v, "__dataclass_fields__")
-                      and v.__module__ == module.__name__)
+    config_cls = getattr(module, f"{venue.capitalize()}FuturesSLTPTradingEnvConfig",
+                         None) or getattr(module, "OKXFuturesSLTPTradingEnvConfig")
     assert config_cls.__post_init__ is BaseFuturesSLTPConfig.__post_init__, (
         f"{config_cls.__name__} re-forks __post_init__, so validate_sltp_levels no "
         f"longer provably runs for it"

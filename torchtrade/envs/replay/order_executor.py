@@ -211,7 +211,6 @@ class ReplayOrderExecutor:
         side: str,
         quantity: float,
         order_type: str = "market",
-        position_side: str = "BOTH",
         limit_price: Optional[float] = None,
         stop_price: Optional[float] = None,
         take_profit: Optional[float] = None,
@@ -383,7 +382,7 @@ class ReplayOrderExecutor:
         """Get current mark price (latest close)."""
         return self.current_price
 
-    def close_position(self, position_side: str = "BOTH") -> bool:
+    def close_position(self) -> bool:
         """Close the current position at current price."""
         if self.position_qty == 0:
             return True

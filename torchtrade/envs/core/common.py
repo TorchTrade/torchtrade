@@ -1,6 +1,6 @@
 """Common utilities shared across all environments."""
 
-from typing import Literal
+from typing import Literal, Sequence
 
 
 # Type alias for trade mode with autocomplete and validation
@@ -40,7 +40,9 @@ def validate_position_sizing(
             raise ValueError(f"quantity_per_trade must be positive, got {quantity_per_trade}")
 
 
-def validate_sltp_levels(stoploss_levels, takeprofit_levels) -> None:
+def validate_sltp_levels(
+    stoploss_levels: Sequence[float], takeprofit_levels: Sequence[float]
+) -> None:
     """Reject SL/TP levels whose sign would invert the bracket.
 
     The action map NEGATES these for shorts (#279), so the sign convention is what puts
