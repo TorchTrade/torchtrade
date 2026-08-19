@@ -203,13 +203,6 @@ env = BitgetFuturesTorchTradingEnv(
 
 ### BitgetFuturesSLTPTorchTradingEnv
 
-Stop levels must be **negative** and target levels **positive**; the config raises
-otherwise. The sign is what places each leg relative to entry, and a positive stop would
-put a long's stop *above* entry — an inverted bracket that exits on a favourable move.
-Short actions mirror their long counterpart (action *k* carries the same risk and reward
-either way, #279), so a checkpoint trained before that fix should be retrained rather
-than reloaded: the action count is unchanged but short indices mean something different.
-
 ```python
 from torchtrade.envs.live.bitget import BitgetFuturesSLTPTorchTradingEnv, BitgetFuturesSLTPTradingEnvConfig
 from torchtrade.envs.live.bitget.order_executor import MarginMode, PositionMode

@@ -320,7 +320,6 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 "quantity": self._format_quantity(quantity),
             }
 
-            # Add position side for hedge mode
 
             # Add reduce only flag
             if reduce_only:
@@ -516,8 +515,6 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
     def close_position(self) -> bool:
         """
         Close the current position.
-
-        Args:
 
         Returns:
             bool: True if position was closed successfully

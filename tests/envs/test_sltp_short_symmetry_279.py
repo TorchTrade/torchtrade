@@ -118,23 +118,29 @@ def _sltp_configs():
     ]
 
 
-@pytest.mark.parametrize("venue", ["bitget", "bybit", "okx"])
-def test_no_futures_sltp_config_reforks_the_level_guard(venue):
+def _reforkable_futures_configs():
+    from torchtrade.envs.live.bitget.env_sltp import BitgetFuturesSLTPTradingEnvConfig
+    from torchtrade.envs.live.bybit.env_sltp import BybitFuturesSLTPTradingEnvConfig
+    from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTradingEnvConfig
+    return [BitgetFuturesSLTPTradingEnvConfig, BybitFuturesSLTPTradingEnvConfig,
+            OKXFuturesSLTPTradingEnvConfig]
+
+
+@pytest.mark.parametrize("config_cls", _reforkable_futures_configs(),
+                         ids=lambda c: c.__name__)
+def test_no_futures_sltp_config_reforks_the_level_guard(config_cls):
     """The three venues the parametrization above drops, held by identity instead.
 
     They are covered only because they inherit `BaseFuturesSLTPConfig.__post_init__`. A
     venue that declares its own would silently stop validating its levels while every
     other test stayed green -- the re-fork shape this repo has shipped three times.
+
+    Imported by name rather than resolved at runtime: a namespace scan re-targets
+    silently when an import lands in the module, and building the name from the venue
+    string needs a special case for OKX. Neither can go wrong if the class is the param.
     """
-    import importlib
     from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 
-    # getattr by exact name, not a `next(...)` scan of the namespace: a scan silently
-    # re-targets when an import lands in the module, which is how a guard here stopped
-    # testing its subject once already.
-    module = importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp")
-    config_cls = getattr(module, f"{venue.capitalize()}FuturesSLTPTradingEnvConfig",
-                         None) or getattr(module, "OKXFuturesSLTPTradingEnvConfig")
     assert config_cls.__post_init__ is BaseFuturesSLTPConfig.__post_init__, (
         f"{config_cls.__name__} re-forks __post_init__, so validate_sltp_levels no "
         f"longer provably runs for it"

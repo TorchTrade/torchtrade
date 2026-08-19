@@ -737,8 +737,6 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
         """
         Close the current position using CCXT.
 
-        Args:
-
         Returns:
             bool: True if position was closed successfully
         """
