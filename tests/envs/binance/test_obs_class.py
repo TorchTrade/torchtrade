@@ -371,14 +371,3 @@ class TestBinanceSharesTheObservationBase:
         """
         obs = self._obs(self._klines(60), fn=fn).get_observations(return_base_ohlc=True)
         assert obs["base_features"].shape[0] > 0
-
-    def test_an_observation_with_no_usable_candles_is_refused(self):
-        """The stale-bar check cannot see this -- there is no last row to compare.
-
-        Without a separate check a total outage returned a silent (0, n) array, and
-        `base_features[-1, 3]` then raised IndexError from inside the trade path.
-        """
-        with pytest.raises(ValueError, match="no usable candles"):
-            self._obs(
-                self._klines(60), fn=lambda df: _basic_features(df).iloc[0:0]
-            ).get_observations(return_base_ohlc=True)

@@ -287,6 +287,31 @@ class BaseObservationClassTests(ABC):
         # Custom preprocessing has 2 features
         assert observations[key].shape[1] == 2
 
+    @pytest.mark.parametrize("kept", [0, 4], ids=["total-outage", "malformed-burst"])
+    def test_an_observation_shorter_than_the_declared_spec_is_refused(self, kept):
+        """`iloc[-window_size:]` is a silent short read, not an error (#400).
+
+        Preprocessing drops rows, so a burst of malformed candles exceeding the fetch
+        buffer emitted a (4, n) array against a declared (5, n) spec, and reset() and
+        rollout() both SUCCEEDED on it. Empty is the degenerate case, and it surfaced
+        instead as an IndexError from `base_features[-1, 3]` inside the trade path
+        (#397). Here, not per-venue: alpaca hand-rolls this while the four futures
+        venues share one base, which is exactly how a fix lands on some and not others.
+        """
+        def truncating(df):
+            df = df.copy()
+            df["feature_range"] = df["high"] - df["low"]
+            return df.iloc[:kept]
+
+        observer = self.create_observer(
+            symbol="BTC/USD",
+            timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=5,
+            feature_preprocessing_fn=truncating,
+        )
+        with pytest.raises(ValueError, match="usable candles"):
+            observer.get_observations(return_base_ohlc=True)
+
     # Edge cases
 
     def test_window_size_one(self):

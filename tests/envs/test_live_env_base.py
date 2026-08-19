@@ -1862,6 +1862,28 @@ def test_an_unusable_mark_price_cannot_size_a_trade(source, price):
         TorchTradeFuturesLiveEnv._current_mark_price(env, position_status)
 
 
+@pytest.mark.parametrize("venue_error", [
+    pytest.param(RuntimeError("venue unreachable"), id="wrapped"),
+    pytest.param(ConnectionError("socket closed"), id="raw-sdk"),
+    pytest.param(KeyError("markPrice"), id="malformed-payload"),
+])
+def test_a_mark_price_that_cannot_be_read_raises_what_halting_catches(venue_error):
+    """#394: no adapter raised a type `_halting` catches, so the policy was bypassed.
+
+    `_halting` catches (PositionUnknownError, ValueError) and deliberately not
+    RuntimeError, which adapters use for timeouts. Failing to READ the mark is the same
+    event as reading an unusable one above, so it must raise the same way. The three
+    shapes are three exception families: narrowing the catch to RuntimeError, or to
+    (RuntimeError, OSError), lets one of them escape again.
+    """
+    env = SimpleNamespace(
+        trader=SimpleNamespace(get_mark_price=MagicMock(side_effect=venue_error)),
+        config=SimpleNamespace(symbol="BTCUSDT"),
+    )
+    with pytest.raises(ValueError, match="could not read the mark price"):
+        TorchTradeFuturesLiveEnv._current_mark_price(env, None)
+
+
 @pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
 @pytest.mark.parametrize("module", ["env", "env_sltp"])
 def test_no_futures_env_reads_the_mark_price_unvalidated(exchange, module):
@@ -2815,15 +2837,23 @@ def test_no_live_env_re_forks_the_shared_accessors():
     """
     from torchtrade.envs.core.live import TorchTradeLiveEnv
 
-    for name in ("get_account_state", "get_market_data_keys"):
+    shared = [
+        ("get_account_state", LIVE_ENVS, TorchTradeLiveEnv),
+        ("get_market_data_keys", LIVE_ENVS, TorchTradeLiveEnv),
+        # A venue that re-forks these keeps the #394 bypass: `_current_mark_price` is
+        # what converts a fetch failure into a type `_halting` catches, and the sibling
+        # source grep only reads env.py / env_sltp.py.
+        ("_current_mark_price", FUTURES_ENVS, TorchTradeFuturesLiveEnv),
+        ("_halting", FUTURES_ENVS, TorchTradeFuturesLiveEnv),
+    ]
+    for name, envs, owner in shared:
         wrong_owner = {
             c.__name__: next(b for b in c.__mro__ if name in b.__dict__).__name__
-            for c in LIVE_ENVS
-            if next((b for b in c.__mro__ if name in b.__dict__), None)
-            is not TorchTradeLiveEnv
+            for c in envs
+            if next((b for b in c.__mro__ if name in b.__dict__), None) is not owner
         }
         assert not wrong_owner, (
-            f"{name} does not resolve to TorchTradeLiveEnv on: {wrong_owner}"
+            f"{name} does not resolve to {owner.__name__} on: {wrong_owner}"
         )
 
 
@@ -3406,65 +3436,3 @@ def test_an_observer_disagreeing_with_the_config_raises_rather_than_guessing():
         BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"
     ), pytest.raises(ValueError, match="zip"):
         BinanceFuturesTorchTradingEnv(config=config, observer=observer, trader=trader)
-
-
-
-
-@pytest.mark.parametrize("venue_error", [
-    pytest.param(RuntimeError("venue unreachable"), id="wrapped-RuntimeError"),
-    pytest.param(ConnectionError("socket closed"), id="raw-sdk-exception"),
-    pytest.param(KeyError("markPrice"), id="malformed-payload"),
-], )
-@pytest.mark.parametrize("policy", ["halt", "flatten"])
-def test_a_mark_price_that_cannot_be_read_engages_the_failure_policy(venue_error, policy):
-    """`_halting` catches (PositionUnknownError, ValueError), deliberately NOT RuntimeError.
-
-    binance and bitget wrap a mark-price fetch failure in RuntimeError; bybit and okx do
-    not wrap it at all. Either way the raw type escaped `_halting`, so
-    ObservationFailurePolicy was never consulted -- measured BYPASSED under both HALT and
-    FLATTEN on a FLAT account, which is the only branch that re-fetches the mark (#394).
-
-    Flat is also why converting it is safe: FLATTEN has nothing to close, and HALT gets
-    the structured signal orchestration is built to catch.
-    """
-    from torchtrade.envs.core.live import LiveObservationHalt, ObservationFailurePolicy
-    from torchtrade.envs.live.binance.env import (
-        BinanceFuturesTorchTradingEnv,
-        BinanceFuturesTradingEnvConfig,
-    )
-
-    observer = MagicMock()
-    observer.get_keys.return_value = ["1Minute_10"]
-    observer.get_features.return_value = {
-        "observation_features": ["a", "b", "c", "d"], "original_features": []}
-    observer.get_observations.return_value = {
-        "1Minute_10": np.zeros((10, 4), dtype=np.float32)}
-    observer.reset.return_value = None
-
-    trader = MagicMock()
-    trader.get_account_balance.return_value = {
-        "available_balance": 1000.0, "total_margin_balance": 1000.0,
-        "total_wallet_balance": 1000.0,
-    }
-    trader.get_status.return_value = {"position_status": None}  # flat
-    trader.cancel_open_orders.return_value = True
-    trader.close_position.return_value = True
-    trader.get_mark_price.side_effect = venue_error
-
-    config = BinanceFuturesTradingEnvConfig(
-        symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10], execute_on="1m",
-        observation_failure_policy=policy,
-    )
-    with patch("time.sleep"), patch.object(
-        BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"
-    ):
-        env = BinanceFuturesTorchTradingEnv(
-            config=config, observer=observer, trader=trader
-        )
-
-    td = env.reset()
-    td["action"] = torch.tensor(1)
-    with pytest.raises(LiveObservationHalt):
-        env.step(td)
-    if config.observation_failure_policy is ObservationFailurePolicy.FLATTEN:
-        trader.close_position.assert_called()

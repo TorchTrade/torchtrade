@@ -224,10 +224,9 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         So flat rows do fetch, but NEVER fatally. The first version of this fix called
         `_current_mark_price()` inside the halt wrapper, where a non-positive or missing
-        mark raises -- and under FLATTEN that emergency-closes a real position (bybit and
-        okx raise RuntimeError, which `_halting` does not even catch). A price that only
-        labels a history row is not worth a market order, so an unavailable mark returns
-        None and the caller records the pre-trade price instead.
+        mark raises -- and under FLATTEN that emergency-closes a real position. A price
+        that only labels a history row is not worth a market order, so an unavailable
+        mark returns None and the caller records the pre-trade price instead.
         """
         def read():
             self._last_observed_mark = None
@@ -266,13 +265,10 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             try:
                 price = self.trader.get_mark_price()
             except Exception as error:
-                # ValueError, not the venue's own type: `_halting` catches
-                # (PositionUnknownError, ValueError) and deliberately NOT RuntimeError,
-                # which adapters use for timeouts. binance and bitget wrap this in
-                # RuntimeError and bybit and okx do not wrap it at all, so the raw type
-                # escaped and ObservationFailurePolicy was never consulted -- measured
-                # BYPASSED under both HALT and FLATTEN (#394). Failing to READ the mark
-                # is the same event as reading an unusable one, so it raises the same way.
+                # `_halting` catches (PositionUnknownError, ValueError) and deliberately
+                # not RuntimeError; no adapter raised either from here, so the policy was
+                # bypassed (#394). Broad on purpose: the shapes span four SDKs, and any
+                # tuple fails open the first time one adds a type.
                 raise ValueError(
                     f"could not read the mark price for {self.config.symbol}: {error}"
                 ) from error

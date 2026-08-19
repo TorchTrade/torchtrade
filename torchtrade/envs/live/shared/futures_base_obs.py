@@ -306,14 +306,15 @@ class BaseFuturesObservationClass(ABC):
 
             processed_df = self.feature_preprocessing_fn(df)
 
-            # An empty observation is never valid, whatever the preprocessing fn is.
-            # The stale-bar check below cannot see this case -- there is no last row to
-            # compare -- so without it a total outage returned a silent (0, n) array and
-            # `base_features[-1, 3]` raised IndexError from inside the trade path.
-            if processed_df.empty:
+            # `iloc[-window_size:]` is a silent short read, not an error: preprocessing
+            # drops rows, so a burst of malformed candles exceeding the +50 fetch buffer
+            # emitted an array SHORTER than the declared spec and reset()/rollout() both
+            # succeeded (#400). Empty is only its degenerate case -- that one surfaced as
+            # an IndexError from `base_features[-1, 3]` inside the trade path (#397).
+            if len(processed_df) < window_size:
                 raise ValueError(
-                    f"no usable candles for {self.symbol} on "
-                    f"{timeframe.obs_key_freq()} after preprocessing"
+                    f"only {len(processed_df)} usable candles for {self.symbol} on "
+                    f"{timeframe.obs_key_freq()} after preprocessing, need {window_size}"
                 )
 
             # Sliced from the SAME frame as the market data, so row i of each is the
