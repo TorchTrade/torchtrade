@@ -287,8 +287,12 @@ class BaseObservationClassTests(ABC):
         # Custom preprocessing has 2 features
         assert observations[key].shape[1] == 2
 
-    @pytest.mark.parametrize("kept", [0, 4], ids=["total-outage", "malformed-burst"])
-    def test_an_observation_shorter_than_the_declared_spec_is_refused(self, kept):
+    @pytest.mark.parametrize("kept,refused", [
+        pytest.param(0, True, id="total-outage"),
+        pytest.param(4, True, id="malformed-burst"),
+        pytest.param(5, False, id="exactly-enough"),
+    ])
+    def test_an_observation_shorter_than_the_declared_spec_is_refused(self, kept, refused):
         """`iloc[-window_size:]` is a silent short read, not an error (#400).
 
         Preprocessing drops rows, so a burst of malformed candles exceeding the fetch
@@ -309,6 +313,10 @@ class BaseObservationClassTests(ABC):
             window_sizes=5,
             feature_preprocessing_fn=truncating,
         )
+        if not refused:  # the boundary: `<` -> `<=` passes the whole suite without it
+            emitted = observer.get_observations(return_base_ohlc=True)
+            assert emitted["base_features"].shape[0] == 5
+            return
         with pytest.raises(ValueError, match="usable candles"):
             observer.get_observations(return_base_ohlc=True)
 

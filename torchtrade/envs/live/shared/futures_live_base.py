@@ -266,9 +266,9 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                 price = self.trader.get_mark_price()
             except Exception as error:
                 # `_halting` catches (PositionUnknownError, ValueError) and deliberately
-                # not RuntimeError; no adapter raised either from here, so the policy was
-                # bypassed (#394). Broad on purpose: the shapes span four SDKs, and any
-                # tuple fails open the first time one adds a type.
+                # not RuntimeError, which adapters use for timeouts -- so the wrapped and
+                # the raw venue errors both escaped it and the policy was bypassed (#394).
+                # Broad on purpose: any tuple fails open the first time an SDK adds a type.
                 raise ValueError(
                     f"could not read the mark price for {self.config.symbol}: {error}"
                 ) from error

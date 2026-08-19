@@ -1868,13 +1868,13 @@ def test_an_unusable_mark_price_cannot_size_a_trade(source, price):
     pytest.param(KeyError("markPrice"), id="malformed-payload"),
 ])
 def test_a_mark_price_that_cannot_be_read_raises_what_halting_catches(venue_error):
-    """#394: no adapter raised a type `_halting` catches, so the policy was bypassed.
+    """#394: the mark-price fetch raised types `_halting` misses, bypassing the policy.
 
     `_halting` catches (PositionUnknownError, ValueError) and deliberately not
     RuntimeError, which adapters use for timeouts. Failing to READ the mark is the same
     event as reading an unusable one above, so it must raise the same way. The three
-    shapes are three exception families: narrowing the catch to RuntimeError, or to
-    (RuntimeError, OSError), lets one of them escape again.
+    shapes are three exception families: narrowing the catch to RuntimeError lets two
+    escape, to (RuntimeError, OSError) lets one.
     """
     env = SimpleNamespace(
         trader=SimpleNamespace(get_mark_price=MagicMock(side_effect=venue_error)),

@@ -306,11 +306,13 @@ class BaseFuturesObservationClass(ABC):
 
             processed_df = self.feature_preprocessing_fn(df)
 
-            # `iloc[-window_size:]` is a silent short read, not an error: preprocessing
-            # drops rows, so a burst of malformed candles exceeding the +50 fetch buffer
-            # emitted an array SHORTER than the declared spec and reset()/rollout() both
-            # succeeded (#400). Empty is only its degenerate case -- that one surfaced as
-            # an IndexError from `base_features[-1, 3]` inside the trade path (#397).
+            # A short frame is a silent shape corruption, not an error: `iloc[-w:]` just
+            # returns fewer rows, and reset() and rollout() both succeed on it (#400).
+            # This raise runs under `_halting`, so FLATTEN closes an OPEN position --
+            # measured, and accepted: a window short of its spec is not a market view,
+            # which is the event FLATTEN exists for. It takes 50 of 60 candles malformed
+            # to get here (the +50 fetch buffer absorbs the rest), and a config that can
+            # NEVER fill the window raises at reset(), flat, with nothing to close.
             if len(processed_df) < window_size:
                 raise ValueError(
                     f"only {len(processed_df)} usable candles for {self.symbol} on "

@@ -805,22 +805,29 @@ size, exposure and liquidation distance the env has just admitted it cannot veri
 
 So the env **halts**: it raises `LiveObservationHalt` and produces no transition.
 
-**Which reads this covers.** Only the post-bar state read — the portfolio value and
-observation taken after the bar closes. Every *other* venue read raises its original
-exception with no latch and no emergency flatten:
+**Which reads this covers.** The post-bar state read — the portfolio value and
+observation taken after the bar closes — and the pre-trade state read. Both include the
+observation itself, so one the env refuses to emit (a stale last bar, or one shorter than
+its declared spec) engages the policy like any other unreadable state.
+
+The pre-trade read also covers the mark price: a fetch that fails now raises `ValueError`
+rather than the venue's own type, so `ObservationFailurePolicy` is consulted (#394).
+Before that fix the raw exception escaped and the policy was silently bypassed.
+
+Every *other* venue read still raises its original exception with no latch and no
+emergency flatten:
 
 | read | raises |
 |---|---|
 | position read at the top of `_step()` (position sync, duplicate-action guard) | `PositionUnknownError` |
 | the initial read inside `_reset()` | `ValueError` |
-| `_current_mark_price()`, called at the top of every futures `_step()` | `ValueError` |
+| `_current_mark_price()` at the **sizing** call sites in `_execute_fractional_action` / `_execute_trade_if_needed` | `ValueError` |
 | the sizing balance / portfolio checks | `ValueError` |
 | the candle close that prices SL/TP brackets | `ValueError` |
 
-So `except LiveObservationHalt` alone does **not** give you a policy-driven emergency
-close on an unreadable price or balance — it catches the post-bar read and nothing else.
-Catch `ValueError` and `PositionUnknownError` too if you need to cover those. Alpaca and
-Polymarket do not route through this path at all. Closing the gap is #355.
+So `except LiveObservationHalt` covers the two state reads and nothing else. Catch
+`ValueError` and `PositionUnknownError` too if you need the sizing paths. Alpaca and
+Polymarket do not route through this path at all. Closing the rest of the gap is #355.
 
 ```python
 from torchtrade.envs.core.live import LiveObservationHalt
@@ -847,10 +854,16 @@ as requiring an operator to check the account.
 ### What does not halt
 
 Only failures that mean *the venue told us something impossible about our own money* are
-terminal. A transient error is not: every adapter wraps arbitrary failures in
-`RuntimeError("Failed to get account balance: ...")`, so treating that as terminal would
-end an episode — and under `flatten`, close a live position — on a read timeout. Those
-propagate unchanged, as do configuration errors such as a missing feature key. Retry and
-staleness handling are tracked in #295.
+terminal. A transient error is generally not: adapters wrap arbitrary failures in
+`RuntimeError("Failed to get account balance: ...")`, and treating every one of those as
+terminal would end an episode — and under `flatten`, close a live position — on a read
+timeout. Those propagate unchanged, as do configuration errors such as a missing feature
+key.
+
+The mark-price read is the deliberate exception (#394): there a failed read is
+indistinguishable from reading an unusable price, which was already terminal, so it
+raises the same way. Escalating it is safe because the only halt-wrapped caller reaches
+the fetch solely when the account is flat. Retry and staleness handling are tracked
+in #295.
 
 Alpaca and Polymarket do not route through this path at all (#355).
