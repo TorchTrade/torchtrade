@@ -53,35 +53,23 @@ def create_sltp_action_map(
         ('short', 0.03, -0.02)
 
     Note:
-        For short positions, SL must be above entry (positive %) and TP below entry
-        (negative %), so we swap: takeprofit_levels -> stop_loss and stoploss_levels ->
-        take_profit.
+        For short positions SL must be above entry (positive %) and TP below entry
+        (negative %), so the levels are NEGATED: ``-sl`` becomes the stop and ``-tp`` the
+        target. Short action k is then the exact mirror of long action k.
 
-    Warning:
-        That swap reuses the opposite list's MAGNITUDES, so a short action is never the
-        mirror of its long counterpart -- it is the mirror with risk and reward
-        exchanged. This is unconditional: both halves iterate the same
-        ``product(stoploss_levels, takeprofit_levels)``, so the nth long and the nth
-        short always carry the same magnitude pair the other way round. It is only
-        INVISIBLE when every magnitude is equal.
+        It used to SWAP the two lists instead. That puts the sides right and the
+        magnitudes wrong, because both halves iterate the same
+        ``product(stoploss_levels, takeprofit_levels)`` -- so the nth short carried the
+        nth long's risk and reward exchanged, unconditionally, and visibly only when the
+        magnitudes differed. With ``stoploss_levels=(-0.025, -0.05, -0.1)`` and
+        ``takeprofit_levels=(0.05, 0.1, 0.2)`` long stops were {2.5, 5, 10}% while short
+        stops were {5, 10, 20}%: no short action had a 2.5% stop anywhere in the space,
+        so a policy that learned "tight stop, wide target" got the opposite geometry the
+        moment it went short (#279).
 
-        With ``stoploss_levels=(-0.025, -0.05, -0.1)`` and
-        ``takeprofit_levels=(0.05, 0.1, 0.2)`` at entry 100, pairing the nth long with
-        the nth short (actions 1 and 10, then 3 and 12):
-
-        - long 1 = ``(-0.025, 0.05)``  -> risk 2.5%, reward 5%
-        - short 10 = ``(0.05, -0.025)`` -> risk 5%, reward 2.5%
-        - long 3 = ``(-0.025, 0.2)``   -> risk 2.5%, reward 20%
-        - short 12 = ``(0.2, -0.025)``  -> risk 20%, reward 2.5%
-
-        Long stops are {2.5, 5, 10}% and short stops are {5, 10, 20}%: no short action
-        has a 2.5% stop anywhere in the space. A policy that learned "tight stop, wide
-        target" gets the opposite geometry the moment it goes short.
-
-        Whether to mirror the magnitudes instead is #279, and it is deliberately open:
-        the fix leaves the action-space SIZE unchanged (19 actions either way) while
-        changing what every short index MEANS, so a trained checkpoint would load without
-        complaint and trade a different strategy.
+        The action-space SIZE is unchanged (19 actions either way) and only short indices
+        change MEANING, so an SLTP checkpoint trained before this loads without complaint
+        and trades a different strategy. Retrain rather than reload.
     """
     action_map = {}
     idx = 0
@@ -104,9 +92,11 @@ def create_sltp_action_map(
     # Short positions with SL/TP combinations (if enabled)
     if include_short_positions:
         for sl, tp in product(stoploss_levels, takeprofit_levels):
-            # For shorts: SL is above entry (positive), TP is below entry (negative)
-            # We swap: takeprofit_levels (positive) -> SL, stoploss_levels (negative) -> TP
-            action_map[idx] = ("short", tp, sl)
+            # Negate, do not swap. Shorts need SL above entry (positive) and TP below
+            # (negative), which a swap also produces -- but it takes the magnitudes from
+            # the OTHER list, so the nth short carried the nth long's risk and reward
+            # exchanged (#279). Negating keeps the sides and mirrors the geometry.
+            action_map[idx] = ("short", -sl, -tp)
             idx += 1
 
     return action_map

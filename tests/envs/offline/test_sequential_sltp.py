@@ -129,13 +129,14 @@ class TestSLTPActionSpace:
         }
         assert actual_long_combinations == expected_long_combinations
 
-        # Check short combinations have swapped SL/TP (issue #149)
+        # Shorts NEGATE rather than swap, so short k mirrors long k (#279). Sides are
+        # unchanged from #149: SL above entry (positive), TP below (negative).
         if trading_mode != 1:  # futures
             expected_short_combinations = {
-                ("short", 0.03, -0.02),   # tp_pct -> sl_pct, sl_pct -> tp_pct
-                ("short", 0.10, -0.02),
-                ("short", 0.03, -0.05),
-                ("short", 0.10, -0.05),
+                ("short", 0.02, -0.03),
+                ("short", 0.02, -0.10),
+                ("short", 0.05, -0.03),
+                ("short", 0.05, -0.10),
             }
             actual_short_combinations = {
                 v for v in env.action_map.values() if v[0] == "short"
@@ -1307,9 +1308,10 @@ class TestLiquidationVsBracketOnADoubleBreachBar:
         # survived, and the understatement grew with leverage.
         assert env.balance == pytest.approx(0.0)
 
-    # The action tuple is spelled out rather than derived: create_sltp_action_map
-    # stores a short as ("short", tp, sl) -- the pair swapped, not negated -- so a
-    # derived tuple raises KeyError rather than opening the wrong position.
+    # The action tuple is spelled out rather than derived, so a mismatch raises KeyError
+    # rather than silently opening a different position. Since #279 a short NEGATES its
+    # levels instead of swapping them, so each short row now carries the same level
+    # lists as the long row it mirrors.
     @pytest.mark.parametrize(
         "action,stoploss_levels,takeprofit_levels,wick_low,wick_high,armed,expected_balance", [
             # 10x long: liquidation 90.4, SL 95, low 88 breaches both.
@@ -1317,7 +1319,7 @@ class TestLiquidationVsBracketOnADoubleBreachBar:
             # 10x short: liquidation 109.6, SL 105, high 112 breaches both. The short
             # branches of _check_liquidation, _check_sltp_trigger and
             # _execute_liquidation are all separate code from the long ones.
-            (("short", 0.05, -0.50), [-0.50], [0.05], None, 112.0, "stop_loss", 5000.0),
+            (("short", 0.05, -0.50), [-0.05], [0.50], None, 112.0, "stop_loss", 5000.0),
             # 10x long: liquidation 90.4 on the low, TP 150 on the high. The SL is put
             # at 50, outside the bar, so the documented SL-before-TP bias cannot mask
             # the TP.
@@ -1325,7 +1327,7 @@ class TestLiquidationVsBracketOnADoubleBreachBar:
             # 10x short: liquidation 109.6 on the high, TP 90 on the low, SL 150
             # outside the bar. Only a mutation scoped to BOTH short and tp reaches
             # this one, which is why it is the quadrant that stayed hidden longest.
-            (("short", 0.50, -0.10), [-0.10], [0.50], 88.0, 112.0, "take_profit", 400.0),
+            (("short", 0.50, -0.10), [-0.50], [0.10], 88.0, 112.0, "take_profit", 400.0),
         ],
         ids=["long-stop", "short-stop", "long-take-profit", "short-take-profit"],
     )
@@ -1424,8 +1426,9 @@ def test_a_deeper_gap_never_leaves_the_account_richer(side, gaps):
     sl, tp = -0.05, 0.50
     balances = [
         _run_sltp(
-            # Shorts carry the pair swapped in the action map (see #279).
-            [HOLD] * 5 + [(side, sl, tp) if side == "long" else (side, tp, sl)] + [HOLD] * 4,
+            # A short stores its levels negated, not swapped (#279): SL above entry,
+            # TP below, same magnitudes as the long.
+            [HOLD] * 5 + [(side, sl, tp) if side == "long" else (side, -sl, -tp)] + [HOLD] * 4,
             leverage=10, sl_levels=[sl], tp_levels=[tp],
             wick_low=g if side == "long" else None,
             wick_high=g if side == "short" else None,
@@ -1457,7 +1460,7 @@ def test_every_gap_past_bankruptcy_costs_exactly_the_posted_margin(side, wick, d
     """
     def run(open_price, low_or_high):
         return _run_sltp(
-            [HOLD] * 5 + [(side, -0.05, 0.50) if side == "long" else (side, 0.50, -0.05)] + [HOLD] * 4,
+            [HOLD] * 5 + [(side, -0.05, 0.50) if side == "long" else (side, 0.05, -0.50)] + [HOLD] * 4,
             leverage=10, sl_levels=[-0.05], tp_levels=[0.50],
             wick_low=low_or_high if side == "long" else None,
             wick_high=low_or_high if side == "short" else None,

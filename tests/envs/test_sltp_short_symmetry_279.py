@@ -1,4 +1,4 @@
-"""Short action k is not the mirror of long action k, and it never is (#279)."""
+"""Short action k is the mirror of long action k -- same risk, same reward (#279)."""
 
 import pytest
 
@@ -23,21 +23,20 @@ def _geometry(side, sl_pct, tp_pct):
 
 @pytest.mark.parametrize("stoploss,takeprofit", [
     ([-0.025, -0.05, -0.1], [0.05, 0.1, 0.2]),
-    # Symmetric-LOOKING, and still inverted. An earlier version of this test asserted
-    # this case was fine, because it compared magnitude SETS -- which are equal here --
-    # rather than pairing index against index. Long k=1 risks 5% to make 10%; short k=1
-    # risks 10% to make 5%.
+    # Symmetric-LOOKING, and it was still inverted before the fix: comparing magnitude
+    # SETS passes here, because they are equal. Only pairing index against index sees it.
     ([-0.05, -0.1], [0.05, 0.1]),
     # Asymmetric lengths: the relationship is an identity, not an artefact of equal-sized
     # lists -- both halves consume the same product(), so the nth pair always matches.
     ([-0.02, -0.05], [0.03, 0.06, 0.12]),
 ])
-def test_short_k_has_the_risk_and_reward_of_long_k_exchanged(stoploss, takeprofit):
+def test_short_k_mirrors_long_k(stoploss, takeprofit):
     """Measured through calculate_bracket_prices, not by reading the tuple.
 
-    The tuple is `("short", tp, sl)`, and nothing downstream negates it -- the short
-    bracket helper applies `entry * (1 + pct)` directly -- so the swap survives all the
-    way to the prices the venue receives.
+    The map was built by SWAPPING the two lists, which puts the sides right and the
+    magnitudes wrong: short k carried long k's risk and reward exchanged. It negates now.
+    Nothing downstream re-negates -- the bracket helper applies `entry * (1 + pct)`
+    directly -- so what this asserts is what the venue receives.
     """
     action_map = create_sltp_action_map(stoploss, takeprofit, include_short_positions=True)
     longs = [v for v in action_map.values() if v[0] == "long"]
@@ -50,23 +49,21 @@ def test_short_k_has_the_risk_and_reward_of_long_k_exchanged(stoploss, takeprofi
             f"action {k}: a stop on the wrong side of entry (long {long_risk:.4f}, "
             f"short {short_risk:.4f}) -- the bracket is inverted, not merely exchanged"
         )
-        assert (short_risk, short_reward) == pytest.approx((long_reward, long_risk)), (
+        assert (short_risk, short_reward) == pytest.approx((long_risk, long_reward)), (
             f"action {k}: long is {long_risk:.4f}/{long_reward:.4f}, short is "
-            f"{short_risk:.4f}/{short_reward:.4f} -- expected the exchange of the long's"
+            f"{short_risk:.4f}/{short_reward:.4f} -- expected the same geometry"
         )
 
 
-def test_no_short_action_offers_the_tightest_long_stop():
-    """The consequence that matters: a geometry available to longs is unreachable short."""
+def test_every_long_geometry_is_reachable_short():
+    """The consequence that mattered: no short action had a 2.5% stop anywhere."""
     action_map = create_sltp_action_map(
         [-0.025, -0.05, -0.1], [0.05, 0.1, 0.2], include_short_positions=True
     )
     long_stops = {round(_geometry(*v)[0], 6) for v in action_map.values() if v[0] == "long"}
     short_stops = {round(_geometry(*v)[0], 6) for v in action_map.values() if v[0] == "short"}
 
-    assert 0.025 in long_stops and 0.025 not in short_stops
-    assert long_stops == {0.025, 0.05, 0.1}
-    assert short_stops == {0.05, 0.1, 0.2}
+    assert long_stops == short_stops == {0.025, 0.05, 0.1}
 
 
 def test_an_empty_level_list_still_builds_a_hold_only_map():

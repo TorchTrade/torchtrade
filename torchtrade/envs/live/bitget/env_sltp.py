@@ -348,7 +348,7 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
         elif side == "short":
             # Open SHORT with SL/TP bracket order
             # Use helper to calculate correct SL/TP for shorts
-            # The action_map already swaps SL/TP for shorts, helper handles this correctly
+            # The action_map already negates SL/TP for shorts, helper handles this correctly
             stop_loss_price, take_profit_price = calculate_bracket_prices(
                 "short", current_price, stop_loss_pct, take_profit_pct
             )

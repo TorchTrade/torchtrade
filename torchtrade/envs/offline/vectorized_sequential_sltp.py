@@ -472,7 +472,7 @@ class VectorizedSequentialTradingEnvSLTP(VectorizedSequentialTradingEnv):
                 # Set bracket prices: entry * (1 + pct)
                 # E.g. Long entry=100, sl_pct=-0.05 → sl_price=95
                 # E.g. Short entry=100, sl_pct=+0.05 → sl_price=105
-                # (create_sltp_action_map already swaps pcts for shorts)
+                # (create_sltp_action_map already negates pcts for shorts)
                 self._sl_prices[final_open] = (
                     trade_prices * (1 + sl_pcts)
                 )[final_open]
