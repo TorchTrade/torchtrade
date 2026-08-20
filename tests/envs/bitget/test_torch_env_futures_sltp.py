@@ -437,15 +437,13 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
         assert env.takeprofit_levels == [0.03, 0.06]
 
 
-    @pytest.mark.parametrize(
-        "action,label", INVALID_ACTIONS, ids=[i[1] for i in INVALID_ACTIONS]
-    )
-    def test_an_invalid_action_raises_before_trading(self, env, action, label):
-        """bitget SLTP had no guard at all -- a bare KeyError escaped mid-step.
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_raises_before_trading(self, env, action):
+        """Venue wiring: this `_step` must route through the shared validator (#288).
 
-        bybit and okx clamped the same index into a real bracket order instead, so the
-        five SLTP venues had three behaviours between them. #288 routes all five through
-        one validator that runs before the bracket is priced.
+        The original bug was per-venue -- alpaca never called the helper at all -- so a
+        shared-contract test alone would not have caught it. The argument lives once, in
+        `assert_an_invalid_action_raises_before_trading`.
         """
         assert_an_invalid_action_raises_before_trading(env, action)
 

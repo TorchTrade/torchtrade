@@ -407,15 +407,13 @@ class TestBybitInvalidAction:
                 config=config, observer=mock_env_observer, trader=mock_env_trader,
             )
 
-    @pytest.mark.parametrize(
-        "action,label", INVALID_ACTIONS, ids=[i[1] for i in INVALID_ACTIONS]
-    )
-    def test_an_invalid_action_raises_before_trading(self, env, action, label):
-        """This venue used to CLAMP, and #288 reversed that deliberately.
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_raises_before_trading(self, env, action):
+        """Venue wiring: this `_step` must route through the shared validator (#288).
 
-        Clamping never made a malformed action safe -- it made it decisive: `-1` opened a
-        full short here and `NaN` did the same via the index-0 fallback. Nothing about
-        those is a better outcome than refusing to trade.
+        The original bug was per-venue -- alpaca never called the helper at all -- so a
+        shared-contract test alone would not have caught it. The argument lives once, in
+        `assert_an_invalid_action_raises_before_trading`.
         """
         assert_an_invalid_action_raises_before_trading(env, action)
 

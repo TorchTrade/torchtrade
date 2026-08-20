@@ -228,14 +228,10 @@ def test_no_unqualified_margin_enum_is_exported_from_the_live_namespace():
 def test_every_sltp_venue_validates_its_action_index(venue):
     """All five SLTP `_step`s must resolve through the shared validator.
 
-    They had three behaviours between them: bybit and okx carried a byte-identical copy
-    of the old clamp, and alpaca/binance/bitget did a raw `action_map[action_idx]` that
-    let a bare KeyError escape mid-step. Both are now one call.
-
-    `_resolve_action_index`, not `_resolve_action_level`: SLTP envs have no
-    `action_levels` attribute at all, so the level variant would AttributeError here.
-    That is a live temptation -- the same hazard exists on both sides -- so the boundary
-    is pinned rather than left to be rediscovered.
+    They had three behaviours between them: bybit and okx carried a byte-identical copy of
+    the old clamp, the other three let a bare KeyError escape mid-step. The `not in`
+    assertion is the real guard -- SLTP envs have no `action_levels`, so the level variant
+    would AttributeError here.
     """
     import importlib
 

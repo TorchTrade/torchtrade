@@ -492,16 +492,13 @@ class TestOKXSLTPInvalidAction:
                 config=config, observer=mock_env_observer, trader=mock_env_trader,
             )
 
-    @pytest.mark.parametrize(
-        "action,label", INVALID_ACTIONS, ids=[i[1] for i in INVALID_ACTIONS]
-    )
-    def test_an_invalid_action_raises_before_trading(self, env, action, label):
-        """SLTP resolves through `action_map`, a dict, so it never wrapped like a list.
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_raises_before_trading(self, env, action):
+        """Venue wiring: this `_step` must route through the shared validator (#288).
 
-        It still had three different behaviours across five venues: this venue clamped,
-        while alpaca/binance/bitget let a bare KeyError escape mid-step. #288 routes all
-        five through the same validator, so a malformed action refuses to trade instead
-        of picking an endpoint or crashing after the bracket was priced.
+        The original bug was per-venue -- alpaca never called the helper at all -- so a
+        shared-contract test alone would not have caught it. The argument lives once, in
+        `assert_an_invalid_action_raises_before_trading`.
         """
         assert_an_invalid_action_raises_before_trading(env, action)
 

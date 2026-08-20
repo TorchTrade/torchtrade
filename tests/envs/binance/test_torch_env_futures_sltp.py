@@ -670,18 +670,14 @@ class TestCriticalEdgeCases:
         assert env.active_take_profit == 0.0
         assert env.position.current_position == 0
 
-    @pytest.mark.parametrize(
-        "action,label", INVALID_ACTIONS, ids=[i[1] for i in INVALID_ACTIONS]
-    )
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
     def test_an_invalid_action_raises_before_trading(
-        self, env_with_mocks, action, label
-    ):
-        """Was a bare `KeyError` escaping mid-step, asserted as if it were the contract.
+        self, env_with_mocks, action):
+        """Venue wiring: this `_step` must route through the shared validator (#288).
 
-        It was not a contract, it was the absence of one: binance/bitget/alpaca let the
-        dict lookup fail while bybit/okx clamped the same index into a real bracket
-        order. #288 gives all five the same validator, so the type is now intentional and
-        the check runs before the bracket is priced rather than after.
+        The original bug was per-venue -- alpaca never called the helper at all -- so a
+        shared-contract test alone would not have caught it. The argument lives once, in
+        `assert_an_invalid_action_raises_before_trading`.
         """
         env, mock_trader, _ = env_with_mocks
         assert_an_invalid_action_raises_before_trading(env, action)

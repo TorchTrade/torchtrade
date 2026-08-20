@@ -2688,21 +2688,10 @@ def test_what_a_short_observation_costs_under_flatten(flat_at_reset):
     -1, 99, 1.5, float("nan"), float("inf"), True,
 ], ids=["negative", "too-large", "fractional", "nan", "inf", "bool"])
 def test_an_invalid_action_index_cannot_pick_a_position(bad_idx):
-    """`action_levels[-1]` returns the LAST level, so -1 silently opened a FULL LONG.
+    """The six kinds of malformed index, swept once against the one implementation.
 
-    The contract is raise, not clamp. Clamping was bybit's and okx's behaviour and #288
-    reversed it: it never made a malformed action safe, it made it decisive -- `-1` a full
-    short, `99` a full long, `NaN` a short via the index-0 fallback, `1.5` a different
-    action than the policy emitted, and `True` the second level, since bool is an int.
-
-    One shared implementation, so one test -- an earlier version parametrized this over
-    FUTURES_ENVS and produced 48 cases that all ran identical code on an identical stub.
-    Sixteen of them were SLTP classes, which resolve through `action_map` and never reach
-    this method at all.
-
-    The venue-level proof lives where it belongs: each venue's own suite drives a real
-    `env.step()` with a bad index. bybit and okx had those already; binance and bitget did
-    not, which is why the bug shipped there.
+    Clamping was bybit's and okx's behaviour and #288 reversed it. `True` is here because
+    bool is an int subclass, so it was resolving to the second level.
     """
     with pytest.raises(InvalidActionError):
         TorchTradeLiveEnv._resolve_action_index(
@@ -2711,12 +2700,9 @@ def test_an_invalid_action_index_cannot_pick_a_position(bad_idx):
 
 
 def test_an_invalid_action_is_not_a_valueerror_that_halting_would_flatten():
-    """`_halting` catches ValueError and under FLATTEN emergency-closes a real position.
-
-    Nothing routes the resolver through `_halting` today, but a malformed action is a
-    policy bug with the account state fully known -- flattening on it would turn a bad
-    action into a real, unrequested exit. #355 and #394 were both this shape: an
-    exception type that the wrong handler was willing to catch.
+    """`_halting` catches ValueError to emergency-close, and `_current_mark_price`
+    raises one on the same `_step` path -- a shared type would let both pass for a
+    malformed action. See InvalidActionError's own docstring.
     """
     assert not issubclass(InvalidActionError, ValueError)
 

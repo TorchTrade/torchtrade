@@ -525,31 +525,24 @@ def assert_the_step_emits_the_whole_done_family(env):
     assert not nxt["truncated"].any(), "a live env never truncates itself"
 
 
-# 9999, not a small overshoot: the SLTP action maps run to 19 entries, so `5` is a
-# VALID index there and the case quietly tested nothing. It has to exceed every venue's
-# action space to mean the same thing on all of them.
+# 9999, not a small overshoot: the SLTP action maps run to 19 entries, so `5` is a VALID
+# index there and the case quietly tested nothing.
 INVALID_ACTIONS = [
-    (torch.tensor(-1), "negative"),
-    (torch.tensor(9999), "past-the-end"),
-    (torch.tensor(1.5), "fractional"),
-    (torch.tensor(float("nan")), "nan"),
-    (torch.tensor(float("inf")), "inf"),
-    (torch.tensor(True), "bool"),
+    pytest.param(torch.tensor(-1), id="negative"),
+    pytest.param(torch.tensor(9999), id="past-the-end"),
+    pytest.param(torch.tensor(1.5), id="fractional"),
+    pytest.param(torch.tensor(float("nan")), id="nan"),
+    pytest.param(torch.tensor(float("inf")), id="inf"),
+    pytest.param(torch.tensor(True), id="bool"),
 ]
 
 
 def assert_an_invalid_action_raises_before_trading(env, action):
     """A malformed action index must raise, and must not move any money doing it.
 
-    Every one of these was previously a *trade*, not an error. `-1` indexed a list from
-    the end and opened a full LONG on binance/bitget; bybit and okx clamped it to the
-    first level and opened a full SHORT; `NaN` fell back to index 0, also a short; `1.5`
-    truncated to a different action than the policy emitted; `True` is an int subclass
-    and selected the second level. Clamping does not make a malformed action safe, it
-    makes it decisive -- so the contract is raise, and raise BEFORE any order.
-
-    Asserting the exception alone is not enough: the buggy paths raised nothing at all,
-    so the load-bearing half is that `trade` was never called and the position is intact.
+    Every one of these was previously a *trade*, not an error -- `-1` wrapped a list into
+    a full long, bybit/okx clamped it to a full short, `NaN` fell back to index 0. The
+    load-bearing assertions are the last two: the buggy paths raised nothing at all.
     """
     from torchtrade.envs.core.live import InvalidActionError
 

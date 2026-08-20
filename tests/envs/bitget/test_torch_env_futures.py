@@ -109,15 +109,13 @@ class TestBitgetFuturesTorchTradingEnv:
         assert_done_family(env)
 
 
-    @pytest.mark.parametrize(
-        "action,label", INVALID_ACTIONS, ids=[i[1] for i in INVALID_ACTIONS]
-    )
-    def test_an_invalid_action_raises_before_trading(self, env, action, label):
-        """Venue-level proof that this `_step` actually routes through the shared check.
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_raises_before_trading(self, env, action):
+        """Venue wiring: this `_step` must route through the shared validator (#288).
 
-        The shared contract is asserted once in `tests/envs/test_live_env_base.py`; this
-        is here because the bug was per-venue wiring, not the helper -- alpaca indexed
-        `action_levels` raw and never called it at all (#288).
+        The original bug was per-venue -- alpaca never called the helper at all -- so a
+        shared-contract test alone would not have caught it. The argument lives once, in
+        `assert_an_invalid_action_raises_before_trading`.
         """
         assert_an_invalid_action_raises_before_trading(env, action)
 
