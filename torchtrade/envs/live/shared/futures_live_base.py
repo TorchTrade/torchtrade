@@ -246,6 +246,31 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         return self._halting(read)
 
+    def _resolve_action_level(self, tensordict) -> float:
+        """The action index the policy emitted, validated, as an action LEVEL.
+
+        A negative index is the dangerous one: `action_levels[-1]` returns the LAST level
+        rather than raising, so on `[-1, 0, 1]` it silently opens a full LONG. bybit and
+        okx guarded this and binance and bitget did not -- the same fix landing on some
+        exchanges and not others that #271, #272 and the hedge surface each hit (#288).
+        """
+        action_idx = tensordict.get("action", 0)
+        if isinstance(action_idx, torch.Tensor):
+            action_idx = action_idx.item()
+        if not isinstance(action_idx, int):
+            if isinstance(action_idx, float) and math.isfinite(action_idx):
+                action_idx = int(action_idx)
+            else:
+                logger.warning(f"Invalid action index {action_idx}, defaulting to 0")
+                action_idx = 0
+        if action_idx < 0 or action_idx >= len(self.action_levels):
+            logger.warning(
+                f"Action index {action_idx} out of range "
+                f"[0, {len(self.action_levels) - 1}], clamping"
+            )
+            action_idx = max(0, min(action_idx, len(self.action_levels) - 1))
+        return self.action_levels[action_idx]
+
     def _current_mark_price(self, position_status=None) -> float:
         """The bar's mark price, validated before it can size an order (#347).
 
