@@ -1,7 +1,7 @@
 """Order executor for Bybit Futures trading using pybit."""
-from torchtrade.envs.core.common_types import PositionStatus
 import logging
 
+from torchtrade.envs.core.common_types import PositionStatus
 from torchtrade.envs.live.shared.executor_helpers import (
     ExecutorHelpersMixin,
     TickSizeMixin,

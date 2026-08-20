@@ -401,9 +401,6 @@ class TestBinanceFuturesOrderClass:
         assert success is False
 
 
-
-
-
 class TestBinanceLotSizeRounding:
     """#271: binance parsed only PRICE_FILTER, so every quantity went out as
     `round(quantity, 3)` and any symbol whose step is not three decimals got a silently

@@ -1,10 +1,10 @@
 """Replay order executor for simulated trading with historical data."""
 
-from torchtrade.envs.core.common_types import PositionStatus
 import logging
 import math
 from typing import Dict, Optional
 
+from torchtrade.envs.core.common_types import PositionStatus
 from torchtrade.envs.utils.liquidation import (
     require_fee_fits_maintenance,
     bankruptcy_price,

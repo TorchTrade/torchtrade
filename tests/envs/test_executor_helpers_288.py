@@ -174,18 +174,16 @@ def test_every_venue_shares_one_position_status(venue, module):
 
 
 def test_alpaca_position_status_is_deliberately_its_own_shape():
-    """The one that must NOT be folded, and the existing suite would barely notice.
+    """The one that must NOT be folded, stated rather than left to inference.
 
-    Simulated: replacing alpaca's PositionStatus with the shared one fails 2 of 200
-    alpaca tests, both with generic downstream symptoms. It does not crash, because
-    `AlpacaOrderClass.get_status()` wraps the construction in `except Exception` -- so the
-    TypeError is swallowed and every live position read silently degrades to
-    POSITION_UNKNOWN. This test failing IS the diagnosis.
+    `AlpacaOrderClass.get_status()` builds its status inside `except Exception`, so a
+    folded-in TypeError is swallowed and every live position read degrades quietly to
+    POSITION_UNKNOWN rather than raising. Four lines that name the invariant are cheaper
+    than relying on that failure being legible.
     """
     from torchtrade.envs.live.alpaca.order_executor import PositionStatus as Alpaca
     from torchtrade.envs.core.common_types import PositionStatus as Shared
 
-    assert Alpaca is not Shared
     assert {f.name for f in dataclasses.fields(Alpaca)} != {
         f.name for f in dataclasses.fields(Shared)}
 
