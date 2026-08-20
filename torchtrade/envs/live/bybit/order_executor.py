@@ -1,13 +1,13 @@
 """Order executor for Bybit Futures trading using pybit."""
 import logging
 
+from torchtrade.envs.core.common_types import PositionStatus
 from torchtrade.envs.live.shared.executor_helpers import (
     ExecutorHelpersMixin,
     TickSizeMixin,
 )
 
 from torchtrade.envs.utils.precision import decimals_for_step
-from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
 
@@ -52,20 +52,6 @@ class MarginMode(Enum):
             1 for ISOLATED, 0 for CROSSED
         """
         return 1 if self == MarginMode.ISOLATED else 0
-
-
-@dataclass
-class PositionStatus:
-    qty: float  # Positive for long, negative for short
-    notional_value: float
-    entry_price: float
-    unrealized_pnl: float
-    unrealized_pnl_pct: float
-    mark_price: float
-    leverage: float  # float, not int: int() truncated 1.5x to 1x, which then took
-    # the no-liquidation branch and reported a levered position as safe (#277).
-    margin_mode: Optional[str]
-    liquidation_price: float
 
 
 class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):

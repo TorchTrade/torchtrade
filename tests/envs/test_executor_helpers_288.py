@@ -1,5 +1,6 @@
 """One copy of the shared executor helpers, and a guard against re-forking (#288)."""
 
+import dataclasses
 import inspect
 
 import pytest
@@ -145,7 +146,7 @@ def test_the_executor_trade_surface_advertises_nothing_it_cannot_do(executor):
     )
 
 
-POSITION_STATUS_CLASSES = [
+POSITION_STATUS_MODULES = [
     ("binance", "torchtrade.envs.live.binance.order_executor"),
     ("bitget", "torchtrade.envs.live.bitget.order_executor"),
     ("bybit", "torchtrade.envs.live.bybit.order_executor"),
@@ -154,22 +155,37 @@ POSITION_STATUS_CLASSES = [
 ]
 
 
-@pytest.mark.parametrize("venue,module", POSITION_STATUS_CLASSES, ids=lambda v: v)
-def test_every_position_status_spells_the_margin_field_the_same_way(venue, module):
-    """Five PositionStatus dataclasses, one field name (#289).
+@pytest.mark.parametrize("venue,module", POSITION_STATUS_MODULES, ids=lambda v: v)
+def test_every_venue_shares_one_position_status(venue, module):
+    """Identity, not a matching field list -- see `common_types.PositionStatus`.
 
-    The configs are guarded in `test_live_env_base.py`; this is the other half. Replay's
-    carried BOTH `margin_type` and `margin_mode` as separate fields to satisfy binance's
-    readers and everyone else's -- a duplicate that only surfaced because the rename made
-    the two names collide into a SyntaxError.
+    A name-and-shape check would have passed on all five copies, so it could never have
+    caught what this exists to prevent. Sharing the OBJECT is the property that holds.
     """
-    import dataclasses, importlib
+    import importlib
 
-    status = getattr(importlib.import_module(module), "PositionStatus")
-    names = {f.name for f in dataclasses.fields(status)}
-    assert "margin_mode" in names and "margin_type" not in names, (
-        f"{venue} PositionStatus spells it {names & {'margin_mode', 'margin_type'}}"
+    from torchtrade.envs.core.common_types import PositionStatus as Shared
+
+    venue_cls = getattr(importlib.import_module(module), "PositionStatus")
+    assert venue_cls is Shared, (
+        f"{venue} re-declares PositionStatus instead of sharing core's. A matching field "
+        f"list is not enough -- three of the five copies were byte-identical."
     )
+
+
+def test_alpaca_position_status_is_deliberately_its_own_shape():
+    """The one that must NOT be folded, stated rather than left to inference.
+
+    `AlpacaOrderClass.get_status()` builds its status inside `except Exception`, so a
+    folded-in TypeError is swallowed and every live position read degrades quietly to
+    POSITION_UNKNOWN rather than raising. Four lines that name the invariant are cheaper
+    than relying on that failure being legible.
+    """
+    from torchtrade.envs.live.alpaca.order_executor import PositionStatus as Alpaca
+    from torchtrade.envs.core.common_types import PositionStatus as Shared
+
+    assert {f.name for f in dataclasses.fields(Alpaca)} != {
+        f.name for f in dataclasses.fields(Shared)}
 
 
 def test_no_unqualified_margin_enum_is_exported_from_the_live_namespace():

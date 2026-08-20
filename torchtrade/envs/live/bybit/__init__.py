@@ -5,7 +5,6 @@ from torchtrade.envs.live.bybit.order_executor import (
     BybitFuturesOrderClass,
     MarginMode,
     PositionMode,
-    PositionStatus,
 )
 from torchtrade.envs.live.bybit.env import (
     BybitFuturesTorchTradingEnv,
@@ -21,7 +20,6 @@ __all__ = [
     "BybitFuturesOrderClass",
     "MarginMode",
     "PositionMode",
-    "PositionStatus",
     "BybitFuturesTorchTradingEnv",
     "BybitFuturesTradingEnvConfig",
     "BybitFuturesSLTPTorchTradingEnv",

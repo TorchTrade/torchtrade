@@ -16,6 +16,26 @@ class MarginMode(Enum):
 
 
 @dataclass
+class PositionStatus:
+    """What a futures venue says it is holding, in one shape for all of them (#288).
+
+    Alpaca is deliberately NOT here: it is spot, and its status is a different SHAPE
+    (`market_value`, `avg_entry_price`) rather than this one under other names.
+    """
+
+    qty: float  # Positive for long, negative for short
+    notional_value: float
+    entry_price: float
+    unrealized_pnl: float
+    unrealized_pnl_pct: float
+    mark_price: float
+    leverage: float  # float, not int: int() truncated 1.5x to 1x, which then took
+    # the no-liquidation branch and reported a levered position as safe (#277).
+    margin_mode: Optional[str]  # Optional: bybit reports none for a cross-margin account
+    liquidation_price: float
+
+
+@dataclass
 class OrderStatus:
     """Standard order status structure across exchanges."""
     is_open: bool

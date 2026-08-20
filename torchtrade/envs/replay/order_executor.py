@@ -2,9 +2,9 @@
 
 import logging
 import math
-from dataclasses import dataclass
 from typing import Dict, Optional
 
+from torchtrade.envs.core.common_types import PositionStatus
 from torchtrade.envs.utils.liquidation import (
     require_fee_fits_maintenance,
     bankruptcy_price,
@@ -16,19 +16,6 @@ from torchtrade.envs.utils.sltp_helpers import stop_fill_price
 from torchtrade.envs.core.state import POSITION_DUST_EPS
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class PositionStatus:
-    qty: float
-    notional_value: float
-    entry_price: float
-    unrealized_pnl: float
-    unrealized_pnl_pct: float
-    mark_price: float
-    leverage: int
-    margin_mode: str
-    liquidation_price: float
 
 
 # The grid replay has effectively used all along -- see round_quantity (#271).

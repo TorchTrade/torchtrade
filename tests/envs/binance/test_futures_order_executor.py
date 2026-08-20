@@ -401,30 +401,6 @@ class TestBinanceFuturesOrderClass:
         assert success is False
 
 
-class TestPositionStatusDataclass:
-    """Tests for PositionStatus dataclass."""
-
-    def test_position_status_creation(self):
-        """Test creating PositionStatus."""
-        from torchtrade.envs.live.binance.order_executor import PositionStatus
-
-        pos = PositionStatus(
-            qty=0.001,
-            notional_value=50.0,
-            entry_price=50000.0,
-            unrealized_pnl=0.1,
-            unrealized_pnl_pct=0.002,
-            mark_price=50100.0,
-            leverage=10,
-            margin_mode="isolated",
-            liquidation_price=45000.0,
-        )
-
-        assert pos.qty == 0.001
-        assert pos.leverage == 10
-
-
-
 class TestBinanceLotSizeRounding:
     """#271: binance parsed only PRICE_FILTER, so every quantity went out as
     `round(quantity, 3)` and any symbol whose step is not three decimals got a silently

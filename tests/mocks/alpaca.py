@@ -4,6 +4,7 @@ Mock classes for testing Alpaca trading environments.
 These mocks simulate the behavior of Alpaca API clients without making real API calls.
 """
 
+from torchtrade.envs.live.alpaca.order_executor import PositionStatus
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -440,15 +441,6 @@ class MockTrader:
         return MockClock()
 
 
-@dataclass
-class PositionStatus:
-    """Position status dataclass for MockTrader."""
-    qty: float
-    market_value: float
-    avg_entry_price: float
-    unrealized_pl: float
-    unrealized_plpc: float
-    current_price: float
 
 
 class MockCryptoHistoricalDataClient:

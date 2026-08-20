@@ -1,7 +1,6 @@
 import logging
 
 from torchtrade.envs.live.shared.executor_helpers import ExecutorHelpersMixin
-from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Union
 
@@ -9,7 +8,7 @@ import ccxt
 
 from torchtrade.envs.live.bitget.utils import normalize_symbol
 from torchtrade.envs.core.common import TradeMode
-from torchtrade.envs.core.common_types import OrderStatus
+from torchtrade.envs.core.common_types import PositionStatus, OrderStatus
 from torchtrade.envs.core.state import POSITION_UNKNOWN
 from torchtrade.envs.utils.leverage import (
     leverage_already_set,
@@ -60,20 +59,6 @@ class MarginMode(Enum):
             'isolated' for ISOLATED, 'cross' for CROSSED
         """
         return 'isolated' if self == MarginMode.ISOLATED else 'cross'
-
-
-@dataclass
-class PositionStatus:
-    qty: float  # Positive for long, negative for short
-    notional_value: float
-    entry_price: float
-    unrealized_pnl: float
-    unrealized_pnl_pct: float
-    mark_price: float
-    leverage: float  # float, not int: int() truncated 1.5x to 1x, which then took
-    # the no-liquidation branch and reported a levered position as safe (#277).
-    margin_mode: str
-    liquidation_price: float
 
 
 class BitgetFuturesOrderClass(ExecutorHelpersMixin):

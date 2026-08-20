@@ -6,7 +6,6 @@ from torchtrade.envs.live.binance.order_executor import (
     TradeMode,
     MarginMode,
     OrderStatus,
-    PositionStatus,
 )
 from torchtrade.envs.live.binance.env import (
     BinanceFuturesTorchTradingEnv,
@@ -23,7 +22,6 @@ __all__ = [
     "TradeMode",
     "MarginMode",
     "OrderStatus",
-    "PositionStatus",
     "BinanceFuturesTorchTradingEnv",
     "BinanceFuturesTradingEnvConfig",
     "BinanceFuturesSLTPTorchTradingEnv",
