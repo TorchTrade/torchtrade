@@ -222,3 +222,25 @@ def test_no_unqualified_margin_enum_is_exported_from_the_live_namespace():
         f"silently and the wire value changes with it -- "
         f"{sorted(n for n in live.__all__ if live.__all__.count(n) > 1)}"
     )
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx", "alpaca"])
+def test_sltp_envs_resolve_through_action_map_not_action_levels(venue):
+    """`_resolve_action_level` reads `self.action_levels`, which SLTP envs do not have.
+
+    Routing an SLTP `_step` through it would AttributeError rather than clamp -- and that
+    is a real temptation, since the same out-of-range hazard exists there through
+    `action_map`. This pins the boundary so the attempt fails by name instead of by
+    missing attribute. The clamp-vs-raise question for SLTP is open (#288).
+    """
+    import importlib
+
+    module = importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp")
+    cls = next(v for k, v in vars(module).items()
+               if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
+    src = inspect.getsource(cls)
+    assert "action_map[" in src, f"{venue} SLTP no longer resolves through action_map"
+    assert "_resolve_action_level" not in src, (
+        f"{venue} SLTP calls _resolve_action_level, which reads action_levels -- SLTP "
+        f"envs do not have that attribute, so this AttributeErrors at the first step"
+    )

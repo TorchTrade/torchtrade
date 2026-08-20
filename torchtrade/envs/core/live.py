@@ -369,6 +369,11 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         checkpoint from before `action_levels` was reconfigured -- argmaxes past the end.
         bybit and okx guarded both containers; binance, bitget and alpaca guarded neither
         (#288).
+
+        NOT for the SLTP envs: they have no `action_levels` at all and resolve through
+        `action_map`, a dict, which raises KeyError instead of wrapping. Whether they
+        should clamp like this or keep raising is open -- binance's own tests assert
+        `pytest.raises(KeyError)` there, so it is a decision, not an oversight.
         """
         n_actions = len(self.action_levels)
         action_idx = tensordict.get("action", 0)
