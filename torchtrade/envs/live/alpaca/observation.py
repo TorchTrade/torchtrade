@@ -1,33 +1,22 @@
-from typing import List, Union, Callable, Dict, Optional
+"""Alpaca crypto bars, on the shared observation base."""
+
+from typing import List, Union, Callable, Optional
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-import numpy as np
 import pandas as pd
+from torchtrade.envs.live.shared.base_obs import BaseObservationClass
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, timeframe_to_alpaca
 from alpaca.data.requests import CryptoBarsRequest
 from alpaca.data.historical.crypto import CryptoHistoricalDataClient
 
-def _timestamps_of(df, column):
-    """Timestamps for `df`'s rows, from the column or the index.
 
-    `feature_preprocessing_fn` is public and may leave the timestamp in the index --
-    alpaca's SDK returns a (symbol, timestamp) MultiIndex and a custom fn need not call
-    reset_index. Reading the column unconditionally regressed that path to a KeyError.
+class AlpacaObservationClass(BaseObservationClass):
+    """Spot crypto bars from alpaca.
+
+    Everything about the WINDOW is inherited. This class is the part alpaca does
+    differently: it fetches a date RANGE rather than a bar count, and its SDK returns a
+    frame with a (symbol, timestamp) MultiIndex instead of a list of klines.
     """
-    if column in df.columns:
-        return df[column].values
-    if column in (df.index.names or []):
-        return df.index.get_level_values(column).values
-    raise KeyError(
-        f"feature_preprocessing_fn returned a frame with no {column!r} column or index "
-        f"level; base_features cannot be timestamped"
-    )
-
-
-class AlpacaObservationClass:
-
-    def reset(self) -> None:
-        """No-op; see BaseFuturesObservationClass.reset (#278)."""
 
     def __init__(
         self,
@@ -49,177 +38,55 @@ class AlpacaObservationClass:
                                    and returns a DataFrame with feature columns
             client: Optional pre-configured CryptoHistoricalDataClient for dependency injection (useful for testing)
         """
-        self.symbol = symbol
-        self.timeframes = (
-            [timeframes] if isinstance(timeframes, TimeFrame) else timeframes
-        )
-        self.window_sizes = (
-            [window_sizes] if isinstance(window_sizes, int) else window_sizes
-        )
         self.default_lookback = 60
-        # Validate that timeframes and window_sizes have matching lengths when both are lists
-        if isinstance(timeframes, list) and isinstance(window_sizes, list):
-            if len(self.timeframes) != len(self.window_sizes):
-                raise ValueError("If both timeframes and window_sizes are lists, they must have the same length")
-
-        self.feature_preprocessing_fn = (
-            feature_preprocessing_fn or self._default_preprocessing
+        super().__init__(
+            symbol=symbol,
+            time_frames=timeframes,
+            window_sizes=window_sizes,
+            feature_preprocessing_fn=feature_preprocessing_fn,
+            client=client,
         )
-        self.client = client if client is not None else CryptoHistoricalDataClient()
 
-    def _default_preprocessing(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Default preprocessing function if none is provided."""
-        df = df.reset_index()
-        df.dropna(inplace=True)
-        df.drop_duplicates(inplace=True)
-        df = df.drop(columns=["symbol"])
+    def _create_client(self) -> object:
+        return CryptoHistoricalDataClient()
 
-        # Generating base features
-        # TODO: should those be unnormalized?
-        df["feature_close"] = df["close"].pct_change().fillna(0)
-        df["feature_open"] = df["open"] / df["close"]
-        df["feature_high"] = df["high"] / df["close"]
-        df["feature_low"] = df["low"] / df["close"]
-        df.dropna(inplace=True)
-        # dropna removes NaN but NOT inf, and a zero close produces it twice over:
-        # `open/close` on the zero bar itself, and `close.pct_change()` on the next one.
-        # inf then reaches the policy's observation tensor (#398).
-        df = df[np.isfinite(df.select_dtypes(include=[np.number])).all(axis=1)]
-        return df
-
-    def _get_numpy_obs(self, df: pd.DataFrame, columns: List[str] = None) -> np.ndarray:
-        """Convert specified columns to numpy array."""
-        if columns is None:
-            columns = [col for col in df.columns if "feature" in col]
-        if not columns:
-            raise ValueError(f"No columns found in preprocessed DataFrame matching: {columns}")
-        return np.array(df[columns], dtype=np.float32)
-
-    def _fetch_single_timeframe(
-        self, timeframe: TimeFrame #, window_size: int
-    ) -> pd.DataFrame:
-        """Fetch and preprocess data for a single timeframe.
-
-        Args:
-            timeframe: Custom TimeFrame object
-
-        Returns:
-            DataFrame with OHLCV data
-        """
+    def _validate_timeframe(self, timeframe: TimeFrame) -> None:
+        """The 60-day fetch window cannot fill a daily-bar observation."""
         if timeframe.unit == TimeFrameUnit.Day and self.default_lookback > 30:
-            raise ValueError("Default lookback is greater than 30 days, which is not allowed for daily data")
+            raise ValueError(
+                "Default lookback is greater than 30 days, which is not allowed for daily data"
+            )
 
-        # Convert custom TimeFrame to Alpaca TimeFrame for API calls
-        alpaca_timeframe = timeframe_to_alpaca(timeframe)
+    def _get_timestamp_column(self) -> str:
+        return "timestamp"
 
+    def _fetch_single_timeframe(self, timeframe: TimeFrame, limit: int = None) -> pd.DataFrame:
+        """A date RANGE, not a bar count, so `limit` has nothing to bind to."""
         now = datetime.now(ZoneInfo("America/New_York"))
         request = CryptoBarsRequest(
             symbol_or_symbols=self.symbol,
-            timeframe=alpaca_timeframe,
-            start=now - timedelta(days=self.default_lookback), # TODO: this is critical
+            timeframe=timeframe_to_alpaca(timeframe),
+            start=now - timedelta(days=self.default_lookback),
             end=now,
-            #limit=window_size
         )
         return self.client.get_crypto_bars(request).df
 
-    def get_keys(self) -> List[str]:
+    def _normalise_frame(self, df: pd.DataFrame) -> pd.DataFrame:
+        """The SDK hands back a (symbol, timestamp) MultiIndex and a constant `symbol`.
+
+        Dropped BEFORE the shared dropna/drop_duplicates, where it used to go after. Safe
+        only because `symbol: str` means one symbol per observer: with the column gone,
+        two bars alike in every OHLCV field but differing in symbol would dedupe to one.
+        Revisit this ordering before any multi-symbol support.
         """
-        Get the list of keys that will be present in the observations dictionary.
+        return df.reset_index().drop(columns=["symbol"])
 
-        Returns:
-            List of strings formatted as '{timeframe}_{window_size}'
-            (e.g., '5Minute_10', '1Hour_20')
-        """
-        return [
-            f"{tf.obs_key_freq()}_{ws}"
-            for tf, ws in zip(self.timeframes, self.window_sizes)
-        ]
-
-    def get_features(self) -> Dict[str, List[str]]:
-        """Returns a dictionary with the observation features and the original features."""
-        def get_dummy_data(window_size: int):
-            df = pd.DataFrame()
-            df["symbol"] = [self.symbol]*window_size
-            df["open"] = np.random.rand(window_size)
-            df["high"] = np.random.rand(window_size)
-            df["low"] = np.random.rand(window_size)
-            df["close"] = np.random.rand(window_size)
-            df["volume"] = np.random.rand(window_size)
-            return df
-        # TODO: we could do this for all window sizes in case we have different processings per time frame
-        #features = []
-        #for window_size in self.window_sizes:
-            #dummy_df = get_dummy_data(window_size)
-            #features.extend([f for f in self.feature_preprocessing_fn(dummy_df).columns if "feature" in f])
-        dummy_df = self.feature_preprocessing_fn(get_dummy_data(self.window_sizes[0]))
-        observation_features = [f for f in dummy_df.columns if "feature" in f]
-        original_features = [f for f in dummy_df.columns if "feature" not in f]
-        return {"observation_features": observation_features, "original_features": original_features}
-
-    def get_observations(self, return_base_ohlc: bool = False) -> Dict[str, np.ndarray]:
-        """
-        Fetch and process observations for all specified timeframes and window sizes.
-
-        Args:
-            return_base_ohlc: If True, includes the raw OHLC data from the first timeframe
-                            in the observations dictionary under the 'base_features' key.
-
-        Returns:
-            Dictionary with keys formatted as '{timeframe}_{window_size}' and numpy array values.
-            If return_base_ohlc is True, includes 'base_features'and 'base_timestamps' keys with raw OHLC and timestamp data.
-        """
-        observations = {}
-
-        for timeframe, window_size in zip(self.timeframes, self.window_sizes):
-            key = f"{timeframe.obs_key_freq()}_{window_size}"
-            df = self._fetch_single_timeframe(timeframe)
-            
-            processed_df = self.feature_preprocessing_fn(df)
-
-            # A short frame is a silent shape corruption, not an error: `iloc[-w:]` just
-            # returns fewer rows, and reset() and rollout() both succeed on it (#400).
-            # Alpaca has no ObservationFailurePolicy, so this ends the step rather than
-            # flattening, and a config that can never fill the window raises at reset().
-            if len(processed_df) < window_size:
-                raise ValueError(
-                    f"only {len(processed_df)} usable candles for {self.symbol} on "
-                    f"{timeframe.obs_key_freq()} after preprocessing, need {window_size}"
-                )
-
-            # Sliced from the SAME frame as the market data, so row i of each is the
-            # same bar by construction (#395). Windowed to the (window, 4) spec (#69).
-            if return_base_ohlc and timeframe == self.timeframes[0]:
-                # `base_features[-1, 3]` is the current price at three SLTP call sites,
-                # each guarded by isfinite and `<= 0`. If the newest bar was dropped,
-                # `[-1]` is the PREVIOUS bar and those guards pass on a stale price.
-                #
-                # Here, not per-timeframe. Alpaca has no ObservationFailurePolicy, so
-                # this ends the step rather than flattening -- the futures copy of this
-                # guard carries that cost, see `futures_base_obs`. Only the default fn:
-                # a custom one may resample or trim the forming bar.
-                if self.feature_preprocessing_fn == self._default_preprocessing:
-                    _kept = _timestamps_of(processed_df, 'timestamp')
-                    _fetched = _timestamps_of(df, 'timestamp')
-                    if len(_fetched) and _kept[-1] != _fetched[-1]:
-                        raise ValueError(
-                            f"most recent candle for {self.symbol} on "
-                            f"{timeframe.obs_key_freq()} did not survive preprocessing; "
-                            f"refusing an observation whose last bar is stale"
-                        )
-
-                observations['base_features'] = self._get_numpy_obs(
-                    processed_df,
-                    columns=['open', 'high', 'low', 'close']
-                )[-window_size:]
-                observations['base_timestamps'] = _timestamps_of(
-                    processed_df, 'timestamp'
-                )[-window_size:]
-
-            # apply window size
-            processed_df = processed_df.iloc[-window_size:]
-            observations[key] = self._get_numpy_obs(processed_df)
-
-        return observations
+    def _dummy_frame(self, window_size: int) -> pd.DataFrame:
+        """Carries `symbol` because `_normalise_frame` drops it: the dummy has to have
+        the shape real data has, or `get_features` measures a frame that never occurs."""
+        df = super()._dummy_frame(window_size)
+        df.insert(0, "symbol", [self.symbol] * window_size)
+        return df
 
     def get_current_price(self) -> float:
         """
@@ -231,92 +98,12 @@ class AlpacaObservationClass:
         Returns:
             float: Most recent close price from the first timeframe
         """
-        if not self.timeframes:
+        if not self.time_frames:
             raise ValueError("No timeframes configured")
 
-        # Fetch data from the first timeframe
-        df = self._fetch_single_timeframe(self.timeframes[0])
+        df = self._fetch_single_timeframe(self.time_frames[0])
 
         if df.empty:
             raise ValueError(f"No data available for {self.symbol}")
 
-        # Return the most recent close price
         return float(df['close'].iloc[-1])
-
-
-# Example usage:
-if __name__ == "__main__":
-    # Note: Examples now use custom TimeFrame from torchtrade.envs.timeframe
-    # instead of Alpaca's TimeFrame class
-
-    # Single timeframe example
-    print("Testing single timeframe...")
-    window_size = 10
-    observer = AlpacaObservationClass(
-        symbol="BTC/USD",
-        timeframes=TimeFrame(15, TimeFrameUnit.Minute),
-        window_sizes=window_size,
-    )
-    expected_keys = observer.get_keys()
-    observations = observer.get_observations()
-    #features = observer.get_features()
-
-    assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
-    # Default preprocessing has 4 features: feature_close, feature_open, feature_high, feature_low
-    assert observations[expected_keys[0]].shape == (window_size, 4), \
-        f"Expected shape (10, 4) for default features, got {observations[expected_keys[0]].shape}"
-    print("Single timeframe test passed!")
-
-    # Example with multiple timeframes and window sizes
-    print("\nTesting multiple timeframes...")
-    window_sizes = [10, 20]
-    observer = AlpacaObservationClass(
-        symbol="BTC/USD",
-        timeframes=[
-            TimeFrame(15, TimeFrameUnit.Minute),
-            TimeFrame(1, TimeFrameUnit.Hour)
-        ],
-        window_sizes=window_sizes
-    )
-
-    expected_keys = observer.get_keys()
-    print("Expected keys:", expected_keys)
-    observations = observer.get_observations()
-    #features = observer.get_features()
-
-    assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
-    assert len(observations) == 2, "Expected exactly 2 observations"
-
-    # Check shapes for each timeframe/window combination
-    expected_shapes = { key: (w, 4) for key, w in zip(expected_keys, window_sizes)
-    }
-
-    for key, expected_shape in expected_shapes.items():
-        assert observations[key].shape == expected_shape, \
-            f"Shape mismatch for {key}: expected {expected_shape}, got {observations[key].shape}"
-    print("Multiple timeframes test passed!")
-
-    # Custom preprocessing example
-    print("\nTesting custom preprocessing...")
-    def custom_preprocessing(df):
-        df = df.reset_index()
-        df.dropna(inplace=True)
-        df["feature_volatility"] = df["high"] - df["low"]
-        df["feature_volume_ma"] = df["volume"].rolling(window=3).mean()
-        df.dropna(inplace=True)  # Drop NaN values from rolling window
-        return df
-
-    observer_custom = AlpacaObservationClass(
-        symbol="BTC/USD",
-        timeframes=TimeFrame(15, TimeFrameUnit.Minute),
-        window_sizes=10,
-        feature_preprocessing_fn=custom_preprocessing,
-    )
-
-    observations_custom = observer_custom.get_observations()
-    key = observer_custom.get_keys()[0]
-    #features_custom = observer_custom.get_features()
-    # Custom preprocessing has 2 features and loses 2 rows due to rolling window
-    assert observations_custom[key].shape == (8, 2), \
-        f"Expected shape (8, 2) for custom features, got {observations_custom[key].shape}"
-    print("Custom preprocessing test passed!")

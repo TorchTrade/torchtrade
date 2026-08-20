@@ -143,7 +143,9 @@ def _basic_features(df):
 class TestBinanceSharesTheObservationBase:
     """binance was the last FUTURES venue with a parallel observation class (#289).
 
-    alpaca still hand-rolls its own; it is spot, so outside this issue's scope.
+    alpaca folded onto the shared BaseObservationClass in #288; this guard stays
+    futures-only because _fetch_single_timeframe is concrete one level down, and
+    base_exchange_tests.py covers all five venues at the BaseObservationClass level.
     """
 
     @staticmethod
@@ -176,8 +178,14 @@ class TestBinanceSharesTheObservationBase:
         `get_features` a property drops it from a callable filter), and a merely non-empty
         check would still pass.
         """
+        # Over the MRO, not one class's __dict__: the window logic now lives on
+        # BaseObservationClass and only the kline half on BaseFuturesObservationClass
+        # (#288). A __dict__-scoped set silently stopped covering `get_observations` the
+        # moment it was hoisted, which is how this guard would have gone quiet.
         shared = {
-            n for n, v in vars(BaseFuturesObservationClass).items()
+            n for klass in BaseFuturesObservationClass.__mro__
+            if klass.__module__.startswith("torchtrade.")
+            for n, v in vars(klass).items()
             if callable(v) and not getattr(v, "__isabstractmethod__", False)
             and not n.startswith("__")
         }

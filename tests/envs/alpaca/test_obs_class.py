@@ -42,6 +42,19 @@ class TestAlpacaObservationClass(BaseObservationClassTests):
         assert obs.symbol == "BTC/USD"
         assert obs.client is mock_client
 
+    def test_a_daily_timeframe_is_refused_at_construction(self):
+        """The 60-day fetch window cannot fill a daily observation, and says so early.
+
+        This check used to live inside `_fetch_single_timeframe`, so the config built
+        fine and failed on the first fetch -- during `reset()`, on a live account. The
+        shared base calls `_validate_timeframe` from `__init__`, which is where the
+        futures venues have always validated theirs (#288). Untested either way before.
+        """
+        with pytest.raises(ValueError, match="not allowed for daily data"):
+            self.create_observer(
+                symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Day),
+                window_sizes=5)
+
     def test_get_keys_multiple_timeframes(self):
         obs = self.create_observer(
             symbol="BTC/USD",
@@ -96,14 +109,6 @@ class TestAlpacaObservationClass(BaseObservationClassTests):
         key = obs.get_keys()[0]
         assert obs.get_observations()[key].shape[0] == 15
 
-    def test_feature_close_is_pct_change(self):
-        """feature_close is a percentage change (small values around 0)."""
-        obs = self.create_observer(
-            symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute), window_sizes=10)
-        key = obs.get_keys()[0]
-        feature_close = obs.get_observations()[key][:, 0]
-        assert np.abs(feature_close).max() < 0.1
-
     def test_different_timeframe_units(self):
         """Hourly timeframe produces the expected key."""
         obs = self.create_observer(
@@ -119,21 +124,45 @@ class TestAlpacaObservationClass(BaseObservationClassTests):
         obs2 = obs.get_observations()[key]
         assert obs1.shape == obs2.shape == (10, 4)
 
-    def test_ohlc_relationship(self):
-        """OHLC high >= low holds in the base features."""
-        obs = self.create_observer(
-            symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute), window_sizes=10)
-        base = obs.get_observations(return_base_ohlc=True)["base_features"]
-        highs, lows = base[:, 1], base[:, 2]
-        assert np.all(highs >= lows)
 
-    def test_timestamps_are_ordered(self):
-        """base_timestamps are chronological."""
-        obs = self.create_observer(
-            symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute), window_sizes=10)
-        timestamps = obs.get_observations(return_base_ohlc=True)["base_timestamps"]
-        for i in range(len(timestamps) - 1):
-            assert timestamps[i] < timestamps[i + 1]
+def test_a_bar_with_a_null_symbol_but_sound_prices_survives(monkeypatch):
+    """The one deliberate behaviour change in the #288 fold, pinned in both directions.
+
+    `_normalise_frame` drops `symbol` BEFORE the shared dropna, where it used to be
+    dropped after -- so a bar whose metadata came back null and whose OHLCV is intact is
+    kept now and was discarded before. That is the better answer (losing usable bars to a
+    metadata gap is what pushes a window under its spec, #400), but it was a stated
+    change with nothing asserting it: move the drop back after the dropna and no test
+    would have failed.
+    """
+    observer = AlpacaObservationClass(
+        symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+        window_sizes=5, client=MockCryptoHistoricalDataClient(num_bars=60))
+
+    def frame_with_a_null_symbol(timeframe, limit=None):
+        n = 60
+        df = pd.DataFrame({
+            "symbol": ["BTC/USD"] * n,
+            "open": np.full(n, 100.0), "high": np.full(n, 101.0),
+            "low": np.full(n, 99.0), "close": np.full(n, 100.5),
+            "volume": np.full(n, 10.0),
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        })
+        df.loc[55, "symbol"] = None      # metadata gap, prices intact
+        return df
+
+    monkeypatch.setattr(observer, "_fetch_single_timeframe", frame_with_a_null_symbol)
+    obs = observer.get_observations(return_base_ohlc=True)
+
+    # The window is the last 5 of 60, so bar 55 is INSIDE it. Asserting the row count
+    # cannot distinguish the two orderings -- 59 surviving rows still fill a 5-bar
+    # window. The timestamp is what moves: drop bar 55 and the window shifts back to
+    # include bar 54.
+    kept = pd.to_datetime(obs["base_timestamps"])
+    assert pd.Timestamp("2024-01-01 00:55:00") in set(kept), (
+        f"the null-symbol bar was discarded despite sound prices; window is {list(kept)}"
+    )
+    assert pd.Timestamp("2024-01-01 00:54:00") not in set(kept)
 
 
 def test_a_malformed_candle_never_reaches_alpaca_base_features(monkeypatch):
@@ -151,7 +180,7 @@ def test_a_malformed_candle_never_reaches_alpaca_base_features(monkeypatch):
         client=MagicMock(),
     )
 
-    def frame_with_a_hole(timeframe):
+    def frame_with_a_hole(timeframe, limit=None):
         n = 60
         df = pd.DataFrame({
             "symbol": ["BTC/USD"] * n,  # alpaca's default preprocessing drops this column
@@ -202,7 +231,7 @@ def test_alpaca_base_features_survive_a_fn_that_leaves_the_timestamp_in_the_inde
             [["BTC/USD"] * n, stamps], names=["symbol", "timestamp"]
         ),
     )
-    observer._fetch_single_timeframe = lambda timeframe: frame
+    observer._fetch_single_timeframe = lambda timeframe, limit=None: frame
 
     observations = observer.get_observations(return_base_ohlc=True)
     assert observations["base_features"].shape == (10, 4)
@@ -231,7 +260,7 @@ def test_alpaca_refuses_a_fn_that_loses_the_timestamp_entirely():
         client=MagicMock(),
     )
     n = 60
-    observer._fetch_single_timeframe = lambda timeframe: pd.DataFrame(
+    observer._fetch_single_timeframe = lambda timeframe, limit=None: pd.DataFrame(
         {"open": np.full(n, 100.0), "high": np.full(n, 101.0),
          "low": np.full(n, 99.0), "close": np.full(n, 100.5),
          "volume": np.full(n, 10.0)},
@@ -268,7 +297,7 @@ def test_alpaca_drops_a_zero_priced_bar_rather_than_emitting_inf():
             names=["symbol", "timestamp"],
         ),
     )
-    observer._fetch_single_timeframe = lambda timeframe: frame
+    observer._fetch_single_timeframe = lambda timeframe, limit=None: frame
 
     observations = observer.get_observations(return_base_ohlc=True)
     for key, array in observations.items():
@@ -298,7 +327,7 @@ def test_alpaca_refuses_a_stale_last_bar():
     n = 60
     close = np.linspace(100.0, 130.0, n)
     close[-1] = 0.0  # the most recent candle is unusable
-    observer._fetch_single_timeframe = lambda timeframe: pd.DataFrame(
+    observer._fetch_single_timeframe = lambda timeframe, limit=None: pd.DataFrame(
         {"open": np.full(n, 100.0), "high": np.full(n, 101.0),
          "low": np.full(n, 99.0), "close": close, "volume": np.full(n, 10.0)},
         index=pd.MultiIndex.from_arrays(

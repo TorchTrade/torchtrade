@@ -320,6 +320,104 @@ class BaseObservationClassTests(ABC):
         with pytest.raises(ValueError, match="usable candles"):
             observer.get_observations(return_base_ohlc=True)
 
+    @pytest.mark.parametrize("timeframes,window_sizes", [
+        (TimeFrame(1, TimeFrameUnit.Minute), [10, 20]),
+        ([TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute)], 10),
+    ], ids=["one-timeframe-two-windows", "two-timeframes-one-window"])
+    def test_a_length_mismatch_raises_instead_of_truncating(self, timeframes, window_sizes):
+        """`zip()` truncates, so a mismatch used to become a SHORTER observation set.
+
+        Alpaca checked only when BOTH arguments were already lists, so passing one of
+        each normalised to lists of different length and then silently lost a timeframe
+        in `get_keys()` -- the policy trains on a window it was not configured for. The
+        futures venues always checked unconditionally; folding onto the shared base is
+        what made alpaca agree (#288).
+        """
+        with pytest.raises(ValueError, match="same length"):
+            self.create_observer(symbol="BTC/USD", timeframes=timeframes,
+                                 window_sizes=window_sizes)
+
+    def test_the_shared_preprocessing_semantics_hold(self):
+        """`_default_preprocessing` is one implementation now, so assert it on every venue.
+
+        These three assertions lived only in alpaca's file. That was fine while alpaca
+        owned its own copy; after the fold they cover code all five venues run, and a
+        regression would have shipped silently for the four that had no equivalent (#288).
+        """
+        observer = self.create_observer(
+            symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=10)
+        obs = observer.get_observations(return_base_ohlc=True)
+
+        # feature_close is a pct_change, so it sits near zero rather than near price.
+        assert np.abs(obs[observer.get_keys()[0]][:, 0]).max() < 0.1
+
+        # A column swap in the base_features slice would break high >= low.
+        base = obs["base_features"]
+        assert np.all(base[:, 1] >= base[:, 2])
+
+        # base_timestamps is windowed alongside base_features; a mis-slice reorders it.
+        timestamps = obs["base_timestamps"]
+        assert len(timestamps) == len(base)
+        assert np.all(timestamps[:-1] < timestamps[1:])
+
+    def test_preprocessing_does_not_mutate_the_fetched_frame(self):
+        """`_normalise_frame` returns a COPY, and the #399 guard depends on it.
+
+        `_default_preprocessing` drops rows with `inplace=True`, and `get_observations`
+        then compares the processed frame's last timestamp against the FETCHED frame's to
+        refuse a stale bar. Share one object between them and both sides move together,
+        so the comparison can never differ and a stale bar reaches the policy. Measured:
+        returning `df` instead of `df.copy()` passes the entire suite.
+        """
+        observer = self.create_observer(
+            symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=5)
+        fetched = observer._fetch_single_timeframe(observer.time_frames[0], limit=55)
+        before = (len(fetched), list(fetched.columns))
+
+        observer.feature_preprocessing_fn(fetched)
+
+        assert (len(fetched), list(fetched.columns)) == before, (
+            "preprocessing mutated the frame it was handed, so the stale-bar check "
+            "compares an object against itself"
+        )
+
+    def test_this_venue_does_not_re_fork_the_shared_window_logic(self):
+        """One `get_observations`, for all five venues (#288).
+
+        Alpaca kept a byte-for-byte parallel copy of the window logic until this landed,
+        and each of the last three fixes to it -- row alignment (#395), the stale last bar
+        (#399), the short window (#400) -- had to be pasted into both. A re-fork puts that
+        back, and every behavioural test still passes on the day it happens, because both
+        copies are correct at birth.
+
+        `_dummy_frame` and `_normalise_frame` are extension points, not re-forks: venues
+        return different columns, and their SDKs hand back different frame shapes.
+
+        Name-based, deliberately: this diffs method NAMES and never reads a body, so a
+        venue that reimplements the pipeline INSIDE one of those two exempted overrides
+        passes. That is a copy-paste-drift guard, not a circumvention guard -- the
+        behavioural tests above are what would catch the reimplementation.
+        """
+        from torchtrade.envs.live.shared.base_obs import BaseObservationClass
+
+        venue_cls = type(self.create_observer(
+            symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=5,
+        ))
+        shared = {
+            n for n, v in vars(BaseObservationClass).items()
+            if callable(v) and not getattr(v, "__isabstractmethod__", False)
+            and not n.startswith("__")
+        }
+        assert {"get_observations", "_default_preprocessing", "get_features"} <= shared
+        redeclared = (shared & set(vars(venue_cls))) - {"_dummy_frame", "_normalise_frame"}
+        assert not redeclared, (
+            f"{venue_cls.__name__} re-forks {sorted(redeclared)} instead of sharing "
+            f"BaseObservationClass's"
+        )
+
     # Edge cases
 
     def test_window_size_one(self):
