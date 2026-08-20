@@ -320,6 +320,23 @@ class BaseObservationClassTests(ABC):
         with pytest.raises(ValueError, match="usable candles"):
             observer.get_observations(return_base_ohlc=True)
 
+    @pytest.mark.parametrize("timeframes,window_sizes", [
+        (TimeFrame(1, TimeFrameUnit.Minute), [10, 20]),
+        ([TimeFrame(1, TimeFrameUnit.Minute), TimeFrame(5, TimeFrameUnit.Minute)], 10),
+    ], ids=["one-timeframe-two-windows", "two-timeframes-one-window"])
+    def test_a_length_mismatch_raises_instead_of_truncating(self, timeframes, window_sizes):
+        """`zip()` truncates, so a mismatch used to become a SHORTER observation set.
+
+        Alpaca checked only when BOTH arguments were already lists, so passing one of
+        each normalised to lists of different length and then silently lost a timeframe
+        in `get_keys()` -- the policy trains on a window it was not configured for. The
+        futures venues always checked unconditionally; folding onto the shared base is
+        what made alpaca agree (#288).
+        """
+        with pytest.raises(ValueError, match="same length"):
+            self.create_observer(symbol="BTC/USD", timeframes=timeframes,
+                                 window_sizes=window_sizes)
+
     def test_this_venue_does_not_re_fork_the_shared_window_logic(self):
         """One `get_observations`, for all five venues (#288).
 

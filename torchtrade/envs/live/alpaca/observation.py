@@ -81,7 +81,16 @@ class AlpacaObservationClass(BaseObservationClass):
         return self.client.get_crypto_bars(request).df
 
     def _normalise_frame(self, df: pd.DataFrame) -> pd.DataFrame:
-        """The SDK hands back a (symbol, timestamp) MultiIndex and a constant `symbol`."""
+        """The SDK hands back a (symbol, timestamp) MultiIndex and a constant `symbol`.
+
+        Dropped BEFORE the shared `dropna`, where it used to be dropped after. For a
+        single-symbol request the column is constant and the surviving rows are the same
+        either way -- measured. The one input that differs is a row whose `symbol` is
+        null: it used to be discarded, and now survives if its OHLCV is intact. That is
+        the better answer. Losing a usable bar to a gap in a METADATA column is the
+        over-eager row removal #400 exists to catch, and `symbol` is a field this class
+        already knows the value of -- it is the one it asked for.
+        """
         return df.reset_index().drop(columns=["symbol"])
 
     def _dummy_frame(self, window_size: int) -> pd.DataFrame:
