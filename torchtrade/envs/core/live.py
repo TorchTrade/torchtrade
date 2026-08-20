@@ -366,21 +366,23 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         self.position.target_tol = tol if math.isfinite(tol) and tol > 0 else 0.0
         self.position.target_reported = False
 
-    def _resolve_action_level(self, tensordict) -> float:
-        """The policy's action level, or `InvalidActionError` before anything trades.
+    def _resolve_action_index(self, tensordict, n_actions: int) -> int:
+        """The policy's action index, validated, or `InvalidActionError` before trading.
 
         Indexing raw is two different bugs depending on the container. A LIST wraps:
         `action_levels[-1]` is the last level, so a negative index silently opened a full
-        LONG on binance and bitget. A DICT does not: `action_map[-1]` raises KeyError.
-        Reachable, not theoretical: a policy sized for a different action space -- a
-        checkpoint from before `action_levels` was reconfigured -- argmaxes past the end.
+        LONG on binance and bitget. A DICT does not: `action_map[-1]` raises KeyError
+        mid-step on the three SLTP envs that had no guard at all. Reachable, not
+        theoretical: a policy sized for a different action space -- a checkpoint from
+        before the action space was reconfigured -- argmaxes past the end.
 
         This RAISES rather than clamping, reversing bybit's and okx's longstanding clamp.
         Clamping does not make a malformed action safe, it makes it decisive: `-1` becomes
-        a full short, a high index a full long, `NaN` a short, and `1.5` a different
-        action than the policy emitted. Turning nonsense into a confident market order is
-        the failure mode invariant 4 names -- validate at the boundary, never guard in the
-        rule. An `IndexError` at least halted before an order; a clamp does not.
+        a full short, a high index a full long, `NaN` a short via the index-0 fallback,
+        and `1.5` a different action than the policy emitted. Turning nonsense into a
+        confident market order is the failure mode invariant 4 names -- validate at the
+        boundary, never guard in the rule. An `IndexError` at least halted before an
+        order; a clamp does not.
 
         NOT a ValueError, deliberately. `_halting` catches ValueError and under FLATTEN
         emergency-closes a real position. Nothing routes this call through `_halting`
@@ -388,8 +390,10 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         -- flattening on it would be wrong, and that is one refactor away from happening
         silently (cf. #355, #394).
 
-        SLTP envs do not use this: they have no `action_levels` and resolve through
-        `action_map`, which raises KeyError. Applying this validator there is a follow-up.
+        `n_actions` rather than the container itself because the two callers hold
+        different types: a list of levels, and the SLTP `action_map` dict. That dict is
+        built dense over `range(n)` by `create_sltp_action_map`, so a range check is
+        equivalent to key membership and gives a better message than a bare KeyError.
         """
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
@@ -405,12 +409,17 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 f"expected an integer action index, got {action_idx!r} "
                 f"({type(action_idx).__name__})"
             )
-        n_actions = len(self.action_levels)
         if not 0 <= action_idx < n_actions:
             raise InvalidActionError(
                 f"action index {action_idx} is outside [0, {n_actions - 1}]"
             )
-        return self.action_levels[action_idx]
+        return action_idx
+
+    def _resolve_action_level(self, tensordict) -> float:
+        """The validated action index, resolved against this env's `action_levels`."""
+        return self.action_levels[
+            self._resolve_action_index(tensordict, len(self.action_levels))
+        ]
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""

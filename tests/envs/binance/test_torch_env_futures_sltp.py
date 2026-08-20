@@ -9,6 +9,11 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
+from tests.envs.base_exchange_tests import (
+    INVALID_ACTIONS,
+    assert_an_invalid_action_raises_before_trading,
+)
+
 
 class TestBinanceFuturesSLTPTorchTradingEnv:
     """Tests for BinanceFuturesSLTPTorchTradingEnv."""
@@ -665,34 +670,21 @@ class TestCriticalEdgeCases:
         assert env.active_take_profit == 0.0
         assert env.position.current_position == 0
 
-    def test_invalid_action_index_handling(self, env_with_mocks):
-        """Test handling of invalid action indices (Critical: 8/10)."""
+    @pytest.mark.parametrize(
+        "action,label", INVALID_ACTIONS, ids=[i[1] for i in INVALID_ACTIONS]
+    )
+    def test_an_invalid_action_raises_before_trading(
+        self, env_with_mocks, action, label
+    ):
+        """Was a bare `KeyError` escaping mid-step, asserted as if it were the contract.
+
+        It was not a contract, it was the absence of one: binance/bitget/alpaca let the
+        dict lookup fail while bybit/okx clamped the same index into a real bracket
+        order. #288 gives all five the same validator, so the type is now intentional and
+        the check runs before the bracket is priced rather than after.
+        """
         env, mock_trader, _ = env_with_mocks
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-
-            # Test out-of-bounds action
-            action_td = TensorDict({"action": torch.tensor(999)}, batch_size=())
-
-            with pytest.raises(KeyError) as exc_info:
-                env.step(action_td)
-
-            # Verify it's a KeyError with the invalid index
-            assert "999" in str(exc_info.value)
-
-    def test_negative_action_index_handling(self, env_with_mocks):
-        """Test handling of negative action indices (Critical: 8/10)."""
-        env, mock_trader, _ = env_with_mocks
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-
-            # Test negative action
-            action_td = TensorDict({"action": torch.tensor(-1)}, batch_size=())
-
-            with pytest.raises(KeyError):
-                env.step(action_td)
+        assert_an_invalid_action_raises_before_trading(env, action)
 
     def test_position_state_resync_on_reset(self, env_with_mocks):
         """Test that reset synchronizes position state with exchange (Critical: 8/10)."""

@@ -9,6 +9,11 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
+from tests.envs.base_exchange_tests import (
+    INVALID_ACTIONS,
+    assert_an_invalid_action_raises_before_trading,
+)
+
 from torchtrade.envs import TimeFrame
 
 
@@ -430,6 +435,19 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
         """Test that SL/TP levels are stored correctly."""
         assert env.stoploss_levels == [-0.02, -0.05]
         assert env.takeprofit_levels == [0.03, 0.06]
+
+
+    @pytest.mark.parametrize(
+        "action,label", INVALID_ACTIONS, ids=[i[1] for i in INVALID_ACTIONS]
+    )
+    def test_an_invalid_action_raises_before_trading(self, env, action, label):
+        """bitget SLTP had no guard at all -- a bare KeyError escaped mid-step.
+
+        bybit and okx clamped the same index into a real bracket order instead, so the
+        five SLTP venues had three behaviours between them. #288 routes all five through
+        one validator that runs before the bracket is priced.
+        """
+        assert_an_invalid_action_raises_before_trading(env, action)
 
 
 class TestBitgetFuturesSLTPTorchTradingEnvIntegration:

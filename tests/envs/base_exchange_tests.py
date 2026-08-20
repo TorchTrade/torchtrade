@@ -525,9 +525,12 @@ def assert_the_step_emits_the_whole_done_family(env):
     assert not nxt["truncated"].any(), "a live env never truncates itself"
 
 
+# 9999, not a small overshoot: the SLTP action maps run to 19 entries, so `5` is a
+# VALID index there and the case quietly tested nothing. It has to exceed every venue's
+# action space to mean the same thing on all of them.
 INVALID_ACTIONS = [
     (torch.tensor(-1), "negative"),
-    (torch.tensor(5), "past-the-end"),
+    (torch.tensor(9999), "past-the-end"),
     (torch.tensor(1.5), "fractional"),
     (torch.tensor(float("nan")), "nan"),
     (torch.tensor(float("inf")), "inf"),

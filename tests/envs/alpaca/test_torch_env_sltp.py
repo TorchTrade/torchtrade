@@ -227,6 +227,30 @@ class TestAlpacaSLTPTradingEnvStep:
 
         return env
 
+    @pytest.mark.parametrize("action", [
+        torch.tensor(-1), torch.tensor(9999), torch.tensor(1.5),
+        torch.tensor(float("nan")), torch.tensor(True),
+    ], ids=["negative", "past-the-end", "fractional", "nan", "bool"])
+    def test_an_invalid_action_raises_before_trading(self, env, action):
+        """alpaca SLTP had no guard at all -- a bare KeyError escaped mid-step.
+
+        bybit and okx clamped the same index into a real bracket order instead, so the
+        five SLTP venues had three behaviours between them. #288 routes all five through
+        one validator that runs before the bracket is priced.
+
+        Its own assertion rather than the shared helper because alpaca's mock trader is a
+        real class with a `position_qty`, not a MagicMock with a `trade` spy.
+        """
+        from torchtrade.envs.core.live import InvalidActionError
+
+        env.reset()
+        with pytest.raises(InvalidActionError):
+            env._step(TensorDict({"action": action}, batch_size=()))
+        assert env.trader.position_qty == 0.0, (
+            f"action {action!r} raised but still opened {env.trader.position_qty} -- "
+            f"the check must precede the bracket order"
+        )
+
     def test_step_hold_action(self, env):
         """Test hold action (action=0)."""
         env.reset()

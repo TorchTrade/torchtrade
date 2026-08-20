@@ -8,6 +8,11 @@ from tensordict import TensorDict
 
 from torchtrade.envs import TimeFrame
 
+from tests.envs.base_exchange_tests import (
+    INVALID_ACTIONS,
+    assert_an_invalid_action_raises_before_trading,
+)
+
 
 class TestBybitFuturesSLTPTorchTradingEnv:
     """Tests for BybitFuturesSLTPTorchTradingEnv."""
@@ -445,8 +450,8 @@ class TestBybitSLTPMarkPrice:
             assert call_kwargs["take_profit"] == pytest.approx(expected_tp, rel=1e-4)
 
 
-class TestBybitSLTPActionIndexClamping:
-    """Test SLTP action index clamping."""
+class TestBybitSLTPInvalidAction:
+    """An invalid SLTP action must refuse to trade, not pick an endpoint."""
 
     @pytest.fixture
     def env(self, mock_env_observer, mock_env_trader):
@@ -469,22 +474,18 @@ class TestBybitSLTPActionIndexClamping:
                 config=config, observer=mock_env_observer, trader=mock_env_trader,
             )
 
-    @pytest.mark.parametrize("action_idx", [-1, 99], ids=["negative", "too-high"])
-    def test_action_index_clamping(self, env, action_idx):
-        """Out-of-range SLTP action indices must be clamped without error."""
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-            action_td = TensorDict({"action": torch.tensor(action_idx)}, batch_size=())
-            next_td = env.step(action_td)
-            assert "reward" in next_td["next"].keys()
+    @pytest.mark.parametrize(
+        "action,label", INVALID_ACTIONS, ids=[i[1] for i in INVALID_ACTIONS]
+    )
+    def test_an_invalid_action_raises_before_trading(self, env, action, label):
+        """SLTP resolves through `action_map`, a dict, so it never wrapped like a list.
 
-    def test_nan_action_defaults_to_zero(self, env):
-        """NaN action must default to action index 0 (HOLD) without crashing."""
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-            action_td = TensorDict({"action": torch.tensor(float("nan"))}, batch_size=())
-            next_td = env.step(action_td)
-            assert "reward" in next_td["next"].keys()
+        It still had three different behaviours across five venues: this venue clamped,
+        while alpaca/binance/bitget let a bare KeyError escape mid-step. #288 routes all
+        five through the same validator, so a malformed action refuses to trade instead
+        of picking an endpoint or crashing after the bracket was priced.
+        """
+        assert_an_invalid_action_raises_before_trading(env, action)
 
 
 class TestBybitSLTPPositionClosedClobber:

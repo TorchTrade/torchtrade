@@ -652,6 +652,9 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
     )
     # Real, for the reason above: a stub without it turns any regression here into a
     # missing-attribute error rather than the order the env placed.
+    env._resolve_action_index = (
+        lambda td, n: TorchTradeLiveEnv._resolve_action_index(env, td, n)
+    )
     env._resolve_action_level = (
         lambda td: TorchTradeLiveEnv._resolve_action_level(env, td)
     )
@@ -945,6 +948,9 @@ def test_okx_sizes_through_the_dust_rule_in_step():
     env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
     env._acquire_pre_trade_state = (
         lambda: TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
+    )
+    env._resolve_action_index = (
+        lambda td, n: TorchTradeLiveEnv._resolve_action_index(env, td, n)
     )
     env._resolve_action_level = (
         lambda td: TorchTradeLiveEnv._resolve_action_level(env, td)
@@ -2698,9 +2704,10 @@ def test_an_invalid_action_index_cannot_pick_a_position(bad_idx):
     `env.step()` with a bad index. bybit and okx had those already; binance and bitget did
     not, which is why the bug shipped there.
     """
-    env = SimpleNamespace(action_levels=[-1.0, 0.0, 1.0])
     with pytest.raises(InvalidActionError):
-        TorchTradeLiveEnv._resolve_action_level(env, {"action": bad_idx})
+        TorchTradeLiveEnv._resolve_action_index(
+            SimpleNamespace(), {"action": bad_idx}, 3
+        )
 
 
 def test_an_invalid_action_is_not_a_valueerror_that_halting_would_flatten():
