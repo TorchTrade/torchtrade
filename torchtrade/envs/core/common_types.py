@@ -17,21 +17,10 @@ class MarginMode(Enum):
 
 @dataclass
 class PositionStatus:
-    """What a futures venue says it is holding, in one shape for all of them.
+    """What a futures venue says it is holding, in one shape for all of them (#288).
 
-    Was five dataclasses -- four venues plus replay -- with identical field NAMES and two
-    diverging annotations (#288). Three of the five were byte-identical. A copy that has
-    not drifted yet is still a copy, and this one had already drifted once: replay carried
-    both `margin_type` and `margin_mode` as separate fields to satisfy two spellings of
-    the same concept, which only surfaced when #289 collapsed the names.
-
-    Alpaca is deliberately NOT here. It is spot, and its status object is a different
-    shape (`market_value`, `avg_entry_price`, `unrealized_pl`) rather than the same shape
-    under other names.
-
-    One real behaviour change from the collapse: dataclass `__eq__` compares
-    `other.__class__`, so a binance and a bybit status with equal fields now compare EQUAL
-    where they used to differ by type. Nothing compares statuses across venues today.
+    Alpaca is deliberately NOT here: it is spot, and its status is a different SHAPE
+    (`market_value`, `avg_entry_price`) rather than this one under other names.
     """
 
     qty: float  # Positive for long, negative for short

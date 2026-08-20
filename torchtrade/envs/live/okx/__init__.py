@@ -5,7 +5,6 @@ from torchtrade.envs.live.okx.order_executor import (
     OKXFuturesOrderClass,
     MarginMode,
     PositionMode,
-    PositionStatus,
 )
 from torchtrade.envs.live.okx.env import (
     OKXFuturesTorchTradingEnv,
@@ -21,7 +20,6 @@ __all__ = [
     "OKXFuturesOrderClass",
     "MarginMode",
     "PositionMode",
-    "PositionStatus",
     "OKXFuturesTorchTradingEnv",
     "OKXFuturesTradingEnvConfig",
     "OKXFuturesSLTPTorchTradingEnv",

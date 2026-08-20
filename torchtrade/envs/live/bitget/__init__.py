@@ -7,7 +7,6 @@ from torchtrade.envs.live.bitget.order_executor import (
     MarginMode,
     PositionMode,
     OrderStatus,
-    PositionStatus,
 )
 from torchtrade.envs.live.bitget.env import (
     BitgetFuturesTorchTradingEnv,
@@ -25,7 +24,6 @@ __all__ = [
     "MarginMode",
     "PositionMode",
     "OrderStatus",
-    "PositionStatus",
     "BitgetFuturesTorchTradingEnv",
     "BitgetFuturesTradingEnvConfig",
     "BitgetFuturesSLTPTorchTradingEnv",
