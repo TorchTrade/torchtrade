@@ -6,7 +6,7 @@ from typing import Optional
 
 
 class MarginMode(Enum):
-    """Margin type for futures trading.
+    """Margin mode for futures trading.
 
     - ISOLATED: Margin is isolated to individual positions
     - CROSSED: Margin is shared across all positions

@@ -183,7 +183,6 @@ bankrupt_threshold: 0.1
 include_base_features: false
 max_traj_length: null
 random_start: true
-margin_mode: isolated
 maintenance_margin_rate: 0.004
 seed: 0
 train_envs: 5
@@ -213,7 +212,6 @@ bankrupt_threshold: 0.1
 include_base_features: false
 max_traj_length: null
 random_start: true
-margin_mode: isolated
 maintenance_margin_rate: 0.004
 seed: 0
 train_envs: 10

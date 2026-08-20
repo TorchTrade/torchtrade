@@ -145,33 +145,28 @@ def test_the_executor_trade_surface_advertises_nothing_it_cannot_do(executor):
     )
 
 
-def test_every_venue_spells_the_margin_field_the_same_way():
-    """binance called it `margin_type` while the other three called it `margin_mode`.
+POSITION_STATUS_CLASSES = [
+    ("binance", "torchtrade.envs.live.binance.order_executor"),
+    ("bitget", "torchtrade.envs.live.bitget.order_executor"),
+    ("bybit", "torchtrade.envs.live.bybit.order_executor"),
+    ("okx", "torchtrade.envs.live.okx.order_executor"),
+    ("replay", "torchtrade.envs.replay.order_executor"),
+]
 
-    One concept, two spellings, on configs and on the shared-in-name-only PositionStatus
-    -- so exchange-agnostic config code could not set it, and replay carried BOTH fields
-    to satisfy both readers (#289). The VALUES stay venue-specific: they are API strings,
-    and okx's is `cross` where bitget's and bybit's are `crossed`.
+
+@pytest.mark.parametrize("venue,module", POSITION_STATUS_CLASSES, ids=lambda v: v)
+def test_every_position_status_spells_the_margin_field_the_same_way(venue, module):
+    """Five PositionStatus dataclasses, one field name (#289).
+
+    The configs are guarded in `test_live_env_base.py`; this is the other half. Replay's
+    carried BOTH `margin_type` and `margin_mode` as separate fields to satisfy binance's
+    readers and everyone else's -- a duplicate that only surfaced because the rename made
+    the two names collide into a SyntaxError.
     """
     import dataclasses, importlib
 
-    for venue in ("binance", "bitget", "bybit", "okx"):
-        config_cls = getattr(importlib.import_module(f"torchtrade.envs.live.{venue}.env"),
-                             {"binance": "BinanceFuturesTradingEnvConfig",
-                              "bitget": "BitgetFuturesTradingEnvConfig",
-                              "bybit": "BybitFuturesTradingEnvConfig",
-                              "okx": "OKXFuturesTradingEnvConfig"}[venue])
-        names = {f.name for f in dataclasses.fields(config_cls)}
-        assert "margin_mode" in names, f"{venue} config lost margin_mode"
-        assert "margin_type" not in names, f"{venue} config reintroduced margin_type"
-
-    for venue, module in (("binance", "torchtrade.envs.live.binance.order_executor"),
-                          ("bitget", "torchtrade.envs.live.bitget.order_executor"),
-                          ("bybit", "torchtrade.envs.live.bybit.order_executor"),
-                          ("okx", "torchtrade.envs.live.okx.order_executor"),
-                          ("replay", "torchtrade.envs.replay.order_executor")):
-        status = getattr(importlib.import_module(module), "PositionStatus")
-        names = {f.name for f in dataclasses.fields(status)}
-        assert "margin_mode" in names and "margin_type" not in names, (
-            f"{venue} PositionStatus spells the margin field {names & {'margin_mode', 'margin_type'}}"
-        )
+    status = getattr(importlib.import_module(module), "PositionStatus")
+    names = {f.name for f in dataclasses.fields(status)}
+    assert "margin_mode" in names and "margin_type" not in names, (
+        f"{venue} PositionStatus spells it {names & {'margin_mode', 'margin_type'}}"
+    )

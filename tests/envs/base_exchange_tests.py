@@ -457,15 +457,15 @@ def assert_a_direct_flip_does_not_age_the_new_position(
     change and reset hold_counter itself (PR #245 / SLTPMixin), masking the bug: the test goes
     vacuous. Two of these passed on the buggy code before I found that.
     """
-    # Built positionally because the four dataclasses differ only in the NAME of field 8
-    # (margin_mode on binance, margin_mode elsewhere). The only field this test actually reads
-    # is qty -- everything else is inert filler -- so that is the one thing worth pinning.
-    assert [f.name for f in fields(PositionStatus)][0] == "qty"
-
+    # Keyword-built: since #289 every venue's PositionStatus has the same field names, so
+    # the positional form this used to need (they differed only in field 8's spelling) is
+    # gone. Only qty is read; the rest is inert filler.
     def pos(qty):
         liq = 45000.0 if qty > 0 else 55000.0     # shorts liquidate ABOVE the mark
         return {"position_status": PositionStatus(
-            qty, 500.0, 50000.0, 0.0, 0.0, 50000.0, 5, "isolated", liq)}
+            qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
+            unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
+            margin_mode="isolated", liquidation_price=liq)}
 
     with patch.object(env, "_wait_for_next_timestamp"):
         trader.get_status = MagicMock(return_value=pos(0.01))

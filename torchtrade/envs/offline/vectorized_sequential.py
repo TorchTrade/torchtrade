@@ -31,6 +31,7 @@ from torchtrade.envs.utils.fractional_sizing import (
 
 from torchtrade.envs.core.default_rewards import batched_log_return_reward
 from torchtrade.envs.core.common_types import MarginMode
+from torchtrade.envs.core.common import validate_offline_margin_mode
 from torchtrade.envs.utils.liquidation import DEFAULT_MAINTENANCE_MARGIN_RATE, require_fee_fits_maintenance
 
 # Money, prices and position sizes are tracked in float64 to match the scalar envs' Python
@@ -81,6 +82,7 @@ class VectorizedSequentialTradingEnvConfig:
             )
         )
         validate_action_levels(self.action_levels)
+        validate_offline_margin_mode(self.margin_mode)
 
         if self.num_envs < 1:
             raise ValueError(f"num_envs must be >= 1, got {self.num_envs}")

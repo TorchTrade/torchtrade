@@ -139,7 +139,7 @@ The non-SLTP live environments share these base parameters:
 #   action_levels, done_on_bankruptcy, bankrupt_threshold, seed,
 #   include_base_features
 #
-# Futures configs add: leverage, margin_mode/margin_mode, demo,
+# Futures configs add: leverage, margin_mode, demo,
 #   observation_failure_policy; close_position_on_init/_on_reset are on the
 #   futures envs and alpaca, but not polymarket
 # Alpaca adds: paper, trade_mode; it also has close_position_on_init/_on_reset

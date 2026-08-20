@@ -3157,22 +3157,38 @@ def test_hoisting_a_default_did_not_change_it(config_cls):
     assert {f: getattr(config, f) for f in SHARED_DEFAULTS} == SHARED_DEFAULTS
 
 
-@pytest.mark.parametrize("config_cls,margin_field", [
-    pytest.param(c, m, id=c.__name__) for c, m in [
-        (BinanceFuturesSLTPTradingEnvConfig, "margin_mode"),
-        (BitgetFuturesSLTPTradingEnvConfig, "margin_mode"),
-        (BybitFuturesSLTPTradingEnvConfig, "margin_mode"),
-        (OKXFuturesSLTPTradingEnvConfig, "margin_mode"),
-    ]
-])
-def test_the_venue_specific_margin_surface_is_untouched(config_cls, margin_field):
-    """Named per venue, not `margin_mode XOR margin_mode`.
+def _margin_bearing_configs():
+    """Both variants per venue. The SLTP-only list let a base config drift unseen."""
+    import importlib
+    out = []
+    for venue, base, sltp in (
+        ("binance", "BinanceFuturesTradingEnvConfig", "BinanceFuturesSLTPTradingEnvConfig"),
+        ("bitget", "BitgetFuturesTradingEnvConfig", "BitgetFuturesSLTPTradingEnvConfig"),
+        ("bybit", "BybitFuturesTradingEnvConfig", "BybitFuturesSLTPTradingEnvConfig"),
+        ("okx", "OKXFuturesTradingEnvConfig", "OKXFuturesSLTPTradingEnvConfig"),
+    ):
+        out.append(getattr(importlib.import_module(f"torchtrade.envs.live.{venue}.env"), base))
+        out.append(getattr(importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp"), sltp))
+    return out
 
-    The XOR form passed when binance's `margin_mode` was renamed to `margin_mode` -- the
-    exact unification it existed to prevent, since renaming changes a venue's public API
-    and is #289's call. Symmetric assertions cannot catch a swap.
+
+@pytest.mark.parametrize("config_cls", _margin_bearing_configs(), ids=lambda c: c.__name__)
+def test_every_venue_spells_the_margin_field_the_same_way(config_cls):
+    """#289's call was made: one spelling, `margin_mode`, on all four venues.
+
+    This used to assert each venue's OWN name, because binance said `margin_type` and the
+    other three `margin_mode` -- one concept exchange-agnostic config code could not set.
+    It guarded against an accidental unification while a deliberate one was still open.
+
+    Named per venue rather than `margin_type XOR margin_mode`: the XOR form passes the
+    very swap it names as the risk, which is how the original divergence survived.
     """
-    assert margin_field in {f.name for f in dataclasses.fields(config_cls)}
+    names = {f.name for f in dataclasses.fields(config_cls)}
+    assert "margin_mode" in names
+    assert "margin_type" not in names, (
+        f"{config_cls.__name__} reintroduced margin_type; the VALUES stay venue-specific "
+        f"(okx 'cross' vs bitget/bybit 'crossed'), the field name does not"
+    )
 
 
 SIZING_CONFIGS = SLTP_CONFIGS + [
