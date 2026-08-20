@@ -357,6 +357,35 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         self.position.target_tol = tol if math.isfinite(tol) and tol > 0 else 0.0
         self.position.target_reported = False
 
+    def _resolve_action_index(self, tensordict, n_actions: int) -> int:
+        """The policy's action index, coerced and clamped into `[0, n_actions - 1]`.
+
+        Indexing raw is two different bugs depending on the container. A LIST wraps:
+        `action_levels[-1]` is the last level, so a negative index silently opened a full
+        LONG on binance and bitget. A DICT does not: `action_map[-1]` raises KeyError
+        mid-step, which crashed the three SLTP envs that lacked this guard.
+
+        Reachable, not theoretical: a policy sized for a different action space -- a
+        checkpoint from before `action_levels` was reconfigured -- argmaxes past the end.
+        bybit and okx guarded both containers; binance, bitget and alpaca guarded neither
+        (#288).
+        """
+        action_idx = tensordict.get("action", 0)
+        if isinstance(action_idx, torch.Tensor):
+            action_idx = action_idx.item()
+        if not isinstance(action_idx, int):
+            if isinstance(action_idx, float) and math.isfinite(action_idx):
+                action_idx = int(action_idx)
+            else:
+                logger.warning(f"Invalid action index {action_idx}, defaulting to 0")
+                action_idx = 0
+        if action_idx < 0 or action_idx >= n_actions:
+            logger.warning(
+                f"Action index {action_idx} out of range [0, {n_actions - 1}], clamping"
+            )
+            action_idx = max(0, min(action_idx, n_actions - 1))
+        return action_idx
+
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""
         return is_bankrupt(

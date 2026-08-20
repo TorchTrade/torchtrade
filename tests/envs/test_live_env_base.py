@@ -940,6 +940,9 @@ def test_okx_sizes_through_the_dust_rule_in_step():
     env._acquire_pre_trade_state = (
         lambda: TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
     )
+    env._resolve_action_index = (
+        lambda td, n: TorchTradeLiveEnv._resolve_action_index(env, td, n)
+    )
     env._resolve_action_level = (
         lambda td: TorchTradeFuturesLiveEnv._resolve_action_level(env, td)
     )
@@ -2688,6 +2691,9 @@ def test_an_out_of_range_action_index_cannot_pick_a_position(bad_idx, expected_l
     not, which is why the bug shipped there.
     """
     env = SimpleNamespace(action_levels=[-1.0, 0.0, 1.0])
+    env._resolve_action_index = (
+        lambda td, n: TorchTradeLiveEnv._resolve_action_index(env, td, n)
+    )
     assert TorchTradeFuturesLiveEnv._resolve_action_level(env, {"action": bad_idx}) == expected_level
 
 
