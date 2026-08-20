@@ -10,7 +10,6 @@ import math
 from decimal import Decimal
 from typing import Dict, List, Optional, Union
 import warnings
-import os
 from dotenv import load_dotenv
 
 from torchtrade.envs.core.common import TradeMode

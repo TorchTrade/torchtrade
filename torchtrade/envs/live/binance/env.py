@@ -6,7 +6,7 @@ import logging
 import torch
 
 logger = logging.getLogger(__name__)
-from tensordict import TensorDict, TensorDictBase
+from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
 from torchtrade.envs.utils.timeframe import TimeFrame
