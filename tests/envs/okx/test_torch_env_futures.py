@@ -1,12 +1,17 @@
 """Tests for OKXFuturesTorchTradingEnv."""
 
-import logging
 import pytest
 import torch
 from torchrl.envs.utils import check_env_specs
 import numpy as np
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
+
+from tests.envs.base_exchange_tests import (
+    INVALID_ACTIONS,
+    assert_an_invalid_action_cannot_move_an_open_position,
+    assert_an_invalid_action_raises_before_trading,
+)
 
 
 class TestOKXFuturesTorchTradingEnv:
@@ -388,8 +393,8 @@ class TestOKXFuturesTorchTradingEnv:
         mock_env_trader.trade.assert_not_called()
 
 
-class TestOKXActionIndexClamping:
-    """Tests for action index out-of-range clamping."""
+class TestOKXInvalidAction:
+    """An invalid action index must refuse to trade, not pick an endpoint."""
 
     @pytest.fixture
     def env(self, mock_env_observer, mock_env_trader):
@@ -403,13 +408,15 @@ class TestOKXActionIndexClamping:
              patch.object(OKXFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
             return OKXFuturesTorchTradingEnv(config=config, observer=mock_env_observer, trader=mock_env_trader)
 
-    @pytest.mark.parametrize("action_idx", [-1, 5, float("nan")], ids=["negative", "too-high", "nan"])
-    def test_invalid_action_index_handled(self, env, action_idx):
-        """Out-of-range and NaN action indices must be handled without crashing."""
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-            next_td = env.step(TensorDict({"action": torch.tensor(action_idx)}, batch_size=()))
-            assert "reward" in next_td["next"].keys()
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_raises_before_trading(self, env, action):
+        """Venue wiring: this `_step` must route through the shared validator (#288)."""
+        assert_an_invalid_action_raises_before_trading(env, action)
+
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_cannot_move_an_open_position(self, env, action):
+        """The expensive direction -- every other case here starts flat (#288)."""
+        assert_an_invalid_action_cannot_move_an_open_position(env, action)
 
 
 class TestOKXZeroLiquidationPrice:

@@ -24,6 +24,16 @@ class SLTPMixin:
     # further down each env, which is why it lives in one place.
     SIDE_DIRECTION = {"long": 1, "short": -1}
 
+    def _resolve_action_tuple(self, tensordict):
+        """The validated action index, resolved against this env's `action_map`.
+
+        The dict-side twin of `_resolve_action_level`, so `len(self.action_map)` is not
+        restated at five call sites where a copy-paste could pass the wrong container.
+        """
+        return self.action_map[
+            self._resolve_action_index(tensordict, len(self.action_map))
+        ]
+
     def _record_sltp_position(self, side) -> None:
         """The position the ACTION targets, never the order side (#276)."""
         self.position.current_position = self.SIDE_DIRECTION.get(side, 0)

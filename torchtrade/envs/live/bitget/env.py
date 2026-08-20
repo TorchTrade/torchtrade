@@ -159,10 +159,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         self._sync_position_from_exchange(position_status)
 
         # Get desired action level
-        action_idx = tensordict.get("action", 0)
-        if isinstance(action_idx, torch.Tensor):
-            action_idx = action_idx.item()
-        desired_action = self.action_levels[action_idx]
+        desired_action = self._resolve_action_level(tensordict)
 
         # Calculate and execute trade if needed
         trade_info = self._execute_trade_if_needed(desired_action)

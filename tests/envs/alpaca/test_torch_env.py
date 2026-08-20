@@ -12,6 +12,12 @@ import torch
 from torchrl.envs.utils import check_env_specs
 from tensordict import TensorDict
 
+from tests.envs.base_exchange_tests import (
+    INVALID_ACTIONS,
+    assert_an_invalid_action_cannot_move_an_open_position,
+    assert_an_invalid_action_raises_before_trading,
+)
+
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from .mocks import MockObserver, MockTrader
 
@@ -261,6 +267,18 @@ class TestAlpacaTorchTradingEnvStep:
         env._wait_for_next_timestamp = lambda: None
 
         return env
+
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_raises_before_trading(self, env, action):
+        """Venue wiring: this `_step` must route through the shared validator (#288)."""
+        env.trader.trade = MagicMock(wraps=env.trader.trade)
+        assert_an_invalid_action_raises_before_trading(env, action)
+
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_cannot_move_an_open_position(self, env, action):
+        """The expensive direction -- every other case here starts flat (#288)."""
+        env.trader.trade = MagicMock(wraps=env.trader.trade)
+        assert_an_invalid_action_cannot_move_an_open_position(env, action)
 
     def test_step_returns_tensordict(self, env):
         """Test that step returns a TensorDict."""

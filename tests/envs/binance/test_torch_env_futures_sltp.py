@@ -9,6 +9,12 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
+from tests.envs.base_exchange_tests import (
+    INVALID_ACTIONS,
+    assert_an_invalid_action_cannot_move_an_open_position,
+    assert_an_invalid_action_raises_before_trading,
+)
+
 
 class TestBinanceFuturesSLTPTorchTradingEnv:
     """Tests for BinanceFuturesSLTPTorchTradingEnv."""
@@ -665,34 +671,17 @@ class TestCriticalEdgeCases:
         assert env.active_take_profit == 0.0
         assert env.position.current_position == 0
 
-    def test_invalid_action_index_handling(self, env_with_mocks):
-        """Test handling of invalid action indices (Critical: 8/10)."""
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_raises_before_trading(
+        self, env_with_mocks, action):
+        """Venue wiring: this `_step` must route through the shared validator (#288)."""
         env, mock_trader, _ = env_with_mocks
+        assert_an_invalid_action_raises_before_trading(env, action)
 
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-
-            # Test out-of-bounds action
-            action_td = TensorDict({"action": torch.tensor(999)}, batch_size=())
-
-            with pytest.raises(KeyError) as exc_info:
-                env.step(action_td)
-
-            # Verify it's a KeyError with the invalid index
-            assert "999" in str(exc_info.value)
-
-    def test_negative_action_index_handling(self, env_with_mocks):
-        """Test handling of negative action indices (Critical: 8/10)."""
-        env, mock_trader, _ = env_with_mocks
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-
-            # Test negative action
-            action_td = TensorDict({"action": torch.tensor(-1)}, batch_size=())
-
-            with pytest.raises(KeyError):
-                env.step(action_td)
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_cannot_move_an_open_position(self, env_with_mocks, action):
+        """The expensive direction -- every other case here starts flat (#288)."""
+        assert_an_invalid_action_cannot_move_an_open_position(env_with_mocks[0], action)
 
     def test_position_state_resync_on_reset(self, env_with_mocks):
         """Test that reset synchronizes position state with exchange (Critical: 8/10)."""

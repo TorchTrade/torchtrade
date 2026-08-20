@@ -2,7 +2,12 @@
 
 import pytest
 
-from tests.envs.base_exchange_tests import mirror_features_on
+from tests.envs.base_exchange_tests import (
+    INVALID_ACTIONS,
+    assert_an_invalid_action_cannot_move_an_open_position,
+    assert_an_invalid_action_raises_before_trading,
+    mirror_features_on,
+)
 import torch
 from torchrl.envs.utils import check_env_specs
 import numpy as np
@@ -103,6 +108,17 @@ class TestBitgetFuturesTorchTradingEnv:
             assert_the_step_emits_the_whole_done_family as assert_done_family,
         )
         assert_done_family(env)
+
+
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_raises_before_trading(self, env, action):
+        """Venue wiring: this `_step` must route through the shared validator (#288)."""
+        assert_an_invalid_action_raises_before_trading(env, action)
+
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_cannot_move_an_open_position(self, env, action):
+        """The expensive direction -- every other case here starts flat (#288)."""
+        assert_an_invalid_action_cannot_move_an_open_position(env, action)
 
     def test_check_env_specs_passes(self, env):
         """check_env_specs compares the emitted step against every declared spec;

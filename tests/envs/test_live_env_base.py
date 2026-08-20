@@ -31,6 +31,7 @@ from tensordict import TensorDict
 
 import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import (
+    InvalidActionError,
     LiveObservationHalt,
     ObservationFailurePolicy,
     TorchTradeLiveEnv,
@@ -232,6 +233,40 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
     assert calls.index("_sync_position_from_exchange") < calls.index("_execute_trade_if_needed"), (
         f"{env_cls.__name__}._step syncs AFTER it trades: the duplicate-action guard still "
         f"reads the stale position."
+    )
+
+
+# Every live env that owns a `_step` -- the concrete venues. The intermediate bases
+# define none, and an exchange #6 would land here the moment it does.
+STEPPING_ENVS = [c for c in LIVE_ENVS if "_step" in c.__dict__]
+
+
+@pytest.mark.parametrize("env_cls", STEPPING_ENVS, ids=lambda c: c.__name__)
+def test_every_live_step_validates_its_action_before_it_trades(env_cls):
+    """No `_step` may reach an order with an unvalidated action index.
+
+    LIVE_ENVS is discovered via __subclasses__, so this is the only check that extends to
+    an exchange #6 nobody wrote a test for -- the ten behavioural tests cover the ten envs
+    that exist today. It replaces a substring guard that false-positived on a cosmetic
+    re-wrap; AST, so a comment naming the method cannot satisfy it.
+
+    Ordering is the point. Presence alone would pass a `_step` that validated AFTER
+    submitting, and the whole contract is that a malformed action costs nothing.
+    """
+    tree = ast.parse(inspect.getsource(env_cls.__dict__["_step"]).lstrip())
+    calls = [n.func.attr for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+
+    resolvers = [c for c in calls if c in
+                 ("_resolve_action_level", "_resolve_action_index", "_resolve_action_tuple")]
+    assert resolvers, (
+        f"{env_cls.__name__}._step indexes its action space without validating -- on a "
+        f"list a negative index wraps to a full LONG, on the SLTP dict it raises KeyError "
+        f"after the bracket is priced."
+    )
+    assert calls.index(resolvers[0]) < calls.index("_execute_trade_if_needed"), (
+        f"{env_cls.__name__}._step validates AFTER it trades, so a malformed action still "
+        f"reaches the exchange."
     )
 
 
@@ -649,6 +684,14 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
     env._current_mark_price = (
         lambda ps=None: TorchTradeFuturesLiveEnv._current_mark_price(env, ps)
     )
+    # Real, for the reason above: a stub without it turns any regression here into a
+    # missing-attribute error rather than the order the env placed.
+    env._resolve_action_index = (
+        lambda td, n: TorchTradeLiveEnv._resolve_action_index(env, td, n)
+    )
+    env._resolve_action_level = (
+        lambda td: TorchTradeLiveEnv._resolve_action_level(env, td)
+    )
     # The real halt wrapper: #355 routes the pre-trade read through it, so an outage now
     # surfaces as LiveObservationHalt rather than the bare exception -- which is the point,
     # since `except LiveObservationHalt` is what the docs and the DQN example catch.
@@ -939,6 +982,12 @@ def test_okx_sizes_through_the_dust_rule_in_step():
     env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
     env._acquire_pre_trade_state = (
         lambda: TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
+    )
+    env._resolve_action_index = (
+        lambda td, n: TorchTradeLiveEnv._resolve_action_index(env, td, n)
+    )
+    env._resolve_action_level = (
+        lambda td: TorchTradeLiveEnv._resolve_action_level(env, td)
     )
     with pytest.raises(RuntimeError):
         OKXFuturesTorchTradingEnv._step(env, {"action": 1})
@@ -2667,6 +2716,29 @@ def test_what_a_short_observation_costs_under_flatten(flat_at_reset):
         with pytest.raises(LiveObservationHalt):
             env._acquire_post_bar_state()
         assert trader.close_position.call_count == 1
+
+
+@pytest.mark.parametrize("bad_idx", [
+    -1, 99, 1.5, float("nan"), float("inf"), True,
+], ids=["negative", "too-large", "fractional", "nan", "inf", "bool"])
+def test_an_invalid_action_index_cannot_pick_a_position(bad_idx):
+    """The six kinds of malformed index, swept once against the one implementation.
+
+    Clamping was bybit's and okx's behaviour and #288 reversed it. `True` is here because
+    bool is an int subclass, so it was resolving to the second level.
+    """
+    with pytest.raises(InvalidActionError):
+        TorchTradeLiveEnv._resolve_action_index(
+            SimpleNamespace(), {"action": bad_idx}, 3
+        )
+
+
+def test_an_invalid_action_is_not_a_valueerror_that_halting_would_flatten():
+    """`_halting` catches ValueError to emergency-close, and `_current_mark_price`
+    raises one on the same `_step` path -- a shared type would let both pass for a
+    malformed action. See InvalidActionError's own docstring.
+    """
+    assert not issubclass(InvalidActionError, ValueError)
 
 
 def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():

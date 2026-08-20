@@ -136,10 +136,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         position_closed = self._sync_position_from_exchange(position_status)
 
         # Get action and map to (side, SL, TP) tuple
-        action_idx = tensordict.get("action", 0)
-        if isinstance(action_idx, torch.Tensor):
-            action_idx = action_idx.item()
-        action_tuple = self.action_map[action_idx]
+        action_tuple = self._resolve_action_tuple(tensordict)
 
         # Execute trade if needed (duplicate guard uses synced state)
         trade_info = self._execute_trade_if_needed(action_tuple)
