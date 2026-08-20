@@ -119,9 +119,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         """Execute one environment step."""
 
         # Get desired action and current position
-        desired_action = self.action_levels[
-            self._resolve_action_index(tensordict, len(self.action_levels))
-        ]
+        desired_action = self._resolve_action_level(tensordict)
 
         # Get current price
         status = self.trader.get_status()

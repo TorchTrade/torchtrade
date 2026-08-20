@@ -246,11 +246,6 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         return self._halting(read)
 
-    def _resolve_action_level(self, tensordict) -> float:
-        """The action LEVEL for a validated index -- see `_resolve_action_index`."""
-        idx = self._resolve_action_index(tensordict, len(self.action_levels))
-        return self.action_levels[idx]
-
     def _current_mark_price(self, position_status=None) -> float:
         """The bar's mark price, validated before it can size an order (#347).
 

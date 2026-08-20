@@ -357,7 +357,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         self.position.target_tol = tol if math.isfinite(tol) and tol > 0 else 0.0
         self.position.target_reported = False
 
-    def _resolve_action_index(self, tensordict, n_actions: int) -> int:
+    def _resolve_action_level(self, tensordict) -> float:
         """The policy's action index, coerced and clamped into `[0, n_actions - 1]`.
 
         Indexing raw is two different bugs depending on the container. A LIST wraps:
@@ -370,6 +370,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         bybit and okx guarded both containers; binance, bitget and alpaca guarded neither
         (#288).
         """
+        n_actions = len(self.action_levels)
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
             action_idx = action_idx.item()
@@ -384,7 +385,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 f"Action index {action_idx} out of range [0, {n_actions - 1}], clamping"
             )
             action_idx = max(0, min(action_idx, n_actions - 1))
-        return action_idx
+        return self.action_levels[action_idx]
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""

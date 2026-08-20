@@ -262,26 +262,30 @@ class TestAlpacaTorchTradingEnvStep:
 
         return env
 
-    @pytest.mark.parametrize("action_idx,expected_level", [
-        (-1, 0.0),   # clamps to index 0 -> action_levels[0] -> FLAT
-        (99, 1.0),   # clamps to the last index -> full long
+    @pytest.mark.parametrize("action_idx,expect_flat", [
+        (-1, True),    # clamps to index 0 -> level 0.0 -> FLAT. Unfixed: 1.0, full long.
+        (99, False),   # clamps to the last index -> level 1.0 -> long, by design.
     ], ids=["negative", "too-high"])
-    def test_an_out_of_range_action_index_does_not_wrap(self, env, action_idx, expected_level):
+    def test_an_out_of_range_action_index_does_not_open_a_position(
+        self, env, action_idx, expect_flat
+    ):
         """`action_levels[-1]` is a full LONG, and alpaca indexed it raw (#288).
 
-        Spot, so the levels are [0, 0.5, 1] and a negative index selected 1.0 -- maximum
-        long -- silently. It also indexed with the raw tensor, never calling `.item()`.
-        bybit and okx guarded this; binance, bitget and alpaca did not, and alpaca is the
-        one that is not a futures env, which is why the guard sits on TorchTradeLiveEnv.
+        Through the real `_step`, not the shared helper: an earlier version of this test
+        called `_resolve_action_index` directly and PASSED against a tree where alpaca's
+        `_step` still had the raw index -- it pinned the base method, which is already
+        covered, and said nothing about alpaca's wiring.
+
+        Spot levels are [0, 0.5, 1], so index 0 is FLAT and both out-of-range indices
+        must leave the account flat rather than buying.
         """
         env.reset()
-        idx = env._resolve_action_index(
-            TensorDict({"action": torch.tensor(action_idx)}, batch_size=()),
-            len(env.action_levels),
-        )
-        assert env.action_levels[idx] == expected_level, (
-            f"action index {action_idx} resolved to {env.action_levels[idx]}, "
-            f"expected {expected_level}"
+        env._step(TensorDict({"action": torch.tensor(action_idx)}, batch_size=()))
+        qty = env.trader.position_qty
+        assert (qty == 0.0) is expect_flat, (
+            f"action index {action_idx} left position_qty={qty}; clamping goes to the "
+            f"range ENDS, so -1 is flat and 99 is the top level -- indexing from the end "
+            f"instead makes -1 a full long"
         )
 
     def test_step_returns_tensordict(self, env):

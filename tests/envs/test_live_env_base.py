@@ -651,8 +651,8 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
     )
     # Real, for the reason above: a stub without it turns any regression here into a
     # missing-attribute error rather than the order the env placed.
-    env._resolve_action_index = (
-        lambda td, n: TorchTradeLiveEnv._resolve_action_index(env, td, n)
+    env._resolve_action_level = (
+        lambda td: TorchTradeLiveEnv._resolve_action_level(env, td)
     )
     # The real halt wrapper: #355 routes the pre-trade read through it, so an outage now
     # surfaces as LiveObservationHalt rather than the bare exception -- which is the point,
@@ -945,11 +945,8 @@ def test_okx_sizes_through_the_dust_rule_in_step():
     env._acquire_pre_trade_state = (
         lambda: TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
     )
-    env._resolve_action_index = (
-        lambda td, n: TorchTradeLiveEnv._resolve_action_index(env, td, n)
-    )
     env._resolve_action_level = (
-        lambda td: TorchTradeFuturesLiveEnv._resolve_action_level(env, td)
+        lambda td: TorchTradeLiveEnv._resolve_action_level(env, td)
     )
     with pytest.raises(RuntimeError):
         OKXFuturesTorchTradingEnv._step(env, {"action": 1})
@@ -2696,10 +2693,7 @@ def test_an_out_of_range_action_index_cannot_pick_a_position(bad_idx, expected_l
     not, which is why the bug shipped there.
     """
     env = SimpleNamespace(action_levels=[-1.0, 0.0, 1.0])
-    env._resolve_action_index = (
-        lambda td, n: TorchTradeLiveEnv._resolve_action_index(env, td, n)
-    )
-    assert TorchTradeFuturesLiveEnv._resolve_action_level(env, {"action": bad_idx}) == expected_level
+    assert TorchTradeLiveEnv._resolve_action_level(env, {"action": bad_idx}) == expected_level
 
 
 def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():
