@@ -106,19 +106,31 @@ def test_every_offline_config_field_is_read_somewhere(config_cls):
     )
 
 
-@pytest.mark.parametrize("config_cls", [
-    SequentialTradingEnvConfig, SequentialTradingEnvSLTPConfig, OneStepTradingEnvConfig,
-], ids=lambda c: c.__name__)
-@pytest.mark.parametrize("kwargs,match", [
-    ({"include_base_features": True}, "not implemented for the offline"),
-    ({"margin_mode": MarginMode.CROSSED}, "not implemented for the offline"),
-])
-def test_a_flag_the_offline_envs_ignore_is_rejected(config_cls, kwargs, match):
-    """Every config that inherits the validation, not just Sequential.
+# Paired explicitly, not derived from `dataclasses.fields`: the vectorized configs carry
+# `margin_mode` but not `include_base_features`, and a presence-derived list would drop a
+# case silently the day a field moves. Every config that HAS the flag is listed against it.
+REJECTED_FLAG_CASES = [
+    (SequentialTradingEnvConfig, {"include_base_features": True}),
+    (SequentialTradingEnvSLTPConfig, {"include_base_features": True}),
+    (OneStepTradingEnvConfig, {"include_base_features": True}),
+    (SequentialTradingEnvConfig, {"margin_mode": MarginMode.CROSSED}),
+    (SequentialTradingEnvSLTPConfig, {"margin_mode": MarginMode.CROSSED}),
+    (OneStepTradingEnvConfig, {"margin_mode": MarginMode.CROSSED}),
+    # The two the guard was ADDED for, and the two it was not tested on: removing
+    # `validate_offline_margin_mode` from the vectorized config passed all 4013 tests.
+    (VectorizedSequentialTradingEnvConfig, {"margin_mode": MarginMode.CROSSED}),
+    (VectorizedSequentialTradingEnvSLTPConfig, {"margin_mode": MarginMode.CROSSED}),
+]
+
+
+@pytest.mark.parametrize("config_cls,kwargs", REJECTED_FLAG_CASES,
+                         ids=lambda v: v.__name__ if isinstance(v, type) else next(iter(v)))
+def test_a_flag_the_offline_envs_ignore_is_rejected(config_cls, kwargs):
+    """Every config that HAS the flag, not just the ones that inherit one validator.
 
     Both defaulted to the value the envs actually implement, so the wrong setting was
     accepted and ignored -- a policy configured for cross margin trained against
     isolated liquidation prices with nothing saying so.
     """
-    with pytest.raises(ValueError, match=match):
+    with pytest.raises(ValueError, match="not implemented for the offline"):
         config_cls(**kwargs)

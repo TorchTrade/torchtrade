@@ -5,7 +5,6 @@
   test_torch_env_futures*.py, so the flip contract has one body and five kills.
 """
 
-from dataclasses import fields
 
 import pytest
 import numpy as np
