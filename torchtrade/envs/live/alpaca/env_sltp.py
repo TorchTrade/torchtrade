@@ -2,13 +2,12 @@ import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
 import logging
-import math
 
 import torch
 
 logger = logging.getLogger(__name__)
 from torchtrade.envs.core.state import position_qty_from_status
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.utils.timeframe import TimeFrame
 from torchtrade.envs.core.common import (
     validate_position_sizing,
     validate_sltp_levels,
@@ -349,34 +348,3 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
             )
         else:
             raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
-
-
-if __name__ == "__main__":
-    import os
-    from dotenv import load_dotenv
-
-    load_dotenv()
-
-    config = AlpacaSLTPTradingEnvConfig(
-        symbol="BTC/USD",
-        paper=True,
-        time_frames=[
-            TimeFrame(1, TimeFrameUnit.Minute),
-        ],
-        window_sizes=[15],
-        execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-        stoploss_levels=(-0.02, -0.05),
-        takeprofit_levels=(0.03, 0.06, 0.10),
-    )
-
-    env = AlpacaSLTPTorchTradingEnv(
-        config,
-        api_key=os.getenv("API_KEY"),
-        api_secret=os.getenv("SECRET_KEY")
-    )
-
-    print(f"Action space size: {env.action_spec.n}")
-    print(f"Action map: {env.action_map}")
-
-    td = env.reset()
-    print(td)

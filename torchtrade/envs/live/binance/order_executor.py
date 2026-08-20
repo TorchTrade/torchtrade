@@ -10,15 +10,12 @@ import math
 from decimal import Decimal
 from typing import Dict, List, Optional, Union
 import warnings
-import os
-from dotenv import load_dotenv
 
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.common_types import PositionStatus, MarginMode, OrderStatus
 from torchtrade.envs.core.state import POSITION_UNKNOWN
 from torchtrade.envs.utils.leverage import leverage_already_set, require_leverage_applied
 
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -562,32 +559,3 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         except Exception as e:
             logger.error(f"Error getting positions: {str(e)}")
             return {}
-
-# Example usage
-if __name__ == "__main__":
-    import os
-    from dotenv import load_dotenv
-
-    load_dotenv()
-
-    # Initialize with demo mode
-    order_manager = BinanceFuturesOrderClass(
-        symbol="BTCUSDT",
-        trade_mode="quantity",
-        api_key=os.getenv("BINANCE_API_KEY", ""),
-        api_secret=os.getenv("BINANCE_SECRET", ""),
-        demo=True,
-        leverage=5,
-    )
-
-    # Get account balance
-    balance = order_manager.get_account_balance()
-    print(f"Account balance: {balance}")
-
-    # Get mark price
-    price = order_manager.get_mark_price()
-    print(f"Mark price: {price}")
-
-    # Get status
-    status = order_manager.get_status()
-    print(f"Status: {status}")

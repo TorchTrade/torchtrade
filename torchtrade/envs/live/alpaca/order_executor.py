@@ -1,5 +1,4 @@
 import logging
-import os
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 from typing import Dict, List, Optional, Union
@@ -16,7 +15,6 @@ from alpaca.trading.requests import (
     TakeProfitRequest,
     StopLossRequest,
 )
-from dotenv import load_dotenv
 
 from torchtrade.envs.core.common import TradeMode
 from torchtrade.envs.core.common_types import OrderStatus
@@ -429,59 +427,3 @@ class AlpacaOrderClass:
         except Exception as e:
             logger.error(f"Error getting positions: {str(e)}", exc_info=True)
             return {}
-
-
-# Example usage:
-if __name__ == "__main__":
-    # Load the environment variables from the .env file
-    load_dotenv()
-    key = os.getenv("API_KEY")
-    # Initialize the order class
-    order_manager = AlpacaOrderClass(
-        symbol="BTC/USD",
-        trade_mode="notional",
-        api_key=os.getenv("API_KEY"),
-        api_secret=os.getenv("SECRET_KEY"),
-        paper=True,
-    )
-
-    # Example market buy order
-    success = order_manager.trade(
-        side="buy", amount=100, order_type="market"  # $100 worth of BTC
-    )
-    print(f"Market order submitted successfully: {success}")
-
-    # Get status
-    status = order_manager.get_status()
-    print("\nCurrent Status:")
-    if "order_status" in status:
-        print(f"Order Status: {status['order_status']}")
-    if "position_status" in status:
-        print(f"Position Status: {status['position_status']}")
-
-    # Example limit order
-    success = order_manager.trade(
-        side="buy", amount=100, order_type="limit", limit_price=50000
-    )
-    print(f"\nLimit order submitted successfully: {success}")
-
-    # Get open orders
-    open_orders = order_manager.get_open_orders()
-    print(f"\nOpen Orders: {open_orders}")
-
-    # Cancel open orders
-    success = order_manager.cancel_open_orders()
-    print(f"Open orders cancelled: {success}")
-
-    # Example: Close entire position for the symbol
-    success = order_manager.close_all_positions()
-    print(f"Full position close successful: {success}")
-
-    # Final status
-    status = order_manager.get_status()
-    print("\nFinal Status:")
-    if "order_status" in status:
-        print(f"Order Status: {status['order_status']}")
-    if "position_status" in status:
-        print(f"Position Status: {status['position_status']}")
-    

@@ -7,7 +7,7 @@ import torch
 
 logger = logging.getLogger(__name__)
 from torchtrade.envs.utils.fractional_sizing import validate_action_levels
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.utils.timeframe import TimeFrame
 from torchtrade.envs.live.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass, TradeMode
@@ -359,29 +359,3 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         """Required: the base declares this abstract. Fractional mode sizes in
         _execute_fractional_action instead, so reaching here is a wiring error."""
         raise NotImplementedError("_calculate_trade_amount is not used in fractional mode")
-
-
-if __name__ == "__main__":
-    import os
-    from dotenv import load_dotenv
-    # Load environment variables
-    load_dotenv()
-    # Create environment configuration
-    config = AlpacaTradingEnvConfig(
-        symbol="BTC/USD",
-        paper=True,
-        time_frames=[
-            TimeFrame(1, TimeFrameUnit.Minute),
-            TimeFrame(1, TimeFrameUnit.Hour),
-        ],
-        window_sizes=[15, 10],
-        execute_on=TimeFrame(1, TimeFrameUnit.Minute),
-        include_base_features=True,
-    )
-
-    # Create environment
-    env = AlpacaTorchTradingEnv(
-        config, api_key=os.getenv("API_KEY"), api_secret=os.getenv("SECRET_KEY")
-    )
-    td = env.reset()
-    print(td)

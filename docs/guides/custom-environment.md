@@ -183,7 +183,7 @@ sentiment = torch.randn(len(df))  # Random sentiment scores
 config = SequentialTradingEnvConfig(
     time_frames=["1min", "5min"],
     window_sizes=[12, 8],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
 )
 
 env = CustomLongOnlyEnv(df, config, sentiment)

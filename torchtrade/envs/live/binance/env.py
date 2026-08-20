@@ -6,7 +6,7 @@ import logging
 import torch
 
 logger = logging.getLogger(__name__)
-from tensordict import TensorDict, TensorDictBase
+from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
 from torchtrade.envs.utils.timeframe import TimeFrame
@@ -425,41 +425,3 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             return self._create_trade_info(executed=False)
 
         return self._execute_fractional_action(desired_action)
-
-
-if __name__ == "__main__":
-    import os
-    from dotenv import load_dotenv
-
-    load_dotenv()
-
-    # Create environment configuration
-    config = BinanceFuturesTradingEnvConfig(
-        symbol="BTCUSDT",
-        demo=True,
-        intervals=["1m", "5m"],
-        window_sizes=[10, 10],
-        execute_on="1m",
-        leverage=5,
-        action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0],  # Fractional position sizing
-        include_base_features=False,
-    )
-
-    # Create environment
-    env = BinanceFuturesTorchTradingEnv(
-        config,
-        api_key=os.getenv("BINANCE_API_KEY", ""),
-        api_secret=os.getenv("BINANCE_SECRET", ""),
-    )
-
-    td = env.reset()
-    print("Reset observation:")
-    print(td)
-    for i in range(5):
-        action = env.action_spec.rand()
-        td = TensorDict({"action": action}, batch_size=())
-        next_td = env.step(td)
-        print(f"Step {i+1}: Action={action.item()}, Reward={next_td['next', 'reward'].item():.6f}")
-        if next_td["next", "done"].item():
-            print("Episode terminated")
-            break
