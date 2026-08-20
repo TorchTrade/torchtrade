@@ -125,6 +125,46 @@ class TestAlpacaObservationClass(BaseObservationClassTests):
         assert obs1.shape == obs2.shape == (10, 4)
 
 
+def test_a_bar_with_a_null_symbol_but_sound_prices_survives(monkeypatch):
+    """The one deliberate behaviour change in the #288 fold, pinned in both directions.
+
+    `_normalise_frame` drops `symbol` BEFORE the shared dropna, where it used to be
+    dropped after -- so a bar whose metadata came back null and whose OHLCV is intact is
+    kept now and was discarded before. That is the better answer (losing usable bars to a
+    metadata gap is what pushes a window under its spec, #400), but it was a stated
+    change with nothing asserting it: move the drop back after the dropna and no test
+    would have failed.
+    """
+    observer = AlpacaObservationClass(
+        symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+        window_sizes=5, client=MockCryptoHistoricalDataClient(num_bars=60))
+
+    def frame_with_a_null_symbol(timeframe, limit=None):
+        n = 60
+        df = pd.DataFrame({
+            "symbol": ["BTC/USD"] * n,
+            "open": np.full(n, 100.0), "high": np.full(n, 101.0),
+            "low": np.full(n, 99.0), "close": np.full(n, 100.5),
+            "volume": np.full(n, 10.0),
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
+        })
+        df.loc[55, "symbol"] = None      # metadata gap, prices intact
+        return df
+
+    monkeypatch.setattr(observer, "_fetch_single_timeframe", frame_with_a_null_symbol)
+    obs = observer.get_observations(return_base_ohlc=True)
+
+    # The window is the last 5 of 60, so bar 55 is INSIDE it. Asserting the row count
+    # cannot distinguish the two orderings -- 59 surviving rows still fill a 5-bar
+    # window. The timestamp is what moves: drop bar 55 and the window shifts back to
+    # include bar 54.
+    kept = pd.to_datetime(obs["base_timestamps"])
+    assert pd.Timestamp("2024-01-01 00:55:00") in set(kept), (
+        f"the null-symbol bar was discarded despite sound prices; window is {list(kept)}"
+    )
+    assert pd.Timestamp("2024-01-01 00:54:00") not in set(kept)
+
+
 def test_a_malformed_candle_never_reaches_alpaca_base_features(monkeypatch):
     """Alpaca already dropped NaN before slicing base_features; nothing tested it.
 

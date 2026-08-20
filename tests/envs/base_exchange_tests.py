@@ -361,6 +361,28 @@ class BaseObservationClassTests(ABC):
         assert len(timestamps) == len(base)
         assert np.all(timestamps[:-1] < timestamps[1:])
 
+    def test_preprocessing_does_not_mutate_the_fetched_frame(self):
+        """`_normalise_frame` returns a COPY, and the #399 guard depends on it.
+
+        `_default_preprocessing` drops rows with `inplace=True`, and `get_observations`
+        then compares the processed frame's last timestamp against the FETCHED frame's to
+        refuse a stale bar. Share one object between them and both sides move together,
+        so the comparison can never differ and a stale bar reaches the policy. Measured:
+        returning `df` instead of `df.copy()` passes the entire suite.
+        """
+        observer = self.create_observer(
+            symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=5)
+        fetched = observer._fetch_single_timeframe(observer.time_frames[0], limit=55)
+        before = (len(fetched), list(fetched.columns))
+
+        observer.feature_preprocessing_fn(fetched)
+
+        assert (len(fetched), list(fetched.columns)) == before, (
+            "preprocessing mutated the frame it was handed, so the stale-bar check "
+            "compares an object against itself"
+        )
+
     def test_this_venue_does_not_re_fork_the_shared_window_logic(self):
         """One `get_observations`, for all five venues (#288).
 
@@ -372,6 +394,11 @@ class BaseObservationClassTests(ABC):
 
         `_dummy_frame` and `_normalise_frame` are extension points, not re-forks: venues
         return different columns, and their SDKs hand back different frame shapes.
+
+        Name-based, deliberately: this diffs method NAMES and never reads a body, so a
+        venue that reimplements the pipeline INSIDE one of those two exempted overrides
+        passes. That is a copy-paste-drift guard, not a circumvention guard -- the
+        behavioural tests above are what would catch the reimplementation.
         """
         from torchtrade.envs.live.shared.base_obs import BaseObservationClass
 

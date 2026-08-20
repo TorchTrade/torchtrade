@@ -1,9 +1,8 @@
 """Alpaca crypto bars, on the shared observation base."""
 
-from typing import List, Union, Callable, Dict, Optional
+from typing import List, Union, Callable, Optional
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-import numpy as np
 import pandas as pd
 from torchtrade.envs.live.shared.base_obs import BaseObservationClass
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit, timeframe_to_alpaca
@@ -78,9 +77,7 @@ class AlpacaObservationClass(BaseObservationClass):
         Dropped BEFORE the shared dropna/drop_duplicates, where it used to go after. Safe
         only because `symbol: str` means one symbol per observer: with the column gone,
         two bars alike in every OHLCV field but differing in symbol would dedupe to one.
-        Revisit this ordering before any multi-symbol support. (A row with a null symbol
-        and sound OHLCV also survives now, which is the better answer -- losing a usable
-        bar to a gap in metadata is what pushes a window under its spec, #400.)
+        Revisit this ordering before any multi-symbol support.
         """
         return df.reset_index().drop(columns=["symbol"])
 
