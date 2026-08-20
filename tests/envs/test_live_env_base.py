@@ -2672,28 +2672,23 @@ def test_what_a_short_observation_costs_under_flatten(flat_at_reset):
         assert trader.close_position.call_count == 1
 
 
-@pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
-@pytest.mark.parametrize("bad_idx,expected", [
-    (-1, 0), (99, 2), (1.0, 1), (float("nan"), 0),
+@pytest.mark.parametrize("bad_idx,expected_level", [
+    (-1, -1.0), (99, 1.0), (1.0, 0.0), (float("nan"), -1.0),
 ], ids=["negative", "too-large", "float", "nan"])
-def test_an_out_of_range_action_index_cannot_pick_a_position(env_cls, bad_idx, expected):
+def test_an_out_of_range_action_index_cannot_pick_a_position(bad_idx, expected_level):
     """`action_levels[-1]` returns the LAST level, so -1 silently opened a FULL LONG.
 
-    bybit and okx clamped; binance and bitget indexed raw. On `[-1.0, 0.0, 1.0]` that
-    means a negative index selected +1.0 -- maximum long -- with no error, and an index
-    past the end raised IndexError mid-step instead of being handled. Two venues fixed,
-    two not, which is the shape #271, #272 and the hedge surface each took (#288).
+    One shared implementation, so one test -- an earlier version parametrized this over
+    FUTURES_ENVS and produced 48 cases that all ran identical code on an identical stub.
+    Sixteen of them were SLTP classes, which resolve actions through `action_map` and
+    never reach this method at all.
 
-    Found by measuring `_step` duplication, not by a failing test: binance and bitget's
-    were byte-identical to each other and 85% similar to bybit's -- the missing 15% WAS
-    the guard.
+    The venue-level proof lives where it belongs: each venue's own suite drives a real
+    `env.step()` with a bad index. bybit and okx had those already; binance and bitget did
+    not, which is why the bug shipped there.
     """
     env = SimpleNamespace(action_levels=[-1.0, 0.0, 1.0])
-    level = TorchTradeFuturesLiveEnv._resolve_action_level(env, {"action": bad_idx})
-    assert level == env.action_levels[expected], (
-        f"{env_cls.__name__}: action index {bad_idx} resolved to {level}, "
-        f"expected {env.action_levels[expected]}"
-    )
+    assert TorchTradeFuturesLiveEnv._resolve_action_level(env, {"action": bad_idx}) == expected_level
 
 
 def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():
