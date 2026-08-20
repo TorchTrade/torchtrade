@@ -8,6 +8,11 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
+from tests.envs.base_exchange_tests import (
+    INVALID_ACTIONS,
+    assert_an_invalid_action_raises_before_trading,
+)
+
 
 class TestOKXFuturesTorchTradingEnv:
     """Tests for OKXFuturesTorchTradingEnv."""
@@ -388,8 +393,8 @@ class TestOKXFuturesTorchTradingEnv:
         mock_env_trader.trade.assert_not_called()
 
 
-class TestOKXActionIndexClamping:
-    """Tests for action index out-of-range clamping."""
+class TestOKXInvalidAction:
+    """An invalid action index must refuse to trade, not pick an endpoint."""
 
     @pytest.fixture
     def env(self, mock_env_observer, mock_env_trader):
@@ -403,13 +408,17 @@ class TestOKXActionIndexClamping:
              patch.object(OKXFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
             return OKXFuturesTorchTradingEnv(config=config, observer=mock_env_observer, trader=mock_env_trader)
 
-    @pytest.mark.parametrize("action_idx", [-1, 5, float("nan")], ids=["negative", "too-high", "nan"])
-    def test_invalid_action_index_handled(self, env, action_idx):
-        """Out-of-range and NaN action indices must be handled without crashing."""
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-            next_td = env.step(TensorDict({"action": torch.tensor(action_idx)}, batch_size=()))
-            assert "reward" in next_td["next"].keys()
+    @pytest.mark.parametrize(
+        "action,label", INVALID_ACTIONS, ids=[i[1] for i in INVALID_ACTIONS]
+    )
+    def test_an_invalid_action_raises_before_trading(self, env, action, label):
+        """This venue used to CLAMP, and #288 reversed that deliberately.
+
+        Clamping never made a malformed action safe -- it made it decisive: `-1` opened a
+        full short here and `NaN` did the same via the index-0 fallback. Nothing about
+        those is a better outcome than refusing to trade.
+        """
+        assert_an_invalid_action_raises_before_trading(env, action)
 
 
 class TestOKXZeroLiquidationPrice:

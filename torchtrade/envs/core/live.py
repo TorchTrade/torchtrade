@@ -51,6 +51,15 @@ class LiveObservationHalt(RuntimeError):
         )
 
 
+class InvalidActionError(Exception):
+    """A policy emitted an action the env cannot resolve to a position.
+
+    Not a ValueError: `_halting` catches ValueError and under FLATTEN emergency-closes a
+    real position. An unreadable venue state warrants that; a malformed action, with the
+    account state fully known, does not.
+    """
+
+
 class TorchTradeLiveEnv(TorchTradeBaseEnv):
     """
     Base class for live trading environments.
@@ -358,38 +367,49 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         self.position.target_reported = False
 
     def _resolve_action_level(self, tensordict) -> float:
-        """The policy's action index, coerced and clamped into `[0, n_actions - 1]`.
+        """The policy's action level, or `InvalidActionError` before anything trades.
 
         Indexing raw is two different bugs depending on the container. A LIST wraps:
         `action_levels[-1]` is the last level, so a negative index silently opened a full
-        LONG on binance and bitget. A DICT does not: `action_map[-1]` raises KeyError
-        mid-step, which crashed the three SLTP envs that lacked this guard.
-
+        LONG on binance and bitget. A DICT does not: `action_map[-1]` raises KeyError.
         Reachable, not theoretical: a policy sized for a different action space -- a
         checkpoint from before `action_levels` was reconfigured -- argmaxes past the end.
-        bybit and okx guarded both containers; binance, bitget and alpaca guarded neither
-        (#288).
 
-        NOT for the SLTP envs: they have no `action_levels` at all and resolve through
-        `action_map`, a dict, which raises KeyError instead of wrapping. Whether they
-        should clamp like this or keep raising is open -- binance's own tests assert
-        `pytest.raises(KeyError)` there, so it is a decision, not an oversight.
+        This RAISES rather than clamping, reversing bybit's and okx's longstanding clamp.
+        Clamping does not make a malformed action safe, it makes it decisive: `-1` becomes
+        a full short, a high index a full long, `NaN` a short, and `1.5` a different
+        action than the policy emitted. Turning nonsense into a confident market order is
+        the failure mode invariant 4 names -- validate at the boundary, never guard in the
+        rule. An `IndexError` at least halted before an order; a clamp does not.
+
+        NOT a ValueError, deliberately. `_halting` catches ValueError and under FLATTEN
+        emergency-closes a real position. Nothing routes this call through `_halting`
+        today, but a malformed action is a policy bug with the account state fully known
+        -- flattening on it would be wrong, and that is one refactor away from happening
+        silently (cf. #355, #394).
+
+        SLTP envs do not use this: they have no `action_levels` and resolve through
+        `action_map`, which raises KeyError. Applying this validator there is a follow-up.
         """
-        n_actions = len(self.action_levels)
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
+            if action_idx.numel() != 1:
+                raise InvalidActionError(
+                    f"expected a scalar action, got shape {tuple(action_idx.shape)}"
+                )
             action_idx = action_idx.item()
-        if not isinstance(action_idx, int):
-            if isinstance(action_idx, float) and math.isfinite(action_idx):
-                action_idx = int(action_idx)
-            else:
-                logger.warning(f"Invalid action index {action_idx}, defaulting to 0")
-                action_idx = 0
-        if action_idx < 0 or action_idx >= n_actions:
-            logger.warning(
-                f"Action index {action_idx} out of range [0, {n_actions - 1}], clamping"
+        # bool is an int subclass, and action_levels[True] is a valid index -- so `True`
+        # would quietly resolve to the second level rather than being rejected.
+        if isinstance(action_idx, bool) or not isinstance(action_idx, int):
+            raise InvalidActionError(
+                f"expected an integer action index, got {action_idx!r} "
+                f"({type(action_idx).__name__})"
             )
-            action_idx = max(0, min(action_idx, n_actions - 1))
+        n_actions = len(self.action_levels)
+        if not 0 <= action_idx < n_actions:
+            raise InvalidActionError(
+                f"action index {action_idx} is outside [0, {n_actions - 1}]"
+            )
         return self.action_levels[action_idx]
 
     def _check_termination(self, portfolio_value: float) -> bool:

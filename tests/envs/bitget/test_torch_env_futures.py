@@ -2,7 +2,11 @@
 
 import pytest
 
-from tests.envs.base_exchange_tests import mirror_features_on
+from tests.envs.base_exchange_tests import (
+    INVALID_ACTIONS,
+    assert_an_invalid_action_raises_before_trading,
+    mirror_features_on,
+)
 import torch
 from torchrl.envs.utils import check_env_specs
 import numpy as np
@@ -105,37 +109,17 @@ class TestBitgetFuturesTorchTradingEnv:
         assert_done_family(env)
 
 
-    @pytest.mark.parametrize("action_idx,expected_side", [
-        (-1, "sell"),   # clamps to index 0 -> action_levels[0] = -1.0 -> SHORT
-        (5, "buy"),     # clamps to index 2 -> action_levels[2] = +1.0 -> LONG
-    ], ids=["negative", "too-high"])
-    def test_action_index_clamping(self, env, action_idx, expected_side):
-        """A negative index used to return `action_levels[-1]` -- a FULL LONG, silently.
+    @pytest.mark.parametrize(
+        "action,label", INVALID_ACTIONS, ids=[i[1] for i in INVALID_ACTIONS]
+    )
+    def test_an_invalid_action_raises_before_trading(self, env, action, label):
+        """Venue-level proof that this `_step` actually routes through the shared check.
 
-        bybit and okx clamped and bitget did not, so this is the venue-level proof that
-        the shared guard is actually wired into bitget's `_step` (#288). Mirrors
-        `tests/envs/bybit/test_torch_env_futures.py::test_action_index_clamping`.
+        The shared contract is asserted once in `tests/envs/test_live_env_base.py`; this
+        is here because the bug was per-venue wiring, not the helper -- alpaca indexed
+        `action_levels` raw and never called it at all (#288).
         """
-        import torch
-        from tensordict import TensorDict
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-            env.trader.trade.reset_mock()
-            action_td = TensorDict({"action": torch.tensor(action_idx)}, batch_size=())
-            next_td = env.step(action_td)          # must not raise IndexError
-            assert "reward" in next_td["next"].keys()
-
-        # The load-bearing half. `-1` does NOT raise on the buggy code -- it silently
-        # resolves to action_levels[-1], the maximum LONG, and the step "succeeds". So
-        # asserting the step ran is not enough; assert WHICH side it traded. Clamping
-        # goes to the range ENDS, not to flat: -1 -> index 0 -> short, 5 -> index 2 ->
-        # long. The bug turns the first of those into a long.
-        sides = [c.kwargs.get("side", "").lower() for c in env.trader.trade.call_args_list]
-        assert sides and sides[-1] == expected_side, (
-            f"action index {action_idx} traded {sides}, expected {expected_side!r}: "
-            f"an out-of-range index must clamp within range, not index from the end"
-        )
+        assert_an_invalid_action_raises_before_trading(env, action)
 
     def test_check_env_specs_passes(self, env):
         """check_env_specs compares the emitted step against every declared spec;

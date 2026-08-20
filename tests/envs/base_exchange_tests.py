@@ -523,3 +523,45 @@ def assert_the_step_emits_the_whole_done_family(env):
         assert nxt[key].dtype is torch.bool, f"{key} is {nxt[key].dtype}, not bool"
         assert nxt[key].shape == (1,), f"{key} has shape {tuple(nxt[key].shape)}, not (1,)"
     assert not nxt["truncated"].any(), "a live env never truncates itself"
+
+
+INVALID_ACTIONS = [
+    (torch.tensor(-1), "negative"),
+    (torch.tensor(5), "past-the-end"),
+    (torch.tensor(1.5), "fractional"),
+    (torch.tensor(float("nan")), "nan"),
+    (torch.tensor(float("inf")), "inf"),
+    (torch.tensor(True), "bool"),
+]
+
+
+def assert_an_invalid_action_raises_before_trading(env, action):
+    """A malformed action index must raise, and must not move any money doing it.
+
+    Every one of these was previously a *trade*, not an error. `-1` indexed a list from
+    the end and opened a full LONG on binance/bitget; bybit and okx clamped it to the
+    first level and opened a full SHORT; `NaN` fell back to index 0, also a short; `1.5`
+    truncated to a different action than the policy emitted; `True` is an int subclass
+    and selected the second level. Clamping does not make a malformed action safe, it
+    makes it decisive -- so the contract is raise, and raise BEFORE any order.
+
+    Asserting the exception alone is not enough: the buggy paths raised nothing at all,
+    so the load-bearing half is that `trade` was never called and the position is intact.
+    """
+    from torchtrade.envs.core.live import InvalidActionError
+
+    with patch.object(env, "_wait_for_next_timestamp"):
+        env.reset()
+        env.trader.trade.reset_mock()
+        before = env.position.current_position
+        with pytest.raises(InvalidActionError):
+            env.step(TensorDict({"action": action}, batch_size=()))
+
+    assert not env.trader.trade.called, (
+        f"action {action!r} raised, but only after submitting "
+        f"{env.trader.trade.call_args_list} -- the check must precede the order"
+    )
+    assert env.position.current_position == before, (
+        f"action {action!r} left the position at {env.position.current_position}, "
+        f"was {before}"
+    )

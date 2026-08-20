@@ -262,30 +262,30 @@ class TestAlpacaTorchTradingEnvStep:
 
         return env
 
-    @pytest.mark.parametrize("action_idx,expect_flat", [
-        (-1, True),    # clamps to index 0 -> level 0.0 -> FLAT. Unfixed: 1.0, full long.
-        (99, False),   # clamps to the last index -> level 1.0 -> long, by design.
-    ], ids=["negative", "too-high"])
-    def test_an_out_of_range_action_index_does_not_open_a_position(
-        self, env, action_idx, expect_flat
-    ):
+    @pytest.mark.parametrize("action", [
+        torch.tensor(-1), torch.tensor(99), torch.tensor(1.5),
+        torch.tensor(float("nan")), torch.tensor(True),
+    ], ids=["negative", "past-the-end", "fractional", "nan", "bool"])
+    def test_an_invalid_action_raises_before_trading(self, env, action):
         """`action_levels[-1]` is a full LONG, and alpaca indexed it raw (#288).
 
         Through the real `_step`, not the shared helper: an earlier version of this test
-        called `_resolve_action_index` directly and PASSED against a tree where alpaca's
-        `_step` still had the raw index -- it pinned the base method, which is already
-        covered, and said nothing about alpaca's wiring.
+        called the helper directly and PASSED against a tree where alpaca's `_step` still
+        had the raw index -- it pinned the base method, which is already covered, and said
+        nothing about alpaca's wiring.
 
-        Spot levels are [0, 0.5, 1], so index 0 is FLAT and both out-of-range indices
-        must leave the account flat rather than buying.
+        Alpaca keeps its own assertion rather than reusing
+        `assert_an_invalid_action_raises_before_trading` because its mock trader is a real
+        class with a `position_qty`, not a MagicMock with a `trade` spy.
         """
+        from torchtrade.envs.core.live import InvalidActionError
+
         env.reset()
-        env._step(TensorDict({"action": torch.tensor(action_idx)}, batch_size=()))
-        qty = env.trader.position_qty
-        assert (qty == 0.0) is expect_flat, (
-            f"action index {action_idx} left position_qty={qty}; clamping goes to the "
-            f"range ENDS, so -1 is flat and 99 is the top level -- indexing from the end "
-            f"instead makes -1 a full long"
+        with pytest.raises(InvalidActionError):
+            env._step(TensorDict({"action": action}, batch_size=()))
+        assert env.trader.position_qty == 0.0, (
+            f"action {action!r} raised but still bought {env.trader.position_qty} -- "
+            f"the check must precede the order"
         )
 
     def test_step_returns_tensordict(self, env):

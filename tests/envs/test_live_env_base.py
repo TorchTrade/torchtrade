@@ -31,6 +31,7 @@ from tensordict import TensorDict
 
 import torchtrade.envs  # noqa: F401  -- registers every live env as a subclass
 from torchtrade.envs.core.live import (
+    InvalidActionError,
     LiveObservationHalt,
     ObservationFailurePolicy,
     TorchTradeLiveEnv,
@@ -2677,23 +2678,40 @@ def test_what_a_short_observation_costs_under_flatten(flat_at_reset):
         assert trader.close_position.call_count == 1
 
 
-@pytest.mark.parametrize("bad_idx,expected_level", [
-    (-1, -1.0), (99, 1.0), (1.0, 0.0), (float("nan"), -1.0),
-], ids=["negative", "too-large", "float", "nan"])
-def test_an_out_of_range_action_index_cannot_pick_a_position(bad_idx, expected_level):
+@pytest.mark.parametrize("bad_idx", [
+    -1, 99, 1.5, float("nan"), float("inf"), True,
+], ids=["negative", "too-large", "fractional", "nan", "inf", "bool"])
+def test_an_invalid_action_index_cannot_pick_a_position(bad_idx):
     """`action_levels[-1]` returns the LAST level, so -1 silently opened a FULL LONG.
+
+    The contract is raise, not clamp. Clamping was bybit's and okx's behaviour and #288
+    reversed it: it never made a malformed action safe, it made it decisive -- `-1` a full
+    short, `99` a full long, `NaN` a short via the index-0 fallback, `1.5` a different
+    action than the policy emitted, and `True` the second level, since bool is an int.
 
     One shared implementation, so one test -- an earlier version parametrized this over
     FUTURES_ENVS and produced 48 cases that all ran identical code on an identical stub.
-    Sixteen of them were SLTP classes, which resolve actions through `action_map` and
-    never reach this method at all.
+    Sixteen of them were SLTP classes, which resolve through `action_map` and never reach
+    this method at all.
 
     The venue-level proof lives where it belongs: each venue's own suite drives a real
     `env.step()` with a bad index. bybit and okx had those already; binance and bitget did
     not, which is why the bug shipped there.
     """
     env = SimpleNamespace(action_levels=[-1.0, 0.0, 1.0])
-    assert TorchTradeLiveEnv._resolve_action_level(env, {"action": bad_idx}) == expected_level
+    with pytest.raises(InvalidActionError):
+        TorchTradeLiveEnv._resolve_action_level(env, {"action": bad_idx})
+
+
+def test_an_invalid_action_is_not_a_valueerror_that_halting_would_flatten():
+    """`_halting` catches ValueError and under FLATTEN emergency-closes a real position.
+
+    Nothing routes the resolver through `_halting` today, but a malformed action is a
+    policy bug with the account state fully known -- flattening on it would turn a bad
+    action into a real, unrequested exit. #355 and #394 were both this shape: an
+    exception type that the wrong handler was willing to catch.
+    """
+    assert not issubclass(InvalidActionError, ValueError)
 
 
 def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():
