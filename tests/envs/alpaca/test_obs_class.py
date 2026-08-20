@@ -42,6 +42,19 @@ class TestAlpacaObservationClass(BaseObservationClassTests):
         assert obs.symbol == "BTC/USD"
         assert obs.client is mock_client
 
+    def test_a_daily_timeframe_is_refused_at_construction(self):
+        """The 60-day fetch window cannot fill a daily observation, and says so early.
+
+        This check used to live inside `_fetch_single_timeframe`, so the config built
+        fine and failed on the first fetch -- during `reset()`, on a live account. The
+        shared base calls `_validate_timeframe` from `__init__`, which is where the
+        futures venues have always validated theirs (#288). Untested either way before.
+        """
+        with pytest.raises(ValueError, match="not allowed for daily data"):
+            self.create_observer(
+                symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Day),
+                window_sizes=5)
+
     def test_get_keys_multiple_timeframes(self):
         obs = self.create_observer(
             symbol="BTC/USD",
@@ -96,14 +109,6 @@ class TestAlpacaObservationClass(BaseObservationClassTests):
         key = obs.get_keys()[0]
         assert obs.get_observations()[key].shape[0] == 15
 
-    def test_feature_close_is_pct_change(self):
-        """feature_close is a percentage change (small values around 0)."""
-        obs = self.create_observer(
-            symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute), window_sizes=10)
-        key = obs.get_keys()[0]
-        feature_close = obs.get_observations()[key][:, 0]
-        assert np.abs(feature_close).max() < 0.1
-
     def test_different_timeframe_units(self):
         """Hourly timeframe produces the expected key."""
         obs = self.create_observer(
@@ -118,22 +123,6 @@ class TestAlpacaObservationClass(BaseObservationClassTests):
         obs1 = obs.get_observations()[key]
         obs2 = obs.get_observations()[key]
         assert obs1.shape == obs2.shape == (10, 4)
-
-    def test_ohlc_relationship(self):
-        """OHLC high >= low holds in the base features."""
-        obs = self.create_observer(
-            symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute), window_sizes=10)
-        base = obs.get_observations(return_base_ohlc=True)["base_features"]
-        highs, lows = base[:, 1], base[:, 2]
-        assert np.all(highs >= lows)
-
-    def test_timestamps_are_ordered(self):
-        """base_timestamps are chronological."""
-        obs = self.create_observer(
-            symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute), window_sizes=10)
-        timestamps = obs.get_observations(return_base_ohlc=True)["base_timestamps"]
-        for i in range(len(timestamps) - 1):
-            assert timestamps[i] < timestamps[i + 1]
 
 
 def test_a_malformed_candle_never_reaches_alpaca_base_features(monkeypatch):

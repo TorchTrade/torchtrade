@@ -38,9 +38,6 @@ class AlpacaObservationClass(BaseObservationClass):
             feature_preprocessing_fn: Optional custom preprocessing function that takes a DataFrame
                                    and returns a DataFrame with feature columns
             client: Optional pre-configured CryptoHistoricalDataClient for dependency injection (useful for testing)
-
-        `timeframes`, not the base's `time_frames`: the spelling is public and renaming it
-        would break every existing alpaca config for no behavioural gain.
         """
         self.default_lookback = 60
         super().__init__(
@@ -65,12 +62,7 @@ class AlpacaObservationClass(BaseObservationClass):
         return "timestamp"
 
     def _fetch_single_timeframe(self, timeframe: TimeFrame, limit: int = None) -> pd.DataFrame:
-        """A date RANGE, not a bar count, so `limit` has nothing to bind to.
-
-        That is why the short-window refusal in `get_observations` matters more here than
-        on the futures venues: they over-fetch by a fixed +50 bars, and this fetches
-        whatever 60 days happens to contain (#400).
-        """
+        """A date RANGE, not a bar count, so `limit` has nothing to bind to."""
         now = datetime.now(ZoneInfo("America/New_York"))
         request = CryptoBarsRequest(
             symbol_or_symbols=self.symbol,
@@ -83,20 +75,14 @@ class AlpacaObservationClass(BaseObservationClass):
     def _normalise_frame(self, df: pd.DataFrame) -> pd.DataFrame:
         """The SDK hands back a (symbol, timestamp) MultiIndex and a constant `symbol`.
 
-        Dropped BEFORE the shared `dropna`, where it used to be dropped after. For a
-        single-symbol request the column is constant and the surviving rows are the same
-        either way -- measured. The one input that differs is a row whose `symbol` is
-        null: it used to be discarded, and now survives if its OHLCV is intact. That is
-        the better answer. Losing a usable bar to a gap in a METADATA column is the
-        over-eager row removal #400 exists to catch, and `symbol` is a field this class
-        already knows the value of -- it is the one it asked for.
+        Dropped before the shared `dropna`, so a row with a null symbol but sound OHLCV
+        now survives (#288 review).
         """
         return df.reset_index().drop(columns=["symbol"])
 
     def _dummy_frame(self, window_size: int) -> pd.DataFrame:
-        """Carries `symbol` because `_normalise_frame` drops it -- the dummy has to have
-        the shape real data has, or `get_features` measures a frame the venue never
-        produces (the dtype-fidelity lesson from binance's #289 fold)."""
+        """Carries `symbol` because `_normalise_frame` drops it: the dummy has to have
+        the shape real data has, or `get_features` measures a frame that never occurs."""
         df = super()._dummy_frame(window_size)
         df.insert(0, "symbol", [self.symbol] * window_size)
         return df
@@ -120,81 +106,3 @@ class AlpacaObservationClass(BaseObservationClass):
             raise ValueError(f"No data available for {self.symbol}")
 
         return float(df['close'].iloc[-1])
-
-
-# Example usage:
-if __name__ == "__main__":
-    # Note: Examples now use custom TimeFrame from torchtrade.envs.timeframe
-    # instead of Alpaca's TimeFrame class
-
-    # Single timeframe example
-    print("Testing single timeframe...")
-    window_size = 10
-    observer = AlpacaObservationClass(
-        symbol="BTC/USD",
-        timeframes=TimeFrame(15, TimeFrameUnit.Minute),
-        window_sizes=window_size,
-    )
-    expected_keys = observer.get_keys()
-    observations = observer.get_observations()
-    #features = observer.get_features()
-
-    assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
-    # Default preprocessing has 4 features: feature_close, feature_open, feature_high, feature_low
-    assert observations[expected_keys[0]].shape == (window_size, 4), \
-        f"Expected shape (10, 4) for default features, got {observations[expected_keys[0]].shape}"
-    print("Single timeframe test passed!")
-
-    # Example with multiple timeframes and window sizes
-    print("\nTesting multiple timeframes...")
-    window_sizes = [10, 20]
-    observer = AlpacaObservationClass(
-        symbol="BTC/USD",
-        timeframes=[
-            TimeFrame(15, TimeFrameUnit.Minute),
-            TimeFrame(1, TimeFrameUnit.Hour)
-        ],
-        window_sizes=window_sizes
-    )
-
-    expected_keys = observer.get_keys()
-    print("Expected keys:", expected_keys)
-    observations = observer.get_observations()
-    #features = observer.get_features()
-
-    assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
-    assert len(observations) == 2, "Expected exactly 2 observations"
-
-    # Check shapes for each timeframe/window combination
-    expected_shapes = { key: (w, 4) for key, w in zip(expected_keys, window_sizes)
-    }
-
-    for key, expected_shape in expected_shapes.items():
-        assert observations[key].shape == expected_shape, \
-            f"Shape mismatch for {key}: expected {expected_shape}, got {observations[key].shape}"
-    print("Multiple timeframes test passed!")
-
-    # Custom preprocessing example
-    print("\nTesting custom preprocessing...")
-    def custom_preprocessing(df):
-        df = df.reset_index()
-        df.dropna(inplace=True)
-        df["feature_volatility"] = df["high"] - df["low"]
-        df["feature_volume_ma"] = df["volume"].rolling(window=3).mean()
-        df.dropna(inplace=True)  # Drop NaN values from rolling window
-        return df
-
-    observer_custom = AlpacaObservationClass(
-        symbol="BTC/USD",
-        timeframes=TimeFrame(15, TimeFrameUnit.Minute),
-        window_sizes=10,
-        feature_preprocessing_fn=custom_preprocessing,
-    )
-
-    observations_custom = observer_custom.get_observations()
-    key = observer_custom.get_keys()[0]
-    #features_custom = observer_custom.get_features()
-    # Custom preprocessing has 2 features and loses 2 rows due to rolling window
-    assert observations_custom[key].shape == (8, 2), \
-        f"Expected shape (8, 2) for custom features, got {observations_custom[key].shape}"
-    print("Custom preprocessing test passed!")

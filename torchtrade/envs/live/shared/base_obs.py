@@ -15,9 +15,7 @@ class BaseObservationClass(ABC):
     Everything a venue can get wrong about the WINDOW lives here: which rows survive
     preprocessing, that base_features is sliced from the same frame as the market data
     (#395), that the newest bar is not stale (#399), and that the window is not shorter
-    than the declared spec (#400). Alpaca kept a parallel copy of all of it, and each
-    of those three fixes had to be pasted into both -- which is the pattern #288 exists
-    to end.
+    than the declared spec (#400).
 
     A subclass supplies the bars (`_fetch_single_timeframe`) and says how its SDK
     hands them over (`_normalise_frame`, `_get_timestamp_column`).
@@ -125,14 +123,13 @@ class BaseObservationClass(ABC):
         `get_observations` (#400).
         """
 
-    @abstractmethod
     def _normalise_frame(self, df: pd.DataFrame) -> pd.DataFrame:
         """A private copy of `df` in the shape the rest of this class expects.
 
-        Exists because SDKs disagree about what they hand back: a plain frame needs only
-        a copy, while alpaca's arrives with a (symbol, timestamp) MultiIndex and a
-        constant `symbol` column. Must not mutate the argument.
+        Overridable because SDKs disagree about what they hand back: a copy is enough for
+        a plain frame, while alpaca's arrives with a (symbol, timestamp) MultiIndex.
         """
+        return df.copy()
 
     def _default_preprocessing(self, df: pd.DataFrame) -> pd.DataFrame:
         """Default preprocessing function if none is provided."""

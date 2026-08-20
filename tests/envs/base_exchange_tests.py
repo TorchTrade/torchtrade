@@ -337,6 +337,30 @@ class BaseObservationClassTests(ABC):
             self.create_observer(symbol="BTC/USD", timeframes=timeframes,
                                  window_sizes=window_sizes)
 
+    def test_the_shared_preprocessing_semantics_hold(self):
+        """`_default_preprocessing` is one implementation now, so assert it on every venue.
+
+        These three assertions lived only in alpaca's file. That was fine while alpaca
+        owned its own copy; after the fold they cover code all five venues run, and a
+        regression would have shipped silently for the four that had no equivalent (#288).
+        """
+        observer = self.create_observer(
+            symbol="BTC/USD", timeframes=TimeFrame(1, TimeFrameUnit.Minute),
+            window_sizes=10)
+        obs = observer.get_observations(return_base_ohlc=True)
+
+        # feature_close is a pct_change, so it sits near zero rather than near price.
+        assert np.abs(obs[observer.get_keys()[0]][:, 0]).max() < 0.1
+
+        # A column swap in the base_features slice would break high >= low.
+        base = obs["base_features"]
+        assert np.all(base[:, 1] >= base[:, 2])
+
+        # base_timestamps is windowed alongside base_features; a mis-slice reorders it.
+        timestamps = obs["base_timestamps"]
+        assert len(timestamps) == len(base)
+        assert np.all(timestamps[:-1] < timestamps[1:])
+
     def test_this_venue_does_not_re_fork_the_shared_window_logic(self):
         """One `get_observations`, for all five venues (#288).
 
@@ -346,8 +370,8 @@ class BaseObservationClassTests(ABC):
         back, and every behavioural test still passes on the day it happens, because both
         copies are correct at birth.
 
-        `_dummy_frame` is an extension point, not a re-fork: venues return different
-        columns and the base cannot know their dtypes.
+        `_dummy_frame` and `_normalise_frame` are extension points, not re-forks: venues
+        return different columns, and their SDKs hand back different frame shapes.
         """
         from torchtrade.envs.live.shared.base_obs import BaseObservationClass
 
@@ -361,7 +385,7 @@ class BaseObservationClassTests(ABC):
             and not n.startswith("__")
         }
         assert {"get_observations", "_default_preprocessing", "get_features"} <= shared
-        redeclared = (shared & set(vars(venue_cls))) - {"_dummy_frame"}
+        redeclared = (shared & set(vars(venue_cls))) - {"_dummy_frame", "_normalise_frame"}
         assert not redeclared, (
             f"{venue_cls.__name__} re-forks {sorted(redeclared)} instead of sharing "
             f"BaseObservationClass's"

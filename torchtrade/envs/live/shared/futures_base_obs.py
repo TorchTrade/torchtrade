@@ -95,7 +95,3 @@ class BaseFuturesObservationClass(BaseObservationClass):
 
         except Exception as e:
             raise RuntimeError(f"Failed to fetch candles for {self.symbol} on {timeframe.obs_key_freq()}: {str(e)}")
-
-    def _normalise_frame(self, df: pd.DataFrame) -> pd.DataFrame:
-        """`_parse_klines` already returns a plain frame, so a copy is the whole job."""
-        return df.copy()

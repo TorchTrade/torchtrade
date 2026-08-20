@@ -143,7 +143,9 @@ def _basic_features(df):
 class TestBinanceSharesTheObservationBase:
     """binance was the last FUTURES venue with a parallel observation class (#289).
 
-    alpaca still hand-rolls its own; it is spot, so outside this issue's scope.
+    alpaca folded onto the shared BaseObservationClass in #288; this guard stays
+    futures-only because _fetch_single_timeframe is concrete one level down, and
+    base_exchange_tests.py covers all five venues at the BaseObservationClass level.
     """
 
     @staticmethod
