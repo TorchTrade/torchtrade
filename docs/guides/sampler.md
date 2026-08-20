@@ -73,7 +73,7 @@ from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvCo
 config = SequentialTradingEnvConfig(
     time_frames=["1min", "5min", "15min", "1hour"],
     window_sizes=[12, 8, 8, 24],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
 )
 
 env = SequentialTradingEnv(df, config)

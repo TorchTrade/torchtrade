@@ -91,7 +91,7 @@ df['timestamp'] = pd.to_datetime(df['timestamp'])
 config = SequentialTradingEnvConfig(
     time_frames=["1min", "5min", "15min"],        # 1m, 5m, 15m bars
     window_sizes=[12, 8, 8],       # Lookback windows
-    execute_on=(5, "Minute"),      # Execute every 5 minutes
+    execute_on="5Min",      # Execute every 5 minutes
     initial_cash=1000,             # Starting capital
     transaction_fee=0.0025,        # 0.25% fee
     slippage=0.001                 # 0.1% slippage
@@ -124,6 +124,7 @@ See the **[Examples](examples.md)** page for all available algorithms (PPO, DQN,
 
 ```python
 import datasets
+import pandas as pd
 
 # Load pre-processed Bitcoin data
 ds = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
@@ -140,16 +141,16 @@ env = SequentialTradingEnv(df, config)
 config = SequentialTradingEnvConfig(
     time_frames=["1min", "5min", "15min", "60min"],        # 1m, 5m, 15m, 1h
     window_sizes=[12, 8, 8, 24],       # Lookback per timeframe
-    execute_on=(5, "Minute"),          # Execute every 5 minutes
+    execute_on="5Min",          # Execute every 5 minutes
     initial_cash=[1000, 5000],         # Domain randomization
 )
 ```
 
 The environment will provide observations:
-- `market_data_1Minute`: [12, num_features] - Last 12 one-minute bars
-- `market_data_5Minute`: [8, num_features] - Last 40 minutes
-- `market_data_15Minute`: [8, num_features] - Last 120 minutes
-- `market_data_60Minute`: [24, num_features] - Last 24 hours
+- `market_data_1Minute_12`: [12, num_features] - Last 12 one-minute bars
+- `market_data_5Minute_8`: [8, num_features] - Last 40 minutes
+- `market_data_15Minute_8`: [8, num_features] - Last 120 minutes
+- `market_data_60Minute_24`: [24, num_features] - Last 24 hours
 
 ### Using Stop-Loss / Take-Profit
 
@@ -161,7 +162,7 @@ config = SequentialTradingEnvSLTPConfig(
     takeprofit_levels=[0.05, 0.10],     # +5%, +10%
     time_frames=["1min", "5min", "15min"],
     window_sizes=[12, 8, 8],
-    execute_on=(5, "Minute"),
+    execute_on="5Min",
     initial_cash=1000
 )
 
