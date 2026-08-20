@@ -128,8 +128,7 @@ import datasets
 # Load pre-processed Bitcoin data
 ds = datasets.load_dataset("Torch-Trade/btcusdt_spot_1m_03_2023_to_12_2025")
 df = ds["train"].to_pandas()
-df['0'] = pd.to_datetime(df['0'])  # First column is timestamp
-df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+df['timestamp'] = pd.to_datetime(df['timestamp'])
 
 # Create environment
 env = SequentialTradingEnv(df, config)
