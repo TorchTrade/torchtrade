@@ -15,7 +15,7 @@ import os
 from dotenv import load_dotenv
 
 from torchtrade.envs.core.common import TradeMode
-from torchtrade.envs.core.common_types import MarginMode, OrderStatus
+from torchtrade.envs.core.common_types import PositionStatus, MarginMode, OrderStatus
 from torchtrade.envs.core.state import POSITION_UNKNOWN
 from torchtrade.envs.utils.leverage import leverage_already_set, require_leverage_applied
 
@@ -54,18 +54,6 @@ def _step_and_decimals(step_str: str):
 
 
 
-@dataclass
-class PositionStatus:
-    qty: float  # Positive for long, negative for short
-    notional_value: float
-    entry_price: float
-    unrealized_pnl: float
-    unrealized_pnl_pct: float
-    mark_price: float
-    leverage: float  # float, not int: int() truncated 1.5x to 1x, which then took
-    # the no-liquidation branch and reported a levered position as safe (#277).
-    margin_mode: str
-    liquidation_price: float
 
 
 class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
