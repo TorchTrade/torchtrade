@@ -262,6 +262,28 @@ class TestAlpacaTorchTradingEnvStep:
 
         return env
 
+    @pytest.mark.parametrize("action_idx,expected_level", [
+        (-1, 0.0),   # clamps to index 0 -> action_levels[0] -> FLAT
+        (99, 1.0),   # clamps to the last index -> full long
+    ], ids=["negative", "too-high"])
+    def test_an_out_of_range_action_index_does_not_wrap(self, env, action_idx, expected_level):
+        """`action_levels[-1]` is a full LONG, and alpaca indexed it raw (#288).
+
+        Spot, so the levels are [0, 0.5, 1] and a negative index selected 1.0 -- maximum
+        long -- silently. It also indexed with the raw tensor, never calling `.item()`.
+        bybit and okx guarded this; binance, bitget and alpaca did not, and alpaca is the
+        one that is not a futures env, which is why the guard sits on TorchTradeLiveEnv.
+        """
+        env.reset()
+        idx = env._resolve_action_index(
+            TensorDict({"action": torch.tensor(action_idx)}, batch_size=()),
+            len(env.action_levels),
+        )
+        assert env.action_levels[idx] == expected_level, (
+            f"action index {action_idx} resolved to {env.action_levels[idx]}, "
+            f"expected {expected_level}"
+        )
+
     def test_step_returns_tensordict(self, env):
         """Test that step returns a TensorDict."""
         env.reset()

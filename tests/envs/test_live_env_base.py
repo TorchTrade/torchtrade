@@ -649,6 +649,11 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
     env._current_mark_price = (
         lambda ps=None: TorchTradeFuturesLiveEnv._current_mark_price(env, ps)
     )
+    # Real, for the reason above: a stub without it turns any regression here into a
+    # missing-attribute error rather than the order the env placed.
+    env._resolve_action_index = (
+        lambda td, n: TorchTradeLiveEnv._resolve_action_index(env, td, n)
+    )
     # The real halt wrapper: #355 routes the pre-trade read through it, so an outage now
     # surfaces as LiveObservationHalt rather than the bare exception -- which is the point,
     # since `except LiveObservationHalt` is what the docs and the DQN example catch.
