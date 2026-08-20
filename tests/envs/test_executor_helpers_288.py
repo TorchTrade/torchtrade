@@ -174,7 +174,14 @@ def test_every_venue_shares_one_position_status(venue, module):
 
 
 def test_alpaca_position_status_is_deliberately_its_own_shape():
-    """The one that must NOT be folded, asserted so nobody folds it by symmetry."""
+    """The one that must NOT be folded, and the existing suite would barely notice.
+
+    Simulated: replacing alpaca's PositionStatus with the shared one fails 2 of 200
+    alpaca tests, both with generic downstream symptoms. It does not crash, because
+    `AlpacaOrderClass.get_status()` wraps the construction in `except Exception` -- so the
+    TypeError is swallowed and every live position read silently degrades to
+    POSITION_UNKNOWN. This test failing IS the diagnosis.
+    """
     from torchtrade.envs.live.alpaca.order_executor import PositionStatus as Alpaca
     from torchtrade.envs.core.common_types import PositionStatus as Shared
 
