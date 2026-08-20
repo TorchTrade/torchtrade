@@ -3,7 +3,6 @@
 from torchtrade.envs.core.common_types import PositionStatus
 import logging
 import math
-from dataclasses import dataclass
 from typing import Dict, Optional
 
 from torchtrade.envs.utils.liquidation import (

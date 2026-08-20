@@ -6,7 +6,6 @@ from torchtrade.envs.live.shared.executor_helpers import (
 )
 
 from torchtrade.envs.utils.precision import decimals_for_step
-from dataclasses import dataclass
 import math
 from decimal import Decimal
 from typing import Dict, List, Optional, Union
@@ -50,10 +49,6 @@ def _step_and_decimals(step_str: str):
     if not math.isfinite(step):
         raise ValueError(f"non-finite LOT_SIZE step {step_str!r}")
     return step, decimals_for_step(step_str)
-
-
-
-
 
 
 class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):

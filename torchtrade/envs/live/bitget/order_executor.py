@@ -1,7 +1,6 @@
 import logging
 
 from torchtrade.envs.live.shared.executor_helpers import ExecutorHelpersMixin
-from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Union
 
@@ -60,8 +59,6 @@ class MarginMode(Enum):
             'isolated' for ISOLATED, 'cross' for CROSSED
         """
         return 'isolated' if self == MarginMode.ISOLATED else 'cross'
-
-
 
 
 class BitgetFuturesOrderClass(ExecutorHelpersMixin):

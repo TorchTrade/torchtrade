@@ -8,7 +8,6 @@ from torchtrade.envs.live.shared.executor_helpers import (
 )
 
 from torchtrade.envs.utils.precision import decimals_for_step
-from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
 
@@ -53,8 +52,6 @@ class MarginMode(Enum):
             1 for ISOLATED, 0 for CROSSED
         """
         return 1 if self == MarginMode.ISOLATED else 0
-
-
 
 
 class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):

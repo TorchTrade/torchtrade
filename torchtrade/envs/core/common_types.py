@@ -28,6 +28,10 @@ class PositionStatus:
     Alpaca is deliberately NOT here. It is spot, and its status object is a different
     shape (`market_value`, `avg_entry_price`, `unrealized_pl`) rather than the same shape
     under other names.
+
+    One real behaviour change from the collapse: dataclass `__eq__` compares
+    `other.__class__`, so a binance and a bybit status with equal fields now compare EQUAL
+    where they used to differ by type. Nothing compares statuses across venues today.
     """
 
     qty: float  # Positive for long, negative for short

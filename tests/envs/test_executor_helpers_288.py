@@ -157,16 +157,10 @@ POSITION_STATUS_MODULES = [
 
 @pytest.mark.parametrize("venue,module", POSITION_STATUS_MODULES, ids=lambda v: v)
 def test_every_venue_shares_one_position_status(venue, module):
-    """Five dataclasses became one (#288). Identity, not a matching field list.
+    """Identity, not a matching field list -- see `common_types.PositionStatus`.
 
-    Three of the five were byte-identical and the other two differed only in an
-    annotation, so a name-and-shape check would have passed on all five copies. It is the
-    OBJECT that has to be shared: a re-declared class with the same fields drifts the
-    moment someone edits one file, which is how replay ended up carrying `margin_type`
-    and `margin_mode` as separate fields for the same concept.
-
-    Alpaca is absent on purpose -- spot, and a genuinely different shape
-    (`market_value`, `avg_entry_price`), not this one under other names.
+    A name-and-shape check would have passed on all five copies, so it could never have
+    caught what this exists to prevent. Sharing the OBJECT is the property that holds.
     """
     import importlib
 
@@ -187,7 +181,6 @@ def test_alpaca_position_status_is_deliberately_its_own_shape():
     assert Alpaca is not Shared
     assert {f.name for f in dataclasses.fields(Alpaca)} != {
         f.name for f in dataclasses.fields(Shared)}
-
 
 
 def test_no_unqualified_margin_enum_is_exported_from_the_live_namespace():
