@@ -131,6 +131,37 @@ while True:
 
 The non-SLTP live environments share these base parameters:
 
+## Margin enums: import them venue-qualified (#289)
+
+Four venues define a `MarginMode` enum with the **same name and different values**, and
+those values are API wire strings:
+
+| venue | ISOLATED | CROSSED |
+|---|---|---|
+| binance (`core.common_types`) | `ISOLATED` | `CROSSED` |
+| bitget, bybit | `isolated` | `crossed` |
+| okx | `isolated` | `cross` (member is `CROSS`) |
+
+So an unqualified import at a namespace serving all four sends the wrong case to
+whichever venue it did not come from. Import from the venue, or from core for binance
+and the offline envs:
+
+```python
+from torchtrade.envs import MarginMode                       # core: binance + offline
+from torchtrade.envs.live.bitget.order_executor import MarginMode as BitgetMarginMode
+from torchtrade.envs.live import BybitMarginMode, OKXMarginMode
+```
+
+**Migrating from before #289.** `MarginType` was renamed to `MarginMode`, so binance's
+config field is `margin_mode` and matches the other three. Two package-level names
+changed with it, and both are silent rather than an ImportError, so they are worth
+checking by hand:
+
+- `torchtrade.envs.MarginMode` now resolves to **core's** enum (uppercase). It previously
+  resolved to bybit's (lowercase).
+- `torchtrade.envs.live.MarginMode` no longer exists. Use `BybitMarginMode`, which is what
+  it meant, or the venue module. okx was already aliased this way.
+
 ```python
 # There is no shared LiveEnvConfig -- each exchange ships its own dataclass. What they
 # have in common:
