@@ -75,8 +75,12 @@ class AlpacaObservationClass(BaseObservationClass):
     def _normalise_frame(self, df: pd.DataFrame) -> pd.DataFrame:
         """The SDK hands back a (symbol, timestamp) MultiIndex and a constant `symbol`.
 
-        Dropped before the shared `dropna`, so a row with a null symbol but sound OHLCV
-        now survives (#288 review).
+        Dropped BEFORE the shared dropna/drop_duplicates, where it used to go after. Safe
+        only because `symbol: str` means one symbol per observer: with the column gone,
+        two bars alike in every OHLCV field but differing in symbol would dedupe to one.
+        Revisit this ordering before any multi-symbol support. (A row with a null symbol
+        and sound OHLCV also survives now, which is the better answer -- losing a usable
+        bar to a gap in metadata is what pushes a window under its spec, #400.)
         """
         return df.reset_index().drop(columns=["symbol"])
 
