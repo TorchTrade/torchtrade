@@ -2,6 +2,8 @@
 
 from typing import Literal, Sequence
 
+from torchtrade.envs.core.common_types import MarginMode
+
 
 # Type alias for trade mode with autocomplete and validation
 # Use string literals "fractional", "notional", or "quantity" throughout the codebase
@@ -44,12 +46,8 @@ def validate_offline_margin_mode(margin_mode) -> None:
     """CROSSED is not implemented offline, so refuse it instead of silently isolating.
 
     Offline liquidation always uses isolated_liquidation_price, so a CROSSED config
-    produced isolated math while the user believed otherwise (#289). The scalar env
-    raised; the vectorized one accepted it silently, which is the parity gap in
-    miniature -- one guard, two configs now.
+    produced isolated math while the user believed otherwise (#289).
     """
-    from torchtrade.envs.core.common_types import MarginMode
-
     if margin_mode is not MarginMode.ISOLATED:
         raise ValueError(
             f"margin_mode={margin_mode} is not implemented for the offline "

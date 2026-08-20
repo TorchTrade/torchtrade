@@ -3094,10 +3094,14 @@ from torchtrade.envs.offline.sequential_sltp import SequentialTradingEnvSLTPConf
 from torchtrade.envs.offline.vectorized_sequential_sltp import (
     VectorizedSequentialTradingEnvSLTPConfig,
 )
-from torchtrade.envs.live.binance import BinanceFuturesSLTPTradingEnvConfig
-from torchtrade.envs.live.bitget import BitgetFuturesSLTPTradingEnvConfig
-from torchtrade.envs.live.bybit import BybitFuturesSLTPTradingEnvConfig
-from torchtrade.envs.live.okx import OKXFuturesSLTPTradingEnvConfig
+from torchtrade.envs.live.binance import (
+    BinanceFuturesSLTPTradingEnvConfig, BinanceFuturesTradingEnvConfig)
+from torchtrade.envs.live.bitget import (
+    BitgetFuturesSLTPTradingEnvConfig, BitgetFuturesTradingEnvConfig)
+from torchtrade.envs.live.bybit import (
+    BybitFuturesSLTPTradingEnvConfig, BybitFuturesTradingEnvConfig)
+from torchtrade.envs.live.okx import (
+    OKXFuturesSLTPTradingEnvConfig, OKXFuturesTradingEnvConfig)
 from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 
 SLTP_CONFIGS = [
@@ -3157,22 +3161,17 @@ def test_hoisting_a_default_did_not_change_it(config_cls):
     assert {f: getattr(config, f) for f in SHARED_DEFAULTS} == SHARED_DEFAULTS
 
 
-def _margin_bearing_configs():
-    """Both variants per venue. The SLTP-only list let a base config drift unseen."""
-    import importlib
-    out = []
-    for venue, base, sltp in (
-        ("binance", "BinanceFuturesTradingEnvConfig", "BinanceFuturesSLTPTradingEnvConfig"),
-        ("bitget", "BitgetFuturesTradingEnvConfig", "BitgetFuturesSLTPTradingEnvConfig"),
-        ("bybit", "BybitFuturesTradingEnvConfig", "BybitFuturesSLTPTradingEnvConfig"),
-        ("okx", "OKXFuturesTradingEnvConfig", "OKXFuturesSLTPTradingEnvConfig"),
-    ):
-        out.append(getattr(importlib.import_module(f"torchtrade.envs.live.{venue}.env"), base))
-        out.append(getattr(importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp"), sltp))
-    return out
+# Both variants per venue: the SLTP-only list let a base config drift unseen. Imported
+# classes, not names resolved at runtime -- a string table re-targets silently.
+MARGIN_BEARING_CONFIGS = [
+    BinanceFuturesTradingEnvConfig, BinanceFuturesSLTPTradingEnvConfig,
+    BitgetFuturesTradingEnvConfig, BitgetFuturesSLTPTradingEnvConfig,
+    BybitFuturesTradingEnvConfig, BybitFuturesSLTPTradingEnvConfig,
+    OKXFuturesTradingEnvConfig, OKXFuturesSLTPTradingEnvConfig,
+]
 
 
-@pytest.mark.parametrize("config_cls", _margin_bearing_configs(), ids=lambda c: c.__name__)
+@pytest.mark.parametrize("config_cls", MARGIN_BEARING_CONFIGS, ids=lambda c: c.__name__)
 def test_every_venue_spells_the_margin_field_the_same_way(config_cls):
     """#289's call was made: one spelling, `margin_mode`, on all four venues.
 

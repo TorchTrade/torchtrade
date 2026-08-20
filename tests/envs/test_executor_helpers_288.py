@@ -170,3 +170,33 @@ def test_every_position_status_spells_the_margin_field_the_same_way(venue, modul
     assert "margin_mode" in names and "margin_type" not in names, (
         f"{venue} PositionStatus spells it {names & {'margin_mode', 'margin_type'}}"
     )
+
+
+def test_the_package_exports_do_not_shadow_one_margin_enum_with_another():
+    """Four venues, four DIFFERENT margin enums, one name -- so exports must not collide.
+
+    The values are API wire strings and deliberately differ: core/binance `ISOLATED`,
+    bitget and bybit `isolated`, okx `cross` where the others say `crossed`. okx was
+    already aliased `OKXMarginMode` for exactly this reason; renaming binance's
+    `MarginType` to `MarginMode` (#289) walked it into the same trap, and for a while
+    `torchtrade.envs.MarginMode` resolved to BYBIT's -- so a binance config built from
+    the package export would have sent `marginType='crossed'` to an API expecting
+    `'CROSSED'`.
+
+    No test covered the export surface, which is why the whole suite passed on it.
+    """
+    import torchtrade.envs as envs
+    import torchtrade.envs.live as live
+
+    assert envs.MarginMode.__module__ == "torchtrade.envs.core.common_types", (
+        f"torchtrade.envs.MarginMode resolves to {envs.MarginMode.__module__}; the "
+        f"offline configs validate against core's, so a venue enum here rejects them"
+    )
+    assert envs.MarginMode.ISOLATED.value == "ISOLATED"
+    assert live.MarginMode.__module__.endswith("bybit.order_executor")
+    for module in (envs, live):
+        for name in ("MarginMode", "PositionMode"):
+            assert getattr(module, "__all__", []).count(name) <= 1, (
+                f"{module.__name__}.__all__ lists {name} twice; the second import wins "
+                f"silently and the wire value changes with it"
+            )
