@@ -11,6 +11,7 @@ from tensordict import TensorDict
 
 from tests.envs.base_exchange_tests import (
     INVALID_ACTIONS,
+    assert_an_invalid_action_cannot_move_an_open_position,
     assert_an_invalid_action_raises_before_trading,
 )
 
@@ -673,14 +674,14 @@ class TestCriticalEdgeCases:
     @pytest.mark.parametrize("action", INVALID_ACTIONS)
     def test_an_invalid_action_raises_before_trading(
         self, env_with_mocks, action):
-        """Venue wiring: this `_step` must route through the shared validator (#288).
-
-        The original bug was per-venue -- alpaca never called the helper at all -- so a
-        shared-contract test alone would not have caught it. The argument lives once, in
-        `assert_an_invalid_action_raises_before_trading`.
-        """
+        """Venue wiring: this `_step` must route through the shared validator (#288)."""
         env, mock_trader, _ = env_with_mocks
         assert_an_invalid_action_raises_before_trading(env, action)
+
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_cannot_move_an_open_position(self, env_with_mocks, action):
+        """The expensive direction -- every other case here starts flat (#288)."""
+        assert_an_invalid_action_cannot_move_an_open_position(env_with_mocks[0], action)
 
     def test_position_state_resync_on_reset(self, env_with_mocks):
         """Test that reset synchronizes position state with exchange (Critical: 8/10)."""

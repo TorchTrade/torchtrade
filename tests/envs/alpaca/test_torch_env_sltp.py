@@ -5,13 +5,19 @@ Tests environment initialization, reset, step, and bracket action mapping. Brack
 pricing is not covered here -- that belongs to the order executor and the offline engines.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import numpy as np
 import torch
 from torchrl.envs.utils import check_env_specs
 from tensordict import TensorDict
+
+from tests.envs.base_exchange_tests import (
+    INVALID_ACTIONS,
+    assert_an_invalid_action_cannot_move_an_open_position,
+    assert_an_invalid_action_raises_before_trading,
+)
 
 from torchtrade.envs.live.alpaca.env_sltp import (
     AlpacaSLTPTorchTradingEnv,
@@ -227,29 +233,17 @@ class TestAlpacaSLTPTradingEnvStep:
 
         return env
 
-    @pytest.mark.parametrize("action", [
-        pytest.param(torch.tensor(-1), id="negative"),
-        pytest.param(torch.tensor(True), id="bool"),
-    ])
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
     def test_an_invalid_action_raises_before_trading(self, env, action):
-        """alpaca SLTP had no guard at all -- a bare KeyError escaped mid-step.
+        """Venue wiring: this `_step` must route through the shared validator (#288)."""
+        env.trader.trade = MagicMock(wraps=env.trader.trade)
+        assert_an_invalid_action_raises_before_trading(env, action)
 
-        bybit and okx clamped the same index into a real bracket order instead, so the
-        five SLTP venues had three behaviours between them. #288 routes all five through
-        one validator that runs before the bracket is priced.
-
-        Its own assertion rather than the shared helper because alpaca's mock trader is a
-        real class with a `position_qty`, not a MagicMock with a `trade` spy.
-        """
-        from torchtrade.envs.core.live import InvalidActionError
-
-        env.reset()
-        with pytest.raises(InvalidActionError):
-            env._step(TensorDict({"action": action}, batch_size=()))
-        assert env.trader.position_qty == 0.0, (
-            f"action {action!r} raised but still opened {env.trader.position_qty} -- "
-            f"the check must precede the bracket order"
-        )
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_cannot_move_an_open_position(self, env, action):
+        """The expensive direction -- every other case here starts flat (#288)."""
+        env.trader.trade = MagicMock(wraps=env.trader.trade)
+        assert_an_invalid_action_cannot_move_an_open_position(env, action)
 
     def test_step_hold_action(self, env):
         """Test hold action (action=0)."""

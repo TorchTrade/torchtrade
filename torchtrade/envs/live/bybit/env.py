@@ -27,7 +27,6 @@ from torchtrade.envs.utils.fractional_sizing import (
 )
 
 
-
 @dataclass
 class BybitFuturesTradingEnvConfig:
     """Configuration for Bybit Futures Trading Environment."""

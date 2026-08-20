@@ -25,7 +25,6 @@ from torchtrade.envs.utils.fractional_sizing import (
 )
 
 
-
 @dataclass
 class OKXFuturesTradingEnvConfig:
     """Configuration for OKX Futures Trading Environment."""

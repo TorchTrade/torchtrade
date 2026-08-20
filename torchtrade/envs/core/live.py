@@ -3,6 +3,7 @@
 from typing import List
 import logging
 import math
+import numbers
 import time
 from abc import abstractmethod
 from datetime import datetime, timedelta
@@ -54,10 +55,8 @@ class LiveObservationHalt(RuntimeError):
 class InvalidActionError(Exception):
     """A policy emitted an action the env cannot resolve to a position.
 
-    Its own type, not ValueError, so the tests that assert it mean what they say:
-    `_current_mark_price` raises ValueError on the same `_step` path, and `_halting`
-    catches ValueError to emergency-close a position. A shared type would let both pass
-    for a malformed action.
+    Its own type, not ValueError, which `_halting` catches to emergency-close a position.
+    Pinned by test_an_invalid_action_is_not_a_valueerror_that_halting_would_flatten.
     """
 
 
@@ -370,25 +369,33 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
     def _resolve_action_index(self, tensordict, n_actions: int) -> int:
         """The policy's action index, validated, or `InvalidActionError` before trading.
 
-        Raises rather than clamping, reversing bybit's and okx's longstanding clamp:
-        clamping does not make a malformed action safe, it makes it decisive -- `-1` a
-        full short, a high index a full long, `NaN` a short via the old index-0 fallback.
-        See #288 for the venue-by-venue archaeology.
-
-        `n_actions` rather than the container because the callers hold different types: a
-        list of levels, and the SLTP `action_map` dict, which `create_sltp_action_map`
-        builds dense over `range(n)`.
+        Raises rather than clamping, reversing bybit's and okx's longstanding clamp: see
+        #288 for the venue-by-venue archaeology. `n_actions` rather than the container
+        because the callers hold a list of levels and the SLTP `action_map` dict, which
+        `create_sltp_action_map` builds dense over `range(n)`.
         """
-        action_idx = tensordict.get("action", 0)
+        # NOT `.get("action", 0)`: index 0 is a full SHORT on every futures venue
+        # (action_levels is [-1, 0, 1]), so the missing-key default was the same
+        # fail-open this method exists to remove.
+        action_idx = tensordict["action"]
+        # Before `.item()`, not after: a shape-(2,) action would otherwise escape as a
+        # bare RuntimeError, which is a second malformed-action shape with a type the
+        # caller cannot distinguish from a venue fault.
         if isinstance(action_idx, torch.Tensor):
+            if action_idx.numel() != 1:
+                raise InvalidActionError(
+                    f"expected a scalar action, got shape {tuple(action_idx.shape)}"
+                )
             action_idx = action_idx.item()
-        # bool is an int subclass and action_levels[True] is a valid index, so `True`
-        # would quietly resolve to the second level rather than being rejected.
-        if isinstance(action_idx, bool) or not isinstance(action_idx, int):
+        # `numbers.Integral`, not `int`: `np.argmax(probs)` returns np.int64, which is a
+        # perfectly good index and which three of the five venues accepted before #288.
+        # bool is Integral AND a valid index, so `True` would silently select level 1.
+        if isinstance(action_idx, bool) or not isinstance(action_idx, numbers.Integral):
             raise InvalidActionError(
                 f"expected an integer action index, got {action_idx!r} "
                 f"({type(action_idx).__name__})"
             )
+        action_idx = int(action_idx)
         if not 0 <= action_idx < n_actions:
             raise InvalidActionError(
                 f"action index {action_idx} is outside [0, {n_actions - 1}]"

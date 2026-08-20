@@ -236,6 +236,40 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
     )
 
 
+# Every live env that owns a `_step` -- the concrete venues. The intermediate bases
+# define none, and an exchange #6 would land here the moment it does.
+STEPPING_ENVS = [c for c in LIVE_ENVS if "_step" in c.__dict__]
+
+
+@pytest.mark.parametrize("env_cls", STEPPING_ENVS, ids=lambda c: c.__name__)
+def test_every_live_step_validates_its_action_before_it_trades(env_cls):
+    """No `_step` may reach an order with an unvalidated action index.
+
+    LIVE_ENVS is discovered via __subclasses__, so this is the only check that extends to
+    an exchange #6 nobody wrote a test for -- the ten behavioural tests cover the ten envs
+    that exist today. It replaces a substring guard that false-positived on a cosmetic
+    re-wrap; AST, so a comment naming the method cannot satisfy it.
+
+    Ordering is the point. Presence alone would pass a `_step` that validated AFTER
+    submitting, and the whole contract is that a malformed action costs nothing.
+    """
+    tree = ast.parse(inspect.getsource(env_cls.__dict__["_step"]).lstrip())
+    calls = [n.func.attr for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+
+    resolvers = [c for c in calls if c in
+                 ("_resolve_action_level", "_resolve_action_index", "_resolve_action_tuple")]
+    assert resolvers, (
+        f"{env_cls.__name__}._step indexes its action space without validating -- on a "
+        f"list a negative index wraps to a full LONG, on the SLTP dict it raises KeyError "
+        f"after the bracket is priced."
+    )
+    assert calls.index(resolvers[0]) < calls.index("_execute_trade_if_needed"), (
+        f"{env_cls.__name__}._step validates AFTER it trades, so a malformed action still "
+        f"reaches the exchange."
+    )
+
+
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
 def test_position_sync_resolves_to_a_shared_implementation(env_cls):
     """Each env gets the position sync its _step actually expects.

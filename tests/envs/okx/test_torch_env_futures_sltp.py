@@ -8,6 +8,7 @@ from tensordict import TensorDict
 
 from tests.envs.base_exchange_tests import (
     INVALID_ACTIONS,
+    assert_an_invalid_action_cannot_move_an_open_position,
     assert_an_invalid_action_raises_before_trading,
 )
 
@@ -494,13 +495,13 @@ class TestOKXSLTPInvalidAction:
 
     @pytest.mark.parametrize("action", INVALID_ACTIONS)
     def test_an_invalid_action_raises_before_trading(self, env, action):
-        """Venue wiring: this `_step` must route through the shared validator (#288).
-
-        The original bug was per-venue -- alpaca never called the helper at all -- so a
-        shared-contract test alone would not have caught it. The argument lives once, in
-        `assert_an_invalid_action_raises_before_trading`.
-        """
+        """Venue wiring: this `_step` must route through the shared validator (#288)."""
         assert_an_invalid_action_raises_before_trading(env, action)
+
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_cannot_move_an_open_position(self, env, action):
+        """The expensive direction -- every other case here starts flat (#288)."""
+        assert_an_invalid_action_cannot_move_an_open_position(env, action)
 
 
 class TestWithReplayData:

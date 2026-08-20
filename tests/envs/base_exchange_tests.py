@@ -545,6 +545,12 @@ def assert_an_invalid_action_raises_before_trading(env, action):
     Every one of these was previously a *trade*, not an error -- `-1` wrapped a list into
     a full long, bybit/okx clamped it to a full short, `NaN` fell back to index 0. The
     load-bearing assertions are the last two: the buggy paths raised nothing at all.
+
+    The venue-level callers exist because the original bug was per-venue WIRING -- alpaca
+    never called the helper at all -- so a shared-contract test alone would not have
+    caught it. They start FLAT, which makes the position assertion `== 0`; the open-
+    position case, where a clamp is a full reversal, is
+    `assert_an_invalid_action_cannot_move_an_open_position`.
     """
     from torchtrade.envs.core.live import InvalidActionError
 
@@ -562,4 +568,37 @@ def assert_an_invalid_action_raises_before_trading(env, action):
     assert env.position.current_position == before, (
         f"action {action!r} left the position at {env.position.current_position}, "
         f"was {before}"
+    )
+
+
+def assert_an_invalid_action_cannot_move_an_open_position(env, action):
+    """The expensive direction: an invalid action arriving while a position is OPEN.
+
+    Every other invalid-action test starts flat, which makes the `position unchanged`
+    assertion `== 0` and blind to the cases that cost the most. A regression that refuses
+    invalid actions when flat and clamps them when a position is open passes the entire
+    live-env suite while turning `-1` into a full reversal -- closing the long AND opening
+    a short, roughly 2x notional through the book, from a malformed index.
+
+    The sync is stubbed rather than the exchange mocked open, so this stays venue-
+    agnostic: `_sync_position_from_exchange` runs BEFORE the resolve on 9 of 10 envs and
+    would legitimately rewrite `current_position` back to flat from the MagicMock's
+    default `{"position_status": None}`, which is a correct sync, not the regression.
+    """
+    from torchtrade.envs.core.live import InvalidActionError
+
+    with patch.object(env, "_wait_for_next_timestamp"), \
+         patch.object(env, "_sync_position_from_exchange", return_value=False):
+        env.reset()
+        env.position.current_position = 1
+        env.trader.trade.reset_mock()
+        with pytest.raises(InvalidActionError):
+            env.step(TensorDict({"action": action}, batch_size=()))
+
+    assert not env.trader.trade.called, (
+        f"action {action!r} traded {env.trader.trade.call_args_list} against an OPEN "
+        f"position -- on [-1, 0, 1] a clamp to index 0 is a full reversal, not a hold"
+    )
+    assert env.position.current_position == 1, (
+        f"action {action!r} moved the open position to {env.position.current_position}"
     )

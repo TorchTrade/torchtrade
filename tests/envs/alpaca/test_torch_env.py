@@ -12,6 +12,12 @@ import torch
 from torchrl.envs.utils import check_env_specs
 from tensordict import TensorDict
 
+from tests.envs.base_exchange_tests import (
+    INVALID_ACTIONS,
+    assert_an_invalid_action_cannot_move_an_open_position,
+    assert_an_invalid_action_raises_before_trading,
+)
+
 from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from .mocks import MockObserver, MockTrader
 
@@ -262,31 +268,17 @@ class TestAlpacaTorchTradingEnvStep:
 
         return env
 
-    @pytest.mark.parametrize("action", [
-        pytest.param(torch.tensor(-1), id="negative"),
-        pytest.param(torch.tensor(True), id="bool"),
-    ])
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
     def test_an_invalid_action_raises_before_trading(self, env, action):
-        """`action_levels[-1]` is a full LONG, and alpaca indexed it raw (#288).
+        """Venue wiring: this `_step` must route through the shared validator (#288)."""
+        env.trader.trade = MagicMock(wraps=env.trader.trade)
+        assert_an_invalid_action_raises_before_trading(env, action)
 
-        Through the real `_step`, not the shared helper: an earlier version of this test
-        called the helper directly and PASSED against a tree where alpaca's `_step` still
-        had the raw index -- it pinned the base method, which is already covered, and said
-        nothing about alpaca's wiring.
-
-        Alpaca keeps its own assertion rather than reusing
-        `assert_an_invalid_action_raises_before_trading` because its mock trader is a real
-        class with a `position_qty`, not a MagicMock with a `trade` spy.
-        """
-        from torchtrade.envs.core.live import InvalidActionError
-
-        env.reset()
-        with pytest.raises(InvalidActionError):
-            env._step(TensorDict({"action": action}, batch_size=()))
-        assert env.trader.position_qty == 0.0, (
-            f"action {action!r} raised but still bought {env.trader.position_qty} -- "
-            f"the check must precede the order"
-        )
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_cannot_move_an_open_position(self, env, action):
+        """The expensive direction -- every other case here starts flat (#288)."""
+        env.trader.trade = MagicMock(wraps=env.trader.trade)
+        assert_an_invalid_action_cannot_move_an_open_position(env, action)
 
     def test_step_returns_tensordict(self, env):
         """Test that step returns a TensorDict."""
