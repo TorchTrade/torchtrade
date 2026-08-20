@@ -89,7 +89,7 @@ while True:
 ### Binance Futures Trading
 
 ```python
-from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.common_types import MarginMode
 
 import os
 from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
@@ -101,7 +101,7 @@ config = BinanceFuturesTradingEnvConfig(
     execute_on="1Min",
     demo=True,  # Use testnet for testing
     leverage=10.0,
-    margin_type=MarginType.ISOLATED,
+    margin_mode=MarginMode.ISOLATED,
 )
 
 env = BinanceFuturesTorchTradingEnv(
@@ -139,7 +139,7 @@ The non-SLTP live environments share these base parameters:
 #   action_levels, done_on_bankruptcy, bankrupt_threshold, seed,
 #   include_base_features
 #
-# Futures configs add: leverage, margin_type/margin_mode, demo,
+# Futures configs add: leverage, margin_mode/margin_mode, demo,
 #   observation_failure_policy; close_position_on_init/_on_reset are on the
 #   futures envs and alpaca, but not polymarket
 # Alpaca adds: paper, trade_mode; it also has close_position_on_init/_on_reset
@@ -163,11 +163,11 @@ trade_mode: str = "notional"                # "notional" | "quantity" here.
 
 **Binance:**
 ```python
-from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.common_types import MarginMode
 
 demo: bool = True                           # Testnet or mainnet
 leverage: int = 1                           # the leverage APPLIED, not a cap
-margin_type: MarginType = MarginType.ISOLATED   # ISOLATED or CROSSED (the enum)
+margin_mode: MarginMode = MarginMode.ISOLATED   # ISOLATED or CROSSED (the enum)
 ```
 
 **Bitget:**

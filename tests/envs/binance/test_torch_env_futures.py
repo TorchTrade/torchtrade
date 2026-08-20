@@ -326,7 +326,7 @@ class TestBinanceFuturesTorchTradingEnv:
             mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
                 qty=filled, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
                 unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
-                margin_type="isolated", liquidation_price=45000.0,
+                margin_mode="isolated", liquidation_price=45000.0,
             )})
             mock_trader.trade.reset_mock()
             env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
@@ -351,7 +351,7 @@ class TestBinanceFuturesTorchTradingEnv:
         mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
             qty=1e-12, notional_value=500.0, entry_price=47500.0, unrealized_pnl=26.3,
             unrealized_pnl_pct=0.0526, mark_price=50000.0, leverage=20,
-            margin_type="isolated", liquidation_price=48000.0,
+            margin_mode="isolated", liquidation_price=48000.0,
         )})
 
         with patch.object(env, "_wait_for_next_timestamp"):
@@ -391,7 +391,7 @@ class TestBinanceFuturesTorchTradingEnv:
         mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
             qty=0.01, notional_value=500.0, entry_price=47500.0, unrealized_pnl=26.3,
             unrealized_pnl_pct=0.0526, mark_price=50000.0, leverage=20,  # NOT the config's 5
-            margin_type="isolated", liquidation_price=45000.0,
+            margin_mode="isolated", liquidation_price=45000.0,
         )})
 
         with patch.object(env, "_wait_for_next_timestamp"):
@@ -444,7 +444,7 @@ class TestBinanceFuturesTorchTradingEnv:
         mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
             qty=qty, notional_value=50.1, entry_price=50000.0, unrealized_pnl=0.1,
             unrealized_pnl_pct=0.002, mark_price=50100.0, leverage=10,
-            margin_type="isolated", liquidation_price=liq_price,
+            margin_mode="isolated", liquidation_price=liq_price,
         )})
         with patch.object(env, "_wait_for_next_timestamp"):
             td = env.reset()
@@ -468,7 +468,7 @@ class TestBinanceFuturesTorchTradingEnv:
         mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
             qty=0.011, notional_value=550.0, entry_price=50000.0, unrealized_pnl=100.0,
             unrealized_pnl_pct=0.02, mark_price=50000.0, leverage=10,
-            margin_type="isolated", liquidation_price=45000.0,
+            margin_mode="isolated", liquidation_price=45000.0,
         )})
         with patch.object(env, "_wait_for_next_timestamp"):
             td = env.reset()
@@ -490,7 +490,7 @@ class TestBinanceFuturesTorchTradingEnv:
             return {"position_status": PositionStatus(
                 qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
                 unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
-                margin_type="isolated", liquidation_price=45000.0,
+                margin_mode="isolated", liquidation_price=45000.0,
             )} if qty else {"position_status": None}
 
         with patch.object(env, "_wait_for_next_timestamp"):
@@ -523,7 +523,7 @@ class TestBinanceFuturesTorchTradingEnv:
             return {"position_status": PositionStatus(
                 qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
                 unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
-                margin_type="isolated", liquidation_price=45000.0,
+                margin_mode="isolated", liquidation_price=45000.0,
             )} if qty else {"position_status": None}
 
         with patch.object(env, "_wait_for_next_timestamp"):
@@ -551,18 +551,18 @@ class TestBinanceFuturesTradingEnvConfig:
     def test_custom_config(self):
         """Test custom configuration."""
         from torchtrade.envs.live.binance.env import BinanceFuturesTradingEnvConfig
-        from torchtrade.envs.live.binance.order_executor import MarginType
+        from torchtrade.envs.live.binance.order_executor import MarginMode
 
         config = BinanceFuturesTradingEnvConfig(
             symbol="ETHUSDT",
             leverage=10,
-            margin_type=MarginType.CROSSED,
+            margin_mode=MarginMode.CROSSED,
             demo=False,
         )
 
         assert config.symbol == "ETHUSDT"
         assert config.leverage == 10
-        assert config.margin_type == MarginType.CROSSED
+        assert config.margin_mode == MarginMode.CROSSED
         assert config.demo is False
 
 

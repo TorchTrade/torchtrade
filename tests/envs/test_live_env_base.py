@@ -1338,7 +1338,7 @@ def test_isolated_missing_liquidation_price_does_not_require_account_maintenance
 
 
 @pytest.mark.parametrize("field,label", [
-    ("margin_type", "CROSSED"),  # Binance
+    ("margin_mode", "CROSSED"),  # Binance
     ("margin_mode", "cross"),    # OKX
     ("margin_mode", "crossed"),  # Bitget
 ], ids=["binance", "okx", "bitget"])
@@ -3159,16 +3159,16 @@ def test_hoisting_a_default_did_not_change_it(config_cls):
 
 @pytest.mark.parametrize("config_cls,margin_field", [
     pytest.param(c, m, id=c.__name__) for c, m in [
-        (BinanceFuturesSLTPTradingEnvConfig, "margin_type"),
+        (BinanceFuturesSLTPTradingEnvConfig, "margin_mode"),
         (BitgetFuturesSLTPTradingEnvConfig, "margin_mode"),
         (BybitFuturesSLTPTradingEnvConfig, "margin_mode"),
         (OKXFuturesSLTPTradingEnvConfig, "margin_mode"),
     ]
 ])
 def test_the_venue_specific_margin_surface_is_untouched(config_cls, margin_field):
-    """Named per venue, not `margin_type XOR margin_mode`.
+    """Named per venue, not `margin_mode XOR margin_mode`.
 
-    The XOR form passed when binance's `margin_type` was renamed to `margin_mode` -- the
+    The XOR form passed when binance's `margin_mode` was renamed to `margin_mode` -- the
     exact unification it existed to prevent, since renaming changes a venue's public API
     and is #289's call. Symmetric assertions cannot catch a swap.
     """

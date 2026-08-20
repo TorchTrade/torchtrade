@@ -416,7 +416,7 @@ class TestPositionStatusDataclass:
             unrealized_pnl_pct=0.002,
             mark_price=50100.0,
             leverage=10,
-            margin_type="isolated",
+            margin_mode="isolated",
             liquidation_price=45000.0,
         )
 

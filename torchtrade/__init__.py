@@ -11,5 +11,5 @@ from torchtrade.envs.offline import (
     SequentialTradingEnvSLTPConfig,
     OneStepTradingEnv,
     OneStepTradingEnvConfig,
-    MarginType,
+    MarginMode,
 )

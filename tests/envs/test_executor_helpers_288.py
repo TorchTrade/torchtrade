@@ -143,3 +143,35 @@ def test_the_executor_trade_surface_advertises_nothing_it_cannot_do(executor):
         f"{executor.__name__}.trade advertises position_side again; it is driven by the "
         f"venue-level position_mode config, and these three have no such config"
     )
+
+
+def test_every_venue_spells_the_margin_field_the_same_way():
+    """binance called it `margin_type` while the other three called it `margin_mode`.
+
+    One concept, two spellings, on configs and on the shared-in-name-only PositionStatus
+    -- so exchange-agnostic config code could not set it, and replay carried BOTH fields
+    to satisfy both readers (#289). The VALUES stay venue-specific: they are API strings,
+    and okx's is `cross` where bitget's and bybit's are `crossed`.
+    """
+    import dataclasses, importlib
+
+    for venue in ("binance", "bitget", "bybit", "okx"):
+        config_cls = getattr(importlib.import_module(f"torchtrade.envs.live.{venue}.env"),
+                             {"binance": "BinanceFuturesTradingEnvConfig",
+                              "bitget": "BitgetFuturesTradingEnvConfig",
+                              "bybit": "BybitFuturesTradingEnvConfig",
+                              "okx": "OKXFuturesTradingEnvConfig"}[venue])
+        names = {f.name for f in dataclasses.fields(config_cls)}
+        assert "margin_mode" in names, f"{venue} config lost margin_mode"
+        assert "margin_type" not in names, f"{venue} config reintroduced margin_type"
+
+    for venue, module in (("binance", "torchtrade.envs.live.binance.order_executor"),
+                          ("bitget", "torchtrade.envs.live.bitget.order_executor"),
+                          ("bybit", "torchtrade.envs.live.bybit.order_executor"),
+                          ("okx", "torchtrade.envs.live.okx.order_executor"),
+                          ("replay", "torchtrade.envs.replay.order_executor")):
+        status = getattr(importlib.import_module(module), "PositionStatus")
+        names = {f.name for f in dataclasses.fields(status)}
+        assert "margin_mode" in names and "margin_type" not in names, (
+            f"{venue} PositionStatus spells the margin field {names & {'margin_mode', 'margin_type'}}"
+        )

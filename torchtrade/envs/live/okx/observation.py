@@ -118,10 +118,6 @@ class OKXObservationClass(BaseFuturesObservationClass):
         """
         return timeframe_to_okx(timeframe)
 
-    def _get_default_lookback(self) -> int:
-        """Get the default number of candles to fetch (OKX max per request is 300)."""
-        return 200
-
     def _get_timestamp_column(self) -> str:
         """Get the name of the timestamp column."""
         return "timestamp"

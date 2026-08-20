@@ -15,7 +15,7 @@ import os
 from dotenv import load_dotenv
 
 from torchtrade.envs.core.common import TradeMode
-from torchtrade.envs.core.common_types import MarginType, OrderStatus
+from torchtrade.envs.core.common_types import MarginMode, OrderStatus
 from torchtrade.envs.core.state import POSITION_UNKNOWN
 from torchtrade.envs.utils.leverage import leverage_already_set, require_leverage_applied
 
@@ -64,7 +64,7 @@ class PositionStatus:
     mark_price: float
     leverage: float  # float, not int: int() truncated 1.5x to 1x, which then took
     # the no-liquidation branch and reported a levered position as safe (#277).
-    margin_type: str
+    margin_mode: str
     liquidation_price: float
 
 
@@ -92,7 +92,7 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         api_secret: str = "",
         demo: bool = True,
         leverage: int = 1,
-        margin_type: MarginType = MarginType.ISOLATED,
+        margin_mode: MarginMode = MarginMode.ISOLATED,
         client: Optional[object] = None,
     ):
         """
@@ -105,7 +105,7 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
             api_secret: Binance API secret
             demo: Whether to use demo trading (default: True for safety)
             leverage: Leverage to use (1-125, default: 1)
-            margin_type: ISOLATED (margin per position, limits loss) or
+            margin_mode: ISOLATED (margin per position, limits loss) or
                         CROSSED (shared margin, higher liquidation risk)
             client: Optional pre-configured Client for dependency injection
         """
@@ -120,7 +120,7 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         self.trade_mode = trade_mode
         self.demo = demo
         self.leverage = leverage
-        self.margin_type = margin_type
+        self.margin_mode = margin_mode
         self.last_order_id = None
 
         self._tick_size: Optional[float] = None
@@ -169,7 +169,7 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         try:
             self.client.futures_change_margin_type(
                 symbol=self.symbol,
-                marginType=self.margin_type.value
+                marginType=self.margin_mode.value
             )
         except Exception as e:
             # May fail if already set to this margin type
@@ -437,7 +437,7 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                         leverage=float(
                             self.leverage if pos.get("leverage") in (None, "") else pos.get("leverage")
                         ),
-                        margin_type=pos.get("marginType", self.margin_type.value),
+                        margin_mode=pos.get("marginType", self.margin_mode.value),
                         liquidation_price=float(pos.get("liquidationPrice", 0)),
                     )
                     break

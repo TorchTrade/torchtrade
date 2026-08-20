@@ -16,7 +16,7 @@ Live trading integration with Binance for crypto futures markets (USDT-margined)
 ```python
 import os
 
-from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.common_types import MarginMode
 from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
 
 config = BinanceFuturesTradingEnvConfig(
@@ -26,7 +26,7 @@ config = BinanceFuturesTradingEnvConfig(
     execute_on="1Min",
     demo=True,  # Use testnet first!
     leverage=10.0,
-    margin_type=MarginType.ISOLATED,
+    margin_mode=MarginMode.ISOLATED,
 )
 
 env = BinanceFuturesTorchTradingEnv(
@@ -47,11 +47,11 @@ obs = env.reset()
 ## Configuration
 
 ```python
-from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.common_types import MarginMode
 from torchtrade.envs.core.live import ObservationFailurePolicy
 from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
 
-from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.common_types import MarginMode
 from torchtrade.envs.core.live import ObservationFailurePolicy
 
 # Every field of BinanceFuturesTradingEnvConfig, with its real default.
@@ -62,7 +62,7 @@ config = BinanceFuturesTradingEnvConfig(
     window_sizes=10,
     execute_on='1Hour',
     leverage=1,
-    margin_type=MarginType.ISOLATED,
+    margin_mode=MarginMode.ISOLATED,
     action_levels=None,
     done_on_bankruptcy=True,
     bankrupt_threshold=0.1,
@@ -106,10 +106,10 @@ config = BinanceFuturesTradingEnvConfig(
 
 ```python
 from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
-from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.common_types import MarginMode
 
 config = BinanceFuturesTradingEnvConfig(
-    margin_type=MarginType.ISOLATED,
+    margin_mode=MarginMode.ISOLATED,
     leverage=10.0,
 )
 ```
@@ -121,10 +121,10 @@ config = BinanceFuturesTradingEnvConfig(
 
 ```python
 from torchtrade.envs.live.binance import BinanceFuturesTradingEnvConfig
-from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.common_types import MarginMode
 
 config = BinanceFuturesTradingEnvConfig(
-    margin_type=MarginType.CROSSED,
+    margin_mode=MarginMode.CROSSED,
     leverage=20.0,
 )
 ```
@@ -202,7 +202,7 @@ evaluating a policy that carries positions across funding timestamps.
 ## Example: Basic Futures Trading
 
 ```python
-from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.common_types import MarginMode
 
 import os
 import torch
@@ -216,7 +216,7 @@ config = BinanceFuturesTradingEnvConfig(
     execute_on="1Min",
     demo=True,
     leverage=5.0,
-    margin_type=MarginType.ISOLATED,
+    margin_mode=MarginMode.ISOLATED,
 )
 
 env = BinanceFuturesTorchTradingEnv(

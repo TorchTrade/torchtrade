@@ -118,10 +118,6 @@ class BybitObservationClass(BaseFuturesObservationClass):
         """
         return timeframe_to_bybit(timeframe)
 
-    def _get_default_lookback(self) -> int:
-        """Get the default number of candles to fetch (Bybit limit)."""
-        return 200
-
     def _get_timestamp_column(self) -> str:
         """Get the name of the timestamp column."""
         return "timestamp"

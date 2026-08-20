@@ -17,7 +17,7 @@ from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
     TAKER_FEE,
     BinanceFuturesOrderClass,
-    MarginType,
+    MarginMode,
 )
 from torchtrade.envs.live.binance.base import BinanceBaseTorchTradingEnv
 from torchtrade.envs.utils.fractional_sizing import (
@@ -41,7 +41,7 @@ class BinanceFuturesTradingEnvConfig:
 
     # Trading parameters
     leverage: int = 1  # Leverage (1-125)
-    margin_type: MarginType = MarginType.ISOLATED
+    margin_mode: MarginMode = MarginMode.ISOLATED
 
     # Action space configuration (fractional mode only)
     action_levels: List[float] = None  # Custom action levels, or None for defaults

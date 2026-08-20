@@ -63,16 +63,13 @@ class BaseFuturesObservationClass(BaseObservationClass):
             Provider-specific interval string (e.g., "1H" for Bitget, "1h" for Binance)
         """
         pass
-    @abstractmethod
-    def _get_default_lookback(self) -> int:
-        """Get the default number of candles to fetch."""
-        pass
+    def _fetch_single_timeframe(self, timeframe: TimeFrame, limit: int) -> pd.DataFrame:
+        """Fetch and preprocess data for a single timeframe.
 
-    def _fetch_single_timeframe(self, timeframe: TimeFrame, limit: int = None) -> pd.DataFrame:
-        """Fetch and preprocess data for a single timeframe."""
-        if limit is None:
-            limit = self._get_default_lookback()
-
+        `limit` is required here, unlike on the base: `get_observations` is the only
+        caller and always sizes it, and the fallback it used to have was a hook four
+        venues implemented and nothing ever reached (#288).
+        """
         # Convert TimeFrame to provider-specific interval format
         provider_interval = self._convert_timeframe(timeframe)
 

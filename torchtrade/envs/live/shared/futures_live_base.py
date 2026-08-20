@@ -37,14 +37,14 @@ from torchtrade.envs.utils.liquidation import (
 def _normalized_margin_mode(position_status):
     """Normalize concrete adapter labels to ``cross``/``isolated`` or unknown.
 
-    Binance exposes ``margin_type`` while the other adapters expose ``margin_mode``.
+    Binance exposes ``margin_mode`` while the other adapters expose ``margin_mode``.
     Unknown labels deliberately remain unknown: when the venue also omits a native
     liquidation price, guessing either route can report a dangerously safe distance.
     """
     margin_mode = getattr(
         position_status,
         "margin_mode",
-        getattr(position_status, "margin_type", None),
+        getattr(position_status, "margin_mode", None),
     )
     value = getattr(margin_mode, "value", margin_mode)
     value = str(value).lower()

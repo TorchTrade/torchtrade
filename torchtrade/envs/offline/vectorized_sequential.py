@@ -30,7 +30,7 @@ from torchtrade.envs.utils.fractional_sizing import (
 )
 
 from torchtrade.envs.core.default_rewards import batched_log_return_reward
-from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.common_types import MarginMode
 from torchtrade.envs.utils.liquidation import DEFAULT_MAINTENANCE_MARGIN_RATE, require_fee_fits_maintenance
 
 # Money, prices and position sizes are tracked in float64 to match the scalar envs' Python
@@ -71,7 +71,7 @@ class VectorizedSequentialTradingEnvConfig:
 
     # Trading parameters
     leverage: int = 1
-    margin_type: MarginType = MarginType.ISOLATED
+    margin_mode: MarginMode = MarginMode.ISOLATED
     maintenance_margin_rate: float = DEFAULT_MAINTENANCE_MARGIN_RATE
 
     def __post_init__(self):

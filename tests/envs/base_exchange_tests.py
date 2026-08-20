@@ -458,7 +458,7 @@ def assert_a_direct_flip_does_not_age_the_new_position(
     vacuous. Two of these passed on the buggy code before I found that.
     """
     # Built positionally because the four dataclasses differ only in the NAME of field 8
-    # (margin_type on binance, margin_mode elsewhere). The only field this test actually reads
+    # (margin_mode on binance, margin_mode elsewhere). The only field this test actually reads
     # is qty -- everything else is inert filler -- so that is the one thing worth pinning.
     assert [f.name for f in fields(PositionStatus)][0] == "qty"
 

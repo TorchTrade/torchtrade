@@ -50,9 +50,6 @@ class BinanceObservationClass(BaseFuturesObservationClass):
     def _convert_timeframe(self, timeframe: TimeFrame) -> str:
         return timeframe_to_binance(timeframe)
 
-    def _get_default_lookback(self) -> int:
-        return 500  # binance's kline default page size (its max is 1000)
-
     def _get_timestamp_column(self) -> str:
         return "open_time"
 
