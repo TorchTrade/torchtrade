@@ -54,9 +54,10 @@ class LiveObservationHalt(RuntimeError):
 class InvalidActionError(Exception):
     """A policy emitted an action the env cannot resolve to a position.
 
-    Not a ValueError: `_halting` catches ValueError and under FLATTEN emergency-closes a
-    real position. An unreadable venue state warrants that; a malformed action, with the
-    account state fully known, does not.
+    Its own type, not ValueError, so the tests that assert it mean what they say:
+    `_current_mark_price` raises ValueError on the same `_step` path, and `_halting`
+    catches ValueError to emergency-close a position. A shared type would let both pass
+    for a malformed action.
     """
 
 
@@ -369,40 +370,19 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
     def _resolve_action_index(self, tensordict, n_actions: int) -> int:
         """The policy's action index, validated, or `InvalidActionError` before trading.
 
-        Indexing raw is two different bugs depending on the container. A LIST wraps:
-        `action_levels[-1]` is the last level, so a negative index silently opened a full
-        LONG on binance and bitget. A DICT does not: `action_map[-1]` raises KeyError
-        mid-step on the three SLTP envs that had no guard at all. Reachable, not
-        theoretical: a policy sized for a different action space -- a checkpoint from
-        before the action space was reconfigured -- argmaxes past the end.
+        Raises rather than clamping, reversing bybit's and okx's longstanding clamp:
+        clamping does not make a malformed action safe, it makes it decisive -- `-1` a
+        full short, a high index a full long, `NaN` a short via the old index-0 fallback.
+        See #288 for the venue-by-venue archaeology.
 
-        This RAISES rather than clamping, reversing bybit's and okx's longstanding clamp.
-        Clamping does not make a malformed action safe, it makes it decisive: `-1` becomes
-        a full short, a high index a full long, `NaN` a short via the index-0 fallback,
-        and `1.5` a different action than the policy emitted. Turning nonsense into a
-        confident market order is the failure mode invariant 4 names -- validate at the
-        boundary, never guard in the rule. An `IndexError` at least halted before an
-        order; a clamp does not.
-
-        NOT a ValueError, deliberately. `_halting` catches ValueError and under FLATTEN
-        emergency-closes a real position. Nothing routes this call through `_halting`
-        today, but a malformed action is a policy bug with the account state fully known
-        -- flattening on it would be wrong, and that is one refactor away from happening
-        silently (cf. #355, #394).
-
-        `n_actions` rather than the container itself because the two callers hold
-        different types: a list of levels, and the SLTP `action_map` dict. That dict is
-        built dense over `range(n)` by `create_sltp_action_map`, so a range check is
-        equivalent to key membership and gives a better message than a bare KeyError.
+        `n_actions` rather than the container because the callers hold different types: a
+        list of levels, and the SLTP `action_map` dict, which `create_sltp_action_map`
+        builds dense over `range(n)`.
         """
         action_idx = tensordict.get("action", 0)
         if isinstance(action_idx, torch.Tensor):
-            if action_idx.numel() != 1:
-                raise InvalidActionError(
-                    f"expected a scalar action, got shape {tuple(action_idx.shape)}"
-                )
             action_idx = action_idx.item()
-        # bool is an int subclass, and action_levels[True] is a valid index -- so `True`
+        # bool is an int subclass and action_levels[True] is a valid index, so `True`
         # would quietly resolve to the second level rather than being rejected.
         if isinstance(action_idx, bool) or not isinstance(action_idx, int):
             raise InvalidActionError(

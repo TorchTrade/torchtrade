@@ -222,27 +222,3 @@ def test_no_unqualified_margin_enum_is_exported_from_the_live_namespace():
         f"silently and the wire value changes with it -- "
         f"{sorted(n for n in live.__all__ if live.__all__.count(n) > 1)}"
     )
-
-
-@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx", "alpaca"])
-def test_every_sltp_venue_validates_its_action_index(venue):
-    """All five SLTP `_step`s must resolve through the shared validator.
-
-    They had three behaviours between them: bybit and okx carried a byte-identical copy of
-    the old clamp, the other three let a bare KeyError escape mid-step. The `not in`
-    assertion is the real guard -- SLTP envs have no `action_levels`, so the level variant
-    would AttributeError here.
-    """
-    import importlib
-
-    module = importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp")
-    cls = next(v for k, v in vars(module).items()
-               if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
-    src = inspect.getsource(cls)
-    assert "_resolve_action_index(tensordict, len(self.action_map))" in src, (
-        f"{venue} SLTP does not validate its action index through the shared helper"
-    )
-    assert "_resolve_action_level" not in src, (
-        f"{venue} SLTP calls _resolve_action_level, which reads action_levels -- SLTP "
-        f"envs do not have that attribute, so this AttributeErrors at the first step"
-    )

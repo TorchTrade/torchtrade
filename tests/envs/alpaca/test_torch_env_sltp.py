@@ -228,9 +228,9 @@ class TestAlpacaSLTPTradingEnvStep:
         return env
 
     @pytest.mark.parametrize("action", [
-        torch.tensor(-1), torch.tensor(9999), torch.tensor(1.5),
-        torch.tensor(float("nan")), torch.tensor(True),
-    ], ids=["negative", "past-the-end", "fractional", "nan", "bool"])
+        pytest.param(torch.tensor(-1), id="negative"),
+        pytest.param(torch.tensor(True), id="bool"),
+    ])
     def test_an_invalid_action_raises_before_trading(self, env, action):
         """alpaca SLTP had no guard at all -- a bare KeyError escaped mid-step.
 

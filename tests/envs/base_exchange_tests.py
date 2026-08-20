@@ -525,14 +525,16 @@ def assert_the_step_emits_the_whole_done_family(env):
     assert not nxt["truncated"].any(), "a live env never truncates itself"
 
 
-# 9999, not a small overshoot: the SLTP action maps run to 19 entries, so `5` is a VALID
-# index there and the case quietly tested nothing.
+# The two inputs that pre-fix produced a SILENT TRADE rather than a crash, which is what
+# a per-venue wiring regression would reintroduce. `-1` wrapped a list into a full long;
+# `True` is subtler -- hash(True) == hash(1), so on the unguarded SLTP venues
+# `action_map[True]` aliased `action_map[1]` and opened a real bracket order. The other
+# malformed kinds (past-the-end, fractional, non-finite) already raised IndexError,
+# TypeError or KeyError before any order, so at venue level they prove only that the
+# exception type is now unified. The exhaustive sweep over all six kinds belongs to the
+# validator itself, in tests/envs/test_live_env_base.py.
 INVALID_ACTIONS = [
     pytest.param(torch.tensor(-1), id="negative"),
-    pytest.param(torch.tensor(9999), id="past-the-end"),
-    pytest.param(torch.tensor(1.5), id="fractional"),
-    pytest.param(torch.tensor(float("nan")), id="nan"),
-    pytest.param(torch.tensor(float("inf")), id="inf"),
     pytest.param(torch.tensor(True), id="bool"),
 ]
 
