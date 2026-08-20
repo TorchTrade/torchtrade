@@ -143,3 +143,66 @@ def test_the_executor_trade_surface_advertises_nothing_it_cannot_do(executor):
         f"{executor.__name__}.trade advertises position_side again; it is driven by the "
         f"venue-level position_mode config, and these three have no such config"
     )
+
+
+POSITION_STATUS_CLASSES = [
+    ("binance", "torchtrade.envs.live.binance.order_executor"),
+    ("bitget", "torchtrade.envs.live.bitget.order_executor"),
+    ("bybit", "torchtrade.envs.live.bybit.order_executor"),
+    ("okx", "torchtrade.envs.live.okx.order_executor"),
+    ("replay", "torchtrade.envs.replay.order_executor"),
+]
+
+
+@pytest.mark.parametrize("venue,module", POSITION_STATUS_CLASSES, ids=lambda v: v)
+def test_every_position_status_spells_the_margin_field_the_same_way(venue, module):
+    """Five PositionStatus dataclasses, one field name (#289).
+
+    The configs are guarded in `test_live_env_base.py`; this is the other half. Replay's
+    carried BOTH `margin_type` and `margin_mode` as separate fields to satisfy binance's
+    readers and everyone else's -- a duplicate that only surfaced because the rename made
+    the two names collide into a SyntaxError.
+    """
+    import dataclasses, importlib
+
+    status = getattr(importlib.import_module(module), "PositionStatus")
+    names = {f.name for f in dataclasses.fields(status)}
+    assert "margin_mode" in names and "margin_type" not in names, (
+        f"{venue} PositionStatus spells it {names & {'margin_mode', 'margin_type'}}"
+    )
+
+
+def test_no_unqualified_margin_enum_is_exported_from_the_live_namespace():
+    """Four venues, four DIFFERENT margin enums, one class name.
+
+    The values are API wire strings and deliberately differ: core/binance `ISOLATED`,
+    bitget and bybit `isolated`, okx `cross` where the others say `crossed`. So an
+    unqualified `MarginMode` at a namespace covering all four sends the wrong case to
+    whichever venue it did not come from -- measured, `marginType='isolated'` reaching an
+    API that wants `'ISOLATED'`.
+
+    okx was aliased for this reason long before #289; renaming binance's `MarginType` to
+    `MarginMode` put a THIRD claimant on the name and made `torchtrade.envs.MarginMode`
+    resolve to bybit's. Nothing covered the export surface, so the whole suite passed on
+    it. Every venue enum is qualified here now; the bare name belongs to core, which is
+    what the offline configs validate against.
+    """
+    import torchtrade.envs as envs
+    import torchtrade.envs.live as live
+
+    assert envs.MarginMode.__module__ == "torchtrade.envs.core.common_types", (
+        f"torchtrade.envs.MarginMode resolves to {envs.MarginMode.__module__}; the "
+        f"offline configs validate against core's, so a venue enum here rejects them"
+    )
+    assert not hasattr(live, "MarginMode"), (
+        "torchtrade.envs.live exports an unqualified MarginMode; four venues claim that "
+        "name with incompatible wire values, so it must be aliased per venue"
+    )
+    assert not hasattr(live, "PositionMode"), "same, for PositionMode"
+    assert live.BybitMarginMode.ISOLATED.value == "isolated"
+    assert live.OKXMarginMode.CROSS.value == "cross"
+    assert len(live.__all__) == len(set(live.__all__)), (
+        f"duplicate names in torchtrade.envs.live.__all__: the second import wins "
+        f"silently and the wire value changes with it -- "
+        f"{sorted(n for n in live.__all__ if live.__all__.count(n) > 1)}"
+    )

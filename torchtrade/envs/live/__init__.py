@@ -17,7 +17,6 @@ from torchtrade.envs.live.binance import (
     BinanceFuturesTorchTradingEnv,
     BinanceFuturesTradingEnvConfig,
     TradeMode,
-    MarginType,
 )
 
 # Bitget
@@ -36,11 +35,14 @@ from torchtrade.envs.live.bybit import (
     BybitFuturesTradingEnvConfig,
     BybitFuturesSLTPTorchTradingEnv,
     BybitFuturesSLTPTradingEnvConfig,
-    MarginMode,
-    PositionMode,
+    MarginMode as BybitMarginMode,
+    PositionMode as BybitPositionMode,
 )
 
-# OKX (use qualified imports to avoid shadowing Bybit's MarginMode/PositionMode)
+# Every venue's margin enum is qualified here. They share a NAME and not their VALUES --
+# core/binance `ISOLATED`, bitget and bybit `isolated`, okx `cross` where the others say
+# `crossed` -- and those are API wire strings, so an unqualified one silently sends the
+# wrong case to whichever venue it did not come from (#289).
 from torchtrade.envs.live.okx import (
     OKXObservationClass,
     OKXFuturesOrderClass,
@@ -75,7 +77,6 @@ __all__ = [
     "BinanceFuturesTorchTradingEnv",
     "BinanceFuturesTradingEnvConfig",
     "TradeMode",
-    "MarginType",
     # Bitget
     "BitgetObservationClass",
     "BitgetFuturesOrderClass",
@@ -88,8 +89,8 @@ __all__ = [
     "BybitFuturesTradingEnvConfig",
     "BybitFuturesSLTPTorchTradingEnv",
     "BybitFuturesSLTPTradingEnvConfig",
-    "MarginMode",
-    "PositionMode",
+    "BybitMarginMode",
+    "BybitPositionMode",
     # OKX
     "OKXObservationClass",
     "OKXFuturesOrderClass",

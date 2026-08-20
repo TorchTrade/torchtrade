@@ -4,7 +4,7 @@
 from torchtrade.envs.offline.sequential import (
     SequentialTradingEnv,
     SequentialTradingEnvConfig,
-    MarginType,
+    MarginMode,
 )
 from torchtrade.envs.offline.sequential_sltp import (
     SequentialTradingEnvSLTP,
@@ -40,7 +40,7 @@ __all__ = [
     "VectorizedSequentialTradingEnvSLTP",
     "VectorizedSequentialTradingEnvSLTPConfig",
     # Types
-    "MarginType",
+    "MarginMode",
     # Infrastructure
     "MarketDataObservationSampler",
 ]

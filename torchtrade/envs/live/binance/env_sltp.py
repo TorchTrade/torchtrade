@@ -18,7 +18,7 @@ from torchrl.data import Categorical
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
     BinanceFuturesOrderClass,
-    MarginType,
+    MarginMode,
 )
 from torchtrade.envs.live.binance.utils import normalize_binance_timeframe_config
 from torchtrade.envs.live.binance.base import BinanceBaseTorchTradingEnv
@@ -36,7 +36,7 @@ class BinanceFuturesSLTPTradingEnvConfig(BaseFuturesSLTPConfig):
     """
 
     # Trading parameters
-    margin_type: MarginType = MarginType.ISOLATED
+    margin_mode: MarginMode = MarginMode.ISOLATED
 
     _normalize_timeframes = staticmethod(normalize_binance_timeframe_config)
 

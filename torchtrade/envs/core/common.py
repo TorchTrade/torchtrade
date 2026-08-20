@@ -2,6 +2,8 @@
 
 from typing import Literal, Sequence
 
+from torchtrade.envs.core.common_types import MarginMode
+
 
 # Type alias for trade mode with autocomplete and validation
 # Use string literals "fractional", "notional", or "quantity" throughout the codebase
@@ -38,6 +40,21 @@ def validate_position_sizing(
     elif trade_mode in ("notional", "quantity"):
         if quantity_per_trade <= 0:
             raise ValueError(f"quantity_per_trade must be positive, got {quantity_per_trade}")
+
+
+def validate_offline_margin_mode(margin_mode) -> None:
+    """CROSSED is not implemented offline, so refuse it instead of silently isolating.
+
+    Offline liquidation always uses isolated_liquidation_price, so a CROSSED config
+    produced isolated math while the user believed otherwise (#289).
+    """
+    if margin_mode is not MarginMode.ISOLATED:
+        raise ValueError(
+            f"margin_mode={margin_mode} is not implemented for the offline "
+            f"environments: liquidation always uses isolated_liquidation_price, so "
+            f"CROSSED silently produced isolated liquidation math (#289). Nothing "
+            f"reads this field. Use ISOLATED, or the live envs, which honour it."
+        )
 
 
 def validate_sltp_levels(

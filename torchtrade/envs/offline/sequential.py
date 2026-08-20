@@ -41,7 +41,8 @@ from torchtrade.envs.utils.fractional_sizing import (
     POSITION_TOLERANCE_PCT,
     POSITION_TOLERANCE_NOTIONAL,
 )
-from torchtrade.envs.core.common_types import MarginType
+from torchtrade.envs.core.common_types import MarginMode
+from torchtrade.envs.core.common import validate_offline_margin_mode
 from torchtrade.envs.utils.liquidation import (
     DEFAULT_MAINTENANCE_MARGIN_RATE,
     isolated_liquidation_price,
@@ -86,18 +87,12 @@ class SequentialTradingEnvConfig:
     # leverage > 1: Enables futures mode with liquidation mechanics
     # leverage == 1: Spot mode (no liquidation)
     leverage: int = 1
-    margin_type: MarginType = MarginType.ISOLATED
+    margin_mode: MarginMode = MarginMode.ISOLATED
     maintenance_margin_rate: float = DEFAULT_MAINTENANCE_MARGIN_RATE
 
     def __post_init__(self):
         """Validate configuration and normalize timeframes."""
-        if self.margin_type is not MarginType.ISOLATED:
-            raise ValueError(
-                f"margin_type={self.margin_type} is not implemented for the offline "
-                f"environments: liquidation always uses isolated_liquidation_price, so "
-                f"CROSSED silently produced isolated liquidation math (#289). Nothing "
-                f"reads this field. Use ISOLATED, or the live envs, which honour it."
-            )
+        validate_offline_margin_mode(self.margin_mode)
         if self.include_base_features:
             raise ValueError(
                 "include_base_features=True is not implemented for the offline "
@@ -224,7 +219,6 @@ class SequentialTradingEnv(TorchTradeOfflineEnv):
         # Store configuration
         self.action_levels = config.action_levels
         self.leverage = config.leverage
-        self.margin_type = config.margin_type
         self.maintenance_margin_rate = config.maintenance_margin_rate
 
         # Define action spec

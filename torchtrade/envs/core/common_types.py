@@ -5,8 +5,8 @@ from enum import Enum
 from typing import Optional
 
 
-class MarginType(Enum):
-    """Margin type for futures trading.
+class MarginMode(Enum):
+    """Margin mode for futures trading.
 
     - ISOLATED: Margin is isolated to individual positions
     - CROSSED: Margin is shared across all positions

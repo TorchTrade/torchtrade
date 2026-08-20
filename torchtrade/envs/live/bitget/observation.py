@@ -148,68 +148,6 @@ class BitgetObservationClass(BaseFuturesObservationClass):
         """
         return timeframe_to_bitget(timeframe)
 
-    def _get_default_lookback(self) -> int:
-        """Get the default number of candles to fetch (Bitget limit)."""
-        return 200
-
     def _get_timestamp_column(self) -> str:
         """Get the name of the timestamp column."""
         return "timestamp"
-
-
-# Example usage:
-if __name__ == "__main__":
-
-    # Test with demo/testnet (no API keys needed for public data)
-    print("Testing BitgetObservationClass with CCXT...")
-
-    # Single timeframe example
-    print("\n1. Testing single timeframe...")
-    window_size = 10
-    observer = BitgetObservationClass(
-        symbol="BTC/USDT:USDT",  # CCXT perpetual swap format
-        time_frames=TimeFrame(1, TimeFrameUnit.Minute),
-        window_sizes=window_size,
-        demo=True
-    )
-    expected_keys = observer.get_keys()
-    print(f"   Expected keys: {expected_keys}")
-
-    try:
-        observations = observer.get_observations()
-        assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
-        assert observations[expected_keys[0]].shape == (window_size, 4), \
-            f"Expected shape ({window_size}, 4) for default features, got {observations[expected_keys[0]].shape}"
-        print("   ✓ Single timeframe test passed!")
-    except Exception as e:
-        print(f"   ✗ Single timeframe test failed: {e}")
-        import traceback
-        traceback.print_exc()
-
-    # Multiple timeframes example
-    print("\n2. Testing multiple timeframes...")
-    window_sizes = [10, 20]
-    observer = BitgetObservationClass(
-        symbol="BTC/USDT:USDT",  # CCXT perpetual swap format
-        time_frames=[
-            TimeFrame(1, TimeFrameUnit.Minute),
-            TimeFrame(5, TimeFrameUnit.Minute),
-        ],
-        window_sizes=window_sizes,
-        demo=True
-    )
-
-    expected_keys = observer.get_keys()
-    print(f"   Expected keys: {expected_keys}")
-
-    try:
-        observations = observer.get_observations()
-        assert set(observations.keys()) == set(expected_keys), "Keys don't match expected keys"
-        assert len(observations) == 2, "Expected exactly 2 observations"
-        print("   ✓ Multiple timeframes test passed!")
-    except Exception as e:
-        print(f"   ✗ Multiple timeframes test failed: {e}")
-        import traceback
-        traceback.print_exc()
-
-    print("\n✅ All tests completed!")

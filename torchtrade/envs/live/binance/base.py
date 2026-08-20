@@ -132,5 +132,5 @@ class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
             api_secret=api_secret,
             demo=self.config.demo,
             leverage=self.config.leverage,
-            margin_type=self.config.margin_type,
+            margin_mode=self.config.margin_mode,
         )

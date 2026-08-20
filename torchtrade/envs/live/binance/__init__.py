@@ -4,7 +4,7 @@ from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
     BinanceFuturesOrderClass,
     TradeMode,
-    MarginType,
+    MarginMode,
     OrderStatus,
     PositionStatus,
 )
@@ -21,7 +21,7 @@ __all__ = [
     "BinanceObservationClass",
     "BinanceFuturesOrderClass",
     "TradeMode",
-    "MarginType",
+    "MarginMode",
     "OrderStatus",
     "PositionStatus",
     "BinanceFuturesTorchTradingEnv",

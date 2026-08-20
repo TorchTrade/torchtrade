@@ -27,8 +27,7 @@ class PositionStatus:
     unrealized_pnl_pct: float
     mark_price: float
     leverage: int
-    margin_type: str    # Binance-compatible
-    margin_mode: str    # Bybit-compatible
+    margin_mode: str
     liquidation_price: float
 
 
@@ -331,7 +330,6 @@ class ReplayOrderExecutor:
                 unrealized_pnl_pct=unrealized_pnl_pct,
                 mark_price=self.current_price,
                 leverage=self.leverage,
-                margin_type="ISOLATED",
                 margin_mode="isolated",
                 liquidation_price=self.liquidation_price,
             )

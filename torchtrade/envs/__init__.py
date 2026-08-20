@@ -24,7 +24,7 @@ from torchtrade.envs.offline import (
     SequentialTradingEnvSLTPConfig,
     OneStepTradingEnv,
     OneStepTradingEnvConfig,
-    MarginType,
+    MarginMode,
 )
 
 # Offline infrastructure
@@ -47,6 +47,4 @@ from torchtrade.envs.live.bybit import (
     BybitFuturesTradingEnvConfig,
     BybitFuturesSLTPTorchTradingEnv,
     BybitFuturesSLTPTradingEnvConfig,
-    MarginMode,
-    PositionMode,
 )
