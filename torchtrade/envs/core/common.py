@@ -100,3 +100,22 @@ def validate_trade_mode(trade_mode: str) -> str:
             f"trade_mode must be 'fractional', 'notional', or 'quantity' (case-insensitive), got '{trade_mode}'"
         )
     return trade_mode_lower
+
+
+def validate_unknown_status_budget(steps) -> None:
+    """The #295 grace period, checked at the boundary rather than guarded downstream.
+
+    A negative budget would read as "disabled" through `>= budget > 0`, silently turning a
+    typo into the strictest posture. A float would compare fine and then never equal the
+    integer counter. Invariant 4: raise here so nothing downstream has to guard.
+    """
+    if isinstance(steps, bool) or not isinstance(steps, int):
+        raise ValueError(
+            f"max_unknown_status_steps must be an int, got {steps!r} "
+            f"({type(steps).__name__})"
+        )
+    if steps < 0:
+        raise ValueError(
+            f"max_unknown_status_steps must be >= 0 (0 disables the grace period), "
+            f"got {steps}"
+        )

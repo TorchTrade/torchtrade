@@ -60,6 +60,10 @@ class InvalidActionError(Exception):
     """
 
 
+#: Observation key carrying 1.0 while the env is running on unconfirmed account state.
+STATUS_UNKNOWN_KEY = "status_unknown"
+
+
 class TorchTradeLiveEnv(TorchTradeBaseEnv):
     """
     Base class for live trading environments.
@@ -124,6 +128,13 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         # Initialize position state
         # Note: Subclasses may override this with their specific position tracking needs
         self.position = PositionState()
+
+        # Consecutive venue reads the env could not confirm. Reset to 0 by any successful
+        # read, so this counts an OUTAGE, not lifetime failures (#295).
+        self.consecutive_unknown_status = 0
+        # Last CONFIRMED value per read site, so the grace period stands on real data
+        # rather than fabricating one. Empty until the first successful read (#295).
+        self._last_confirmed_read = {}
 
     @abstractmethod
     def _init_trading_clients(self, api_key: str, api_secret: str, observer, trader):
@@ -283,6 +294,12 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
             self.account_state_key,
             Unbounded(shape=(len(self.ACCOUNT_STATE),), dtype=torch.float),
         )
+        # A SEPARATE key, not a 7th account_state slot: account_state is shared verbatim
+        # with the offline envs, which have no notion of an unreadable venue, so widening
+        # it would desync live/offline parity for a concept only one side has (#295).
+        self.observation_spec.set(
+            STATUS_UNKNOWN_KEY, Unbounded(shape=(1,), dtype=torch.float)
+        )
 
         self.market_data_keys = []
         # strict=True: every config's __post_init__ normalizes window_sizes to a list as
@@ -304,6 +321,51 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 "base_features",
                 Unbounded(shape=(window_sizes[0], 4), dtype=torch.float),
             )
+
+    def _finalize_step_flags(self, next_tensordict, terminated: bool) -> None:
+        """Stamp status_unknown and the done family. Ten identical copies (#288, #295).
+
+        status_unknown is stamped HERE rather than at observation-build time because the
+        grace period serves a CACHED observation during an outage -- one built while the
+        venue was healthy, carrying 0.0. Baking the flag in at build time meant the policy
+        was told "all confirmed" on exactly the bars it was not, which is worse than not
+        having the flag at all.
+
+        `done` is written EXPLICITLY rather than left to TorchRL. `_step` output is not
+        completed from truncated: setting only `truncated=True` leaves `done=False`, the
+        collector never resets, and the episode silently runs on -- verified against a
+        real Collector, and exactly the dead channel #295 describes.
+
+        A prolonged outage truncates, never terminates. Value estimators read `terminated`
+        as "true return-to-go is 0" and `truncated` as "bootstrap from the final
+        observation"; terminating here would teach the critic that an unreachable API and
+        a blown account carry the same value target.
+        """
+        next_tensordict.set(
+            STATUS_UNKNOWN_KEY,
+            torch.tensor(
+                [float(getattr(self, "_status_unknown_this_step", False))],
+                dtype=torch.float,
+            ),
+        )
+        self._status_unknown_this_step = False
+
+        truncated = self.consecutive_unknown_status >= self._max_unknown_status_steps > 0
+        next_tensordict.set("terminated", torch.tensor([terminated], dtype=torch.bool))
+        next_tensordict.set("truncated", torch.tensor([truncated], dtype=torch.bool))
+        next_tensordict.set(
+            "done", torch.tensor([terminated or truncated], dtype=torch.bool)
+        )
+
+    @property
+    def _max_unknown_status_steps(self) -> int:
+        """Consecutive unconfirmed reads tolerated before the episode truncates.
+
+        0 disables the grace period entirely, which is the pre-#295 posture: the first
+        failed read raises rather than trading on state it cannot confirm. Absent on
+        alpaca, which has no observation-failure policy at all.
+        """
+        return getattr(self.config, "max_unknown_status_steps", 0)
 
     def get_account_state(self) -> List[str]:
         """The account-state field names. Four byte-identical copies (#288).

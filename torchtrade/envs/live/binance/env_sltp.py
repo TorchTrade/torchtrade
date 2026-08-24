@@ -186,8 +186,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         done = self._check_termination(new_portfolio_value)
 
         next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
-        next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))
-        next_tensordict.set("terminated", torch.tensor([done], dtype=torch.bool))
+        self._finalize_step_flags(next_tensordict, terminated=done)
 
         return next_tensordict
 

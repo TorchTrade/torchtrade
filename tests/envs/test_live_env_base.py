@@ -714,7 +714,15 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
     env.config = SimpleNamespace(
         observation_failure_policy=ObservationFailurePolicy.HALT, symbol="TEST"
     )
-    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    env.consecutive_unknown_status = 0
+    env._last_confirmed_read = {}
+    env._max_unknown_status_steps = 0
+    env._flatten_if_policy_says_so = (
+        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
+    )
+    env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
+        env, read, cache_key
+    )
     env._acquire_pre_trade_state = (
         lambda: TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
     )
@@ -995,7 +1003,15 @@ def test_okx_sizes_through_the_dust_rule_in_step():
     env.config = SimpleNamespace(
         observation_failure_policy=ObservationFailurePolicy.HALT, symbol="TEST"
     )
-    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    env.consecutive_unknown_status = 0
+    env._last_confirmed_read = {}
+    env._max_unknown_status_steps = 0
+    env._flatten_if_policy_says_so = (
+        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
+    )
+    env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
+        env, read, cache_key
+    )
     env._acquire_pre_trade_state = (
         lambda: TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
     )
@@ -1036,6 +1052,8 @@ def _futures_env_stub(position_status, balance, leverage=5):
         position=PositionState(),
         account_state_key="account_state",
         market_data_keys=[],
+        # _get_observation publishes status_unknown from this counter (#295).
+        consecutive_unknown_status=0,
     )
 
 
@@ -2591,6 +2609,12 @@ def test_a_failed_read_runs_the_configured_policy(policy, expect_flatten):
     env = SimpleNamespace(
         config=SimpleNamespace(observation_failure_policy=policy, symbol="TEST"),
         trader=SimpleNamespace(close_position=lambda: closed.append(1) or True),
+        consecutive_unknown_status=0,
+        _last_confirmed_read={},
+        _max_unknown_status_steps=0,
+    )
+    env._flatten_if_policy_says_so = (
+        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
     )
 
     def boom():
@@ -2623,7 +2647,15 @@ def test_an_unreadable_position_halts_before_the_env_trades(policy, expect_flatt
             close_position=lambda: closed.append("close") or True,
         ),
     )
-    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    env.consecutive_unknown_status = 0
+    env._last_confirmed_read = {}
+    env._max_unknown_status_steps = 0
+    env._flatten_if_policy_says_so = (
+        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
+    )
+    env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
+        env, read, cache_key
+    )
     env._current_mark_price = (
         lambda ps=None: TorchTradeFuturesLiveEnv._current_mark_price(env, ps)
     )
@@ -2802,7 +2834,15 @@ def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():
         trader=SimpleNamespace(get_status=lambda: {"position_status": ps},
                                get_mark_price=lambda: 50000.0),
     )
-    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    env.consecutive_unknown_status = 0
+    env._last_confirmed_read = {}
+    env._max_unknown_status_steps = 0
+    env._flatten_if_policy_says_so = (
+        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
+    )
+    env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
+        env, read, cache_key
+    )
     env._current_mark_price = (
         lambda p=None: TorchTradeFuturesLiveEnv._current_mark_price(env, p)
     )
@@ -3254,6 +3294,7 @@ SHARED_DEFAULTS = {
     "include_base_features": False,
     "close_position_on_init": True,
     "close_position_on_reset": False,
+    "max_unknown_status_steps": 0,
 }
 
 
@@ -3644,3 +3685,48 @@ def test_an_observer_disagreeing_with_the_config_raises_rather_than_guessing():
         BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"
     ), pytest.raises(ValueError, match="zip"):
         BinanceFuturesTorchTradingEnv(config=config, observer=observer, trader=trader)
+
+
+@pytest.mark.parametrize("env_cls", STEPPING_ENVS, ids=lambda c: c.__name__)
+def test_every_live_step_writes_done_explicitly(env_cls):
+    """`done` must be written by `_step`, not inferred from `truncated` (#295).
+
+    Verified against a real Collector: setting only `truncated=True` leaves `done=False`,
+    the collector never resets, and the episode silently runs on -- which is precisely the
+    dead channel this work exists to remove. `truncated` has been write-only since #313,
+    so nothing else would have caught it.
+    """
+    step = env_cls.__dict__["_step"]
+    src = inspect.getsource(step)
+    assert "_finalize_step_flags" in src, (
+        f"{env_cls.__name__}._step does not use the shared done-family writer, so its "
+        f"truncation channel is unreachable"
+    )
+
+
+@pytest.mark.parametrize("terminated,unknown,budget,expected", [
+    (False, 0, 3, (False, False, False)),   # healthy
+    (True,  0, 3, (True,  True,  False)),   # bankruptcy terminates, never truncates
+    (False, 3, 3, (True,  False, True)),    # outage spends the budget -> truncate
+    (False, 9, 0, (False, False, False)),   # budget 0 disables the channel entirely
+    (True,  3, 3, (True,  True,  True)),    # both: done stays the OR of the two
+], ids=["healthy", "bankrupt", "outage", "disabled", "both"])
+def test_the_done_family_separates_an_outage_from_a_blown_account(
+    terminated, unknown, budget, expected
+):
+    """A prolonged outage truncates; only a blown account terminates.
+
+    Value estimators read `terminated` as "true return-to-go is 0" and `truncated` as
+    "bootstrap from the final observation". Terminating on an unreachable API would teach
+    the critic that a broker outage and a liquidated account carry the same value target.
+    """
+    env = SimpleNamespace(
+        consecutive_unknown_status=unknown,
+        config=SimpleNamespace(max_unknown_status_steps=budget),
+    )
+    env._max_unknown_status_steps = TorchTradeLiveEnv._max_unknown_status_steps.fget(env)
+    td = TensorDict({}, batch_size=())
+    TorchTradeLiveEnv._finalize_step_flags(env, td, terminated=terminated)
+
+    got = (bool(td["done"]), bool(td["terminated"]), bool(td["truncated"]))
+    assert got == expected, f"done/terminated/truncated = {got}, expected {expected}"

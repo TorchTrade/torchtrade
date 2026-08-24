@@ -21,6 +21,7 @@ from torchtrade.envs.core.live import (
     LiveObservationHalt,
     ObservationFailurePolicy,
     TorchTradeLiveEnv,
+    STATUS_UNKNOWN_KEY,
 )
 from torchtrade.envs.core.state import (
     PositionUnknownError,
@@ -70,32 +71,96 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     - _execute_trade_if_needed(): trade execution, whose action space differs by env
     """
 
-    def _halting(self, read):
-        """Run a venue read under the halt policy, or raise LiveObservationHalt.
+    def _halting(self, read, cache_key=None):
+        """Run a venue read under the halt policy, degrading through a grace period.
 
         #343's rule is that ANY failure to read account state while a position is open
         must halt -- not only the post-bar read. The pre-trade read at the top of _step
         and the initial read in _reset bypassed this, so a POSITION_UNKNOWN between bars
         raised a bare PositionUnknownError that `except LiveObservationHalt` did not
-        catch, and no emergency flatten ran even under FLATTEN (#355). The pre-trade read
-        is the one that happens BEFORE the env trades.
+        catch, and no emergency flatten ran even under FLATTEN (#355).
+
+        #295 adds the grace period. With `max_unknown_status_steps > 0` a transient blip
+        no longer kills the process: the env keeps stepping on the last CONFIRMED read,
+        publishes `status_unknown=1.0` so the policy can see it is flying blind, and
+        truncates once the outage outlasts the budget. At 0 -- the default, and the
+        pre-#295 posture -- the first failure still raises.
+
+        The grace period trades on unconfirmed state, which is a real risk and the reason
+        it is opt-in. What it must NEVER do is fabricate: with no cached read to fall back
+        on (a failure in `_reset`, or the first bar of an episode) it raises regardless of
+        the budget, because there is no last-known truth to stand on.
         """
         try:
-            return read()
+            value = read()
         # NOT RuntimeError: adapters wrap timeouts in it, and KeyError is a config
         # error. See docs/environments/online.md.
         except (PositionUnknownError, ValueError) as error:
-            policy = self.config.observation_failure_policy
-            accepted = flatten_error = None
-            if policy is ObservationFailurePolicy.FLATTEN:
-                try:
-                    accepted = bool(self.trader.close_position())
-                except Exception as exc:
-                    flatten_error = exc
-                    logger.exception(
-                        "Emergency close_position failed for %s", self.config.symbol
+            budget = self._max_unknown_status_steps
+            cached = self._last_confirmed_read.get(cache_key) if cache_key else None
+            # Only the pre-trade read advances the counter. It runs exactly once per
+            # `_step`, so the budget reads as BARS. Counting every read site would make
+            # `max_unknown_status_steps=3` truncate after two bars, since the post-bar
+            # read fails in the same outage -- a budget that silently means something
+            # other than what it says.
+            if cache_key != "post_bar":
+                self.consecutive_unknown_status += 1
+            self._status_unknown_this_step = True
+
+            # FLATTEN and a grace period are contradictory postures: FLATTEN means "get
+            # me out while I cannot see the account", so riding out the outage would
+            # defeat the only thing it is for. Grace applies to HALT only.
+            grace = (
+                budget > 0
+                and cached is not None
+                and self.config.observation_failure_policy
+                is not ObservationFailurePolicy.FLATTEN
+            )
+            if grace:
+                if self.consecutive_unknown_status < budget:
+                    if cache_key != "post_bar":   # the counting site logs, once per bar
+                        logger.warning(
+                                "%s: venue read failed (%s); running on unconfirmed "
+                            "state, %d of %d grace steps used",
+                            self.config.symbol, type(error).__name__,
+                            self.consecutive_unknown_status, budget,
+                        )
+                    return cached
+                # Budget spent. Still attempt the protective close under FLATTEN, then
+                # let the step finish on cached state so `_set_done_family` can truncate
+                # -- an exception here would be the process crash #295 exists to remove.
+                self._flatten_if_policy_says_so()
+                if cache_key != "post_bar":
+                    logger.error(
+                        "%s: venue unreadable for %d consecutive bars; truncating",
+                        self.config.symbol, self.consecutive_unknown_status,
                     )
-            raise LiveObservationHalt(error, policy, accepted, flatten_error) from error
+                return cached
+
+            accepted, flatten_error = self._flatten_if_policy_says_so()
+            raise LiveObservationHalt(
+                error, self.config.observation_failure_policy, accepted, flatten_error
+            ) from error
+
+        if cache_key != "post_bar":
+            self.consecutive_unknown_status = 0
+        if cache_key:
+            self._last_confirmed_read[cache_key] = value
+        return value
+
+    def _flatten_if_policy_says_so(self):
+        """Attempt the emergency close when the policy is FLATTEN. Returns (accepted, error).
+
+        `accepted` records that the venue accepted a close REQUEST, not that the position
+        is gone -- the distinction LiveObservationHalt already documents.
+        """
+        if self.config.observation_failure_policy is not ObservationFailurePolicy.FLATTEN:
+            return None, None
+        try:
+            return bool(self.trader.close_position()), None
+        except Exception as exc:
+            logger.exception("Emergency close_position failed for %s", self.config.symbol)
+            return None, exc
 
     def _acquire_pre_trade_state(self):
         """The venue read at the TOP of _step, under the halt policy (#355).
@@ -117,7 +182,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                 position_qty_from_status(position_status),
             )
 
-        return self._halting(read)
+        return self._halting(read, cache_key="pre_trade")
 
     def _create_trade_info(self, executed: bool = False, **kwargs) -> Dict:
         """The trade-info dict every futures `_step` returns. Four identical copies (#288).
@@ -244,7 +309,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                     mark = None
             return portfolio_value, mark, self._last_observed_qty, observation
 
-        return self._halting(read)
+        return self._halting(read, cache_key="post_bar")
 
     def _current_mark_price(self, position_status=None) -> float:
         """The bar's mark price, validated before it can size an order (#347).
@@ -483,7 +548,18 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             dtype=torch.float,
         )
 
-        out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
+        out_td = TensorDict(
+            {
+                self.account_state_key: account_state,
+                # Declared for all ten envs so the observation contract does not fork by
+                # venue. Alpaca has no observation-failure policy, so its counter never
+                # advances and this is always 0.0 there -- see _max_unknown_status_steps.
+                STATUS_UNKNOWN_KEY: torch.tensor(
+                    [float(self.consecutive_unknown_status > 0)], dtype=torch.float
+                ),
+            },
+            batch_size=(),
+        )
         for market_data_name, data in zip(self.market_data_keys, market_data):
             out_td.set(market_data_name, torch.from_numpy(data))
 

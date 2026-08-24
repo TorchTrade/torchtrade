@@ -26,7 +26,15 @@ def _env(error, policy=ObservationFailurePolicy.HALT, close_result=True):
     )
     # The post-bar read delegates to the shared policy now rather than restating it, so
     # these tests exercise `_halting` itself -- which is the point of extracting it.
-    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    env.consecutive_unknown_status = 0
+    env._last_confirmed_read = {}
+    env._max_unknown_status_steps = 0
+    env._flatten_if_policy_says_so = (
+        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
+    )
+    env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
+        env, read, cache_key
+    )
     return env, closed
 
 
@@ -144,3 +152,167 @@ def test_every_futures_config_coerces_its_failure_policy(exchange, module):
     )
     with pytest.raises(ValueError):
         cfg_cls(observation_failure_policy="nonsense")
+
+
+# --- #295: the grace period, and the truncation that ends it --------------------------
+
+def _grace_env(budget, policy=ObservationFailurePolicy.HALT):
+    """A stub wired to the real `_halting`, with a configurable outage budget."""
+    closed = []
+    env = SimpleNamespace(
+        trader=SimpleNamespace(close_position=lambda: closed.append(True) or True),
+        config=SimpleNamespace(symbol="BTCUSDT", observation_failure_policy=policy),
+        consecutive_unknown_status=0,
+        _last_confirmed_read={},
+        _max_unknown_status_steps=budget,
+    )
+    env._flatten_if_policy_says_so = (
+        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
+    )
+    env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
+        env, read, cache_key
+    )
+    return env, closed
+
+
+def _boom():
+    raise PositionUnknownError("venue unreachable")
+
+
+def test_a_confirmed_read_is_what_the_grace_period_stands_on():
+    """The budget alone is not enough -- there must be a real prior read to fall back on.
+
+    A failure on the FIRST read of an episode has no last-known truth, so honouring the
+    budget there would mean inventing an account state. It raises regardless of budget.
+    """
+    env, _ = _grace_env(budget=3)
+
+    with pytest.raises(LiveObservationHalt):
+        env._halting(_boom, cache_key="pre_trade")
+
+    assert env.consecutive_unknown_status == 1, "the failure still counts"
+
+
+def test_the_grace_period_rides_out_an_outage_on_the_last_confirmed_read():
+    env, _ = _grace_env(budget=3)
+    assert env._halting(lambda: "GOOD", cache_key="pre_trade") == "GOOD"
+
+    # Two failures inside the budget: the cached value stands in, nothing raises.
+    for expected_count in (1, 2):
+        assert env._halting(_boom, cache_key="pre_trade") == "GOOD"
+        assert env.consecutive_unknown_status == expected_count
+
+    # The third spends the budget. It must NOT raise -- an exception here is the process
+    # crash #295 exists to remove; the step finishes so _set_done_family can truncate.
+    assert env._halting(_boom, cache_key="pre_trade") == "GOOD"
+    assert env.consecutive_unknown_status == 3
+
+
+def test_a_successful_read_ends_the_outage_rather_than_denting_it():
+    """It counts CONSECUTIVE unknowns. A lifetime counter would truncate a healthy
+    session that had accumulated unrelated blips hours apart."""
+    env, _ = _grace_env(budget=3)
+    env._halting(lambda: "GOOD", cache_key="pre_trade")
+    env._halting(_boom, cache_key="pre_trade")
+    env._halting(_boom, cache_key="pre_trade")
+    assert env.consecutive_unknown_status == 2
+
+    env._halting(lambda: "FRESH", cache_key="pre_trade")
+    assert env.consecutive_unknown_status == 0
+    assert env._halting(_boom, cache_key="pre_trade") == "FRESH", "cache refreshed too"
+
+
+def test_the_default_budget_keeps_the_pre_295_posture():
+    """0 is the default on every venue: refuse to act on state you cannot confirm."""
+    env, _ = _grace_env(budget=0)
+    env._halting(lambda: "GOOD", cache_key="pre_trade")
+
+    with pytest.raises(LiveObservationHalt):
+        env._halting(_boom, cache_key="pre_trade")
+
+
+def test_flatten_does_not_honour_the_grace_period():
+    """FLATTEN means "get me out while I cannot see the account". Riding out the outage
+    would defeat the only thing it is for, so grace is a HALT-only concession."""
+    env, closed = _grace_env(budget=3, policy=ObservationFailurePolicy.FLATTEN)
+    env._halting(lambda: "GOOD", cache_key="pre_trade")
+
+    with pytest.raises(LiveObservationHalt):
+        env._halting(_boom, cache_key="pre_trade")
+    assert closed == [True], "the emergency close must still run"
+
+
+def test_the_two_read_sites_do_not_share_a_cache_slot():
+    """`_acquire_pre_trade_state` and `_acquire_post_bar_state` return different shapes.
+    One slot would hand the post-bar caller a pre-trade tuple during an outage."""
+    env, _ = _grace_env(budget=3)
+    env._halting(lambda: "PRE", cache_key="pre_trade")
+    env._halting(lambda: "POST", cache_key="post_bar")
+
+    assert env._halting(_boom, cache_key="pre_trade") == "PRE"
+    assert env._halting(_boom, cache_key="post_bar") == "POST"
+
+
+def test_a_real_env_flags_the_outage_and_truncates_on_the_budgeted_bar():
+    """Drives a REAL env through an outage. The unit tests above missed two defects here.
+
+    The first: `status_unknown` was stamped at observation-BUILD time, so the grace period
+    served a cached observation carrying the healthy 0.0 -- the policy was told "all
+    confirmed" on exactly the bars it was not.
+
+    The second: both read sites advanced the counter, so a budget of 3 truncated after two
+    bars. `max_unknown_status_steps` has to mean bars, or it means nothing a trader can
+    reason about.
+
+    Neither is visible from `_halting` in isolation, which is why this drives `env.step`.
+    """
+    from unittest.mock import MagicMock, patch
+    import numpy as np
+    import torch
+    from torchtrade.envs.live.binance.env import (
+        BinanceFuturesTorchTradingEnv as Env,
+        BinanceFuturesTradingEnvConfig as Config,
+    )
+
+    observer = MagicMock()
+    observer.get_keys.return_value = ["1m_10"]
+    observer.get_observations.return_value = {"1m_10": np.zeros((10, 4), dtype=np.float32)}
+    observer.get_features.return_value = {
+        "observation_features": list("abcd"), "original_features": []
+    }
+    observer.reset.return_value = None
+
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1e4, "total_margin_balance": 1e4,
+        "total_wallet_balance": 1e4, "total_maintenance_margin": 0.0,
+    }
+    trader.get_status.return_value = {"position_status": None}
+    trader.get_mark_price.return_value = 100.0
+    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
+
+    config = Config(symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10],
+                    execute_on="1m", max_unknown_status_steps=3,
+                    close_position_on_init=False)
+    with patch("time.sleep"), patch.object(Env, "_wait_for_next_timestamp"):
+        env = Env(config=config, observer=observer, trader=trader)
+        td = env.reset()
+
+        # One healthy bar, so the grace period has a confirmed read to stand on.
+        td = env.step(td.set("action", torch.tensor(1)))["next"]
+        assert td["status_unknown"].item() == 0.0
+
+        trader.get_status.side_effect = PositionUnknownError("venue unreachable")
+        seen = []
+        for _ in range(3):
+            td = td.exclude("done", "terminated", "truncated", "reward")
+            nxt = env.step(td.set("action", torch.tensor(1)))["next"]
+            seen.append((nxt["status_unknown"].item(), bool(nxt["done"]),
+                         bool(nxt["terminated"]), bool(nxt["truncated"])))
+            td = nxt
+
+    assert seen == [
+        (1.0, False, False, False),
+        (1.0, False, False, False),
+        (1.0, True, False, True),
+    ], f"outage bars were {seen}"

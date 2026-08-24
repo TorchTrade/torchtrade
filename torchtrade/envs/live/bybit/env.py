@@ -17,6 +17,7 @@ from torchtrade.envs.live.bybit.order_executor import (
     PositionMode,
 )
 from torchtrade.envs.live.bybit.base import BybitBaseTorchTradingEnv
+from torchtrade.envs.core.common import validate_unknown_status_budget
 from torchtrade.envs.core.live import (
     ObservationFailurePolicy,
 )
@@ -57,9 +58,14 @@ class BybitFuturesTradingEnvConfig:
     close_position_on_init: bool = True
     close_position_on_reset: bool = False
     observation_failure_policy: ObservationFailurePolicy | str = ObservationFailurePolicy.HALT
+    # 0 = the pre-#295 posture: the first unreadable venue read raises. Above 0, that many
+    # consecutive unconfirmed reads are ridden out on last-known state (publishing
+    # status_unknown=1.0) before the episode truncates. HALT only -- see _halting.
+    max_unknown_status_steps: int = 0
 
     def __post_init__(self):
         self.observation_failure_policy = ObservationFailurePolicy(self.observation_failure_policy)
+        validate_unknown_status_budget(self.max_unknown_status_steps)
         from torchtrade.envs.live.bybit.utils import normalize_bybit_timeframe_config
         self.execute_on, self.time_frames, self.window_sizes = normalize_bybit_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
@@ -147,8 +153,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         done = self._check_termination(new_portfolio_value)
 
         next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
-        next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))
-        next_tensordict.set("terminated", torch.tensor([done], dtype=torch.bool))
+        self._finalize_step_flags(next_tensordict, terminated=done)
 
         return next_tensordict
 

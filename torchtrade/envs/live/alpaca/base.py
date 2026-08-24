@@ -11,6 +11,7 @@ from tensordict import TensorDict, TensorDictBase
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
+from torchtrade.envs.core.live import STATUS_UNKNOWN_KEY
 from torchtrade.envs.core.state import (
     HistoryTracker,
     PositionState,
@@ -275,7 +276,18 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         )
 
         # Build output TensorDict
-        out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
+        out_td = TensorDict(
+            {
+                self.account_state_key: account_state,
+                # Declared for all ten envs so the observation contract does not fork by
+                # venue. Alpaca has no observation-failure policy, so its counter never
+                # advances and this is always 0.0 there -- see _max_unknown_status_steps.
+                STATUS_UNKNOWN_KEY: torch.tensor(
+                    [float(self.consecutive_unknown_status > 0)], dtype=torch.float
+                ),
+            },
+            batch_size=(),
+        )
         for market_data_name, data in zip(self.market_data_keys, market_data):
             out_td.set(market_data_name, torch.from_numpy(data))
 
