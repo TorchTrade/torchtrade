@@ -203,7 +203,7 @@ def test_the_grace_period_rides_out_an_outage_on_the_last_confirmed_read():
         assert env.consecutive_unknown_status == expected_count
 
     # The third spends the budget. It must NOT raise -- an exception here is the process
-    # crash #295 exists to remove; the step finishes so _set_done_family can truncate.
+    # crash #295 exists to remove; the step finishes so _finalize_step_flags can truncate.
     assert env._halting(_boom, cache_key="pre_trade") == "GOOD"
     assert env.consecutive_unknown_status == 3
 
@@ -316,3 +316,82 @@ def test_a_real_env_flags_the_outage_and_truncates_on_the_budgeted_bar():
         (1.0, False, False, False),
         (1.0, True, False, True),
     ], f"outage bars were {seen}"
+
+
+def test_reset_halts_typed_rather_than_relocating_the_crash():
+    """The reset read must go through the halt policy too (#295).
+
+    Truncation fires precisely BECAUSE the outage is ongoing, so the very next `reset()`
+    is the likeliest moment for the venue to still be down. With reset's reads outside
+    `_halting`, the process crash this work exists to remove did not go away -- it moved
+    from `_step` to the following `reset`, one bar later, as a bare PositionUnknownError
+    that `except LiveObservationHalt` does not catch and FLATTEN does not act on.
+
+    Raising here is still correct: an episode must not START on unconfirmed state. What
+    the grace period buys is riding out an outage mid-episode, not beginning one blind.
+    """
+    from unittest.mock import MagicMock, patch
+    import numpy as np
+    from torchtrade.envs.live.binance.env import (
+        BinanceFuturesTorchTradingEnv as Env, BinanceFuturesTradingEnvConfig as Config,
+    )
+
+    observer = MagicMock()
+    observer.get_keys.return_value = ["1m_10"]
+    observer.get_observations.return_value = {"1m_10": np.zeros((10, 4), dtype=np.float32)}
+    observer.get_features.return_value = {
+        "observation_features": list("abcd"), "original_features": []}
+    observer.reset.return_value = None
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1e4, "total_margin_balance": 1e4,
+        "total_wallet_balance": 1e4, "total_maintenance_margin": 0.0}
+    trader.get_mark_price.return_value = 100.0
+    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
+    trader.get_status.return_value = {"position_status": None}
+
+    config = Config(symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10],
+                    execute_on="1m", max_unknown_status_steps=3,
+                    observation_failure_policy=ObservationFailurePolicy.FLATTEN,
+                    close_position_on_init=False)
+    with patch("time.sleep"), patch.object(Env, "_wait_for_next_timestamp"):
+        env = Env(config=config, observer=observer, trader=trader)
+        trader.get_status.side_effect = PositionUnknownError("still down")
+        trader.close_position.reset_mock()
+
+        with pytest.raises(LiveObservationHalt):
+            env.reset()
+
+    assert trader.close_position.called, (
+        "FLATTEN did not act on the reset read: it was outside the halt policy"
+    )
+
+
+def test_the_cache_holds_a_copy_not_the_object_the_collector_mutates():
+    """`TensorDict.set()` stores references, so caching the read by reference aliases it.
+
+    The post-bar tuple carries the observation tensordict that `_step` returns -- the same
+    object the collector then stamps with reward and the done family. Cached by reference,
+    a grace bar re-serves LAST bar's flags, which is how a stale `done=False` ends up in a
+    tensordict that `EnvBase._complete_done` then declines to fill.
+
+    Currently invisible behaviourally, because `_finalize_step_flags` overwrites the whole
+    family anyway. That is precisely why it needs pinning directly: the aliasing is a live
+    hazard that today's code happens to paper over, and removing the clone fails nothing
+    without this test.
+    """
+    import torch
+    from tensordict import TensorDict
+
+    env, _ = _grace_env(budget=3)
+    observation = TensorDict({"done": torch.zeros(1, dtype=torch.bool)}, batch_size=())
+    env._halting(lambda: ("status", observation), cache_key="post_bar")
+
+    # The collector stamps the object it was handed.
+    observation.set("done", torch.ones(1, dtype=torch.bool))
+
+    _, cached_obs = env._halting(_boom, cache_key="post_bar")
+    assert cached_obs is not observation, "the cache aliases the returned tensordict"
+    assert not bool(cached_obs["done"]), (
+        "the cached observation inherited the flag stamped after it was cached"
+    )

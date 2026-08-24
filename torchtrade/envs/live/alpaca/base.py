@@ -344,6 +344,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
+        self._reset_outage_state()
         # Before any read below -- see the bybit copy for why the order matters (#278).
         self.observer.reset()
         if not self.trader.cancel_open_orders():

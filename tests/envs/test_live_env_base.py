@@ -257,6 +257,9 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
 # define none, and an exchange #6 would land here the moment it does.
 STEPPING_ENVS = [c for c in LIVE_ENVS if "_step" in c.__dict__]
 
+# Every live env that owns a . The two shared implementations plus any override.
+RESETTING_ENVS = [c for c in LIVE_ENVS if "_reset" in c.__dict__]
+
 
 @pytest.mark.parametrize("env_cls", STEPPING_ENVS, ids=lambda c: c.__name__)
 def test_every_live_step_validates_its_action_before_it_trades(env_cls):
@@ -3422,6 +3425,21 @@ class _ResetStub:
 
         self.history_reset_calls = 0
         self.sync_action_level_calls = 0
+        # #295: the shared _reset clears the outage state at the episode boundary.
+        self.consecutive_unknown_status = 0
+        self._status_unknown_this_step = False
+        self._last_confirmed_read = {}
+        self._reset_outage_state = (
+            lambda: TorchTradeLiveEnv._reset_outage_state(self)
+        )
+        self._max_unknown_status_steps = 0
+        self._flatten_if_policy_says_so = (
+            lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(self)
+        )
+        # The reset read runs under the halt policy as of #295.
+        self._halting = lambda read, cache_key=None: (
+            TorchTradeFuturesLiveEnv._halting(self, read, cache_key)
+        )
         self.trader, self.observer = _Trader(), _Observer()
         self.history = SimpleNamespace(reset=lambda: setattr(
             outer, "history_reset_calls", outer.history_reset_calls + 1))
@@ -3722,6 +3740,7 @@ def test_the_done_family_separates_an_outage_from_a_blown_account(
     """
     env = SimpleNamespace(
         consecutive_unknown_status=unknown,
+        _status_unknown_this_step=bool(unknown),
         config=SimpleNamespace(max_unknown_status_steps=budget),
     )
     env._max_unknown_status_steps = TorchTradeLiveEnv._max_unknown_status_steps.fget(env)
@@ -3730,3 +3749,91 @@ def test_the_done_family_separates_an_outage_from_a_blown_account(
 
     got = (bool(td["done"]), bool(td["terminated"]), bool(td["truncated"]))
     assert got == expected, f"done/terminated/truncated = {got}, expected {expected}"
+
+
+@pytest.mark.parametrize("env_cls", RESETTING_ENVS, ids=lambda c: c.__name__)
+def test_every_live_reset_clears_the_outage_state(env_cls):
+    """A truncated episode must not poison the next one (#295).
+
+    `_finalize_step_flags` derives `truncated` from the counter, so an episode that ended
+    on a spent budget would start the NEXT one already at budget and truncate on its first
+    step -- 1-step episodes forever, and a collector that looks busy while collecting
+    nothing. AST rather than source text, so a comment naming the method cannot satisfy it.
+    """
+    calls = [n.func.attr for n in ast.walk(ast.parse(
+        inspect.getsource(env_cls.__dict__["_reset"]).lstrip()))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+    # `_reset` accepted as delegation: the SLTP envs override _reset and call
+    # super()._reset(), which is where the clear lives. What this rejects is an override
+    # that does NEITHER -- reimplementing reset and dropping the clear on the floor.
+    assert {"_reset_outage_state", "_reset"} & set(calls), (
+        f"{env_cls.__name__}._reset neither clears the outage counter nor delegates to a "
+        f"_reset that does; a truncated episode would make every following episode "
+        f"truncate on step 1"
+    )
+
+
+def test_a_recovered_venue_does_not_truncate_the_next_episode():
+    """The behavioural half of the guard above, driven through a real env."""
+    from unittest.mock import MagicMock, patch
+    import numpy as np
+    from torchtrade.envs.core.state import PositionUnknownError
+    from torchtrade.envs.live.binance.env import (
+        BinanceFuturesTorchTradingEnv as Env, BinanceFuturesTradingEnvConfig as Config,
+    )
+
+    observer = MagicMock()
+    observer.get_keys.return_value = ["1m_10"]
+    observer.get_observations.return_value = {"1m_10": np.zeros((10, 4), dtype=np.float32)}
+    observer.get_features.return_value = {
+        "observation_features": list("abcd"), "original_features": []}
+    observer.reset.return_value = None
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1e4, "total_margin_balance": 1e4,
+        "total_wallet_balance": 1e4, "total_maintenance_margin": 0.0}
+    trader.get_status.return_value = {"position_status": None}
+    trader.get_mark_price.return_value = 100.0
+    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
+
+    with patch("time.sleep"), patch.object(Env, "_wait_for_next_timestamp"):
+        env = Env(config=Config(
+            symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10], execute_on="1m",
+            max_unknown_status_steps=2, close_position_on_init=False,
+        ), observer=observer, trader=trader)
+
+        td = env.reset()
+        td = env.step(td.set("action", torch.tensor(1)))["next"]
+        trader.get_status.side_effect = PositionUnknownError("down")
+        for _ in range(2):
+            td = env.step(td.exclude("done", "terminated", "truncated", "reward")
+                          .set("action", torch.tensor(1)))["next"]
+        assert bool(td["truncated"]), "setup: the outage should have truncated"
+
+        trader.get_status.side_effect = None          # venue recovers
+        fresh = env.reset()
+        assert env.consecutive_unknown_status == 0
+        nxt = env.step(fresh.set("action", torch.tensor(1)))["next"]
+
+    assert not bool(nxt["truncated"]), (
+        "the new episode truncated on its first step: the outage counter survived reset"
+    )
+
+
+@pytest.mark.parametrize("config_cls", [c.values[0] for c in SLTP_CONFIGS] + [
+    BinanceFuturesTradingEnvConfig, BitgetFuturesTradingEnvConfig,
+    BybitFuturesTradingEnvConfig, OKXFuturesTradingEnvConfig,
+], ids=lambda c: c.__name__)
+@pytest.mark.parametrize("bad", [-1, 1.5, True, "3", None], ids=[
+    "negative", "fractional", "bool", "str", "none"])
+def test_an_unusable_outage_budget_is_rejected_at_the_boundary(config_cls, bad):
+    """A negative budget reads as "disabled" through `>= budget > 0`.
+
+    So a typo silently selects the STRICTEST posture rather than erroring -- the shape
+    invariant 4 names: a guard that absorbs nonsense is worse than no guard. `True` is
+    here because bool is an int subclass, and would otherwise pass as a budget of 1.
+
+    Deleting the validator's body failed ZERO tests before this: it shipped unpinned.
+    """
+    with pytest.raises(ValueError, match="max_unknown_status_steps"):
+        config_cls(symbol="TEST", max_unknown_status_steps=bad)

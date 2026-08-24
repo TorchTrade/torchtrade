@@ -46,9 +46,7 @@ class BaseFuturesSLTPConfig:
     observation_failure_policy: Union[ObservationFailurePolicy, str] = (
         ObservationFailurePolicy.HALT
     )
-    # 0 = the pre-#295 posture: the first unreadable venue read raises. Above 0, that many
-    # consecutive unconfirmed reads are ridden out on last-known state (publishing
-    # status_unknown=1.0) before the episode truncates. HALT only -- see _halting.
+    # Bars to ride out an unreadable venue before truncating; 0 disables (#295).
     max_unknown_status_steps: int = 0
 
     # Each subclass sets this to its venue normalizer -- all four are a partial of the

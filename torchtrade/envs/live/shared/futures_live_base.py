@@ -76,9 +76,10 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         #343's rule is that ANY failure to read account state while a position is open
         must halt -- not only the post-bar read. The pre-trade read at the top of _step
-        and the initial read in _reset bypassed this, so a POSITION_UNKNOWN between bars
         raised a bare PositionUnknownError that `except LiveObservationHalt` did not
-        catch, and no emergency flatten ran even under FLATTEN (#355).
+        catch, and no emergency flatten ran even under FLATTEN (#355). The reset read is
+        routed through here too as of #295 -- the docstring claimed it already was, and
+        it was not.
 
         #295 adds the grace period. With `max_unknown_status_steps > 0` a transient blip
         no longer kills the process: the env keeps stepping on the last CONFIRMED read,
@@ -91,6 +92,12 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         on (a failure in `_reset`, or the first bar of an episode) it raises regardless of
         the budget, because there is no last-known truth to stand on.
         """
+        # Only the pre-trade read defines a bar: it runs exactly once per `_step`. Counting
+        # every read site would make `max_unknown_status_steps=3` truncate after two bars,
+        # since the post-bar read fails in the same outage -- a budget that silently means
+        # something other than what it says.
+        counts = cache_key != "post_bar"
+
         try:
             value = read()
         # NOT RuntimeError: adapters wrap timeouts in it, and KeyError is a config
@@ -98,12 +105,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         except (PositionUnknownError, ValueError) as error:
             budget = self._max_unknown_status_steps
             cached = self._last_confirmed_read.get(cache_key) if cache_key else None
-            # Only the pre-trade read advances the counter. It runs exactly once per
-            # `_step`, so the budget reads as BARS. Counting every read site would make
-            # `max_unknown_status_steps=3` truncate after two bars, since the post-bar
-            # read fails in the same outage -- a budget that silently means something
-            # other than what it says.
-            if cache_key != "post_bar":
+            if counts:
                 self.consecutive_unknown_status += 1
             self._status_unknown_this_step = True
 
@@ -118,7 +120,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             )
             if grace:
                 if self.consecutive_unknown_status < budget:
-                    if cache_key != "post_bar":   # the counting site logs, once per bar
+                    if counts:   # the counting site logs, once per bar
                         logger.warning(
                                 "%s: venue read failed (%s); running on unconfirmed "
                             "state, %d of %d grace steps used",
@@ -126,11 +128,11 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                             self.consecutive_unknown_status, budget,
                         )
                     return cached
-                # Budget spent. Still attempt the protective close under FLATTEN, then
-                # let the step finish on cached state so `_set_done_family` can truncate
-                # -- an exception here would be the process crash #295 exists to remove.
-                self._flatten_if_policy_says_so()
-                if cache_key != "post_bar":
+                # No flatten here: `grace` above already excludes FLATTEN, so a close
+                # attempt on this branch is unreachable. The step finishes on cached state
+                # so `_finalize_step_flags` can truncate -- raising instead would be the
+                # process crash #295 exists to remove.
+                if counts:
                     logger.error(
                         "%s: venue unreadable for %d consecutive bars; truncating",
                         self.config.symbol, self.consecutive_unknown_status,
@@ -142,10 +144,17 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                 error, self.config.observation_failure_policy, accepted, flatten_error
             ) from error
 
-        if cache_key != "post_bar":
+        if counts:
             self.consecutive_unknown_status = 0
         if cache_key:
-            self._last_confirmed_read[cache_key] = value
+            # CLONE, not the reference. `TensorDict.set()` stores references, so the
+            # post-bar tuple's observation is the SAME object the collector received and
+            # then stamped with reward/done/terminated/truncated. Caching it by reference
+            # meant a grace bar re-served last bar's flags -- which is what made an
+            # explicit `done` write look necessary when the real fault was aliasing.
+            self._last_confirmed_read[cache_key] = tuple(
+                v.clone() if hasattr(v, "clone") else v for v in value
+            ) if isinstance(value, tuple) else value
         return value
 
     def _flatten_if_policy_says_so(self):
@@ -607,6 +616,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         start -- so they warn. All four venues return True when flat, so a clean reset is
         silent.
         """
+        self._reset_outage_state()
         self.observer.reset()
         if not self.trader.cancel_open_orders():
             logger.warning(
@@ -620,14 +630,23 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                     "close_position failed during reset; proceeding with residual exposure"
                 )
 
-        balance = self.trader.get_account_balance()
-        self.balance = balance.get("available_balance", 0)
+        # Under `_halting`, like every other account read (#295). NO cache_key: an
+        # episode must not START on stale state -- the grace period exists to ride out an
+        # outage mid-episode, not to begin one blind. So this raises LiveObservationHalt
+        # rather than a bare PositionUnknownError, which is what `except
+        # LiveObservationHalt` and the FLATTEN policy were always documented to cover and
+        # what the reset path actually bypassed until now.
+        def read_account():
+            balance = self.trader.get_account_balance()
+            status = self.trader.get_status()
+            return balance, status, position_direction_from_status(
+                status.get("position_status")
+            )
 
-        status = self.trader.get_status()
+        balance, status, direction = self._halting(read_account)
+        self.balance = balance.get("available_balance", 0)
         self.position.hold_counter = 0
-        self.position.current_position = position_direction_from_status(
-            status.get("position_status")
-        )
+        self.position.current_position = direction
 
         # Load-bearing for binance and bitget, whose _execute_trade_if_needed compares
         # `desired_action == self.position.current_action_level` and returns executed=False

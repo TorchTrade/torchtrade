@@ -58,9 +58,7 @@ class BybitFuturesTradingEnvConfig:
     close_position_on_init: bool = True
     close_position_on_reset: bool = False
     observation_failure_policy: ObservationFailurePolicy | str = ObservationFailurePolicy.HALT
-    # 0 = the pre-#295 posture: the first unreadable venue read raises. Above 0, that many
-    # consecutive unconfirmed reads are ridden out on last-known state (publishing
-    # status_unknown=1.0) before the episode truncates. HALT only -- see _halting.
+    # Bars to ride out an unreadable venue before truncating; 0 disables (#295).
     max_unknown_status_steps: int = 0
 
     def __post_init__(self):

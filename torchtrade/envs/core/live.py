@@ -132,6 +132,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         # Consecutive venue reads the env could not confirm. Reset to 0 by any successful
         # read, so this counts an OUTAGE, not lifetime failures (#295).
         self.consecutive_unknown_status = 0
+        self._status_unknown_this_step = False
         # Last CONFIRMED value per read site, so the grace period stands on real data
         # rather than fabricating one. Empty until the first successful read (#295).
         self._last_confirmed_read = {}
@@ -322,6 +323,18 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 Unbounded(shape=(window_sizes[0], 4), dtype=torch.float),
             )
 
+    def _reset_outage_state(self) -> None:
+        """Clear the #295 staleness state at an episode boundary.
+
+        Without this a truncated episode poisons the next one: `_finalize_step_flags`
+        reads the counter, so a fresh episode starts already at budget and truncates on
+        its first step -- forever. The cached reads go too; they belong to an account
+        state the new episode has not confirmed.
+        """
+        self.consecutive_unknown_status = 0
+        self._status_unknown_this_step = False
+        self._last_confirmed_read.clear()
+
     def _finalize_step_flags(self, next_tensordict, terminated: bool) -> None:
         """Stamp status_unknown and the done family. Ten identical copies (#288, #295).
 
@@ -331,10 +344,16 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         was told "all confirmed" on exactly the bars it was not, which is worse than not
         having the flag at all.
 
-        `done` is written EXPLICITLY rather than left to TorchRL. `_step` output is not
-        completed from truncated: setting only `truncated=True` leaves `done=False`, the
-        collector never resets, and the episode silently runs on -- verified against a
-        real Collector, and exactly the dead channel #295 describes.
+        `done` IS written, and not because TorchRL cannot derive it -- it can:
+        `EnvBase._complete_done` fills `terminated | truncated` when the key is absent.
+        It is written because these envs emit the whole family from `_step` itself, which
+        `assert_the_step_emits_the_whole_done_family` pins by name across all ten, and
+        because many tests drive `_step` directly, where `_complete_done` never runs.
+
+        The one case where derivation genuinely fails is a STALE `done` already present
+        in the tensordict -- which the cached read used to serve by reference, before
+        `_halting` started cloning. That was an aliasing bug, not a TorchRL limitation,
+        and it is fixed at the cache rather than papered over here.
 
         A prolonged outage truncates, never terminates. Value estimators read `terminated`
         as "true return-to-go is 0" and `truncated` as "bootstrap from the final
@@ -344,7 +363,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         next_tensordict.set(
             STATUS_UNKNOWN_KEY,
             torch.tensor(
-                [float(getattr(self, "_status_unknown_this_step", False))],
+                [float(self._status_unknown_this_step)],
                 dtype=torch.float,
             ),
         )
