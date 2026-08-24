@@ -9,6 +9,12 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
+from tests.envs.base_exchange_tests import (
+    INVALID_ACTIONS,
+    assert_an_invalid_action_cannot_move_an_open_position,
+    assert_an_invalid_action_raises_before_trading,
+)
+
 from torchtrade.envs import TimeFrame
 
 
@@ -430,6 +436,17 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
         """Test that SL/TP levels are stored correctly."""
         assert env.stoploss_levels == [-0.02, -0.05]
         assert env.takeprofit_levels == [0.03, 0.06]
+
+
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_raises_before_trading(self, env, action):
+        """Venue wiring: this `_step` must route through the shared validator (#288)."""
+        assert_an_invalid_action_raises_before_trading(env, action)
+
+    @pytest.mark.parametrize("action", INVALID_ACTIONS)
+    def test_an_invalid_action_cannot_move_an_open_position(self, env, action):
+        """The expensive direction -- every other case here starts flat (#288)."""
+        assert_an_invalid_action_cannot_move_an_open_position(env, action)
 
 
 class TestBitgetFuturesSLTPTorchTradingEnvIntegration:

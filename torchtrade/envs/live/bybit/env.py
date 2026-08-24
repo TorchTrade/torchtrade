@@ -4,7 +4,6 @@ import math
 from torchtrade.envs.utils.precision import decimals_for_step
 from dataclasses import dataclass
 from typing import List, Optional, Union, Callable, Dict
-import logging
 
 import torch
 from tensordict import TensorDictBase
@@ -26,9 +25,6 @@ from torchtrade.envs.utils.fractional_sizing import (
     calculate_fractional_position,
     PositionCalculationParams,
 )
-
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -123,19 +119,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         # guard here can't reintroduce the silent no-op that bit alpaca/binance/bitget.
         self._sync_position_from_exchange(position_status)
 
-        action_idx = tensordict.get("action", 0)
-        if isinstance(action_idx, torch.Tensor):
-            action_idx = action_idx.item()
-        if not isinstance(action_idx, int):
-            if isinstance(action_idx, float) and math.isfinite(action_idx):
-                action_idx = int(action_idx)
-            else:
-                logger.warning(f"Invalid action index {action_idx}, defaulting to 0")
-                action_idx = 0
-        if action_idx < 0 or action_idx >= len(self.action_levels):
-            logger.warning(f"Action index {action_idx} out of range [0, {len(self.action_levels) - 1}], clamping")
-            action_idx = max(0, min(action_idx, len(self.action_levels) - 1))
-        desired_action = self.action_levels[action_idx]
+        desired_action = self._resolve_action_level(tensordict)
 
         trade_info = self._execute_trade_if_needed(desired_action)
 

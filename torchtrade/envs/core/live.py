@@ -3,6 +3,7 @@
 from typing import List
 import logging
 import math
+import numbers
 import time
 from abc import abstractmethod
 from datetime import datetime, timedelta
@@ -49,6 +50,14 @@ class LiveObservationHalt(RuntimeError):
         super().__init__(
             f"live state acquisition failed with {type(error).__name__}: {error}"
         )
+
+
+class InvalidActionError(Exception):
+    """A policy emitted an action the env cannot resolve to a position.
+
+    Its own type, not ValueError, which `_halting` catches to emergency-close a position.
+    Pinned by test_an_invalid_action_is_not_a_valueerror_that_halting_would_flatten.
+    """
 
 
 class TorchTradeLiveEnv(TorchTradeBaseEnv):
@@ -356,6 +365,48 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         # routinely, which is why this falls back rather than raising.
         self.position.target_tol = tol if math.isfinite(tol) and tol > 0 else 0.0
         self.position.target_reported = False
+
+    def _resolve_action_index(self, tensordict, n_actions: int) -> int:
+        """The policy's action index, validated, or `InvalidActionError` before trading.
+
+        Raises rather than clamping, reversing bybit's and okx's longstanding clamp: see
+        #288 for the venue-by-venue archaeology. `n_actions` rather than the container
+        because the callers hold a list of levels and the SLTP `action_map` dict, which
+        `create_sltp_action_map` builds dense over `range(n)`.
+        """
+        # NOT `.get("action", 0)`: index 0 is a full SHORT on every futures venue
+        # (action_levels is [-1, 0, 1]), so the missing-key default was the same
+        # fail-open this method exists to remove.
+        action_idx = tensordict["action"]
+        # Before `.item()`, not after: a shape-(2,) action would otherwise escape as a
+        # bare RuntimeError, which is a second malformed-action shape with a type the
+        # caller cannot distinguish from a venue fault.
+        if isinstance(action_idx, torch.Tensor):
+            if action_idx.numel() != 1:
+                raise InvalidActionError(
+                    f"expected a scalar action, got shape {tuple(action_idx.shape)}"
+                )
+            action_idx = action_idx.item()
+        # `numbers.Integral`, not `int`: `np.argmax(probs)` returns np.int64, which is a
+        # perfectly good index and which three of the five venues accepted before #288.
+        # bool is Integral AND a valid index, so `True` would silently select level 1.
+        if isinstance(action_idx, bool) or not isinstance(action_idx, numbers.Integral):
+            raise InvalidActionError(
+                f"expected an integer action index, got {action_idx!r} "
+                f"({type(action_idx).__name__})"
+            )
+        action_idx = int(action_idx)
+        if not 0 <= action_idx < n_actions:
+            raise InvalidActionError(
+                f"action index {action_idx} is outside [0, {n_actions - 1}]"
+            )
+        return action_idx
+
+    def _resolve_action_level(self, tensordict) -> float:
+        """The validated action index, resolved against this env's `action_levels`."""
+        return self.action_levels[
+            self._resolve_action_index(tensordict, len(self.action_levels))
+        ]
 
     def _check_termination(self, portfolio_value: float) -> bool:
         """Terminate when the portfolio falls below bankrupt_threshold * its initial value."""
