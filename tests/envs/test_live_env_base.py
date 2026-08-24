@@ -210,6 +210,23 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     )
 
 
+def _first_call_position(func, names):
+    """Source position of the earliest call to any of `names`, or None.
+
+    NOT `ast.walk` order: walk is breadth-first, so a call nested in an earlier `if` is
+    visited AFTER a later top-level one, and an index comparison then "passes" while the
+    trade actually comes first. Ordering claims have to compare source positions.
+    """
+    tree = ast.parse(inspect.getsource(func).lstrip())
+    positions = [
+        (n.lineno, n.col_offset)
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        and n.func.attr in names
+    ]
+    return min(positions) if positions else None
+
+
 @pytest.mark.parametrize("env_cls", NON_SLTP_ENVS, ids=lambda c: c.__name__)
 def test_non_sltp_step_syncs_before_it_trades(env_cls):
     """Every non-SLTP _step reconciles with the exchange BEFORE the duplicate-action guard.
@@ -222,15 +239,15 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
     would be useless, and the guard would still read the stale cache. AST, not source text,
     so a comment mentioning the method cannot satisfy it.
     """
-    tree = ast.parse(inspect.getsource(env_cls.__dict__["_step"]).lstrip())
-    calls = [n.func.attr for n in ast.walk(tree)
-             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+    step = env_cls.__dict__["_step"]
+    sync = _first_call_position(step, {"_sync_position_from_exchange"})
+    trade = _first_call_position(step, {"_execute_trade_if_needed"})
 
-    assert "_sync_position_from_exchange" in calls, (
+    assert sync is not None, (
         f"{env_cls.__name__}._step never reconciles the cached position with the exchange -- "
         f"a liquidation would leave it stale for the rest of the episode."
     )
-    assert calls.index("_sync_position_from_exchange") < calls.index("_execute_trade_if_needed"), (
+    assert sync < trade, (
         f"{env_cls.__name__}._step syncs AFTER it trades: the duplicate-action guard still "
         f"reads the stale position."
     )
@@ -253,18 +270,17 @@ def test_every_live_step_validates_its_action_before_it_trades(env_cls):
     Ordering is the point. Presence alone would pass a `_step` that validated AFTER
     submitting, and the whole contract is that a malformed action costs nothing.
     """
-    tree = ast.parse(inspect.getsource(env_cls.__dict__["_step"]).lstrip())
-    calls = [n.func.attr for n in ast.walk(tree)
-             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+    step = env_cls.__dict__["_step"]
+    resolve = _first_call_position(step, {
+        "_resolve_action_level", "_resolve_action_index", "_resolve_action_tuple"})
+    trade = _first_call_position(step, {"_execute_trade_if_needed"})
 
-    resolvers = [c for c in calls if c in
-                 ("_resolve_action_level", "_resolve_action_index", "_resolve_action_tuple")]
-    assert resolvers, (
+    assert resolve is not None, (
         f"{env_cls.__name__}._step indexes its action space without validating -- on a "
         f"list a negative index wraps to a full LONG, on the SLTP dict it raises KeyError "
         f"after the bracket is priced."
     )
-    assert calls.index(resolvers[0]) < calls.index("_execute_trade_if_needed"), (
+    assert resolve < trade, (
         f"{env_cls.__name__}._step validates AFTER it trades, so a malformed action still "
         f"reaches the exchange."
     )
@@ -2719,8 +2735,8 @@ def test_what_a_short_observation_costs_under_flatten(flat_at_reset):
 
 
 @pytest.mark.parametrize("bad_idx", [
-    -1, 99, 1.5, float("nan"), float("inf"), True,
-], ids=["negative", "too-large", "fractional", "nan", "inf", "bool"])
+    -1, 99, 1.5, float("nan"), float("inf"), True, torch.tensor([1, 2]),
+], ids=["negative", "too-large", "fractional", "nan", "inf", "bool", "multi-element"])
 def test_an_invalid_action_index_cannot_pick_a_position(bad_idx):
     """The six kinds of malformed index, swept once against the one implementation.
 
@@ -2731,6 +2747,35 @@ def test_an_invalid_action_index_cannot_pick_a_position(bad_idx):
         TorchTradeLiveEnv._resolve_action_index(
             SimpleNamespace(), {"action": bad_idx}, 3
         )
+
+
+def test_a_numpy_index_is_accepted():
+    """`np.argmax(probs)` returns np.int64, which is not an `int` subclass.
+
+    main accepted it on three venues; bybit and okx fell through to their index-0
+    default, a full SHORT. A strict `isinstance(x, int)` check would have turned the
+    canonical hand-rolled live-loop idiom into a killed episode, so this pins acceptance
+    rather than leaving it to the next person to rediscover.
+    """
+    idx = TorchTradeLiveEnv._resolve_action_index(
+        SimpleNamespace(), {"action": np.int64(2)}, 3
+    )
+    assert idx == 2 and type(idx) is int, f"got {idx!r} ({type(idx).__name__})"
+
+
+def test_a_missing_action_key_cannot_resolve_to_a_tradeable_index():
+    """`.get("action", 0)` used to default here, and index 0 is a full SHORT on futures.
+
+    That was the same fail-open this method exists to delete, surviving inside the
+    boundary itself -- and nothing in the suite depended on it, so it was pure untested
+    surface. The type matters less than that it refuses: it must not return.
+    """
+    with pytest.raises(Exception) as caught:
+        TorchTradeLiveEnv._resolve_action_index(SimpleNamespace(), {}, 3)
+    assert not isinstance(caught.value, ValueError), (
+        "a ValueError here would be caught by _halting, which under FLATTEN closes a "
+        "real position"
+    )
 
 
 def test_an_invalid_action_is_not_a_valueerror_that_halting_would_flatten():
