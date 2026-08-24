@@ -257,7 +257,7 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
 # define none, and an exchange #6 would land here the moment it does.
 STEPPING_ENVS = [c for c in LIVE_ENVS if "_step" in c.__dict__]
 
-# Every live env that owns a . The two shared implementations plus any override.
+# Every live env that owns a `_reset`: the two shared bodies plus the SLTP overrides.
 RESETTING_ENVS = [c for c in LIVE_ENVS if "_reset" in c.__dict__]
 
 
@@ -1049,7 +1049,7 @@ def _futures_env_stub(position_status, balance, leverage=5):
         position=PositionState(),
         account_state_key="account_state",
         market_data_keys=[],
-        # _get_observation publishes status_unknown from this counter (#295).
+        # _get_observation declares status_unknown; _finalize_step_flags sets it (#295).
         consecutive_unknown_status=0,
     )
 

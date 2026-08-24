@@ -118,7 +118,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         """Execute one environment step."""
         status, position_status, current_price, position_size = self._acquire_pre_trade_state()
 
-        # No-op today (this env's _execute_trade_if_needed recomputes qty live and never reads
+        # No-op today (this env's _execute_trade_if_needed takes the threaded qty (#295) and never reads
         # current_action_level), but keeps the field consistent so adding a duplicate-action
         # guard here can't reintroduce the silent no-op that bit alpaca/binance/bitget.
         self._sync_position_from_exchange(position_status)
@@ -163,7 +163,14 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         if action_value == 0.0:
             return 0.0, 0.0, "flat"
 
-        balance_info = self.trader.get_account_balance()
+        # Under `_halting` like every other account read: this is the read that SIZES
+        # the order, and it sat outside the policy -- so during a #295 grace bar the
+        # decision to trade survived on cached state and then died here anyway, with a
+        # bare error rather than a truncation. Cached separately from the pre-trade and
+        # post-bar reads because it is a different shape.
+        balance_info = self._halting(
+            self.trader.get_account_balance, cache_key="balance"
+        )
         # Indexed, and `not (x > 0)`: defaulting to 0.0 turned a broken adapter into a
         # permanent silent refusal to trade, and `<= 0` lets a NaN balance through to
         # size a NaN position (#277).
@@ -188,23 +195,14 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         return calculate_fractional_position(params)
 
     def _execute_fractional_action(
-        self, action_value: float, *, current_qty: float | None = None,
-        current_price: float | None = None,
+        self, action_value: float, *, current_qty: float, current_price: float,
     ) -> Dict:
         """Execute action using fractional position sizing."""
-        # Threaded from `_step`'s halted read where available. Re-reading here bypassed
-        # `_halting` entirely, so during a #295 grace bar these two calls hit the dead
-        # venue and raised -- no order, no status_unknown, no truncation, on exactly the
-        # bars the grace period exists to cover. okx already threaded them; this is the
-        # other three catching up (#288 parity).
-        #
-        # None means "no caller-supplied read", which is the pre-#295 behaviour and what
-        # the direct-call tests rely on. `test_every_futures_step_threads_its_halted_read`
-        # is what stops a `_step` quietly going back to it.
-        if current_qty is None:
-            current_qty = self._get_current_position_quantity()
-        if current_price is None:
-            current_price = self._current_mark_price()
+        # Threaded from `_step`'s halted read, REQUIRED rather than defaulted. Reading
+        # here bypassed `_halting`, so on a grace bar these hit the dead venue and
+        # raised -- no order, no status_unknown, no truncation, on exactly the bars
+        # grace exists for. A default would restore that silently; omitting the
+        # argument is a TypeError on the first step instead (#295, #288 parity).
 
         if action_value == 0.0:
             if abs(current_qty) > 0:
@@ -236,8 +234,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         return info
 
     def _execute_trade_if_needed(
-        self, desired_action: float, *, current_qty: float | None = None,
-        current_price: float | None = None,
+        self, desired_action: float, *, current_qty: float, current_price: float,
     ) -> Dict:
         """Execute trade based on desired action value."""
         return self._execute_fractional_action(

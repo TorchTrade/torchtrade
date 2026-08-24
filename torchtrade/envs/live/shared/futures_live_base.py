@@ -631,6 +631,11 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             )
 
         balance, status, direction = self._halting(read_account)
+        # Seed the sizing cache from reset's CONFIRMED balance. Without this the grace
+        # period could not size a trade it had not already sized once: the "balance" slot
+        # is otherwise filled only by `_calculate_fractional_position`, so a policy that
+        # held through the healthy bars and wanted to open during the outage got a halt.
+        self._last_confirmed_read["balance"] = balance
         self.balance = balance.get("available_balance", 0)
         self.position.hold_counter = 0
         self.position.current_position = direction

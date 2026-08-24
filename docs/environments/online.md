@@ -911,6 +911,13 @@ Three things are load-bearing here:
   nothing cached — the first bar of an episode — raises regardless of the budget, because
   the alternative is inventing an account state.
 
+**Which reads are covered.** All of them on the trade path: the pre-trade position and
+mark, the post-bar account read, the reset read, and the balance read that *sizes* the
+order. That last one matters — threading the position and price only fixes the decision
+*whether* to trade; a policy that actually opens or resizes during an outage needs the
+balance too, and its cache is seeded from reset's confirmed read so a first trade during
+an outage is still possible.
+
 **This trades on unconfirmed state, which is why it is opt-in.** During the grace period
 the env sizes orders against the last known account; it knows the position it *had*, not
 the one it *has*. `flatten` deliberately ignores the budget: it exists to get you out

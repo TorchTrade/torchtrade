@@ -490,7 +490,11 @@ def test_a_new_episode_cannot_be_served_the_previous_one_s_account():
     assert env._last_confirmed_read, "setup: the cache should be populated"
 
     env.reset()                                   # episode N+1, venue healthy
-    assert not env._last_confirmed_read, "reset left the previous episode's account cached"
+    # `balance` is legitimately re-seeded by reset's own confirmed read. What must NOT
+    # survive is the previous episode's POSITION and mark -- a position that may since
+    # have been closed, at a price from before the outage.
+    assert "pre_trade" not in env._last_confirmed_read
+    assert "post_bar" not in env._last_confirmed_read
 
     trader.get_status.side_effect = PositionUnknownError("down again")
     with pytest.raises(LiveObservationHalt):       # nothing confirmed yet this episode
@@ -527,3 +531,31 @@ def test_alpaca_reports_its_status_as_known_because_it_has_no_failure_policy():
         assert td["status_unknown"].item() == 0.0
         assert not bool(td["truncated"])
         td = td.exclude("done", "terminated", "truncated", "reward")
+
+
+def test_a_grace_bar_can_still_SIZE_a_trade_with_the_venue_down():
+    """Every other grace test holds the action constant, so sizing never ran.
+
+    `_execute_trade_if_needed` early-returns when the action equals the current level, so
+    a test that never CHANGES the action never reaches `_calculate_fractional_position` --
+    and that is where the balance read lives. Threading qty and price fixed the decision
+    to trade; the read that SIZES the trade was still outside `_halting`, so the first
+    grace bar on which a policy actually wanted to open or resize died with a bare error
+    instead of trading on cached state and truncating on budget.
+    """
+    import torch
+
+    env, trader = _real_binance_env(budget=3)
+    td = env.reset()
+    td = env.step(td.set("action", torch.tensor(1)))["next"]          # flat, confirmed
+
+    trader.get_status.side_effect = PositionUnknownError("venue unreachable")
+    trader.get_mark_price.side_effect = PositionUnknownError("venue unreachable")
+    trader.get_account_balance.side_effect = PositionUnknownError("venue unreachable")
+
+    # CHANGE the action, so the early-return cannot hide the sizing path.
+    nxt = env.step(td.exclude("done", "terminated", "truncated", "reward")
+                   .set("action", torch.tensor(2)))["next"]
+
+    assert nxt["status_unknown"].item() == 1.0, "the bar must be flagged, not crash"
+    assert not bool(nxt["terminated"]), "an outage is never a terminated episode"

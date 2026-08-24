@@ -166,7 +166,11 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         if action_value == 0.0:
             return 0.0, 0.0, "flat"
 
-        balance_info = self.trader.get_account_balance()
+        # Under `_halting` like every other account read -- this is the read that SIZES
+        # the order, and it sat outside the policy (#295).
+        balance_info = self._halting(
+            self.trader.get_account_balance, cache_key="balance"
+        )
         # Indexed, and `not (x > 0)`: defaulting to 0.0 turned a broken adapter into a
         # permanent silent refusal to trade, and `<= 0` lets a NaN balance through to
         # size a NaN position (#277).
@@ -214,7 +218,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         return info
 
     def _execute_trade_if_needed(
-        self, desired_action: float, *, current_qty: float = 0.0, current_price: float = 0.0,
+        self, desired_action: float, *, current_qty: float, current_price: float,
     ) -> Dict:
         """Execute trade based on desired action value."""
         return self._execute_fractional_action(
