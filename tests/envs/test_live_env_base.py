@@ -2738,7 +2738,7 @@ def test_what_a_short_observation_costs_under_flatten(flat_at_reset):
     -1, 99, 1.5, float("nan"), float("inf"), True, torch.tensor([1, 2]),
 ], ids=["negative", "too-large", "fractional", "nan", "inf", "bool", "multi-element"])
 def test_an_invalid_action_index_cannot_pick_a_position(bad_idx):
-    """The six kinds of malformed index, swept once against the one implementation.
+    """Every kind of malformed index, swept once against the one implementation.
 
     Clamping was bybit's and okx's behaviour and #288 reversed it. `True` is here because
     bool is an int subclass, so it was resolving to the second level.
@@ -2770,12 +2770,11 @@ def test_a_missing_action_key_cannot_resolve_to_a_tradeable_index():
     boundary itself -- and nothing in the suite depended on it, so it was pure untested
     surface. The type matters less than that it refuses: it must not return.
     """
-    with pytest.raises(Exception) as caught:
+    # KeyError, not `raises(Exception)`: the loose form would pass for an AttributeError
+    # from a future refactor reading something off the stub, leaving the claim unchecked.
+    # It is structurally not a ValueError, so _halting cannot FLATTEN on it.
+    with pytest.raises(KeyError):
         TorchTradeLiveEnv._resolve_action_index(SimpleNamespace(), {}, 3)
-    assert not isinstance(caught.value, ValueError), (
-        "a ValueError here would be caught by _halting, which under FLATTEN closes a "
-        "real position"
-    )
 
 
 def test_an_invalid_action_is_not_a_valueerror_that_halting_would_flatten():
