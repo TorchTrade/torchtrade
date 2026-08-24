@@ -635,7 +635,7 @@ class TestBitgetFractionalPositionResizing:
             result = env._execute_trade_if_needed(second_action)
 
             if should_execute:
-                mock_exec.assert_called_once_with(second_action)
+                mock_exec.assert_called_once_with(second_action, current_qty=None, current_price=None)
             else:
                 mock_exec.assert_not_called()
                 assert result["executed"] is False

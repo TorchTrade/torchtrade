@@ -360,12 +360,17 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         observation"; terminating here would teach the critic that an unreachable API and
         a blown account carry the same value target.
         """
+        # The counter advances HERE, once per bar, because this is the only thing that
+        # runs exactly once per step. Counting inside `_halting` double-counted a bar
+        # where both reads failed, and counting only the pre-trade read let a persistent
+        # POST-BAR-only outage run forever: every bar flagged unknown, while the healthy
+        # pre-trade read reset the counter to zero each time, so the budget never spent.
+        unknown = self._status_unknown_this_step
+        self.consecutive_unknown_status = (
+            self.consecutive_unknown_status + 1 if unknown else 0
+        )
         next_tensordict.set(
-            STATUS_UNKNOWN_KEY,
-            torch.tensor(
-                [float(self._status_unknown_this_step)],
-                dtype=torch.float,
-            ),
+            STATUS_UNKNOWN_KEY, torch.tensor([float(unknown)], dtype=torch.float)
         )
         self._status_unknown_this_step = False
 

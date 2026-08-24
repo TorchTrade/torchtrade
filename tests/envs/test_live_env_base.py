@@ -720,9 +720,6 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
     env.consecutive_unknown_status = 0
     env._last_confirmed_read = {}
     env._max_unknown_status_steps = 0
-    env._flatten_if_policy_says_so = (
-        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
-    )
     env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
         env, read, cache_key
     )
@@ -1009,9 +1006,6 @@ def test_okx_sizes_through_the_dust_rule_in_step():
     env.consecutive_unknown_status = 0
     env._last_confirmed_read = {}
     env._max_unknown_status_steps = 0
-    env._flatten_if_policy_says_so = (
-        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
-    )
     env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
         env, read, cache_key
     )
@@ -2616,9 +2610,6 @@ def test_a_failed_read_runs_the_configured_policy(policy, expect_flatten):
         _last_confirmed_read={},
         _max_unknown_status_steps=0,
     )
-    env._flatten_if_policy_says_so = (
-        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
-    )
 
     def boom():
         raise PositionUnknownError("venue unreachable")
@@ -2653,9 +2644,6 @@ def test_an_unreadable_position_halts_before_the_env_trades(policy, expect_flatt
     env.consecutive_unknown_status = 0
     env._last_confirmed_read = {}
     env._max_unknown_status_steps = 0
-    env._flatten_if_policy_says_so = (
-        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
-    )
     env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
         env, read, cache_key
     )
@@ -2840,9 +2828,6 @@ def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():
     env.consecutive_unknown_status = 0
     env._last_confirmed_read = {}
     env._max_unknown_status_steps = 0
-    env._flatten_if_policy_says_so = (
-        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
-    )
     env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
         env, read, cache_key
     )
@@ -3433,9 +3418,6 @@ class _ResetStub:
             lambda: TorchTradeLiveEnv._reset_outage_state(self)
         )
         self._max_unknown_status_steps = 0
-        self._flatten_if_policy_says_so = (
-            lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(self)
-        )
         # The reset read runs under the halt policy as of #295.
         self._halting = lambda read, cache_key=None: (
             TorchTradeFuturesLiveEnv._halting(self, read, cache_key)
@@ -3707,18 +3689,31 @@ def test_an_observer_disagreeing_with_the_config_raises_rather_than_guessing():
 
 @pytest.mark.parametrize("env_cls", STEPPING_ENVS, ids=lambda c: c.__name__)
 def test_every_live_step_writes_done_explicitly(env_cls):
-    """`done` must be written by `_step`, not inferred from `truncated` (#295).
+    """Every live `_step` writes the done family through the shared writer (#295).
 
-    Verified against a real Collector: setting only `truncated=True` leaves `done=False`,
-    the collector never resets, and the episode silently runs on -- which is precisely the
-    dead channel this work exists to remove. `truncated` has been write-only since #313,
-    so nothing else would have caught it.
+    Not because TorchRL cannot derive `done` -- `EnvBase._complete_done` fills
+    `terminated | truncated` when the key is absent. Because these envs emit the whole
+    family from `_step` itself, which many tests drive directly, and because a venue
+    reimplementing the writes by hand is how `truncated` became a declared constant in
+    the first place.
     """
-    step = env_cls.__dict__["_step"]
-    src = inspect.getsource(step)
-    assert "_finalize_step_flags" in src, (
-        f"{env_cls.__name__}._step does not use the shared done-family writer, so its "
+    calls = [n.func.attr for n in ast.walk(ast.parse(
+        inspect.getsource(env_cls.__dict__["_step"]).lstrip()))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+    assert "_finalize_step_flags" in calls, (
+        f"{env_cls.__name__}._step does not call the shared done-family writer, so its "
         f"truncation channel is unreachable"
+    )
+    # A substring check passed on a commented-out call with the writes reimplemented
+    # alongside it. Only binance had an end-to-end backstop for that; nine venues did not.
+    assert not [n for n in ast.walk(ast.parse(
+        inspect.getsource(env_cls.__dict__["_step"]).lstrip()))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "set"
+        and n.args and isinstance(n.args[0], ast.Constant)
+        and n.args[0].value in ("done", "terminated", "truncated")], (
+        f"{env_cls.__name__}._step writes the done family by hand alongside "
+        f"_finalize_step_flags; the hand-written value wins and the shared one is a lie"
     )
 
 
@@ -3820,9 +3815,10 @@ def test_a_recovered_venue_does_not_truncate_the_next_episode():
     )
 
 
-@pytest.mark.parametrize("config_cls", [c.values[0] for c in SLTP_CONFIGS] + [
+@pytest.mark.parametrize("config_cls", [
     BinanceFuturesTradingEnvConfig, BitgetFuturesTradingEnvConfig,
     BybitFuturesTradingEnvConfig, OKXFuturesTradingEnvConfig,
+    BinanceFuturesSLTPTradingEnvConfig,
 ], ids=lambda c: c.__name__)
 @pytest.mark.parametrize("bad", [-1, 1.5, True, "3", None], ids=[
     "negative", "fractional", "bool", "str", "none"])
@@ -3834,6 +3830,27 @@ def test_an_unusable_outage_budget_is_rejected_at_the_boundary(config_cls, bad):
     here because bool is an int subclass, and would otherwise pass as a budget of 1.
 
     Deleting the validator's body failed ZERO tests before this: it shipped unpinned.
+
+    Four plain configs, because deleting the call from ONE of them fails only its own
+    cases -- they are four independent regression points, which is the shape this repo
+    keeps shipping. One SLTP config, because deleting it from BaseFuturesSLTPConfig fails
+    all four together: they are one call site wearing four names, pinned below.
     """
     with pytest.raises(ValueError, match="max_unknown_status_steps"):
         config_cls(symbol="TEST", max_unknown_status_steps=bad)
+
+
+@pytest.mark.parametrize("config_cls", [c.values[0] for c in SLTP_CONFIGS],
+                         ids=lambda c: c.__name__)
+def test_every_sltp_config_shares_the_one_validated_post_init(config_cls):
+    """The cheaper half of the sweep above, and a stronger guard than re-running it.
+
+    Re-running five bad inputs against four configs that resolve to the SAME function
+    tests one thing four times. What can actually break is a subclass growing its own
+    `__post_init__` and dropping the `super()` call -- which this catches and the
+    parametrized sweep would not, since the venue would simply stop validating.
+    """
+    assert config_cls.__post_init__ is BaseFuturesSLTPConfig.__post_init__, (
+        f"{config_cls.__name__} defines its own __post_init__; it must call super() or "
+        f"it silently stops validating every field the shared one checks"
+    )

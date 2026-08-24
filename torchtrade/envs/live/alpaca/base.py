@@ -282,9 +282,10 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
                 # Declared for all ten envs so the observation contract does not fork by
                 # venue. Alpaca has no observation-failure policy, so its counter never
                 # advances and this is always 0.0 there -- see _max_unknown_status_steps.
-                STATUS_UNKNOWN_KEY: torch.tensor(
-                    [float(self.consecutive_unknown_status > 0)], dtype=torch.float
-                ),
+                # Always 0.0 here: `_finalize_step_flags` overwrites it on every step,
+                # and the only other path is `_reset`, which just zeroed the counter.
+                # Declared so the reset observation matches the spec.
+                STATUS_UNKNOWN_KEY: torch.zeros(1, dtype=torch.float),
             },
             batch_size=(),
         )

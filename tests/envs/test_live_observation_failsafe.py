@@ -29,9 +29,6 @@ def _env(error, policy=ObservationFailurePolicy.HALT, close_result=True):
     env.consecutive_unknown_status = 0
     env._last_confirmed_read = {}
     env._max_unknown_status_steps = 0
-    env._flatten_if_policy_says_so = (
-        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
-    )
     env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
         env, read, cache_key
     )
@@ -156,6 +153,46 @@ def test_every_futures_config_coerces_its_failure_policy(exchange, module):
 
 # --- #295: the grace period, and the truncation that ends it --------------------------
 
+def _real_binance_env(budget, position_status=None, **config_kw):
+    """A real BinanceFuturesTorchTradingEnv on mocks. Three copies of this existed."""
+    from unittest.mock import MagicMock, patch
+    import numpy as np
+    from torchtrade.envs.live.binance.env import (
+        BinanceFuturesTorchTradingEnv as Env, BinanceFuturesTradingEnvConfig as Config,
+    )
+
+    observer = MagicMock()
+    observer.get_keys.return_value = ["1m_10"]
+    observer.get_observations.return_value = {"1m_10": np.zeros((10, 4), dtype=np.float32)}
+    observer.get_features.return_value = {
+        "observation_features": list("abcd"), "original_features": []}
+    observer.reset.return_value = None
+
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1e4, "total_margin_balance": 1e4,
+        "total_wallet_balance": 1e4, "total_maintenance_margin": 0.0}
+    trader.get_status.return_value = {"position_status": position_status}
+    trader.get_mark_price.return_value = 100.0
+    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
+    trader.round_quantity.side_effect = lambda q: round(float(q), 3)
+    trader.trade.return_value = True
+    trader.close_position.return_value = True
+    trader.client.futures_exchange_info.return_value = {"symbols": [{
+        "symbol": "BTCUSDT",
+        "filters": [{"filterType": "LOT_SIZE", "stepSize": "0.001"},
+                    {"filterType": "MIN_NOTIONAL", "notional": "10"}],
+    }]}
+
+    config = Config(symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10],
+                    execute_on="1m", max_unknown_status_steps=budget,
+                    close_position_on_init=False, **config_kw)
+    with patch("time.sleep"), patch.object(Env, "_wait_for_next_timestamp"):
+        env = Env(config=config, observer=observer, trader=trader)
+    env._wait_for_next_timestamp = lambda: None
+    return env, trader
+
+
 def _grace_env(budget, policy=ObservationFailurePolicy.HALT):
     """A stub wired to the real `_halting`, with a configurable outage budget."""
     closed = []
@@ -165,9 +202,6 @@ def _grace_env(budget, policy=ObservationFailurePolicy.HALT):
         consecutive_unknown_status=0,
         _last_confirmed_read={},
         _max_unknown_status_steps=budget,
-    )
-    env._flatten_if_policy_says_so = (
-        lambda: TorchTradeFuturesLiveEnv._flatten_if_policy_says_so(env)
     )
     env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
         env, read, cache_key
@@ -190,36 +224,31 @@ def test_a_confirmed_read_is_what_the_grace_period_stands_on():
     with pytest.raises(LiveObservationHalt):
         env._halting(_boom, cache_key="pre_trade")
 
-    assert env.consecutive_unknown_status == 1, "the failure still counts"
+    assert env._status_unknown_this_step, "the bar is still marked unconfirmed"
 
 
 def test_the_grace_period_rides_out_an_outage_on_the_last_confirmed_read():
+    """`_halting` serves the cached read and never raises once grace applies.
+
+    It deliberately does NOT consult the budget: whether the outage has outlasted it is a
+    question about the BAR, answered once in `_finalize_step_flags`. Raising here on the
+    spent bar would reintroduce the process crash #295 exists to remove.
+    """
     env, _ = _grace_env(budget=3)
     assert env._halting(lambda: "GOOD", cache_key="pre_trade") == "GOOD"
 
-    # Two failures inside the budget: the cached value stands in, nothing raises.
-    for expected_count in (1, 2):
+    for _ in range(5):        # well past the budget: still cached, still no raise
         assert env._halting(_boom, cache_key="pre_trade") == "GOOD"
-        assert env.consecutive_unknown_status == expected_count
-
-    # The third spends the budget. It must NOT raise -- an exception here is the process
-    # crash #295 exists to remove; the step finishes so _finalize_step_flags can truncate.
-    assert env._halting(_boom, cache_key="pre_trade") == "GOOD"
-    assert env.consecutive_unknown_status == 3
+        assert env._status_unknown_this_step
 
 
-def test_a_successful_read_ends_the_outage_rather_than_denting_it():
-    """It counts CONSECUTIVE unknowns. A lifetime counter would truncate a healthy
-    session that had accumulated unrelated blips hours apart."""
+def test_a_successful_read_refreshes_what_the_grace_period_will_serve():
     env, _ = _grace_env(budget=3)
     env._halting(lambda: "GOOD", cache_key="pre_trade")
-    env._halting(_boom, cache_key="pre_trade")
-    env._halting(_boom, cache_key="pre_trade")
-    assert env.consecutive_unknown_status == 2
+    assert env._halting(_boom, cache_key="pre_trade") == "GOOD"
 
     env._halting(lambda: "FRESH", cache_key="pre_trade")
-    assert env.consecutive_unknown_status == 0
-    assert env._halting(_boom, cache_key="pre_trade") == "FRESH", "cache refreshed too"
+    assert env._halting(_boom, cache_key="pre_trade") == "FRESH"
 
 
 def test_the_default_budget_keeps_the_pre_295_posture():
@@ -387,11 +416,114 @@ def test_the_cache_holds_a_copy_not_the_object_the_collector_mutates():
     observation = TensorDict({"done": torch.zeros(1, dtype=torch.bool)}, batch_size=())
     env._halting(lambda: ("status", observation), cache_key="post_bar")
 
-    # The collector stamps the object it was handed.
-    observation.set("done", torch.ones(1, dtype=torch.bool))
+    # Two grace bars in a row. Each must get its OWN object: `_step` stamps reward and
+    # the done family onto whatever it is handed, so one shared object means bar 1 and
+    # bar 2 in a collector's rollout both end up carrying bar 2's values.
+    _, first = env._halting(_boom, cache_key="post_bar")
+    _, second = env._halting(_boom, cache_key="post_bar")
+    assert first is not second, "two grace bars were served the same tensordict"
 
-    _, cached_obs = env._halting(_boom, cache_key="post_bar")
-    assert cached_obs is not observation, "the cache aliases the returned tensordict"
-    assert not bool(cached_obs["done"]), (
-        "the cached observation inherited the flag stamped after it was cached"
+    first.set("done", torch.ones(1, dtype=torch.bool))
+    assert not bool(second["done"]), "stamping one grace bar mutated another"
+    assert not bool(observation["done"]), "stamping a grace bar mutated the cache"
+
+
+def test_an_open_position_is_frozen_but_flagged_through_a_grace_outage():
+    """The scenario the whole feature exists for, and the one nothing else covered.
+
+    Every other test here drives the outage FLAT. With a position open, `account_state`
+    -- exposure, unrealised PnL, distance to liquidation -- is served from the cached
+    read and freezes at the last confirmed values while the real account keeps moving.
+    That is the accepted cost of the opt-in posture, but it must be exactly that: frozen
+    and FLAGGED, never silently re-derived from a stale mark as though it were fresh.
+    """
+    import torch
+    from torchtrade.envs.core.common_types import PositionStatus
+
+    open_long = PositionStatus(
+        qty=0.05, notional_value=5000.0, entry_price=100.0, unrealized_pnl=0.0,
+        unrealized_pnl_pct=0.0, mark_price=100.0, leverage=10,
+        margin_mode="isolated", liquidation_price=91.0,
     )
+    env, trader = _real_binance_env(budget=3, position_status=open_long)
+
+    td = env.reset()
+    td = env.step(td.set("action", torch.tensor(2)))["next"]
+    confirmed = td["account_state"].clone()
+    assert confirmed[1].item() != 0.0, "setup: expected an open position"
+
+    trader.get_status.side_effect = PositionUnknownError("venue unreachable")
+    trader.get_mark_price.side_effect = PositionUnknownError("venue unreachable")
+
+    frozen = []
+    for _ in range(2):
+        td = env.step(td.exclude("done", "terminated", "truncated", "reward")
+                      .set("action", torch.tensor(2)))["next"]
+        frozen.append((td["account_state"].clone(), td["status_unknown"].item()))
+
+    for state, flag in frozen:
+        assert flag == 1.0, "an unconfirmed bar must say so"
+        assert torch.equal(state, confirmed), (
+            "account_state moved during an outage: it must be the last CONFIRMED read, "
+            "not a value re-derived from a stale mark"
+        )
+
+
+def test_a_new_episode_cannot_be_served_the_previous_one_s_account():
+    """`_reset_outage_state` clears the cache; nothing forced the case it protects.
+
+    Episode N truncates with a populated cache. Episode N+1 resets successfully, then its
+    FIRST pre-trade read fails. With the cache uncleared, grace would serve episode N's
+    account -- a position that may since have been closed, at a price hours old.
+    """
+    import torch
+    from torchtrade.envs.core.common_types import PositionStatus
+
+    open_long = PositionStatus(
+        qty=0.05, notional_value=5000.0, entry_price=100.0, unrealized_pnl=0.0,
+        unrealized_pnl_pct=0.0, mark_price=100.0, leverage=10,
+        margin_mode="isolated", liquidation_price=91.0,
+    )
+    env, trader = _real_binance_env(budget=3, position_status=open_long)
+    td = env.reset()
+    env.step(td.set("action", torch.tensor(2)))
+    assert env._last_confirmed_read, "setup: the cache should be populated"
+
+    env.reset()                                   # episode N+1, venue healthy
+    assert not env._last_confirmed_read, "reset left the previous episode's account cached"
+
+    trader.get_status.side_effect = PositionUnknownError("down again")
+    with pytest.raises(LiveObservationHalt):       # nothing confirmed yet this episode
+        env.step(td.set("action", torch.tensor(2)))
+
+
+def test_alpaca_reports_its_status_as_known_because_it_has_no_failure_policy():
+    """Alpaca is the third hand-written copy of the same one-line tensor.
+
+    It has no `observation_failure_policy` and no `_halting`, so its counter never
+    advances and the flag is a constant. Declared anyway, so the observation contract does
+    not fork by venue -- and pinned here, because this repo's recorded failure mode is a
+    third copy quietly drifting from the other two.
+    """
+    import torch
+    from tests.mocks.alpaca import MockObserver, MockTrader
+    from torchtrade.envs.live.alpaca.env import (
+        AlpacaTorchTradingEnv, AlpacaTradingEnvConfig,
+    )
+
+    env = AlpacaTorchTradingEnv(
+        config=AlpacaTradingEnvConfig(symbol="BTC/USD", window_sizes=[10]),
+        observer=MockObserver(window_sizes=[10]), trader=MockTrader(initial_cash=10000.0),
+    )
+    env._wait_for_next_timestamp = lambda: None
+
+    assert not hasattr(env.config, "max_unknown_status_steps"), (
+        "alpaca grew an outage budget; this test and the docs both need revisiting"
+    )
+    td = env.reset()
+    assert td["status_unknown"].item() == 0.0
+    for _ in range(3):
+        td = env.step(td.set("action", torch.tensor(1)))["next"]
+        assert td["status_unknown"].item() == 0.0
+        assert not bool(td["truncated"])
+        td = td.exclude("done", "terminated", "truncated", "reward")

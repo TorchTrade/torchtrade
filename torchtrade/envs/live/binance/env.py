@@ -170,7 +170,9 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         desired_action = self._resolve_action_level(tensordict)
 
         # Execute trade
-        trade_info = self._execute_trade_if_needed(desired_action)
+        trade_info = self._execute_trade_if_needed(
+            desired_action, current_qty=position_size, current_price=current_price,
+        )
 
         self._record_position_after_trade(desired_action, trade_info)
 
@@ -326,7 +328,10 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
 
         return position_size, notional_value, side
 
-    def _execute_fractional_action(self, action_value: float) -> Dict:
+    def _execute_fractional_action(
+        self, action_value: float, *, current_qty: float | None = None,
+        current_price: float | None = None,
+    ) -> Dict:
         """Execute action using fractional position sizing with query-first pattern.
 
         This implementation:
@@ -343,8 +348,19 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             trade_info: Dict with execution details
         """
         # 1. Query actual position from exchange (source of truth)
-        current_qty = self._get_current_position_quantity()
-        current_price = self._current_mark_price()
+        # Threaded from `_step`'s halted read where available. Re-reading here bypassed
+        # `_halting` entirely, so during a #295 grace bar these two calls hit the dead
+        # venue and raised -- no order, no status_unknown, no truncation, on exactly the
+        # bars the grace period exists to cover. okx already threaded them; this is the
+        # other three catching up (#288 parity).
+        #
+        # None means "no caller-supplied read", which is the pre-#295 behaviour and what
+        # the direct-call tests rely on. `test_every_futures_step_threads_its_halted_read`
+        # is what stops a `_step` quietly going back to it.
+        if current_qty is None:
+            current_qty = self._get_current_position_quantity()
+        if current_price is None:
+            current_price = self._current_mark_price()
 
         # 2. Special case: Close to flat
         if action_value == 0.0:
@@ -409,7 +425,10 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         info["target_tol"] = min_notional / current_price
         return info
 
-    def _execute_trade_if_needed(self, desired_action: float) -> Dict:
+    def _execute_trade_if_needed(
+        self, desired_action: float, *, current_qty: float | None = None,
+        current_price: float | None = None,
+    ) -> Dict:
         """
         Execute trade if position change is needed.
 
@@ -424,4 +443,6 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         if desired_action == self.position.current_action_level:
             return self._create_trade_info(executed=False)
 
-        return self._execute_fractional_action(desired_action)
+        return self._execute_fractional_action(
+            desired_action, current_qty=current_qty, current_price=current_price,
+        )

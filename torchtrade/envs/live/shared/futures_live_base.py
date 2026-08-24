@@ -92,84 +92,70 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         on (a failure in `_reset`, or the first bar of an episode) it raises regardless of
         the budget, because there is no last-known truth to stand on.
         """
-        # Only the pre-trade read defines a bar: it runs exactly once per `_step`. Counting
-        # every read site would make `max_unknown_status_steps=3` truncate after two bars,
-        # since the post-bar read fails in the same outage -- a budget that silently means
-        # something other than what it says.
-        counts = cache_key != "post_bar"
-
         try:
             value = read()
         # NOT RuntimeError: adapters wrap timeouts in it, and KeyError is a config
         # error. See docs/environments/online.md.
         except (PositionUnknownError, ValueError) as error:
-            budget = self._max_unknown_status_steps
-            cached = self._last_confirmed_read.get(cache_key) if cache_key else None
-            if counts:
-                self.consecutive_unknown_status += 1
+            # The BAR is unconfirmed. The counter advances once per step in
+            # `_finalize_step_flags`, not here: counting per read site double-counts a bar
+            # where both reads fail, and counting only the pre-trade read let a persistent
+            # POST-BAR-only outage run forever -- every bar flagged unknown while the
+            # healthy pre-trade read reset the counter to zero each time.
             self._status_unknown_this_step = True
 
             # FLATTEN and a grace period are contradictory postures: FLATTEN means "get
             # me out while I cannot see the account", so riding out the outage would
             # defeat the only thing it is for. Grace applies to HALT only.
+            # COPIED on the way out, not on the way in. Copying at the store side was
+            # the round-1 mistake: every grace bar returned the SAME physical object,
+            # which `_step` then stamps with reward and the done family, so a collector
+            # holding it in two rollout slots reads the later bar's values in both.
+            # `TensorDict.set()` stores references -- this repo's own recorded rule.
+            cached = self._last_confirmed_read.get(cache_key) if cache_key else None
+            if isinstance(cached, tuple):
+                cached = tuple(
+                    v.clone() if isinstance(v, TensorDictBase) else v for v in cached
+                )
             grace = (
-                budget > 0
+                self._max_unknown_status_steps > 0
                 and cached is not None
                 and self.config.observation_failure_policy
                 is not ObservationFailurePolicy.FLATTEN
             )
             if grace:
-                if self.consecutive_unknown_status < budget:
-                    if counts:   # the counting site logs, once per bar
-                        logger.warning(
-                                "%s: venue read failed (%s); running on unconfirmed "
-                            "state, %d of %d grace steps used",
-                            self.config.symbol, type(error).__name__,
-                            self.consecutive_unknown_status, budget,
-                        )
-                    return cached
-                # No flatten here: `grace` above already excludes FLATTEN, so a close
-                # attempt on this branch is unreachable. The step finishes on cached state
-                # so `_finalize_step_flags` can truncate -- raising instead would be the
-                # process crash #295 exists to remove.
-                if counts:
-                    logger.error(
-                        "%s: venue unreadable for %d consecutive bars; truncating",
-                        self.config.symbol, self.consecutive_unknown_status,
+                # No budget check here. Whether the outage has outlasted its budget is a
+                # question about the BAR, answered once in `_finalize_step_flags`; asking
+                # it per read site is what made the budget mean reads rather than bars.
+                # Raising on the spent bar would also reintroduce the process crash #295
+                # exists to remove -- the step has to finish so it can truncate.
+                if cache_key != "post_bar":   # log once per bar, not per read
+                    logger.warning(
+                        "%s: venue read failed (%s); running on unconfirmed state "
+                        "(bar %d of a %d-bar budget)",
+                        self.config.symbol, type(error).__name__,
+                        self.consecutive_unknown_status + 1,
+                        self._max_unknown_status_steps,
                     )
                 return cached
 
-            accepted, flatten_error = self._flatten_if_policy_says_so()
+            accepted = flatten_error = None
+            if (self.config.observation_failure_policy
+                    is ObservationFailurePolicy.FLATTEN):
+                try:
+                    accepted = bool(self.trader.close_position())
+                except Exception as exc:
+                    flatten_error = exc
+                    logger.exception(
+                        "Emergency close_position failed for %s", self.config.symbol
+                    )
             raise LiveObservationHalt(
                 error, self.config.observation_failure_policy, accepted, flatten_error
             ) from error
 
-        if counts:
-            self.consecutive_unknown_status = 0
         if cache_key:
-            # CLONE, not the reference. `TensorDict.set()` stores references, so the
-            # post-bar tuple's observation is the SAME object the collector received and
-            # then stamped with reward/done/terminated/truncated. Caching it by reference
-            # meant a grace bar re-served last bar's flags -- which is what made an
-            # explicit `done` write look necessary when the real fault was aliasing.
-            self._last_confirmed_read[cache_key] = tuple(
-                v.clone() if hasattr(v, "clone") else v for v in value
-            ) if isinstance(value, tuple) else value
+            self._last_confirmed_read[cache_key] = value
         return value
-
-    def _flatten_if_policy_says_so(self):
-        """Attempt the emergency close when the policy is FLATTEN. Returns (accepted, error).
-
-        `accepted` records that the venue accepted a close REQUEST, not that the position
-        is gone -- the distinction LiveObservationHalt already documents.
-        """
-        if self.config.observation_failure_policy is not ObservationFailurePolicy.FLATTEN:
-            return None, None
-        try:
-            return bool(self.trader.close_position()), None
-        except Exception as exc:
-            logger.exception("Emergency close_position failed for %s", self.config.symbol)
-            return None, exc
 
     def _acquire_pre_trade_state(self):
         """The venue read at the TOP of _step, under the halt policy (#355).
@@ -563,9 +549,10 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                 # Declared for all ten envs so the observation contract does not fork by
                 # venue. Alpaca has no observation-failure policy, so its counter never
                 # advances and this is always 0.0 there -- see _max_unknown_status_steps.
-                STATUS_UNKNOWN_KEY: torch.tensor(
-                    [float(self.consecutive_unknown_status > 0)], dtype=torch.float
-                ),
+                # Always 0.0 here: `_finalize_step_flags` overwrites it on every step,
+                # and the only other path is `_reset`, which just zeroed the counter.
+                # Declared so the reset observation matches the spec.
+                STATUS_UNKNOWN_KEY: torch.zeros(1, dtype=torch.float),
             },
             batch_size=(),
         )

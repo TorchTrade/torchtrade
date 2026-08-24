@@ -639,7 +639,7 @@ class TestBybitFractionalPositionResizing:
         with patch.object(env, '_execute_fractional_action', return_value=trade_result) as mock_exec:
             env.position.current_action_level = first_action
             env._execute_trade_if_needed(second_action)
-            mock_exec.assert_called_once_with(second_action)
+            mock_exec.assert_called_once_with(second_action, current_qty=None, current_price=None)
 
     def test_qty_step_rounding_no_float_artifacts(self, env, mock_env_trader):
         """Quantity must be rounded to avoid float artifacts like 0.00300000000003."""

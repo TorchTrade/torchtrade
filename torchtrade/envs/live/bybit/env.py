@@ -125,7 +125,9 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
 
         desired_action = self._resolve_action_level(tensordict)
 
-        trade_info = self._execute_trade_if_needed(desired_action)
+        trade_info = self._execute_trade_if_needed(
+            desired_action, current_qty=position_size, current_price=current_price,
+        )
 
         self._record_position_after_trade(desired_action, trade_info)
 
@@ -185,10 +187,24 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         )
         return calculate_fractional_position(params)
 
-    def _execute_fractional_action(self, action_value: float) -> Dict:
+    def _execute_fractional_action(
+        self, action_value: float, *, current_qty: float | None = None,
+        current_price: float | None = None,
+    ) -> Dict:
         """Execute action using fractional position sizing."""
-        current_qty = self._get_current_position_quantity()
-        current_price = self._current_mark_price()
+        # Threaded from `_step`'s halted read where available. Re-reading here bypassed
+        # `_halting` entirely, so during a #295 grace bar these two calls hit the dead
+        # venue and raised -- no order, no status_unknown, no truncation, on exactly the
+        # bars the grace period exists to cover. okx already threaded them; this is the
+        # other three catching up (#288 parity).
+        #
+        # None means "no caller-supplied read", which is the pre-#295 behaviour and what
+        # the direct-call tests rely on. `test_every_futures_step_threads_its_halted_read`
+        # is what stops a `_step` quietly going back to it.
+        if current_qty is None:
+            current_qty = self._get_current_position_quantity()
+        if current_price is None:
+            current_price = self._current_mark_price()
 
         if action_value == 0.0:
             if abs(current_qty) > 0:
@@ -219,6 +235,11 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         info["target_tol"] = lot_size["min_qty"]
         return info
 
-    def _execute_trade_if_needed(self, desired_action: float) -> Dict:
+    def _execute_trade_if_needed(
+        self, desired_action: float, *, current_qty: float | None = None,
+        current_price: float | None = None,
+    ) -> Dict:
         """Execute trade based on desired action value."""
-        return self._execute_fractional_action(desired_action)
+        return self._execute_fractional_action(
+            desired_action, current_qty=current_qty, current_price=current_price,
+        )
