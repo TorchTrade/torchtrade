@@ -327,6 +327,22 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 Unbounded(shape=(window_sizes[0], 4), dtype=torch.float),
             )
 
+    #: The universal 6-element account state, shared by every live env AND the offline
+    #: ones. Five identical copies lived in the per-venue bases (#288); the contract is
+    #: one thing, and a venue reordering its own copy would silently hand a trained policy
+    #: a permuted observation.
+    #:
+    #: - exposure_pct: position_value / equity (0.0 to 1.0+ with leverage)
+    #: - position_direction: sign(position_size) (-1 short, 0 flat, +1 long)
+    #: - unrealized_pnlpct: percentage unrealised PnL from entry
+    #: - holding_time: steps since the position opened
+    #: - leverage: 1.0 for spot, 1-125 for futures
+    #: - distance_to_liquidation: normalised distance (1.0 when there is none)
+    ACCOUNT_STATE = [
+        "exposure_pct", "position_direction", "unrealized_pnlpct",
+        "holding_time", "leverage", "distance_to_liquidation",
+    ]
+
     def _reset_outage_state(self) -> None:
         """Clear the staleness state at an episode boundary.
 

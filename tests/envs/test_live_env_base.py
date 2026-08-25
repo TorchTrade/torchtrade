@@ -1599,7 +1599,14 @@ def test_every_live_env_delegates_its_baseline(exchange):
     """Alpaca included, not exempted -- excluding it is how the bug survived last time."""
     src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
            / "live" / exchange / "base.py").read_text()
-    assert "_capture_bankruptcy_baseline()" in src
+    # `_finish_futures_init()` calls it: as of #288 the four futures venues share that
+    # tail instead of each spelling the call out. Alpaca still calls it directly.
+    assert ("_capture_bankruptcy_baseline()" in src
+            or "_finish_futures_init()" in src), (
+        f"{exchange} neither captures the baseline nor delegates to the shared tail"
+    )
+    # The load-bearing half, unchanged: delegating is the point, re-forking the READ is
+    # the bug. This is what actually caught it last time.
     assert 'balance["total_margin_balance"]' not in src, (
         f"{exchange} re-forked the baseline read instead of delegating"
     )
@@ -2974,6 +2981,12 @@ def test_every_live_env_can_actually_run_the_bar_wait(cls):
     # `self.execute_on = None`, so an MRO-wide search passes on a concrete class that
     # never assigns it -- which is exactly the alpaca break, certified clean. First
     # version of this test did that and the mutation survived.
+    #
+    # #288 moved the assignment into the shared `_finish_futures_init`, so the PREDICATE
+    # widens, not the base list. Admitting the futures base as a source was my first
+    # attempt and it restored the hole above -- mutation-proven: deleting bybit's
+    # `_finish_futures_init()` call still passed. The venue must show one or the other in
+    # ITS OWN source.
     exchange_bases = [
         base for base in cls.__mro__
         if base.__module__.startswith("torchtrade.envs.live.")
@@ -2982,7 +2995,9 @@ def test_every_live_env_can_actually_run_the_bar_wait(cls):
     if not exchange_bases:
         pytest.skip(f"{cls.__name__} is a shared base, not an exchange env")
     assert any(
-        "self.execute_on = " in inspect.getsource(base) for base in exchange_bases
+        "self.execute_on = " in inspect.getsource(base)
+        or "_finish_futures_init()" in inspect.getsource(base)
+        for base in exchange_bases
     ), (
         f"{cls.__name__} never assigns self.execute_on in its exchange base; the shared "
         f"bar wait reads it and will AttributeError at the first bar, after the order"
@@ -3864,7 +3879,9 @@ def test_every_successful_close_invalidates_the_cached_balance():
     import ast
     import pathlib
 
-    EXEMPT = {"_halting", "_reset"}
+    # `_finish_futures_init` runs at CONSTRUCTION, before any read has been cached, so
+    # its startup flatten has nothing to invalidate -- same ordering argument as `_reset`.
+    EXEMPT = {"_halting", "_reset", "_finish_futures_init"}
     root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
     offenders = []
     for path in sorted(root.glob("*/env_sltp.py")) + [
@@ -3891,3 +3908,185 @@ def test_every_successful_close_invalidates_the_cached_balance():
         "a successful close leaves the cached sizing balance stale in: "
         + "; ".join(offenders)
     )
+
+
+@pytest.mark.parametrize("venue,expect", [
+    ("binance", {}),
+    ("bitget",  {}),
+    ("bybit",   {"client": "SHARED"}),
+    ("okx",     {}),
+], ids=["binance", "bitget", "bybit", "okx"])
+def test_each_venue_builds_its_observer_with_the_arguments_it_needs(venue, expect):
+    """The non-DI path, which no test in the repo exercised: 83 constructions inject an
+    observer, 2 do not, and those 2 need live credentials so they skip.
+
+    So `_observer_kwargs` -- the whole point of #288 slice 1 -- was unreachable by the
+    suite, and it shipped with two bugs. okx inherited a `client=` override copied from
+    bybit, handing its observer the trader's `Trade.TradeAPI`, which has no
+    `get_candlesticks`: every kline fetch would have raised. bitget lost `product_type`,
+    so a COIN-FUTURES deployment would trade one product line and read candles from
+    another, silently.
+
+    `client` is asserted as a CATEGORY, not a value: bybit shares one session between the
+    two roles and the other three must not, which is the actual contract.
+    """
+    import importlib
+
+    # The concrete plain env, not the abstract exchange base: the base still declares
+    # `_step`/`_execute_trade_if_needed` abstract, so it cannot be instantiated at all.
+    module = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
+    cls = next(v for k, v in vars(module).items()
+               if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
+
+    # A real instance via __new__, not a SimpleNamespace: `_observer_kwargs` calls
+    # zero-arg `super()`, which needs the class in its MRO. __init__ is skipped so the
+    # venue is never contacted.
+    env = cls.__new__(cls)
+    env.config = SimpleNamespace(
+        symbol="X", time_frames=["1m"], window_sizes=[10], demo=True,
+        leverage=5, margin_mode="isolated", position_mode="one_way",
+        product_type="USDT-FUTURES",
+    )
+    env._feature_preprocessing_fn = None
+    env.trader = SimpleNamespace(client="SHARED")
+    kwargs = env._observer_kwargs()
+
+    base_keys = {"symbol", "time_frames", "window_sizes",
+                 "feature_preprocessing_fn", "demo"}
+    assert base_keys <= set(kwargs), f"{venue} dropped {base_keys - set(kwargs)}"
+
+    extras = {k: v for k, v in kwargs.items() if k not in base_keys}
+    assert extras == expect, (
+        f"{venue} observer extras are {extras}, expected {expect}. A client the venue "
+        f"does not share is a broken market-data feed; a missing product_type is a "
+        f"silent wrong-market read."
+    )
+
+
+@pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
+def test_no_venue_redeclares_the_account_state_contract(env_cls):
+    """`ACCOUNT_STATE` lived in five identical copies before #288.
+
+    It is the observation contract itself -- CLAUDE.md's "universal 6 elements", shared
+    with the offline envs. A venue re-declaring it can reorder or rename an element and
+    every existing test still passes, because each env is only ever compared against its
+    OWN list. What breaks is a trained checkpoint, silently, at a different index.
+
+    Structural for the reason this file keeps needing structural tests: a re-forked copy
+    that has not drifted yet passes everything.
+    """
+    offenders = [c.__name__ for c in env_cls.__mro__
+                 if "ACCOUNT_STATE" in c.__dict__
+                 and c.__name__ != "TorchTradeLiveEnv"]
+    assert not offenders, (
+        f"{env_cls.__name__} resolves ACCOUNT_STATE from {offenders} rather than the "
+        f"shared contract on TorchTradeLiveEnv; a reordered copy is a permuted "
+        f"observation that no test compares against anything else"
+    )
+
+
+@pytest.mark.parametrize("venue,expect_order,observer_extras,trader_extras", [
+    ("binance", ["observer", "trader"], set(),
+     {"trade_mode": "fractional"}),
+    ("bitget",  ["observer", "trader"], set(),
+     {"trade_mode": "fractional", "position_mode": "one_way",
+      "product_type": "COIN-FUTURES", "passphrase": "PASS"}),
+    ("bybit",   ["trader", "observer"], {"client"},
+     {"position_mode": "one_way"}),
+    ("okx",     ["trader", "observer"], set(),
+     {"position_mode": "one_way", "passphrase": "PASS"}),
+], ids=["binance", "bitget", "bybit", "okx"])
+def test_init_trading_clients_wires_each_venue_as_before(
+    venue, expect_order, observer_extras, trader_extras
+):
+    """Characterisation of the code #288 actually refactored, network-free.
+
+    The previous test called `_observer_kwargs()` directly on a `__new__`'d instance, so
+    it never ran `_init_trading_clients` -- the method that selects the order, constructs
+    both classes and consumes both hooks. A mutation of a hook failed it while a wiring
+    regression at any of the eight call sites passed. Same error as the kwargs probe in
+    the PR body: verifying something adjacent to the thing that changed.
+
+    Construction ORDER is asserted, not just kwargs. bybit's observer reuses the trader's
+    session, so it must be built second; okx must NOT, because its trader client is a
+    Trade API and klines live on the MarketData one -- the round-1 regression.
+    """
+    import importlib
+
+    module = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
+    cls = next(v for k, v in vars(module).items()
+               if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
+
+    log = []
+
+    class FakeObserver:
+        def __init__(self, **kw):
+            log.append(("observer", kw))
+
+    class FakeTrader:
+        def __init__(self, **kw):
+            log.append(("trader", kw))
+            self.client = "TRADER_SESSION"
+
+    env = cls.__new__(cls)
+    env.config = SimpleNamespace(
+        symbol="X", time_frames=["1m"], window_sizes=[10], demo=True,
+        leverage=5, margin_mode="isolated", position_mode="one_way",
+        product_type="COIN-FUTURES", trade_mode="fractional",
+    )
+    env._feature_preprocessing_fn = None
+    env._passphrase = env._api_passphrase = "PASS"
+
+    with patch.object(cls, "OBSERVER_CLS", FakeObserver), \
+         patch.object(cls, "TRADER_CLS", FakeTrader):
+        env._init_trading_clients("KEY", "SECRET", None, None)
+
+    assert [name for name, _ in log] == expect_order, (
+        f"{venue} built {[n for n, _ in log]}, expected {expect_order}"
+    )
+
+    kw = dict(log)
+    base_obs = {"symbol", "time_frames", "window_sizes", "feature_preprocessing_fn", "demo"}
+    assert set(kw["observer"]) == base_obs | observer_extras, (
+        f"{venue} observer kwargs {sorted(kw['observer'])}, expected "
+        f"{sorted(base_obs | observer_extras)}"
+    )
+    if "client" in observer_extras:
+        assert kw["observer"]["client"] == "TRADER_SESSION", (
+            f"{venue} shares the trader's session, so it must receive that object"
+        )
+
+    # EXACT, not a subset. A subset check passed while binance dropped `trade_mode`,
+    # bitget dropped `product_type`, okx dropped `passphrase` and bybit's `position_mode`
+    # changed value -- the routing `_trader_kwargs` exists to do was entirely unpinned.
+    base_tr = {"symbol": "X", "api_key": "KEY", "api_secret": "SECRET",
+               "demo": True, "leverage": 5, "margin_mode": "isolated"}
+    assert kw["trader"] == {**base_tr, **trader_extras}, (
+        f"{venue} trader kwargs {kw['trader']}, expected {{**base, **{trader_extras}}}"
+    )
+
+
+def test_dependency_injection_still_skips_construction_entirely():
+    """A supplied observer/trader must win, on the shared path as on the old per-venue one.
+
+    83 of the suite's 85 env constructions rely on this, so a regression here would show
+    up everywhere at once -- but it is the shared method's contract now, and nothing
+    asserted it directly.
+    """
+    from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv as Env
+
+    def explode(**kw):
+        raise AssertionError("constructed a client despite dependency injection")
+
+    env = Env.__new__(Env)
+    env.config = SimpleNamespace(
+        symbol="X", time_frames=["1m"], window_sizes=[10], demo=True,
+        leverage=5, margin_mode="isolated", trade_mode="fractional",
+    )
+    env._feature_preprocessing_fn = None
+    supplied_obs, supplied_tr = object(), object()
+
+    with patch.object(Env, "OBSERVER_CLS", explode), patch.object(Env, "TRADER_CLS", explode):
+        env._init_trading_clients("K", "S", supplied_obs, supplied_tr)
+
+    assert env.observer is supplied_obs and env.trader is supplied_tr

@@ -85,13 +85,6 @@ class TestBitgetObservationClass(BaseObservationClassTests):
                 symbol="BTC/USDT:USDT", time_frames=TimeFrame(2, TimeFrameUnit.Minute),
                 window_sizes=10, client=mock_ccxt_client)
 
-    def test_product_type_demo(self, mock_ccxt_client):
-        """demo=True sets the product type."""
-        observer = BitgetObservationClass(
-            symbol="BTC/USDT:USDT", time_frames=TimeFrame(1, TimeFrameUnit.Minute),
-            window_sizes=10, product_type="USDT-FUTURES", demo=True, client=mock_ccxt_client)
-        assert observer.product_type == "USDT-FUTURES"
-
     def test_get_keys_multi(self, observer_multi):
         assert observer_multi.get_keys() == ["1Minute_10", "5Minute_20", "1Hour_15"]
 
