@@ -130,19 +130,15 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             make_trader()
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
-        """One step for the four PLAIN futures envs. Four copies, 100%/96% identical --
-        the 4% was a trailing comment on one line (#288).
+        """One step for the four PLAIN futures envs (#288).
 
-        The SLTP envs do NOT get this: `SLTPMixin` sits ahead of this class in their MRO
-        and owns their own `_step`, which resolves a bracket tuple rather than an action
-        level. Alpaca does not inherit this class at all.
-
-        Ordering here is the contract, not style. The pre-trade read comes first because
-        the duplicate-action guard downstream reads the position it syncs (invariant 2);
-        the trade takes the qty and price that read already acquired under the halt policy,
-        rather than fetching its own (#295); and `record_step` precedes the reward because
-        the reward function scores the history row it just wrote.
+        The SLTP envs override this via SLTPMixin, which precedes this class in their MRO;
+        alpaca does not inherit this class. Ordering is load-bearing, and each constraint
+        is stated where it binds rather than listed here.
         """
+        # Before the trade: the duplicate-action guard reads the position this syncs
+        # (invariant 2), and the trade below takes the qty and price it acquired under the
+        # halt policy rather than fetching its own (#295).
         status, position_status, current_price, position_size = self._acquire_pre_trade_state()
 
         self._sync_position_from_exchange(position_status)
