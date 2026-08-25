@@ -516,13 +516,19 @@ def assert_the_step_emits_the_whole_done_family(env):
 
     for key in ("done", "terminated", "truncated"):
         assert key in nxt.keys(), (
-            f"{key} missing from the emitted step. The live envs no longer write the done "
-            "family by hand (#313), so a key absent here means the shared full_done_spec "
-            "stopped declaring it."
+            f"{key} missing from the emitted step. The live envs write the done family "
+            "through the shared _finalize_step_flags (#295), so a key absent here means "
+            "an env stopped routing through it."
         )
         assert nxt[key].dtype is torch.bool, f"{key} is {nxt[key].dtype}, not bool"
         assert nxt[key].shape == (1,), f"{key} has shape {tuple(nxt[key].shape)}, not (1,)"
-    assert not nxt["truncated"].any(), "a live env never truncates itself"
+    # Scoped to the DEFAULT config, which disables the grace period. Unscoped this reads
+    # as "a live env never truncates", which #295 made false -- and it would keep passing
+    # only because these fixtures leave max_unknown_status_steps at 0.
+    budget = getattr(env.config, "max_unknown_status_steps", 0)   # absent on alpaca
+    assert budget == 0 and not nxt["truncated"].any(), (
+        "a live env does not truncate itself with the outage budget disabled"
+    )
 
 
 # The two inputs that pre-fix produced a SILENT TRADE rather than a crash, which is what
@@ -602,3 +608,16 @@ def assert_an_invalid_action_cannot_move_an_open_position(env, action):
     assert env.position.current_position == 1, (
         f"action {action!r} moved the open position to {env.position.current_position}"
     )
+
+
+def wire_outage_state(env, budget=0):
+    """Give a stub the #295 staleness attributes `__init__` would have set.
+
+    Ten sites were pasting these four lines. A stub that skips them fails with an
+    AttributeError from whichever read happens to touch them first, which says nothing
+    about what the test was checking.
+    """
+    env.consecutive_unknown_status = 0
+    env._status_unknown_this_step = False
+    env._last_confirmed_read = {}
+    env._max_unknown_status_steps = budget

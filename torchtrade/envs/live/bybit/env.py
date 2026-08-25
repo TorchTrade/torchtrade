@@ -17,6 +17,7 @@ from torchtrade.envs.live.bybit.order_executor import (
     PositionMode,
 )
 from torchtrade.envs.live.bybit.base import BybitBaseTorchTradingEnv
+from torchtrade.envs.core.common import validate_unknown_status_budget
 from torchtrade.envs.core.live import (
     ObservationFailurePolicy,
 )
@@ -57,9 +58,12 @@ class BybitFuturesTradingEnvConfig:
     close_position_on_init: bool = True
     close_position_on_reset: bool = False
     observation_failure_policy: ObservationFailurePolicy | str = ObservationFailurePolicy.HALT
+    # Bars to ride out an unreadable venue before truncating; 0 disables (#295).
+    max_unknown_status_steps: int = 0
 
     def __post_init__(self):
         self.observation_failure_policy = ObservationFailurePolicy(self.observation_failure_policy)
+        validate_unknown_status_budget(self.max_unknown_status_steps)
         from torchtrade.envs.live.bybit.utils import normalize_bybit_timeframe_config
         self.execute_on, self.time_frames, self.window_sizes = normalize_bybit_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
@@ -114,14 +118,16 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         """Execute one environment step."""
         status, position_status, current_price, position_size = self._acquire_pre_trade_state()
 
-        # No-op today (this env's _execute_trade_if_needed recomputes qty live and never reads
+        # No-op today (this env's _execute_trade_if_needed takes the threaded qty (#295) and never reads
         # current_action_level), but keeps the field consistent so adding a duplicate-action
         # guard here can't reintroduce the silent no-op that bit alpaca/binance/bitget.
         self._sync_position_from_exchange(position_status)
 
         desired_action = self._resolve_action_level(tensordict)
 
-        trade_info = self._execute_trade_if_needed(desired_action)
+        trade_info = self._execute_trade_if_needed(
+            desired_action, current_qty=position_size, current_price=current_price,
+        )
 
         self._record_position_after_trade(desired_action, trade_info)
 
@@ -147,8 +153,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         done = self._check_termination(new_portfolio_value)
 
         next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
-        next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))
-        next_tensordict.set("terminated", torch.tensor([done], dtype=torch.bool))
+        self._finalize_step_flags(next_tensordict, terminated=done)
 
         return next_tensordict
 
@@ -158,19 +163,25 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         if action_value == 0.0:
             return 0.0, 0.0, "flat"
 
-        balance_info = self.trader.get_account_balance()
-        # Indexed, and `not (x > 0)`: defaulting to 0.0 turned a broken adapter into a
-        # permanent silent refusal to trade, and `<= 0` lets a NaN balance through to
-        # size a NaN position (#277).
-        total_balance = balance_info['total_margin_balance']
+        # The VERDICT is inside the closure, not just the read. `_halting` catches
+        # ValueError precisely so an impossible account state becomes a halt; raising one
+        # frame above it sent that straight out of `_step`. `equity == 0.0` is what a
+        # venue reports while liquidating you -- the worst moment to crash rather than
+        # halt under policy (#295).
+        def read_balance():
+            info = self.trader.get_account_balance()
+            total_balance = info["total_margin_balance"]
+            # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
+            # balance sizes an inf target (#277). The name is load-bearing:
+            # test_futures_sizing_rejects_a_non_finite_balance greps for it.
+            if not math.isfinite(total_balance) or total_balance <= 0:
+                raise ValueError(
+                    f"cannot size a trade against a portfolio value of {total_balance}"
+                )
+            return info
 
-        # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
-        # balance sizes an inf target -- bitget's amount rounding then yields NaN and
-        # hands it to create_order. Same defect this PR fixed on the baselines (#277).
-        if not math.isfinite(total_balance) or total_balance <= 0:
-            raise ValueError(
-                f"cannot size a trade against a portfolio value of {total_balance}"
-            )
+        balance_info = self._halting(read_balance, cache_key="balance")
+        total_balance = balance_info["total_margin_balance"]
 
         effective_balance = total_balance * 0.98
         params = PositionCalculationParams(
@@ -182,11 +193,11 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         )
         return calculate_fractional_position(params)
 
-    def _execute_fractional_action(self, action_value: float) -> Dict:
+    def _execute_fractional_action(
+        self, action_value: float, *, current_qty: float, current_price: float,
+    ) -> Dict:
         """Execute action using fractional position sizing."""
-        current_qty = self._get_current_position_quantity()
-        current_price = self._current_mark_price()
-
+        # Threaded from `_step`'s halted read; required, never defaulted (#295).
         if action_value == 0.0:
             if abs(current_qty) > 0:
                 return self._handle_close_action(current_qty)
@@ -216,6 +227,10 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         info["target_tol"] = lot_size["min_qty"]
         return info
 
-    def _execute_trade_if_needed(self, desired_action: float) -> Dict:
+    def _execute_trade_if_needed(
+        self, desired_action: float, *, current_qty: float, current_price: float,
+    ) -> Dict:
         """Execute trade based on desired action value."""
-        return self._execute_fractional_action(desired_action)
+        return self._execute_fractional_action(
+            desired_action, current_qty=current_qty, current_price=current_price,
+        )

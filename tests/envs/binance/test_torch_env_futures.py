@@ -13,8 +13,9 @@ import torch
 from torchrl.envs.utils import check_env_specs
 import numpy as np
 import math
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 from tensordict import TensorDict
+from torchtrade.envs.core.state import position_qty_from_status
 
 
 class TestBinanceFuturesTorchTradingEnv:
@@ -659,10 +660,14 @@ class TestBinanceFractionalPositionResizing:
 
         with patch.object(env, '_execute_fractional_action', return_value=trade_executed) as mock_exec:
             env.position.current_action_level = first_action
-            result = env._execute_trade_if_needed(second_action)
+            result = env._execute_trade_if_needed(second_action, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
 
             if should_execute:
-                mock_exec.assert_called_once_with(second_action)
+                mock_exec.assert_called_once_with(
+                second_action, current_qty=ANY, current_price=ANY
+            )
             else:
                 mock_exec.assert_not_called()
                 assert result["executed"] is False

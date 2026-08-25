@@ -68,13 +68,11 @@ class TorchTradeBaseEnv(EnvBase):
         # pre-allocating from the spec (collectors, ParallelEnv) drops truncated silently
         # (#272).
         #
-        # For the LIVE envs this declaration is the only source of the key: since #313
-        # their _step methods no longer write it and EnvBase._complete_done fills it from
-        # here. One consequence -- their check_env_specs can no longer catch a narrowed
-        # done spec, since real and fake rollouts would both lack the key. The live guard
-        # is assert_the_step_emits_the_whole_done_family, run against all ten. The offline
-        # envs still write truncated themselves, and meaningfully (they do truncate), so
-        # their check_env_specs does still catch it.
+        # This WAS the only source of the key for the live envs between #313 and #295.
+        # As of #295 they write the whole family from `_step` again, through the shared
+        # `_finalize_step_flags`, because a prolonged venue outage now genuinely truncates
+        # -- so `truncated` is load-bearing rather than a declared constant. The live
+        # guard is assert_the_step_emits_the_whole_done_family, run against all ten.
         self.full_done_spec = Composite(
             done=Categorical(2, dtype=torch.bool, shape=(1,)),
             terminated=Categorical(2, dtype=torch.bool, shape=(1,)),

@@ -131,7 +131,7 @@ class TestOKXFuturesSLTPTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            env._execute_trade_if_needed(("long", -0.02, 0.03))
+            env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=51000.0)
             call_kwargs = mock_env_trader.trade.call_args[1]
             # SL/TP should be based on mark price (51000), not candle close (50050)
             assert call_kwargs["stop_loss"] == pytest.approx(51000.0 * (1 - 0.02), rel=1e-4)
@@ -233,7 +233,7 @@ class TestOKXDuplicateActionPrevention:
         env.reset()
         mock_trader.reset_mock()
         env.position.current_position = position
-        trade_info = env._execute_trade_if_needed(action_tuple)
+        trade_info = env._execute_trade_if_needed(action_tuple, current_price=50000.0)
         assert trade_info["executed"] is should_trade
 
     @pytest.mark.parametrize("initial_pos,action_tuple,expected_side", [
@@ -246,7 +246,7 @@ class TestOKXDuplicateActionPrevention:
         env.reset()
         mock_trader.reset_mock()
         env.position.current_position = initial_pos
-        env._execute_trade_if_needed(action_tuple)
+        env._execute_trade_if_needed(action_tuple, current_price=50000.0)
         mock_trader.close_position.assert_called_once()
         mock_trader.trade.assert_called_once()
         assert mock_trader.trade.call_args.kwargs["side"] == expected_side
@@ -279,14 +279,14 @@ class TestOKXSLTPCloseAction:
     def test_close_action_closes_position(self, env_with_close, mock_env_trader):
         """Close action must close an existing position."""
         env_with_close.position.current_position = 1
-        trade_info = env_with_close._execute_trade_if_needed(("close", None, None))
+        trade_info = env_with_close._execute_trade_if_needed(("close", None, None), current_price=50000.0)
         assert trade_info["executed"] is True
         assert trade_info["closed_position"] is True
 
     def test_close_action_no_position(self, env_with_close, mock_env_trader):
         """Close action with no position should be a no-op."""
         env_with_close.position.current_position = 0
-        trade_info = env_with_close._execute_trade_if_needed(("close", None, None))
+        trade_info = env_with_close._execute_trade_if_needed(("close", None, None), current_price=50000.0)
         assert trade_info["executed"] is False
 
 
@@ -317,7 +317,7 @@ class TestOKXSLTPNotionalTradeMode:
         mock_env_trader.get_mark_price = MagicMock(return_value=50000.0)
         with patch.object(notional_env, "_wait_for_next_timestamp"):
             notional_env.reset()
-            notional_env._execute_trade_if_needed(action_tuple)
+            notional_env._execute_trade_if_needed(action_tuple, current_price=50000.0)
             call_kwargs = mock_env_trader.trade.call_args[1]
             assert call_kwargs["side"] == expected_side
             assert call_kwargs["quantity"] == pytest.approx(0.01, rel=1e-6)
@@ -333,7 +333,7 @@ class TestOKXSLTPNotionalTradeMode:
         with patch.object(notional_env, "_wait_for_next_timestamp"):
             notional_env.reset()
             with pytest.raises(ValueError, match="unusable mark price"):
-                notional_env._execute_trade_if_needed(("long", -0.02, 0.03))
+                notional_env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=0.0)
             mock_env_trader.trade.assert_not_called()
 
     def test_quantity_mode_passes_raw_value(self, mock_env_observer, mock_env_trader):
@@ -352,7 +352,7 @@ class TestOKXSLTPNotionalTradeMode:
             )
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            env._execute_trade_if_needed(("long", -0.02, 0.03))
+            env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=50000.0)
             assert mock_env_trader.trade.call_args[1]["quantity"] == pytest.approx(0.001, rel=1e-6)
 
     def test_fractional_converts_balance_to_quantity(self, mock_env_observer, mock_env_trader):
@@ -386,7 +386,7 @@ class TestOKXSLTPNotionalTradeMode:
         })
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            env._execute_trade_if_needed(("long", -0.02, 0.03))
+            env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=50000.0)
             # margin_balance=1100 * fraction=0.1 * leverage=5 / price=50000 = 0.011
             from torchtrade.envs.live.okx.order_executor import TAKER_FEE
             # Net of the reserved entry fee (#278).
@@ -416,11 +416,11 @@ class TestOKXSLTPLockPosition:
         """With lock=True, a short action while long should be ignored."""
         with patch.object(locked_env, "_wait_for_next_timestamp"):
             locked_env.reset()
-            locked_env._execute_trade_if_needed(("long", -0.02, 0.03))
+            locked_env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=50000.0)
             locked_env.position.current_position = 1
             mock_env_trader.reset_mock()
 
-            trade_info = locked_env._execute_trade_if_needed(("short", 0.02, -0.03))
+            trade_info = locked_env._execute_trade_if_needed(("short", 0.02, -0.03), current_price=50000.0)
             assert trade_info["executed"] is False
             mock_env_trader.trade.assert_not_called()
 
@@ -431,7 +431,7 @@ class TestOKXSLTPLockPosition:
             locked_env.position.current_position = 1
             mock_env_trader.reset_mock()
 
-            trade_info = locked_env._execute_trade_if_needed(("close", None, None))
+            trade_info = locked_env._execute_trade_if_needed(("close", None, None), current_price=50000.0)
             assert trade_info["executed"] is False
             mock_env_trader.close_position.assert_not_called()
 
@@ -440,7 +440,7 @@ class TestOKXSLTPLockPosition:
         with patch.object(locked_env, "_wait_for_next_timestamp"):
             locked_env.reset()
             assert locked_env.position.current_position == 0
-            locked_env._execute_trade_if_needed(("long", -0.02, 0.03))
+            locked_env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=50000.0)
             mock_env_trader.trade.assert_called_once()
 
 

@@ -73,6 +73,11 @@ class SLTPMixin:
             logger.info("Position closed by SL/TP or external action")
             self.active_stop_loss = 0.0
             self.active_take_profit = 0.0
+            # The exchange closed it, so the realised P&L has already moved equity and the
+            # cached sizing balance is stale by exactly that amount. This closure path is
+            # the one the ENV never asked for -- a bracket firing, or a manual close -- so
+            # it has no `close_position()` call for the close-site guard to find (#295).
+            getattr(self, "_last_confirmed_read", {}).pop("balance", None)
 
         # Detect direction flip (e.g., long→short via external action).
         # Reset SL/TP since the old bracket levels are stale for the new direction.

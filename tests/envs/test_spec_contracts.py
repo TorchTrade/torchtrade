@@ -13,11 +13,11 @@ with no error at all. `TorchTradeBaseEnv` declares all three for live and offlin
 the tests at the end of this file guard that one declaration against both drift and
 silent loss.
 
-Since #313 the LIVE `_step` methods no longer write `truncated` by hand, so for them the
-declaration is its only source. One consequence is worth knowing: their `check_env_specs`
-can no longer catch a *narrowed* done spec, because it compares a real rollout against a
-fake one and both would lack the key. `assert_the_step_emits_the_whole_done_family`, run
-against all ten live envs, is what catches it there. The offline envs still write
+Between #313 and #295 the LIVE `_step` methods did not write `truncated` by hand, and for
+them this declaration was the key's only source. As of #295 they write the whole family
+again through the shared `_finalize_step_flags`, because a prolonged venue outage now
+genuinely truncates. `assert_the_step_emits_the_whole_done_family`, run against all ten
+live envs, is what catches a narrowed done spec there. The offline envs still write
 `truncated` themselves -- they genuinely truncate -- so their `check_env_specs` does still
 catch it, and so does `test_a_collector_batch_carries_truncated` below. Dropping
 `truncated` from the shared spec fails 21 tests: 17 across those three guards -- 10 live
@@ -342,8 +342,8 @@ def test_a_collector_batch_carries_truncated(sample_ohlcv_df):
     truncated. The mechanism is env-agnostic and a collector is cheap on this side, where
     the live envs would need broker mocks and a patched clock. So this pins the shared
     declaration going forward; the ten assert_the_step_emits_the_whole_done_family cells
-    are what cover the live regression itself, since #313 left the live check_env_specs
-    tests unable to see a narrowed done spec.
+    are what cover the live regression itself: check_env_specs compares a real rollout
+    against a fake one, so a narrowed done spec looks consistent to it.
     """
     from torchrl.collectors import Collector
 

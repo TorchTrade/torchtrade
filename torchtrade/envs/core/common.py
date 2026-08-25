@@ -100,3 +100,12 @@ def validate_trade_mode(trade_mode: str) -> str:
             f"trade_mode must be 'fractional', 'notional', or 'quantity' (case-insensitive), got '{trade_mode}'"
         )
     return trade_mode_lower
+
+
+def validate_unknown_status_budget(steps) -> None:
+    """Checked at the boundary: a negative budget reads as "disabled" (#295)."""
+    if not isinstance(steps, int) or isinstance(steps, bool) or steps < 0:
+        raise ValueError(
+            f"max_unknown_status_steps must be an int >= 0 (0 disables the grace "
+            f"period), got {steps!r}"
+        )

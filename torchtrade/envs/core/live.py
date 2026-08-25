@@ -60,6 +60,10 @@ class InvalidActionError(Exception):
     """
 
 
+#: Observation key carrying 1.0 while the env is running on unconfirmed account state.
+STATUS_UNKNOWN_KEY = "status_unknown"
+
+
 class TorchTradeLiveEnv(TorchTradeBaseEnv):
     """
     Base class for live trading environments.
@@ -124,6 +128,18 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         # Initialize position state
         # Note: Subclasses may override this with their specific position tracking needs
         self.position = PositionState()
+
+        # Consecutive venue reads the env could not confirm. Reset to 0 by any successful
+        # read, so this counts an OUTAGE, not lifetime failures (#295).
+        self.consecutive_unknown_status = 0
+        self._status_unknown_this_step = False
+        # 0 disables the grace period: the pre-#295 posture. Absent on alpaca.
+        self._max_unknown_status_steps = getattr(
+            config, "max_unknown_status_steps", 0
+        )
+        # Last CONFIRMED value per read site, so the grace period stands on real data
+        # rather than fabricating one. Empty until the first successful read (#295).
+        self._last_confirmed_read = {}
 
     @abstractmethod
     def _init_trading_clients(self, api_key: str, api_secret: str, observer, trader):
@@ -283,6 +299,12 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
             self.account_state_key,
             Unbounded(shape=(len(self.ACCOUNT_STATE),), dtype=torch.float),
         )
+        # A SEPARATE key, not a 7th account_state slot: account_state is shared verbatim
+        # with the offline envs, which have no notion of an unreadable venue, so widening
+        # it would desync live/offline parity for a concept only one side has (#295).
+        self.observation_spec.set(
+            STATUS_UNKNOWN_KEY, Unbounded(shape=(1,), dtype=torch.float)
+        )
 
         self.market_data_keys = []
         # strict=True: every config's __post_init__ normalizes window_sizes to a list as
@@ -304,6 +326,48 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
                 "base_features",
                 Unbounded(shape=(window_sizes[0], 4), dtype=torch.float),
             )
+
+    def _reset_outage_state(self) -> None:
+        """Clear the staleness state at an episode boundary.
+
+        Without this a truncated episode starts the next one already at budget (#295).
+        """
+        self.consecutive_unknown_status = 0
+        self._status_unknown_this_step = False
+        self._last_confirmed_read.clear()
+
+    def _finalize_step_flags(self, next_tensordict, terminated: bool) -> None:
+        """Stamp status_unknown and the done family. Ten identical copies (#288, #295).
+
+        status_unknown is stamped HERE, not at observation-build time: the grace period
+        serves a CACHED observation, so a build-time flag carried the healthy 0.0 into
+        exactly the bars it should have flagged.
+
+        A prolonged outage truncates, never terminates -- value estimators read
+        `terminated` as "return-to-go is 0" and `truncated` as "bootstrap from the final
+        observation".
+        """
+        # The counter advances HERE, once per bar, because this is the only thing that
+        # runs exactly once per step. Counting inside `_halting` double-counted a bar
+        # where both reads failed, and counting only the pre-trade read let a persistent
+        # POST-BAR-only outage run forever: every bar flagged unknown, while the healthy
+        # pre-trade read reset the counter to zero each time, so the budget never spent.
+        unknown = self._status_unknown_this_step
+        self.consecutive_unknown_status = (
+            self.consecutive_unknown_status + 1 if unknown else 0
+        )
+        next_tensordict.set(
+            STATUS_UNKNOWN_KEY, torch.tensor([float(unknown)], dtype=torch.float)
+        )
+        self._status_unknown_this_step = False
+
+        truncated = self.consecutive_unknown_status >= self._max_unknown_status_steps > 0
+        next_tensordict.set("terminated", torch.tensor([terminated], dtype=torch.bool))
+        next_tensordict.set("truncated", torch.tensor([truncated], dtype=torch.bool))
+        next_tensordict.set(
+            "done", torch.tensor([terminated or truncated], dtype=torch.bool)
+        )
+
 
     def get_account_state(self) -> List[str]:
         """The account-state field names. Four byte-identical copies (#288).

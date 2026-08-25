@@ -9,6 +9,7 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
+from torchtrade.envs.core.live import LiveObservationHalt
 from tests.envs.base_exchange_tests import (
     INVALID_ACTIONS,
     assert_an_invalid_action_cannot_move_an_open_position,
@@ -723,7 +724,7 @@ class TestCriticalEdgeCases:
         # "Handle gracefully" used to mean a conditional assertion that ran only if the
         # trade executed -- so it passed whether or not brackets were priced off zero.
         # A zero close now refuses outright, which is the graceful handling (#347).
-        with pytest.raises(ValueError, match="unusable close price"):
+        with pytest.raises(LiveObservationHalt, match="unusable close price"):
             env._execute_trade_if_needed(action_tuple)
         mock_trader.trade.assert_not_called()
 
@@ -1029,7 +1030,10 @@ class TestBinanceSLTPNotionalTradeMode:
         mock_trader.reset_mock()
         # A zero candle close is unusable data, not a soft abort: it divides the notional
         # sizing and prices both brackets, including in the "quantity" default (#347).
-        with pytest.raises(ValueError, match="unusable close price"):
+        # Wrapped in LiveObservationHalt as of #295 -- the read is under the halt policy
+        # now, which makes it agree with `_acquire_post_bar_state`, where the same
+        # observer error mid-episode has always halted rather than escaping bare.
+        with pytest.raises(LiveObservationHalt, match="unusable close price"):
             env._execute_trade_if_needed(("long", -0.02, 0.03))
 
         mock_trader.trade.assert_not_called()

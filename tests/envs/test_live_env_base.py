@@ -42,6 +42,7 @@ from torchtrade.envs.utils.liquidation import (
     cross_liquidation_price,
     isolated_liquidation_price,
 )
+from tests.envs.base_exchange_tests import wire_outage_state
 from torchtrade.envs.core.state import (
     POSITION_UNKNOWN,
     PositionState,
@@ -256,6 +257,9 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
 # Every live env that owns a `_step` -- the concrete venues. The intermediate bases
 # define none, and an exchange #6 would land here the moment it does.
 STEPPING_ENVS = [c for c in LIVE_ENVS if "_step" in c.__dict__]
+
+# Every live env that owns a `_reset`: the two shared bodies plus the SLTP overrides.
+RESETTING_ENVS = [c for c in LIVE_ENVS if "_reset" in c.__dict__]
 
 
 @pytest.mark.parametrize("env_cls", STEPPING_ENVS, ids=lambda c: c.__name__)
@@ -512,14 +516,6 @@ def test_unknown_status_refuses_to_build_account_state():
         TorchTradeFuturesLiveEnv._get_observation(env)
 
 
-# Envs that RESOLVE the shared accessor, which replaced three byte-identical copies
-# (#283). Note okx resolves it but sizes in _step instead, so these cells prove wiring
-# rather than okx's own path. A rename would empty this and pytest would SKIP rather
-# than fail -- the hazard this file guards against elsewhere with its own len()
-# assertions.
-_SIZING_ENVS = [c for c in NON_SLTP_ENVS if hasattr(c, "_get_current_position_quantity")]
-assert len(_SIZING_ENVS) == 4, f"expected 4 envs that size from a live query, got {_SIZING_ENVS}"
-
 _FAILING_FETCH_EXCHANGES = ["binance", "bitget", "bybit", "okx", "alpaca"]
 
 
@@ -617,29 +613,11 @@ def test_reading_a_field_off_an_unknown_status_says_why():
         POSITION_UNKNOWN.qty
 
 
-@pytest.mark.parametrize(
-    "env_cls",
-    _SIZING_ENVS,
-    ids=lambda c: c.__name__,
-)
-def test_position_sizing_refuses_an_unknown_status(env_cls):
-    """_get_current_position_quantity must not size an order off a phantom flat account.
-
-    The hand-rolled `position.qty if position is not None else 0.0` read an outage as 0
-    quantity, so the delta was computed against a position the exchange never said was
-    gone. _step normally raises earlier, on its own status read -- this is the path when
-    the outage begins between the two get_status() calls inside a single step.
-
-    All four resolve the accessor since it was shared (#283), though okx sizes in _step
-    and never calls it -- these cells prove the MRO wiring, and okx's real path is covered
-    by test_okx_sizes_through_the_dust_rule_in_step. Alpaca spells the same second query
-    inline and is covered through _step by the composite test.
-    """
-    env = SimpleNamespace(
-        trader=SimpleNamespace(get_status=lambda: {"position_status": POSITION_UNKNOWN})
-    )
-    with pytest.raises(PositionUnknownError):
-        env_cls._get_current_position_quantity(env)
+# `test_position_sizing_refuses_an_unknown_status` lived here. It guarded an outage that
+# began BETWEEN the two get_status() calls inside one step -- a window #295 closed by
+# construction: the trade path now takes the qty `_acquire_pre_trade_state` already
+# resolved, so there is one status read per step and no second window to fall into.
+# `test_an_outage_stops_the_step_before_it_can_trade` below covers what remains.
 
 
 @pytest.mark.parametrize("module", ["env", "env_sltp"])
@@ -714,7 +692,12 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
     env.config = SimpleNamespace(
         observation_failure_policy=ObservationFailurePolicy.HALT, symbol="TEST"
     )
-    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    env.consecutive_unknown_status = 0
+    env._last_confirmed_read = {}
+    env._max_unknown_status_steps = 0
+    env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
+        env, read, cache_key
+    )
     env._acquire_pre_trade_state = (
         lambda: TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
     )
@@ -899,19 +882,21 @@ def test_no_live_env_reforks_the_position_quantity_accessor(env_cls):
     that never happened.
 
     Structural, not behavioural: a re-forked copy that has not drifted yet passes every
-    behavioural test, which is exactly how three of them survived. Over FUTURES_ENVS, not
-    just the non-SLTP ones: the SLTP variants inherit the accessor without calling it
-    today, so a fork there would be dead code -- and dead-but-wrong is the state the three
-    originals were in.
+    behavioural test, which is exactly how three of them survived.
+
+    #295 deleted the shared accessor entirely -- the trade path now takes the qty
+    `_acquire_pre_trade_state` resolved under the halt policy, so there is nothing left to
+    inherit. That makes re-introducing a private copy MORE tempting, not less, which is
+    why this guard outlived the method it was written for.
     """
     assert "_get_current_position_quantity" not in vars(env_cls), (
-        f"{env_cls.__name__} redefines _get_current_position_quantity. The dust rule "
-        "lives in position_qty_from_status -- inherit it rather than re-deriving qty."
+        f"{env_cls.__name__} defines its own _get_current_position_quantity. The dust "
+        f"rule lives in position_qty_from_status, and the qty is already resolved once "
+        f"per step in _acquire_pre_trade_state -- take it from there."
     )
 
 
-@pytest.mark.parametrize("env_cls", _SIZING_ENVS, ids=lambda c: c.__name__)
-def test_a_dust_residual_does_not_look_like_a_position_to_the_trade_path(env_cls):
+def test_a_dust_residual_does_not_look_like_a_position_to_the_trade_path():
     """The concrete failure from #283, at the seam every sizing path reads.
 
     An exchange can leave a float residual after a full close. Read as a live position it
@@ -919,17 +904,30 @@ def test_a_dust_residual_does_not_look_like_a_position_to_the_trade_path(env_cls
     close_position() on nothing -- and still advances current_action_level from a trade
     that never happened, which freezes the duplicate-action guard (invariant 2).
 
-    The account_state paths already honoured the dust rule; only the TRADE paths
-    hand-rolled it, which is why nothing caught this.
+    The seam MOVED in #295: the trade path no longer queries the venue itself, it takes
+    the qty `_acquire_pre_trade_state` already resolved under the halt policy. So this
+    drives that, rather than the per-env accessor it used to -- which #295 left with no
+    production callers at all.
     """
+    ps = SimpleNamespace(qty=1e-12, mark_price=100.0)
     env = SimpleNamespace(
-        trader=SimpleNamespace(
-            get_status=lambda: {"position_status": SimpleNamespace(qty=1e-12)}
-        )
+        config=SimpleNamespace(
+            observation_failure_policy=ObservationFailurePolicy.HALT, symbol="T"
+        ),
+        trader=SimpleNamespace(get_status=lambda: {"position_status": ps},
+                               get_mark_price=lambda: 100.0),
+        consecutive_unknown_status=0, _status_unknown_this_step=False,
+        _last_confirmed_read={}, _max_unknown_status_steps=0,
     )
-    assert env_cls._get_current_position_quantity(env) == 0.0, (
-        "a 1e-12 residual must read as flat, not as a position to close"
+    env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
+        env, read, cache_key
     )
+    env._current_mark_price = (
+        lambda p=None: TorchTradeFuturesLiveEnv._current_mark_price(env, p)
+    )
+
+    _, _, _, size = TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
+    assert size == 0.0, "a 1e-12 residual must read as flat, not as a position to close"
 
 
 @pytest.mark.parametrize("qty,expected", [
@@ -995,7 +993,12 @@ def test_okx_sizes_through_the_dust_rule_in_step():
     env.config = SimpleNamespace(
         observation_failure_policy=ObservationFailurePolicy.HALT, symbol="TEST"
     )
-    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    env.consecutive_unknown_status = 0
+    env._last_confirmed_read = {}
+    env._max_unknown_status_steps = 0
+    env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
+        env, read, cache_key
+    )
     env._acquire_pre_trade_state = (
         lambda: TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
     )
@@ -1036,6 +1039,8 @@ def _futures_env_stub(position_status, balance, leverage=5):
         position=PositionState(),
         account_state_key="account_state",
         market_data_keys=[],
+        # _get_observation declares status_unknown; _finalize_step_flags sets it (#295).
+        consecutive_unknown_status=0,
     )
 
 
@@ -2591,6 +2596,9 @@ def test_a_failed_read_runs_the_configured_policy(policy, expect_flatten):
     env = SimpleNamespace(
         config=SimpleNamespace(observation_failure_policy=policy, symbol="TEST"),
         trader=SimpleNamespace(close_position=lambda: closed.append(1) or True),
+        consecutive_unknown_status=0,
+        _last_confirmed_read={},
+        _max_unknown_status_steps=0,
     )
 
     def boom():
@@ -2623,7 +2631,12 @@ def test_an_unreadable_position_halts_before_the_env_trades(policy, expect_flatt
             close_position=lambda: closed.append("close") or True,
         ),
     )
-    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    env.consecutive_unknown_status = 0
+    env._last_confirmed_read = {}
+    env._max_unknown_status_steps = 0
+    env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
+        env, read, cache_key
+    )
     env._current_mark_price = (
         lambda ps=None: TorchTradeFuturesLiveEnv._current_mark_price(env, ps)
     )
@@ -2802,7 +2815,12 @@ def test_the_pre_trade_tuple_cannot_be_reordered_unnoticed():
         trader=SimpleNamespace(get_status=lambda: {"position_status": ps},
                                get_mark_price=lambda: 50000.0),
     )
-    env._halting = lambda read: TorchTradeFuturesLiveEnv._halting(env, read)
+    env.consecutive_unknown_status = 0
+    env._last_confirmed_read = {}
+    env._max_unknown_status_steps = 0
+    env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
+        env, read, cache_key
+    )
     env._current_mark_price = (
         lambda p=None: TorchTradeFuturesLiveEnv._current_mark_price(env, p)
     )
@@ -3127,6 +3145,7 @@ def test_closing_reports_the_order_side_that_closed_it(qty, expected_side):
         position=SimpleNamespace(current_position=1),
         _create_trade_info=TorchTradeFuturesLiveEnv._create_trade_info.__get__(object()),
     )
+    wire_outage_state(env)   # _handle_close_action clears the balance cache
     info = TorchTradeFuturesLiveEnv._handle_close_action(env, qty)
 
     assert info["side"] == expected_side, "a close must report the side it sent"
@@ -3254,6 +3273,7 @@ SHARED_DEFAULTS = {
     "include_base_features": False,
     "close_position_on_init": True,
     "close_position_on_reset": False,
+    "max_unknown_status_steps": 0,
 }
 
 
@@ -3381,6 +3401,16 @@ class _ResetStub:
 
         self.history_reset_calls = 0
         self.sync_action_level_calls = 0
+        # #295: the shared _reset clears the outage state at the episode boundary.
+        wire_outage_state(self)
+        self._reset_outage_state = (
+            lambda: TorchTradeLiveEnv._reset_outage_state(self)
+        )
+        self._max_unknown_status_steps = 0
+        # The reset read runs under the halt policy as of #295.
+        self._halting = lambda read, cache_key=None: (
+            TorchTradeFuturesLiveEnv._halting(self, read, cache_key)
+        )
         self.trader, self.observer = _Trader(), _Observer()
         self.history = SimpleNamespace(reset=lambda: setattr(
             outer, "history_reset_calls", outer.history_reset_calls + 1))
@@ -3397,7 +3427,7 @@ class _ResetStub:
         # assertion in one bitget test.
         self.sync_action_level_calls += 1
 
-    _get_observation = lambda self, advance_hold=True: advance_hold
+    _get_observation = lambda self, advance_hold=True, **_kw: advance_hold
 
 
 @pytest.mark.parametrize("kwargs,expected", [
@@ -3644,3 +3674,220 @@ def test_an_observer_disagreeing_with_the_config_raises_rather_than_guessing():
         BinanceFuturesTorchTradingEnv, "_wait_for_next_timestamp"
     ), pytest.raises(ValueError, match="zip"):
         BinanceFuturesTorchTradingEnv(config=config, observer=observer, trader=trader)
+
+
+@pytest.mark.parametrize("env_cls", STEPPING_ENVS, ids=lambda c: c.__name__)
+def test_every_live_step_writes_done_explicitly(env_cls):
+    """Every live `_step` writes the done family through the shared writer (#295).
+
+    Not because TorchRL cannot derive `done` -- `EnvBase._complete_done` fills
+    `terminated | truncated` when the key is absent. Because these envs emit the whole
+    family from `_step` itself, which many tests drive directly, and because a venue
+    reimplementing the writes by hand is how `truncated` became a declared constant in
+    the first place.
+    """
+    calls = [n.func.attr for n in ast.walk(ast.parse(
+        inspect.getsource(env_cls.__dict__["_step"]).lstrip()))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+    assert "_finalize_step_flags" in calls, (
+        f"{env_cls.__name__}._step does not call the shared done-family writer, so its "
+        f"truncation channel is unreachable"
+    )
+    # A substring check passed on a commented-out call with the writes reimplemented
+    # alongside it. Only binance had an end-to-end backstop for that; nine venues did not.
+    assert not [n for n in ast.walk(ast.parse(
+        inspect.getsource(env_cls.__dict__["_step"]).lstrip()))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "set"
+        and n.args and isinstance(n.args[0], ast.Constant)
+        and n.args[0].value in ("done", "terminated", "truncated")], (
+        f"{env_cls.__name__}._step writes the done family by hand alongside "
+        f"_finalize_step_flags; the hand-written value wins and the shared one is a lie"
+    )
+
+
+@pytest.mark.parametrize("terminated,unknown,budget,expected", [
+    (False, 0, 3, (False, False, False)),   # healthy
+    (True,  0, 3, (True,  True,  False)),   # bankruptcy terminates, never truncates
+    (False, 3, 3, (True,  False, True)),    # outage spends the budget -> truncate
+    (False, 9, 0, (False, False, False)),   # budget 0 disables the channel entirely
+    (True,  3, 3, (True,  True,  True)),    # both: done stays the OR of the two
+], ids=["healthy", "bankrupt", "outage", "disabled", "both"])
+def test_the_done_family_separates_an_outage_from_a_blown_account(
+    terminated, unknown, budget, expected
+):
+    """A prolonged outage truncates; only a blown account terminates.
+
+    Value estimators read `terminated` as "true return-to-go is 0" and `truncated` as
+    "bootstrap from the final observation". Terminating on an unreachable API would teach
+    the critic that a broker outage and a liquidated account carry the same value target.
+    """
+    env = SimpleNamespace(
+        consecutive_unknown_status=unknown,
+        _status_unknown_this_step=bool(unknown),
+        config=SimpleNamespace(max_unknown_status_steps=budget),
+    )
+    env._max_unknown_status_steps = budget
+    td = TensorDict({}, batch_size=())
+    TorchTradeLiveEnv._finalize_step_flags(env, td, terminated=terminated)
+
+    got = (bool(td["done"]), bool(td["terminated"]), bool(td["truncated"]))
+    assert got == expected, f"done/terminated/truncated = {got}, expected {expected}"
+
+
+@pytest.mark.parametrize("env_cls", RESETTING_ENVS, ids=lambda c: c.__name__)
+def test_every_live_reset_clears_the_outage_state(env_cls):
+    """A truncated episode must not poison the next one (#295).
+
+    `_finalize_step_flags` derives `truncated` from the counter, so an episode that ended
+    on a spent budget would start the NEXT one already at budget and truncate on its first
+    step -- 1-step episodes forever, and a collector that looks busy while collecting
+    nothing. AST rather than source text, so a comment naming the method cannot satisfy it.
+    """
+    calls = [n.func.attr for n in ast.walk(ast.parse(
+        inspect.getsource(env_cls.__dict__["_reset"]).lstrip()))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+    # `_reset` accepted as delegation: the SLTP envs override _reset and call
+    # super()._reset(), which is where the clear lives. What this rejects is an override
+    # that does NEITHER -- reimplementing reset and dropping the clear on the floor.
+    assert {"_reset_outage_state", "_reset"} & set(calls), (
+        f"{env_cls.__name__}._reset neither clears the outage counter nor delegates to a "
+        f"_reset that does; a truncated episode would make every following episode "
+        f"truncate on step 1"
+    )
+
+
+def test_a_recovered_venue_does_not_truncate_the_next_episode():
+    """The behavioural half of the guard above, driven through a real env."""
+    from unittest.mock import MagicMock, patch
+    import numpy as np
+    from torchtrade.envs.core.state import PositionUnknownError
+    from torchtrade.envs.live.binance.env import (
+        BinanceFuturesTorchTradingEnv as Env, BinanceFuturesTradingEnvConfig as Config,
+    )
+
+    observer = MagicMock()
+    observer.get_keys.return_value = ["1m_10"]
+    observer.get_observations.return_value = {"1m_10": np.zeros((10, 4), dtype=np.float32)}
+    observer.get_features.return_value = {
+        "observation_features": list("abcd"), "original_features": []}
+    observer.reset.return_value = None
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1e4, "total_margin_balance": 1e4,
+        "total_wallet_balance": 1e4, "total_maintenance_margin": 0.0}
+    trader.get_status.return_value = {"position_status": None}
+    trader.get_mark_price.return_value = 100.0
+    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
+
+    with patch("time.sleep"), patch.object(Env, "_wait_for_next_timestamp"):
+        env = Env(config=Config(
+            symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10], execute_on="1m",
+            max_unknown_status_steps=2, close_position_on_init=False,
+        ), observer=observer, trader=trader)
+
+        td = env.reset()
+        td = env.step(td.set("action", torch.tensor(1)))["next"]
+        trader.get_status.side_effect = PositionUnknownError("down")
+        for _ in range(2):
+            td = env.step(td.exclude("done", "terminated", "truncated", "reward")
+                          .set("action", torch.tensor(1)))["next"]
+        assert bool(td["truncated"]), "setup: the outage should have truncated"
+
+        trader.get_status.side_effect = None          # venue recovers
+        fresh = env.reset()
+        assert env.consecutive_unknown_status == 0
+        nxt = env.step(fresh.set("action", torch.tensor(1)))["next"]
+
+    assert not bool(nxt["truncated"]), (
+        "the new episode truncated on its first step: the outage counter survived reset"
+    )
+
+
+@pytest.mark.parametrize("config_cls", [
+    BinanceFuturesTradingEnvConfig, BitgetFuturesTradingEnvConfig,
+    BybitFuturesTradingEnvConfig, OKXFuturesTradingEnvConfig,
+    BinanceFuturesSLTPTradingEnvConfig,
+], ids=lambda c: c.__name__)
+@pytest.mark.parametrize("bad", [-1, 1.5, True, "3", None], ids=[
+    "negative", "fractional", "bool", "str", "none"])
+def test_an_unusable_outage_budget_is_rejected_at_the_boundary(config_cls, bad):
+    """A negative budget reads as "disabled" through `>= budget > 0`.
+
+    So a typo silently selects the STRICTEST posture rather than erroring -- the shape
+    invariant 4 names: a guard that absorbs nonsense is worse than no guard. `True` is
+    here because bool is an int subclass, and would otherwise pass as a budget of 1.
+
+    Deleting the validator's body failed ZERO tests before this: it shipped unpinned.
+
+    Four plain configs, because deleting the call from ONE of them fails only its own
+    cases -- they are four independent regression points, which is the shape this repo
+    keeps shipping. One SLTP config, because deleting it from BaseFuturesSLTPConfig fails
+    all four together: they are one call site wearing four names, pinned below.
+    """
+    with pytest.raises(ValueError, match="max_unknown_status_steps"):
+        config_cls(symbol="TEST", max_unknown_status_steps=bad)
+
+
+@pytest.mark.parametrize("config_cls", [c.values[0] for c in SLTP_CONFIGS],
+                         ids=lambda c: c.__name__)
+def test_every_sltp_config_shares_the_one_validated_post_init(config_cls):
+    """The cheaper half of the sweep above, and a stronger guard than re-running it.
+
+    Re-running five bad inputs against four configs that resolve to the SAME function
+    tests one thing four times. What can actually break is a subclass growing its own
+    `__post_init__` and dropping the `super()` call -- which this catches and the
+    parametrized sweep would not, since the venue would simply stop validating.
+    """
+    assert config_cls.__post_init__ is BaseFuturesSLTPConfig.__post_init__, (
+        f"{config_cls.__name__} defines its own __post_init__; it must call super() or "
+        f"it silently stops validating every field the shared one checks"
+    )
+
+
+def test_every_successful_close_invalidates_the_cached_balance():
+    """A realised close moves equity, so the cached sizing balance is stale after it.
+
+    Seven close sites exist: the shared `_handle_close_action` (which the direction-switch
+    leg routes through) and six across the SLTP envs, in three different shapes. I patched
+    one and reported it done -- the exact "landed on some copies, not others" failure this
+    PR has now reproduced five times, that time while fixing an instance of it.
+
+    Structural, because the cost is invisible behaviourally: a stale balance sizes an
+    order the venue rejects on margin, many bars later, only during an outage.
+
+    Two functions are exempt BY ORDERING, not by oversight. `_halting`'s emergency FLATTEN
+    close runs when the venue is already unreadable -- the cache is what grace is standing
+    on. `_reset` clears the whole cache before it closes and re-seeds from a fresh read
+    after, so its balance already reflects the close.
+    """
+    import ast
+    import pathlib
+
+    EXEMPT = {"_halting", "_reset"}
+    root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
+    offenders = []
+    for path in sorted(root.glob("*/env_sltp.py")) + [
+        root / "shared" / "futures_live_base.py"
+    ]:
+        for fn in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(fn, ast.FunctionDef) or fn.name in EXEMPT:
+                continue
+            closes = [n for n in ast.walk(fn)
+                      if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                      and n.func.attr == "close_position"]
+            if not closes:
+                continue
+            invalidations = [n for n in ast.walk(fn)
+                             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                             and n.func.attr == "pop" and n.args
+                             and isinstance(n.args[0], ast.Constant)
+                             and n.args[0].value == "balance"]
+            if len(invalidations) < len(closes):
+                offenders.append(f"{path.parent.name}/{path.name}::{fn.name} "
+                                 f"({len(closes)} closes, {len(invalidations)} invalidations)")
+
+    assert not offenders, (
+        "a successful close leaves the cached sizing balance stale in: "
+        + "; ".join(offenders)
+    )

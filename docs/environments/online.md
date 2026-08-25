@@ -871,7 +871,63 @@ key.
 The mark-price read is the deliberate exception (#394): there a failed read is
 indistinguishable from reading an unusable price, which was already terminal, so it
 raises the same way. Escalating it is safe because the only halt-wrapped caller reaches
-the fetch solely when the account is flat. Retry and staleness handling are tracked
-in #295.
+the fetch solely when the account is flat.
 
 Alpaca and Polymarket do not route through this path at all.
+
+### `max_unknown_status_steps` — riding out a short outage (#295)
+
+Default `0`, which is the behaviour above: the first unreadable read raises. Set it above
+zero and the env will instead keep stepping on the **last confirmed** read for that many
+bars before ending the episode:
+
+```python
+config = BinanceFuturesTradingEnvConfig(
+    symbol="BTCUSDT",
+    observation_failure_policy="halt",   # grace is a HALT-only concession
+    max_unknown_status_steps=3,          # ride out 3 bars, then truncate
+)
+```
+
+| bar | `status_unknown` | `done` | `terminated` | `truncated` |
+|---|---|---|---|---|
+| healthy | `0.0` | 0 | 0 | 0 |
+| outage 1 | `1.0` | 0 | 0 | 0 |
+| outage 2 | `1.0` | 0 | 0 | 0 |
+| outage 3 | `1.0` | **1** | 0 | **1** |
+
+Three things are load-bearing here:
+
+- **It truncates, never terminates.** Value estimators read `terminated` as "true
+  return-to-go is 0" and `truncated` as "bootstrap from the final observation".
+  Terminating on an unreachable API would teach the critic that a broker outage and a
+  liquidated account carry the same value target.
+- **`status_unknown` is a separate observation key**, not a seventh `account_state` slot.
+  `account_state` is shared verbatim with the offline envs, which have no notion of an
+  unreadable venue; widening it would desync live/offline parity for a concept only one
+  side has. It is emitted by all ten live envs, and is always `0.0` on Alpaca, which has
+  no failure policy.
+- **The budget counts bars, and needs a confirmed read to stand on.** A failure with
+  nothing cached — the first bar of an episode — raises regardless of the budget, because
+  the alternative is inventing an account state.
+
+**Which reads are covered.** All of them on the trade path: the pre-trade position and
+mark, the post-bar account read, the reset read, and the balance read that *sizes* the
+order. That last one matters — threading the position and price only fixes the decision
+*whether* to trade; a policy that actually opens or resizes during an outage needs the
+balance too, and its cache is seeded from reset's confirmed read so a first trade during
+an outage is still possible.
+
+**One boundary the grace period does not cover.** On binance and bitget the SL/TP
+bracket price comes from a candle close, and that read only happens on a bar that
+actually trades — the hold path returns before it. So after a reset followed by nothing
+but HOLD actions, there is no confirmed close to serve, and the first *trading* bar of an
+outage raises instead of being ridden out. Closing it needs either an extra observer read
+per reset or an explicit change of price source; grace deliberately will not substitute
+the mark, because that silently changes where brackets are priced from. Tracked with the
+#288 parity work.
+
+**This trades on unconfirmed state, which is why it is opt-in.** During the grace period
+the env sizes orders against the last known account; it knows the position it *had*, not
+the one it *has*. `flatten` deliberately ignores the budget: it exists to get you out
+while blind, so riding out the outage would defeat it.

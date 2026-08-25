@@ -8,6 +8,7 @@ from torchtrade.envs.core.common import (
     validate_position_sizing,
     validate_sltp_levels,
     validate_trade_mode,
+    validate_unknown_status_budget,
 )
 from torchtrade.envs.core.live import ObservationFailurePolicy
 from torchtrade.envs.utils.timeframe import TimeFrame
@@ -45,6 +46,8 @@ class BaseFuturesSLTPConfig:
     observation_failure_policy: Union[ObservationFailurePolicy, str] = (
         ObservationFailurePolicy.HALT
     )
+    # Bars to ride out an unreadable venue before truncating; 0 disables (#295).
+    max_unknown_status_steps: int = 0
 
     # Each subclass sets this to its venue normalizer -- all four are a partial of the
     # same normalize_timeframe_config, differing only in parse_fn.
@@ -55,6 +58,7 @@ class BaseFuturesSLTPConfig:
         self.observation_failure_policy = ObservationFailurePolicy(
             self.observation_failure_policy
         )
+        validate_unknown_status_budget(self.max_unknown_status_steps)
         self.trade_mode = validate_trade_mode(self.trade_mode)
         validate_sltp_levels(self.stoploss_levels, self.takeprofit_levels)
         validate_position_sizing(

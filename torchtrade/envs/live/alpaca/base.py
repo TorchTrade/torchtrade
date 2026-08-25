@@ -11,6 +11,7 @@ from tensordict import TensorDict, TensorDictBase
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass
 from torchtrade.envs.core.live import TorchTradeLiveEnv
+from torchtrade.envs.core.live import STATUS_UNKNOWN_KEY
 from torchtrade.envs.core.state import (
     HistoryTracker,
     PositionState,
@@ -275,7 +276,14 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
         )
 
         # Build output TensorDict
-        out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
+        out_td = TensorDict(
+            {
+                self.account_state_key: account_state,
+                # Always 0.0: `_finalize_step_flags` sets it per step (#295).
+                STATUS_UNKNOWN_KEY: torch.zeros(1, dtype=torch.float),
+            },
+            batch_size=(),
+        )
         for market_data_name, data in zip(self.market_data_keys, market_data):
             out_td.set(market_data_name, torch.from_numpy(data))
 
@@ -332,6 +340,7 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment."""
+        self._reset_outage_state()
         # Before any read below -- see the bybit copy for why the order matters (#278).
         self.observer.reset()
         if not self.trader.cancel_open_orders():

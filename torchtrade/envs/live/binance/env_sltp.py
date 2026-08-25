@@ -186,8 +186,7 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         done = self._check_termination(new_portfolio_value)
 
         next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
-        next_tensordict.set("done", torch.tensor([done], dtype=torch.bool))
-        next_tensordict.set("terminated", torch.tensor([done], dtype=torch.bool))
+        self._finalize_step_flags(next_tensordict, terminated=done)
 
         return next_tensordict
 
@@ -225,24 +224,42 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
             return trade_info  # Already in this position, ignore duplicate action
 
-        # Get current price for calculating absolute SL/TP levels
-        obs = self.observer.get_observations(return_base_ohlc=True)
-        current_price = float(obs["base_features"][-1, 3])  # Close price
-        # Validated here, not per trade_mode: this price divides the notional sizing
-        # AND prices both brackets in every mode, including the "quantity" default
-        # which checked nothing. bybit/okx get this from _current_mark_price(); these
-        # two read a candle close, which dropna() does not clear of inf (#347).
-        if not math.isfinite(current_price) or current_price <= 0:
-            raise ValueError(
-                f"unusable close price ({current_price}) for {self.config.symbol}"
-            )
+        # Under `_halting`, read AND verdict (#295). `get_observations` raises ValueError
+        # on a short window or a stale last bar, and this sat outside the policy -- so a
+        # degraded feed escaped as a bare ValueError in EVERY trade_mode, since this runs
+        # before the mode branch. bybit/okx take a threaded mark instead; these two price
+        # brackets off the candle close deliberately, so the read stays rather than being
+        # replaced by the mark.
+        def read_close():
+            obs = self.observer.get_observations(return_base_ohlc=True)
+            current_price = float(obs["base_features"][-1, 3])
+            # This price divides the notional sizing AND prices both brackets in every
+            # mode, including the "quantity" default which checked nothing. dropna() does
+            # not clear a candle close of inf (#347). The name is load-bearing:
+            # test_sltp_sizing_rejects_a_non_finite_price_or_balance greps for it.
+            if not math.isfinite(current_price) or current_price <= 0:
+                raise ValueError(
+                    f"unusable close price ({current_price}) for {self.config.symbol}"
+                )
+            return current_price
+
+        # cache_key is load-bearing, not decoration: without it `cached` is None, grace
+        # cannot apply, and this still raises -- it just raises a nicer type. The claimed
+        # behaviour is "serve the last CONFIRMED close and flag the bar", which needs a
+        # slot to serve from. Its own slot, because it is a candle close, not the mark.
+        current_price = self._halting(read_close, cache_key="candle_close")
 
         # Resolve quantity based on trade_mode
         if self.config.trade_mode == "fractional":
             # Size on total_margin_balance (equity), matching offline sizing and the non-SLTP
             # live path. Binance's total_wallet_balance excludes unrealized PnL and would under-size;
             # bitget/bybit/okx map both keys to equity, so the switch is a no-op there.
-            balance = float(self.trader.get_account_balance()["total_margin_balance"])
+            # Under `_halting` -- the read that SIZES a bracket (#295).
+            balance = float(
+                self._halting(self.trader.get_account_balance, cache_key="balance")[
+                    "total_margin_balance"
+                ]
+            )
             if not math.isfinite(balance) or balance <= 0:
                 logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
                 trade_info["success"] = False
@@ -298,6 +315,9 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
                     return trade_info
                 if not close_success:
                     return trade_info
+                # A realised close moves equity; the cached balance is now wrong by the
+                # trade's P&L. Reached only on success (#295).
+                self._last_confirmed_read.pop("balance", None)
                 self.position.current_position = 0
 
         if side == "long":

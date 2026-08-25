@@ -5,7 +5,7 @@ import pytest
 import torch
 from torchrl.envs.utils import check_env_specs
 import numpy as np
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 from tensordict import TensorDict
 
 from tests.envs.base_exchange_tests import (
@@ -15,6 +15,7 @@ from tests.envs.base_exchange_tests import (
 )
 
 from torchtrade.envs import TimeFrame
+from torchtrade.envs.core.state import position_qty_from_status
 
 
 class TestBybitFuturesTorchTradingEnv:
@@ -638,8 +639,12 @@ class TestBybitFractionalPositionResizing:
 
         with patch.object(env, '_execute_fractional_action', return_value=trade_result) as mock_exec:
             env.position.current_action_level = first_action
-            env._execute_trade_if_needed(second_action)
-            mock_exec.assert_called_once_with(second_action)
+            env._execute_trade_if_needed(second_action, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
+            mock_exec.assert_called_once_with(
+                second_action, current_qty=ANY, current_price=ANY
+            )
 
     def test_qty_step_rounding_no_float_artifacts(self, env, mock_env_trader):
         """Quantity must be rounded to avoid float artifacts like 0.00300000000003."""
@@ -661,7 +666,9 @@ class TestBybitFractionalPositionResizing:
         })
 
         env.reset()
-        result = env._execute_fractional_action(1.0)
+        result = env._execute_fractional_action(1.0, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
         if result["executed"]:
             call_kwargs = mock_env_trader.trade.call_args[1]
             qty = call_kwargs["quantity"]

@@ -21,6 +21,7 @@ from torchtrade.envs.core.live import (
     LiveObservationHalt,
     ObservationFailurePolicy,
     TorchTradeLiveEnv,
+    STATUS_UNKNOWN_KEY,
 )
 from torchtrade.envs.core.state import (
     PositionUnknownError,
@@ -70,24 +71,99 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     - _execute_trade_if_needed(): trade execution, whose action space differs by env
     """
 
-    def _halting(self, read):
-        """Run a venue read under the halt policy, or raise LiveObservationHalt.
+    def _halting(self, read, cache_key=None):
+        """Run a venue read under the halt policy, degrading through a grace period.
 
         #343's rule is that ANY failure to read account state while a position is open
         must halt -- not only the post-bar read. The pre-trade read at the top of _step
-        and the initial read in _reset bypassed this, so a POSITION_UNKNOWN between bars
         raised a bare PositionUnknownError that `except LiveObservationHalt` did not
-        catch, and no emergency flatten ran even under FLATTEN (#355). The pre-trade read
-        is the one that happens BEFORE the env trades.
+        catch, and no emergency flatten ran even under FLATTEN (#355). The reset read is
+        routed through here too as of #295 -- the docstring claimed it already was, and
+        it was not.
+
+        #295 adds the grace period. With `max_unknown_status_steps > 0` a transient blip
+        no longer kills the process: the env keeps stepping on the last CONFIRMED read,
+        publishes `status_unknown=1.0` so the policy can see it is flying blind, and
+        truncates once the outage outlasts the budget. At 0 -- the default, and the
+        pre-#295 posture -- the first failure still raises.
+
+        The grace period trades on unconfirmed state, which is a real risk and the reason
+        it is opt-in. What it must NEVER do is fabricate: with no cached read to fall back
+        on (a failure in `_reset`, or the first bar of an episode) it raises regardless of
+        the budget, because there is no last-known truth to stand on.
         """
         try:
-            return read()
-        # NOT RuntimeError: adapters wrap timeouts in it, and KeyError is a config
-        # error. See docs/environments/online.md.
-        except (PositionUnknownError, ValueError) as error:
-            policy = self.config.observation_failure_policy
+            value = read()
+        # RuntimeError is caught for GRACE ONLY, and re-raised untouched otherwise -- see
+        # the `raise` at the bottom. All four adapters wrap a failed balance read in
+        # `RuntimeError("Failed to get account balance: ...")`, so without this the grace
+        # period never engaged for the failure mode production actually produces; the
+        # tests only ever injected PositionUnknownError.
+        #
+        # It must NOT become halt-and-flatten material (#394, docs/environments/online.md):
+        # a read timeout arrives as RuntimeError too, and flattening a live position on a
+        # timeout is exactly what that decision refused. Grace does not flatten -- it
+        # serves last-known state and flags the bar -- so riding one out is safe where
+        # halting on it is not. KeyError stays out: that is a config error.
+        except (PositionUnknownError, ValueError, RuntimeError) as error:
+            # The BAR is unconfirmed. The counter advances once per step in
+            # `_finalize_step_flags`, not here: counting per read site double-counts a bar
+            # where both reads fail, and counting only the pre-trade read let a persistent
+            # POST-BAR-only outage run forever -- every bar flagged unknown while the
+            # healthy pre-trade read reset the counter to zero each time.
+            self._status_unknown_this_step = True
+
+            # FLATTEN and a grace period are contradictory postures: FLATTEN means "get
+            # me out while I cannot see the account", so riding out the outage would
+            # defeat the only thing it is for. Grace applies to HALT only.
+            # COPIED on the way out, not on the way in. Copying at the store side was
+            # the round-1 mistake: every grace bar returned the SAME physical object,
+            # which `_step` then stamps with reward and the done family, so a collector
+            # holding it in two rollout slots reads the later bar's values in both.
+            # `TensorDict.set()` stores references -- this repo's own recorded rule.
+            cached = self._last_confirmed_read.get(cache_key) if cache_key else None
+            if isinstance(cached, tuple):
+                cached = tuple(
+                    v.clone() if isinstance(v, TensorDictBase) else v for v in cached
+                )
+            grace = (
+                self._max_unknown_status_steps > 0
+                and cached is not None
+                and self.config.observation_failure_policy
+                is not ObservationFailurePolicy.FLATTEN
+            )
+            if grace:
+                # No budget check here. Whether the outage has outlasted its budget is a
+                # question about the BAR, answered once in `_finalize_step_flags`; asking
+                # it per read site is what made the budget mean reads rather than bars.
+                # Raising on the spent bar would also reintroduce the process crash #295
+                # exists to remove -- the step has to finish so it can truncate.
+                if cache_key != "post_bar":   # log once per bar, not per read
+                    logger.warning(
+                        "%s: venue read failed (%s); running on unconfirmed state "
+                        "(bar %d of a %d-bar budget)",
+                        self.config.symbol, type(error).__name__,
+                        self.consecutive_unknown_status + 1,
+                        self._max_unknown_status_steps,
+                    )
+                return cached
+
+            # Grace did not apply. A RuntimeError leaves untouched -- it was caught only
+            # to give the grace path a chance at it, and turning one into a halt (or a
+            # FLATTEN close) is the #394 decision inverted.
+            if isinstance(error, RuntimeError) and not isinstance(
+                error, (PositionUnknownError, LiveObservationHalt)
+            ):
+                # Clear the flag before aborting. `_finalize_step_flags` is what normally
+                # consumes it, and this path never reaches it -- so a caller that catches
+                # the timeout and retries would have the next HEALTHY bar report
+                # status_unknown=1, and count toward truncation.
+                self._status_unknown_this_step = False
+                raise
+
             accepted = flatten_error = None
-            if policy is ObservationFailurePolicy.FLATTEN:
+            if (self.config.observation_failure_policy
+                    is ObservationFailurePolicy.FLATTEN):
                 try:
                     accepted = bool(self.trader.close_position())
                 except Exception as exc:
@@ -95,7 +171,13 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                     logger.exception(
                         "Emergency close_position failed for %s", self.config.symbol
                     )
-            raise LiveObservationHalt(error, policy, accepted, flatten_error) from error
+            raise LiveObservationHalt(
+                error, self.config.observation_failure_policy, accepted, flatten_error
+            ) from error
+
+        if cache_key:
+            self._last_confirmed_read[cache_key] = value
+        return value
 
     def _acquire_pre_trade_state(self):
         """The venue read at the TOP of _step, under the halt policy (#355).
@@ -117,7 +199,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                 position_qty_from_status(position_status),
             )
 
-        return self._halting(read)
+        return self._halting(read, cache_key="pre_trade")
 
     def _create_trade_info(self, executed: bool = False, **kwargs) -> Dict:
         """The trade-info dict every futures `_step` returns. Four identical copies (#288).
@@ -157,6 +239,13 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         if success:
             self.position.current_position = 0
+            # A realised close moves equity, so the cached balance is now wrong by the
+            # trade's P&L. Only on SUCCESS: a failed close leaves the position, and with
+            # it the equity the cache already describes. Without this, a later failed
+            # sizing read serves pre-close equity from an arbitrary number of bars ago --
+            # the sizing path early-returns before the balance read, so nothing refreshes
+            # it (#295).
+            self._last_confirmed_read.pop("balance", None)
 
         return self._create_trade_info(
             executed=True,
@@ -244,7 +333,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                     mark = None
             return portfolio_value, mark, self._last_observed_qty, observation
 
-        return self._halting(read)
+        return self._halting(read, cache_key="post_bar")
 
     def _current_mark_price(self, position_status=None) -> float:
         """The bar's mark price, validated before it can size an order (#347).
@@ -273,7 +362,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             raise ValueError(f"venue reported an unusable mark price ({price})")
         return price
 
-    def _get_observation(self, advance_hold: bool = True) -> TensorDictBase:
+    def _get_observation(self, advance_hold: bool = True, *, snapshot=None) -> TensorDictBase:
         """Get the current observation state.
 
         Args:
@@ -295,9 +384,19 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         ]
 
         # Get account state from trader (single fetch: holding_time and
-        # position_direction below MUST come from this same snapshot)
-        status = self.trader.get_status()
-        balance = self.trader.get_account_balance()
+        # position_direction below MUST come from this same snapshot).
+        #
+        # `snapshot` is `_reset`'s already-CONFIRMED pair. Re-reading there meant the
+        # guarded reads succeeded and were then thrown away, and a failure on the second
+        # pair escaped the policy entirely -- FLATTEN could not act on it. Wrapping this
+        # whole method instead would be wrong: it also reads the OBSERVER, so a window
+        # that can never fill is a config error, and halting it would market-close a
+        # position on every episode start (`reset-is-not-halt-wrapped`).
+        if snapshot is not None:
+            status, balance = snapshot
+        else:
+            status = self.trader.get_status()
+            balance = self.trader.get_account_balance()
 
         # exposure_pct denominator: use total_margin_balance (equity incl. unrealized PnL),
         # NOT total_wallet_balance. The latter's meaning diverges across exchanges -- Binance's
@@ -483,7 +582,14 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             dtype=torch.float,
         )
 
-        out_td = TensorDict({self.account_state_key: account_state}, batch_size=())
+        out_td = TensorDict(
+            {
+                self.account_state_key: account_state,
+                # Always 0.0: `_finalize_step_flags` sets it per step (#295).
+                STATUS_UNKNOWN_KEY: torch.zeros(1, dtype=torch.float),
+            },
+            batch_size=(),
+        )
         for market_data_name, data in zip(self.market_data_keys, market_data):
             out_td.set(market_data_name, torch.from_numpy(data))
 
@@ -509,15 +615,6 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             )
         return equity
 
-    def _get_current_position_quantity(self) -> float:
-        """The signed size the exchange holds, dust read as flat.
-
-        One copy: binance, bitget and bybit each carried a byte-identical
-        `position.qty if position is not None else 0.0`, which returned the residual
-        rather than 0 and let `abs(current_qty) > 0` fire on a flat account (#283).
-        """
-        return position_qty_from_status(self.trader.get_status().get("position_status"))
-
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment.
 
@@ -531,6 +628,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         start -- so they warn. All four venues return True when flat, so a clean reset is
         silent.
         """
+        self._reset_outage_state()
         self.observer.reset()
         if not self.trader.cancel_open_orders():
             logger.warning(
@@ -544,25 +642,51 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                     "close_position failed during reset; proceeding with residual exposure"
                 )
 
-        balance = self.trader.get_account_balance()
-        self.balance = balance.get("available_balance", 0)
+        # Under `_halting`, like every other account read (#295). NO cache_key: an
+        # episode must not START on stale state -- the grace period exists to ride out an
+        # outage mid-episode, not to begin one blind. So this raises LiveObservationHalt
+        # rather than a bare PositionUnknownError, which is what `except
+        # LiveObservationHalt` and the FLATTEN policy were always documented to cover and
+        # what the reset path actually bypassed until now.
+        # Two `_halting` calls rather than one closure plus a manual cache seed: the
+        # balance goes through the same "balance" slot the sizing path uses, so
+        # `_last_confirmed_read` keeps exactly one writer. `_reset_outage_state` has just
+        # cleared it, so a failure here still raises -- an episode cannot start on cache.
+        balance = self._halting(self.trader.get_account_balance, cache_key="balance")
 
-        status = self.trader.get_status()
+        # The CONVERSION is inside the closure, not just the call. No adapter raises from
+        # `get_status`: all four RETURN the POSITION_UNKNOWN sentinel, and the error comes
+        # from the first attribute touch -- which is `position_direction_from_status`.
+        # Wrapping the call alone caught nothing, exactly as `_acquire_pre_trade_state`'s
+        # docstring warns twelve lines up.
+        def read_status():
+            status = self.trader.get_status()
+            return status, position_direction_from_status(status.get("position_status"))
+
+        status, direction = self._halting(read_status)
+        self.balance = balance.get("available_balance", 0)
         self.position.hold_counter = 0
-        self.position.current_position = position_direction_from_status(
-            status.get("position_status")
-        )
+        self.position.current_position = direction
 
         # Load-bearing for binance and bitget, whose _execute_trade_if_needed compares
         # `desired_action == self.position.current_action_level` and returns executed=False
         # on a match: without this, a position that predates the episode leaves a stale
         # level behind which the guard refuses the very trade that would close it (#243).
-        # Inert for bybit and okx, which recompute qty live and never read the field.
+        # Inert for bybit and okx, which take the threaded qty and never read the field.
         self._sync_action_level_after_reset()
 
         # advance_hold=False: hold_counter was just zeroed above; a reset must never
         # itself count a bar (see advance_hold docstring).
-        return self._get_observation(advance_hold=False)
+        # Deliberately NOT under `_halting`, unlike the two account reads above. A review
+        # flagged the asymmetry -- a NaN equity here raises bare while the same NaN in the
+        # post-bar read halts and flattens -- and it is intentional:
+        # `test_what_a_short_observation_costs_under_flatten[reset-is-not-halt-wrapped]`
+        # pins it. `_get_observation` also reads the OBSERVER, so a config whose window can
+        # never fill is a metadata gap, not an outage; halting it would market-close a real
+        # position on every episode start under FLATTEN. Cheap-and-loud is the right cost
+        # for a config error. The account reads that CAN be an outage are wrapped above.
+        # Built from the reads already confirmed above, not a second raw pair.
+        return self._get_observation(advance_hold=False, snapshot=(status, balance))
 
     @abstractmethod
     def _execute_trade_if_needed(self, action) -> dict:

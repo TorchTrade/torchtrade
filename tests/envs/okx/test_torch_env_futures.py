@@ -363,7 +363,7 @@ class TestOKXFuturesTorchTradingEnv:
     ):
         """#347: the sweep guarded the flat half of okx's ternary and stopped.
 
-        The other half runs on every RESIZE, and okx is the only exchange that threads the
+        The other half runs on every RESIZE, and as of #295 all four exchanges thread the
         price down from _step rather than re-fetching inside _execute_fractional_action.
         Both okx fields feeding mark_price fall back to 0.0 when empty, so this arrives
         from two blank venue fields, not only a wire fault -- and {harm}.

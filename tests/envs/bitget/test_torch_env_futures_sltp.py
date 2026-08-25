@@ -15,6 +15,7 @@ from tests.envs.base_exchange_tests import (
     assert_an_invalid_action_raises_before_trading,
 )
 
+from torchtrade.envs.core.live import LiveObservationHalt
 from torchtrade.envs import TimeFrame
 
 
@@ -753,7 +754,10 @@ class TestBitgetSLTPNotionalTradeMode:
         mock_trader.reset_mock()
         # A zero candle close is unusable data, not a soft abort: it divides the notional
         # sizing and prices both brackets, including in the "quantity" default (#347).
-        with pytest.raises(ValueError, match="unusable close price"):
+        # Wrapped in LiveObservationHalt as of #295 -- the read is under the halt policy
+        # now, which makes it agree with `_acquire_post_bar_state`, where the same
+        # observer error mid-episode has always halted rather than escaping bare.
+        with pytest.raises(LiveObservationHalt, match="unusable close price"):
             env._execute_trade_if_needed(("long", -0.02, 0.03))
 
         mock_trader.trade.assert_not_called()
