@@ -614,13 +614,20 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         # `_last_confirmed_read` keeps exactly one writer. `_reset_outage_state` has just
         # cleared it, so a failure here still raises -- an episode cannot start on cache.
         balance = self._halting(self.trader.get_account_balance, cache_key="balance")
-        status = self._halting(self.trader.get_status)
 
+        # The CONVERSION is inside the closure, not just the call. No adapter raises from
+        # `get_status`: all four RETURN the POSITION_UNKNOWN sentinel, and the error comes
+        # from the first attribute touch -- which is `position_direction_from_status`.
+        # Wrapping the call alone caught nothing, exactly as `_acquire_pre_trade_state`'s
+        # docstring warns twelve lines up.
+        def read_status():
+            status = self.trader.get_status()
+            return status, position_direction_from_status(status.get("position_status"))
+
+        status, direction = self._halting(read_status)
         self.balance = balance.get("available_balance", 0)
         self.position.hold_counter = 0
-        self.position.current_position = position_direction_from_status(
-            status.get("position_status")
-        )
+        self.position.current_position = direction
 
         # Load-bearing for binance and bitget, whose _execute_trade_if_needed compares
         # `desired_action == self.position.current_action_level` and returns executed=False
@@ -631,6 +638,14 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         # advance_hold=False: hold_counter was just zeroed above; a reset must never
         # itself count a bar (see advance_hold docstring).
+        # Deliberately NOT under `_halting`, unlike the two account reads above. A review
+        # flagged the asymmetry -- a NaN equity here raises bare while the same NaN in the
+        # post-bar read halts and flattens -- and it is intentional:
+        # `test_what_a_short_observation_costs_under_flatten[reset-is-not-halt-wrapped]`
+        # pins it. `_get_observation` also reads the OBSERVER, so a config whose window can
+        # never fill is a metadata gap, not an outage; halting it would market-close a real
+        # position on every episode start under FLATTEN. Cheap-and-loud is the right cost
+        # for a config error. The account reads that CAN be an outage are wrapped above.
         return self._get_observation(advance_hold=False)
 
     @abstractmethod

@@ -103,11 +103,7 @@ def validate_trade_mode(trade_mode: str) -> str:
 
 
 def validate_unknown_status_budget(steps) -> None:
-    """The #295 grace period, checked at the boundary rather than guarded downstream.
-
-    A negative budget reads as "disabled" through `>= budget > 0`, silently turning a typo
-    into the strictest posture instead of erroring.
-    """
+    """Checked at the boundary: a negative budget reads as "disabled" (#295)."""
     if not isinstance(steps, int) or isinstance(steps, bool) or steps < 0:
         raise ValueError(
             f"max_unknown_status_steps must be an int >= 0 (0 disables the grace "

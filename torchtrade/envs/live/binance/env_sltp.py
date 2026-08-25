@@ -224,17 +224,26 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
             return trade_info  # Already in this position, ignore duplicate action
 
-        # Get current price for calculating absolute SL/TP levels
-        obs = self.observer.get_observations(return_base_ohlc=True)
-        current_price = float(obs["base_features"][-1, 3])  # Close price
-        # Validated here, not per trade_mode: this price divides the notional sizing
-        # AND prices both brackets in every mode, including the "quantity" default
-        # which checked nothing. bybit/okx get this from _current_mark_price(); these
-        # two read a candle close, which dropna() does not clear of inf (#347).
-        if not math.isfinite(current_price) or current_price <= 0:
-            raise ValueError(
-                f"unusable close price ({current_price}) for {self.config.symbol}"
-            )
+        # Under `_halting`, read AND verdict (#295). `get_observations` raises ValueError
+        # on a short window or a stale last bar, and this sat outside the policy -- so a
+        # degraded feed escaped as a bare ValueError in EVERY trade_mode, since this runs
+        # before the mode branch. bybit/okx take a threaded mark instead; these two price
+        # brackets off the candle close deliberately, so the read stays rather than being
+        # replaced by the mark.
+        def read_close():
+            obs = self.observer.get_observations(return_base_ohlc=True)
+            current_price = float(obs["base_features"][-1, 3])
+            # This price divides the notional sizing AND prices both brackets in every
+            # mode, including the "quantity" default which checked nothing. dropna() does
+            # not clear a candle close of inf (#347). The name is load-bearing:
+            # test_sltp_sizing_rejects_a_non_finite_price_or_balance greps for it.
+            if not math.isfinite(current_price) or current_price <= 0:
+                raise ValueError(
+                    f"unusable close price ({current_price}) for {self.config.symbol}"
+                )
+            return current_price
+
+        current_price = self._halting(read_close)
 
         # Resolve quantity based on trade_mode
         if self.config.trade_mode == "fractional":

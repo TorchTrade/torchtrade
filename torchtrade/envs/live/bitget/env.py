@@ -228,22 +228,25 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         # Get actual balance from exchange
         # Use total_margin_balance (not available_balance) so the target reflects
         # the full portfolio, including margin already locked in open positions.
-        # Under `_halting` -- this is the read that SIZES the order (#295).
-        balance_info = self._halting(
-            self.trader.get_account_balance, cache_key="balance"
-        )
-        # Indexed, and `not (x > 0)`: defaulting to 0.0 turned a broken adapter into a
-        # permanent silent refusal to trade, and `<= 0` lets a NaN balance through to
-        # size a NaN position (#277).
-        total_balance = balance_info['total_margin_balance']
+        # The VERDICT is inside the closure, not just the read. `_halting` catches
+        # ValueError precisely so an impossible account state becomes a halt; raising one
+        # frame above it sent that straight out of `_step`. `equity == 0.0` is what a
+        # venue reports while liquidating you -- the worst moment to crash rather than
+        # halt under policy (#295).
+        def read_balance():
+            info = self.trader.get_account_balance()
+            total_balance = info["total_margin_balance"]
+            # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
+            # balance sizes an inf target (#277). The name is load-bearing:
+            # test_futures_sizing_rejects_a_non_finite_balance greps for it.
+            if not math.isfinite(total_balance) or total_balance <= 0:
+                raise ValueError(
+                    f"cannot size a trade against a portfolio value of {total_balance}"
+                )
+            return info
 
-        # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
-        # balance sizes an inf target -- bitget's amount rounding then yields NaN and
-        # hands it to create_order. Same defect this PR fixed on the baselines (#277).
-        if not math.isfinite(total_balance) or total_balance <= 0:
-            raise ValueError(
-                f"cannot size a trade against a portfolio value of {total_balance}"
-            )
+        balance_info = self._halting(read_balance, cache_key="balance")
+        total_balance = balance_info["total_margin_balance"]
 
         # Use shared utility for core position calculation
         # Reserve 2% buffer for exchange maintenance margin requirements

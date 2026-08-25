@@ -3727,7 +3727,7 @@ def test_the_done_family_separates_an_outage_from_a_blown_account(
         _status_unknown_this_step=bool(unknown),
         config=SimpleNamespace(max_unknown_status_steps=budget),
     )
-    env._max_unknown_status_steps = TorchTradeLiveEnv._max_unknown_status_steps.fget(env)
+    env._max_unknown_status_steps = budget
     td = TensorDict({}, batch_size=())
     TorchTradeLiveEnv._finalize_step_flags(env, td, terminated=terminated)
 

@@ -571,3 +571,33 @@ def test_an_sltp_grace_bar_can_still_size_a_bracket_with_the_venue_down(venue):
 
     assert nxt["status_unknown"].item() == 1.0, "the bar must be flagged, not crash"
     assert not bool(nxt["terminated"]), "an outage is never a terminated episode"
+
+
+@pytest.mark.parametrize("sltp", [False, True], ids=["plain", "sltp"])
+@pytest.mark.parametrize("venue", VENUES)
+def test_reset_halts_on_the_sentinel_venues_actually_return(venue, sltp):
+    """`get_status` does not RAISE on an outage -- it returns POSITION_UNKNOWN.
+
+    All four adapters assign the sentinel and return normally; the error surfaces at the
+    first attribute touch. So wrapping the CALL in `_halting` catches nothing, which is
+    the trap `_acquire_pre_trade_state`'s own docstring warns about twelve lines above the
+    code that fell into it -- the conversion has to be inside the closure too.
+
+    The existing reset test drove `side_effect = PositionUnknownError`, a raise. That
+    shape does not occur in production: POSITION_UNKNOWN appeared ZERO times in this file,
+    so the test asserted a halt on a failure the venues never generate.
+    """
+    from torchtrade.envs.core.state import POSITION_UNKNOWN
+
+    env, trader = _real_futures_env(
+        budget=0, venue=venue, sltp=sltp,
+        observation_failure_policy=ObservationFailurePolicy.FLATTEN,
+    )
+    trader.get_status.return_value = {"position_status": POSITION_UNKNOWN}
+    trader.close_position.reset_mock()
+
+    with pytest.raises(LiveObservationHalt):
+        env.reset()
+    assert trader.close_position.called, (
+        "FLATTEN did not act: the sentinel escaped as a bare PositionUnknownError"
+    )
