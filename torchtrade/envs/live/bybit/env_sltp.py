@@ -86,66 +86,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         self.active_stop_loss = 0.0
         self.active_take_profit = 0.0
 
-    def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
-        """Reset the environment, including SLTP-specific state."""
-        result = super()._reset(tensordict, **kwargs)
-        self._reset_sltp_state()
-        return result
 
-    def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
-        """Execute one environment step."""
-        status, position_status, current_price, position_size = self._acquire_pre_trade_state()
-
-        # Sync position state from exchange — this is the source of truth.
-        # Detects SL/TP closures AND fixes state drift from failed bracket orders.
-        position_closed = self._sync_position_from_exchange(position_status)
-
-        action_tuple = self._resolve_action_tuple(tensordict)
-
-        # Execute trade if needed (duplicate guard uses synced state)
-        trade_info = self._execute_trade_if_needed(
-            action_tuple, current_price=current_price
-        )
-        trade_info["position_closed"] = position_closed
-
-        # Eagerly update position from trade result so the rest of this step
-        # sees the new state without waiting for the next sync cycle.
-        if trade_info["executed"] and trade_info.get("success") is not False:
-            self._record_sltp_position(action_tuple[0])
-
-        self._wait_for_next_timestamp()
-
-        new_portfolio_value, new_price, new_qty, next_tensordict = self._acquire_post_bar_state()
-        # None when the account is flat: there is no position mark to read, and
-        # fetching one would add a round-trip that can halt the episode. The
-        # pre-trade price is the honest fallback -- flat rows carry no PnL anyway.
-        new_price = new_price if new_price is not None else current_price
-
-        side, _, _ = action_tuple
-        if side == "long":
-            action_value = 1.0
-        elif side == "short":
-            action_value = -1.0
-        else:
-            action_value = 0.0
-
-        self.history.record_step(
-            price=new_price,
-            action=action_value,
-            reward=0.0,
-            portfolio_value=new_portfolio_value,
-            position=new_qty
-        )
-
-        reward = float(self.reward_function(self.history))
-        self.history.rewards[-1] = reward
-
-        done = self._check_termination(new_portfolio_value)
-
-        next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
-        self._finalize_step_flags(next_tensordict, terminated=done)
-
-        return next_tensordict
 
     def _execute_trade_if_needed(
         self, action_tuple: Tuple[Optional[str], Optional[float], Optional[float]],
@@ -319,3 +260,9 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
             return trade_info
 
         return trade_info
+
+    def _dispatch_sltp_trade(self, action_tuple, current_price: float):
+        # Threaded, not re-read: re-reading the mark inside the trade path bypassed the
+        # halt policy, so a grace bar that priced a bracket died instead of truncating
+        # (#295). binance and bitget price off a candle close and take the default.
+        return self._execute_trade_if_needed(action_tuple, current_price=current_price)

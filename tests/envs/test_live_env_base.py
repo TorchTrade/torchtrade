@@ -636,9 +636,14 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
     """
     import importlib
     env_mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
+    # By NAME, not by `"_step" in vars(c)`: #288 moved the SLTP `_step` onto the mixin,
+    # and a discovery predicate keyed on where the method LIVES silently stops finding
+    # its subject the moment that changes -- pytest then reports a StopIteration rather
+    # than a missing guard.
     env_cls = next(
         c for c in vars(env_mod).values()
-        if isinstance(c, type) and c.__module__ == env_mod.__name__ and "_step" in vars(c)
+        if isinstance(c, type) and c.__module__ == env_mod.__name__
+        and c.__name__.endswith("TorchTradingEnv")
     )
 
     orders = []
@@ -2573,23 +2578,30 @@ def test_a_released_guard_re_arms_only_when_the_env_is_at_target(
 
 
 @pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
+
 @pytest.mark.parametrize("module", ["env", "env_sltp"])
 def test_the_pre_trade_read_halts_like_the_post_bar_one(exchange, module):
-    """#355: only the POST-bar read was wrapped.
+    """Every `_step` must acquire its pre-trade state through the halt-policy helper.
 
-    A POSITION_UNKNOWN between bars raised a bare PositionUnknownError from the read at
-    the top of _step -- so a caller doing `except LiveObservationHalt`, which is what the
-    docs and the DQN example show, did not catch it, and no emergency flatten ran even
-    under FLATTEN. That read happens BEFORE the env trades.
+    Names the helper, not `_halting(get_status)`: wrapping the fetch alone caught NOTHING,
+    because get_status RETURNS the POSITION_UNKNOWN sentinel and the error comes later,
+    when the reads that follow touch its attributes.
+
+    Resolved through the MRO rather than read from the venue's FILE (#288): the SLTP
+    `_step` is shared now, so a file check would fail on a venue that correctly inherits
+    it. Resolution is the stronger check anyway -- a venue that re-forks `_step` without
+    the helper still fails, because `inspect.getsource` then returns ITS copy.
     """
-    path = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
-            / "live" / exchange / f"{module}.py")
-    # Names the helper, not `_halting(get_status)`: wrapping the fetch alone caught
-    # NOTHING, because get_status RETURNS the POSITION_UNKNOWN sentinel and the error
-    # comes later, when the reads that follow touch its attributes.
-    assert "self._acquire_pre_trade_state()" in path.read_text(), (
-        f"{exchange}/{module} reads the venue before trading without the halt policy"
+    import importlib
+
+    mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
+    cls = next(v for k, v in vars(mod).items()
+               if k.endswith("TorchTradingEnv") and v.__module__ == mod.__name__)
+    assert "self._acquire_pre_trade_state()" in inspect.getsource(cls._step), (
+        f"{exchange}/{module}'s resolved _step reads the venue before trading without "
+        f"the halt policy"
     )
+
 
 
 @pytest.mark.parametrize("policy,expect_flatten", [
@@ -4090,3 +4102,94 @@ def test_dependency_injection_still_skips_construction_entirely():
         env._init_trading_clients("K", "S", supplied_obs, supplied_tr)
 
     assert env.observer is supplied_obs and env.trader is supplied_tr
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
+def test_the_shared_sltp_step_keeps_its_three_unpinned_contracts(venue):
+    """#288 folded four SLTP `_step` copies into one. Three of its behaviours had NO test.
+
+    Found by mutating the freshly-shared method: zeroing the reward, dropping
+    `position_closed`, and removing `_reset_sltp_state()` each failed ZERO tests. Those
+    gaps predate the fold, but one copy means one break now reaches all four venues at
+    once -- which is the argument for folding and equally the argument for pinning it.
+
+    - reward must come from `reward_function`, not a placeholder. `record_step` writes 0.0
+      first because the function reads the history it is about to be scored on; the
+      overwrite on the next line is the whole point and nothing checked it happened.
+    - `position_closed` tells the SLTP envs a bracket fired. Dropped, an exchange-side
+      close reads as "no change".
+    - `_reset_sltp_state()` clears the active bracket levels; without it an episode
+      inherits the previous one's stop and target.
+    """
+    import torch
+    from tests.envs.test_live_observation_failsafe import _real_futures_env
+
+    env, trader = _real_futures_env(budget=0, venue=venue, sltp=True)
+    env.reward_function = lambda history: 4.25          # unmistakable, not a placeholder
+
+    td = env.reset()
+    env.active_stop_loss, env.active_take_profit = 111.0, 222.0
+    out = env.step(td.set("action", torch.tensor(0)))["next"]
+
+    assert out["reward"].item() == pytest.approx(4.25), (
+        "the reward is the placeholder `record_step` writes, not the reward function's"
+    )
+    assert env.history.rewards[-1] == pytest.approx(4.25), (
+        "history kept the 0.0 placeholder, so the next step scores against a lie"
+    )
+
+    env.reset()
+    assert (env.active_stop_loss, env.active_take_profit) == (0.0, 0.0), (
+        "reset left the previous episode's bracket levels in place"
+    )
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
+def test_an_exchange_side_close_reaches_the_step_as_position_closed(venue):
+    """`trade_info["position_closed"]` is how a fired bracket becomes visible to the step.
+
+    Dropping the assignment failed zero tests before this.
+    """
+    import torch
+    from tests.envs.test_live_observation_failsafe import _real_futures_env
+
+    env, trader = _real_futures_env(budget=0, venue=venue, sltp=True)
+    seen = {}
+    real = env._dispatch_sltp_trade
+
+    def spy(action_tuple, current_price):
+        info = real(action_tuple, current_price)
+        seen["info"] = info
+        return info
+
+    env._dispatch_sltp_trade = spy
+    td = env.reset()
+    env.position.current_position = 1          # the env believes it holds a position
+    env.step(td.set("action", torch.tensor(0)))   # the venue reports flat: bracket fired
+
+    assert seen["info"].get("position_closed") is True, (
+        f"{venue}: an exchange-side close did not reach _step as position_closed"
+    )
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
+def test_no_sltp_env_reforks_the_shared_step(venue):
+    """#288 folded four SLTP `_step`/`_reset` copies into SLTPMixin. Nothing noticed when
+    one of them did not fold.
+
+    I reverted bybit's file mid-way through mutation testing and it kept its own copies.
+    The suite stayed green -- of course it did: the copy still worked. An incomplete fold
+    is invisible behaviourally, and stays invisible right up until someone fixes a bug in
+    the shared copy and bybit does not get it. That is #288's entire thesis.
+    """
+    import importlib
+
+    mod = importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp")
+    cls = next(v for k, v in vars(mod).items()
+               if k.endswith("TorchTradingEnv") and v.__module__ == mod.__name__)
+
+    reforked = [name for name in ("_step", "_reset") if name in vars(cls)]
+    assert not reforked, (
+        f"{cls.__name__} defines its own {reforked}; SLTPMixin owns them, and a private "
+        f"copy is where a shared fix silently fails to land"
+    )
