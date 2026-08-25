@@ -2628,9 +2628,22 @@ def test_the_pre_trade_read_halts_like_the_post_bar_one(exchange, module):
     mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
     cls = next(v for k, v in vars(mod).items()
                if k.endswith("TorchTradingEnv") and v.__module__ == mod.__name__)
-    assert "self._acquire_pre_trade_state()" in inspect.getsource(cls._step), (
+
+    # AST call POSITIONS, not a substring. A substring passed on a commented-out call and
+    # on the real call moved AFTER the dispatch -- so it proved neither that the read
+    # executes nor that it precedes the trade, which is the entire contract. The tool for
+    # this already existed two hundred lines up; I reached for `in source` anyway.
+    acquire = _first_call_position(cls._step, {"_acquire_pre_trade_state"})
+    trade = _first_call_position(
+        cls._step, {"_execute_trade_if_needed", "_dispatch_sltp_trade"}
+    )
+    assert acquire is not None, (
         f"{exchange}/{module}'s resolved _step reads the venue before trading without "
         f"the halt policy"
+    )
+    assert trade is not None and acquire < trade, (
+        f"{exchange}/{module} acquires its pre-trade state AFTER dispatching the trade; "
+        f"the halt policy then guards nothing the order depended on"
     )
 
 
@@ -4176,34 +4189,6 @@ def test_the_shared_sltp_step_keeps_its_three_unpinned_contracts(venue):
 
 
 @pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
-def test_an_exchange_side_close_reaches_the_step_as_position_closed(venue):
-    """`trade_info["position_closed"]` is how a fired bracket becomes visible to the step.
-
-    Dropping the assignment failed zero tests before this.
-    """
-    import torch
-    from tests.envs.test_live_observation_failsafe import _real_futures_env
-
-    env, trader = _real_futures_env(budget=0, venue=venue, sltp=True)
-    seen = {}
-    real = env._dispatch_sltp_trade
-
-    def spy(action_tuple, current_price):
-        info = real(action_tuple, current_price)
-        seen["info"] = info
-        return info
-
-    env._dispatch_sltp_trade = spy
-    td = env.reset()
-    env.position.current_position = 1          # the env believes it holds a position
-    env.step(td.set("action", torch.tensor(0)))   # the venue reports flat: bracket fired
-
-    assert seen["info"].get("position_closed") is True, (
-        f"{venue}: an exchange-side close did not reach _step as position_closed"
-    )
-
-
-@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
 def test_no_sltp_env_reforks_the_shared_step(venue):
     """#288 folded four SLTP `_step`/`_reset` copies into SLTPMixin. Nothing noticed when
     one of them did not fold.
@@ -4224,3 +4209,47 @@ def test_no_sltp_env_reforks_the_shared_step(venue):
         f"{cls.__name__} defines its own {reforked}; SLTPMixin owns them, and a private "
         f"copy is where a shared fix silently fails to land"
     )
+
+
+@pytest.mark.parametrize("venue,forwards_threaded", [
+    ("binance", False), ("bitget", False),      # price brackets off a candle close
+    ("bybit", True), ("okx", True),             # take the threaded mark
+], ids=["binance", "bitget", "bybit", "okx"])
+def test_the_dispatch_seam_forwards_the_threaded_mark_not_a_fresh_read(
+    venue, forwards_threaded
+):
+    """`_dispatch_sltp_trade` must hand on the mark `_step` already acquired.
+
+    The seam is new, and nothing proved what routes through it. Mutating bybit's override
+    to call `self._current_mark_price()` instead of forwarding `current_price` left 237
+    tests green -- and that mutation IS the unwrapped mark re-read #295 and #409 spent
+    two rounds removing, reintroduced at the one place the fold created.
+
+    The two values are deliberately DIFFERENT here. Equal values would make forwarding and
+    re-reading indistinguishable, which is exactly how a re-read hides.
+    """
+    import importlib
+
+    THREADED, FRESH = 100.0, 999.0
+    mod = importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp")
+    cls = next(v for k, v in vars(mod).items()
+               if k.endswith("TorchTradingEnv") and v.__module__ == mod.__name__)
+
+    seen = {}
+    env = cls.__new__(cls)
+    env._current_mark_price = lambda *a, **k: FRESH        # any fresh read is visible
+    env._execute_trade_if_needed = (
+        lambda action_tuple, **kw: seen.update(kw) or {"executed": False}
+    )
+    env._dispatch_sltp_trade(("long", -0.02, 0.03), THREADED)
+
+    if forwards_threaded:
+        assert seen.get("current_price") == THREADED, (
+            f"{venue} passed {seen.get('current_price')} rather than the threaded "
+            f"{THREADED}; a fresh read here bypasses the halt policy (#295)"
+        )
+    else:
+        assert "current_price" not in seen, (
+            f"{venue} prices brackets off a candle close and must not be handed a mark; "
+            f"got {seen.get('current_price')}"
+        )

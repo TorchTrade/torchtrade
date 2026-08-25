@@ -11,16 +11,23 @@ logger = logging.getLogger(__name__)
 
 
 class SLTPMixin:
-    """Mixin providing common SLTP functionality for environments with bracket orders.
+    """Shared behaviour for every env that places stop-loss / take-profit brackets.
 
-    This mixin provides shared methods for environments that support stop-loss
-    and take-profit bracket orders across all exchange environments.
+    As of #288 this owns the STEP ITSELF, not just helpers: `_step` and `_reset` were
+    four copies, 100% identical within each venue pair. All five SLTP envs inherit them
+    -- alpaca included, which is why deleting its own `_reset` mattered: with both in the
+    MRO, `_reset_sltp_state` ran twice per reset.
 
-    Required attributes (must be set by the inheriting class):
-        - self.position.current_position: int (0=no position, 1=long, -1=short)
-        - self.trader: Object with get_status() method
-        - self.active_stop_loss: float (current SL price)
-        - self.active_take_profit: float (current TP price)
+    The one venue-specific piece is `_dispatch_sltp_trade`. bybit and okx forward the
+    mark `_step` already acquired under the halt policy; binance and bitget price their
+    brackets off a candle close and take the default. That split is deliberate and is a
+    #409 decision, not an accident to unify here.
+
+    Required attributes (set by the inheriting class):
+        - self.position.current_position: int (0 flat, 1 long, -1 short)
+        - self.trader: object with get_status()
+        - self.active_stop_loss / self.active_take_profit: float
+        - self.action_map: dense dict of index -> (side, sl, tp)
     """
 
     # The direction each SLTP side targets. Also used by the duplicate-action check
@@ -73,8 +80,11 @@ class SLTPMixin:
 
         action_tuple = self._resolve_action_tuple(tensordict)
 
+        # `trade_info["position_closed"]` was set here in all four copies and read by
+        # nothing -- `_sync_position_from_exchange` already acts on its own return value.
+        # Asserting a dead field is asserting metadata, so the field and the test that
+        # pinned it both go.
         trade_info = self._dispatch_sltp_trade(action_tuple, current_price)
-        trade_info["position_closed"] = position_closed
 
         # Eagerly update position from the trade result so the rest of this step sees the
         # new state without waiting for the next sync cycle.
