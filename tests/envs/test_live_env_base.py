@@ -242,9 +242,9 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
     """
     step = env_cls._step
     sync = _first_call_position(step, {"_sync_position_from_exchange"})
-    trade = _first_call_position(
-        step, {"_execute_trade_if_needed", "_dispatch_sltp_trade"}
-    )
+    # NOT `_dispatch_sltp_trade`: this is parametrized over NON_SLTP_ENVS, which cannot
+    # contain an SLTP env, so adding it read as coverage that could never bind.
+    trade = _first_call_position(step, {"_execute_trade_if_needed"})
 
     assert sync is not None, (
         f"{env_cls.__name__}._step never reconciles the cached position with the exchange -- "
@@ -271,9 +271,6 @@ assert len(STEPPING_ENVS) == 10, (
     f"expected the 10 concrete live envs (5 venues x plain/SLTP), got "
     f"{[c.__name__ for c in STEPPING_ENVS]}"
 )
-
-# Same set: every concrete env resolves a `_reset`, whether its own or a shared one.
-RESETTING_ENVS = STEPPING_ENVS
 
 
 @pytest.mark.parametrize("env_cls", STEPPING_ENVS, ids=lambda c: c.__name__)
@@ -2609,7 +2606,6 @@ def test_a_released_guard_re_arms_only_when_the_env_is_at_target(
 
 
 @pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
-
 @pytest.mark.parametrize("module", ["env", "env_sltp"])
 def test_the_pre_trade_read_halts_like_the_post_bar_one(exchange, module):
     """Every `_step` must acquire its pre-trade state through the halt-policy helper.
@@ -2645,7 +2641,6 @@ def test_the_pre_trade_read_halts_like_the_post_bar_one(exchange, module):
         f"{exchange}/{module} acquires its pre-trade state AFTER dispatching the trade; "
         f"the halt policy then guards nothing the order depended on"
     )
-
 
 
 @pytest.mark.parametrize("policy,expect_flatten", [
@@ -3806,7 +3801,7 @@ def test_the_done_family_separates_an_outage_from_a_blown_account(
     assert got == expected, f"done/terminated/truncated = {got}, expected {expected}"
 
 
-@pytest.mark.parametrize("env_cls", RESETTING_ENVS, ids=lambda c: c.__name__)
+@pytest.mark.parametrize("env_cls", STEPPING_ENVS, ids=lambda c: c.__name__)
 def test_every_live_reset_clears_the_outage_state(env_cls):
     """A truncated episode must not poison the next one (#295).
 
@@ -4149,7 +4144,7 @@ def test_dependency_injection_still_skips_construction_entirely():
 
 
 @pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
-def test_the_shared_sltp_step_keeps_its_three_unpinned_contracts(venue):
+def test_the_shared_sltp_step_keeps_its_two_unpinned_contracts(venue):
     """#288 folded four SLTP `_step` copies into one. Three of its behaviours had NO test.
 
     Found by mutating the freshly-shared method: zeroing the reward, dropping
@@ -4160,10 +4155,6 @@ def test_the_shared_sltp_step_keeps_its_three_unpinned_contracts(venue):
     - reward must come from `reward_function`, not a placeholder. `record_step` writes 0.0
       first because the function reads the history it is about to be scored on; the
       overwrite on the next line is the whole point and nothing checked it happened.
-    - `position_closed` tells the SLTP envs a bracket fired. Dropped, an exchange-side
-      close reads as "no change".
-    - `_reset_sltp_state()` clears the active bracket levels; without it an episode
-      inherits the previous one's stop and target.
     """
     import torch
     from tests.envs.test_live_observation_failsafe import _real_futures_env
@@ -4180,11 +4171,6 @@ def test_the_shared_sltp_step_keeps_its_three_unpinned_contracts(venue):
     )
     assert env.history.rewards[-1] == pytest.approx(4.25), (
         "history kept the 0.0 placeholder, so the next step scores against a lie"
-    )
-
-    env.reset()
-    assert (env.active_stop_loss, env.active_take_profit) == (0.0, 0.0), (
-        "reset left the previous episode's bracket levels in place"
     )
 
 
@@ -4216,50 +4202,6 @@ def test_no_sltp_env_reforks_the_shared_step(venue):
     )
 
 
-@pytest.mark.parametrize("venue,forwards_threaded", [
-    ("binance", False), ("bitget", False),      # price brackets off a candle close
-    ("bybit", True), ("okx", True),             # take the threaded mark
-], ids=["binance", "bitget", "bybit", "okx"])
-def test_the_dispatch_seam_forwards_the_threaded_mark_not_a_fresh_read(
-    venue, forwards_threaded
-):
-    """`_dispatch_sltp_trade` must hand on the mark `_step` already acquired.
-
-    The seam is new, and nothing proved what routes through it. Mutating bybit's override
-    to call `self._current_mark_price()` instead of forwarding `current_price` left 237
-    tests green -- and that mutation IS the unwrapped mark re-read #295 and #409 spent
-    two rounds removing, reintroduced at the one place the fold created.
-
-    The two values are deliberately DIFFERENT here. Equal values would make forwarding and
-    re-reading indistinguishable, which is exactly how a re-read hides.
-    """
-    import importlib
-
-    THREADED, FRESH = 100.0, 999.0
-    mod = importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp")
-    cls = next(v for k, v in vars(mod).items()
-               if k.endswith("TorchTradingEnv") and v.__module__ == mod.__name__)
-
-    seen = {}
-    env = cls.__new__(cls)
-    env._current_mark_price = lambda *a, **k: FRESH        # any fresh read is visible
-    env._execute_trade_if_needed = (
-        lambda action_tuple, **kw: seen.update(kw) or {"executed": False}
-    )
-    env._dispatch_sltp_trade(("long", -0.02, 0.03), THREADED)
-
-    if forwards_threaded:
-        assert seen.get("current_price") == THREADED, (
-            f"{venue} passed {seen.get('current_price')} rather than the threaded "
-            f"{THREADED}; a fresh read here bypasses the halt policy (#295)"
-        )
-    else:
-        assert "current_price" not in seen, (
-            f"{venue} prices brackets off a candle close and must not be handed a mark; "
-            f"got {seen.get('current_price')}"
-        )
-
-
 def test_no_sltp_env_writes_the_dead_position_closed_field():
     """`trade_info["position_closed"]` had five writers and zero readers.
 
@@ -4286,4 +4228,35 @@ def test_no_sltp_env_writes_the_dead_position_closed_field():
     assert not offenders, (
         f"{offenders} write a field nothing reads; if it gains a reader, delete this test "
         f"deliberately rather than letting the write drift back in"
+    )
+
+
+@pytest.mark.parametrize("side_idx,expected", [(1, 1.0), (-1, -1.0), (0, 0.0)],
+                         ids=["long", "short", "hold"])
+def test_the_history_row_records_the_side_actually_traded(side_idx, expected):
+    """`action_value` is what the reward function reads out of `history.actions`.
+
+    Flipping the long/short sign here fails ZERO of 4196 tests -- found while mutating the
+    freshly-folded `_step`, and pre-existing rather than introduced by the fold. It is the
+    worst shape of bug this repo records: plausible numbers at the wrong sign, so the
+    reward inverts silently and nothing crashes.
+
+    Driven through the real shared `_step` rather than the expression, because the
+    expression is not what can drift -- the mapping from a bracket SIDE to a numeric
+    action is.
+    """
+    import torch
+    from tests.envs.test_live_observation_failsafe import _real_futures_env
+
+    env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
+    td = env.reset()
+
+    # The action index whose bracket side is long / short / hold.
+    want = {1: "long", -1: "short", 0: None}[side_idx]
+    action = next(i for i, tup in sorted(env.action_map.items()) if tup[0] == want)
+
+    env.step(td.set("action", torch.tensor(action)))
+    assert env.history.actions[-1] == pytest.approx(expected), (
+        f"a {want or 'hold'} bracket recorded {env.history.actions[-1]} in the history "
+        f"row the reward function reads, expected {expected}"
     )

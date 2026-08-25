@@ -23,11 +23,14 @@ class SLTPMixin:
     brackets off a candle close and take the default. That split is deliberate and is a
     #409 decision, not an accident to unify here.
 
-    Required attributes (set by the inheriting class):
-        - self.position.current_position: int (0 flat, 1 long, -1 short)
-        - self.trader: object with get_status()
-        - self.active_stop_loss / self.active_take_profit: float
-        - self.action_map: dense dict of index -> (side, sl, tp)
+    Required of the inheriting class -- the full list, because owning `_step` means this
+    mixin now depends on the whole live-env surface, not just SLTP state:
+        state   - position.current_position, active_stop_loss, active_take_profit,
+                  action_map (dense index -> (side, sl, tp)), history, reward_function
+        venue   - trader.get_status(), _execute_trade_if_needed()
+        step    - _acquire_pre_trade_state(), _acquire_post_bar_state(),
+                  _wait_for_next_timestamp(), _check_termination(),
+                  _finalize_step_flags()
     """
 
     # The direction each SLTP side targets. Also used by the duplicate-action check
@@ -76,14 +79,10 @@ class SLTPMixin:
         _, position_status, current_price, _ = self._acquire_pre_trade_state()
 
         # Source of truth: detects SL/TP closures AND state drift from failed brackets.
-        position_closed = self._sync_position_from_exchange(position_status)
+        self._sync_position_from_exchange(position_status)
 
         action_tuple = self._resolve_action_tuple(tensordict)
 
-        # `trade_info["position_closed"]` was set here in all four copies and read by
-        # nothing -- `_sync_position_from_exchange` already acts on its own return value.
-        # Asserting a dead field is asserting metadata, so the field and the test that
-        # pinned it both go.
         trade_info = self._dispatch_sltp_trade(action_tuple, current_price)
 
         # Eagerly update position from the trade result so the rest of this step sees the

@@ -152,7 +152,7 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
 
         # Sync position state from exchange — this is the source of truth.
         # Detects SL/TP closures AND fixes state drift from failed bracket orders.
-        position_closed = self._sync_position_from_exchange(position_status)
+        self._sync_position_from_exchange(position_status)
 
         # Get action and map to SL/TP tuple
         action_tuple = self._resolve_action_tuple(tensordict)
