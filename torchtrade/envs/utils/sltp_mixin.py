@@ -2,22 +2,35 @@
 
 import logging
 
+import torch
+from tensordict import TensorDictBase
+
 from torchtrade.envs.core.state import position_direction_from_status
 
 logger = logging.getLogger(__name__)
 
 
 class SLTPMixin:
-    """Mixin providing common SLTP functionality for environments with bracket orders.
+    """Shared behaviour for every env that places stop-loss / take-profit brackets.
 
-    This mixin provides shared methods for environments that support stop-loss
-    and take-profit bracket orders across all exchange environments.
+    As of #288 this owns the STEP ITSELF, not just helpers: `_step` and `_reset` were
+    four copies, 100% identical within each venue pair. All five SLTP envs inherit them
+    -- alpaca included, which is why deleting its own `_reset` mattered: with both in the
+    MRO, `_reset_sltp_state` ran twice per reset.
 
-    Required attributes (must be set by the inheriting class):
-        - self.position.current_position: int (0=no position, 1=long, -1=short)
-        - self.trader: Object with get_status() method
-        - self.active_stop_loss: float (current SL price)
-        - self.active_take_profit: float (current TP price)
+    The one venue-specific piece is `_dispatch_sltp_trade`. bybit and okx forward the
+    mark `_step` already acquired under the halt policy; binance and bitget price their
+    brackets off a candle close and take the default. That split is deliberate and is a
+    #409 decision, not an accident to unify here.
+
+    Required of the inheriting class -- the full list, because owning `_step` means this
+    mixin now depends on the whole live-env surface, not just SLTP state:
+        state   - position.current_position, active_stop_loss, active_take_profit,
+                  action_map (dense index -> (side, sl, tp)), history, reward_function
+        venue   - trader.get_status(), _execute_trade_if_needed()
+        step    - _acquire_pre_trade_state(), _acquire_post_bar_state(),
+                  _wait_for_next_timestamp(), _check_termination(),
+                  _finalize_step_flags()
     """
 
     # The direction each SLTP side targets. Also used by the duplicate-action check
@@ -37,6 +50,73 @@ class SLTPMixin:
     def _record_sltp_position(self, side) -> None:
         """The position the ACTION targets, never the order side (#276)."""
         self.position.current_position = self.SIDE_DIRECTION.get(side, 0)
+
+    def _dispatch_sltp_trade(self, action_tuple, current_price: float):
+        """Hand the action to the venue's executor. The ONE thing `_step` varies by venue.
+
+        Default: the venue prices its own bracket off a candle close and does not want the
+        mark (binance, bitget). bybit and okx take the threaded price -- see #295, where
+        re-reading it inside the trade path bypassed the halt policy.
+        """
+        return self._execute_trade_if_needed(action_tuple)
+
+    def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
+        """Four byte-identical copies (#288)."""
+        result = super()._reset(tensordict, **kwargs)
+        self._reset_sltp_state()
+        return result
+
+    def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
+        """One step. Four copies, 100% identical within each venue pair and 88% across --
+        the 12% was solely the dispatch call, which `_dispatch_sltp_trade` now owns (#288).
+
+        This is the file where #295 kept finding a fix applied to some copies and not
+        others: the unguarded balance read, the mark re-read, the close that left the
+        cache stale. One copy is the point.
+        """
+        # `status` and `position_size` were unpacked and unused in all four copies.
+        # One canonical copy is the place to stop carrying that.
+        _, position_status, current_price, _ = self._acquire_pre_trade_state()
+
+        # Source of truth: detects SL/TP closures AND state drift from failed brackets.
+        self._sync_position_from_exchange(position_status)
+
+        action_tuple = self._resolve_action_tuple(tensordict)
+
+        trade_info = self._dispatch_sltp_trade(action_tuple, current_price)
+
+        # Eagerly update position from the trade result so the rest of this step sees the
+        # new state without waiting for the next sync cycle.
+        if trade_info["executed"] and trade_info.get("success") is not False:
+            self._record_sltp_position(action_tuple[0])
+
+        self._wait_for_next_timestamp()
+
+        new_portfolio_value, new_price, new_qty, next_tensordict = self._acquire_post_bar_state()
+        # None when the account is flat: there is no position mark to read, and fetching
+        # one would add a round-trip that can halt the episode. The pre-trade price is the
+        # honest fallback -- flat rows carry no PnL anyway.
+        new_price = new_price if new_price is not None else current_price
+
+        side, _, _ = action_tuple
+        action_value = 1.0 if side == "long" else (-1.0 if side == "short" else 0.0)
+
+        # History FIRST: the reward function reads it.
+        self.history.record_step(
+            price=new_price,
+            action=action_value,
+            reward=0.0,
+            portfolio_value=new_portfolio_value,
+            position=new_qty,
+        )
+        reward = float(self.reward_function(self.history))
+        self.history.rewards[-1] = reward
+
+        done = self._check_termination(new_portfolio_value)
+        next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
+        self._finalize_step_flags(next_tensordict, terminated=done)
+
+        return next_tensordict
 
     def _sync_position_from_exchange(self, position_status) -> bool:
         """Sync internal position state from exchange and detect SL/TP closures.

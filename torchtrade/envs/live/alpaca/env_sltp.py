@@ -136,16 +136,6 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         self.active_stop_loss = 0.0
         self.active_take_profit = 0.0
 
-    def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
-        """Reset the environment, including SLTP-specific state."""
-        # Call base reset
-        result = super()._reset(tensordict, **kwargs)
-
-        # Reset SLTP-specific state using mixin
-        self._reset_sltp_state()
-
-        return result
-
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""
 
@@ -162,14 +152,16 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
 
         # Sync position state from exchange — this is the source of truth.
         # Detects SL/TP closures AND fixes state drift from failed bracket orders.
-        position_closed = self._sync_position_from_exchange(position_status)
+        self._sync_position_from_exchange(position_status)
 
         # Get action and map to SL/TP tuple
         action_tuple = self._resolve_action_tuple(tensordict)
 
         # Calculate and execute trade if needed (duplicate guard uses synced state)
+        # No `trade_info["position_closed"]`: nothing reads it. The mixin dropped it and
+        # leaving alpaca's would be this issue's own defect -- a change applied to some
+        # copies and not others -- committed while reviewing the change that made it.
         trade_info = self._execute_trade_if_needed(action_tuple)
-        trade_info["position_closed"] = position_closed
 
         # Eagerly update position from trade result so the rest of this step
         # sees the new state without waiting for the next sync cycle.
