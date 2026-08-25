@@ -5,10 +5,6 @@ from typing import Callable, Optional
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
-from torchtrade.envs.core.state import (
-    HistoryTracker,
-    PositionState,
-)
 
 class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     """
@@ -45,6 +41,9 @@ class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         "holding_time", "leverage", "distance_to_liquidation"
     ]
 
+    OBSERVER_CLS = BinanceObservationClass
+    TRADER_CLS = BinanceFuturesOrderClass
+
     def __init__(
         self,
         config,
@@ -54,8 +53,7 @@ class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         observer: Optional[BinanceObservationClass] = None,
         trader: Optional[BinanceFuturesOrderClass] = None,
     ):
-        """
-        Initialize Binance trading environment.
+        """Initialize Binance trading environment.
 
         Args:
             config: Environment configuration
@@ -65,72 +63,20 @@ class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
             observer: Optional pre-configured BinanceObservationClass for dependency injection
             trader: Optional pre-configured BinanceFuturesOrderClass for dependency injection
         """
-        # Store feature preprocessing function for use in _init_trading_clients
         self._feature_preprocessing_fn = feature_preprocessing_fn
-
-        # Initialize base class (will call _init_trading_clients)
-        # Binance doesn't use timezone parameter (uses UTC internally)
+        # Binance has no timezone parameter; it works in UTC internally.
         super().__init__(
             config=config,
             api_key=api_key,
             api_secret=api_secret,
             observer=observer,
             trader=trader,
-            timezone="UTC"
+            timezone="UTC",
         )
+        self._finish_futures_init()
 
-        # Extract execute timeframe and convert to seconds
-        self.execute_on = config.execute_on
-
-        # Flatten on startup for a clean state (configurable, default: True)
-        self.trader.cancel_open_orders()
-        if config.close_position_on_init:
-            self.trader.close_position()
-
-        self._capture_bankruptcy_baseline()
-
-        # Build observation specs
-        self._build_observation_specs()
-
-        # Initialize position state
-        self.position = PositionState()  # current_position: 0=no position, 1=long, -1=short
-
-        # Initialize history tracking (futures environments use HistoryTracker)
-        self.history = HistoryTracker()
-
-    def _init_trading_clients(
-        self,
-        api_key: str,
-        api_secret: str,
-        observer: Optional[BinanceObservationClass],
-        trader: Optional[BinanceFuturesOrderClass]
-    ):
-        """
-        Initialize Binance observer and trader clients.
-
-        Uses dependency injection pattern - uses provided instances or creates new ones.
-        """
-        # time_frames are already normalized in config.__post_init__,
-        # so we can use them directly
-        time_frames = self.config.time_frames
-        window_sizes = self.config.window_sizes
-
-        # Initialize observer
-        self.observer = observer if observer is not None else BinanceObservationClass(
-            symbol=self.config.symbol,
-            time_frames=time_frames,
-            window_sizes=window_sizes,
-            feature_preprocessing_fn=self._feature_preprocessing_fn,
-            demo=self.config.demo,
-        )
-
-        # Initialize trader
-        self.trader = trader if trader is not None else BinanceFuturesOrderClass(
-            symbol=self.config.symbol,
-            trade_mode=self.config.trade_mode if hasattr(self.config, 'trade_mode') else None,
-            api_key=api_key,
-            api_secret=api_secret,
-            demo=self.config.demo,
-            leverage=self.config.leverage,
-            margin_mode=self.config.margin_mode,
-        )
+    def _trader_kwargs(self, api_key: str, api_secret: str) -> dict:
+        return {
+            **super()._trader_kwargs(api_key, api_secret),
+            "trade_mode": getattr(self.config, "trade_mode", None),
+        }

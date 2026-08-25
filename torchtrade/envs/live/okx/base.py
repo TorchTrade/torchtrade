@@ -33,6 +33,10 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         "holding_time", "leverage", "distance_to_liquidation"
     ]
 
+    OBSERVER_CLS = OKXObservationClass
+    TRADER_CLS = OKXFuturesOrderClass
+    TRADER_FIRST = True
+
     def __init__(
         self,
         config,
@@ -43,79 +47,39 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
         observer: Optional[OKXObservationClass] = None,
         trader: Optional[OKXFuturesOrderClass] = None,
     ):
-        """
-        Initialize OKX trading environment.
+        """Initialize the okx trading environment.
 
         Args:
             config: Environment configuration
-            api_key: OKX API key
-            api_secret: OKX API secret key
+            api_key: API key (not required if observer and trader are provided)
+            api_secret: API secret (not required if observer and trader are provided)
             passphrase: OKX API passphrase
             feature_preprocessing_fn: Optional custom preprocessing function
-            observer: Optional pre-configured OKXObservationClass
-            trader: Optional pre-configured OKXFuturesOrderClass
+            observer: Optional pre-configured observer for dependency injection
+            trader: Optional pre-configured trader for dependency injection
         """
         self._feature_preprocessing_fn = feature_preprocessing_fn
         self._passphrase = passphrase
-
-        # Initialize base class (will call _init_trading_clients)
         super().__init__(
             config=config,
             api_key=api_key,
             api_secret=api_secret,
             observer=observer,
             trader=trader,
-            timezone="UTC"
+            timezone="UTC",
         )
+        self._finish_futures_init()
 
-        # Extract execute timeframe (already normalized to TimeFrame in config.__post_init__)
-        self.execute_on = config.execute_on
+    def _trader_kwargs(self, api_key: str, api_secret: str) -> dict:
+        return {
+            **super()._trader_kwargs(api_key, api_secret),
+            "position_mode": self.config.position_mode,
+            "passphrase": self._passphrase,
+        }
 
-        # Flatten on startup for a clean state (configurable, default: True)
-        self.trader.cancel_open_orders()
-        if config.close_position_on_init:
-            self.trader.close_position()
-
-        self._capture_bankruptcy_baseline()
-
-        # Build observation specs
-        self._build_observation_specs()
-
-        # Initialize history tracking
-        self.history = HistoryTracker()
-
-    def _init_trading_clients(
-        self,
-        api_key: str,
-        api_secret: str,
-        observer: Optional[OKXObservationClass],
-        trader: Optional[OKXFuturesOrderClass]
-    ):
-        """Initialize OKX observer and trader clients."""
-        time_frames = self.config.time_frames
-        window_sizes = self.config.window_sizes
-        demo = getattr(self.config, 'demo', True)
-
-        # Initialize trader first (observer may reuse its client)
-        self.trader = trader if trader is not None else OKXFuturesOrderClass(
-            symbol=self.config.symbol,
-            api_key=api_key,
-            api_secret=api_secret,
-            passphrase=self._passphrase,
-            demo=demo,
-            leverage=self.config.leverage,
-            margin_mode=self.config.margin_mode,
-            position_mode=self.config.position_mode,
-        )
-
-        # Initialize observer
-        if observer is not None:
-            self.observer = observer
-        else:
-            self.observer = OKXObservationClass(
-                symbol=self.config.symbol,
-                time_frames=time_frames,
-                window_sizes=window_sizes,
-                feature_preprocessing_fn=self._feature_preprocessing_fn,
-                demo=demo,
-            )
+    def _observer_kwargs(self) -> dict:
+        # Reuses the trader's client, which is why TRADER_FIRST is set.
+        return {
+            **super()._observer_kwargs(),
+            "client": getattr(self.trader, "client", None),
+        }

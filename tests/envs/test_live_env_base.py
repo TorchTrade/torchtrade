@@ -1599,7 +1599,14 @@ def test_every_live_env_delegates_its_baseline(exchange):
     """Alpaca included, not exempted -- excluding it is how the bug survived last time."""
     src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
            / "live" / exchange / "base.py").read_text()
-    assert "_capture_bankruptcy_baseline()" in src
+    # `_finish_futures_init()` calls it: as of #288 the four futures venues share that
+    # tail instead of each spelling the call out. Alpaca still calls it directly.
+    assert ("_capture_bankruptcy_baseline()" in src
+            or "_finish_futures_init()" in src), (
+        f"{exchange} neither captures the baseline nor delegates to the shared tail"
+    )
+    # The load-bearing half, unchanged: delegating is the point, re-forking the READ is
+    # the bug. This is what actually caught it last time.
     assert 'balance["total_margin_balance"]' not in src, (
         f"{exchange} re-forked the baseline read instead of delegating"
     )
@@ -2974,11 +2981,20 @@ def test_every_live_env_can_actually_run_the_bar_wait(cls):
     # `self.execute_on = None`, so an MRO-wide search passes on a concrete class that
     # never assigns it -- which is exactly the alpaca break, certified clean. First
     # version of this test did that and the mutation survived.
+    #
+    # `_finish_futures_init` is admitted BY NAME as of #288: the four futures venues now
+    # share that tail rather than each spelling the assignment out. Admitting the whole
+    # shared module would restore the hole above -- TorchTradeLiveEnv lives there too.
     exchange_bases = [
         base for base in cls.__mro__
         if base.__module__.startswith("torchtrade.envs.live.")
         and not base.__module__.startswith("torchtrade.envs.live.shared")
     ]
+    futures_base = next(
+        (b for b in cls.__mro__ if b.__name__ == "TorchTradeFuturesLiveEnv"), None
+    )
+    if futures_base is not None and "_finish_futures_init" in futures_base.__dict__:
+        exchange_bases.append(futures_base)
     if not exchange_bases:
         pytest.skip(f"{cls.__name__} is a shared base, not an exchange env")
     assert any(
@@ -3864,7 +3880,9 @@ def test_every_successful_close_invalidates_the_cached_balance():
     import ast
     import pathlib
 
-    EXEMPT = {"_halting", "_reset"}
+    # `_finish_futures_init` runs at CONSTRUCTION, before any read has been cached, so
+    # its startup flatten has nothing to invalidate -- same ordering argument as `_reset`.
+    EXEMPT = {"_halting", "_reset", "_finish_futures_init"}
     root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
     offenders = []
     for path in sorted(root.glob("*/env_sltp.py")) + [

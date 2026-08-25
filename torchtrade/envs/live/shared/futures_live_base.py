@@ -17,6 +17,7 @@ import math
 import torch
 from tensordict import TensorDict, TensorDictBase
 
+from torchtrade.envs.core.state import HistoryTracker
 from torchtrade.envs.core.live import (
     LiveObservationHalt,
     ObservationFailurePolicy,
@@ -28,6 +29,7 @@ from torchtrade.envs.core.state import (
     advance_hold_counter,
     position_direction_from_status,
     position_qty_from_status,
+    PositionState,
 )
 from torchtrade.envs.utils.liquidation import (
     isolated_liquidation_price,
@@ -70,6 +72,82 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     - _init_trading_clients(): provider-specific client construction
     - _execute_trade_if_needed(): trade execution, whose action space differs by env
     """
+
+    #: The venue's observation and order classes. Set by each exchange's base (#288).
+    OBSERVER_CLS = None
+    TRADER_CLS = None
+
+    #: Build the trader before the observer. True where the observer reuses the trader's
+    #: client (bybit, okx). Preserved per venue rather than normalised: both constructors
+    #: talk to the exchange, so the order decides which side effects have already landed
+    #: when the other one fails.
+    TRADER_FIRST = False
+
+    def _observer_kwargs(self) -> dict:
+        """Arguments for `OBSERVER_CLS`. Override to ADD venue-specific ones."""
+        return dict(
+            symbol=self.config.symbol,
+            time_frames=self.config.time_frames,
+            window_sizes=self.config.window_sizes,
+            feature_preprocessing_fn=self._feature_preprocessing_fn,
+            demo=self.config.demo,
+        )
+
+    def _trader_kwargs(self, api_key: str, api_secret: str) -> dict:
+        """Arguments for `TRADER_CLS`. Override to ADD venue-specific ones.
+
+        This is where the credential shapes stopped being a problem. okx and bitget take a
+        `passphrase` and binance and bybit do not, which is why folding these four looked
+        like a choice between `**credentials` (untyped) and an optional argument two
+        venues ignore -- the dead-parameter defect #289 deleted. The passphrase never
+        reaches anything but the trader, so a hook here needs neither.
+        """
+        return dict(
+            symbol=self.config.symbol,
+            api_key=api_key,
+            api_secret=api_secret,
+            demo=self.config.demo,
+            leverage=self.config.leverage,
+            margin_mode=self.config.margin_mode,
+        )
+
+    def _init_trading_clients(self, api_key, api_secret, observer, trader):
+        """Four near-identical copies, folded (#288).
+
+        Dependency injection: a supplied instance wins, otherwise build from the class
+        attributes.
+        """
+        def make_trader():
+            self.trader = trader if trader is not None else self.TRADER_CLS(
+                **self._trader_kwargs(api_key, api_secret)
+            )
+
+        def make_observer():
+            self.observer = observer if observer is not None else self.OBSERVER_CLS(
+                **self._observer_kwargs()
+            )
+
+        for build in ((make_trader, make_observer) if self.TRADER_FIRST
+                      else (make_observer, make_trader)):
+            build()
+
+    def _finish_futures_init(self) -> None:
+        """The tail every futures env ran verbatim after `super().__init__` (#288).
+
+        Ordering is load-bearing and was identical in all four: flatten before the
+        baseline, so the baseline is the balance the episode actually starts from.
+        """
+        self.execute_on = self.config.execute_on
+
+        self.trader.cancel_open_orders()
+        if self.config.close_position_on_init:
+            self.trader.close_position()
+
+        self._capture_bankruptcy_baseline()
+        self._build_observation_specs()
+
+        self.position = PositionState()
+        self.history = HistoryTracker()
 
     def _halting(self, read, cache_key=None):
         """Run a venue read under the halt policy, degrading through a grace period.
