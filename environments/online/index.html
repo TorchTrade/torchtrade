@@ -1204,6 +1204,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#max_unknown_status_steps-riding-out-a-short-outage-295" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        max_unknown_status_steps — riding out a short outage (#295)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2087,6 +2098,17 @@
     <span class="md-ellipsis">
       
         What does not halt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#max_unknown_status_steps-riding-out-a-short-outage-295" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        max_unknown_status_steps — riding out a short outage (#295)
       
     </span>
   </a>
@@ -3217,9 +3239,92 @@ key.</p>
 <p>The mark-price read is the deliberate exception (#394): there a failed read is
 indistinguishable from reading an unusable price, which was already terminal, so it
 raises the same way. Escalating it is safe because the only halt-wrapped caller reaches
-the fetch solely when the account is flat. Retry and staleness handling are tracked
-in #295.</p>
+the fetch solely when the account is flat.</p>
 <p>Alpaca and Polymarket do not route through this path at all.</p>
+<h3 id="max_unknown_status_steps-riding-out-a-short-outage-295"><code>max_unknown_status_steps</code> — riding out a short outage (#295)<a class="headerlink" href="#max_unknown_status_steps-riding-out-a-short-outage-295" title="Permanent link">&para;</a></h3>
+<p>Default <code>0</code>, which is the behaviour above: the first unreadable read raises. Set it above
+zero and the env will instead keep stepping on the <strong>last confirmed</strong> read for that many
+bars before ending the episode:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">BinanceFuturesTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">"BTCUSDT"</span><span class="p">,</span>
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>    <span class="n">observation_failure_policy</span><span class="o">=</span><span class="s2">"halt"</span><span class="p">,</span>   <span class="c1"># grace is a HALT-only concession</span>
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>    <span class="n">max_unknown_status_steps</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>          <span class="c1"># ride out 3 bars, then truncate</span>
+</span><span id="__span-24-5"><a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="p">)</span>
+</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>bar</th>
+<th><code>status_unknown</code></th>
+<th><code>done</code></th>
+<th><code>terminated</code></th>
+<th><code>truncated</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>healthy</td>
+<td><code>0.0</code></td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>outage 1</td>
+<td><code>1.0</code></td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>outage 2</td>
+<td><code>1.0</code></td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>outage 3</td>
+<td><code>1.0</code></td>
+<td><strong>1</strong></td>
+<td>0</td>
+<td><strong>1</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Three things are load-bearing here:</p>
+<ul>
+<li><strong>It truncates, never terminates.</strong> Value estimators read <code>terminated</code> as "true
+  return-to-go is 0" and <code>truncated</code> as "bootstrap from the final observation".
+  Terminating on an unreachable API would teach the critic that a broker outage and a
+  liquidated account carry the same value target.</li>
+<li><strong><code>status_unknown</code> is a separate observation key</strong>, not a seventh <code>account_state</code> slot.
+  <code>account_state</code> is shared verbatim with the offline envs, which have no notion of an
+  unreadable venue; widening it would desync live/offline parity for a concept only one
+  side has. It is emitted by all ten live envs, and is always <code>0.0</code> on Alpaca, which has
+  no failure policy.</li>
+<li><strong>The budget counts bars, and needs a confirmed read to stand on.</strong> A failure with
+  nothing cached — the first bar of an episode — raises regardless of the budget, because
+  the alternative is inventing an account state.</li>
+</ul>
+<p><strong>Which reads are covered.</strong> All of them on the trade path: the pre-trade position and
+mark, the post-bar account read, the reset read, and the balance read that <em>sizes</em> the
+order. That last one matters — threading the position and price only fixes the decision
+<em>whether</em> to trade; a policy that actually opens or resizes during an outage needs the
+balance too, and its cache is seeded from reset's confirmed read so a first trade during
+an outage is still possible.</p>
+<p><strong>One boundary the grace period does not cover.</strong> On binance and bitget the SL/TP
+bracket price comes from a candle close, and that read only happens on a bar that
+actually trades — the hold path returns before it. So after a reset followed by nothing
+but HOLD actions, there is no confirmed close to serve, and the first <em>trading</em> bar of an
+outage raises instead of being ridden out. Closing it needs either an extra observer read
+per reset or an explicit change of price source; grace deliberately will not substitute
+the mark, because that silently changes where brackets are priced from. Tracked with the</p>
+<h1 id="288-parity-work">288 parity work.<a class="headerlink" href="#288-parity-work" title="Permanent link">&para;</a></h1>
+<p><strong>This trades on unconfirmed state, which is why it is opt-in.</strong> During the grace period
+the env sizes orders against the last known account; it knows the position it <em>had</em>, not
+the one it <em>has</em>. <code>flatten</code> deliberately ignores the budget: it exists to get you out
+while blind, so riding out the outage would defeat it.</p>
 
 
 
