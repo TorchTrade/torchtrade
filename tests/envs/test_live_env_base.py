@@ -2424,8 +2424,6 @@ def test_the_size_an_env_reports_actually_reaches_the_position(exchange):
     every COMPLETE fill would have read as a partial one. Exactly the defect the previous
     round fixed, one layer up.
     """
-    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
-           / "live" / exchange / "env.py").read_text()   # noqa: F841 -- see below
 
     # AST over the RESOLVED `_step`, not the venue file: #288 moved the plain `_step` onto
     # TorchTradeFuturesLiveEnv, so a file scan reads a module that no longer contains the
@@ -4349,7 +4347,38 @@ def test_a_flat_bar_falls_back_to_the_pre_trade_price(shared_step, module):
     env._wait_for_next_timestamp = wait
     env.step(td.set("action", torch.tensor(0)))
 
-    assert env.history.base_prices[-1] is not None, "a flat bar recorded a None price"
-    assert isinstance(env.history.base_prices[-1], (int, float)), (
-        f"a flat bar recorded {env.history.base_prices[-1]!r} rather than the pre-trade price"
+    # The VALUE, not just the type. `isinstance(..., (int, float))` passed on a fallback
+    # changed to `else 0.0` -- wrong but numeric -- while the docstring claimed the test
+    # verified "the pre-trade price". 100.0 is what the mock's get_mark_price returned on
+    # the pre-trade read, so it is the only correct answer here.
+    assert env.history.base_prices[-1] == pytest.approx(100.0), (
+        f"a flat bar recorded {env.history.base_prices[-1]!r} rather than the pre-trade "
+        f"price of 100.0"
+    )
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
+def test_no_plain_futures_env_reforks_the_shared_step(venue):
+    """The PLAIN `_step` must resolve to TorchTradeFuturesLiveEnv, not a venue copy.
+
+    I wrote `test_no_sltp_env_reforks_the_shared_step` for the SLTP fold and shipped the
+    plain fold without the equivalent -- the fifth time in this issue that a fix landed on
+    some copies and not others, this time in the guard against exactly that.
+
+    Mutation-proven necessary: appending a BYTE-IDENTICAL copy of the shared `_step` to
+    bitget/env.py passed all 819 tests in this file. An incomplete fold is invisible
+    behaviourally, because a copy that has not drifted yet works perfectly -- right up
+    until a shared fix fails to land on the venue holding one.
+
+    Not folded into `test_no_futures_env_reforks_the_shared_observation`: its FUTURES_ENVS
+    list includes the SLTP envs, which resolve `_step` to SLTPMixin by design.
+    """
+    import importlib
+
+    mod = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
+    cls = next(v for k, v in vars(mod).items()
+               if k.endswith("TorchTradingEnv") and v.__module__ == mod.__name__)
+    assert cls._step is TorchTradeFuturesLiveEnv._step, (
+        f"{cls.__name__} re-forks _step instead of resolving the shared one; a private "
+        f"copy is where a shared fix silently fails to land"
     )
