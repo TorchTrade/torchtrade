@@ -7,28 +7,14 @@ from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 
 class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
-    """
-    Base class for OKX trading environments.
+    """Base class for OKX futures trading environments.
 
-    Provides common functionality for all OKX environments:
-    - OKXObservationClass and OKXFuturesOrderClass initialization
-    - Observation spec construction (account state + market data)
-    - Common observation gathering logic
-    - Portfolio value calculation
-
-    Standard account state (6 elements):
-    [exposure_pct, position_direction, unrealized_pnl_pct,
-     holding_time, leverage, distance_to_liquidation]
-
-    Subclasses must implement:
-    - Action space definition
-    - _execute_trade_if_needed(): Trade execution logic
+    Supplies the OKX observer and order classes plus the passphrase OKX requires. Its
+    observer deliberately builds its OWN client: the trader's is a Trade API and klines
+    live on the MarketData one. `ACCOUNT_STATE` on TorchTradeLiveEnv is the observation
+    contract.
     """
 
-    ACCOUNT_STATE = [
-        "exposure_pct", "position_direction", "unrealized_pnlpct",
-        "holding_time", "leverage", "distance_to_liquidation"
-    ]
 
     OBSERVER_CLS = OKXObservationClass
     TRADER_CLS = OKXFuturesOrderClass

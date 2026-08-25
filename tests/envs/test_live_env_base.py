@@ -3961,3 +3961,25 @@ def test_each_venue_builds_its_observer_with_the_arguments_it_needs(venue, expec
         f"does not share is a broken market-data feed; a missing product_type is a "
         f"silent wrong-market read."
     )
+
+
+@pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
+def test_no_venue_redeclares_the_account_state_contract(env_cls):
+    """`ACCOUNT_STATE` lived in five identical copies before #288.
+
+    It is the observation contract itself -- CLAUDE.md's "universal 6 elements", shared
+    with the offline envs. A venue re-declaring it can reorder or rename an element and
+    every existing test still passes, because each env is only ever compared against its
+    OWN list. What breaks is a trained checkpoint, silently, at a different index.
+
+    Structural for the reason this file keeps needing structural tests: a re-forked copy
+    that has not drifted yet passes everything.
+    """
+    offenders = [c.__name__ for c in env_cls.__mro__
+                 if "ACCOUNT_STATE" in c.__dict__
+                 and c.__name__ != "TorchTradeLiveEnv"]
+    assert not offenders, (
+        f"{env_cls.__name__} resolves ACCOUNT_STATE from {offenders} rather than the "
+        f"shared contract on TorchTradeLiveEnv; a reordered copy is a permuted "
+        f"observation that no test compares against anything else"
+    )

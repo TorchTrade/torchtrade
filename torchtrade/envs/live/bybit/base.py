@@ -7,28 +7,13 @@ from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 
 class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
-    """
-    Base class for Bybit trading environments.
+    """Base class for Bybit futures trading environments.
 
-    Provides common functionality for all Bybit environments:
-    - BybitObservationClass and BybitFuturesOrderClass initialization
-    - Observation spec construction (account state + market data)
-    - Common observation gathering logic
-    - Portfolio value calculation (total_margin_balance)
-
-    Standard account state (6 elements):
-    [exposure_pct, position_direction, unrealized_pnl_pct,
-     holding_time, leverage, distance_to_liquidation]
-
-    Subclasses must implement:
-    - Action space definition
-    - _execute_trade_if_needed(): Trade execution logic
+    Supplies the Bybit observer and order classes. Bybit is the one venue whose observer
+    reuses the trader's session, which is why TRADER_FIRST is set here. `ACCOUNT_STATE` on
+    TorchTradeLiveEnv is the observation contract.
     """
 
-    ACCOUNT_STATE = [
-        "exposure_pct", "position_direction", "unrealized_pnlpct",
-        "holding_time", "leverage", "distance_to_liquidation"
-    ]
 
     OBSERVER_CLS = BybitObservationClass
     TRADER_CLS = BybitFuturesOrderClass

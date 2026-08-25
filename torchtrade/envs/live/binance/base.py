@@ -7,39 +7,14 @@ from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 
 class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
-    """
-    Base class for Binance trading environments.
+    """Base class for Binance futures trading environments.
 
-    Provides common functionality for all Binance environments:
-    - BinanceObservationClass and BinanceFuturesOrderClass initialization
-    - Observation spec construction (account state + market data)
-    - Common observation gathering logic
-    - Portfolio value calculation (total_margin_balance)
-    - Helper methods for market data keys and account state
-
-    Standard account state for Binance futures environments (6 elements):
-    [exposure_pct, position_direction, unrealized_pnl_pct,
-     holding_time, leverage, distance_to_liquidation]
-
-    Element definitions:
-        - exposure_pct: position_value / total_margin_balance (equity incl. unrealized PnL)
-        - position_direction: sign(position_size) (-1=short, 0=flat, +1=long)
-        - unrealized_pnl_pct: percentage unrealized PnL from entry
-        - holding_time: steps since position opened
-        - leverage: 1-125x leverage multiplier
-        - distance_to_liquidation: normalized distance to liquidation price
-
-    Subclasses must implement:
-    - Action space definition (different per environment)
-    - _execute_trade_if_needed(): Trade execution logic
+    Supplies the Binance observer and order classes; everything else -- observation specs,
+    account state, portfolio value, the trade-path helpers -- comes from
+    TorchTradeFuturesLiveEnv. See `ACCOUNT_STATE` on TorchTradeLiveEnv for the observation
+    contract, and `_trader_kwargs` below for what is genuinely Binance-specific.
     """
 
-    # Standard account state for Binance futures environments (6 elements)
-    # Universal state used across all TorchTrade environments for better generalization.
-    ACCOUNT_STATE = [
-        "exposure_pct", "position_direction", "unrealized_pnlpct",
-        "holding_time", "leverage", "distance_to_liquidation"
-    ]
 
     OBSERVER_CLS = BinanceObservationClass
     TRADER_CLS = BinanceFuturesOrderClass

@@ -7,39 +7,14 @@ from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 
 class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
-    """
-    Base class for Bitget trading environments.
+    """Base class for Bitget futures trading environments.
 
-    Provides common functionality for all Bitget environments:
-    - BitgetObservationClass and BitgetFuturesOrderClass initialization
-    - Observation spec construction (account state + market data)
-    - Common observation gathering logic
-    - Portfolio value calculation (total_margin_balance)
-    - Helper methods for market data keys and account state
-
-    Standard account state for Bitget futures environments (6 elements):
-    [exposure_pct, position_direction, unrealized_pnl_pct,
-     holding_time, leverage, distance_to_liquidation]
-
-    Element definitions:
-        - exposure_pct: position_value / total_margin_balance (equity incl. unrealized PnL)
-        - position_direction: sign(position_size) (-1=short, 0=flat, +1=long)
-        - unrealized_pnl_pct: percentage unrealized PnL from entry
-        - holding_time: steps since position opened
-        - leverage: 1-125x leverage multiplier
-        - distance_to_liquidation: normalized distance to liquidation price
-
-    Subclasses must implement:
-    - Action space definition (different per environment)
-    - _execute_trade_if_needed(): Trade execution logic
+    Supplies the Bitget observer and order classes, and the three constructor arguments
+    only Bitget takes: a passphrase, a product type and a position mode. Everything else
+    comes from TorchTradeFuturesLiveEnv; `ACCOUNT_STATE` on TorchTradeLiveEnv is the
+    observation contract.
     """
 
-    # Standard account state for Bitget futures environments (6 elements)
-    # Universal state used across all TorchTrade environments for better generalization.
-    ACCOUNT_STATE = [
-        "exposure_pct", "position_direction", "unrealized_pnlpct",
-        "holding_time", "leverage", "distance_to_liquidation"
-    ]
 
     OBSERVER_CLS = BitgetObservationClass
     TRADER_CLS = BitgetFuturesOrderClass

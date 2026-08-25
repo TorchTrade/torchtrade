@@ -55,12 +55,6 @@ class AlpacaBaseTorchTradingEnv(TorchTradeLiveEnv):
     - _calculate_trade_amount(): Trade sizing logic
     """
 
-    # Standard account state for Alpaca environments (6 elements)
-    # Universal state used across all TorchTrade environments for better generalization.
-    ACCOUNT_STATE = [
-        "exposure_pct", "position_direction", "unrealized_pnlpct",
-        "holding_time", "leverage", "distance_to_liquidation"
-    ]
 
     def __init__(
         self,
