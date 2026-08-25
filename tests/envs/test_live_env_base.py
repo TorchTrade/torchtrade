@@ -3427,7 +3427,7 @@ class _ResetStub:
         # assertion in one bitget test.
         self.sync_action_level_calls += 1
 
-    _get_observation = lambda self, advance_hold=True: advance_hold
+    _get_observation = lambda self, advance_hold=True, **_kw: advance_hold
 
 
 @pytest.mark.parametrize("kwargs,expected", [

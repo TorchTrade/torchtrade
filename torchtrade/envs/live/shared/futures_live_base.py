@@ -154,6 +154,11 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             if isinstance(error, RuntimeError) and not isinstance(
                 error, (PositionUnknownError, LiveObservationHalt)
             ):
+                # Clear the flag before aborting. `_finalize_step_flags` is what normally
+                # consumes it, and this path never reaches it -- so a caller that catches
+                # the timeout and retries would have the next HEALTHY bar report
+                # status_unknown=1, and count toward truncation.
+                self._status_unknown_this_step = False
                 raise
 
             accepted = flatten_error = None
@@ -357,7 +362,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             raise ValueError(f"venue reported an unusable mark price ({price})")
         return price
 
-    def _get_observation(self, advance_hold: bool = True) -> TensorDictBase:
+    def _get_observation(self, advance_hold: bool = True, *, snapshot=None) -> TensorDictBase:
         """Get the current observation state.
 
         Args:
@@ -379,9 +384,19 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         ]
 
         # Get account state from trader (single fetch: holding_time and
-        # position_direction below MUST come from this same snapshot)
-        status = self.trader.get_status()
-        balance = self.trader.get_account_balance()
+        # position_direction below MUST come from this same snapshot).
+        #
+        # `snapshot` is `_reset`'s already-CONFIRMED pair. Re-reading there meant the
+        # guarded reads succeeded and were then thrown away, and a failure on the second
+        # pair escaped the policy entirely -- FLATTEN could not act on it. Wrapping this
+        # whole method instead would be wrong: it also reads the OBSERVER, so a window
+        # that can never fill is a config error, and halting it would market-close a
+        # position on every episode start (`reset-is-not-halt-wrapped`).
+        if snapshot is not None:
+            status, balance = snapshot
+        else:
+            status = self.trader.get_status()
+            balance = self.trader.get_account_balance()
 
         # exposure_pct denominator: use total_margin_balance (equity incl. unrealized PnL),
         # NOT total_wallet_balance. The latter's meaning diverges across exchanges -- Binance's
@@ -670,7 +685,8 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         # never fill is a metadata gap, not an outage; halting it would market-close a real
         # position on every episode start under FLATTEN. Cheap-and-loud is the right cost
         # for a config error. The account reads that CAN be an outage are wrapped above.
-        return self._get_observation(advance_hold=False)
+        # Built from the reads already confirmed above, not a second raw pair.
+        return self._get_observation(advance_hold=False, snapshot=(status, balance))
 
     @abstractmethod
     def _execute_trade_if_needed(self, action) -> dict:

@@ -243,7 +243,11 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
                 )
             return current_price
 
-        current_price = self._halting(read_close)
+        # cache_key is load-bearing, not decoration: without it `cached` is None, grace
+        # cannot apply, and this still raises -- it just raises a nicer type. The claimed
+        # behaviour is "serve the last CONFIRMED close and flag the bar", which needs a
+        # slot to serve from. Its own slot, because it is a candle close, not the mark.
+        current_price = self._halting(read_close, cache_key="candle_close")
 
         # Resolve quantity based on trade_mode
         if self.config.trade_mode == "fractional":

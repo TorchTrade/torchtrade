@@ -660,3 +660,111 @@ def test_a_realised_close_invalidates_the_cached_balance(succeeded, still_cached
     env._handle_close_action(0.05)
 
     assert ("balance" in env._last_confirmed_read) is still_cached
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget"])
+def test_a_candle_close_failure_is_ridden_out_rather_than_raised(venue):
+    """`_halting(read_close)` without a cache_key still RAISES -- just with a nicer type.
+
+    Grace needs a slot to serve from. Wrapping the read made the exception well-typed and
+    changed nothing about the contract the docs claim: serve the last CONFIRMED close and
+    flag the bar. Its own slot, because binance/bitget price brackets off a candle close
+    rather than the mark, deliberately.
+    """
+    import torch
+
+    env, trader = _real_futures_env(budget=3, venue=venue, sltp=True,
+                                    trade_mode="fractional", position_fraction=0.5)
+    td = env.reset()
+    # A TRADING action, not a hold: the hold path early-returns before `read_close`, so a
+    # hold bar never seeds the slot. That is a real residual boundary -- hold for N bars,
+    # then trade during an outage, and there is still no confirmed close to serve -- and
+    # it is reported on the PR rather than papered over here.
+    td = env.step(td.set("action", torch.tensor(1)))["next"]
+
+    trader.get_status.side_effect = PositionUnknownError("down")
+    env.observer.get_observations.side_effect = ValueError(
+        "most recent candle did not survive preprocessing"
+    )
+
+    nxt = env.step(td.exclude("done", "terminated", "truncated", "reward")
+                   .set("action", torch.tensor(1)))["next"]
+    assert nxt["status_unknown"].item() == 1.0, (
+        "the bar raised instead of being ridden out: no cached candle close to serve"
+    )
+
+
+@pytest.mark.parametrize("venue", VENUES)
+def test_reset_survives_its_guarded_reads_then_a_failing_reread(venue):
+    """The reads were confirmed, then thrown away and taken again raw.
+
+    A failure on that SECOND pair escaped the policy entirely -- FLATTEN could not act on
+    it -- while the confirmed snapshot sat unused. `_get_observation` is deliberately NOT
+    halt-wrapped (it reads the observer too, so a config gap must not flatten); the fix is
+    to stop re-reading, not to wrap.
+    """
+    calls = {"n": 0}
+    env, trader = _real_futures_env(
+        budget=0, venue=venue, observation_failure_policy=ObservationFailurePolicy.FLATTEN
+    )
+
+    def failing_second_read():
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise PositionUnknownError("venue went down between the two reads")
+        return {"position_status": None}
+
+    trader.get_status.side_effect = failing_second_read
+    env.reset()      # must not raise: there IS no second read any more
+
+    assert calls["n"] == 1, (
+        f"reset read the venue {calls['n']} times; the second read is what escaped policy"
+    )
+
+
+def test_an_aborted_runtimeerror_does_not_flag_the_retried_bar():
+    """`_status_unknown_this_step` is set before the no-grace re-raise, and consumed by
+    `_finalize_step_flags` -- which that path never reaches.
+
+    So a caller that catches the timeout and retries would have the next HEALTHY bar
+    report status_unknown=1 and count toward truncation. The flag is cleared on abort.
+    """
+    import torch
+
+    env, trader = _real_futures_env(budget=0)     # no grace: RuntimeError re-raises
+    td = env.reset()
+
+    trader.get_account_balance.side_effect = RuntimeError("Failed to get account balance")
+    with pytest.raises(RuntimeError):
+        env.step(td.set("action", torch.tensor(len(env.action_levels) - 1)))
+    assert not env._status_unknown_this_step, "the aborted bar left the flag set"
+
+    trader.get_account_balance.side_effect = None                  # venue recovers
+    nxt = env.step(td.set("action", torch.tensor(1)))["next"]
+    assert nxt["status_unknown"].item() == 0.0, "a healthy retry was flagged as unknown"
+
+
+def test_an_exchange_detected_closure_invalidates_the_cached_balance():
+    """A bracket firing has no `close_position()` call for the close-site guard to find.
+
+    The env never asked for this close, so none of the seven close sites run -- but the
+    realised P&L has moved equity all the same, and a later grace bar would size against
+    the pre-close figure.
+    """
+    from torchtrade.envs.core.common_types import PositionStatus
+
+    open_long = PositionStatus(
+        qty=0.05, notional_value=5000.0, entry_price=100.0, unrealized_pnl=0.0,
+        unrealized_pnl_pct=0.0, mark_price=100.0, leverage=10,
+        margin_mode="isolated", liquidation_price=91.0,
+    )
+    env, trader = _real_futures_env(budget=3, sltp=True, position_status=open_long)
+    env.reset()
+    env.position.current_position = 1
+    env._last_confirmed_read["balance"] = {"total_margin_balance": 1e4}
+
+    env._sync_position_from_exchange(None)        # the bracket fired; venue reports flat
+
+    assert "balance" not in env._last_confirmed_read, (
+        "an SL/TP closure left pre-close equity cached for the next grace bar to size on"
+    )
