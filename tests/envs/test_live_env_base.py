@@ -515,14 +515,6 @@ def test_unknown_status_refuses_to_build_account_state():
         TorchTradeFuturesLiveEnv._get_observation(env)
 
 
-# Envs that RESOLVE the shared accessor, which replaced three byte-identical copies
-# (#283). Note okx resolves it but sizes in _step instead, so these cells prove wiring
-# rather than okx's own path. A rename would empty this and pytest would SKIP rather
-# than fail -- the hazard this file guards against elsewhere with its own len()
-# assertions.
-_SIZING_ENVS = [c for c in NON_SLTP_ENVS if hasattr(c, "_get_current_position_quantity")]
-assert len(_SIZING_ENVS) == 4, f"expected 4 envs that size from a live query, got {_SIZING_ENVS}"
-
 _FAILING_FETCH_EXCHANGES = ["binance", "bitget", "bybit", "okx", "alpaca"]
 
 
@@ -620,29 +612,11 @@ def test_reading_a_field_off_an_unknown_status_says_why():
         POSITION_UNKNOWN.qty
 
 
-@pytest.mark.parametrize(
-    "env_cls",
-    _SIZING_ENVS,
-    ids=lambda c: c.__name__,
-)
-def test_position_sizing_refuses_an_unknown_status(env_cls):
-    """_get_current_position_quantity must not size an order off a phantom flat account.
-
-    The hand-rolled `position.qty if position is not None else 0.0` read an outage as 0
-    quantity, so the delta was computed against a position the exchange never said was
-    gone. _step normally raises earlier, on its own status read -- this is the path when
-    the outage begins between the two get_status() calls inside a single step.
-
-    All four resolve the accessor since it was shared (#283), though okx sizes in _step
-    and never calls it -- these cells prove the MRO wiring, and okx's real path is covered
-    by test_okx_sizes_through_the_dust_rule_in_step. Alpaca spells the same second query
-    inline and is covered through _step by the composite test.
-    """
-    env = SimpleNamespace(
-        trader=SimpleNamespace(get_status=lambda: {"position_status": POSITION_UNKNOWN})
-    )
-    with pytest.raises(PositionUnknownError):
-        env_cls._get_current_position_quantity(env)
+# `test_position_sizing_refuses_an_unknown_status` lived here. It guarded an outage that
+# began BETWEEN the two get_status() calls inside one step -- a window #295 closed by
+# construction: the trade path now takes the qty `_acquire_pre_trade_state` already
+# resolved, so there is one status read per step and no second window to fall into.
+# `test_an_outage_stops_the_step_before_it_can_trade` below covers what remains.
 
 
 @pytest.mark.parametrize("module", ["env", "env_sltp"])
@@ -907,19 +881,21 @@ def test_no_live_env_reforks_the_position_quantity_accessor(env_cls):
     that never happened.
 
     Structural, not behavioural: a re-forked copy that has not drifted yet passes every
-    behavioural test, which is exactly how three of them survived. Over FUTURES_ENVS, not
-    just the non-SLTP ones: the SLTP variants inherit the accessor without calling it
-    today, so a fork there would be dead code -- and dead-but-wrong is the state the three
-    originals were in.
+    behavioural test, which is exactly how three of them survived.
+
+    #295 deleted the shared accessor entirely -- the trade path now takes the qty
+    `_acquire_pre_trade_state` resolved under the halt policy, so there is nothing left to
+    inherit. That makes re-introducing a private copy MORE tempting, not less, which is
+    why this guard outlived the method it was written for.
     """
     assert "_get_current_position_quantity" not in vars(env_cls), (
-        f"{env_cls.__name__} redefines _get_current_position_quantity. The dust rule "
-        "lives in position_qty_from_status -- inherit it rather than re-deriving qty."
+        f"{env_cls.__name__} defines its own _get_current_position_quantity. The dust "
+        f"rule lives in position_qty_from_status, and the qty is already resolved once "
+        f"per step in _acquire_pre_trade_state -- take it from there."
     )
 
 
-@pytest.mark.parametrize("env_cls", _SIZING_ENVS, ids=lambda c: c.__name__)
-def test_a_dust_residual_does_not_look_like_a_position_to_the_trade_path(env_cls):
+def test_a_dust_residual_does_not_look_like_a_position_to_the_trade_path():
     """The concrete failure from #283, at the seam every sizing path reads.
 
     An exchange can leave a float residual after a full close. Read as a live position it
@@ -927,17 +903,30 @@ def test_a_dust_residual_does_not_look_like_a_position_to_the_trade_path(env_cls
     close_position() on nothing -- and still advances current_action_level from a trade
     that never happened, which freezes the duplicate-action guard (invariant 2).
 
-    The account_state paths already honoured the dust rule; only the TRADE paths
-    hand-rolled it, which is why nothing caught this.
+    The seam MOVED in #295: the trade path no longer queries the venue itself, it takes
+    the qty `_acquire_pre_trade_state` already resolved under the halt policy. So this
+    drives that, rather than the per-env accessor it used to -- which #295 left with no
+    production callers at all.
     """
+    ps = SimpleNamespace(qty=1e-12, mark_price=100.0)
     env = SimpleNamespace(
-        trader=SimpleNamespace(
-            get_status=lambda: {"position_status": SimpleNamespace(qty=1e-12)}
-        )
+        config=SimpleNamespace(
+            observation_failure_policy=ObservationFailurePolicy.HALT, symbol="T"
+        ),
+        trader=SimpleNamespace(get_status=lambda: {"position_status": ps},
+                               get_mark_price=lambda: 100.0),
+        consecutive_unknown_status=0, _status_unknown_this_step=False,
+        _last_confirmed_read={}, _max_unknown_status_steps=0,
     )
-    assert env_cls._get_current_position_quantity(env) == 0.0, (
-        "a 1e-12 residual must read as flat, not as a position to close"
+    env._halting = lambda read, cache_key=None: TorchTradeFuturesLiveEnv._halting(
+        env, read, cache_key
     )
+    env._current_mark_price = (
+        lambda p=None: TorchTradeFuturesLiveEnv._current_mark_price(env, p)
+    )
+
+    _, _, _, size = TorchTradeFuturesLiveEnv._acquire_pre_trade_state(env)
+    assert size == 0.0, "a 1e-12 residual must read as flat, not as a position to close"
 
 
 @pytest.mark.parametrize("qty,expected", [

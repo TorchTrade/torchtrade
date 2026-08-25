@@ -330,7 +330,7 @@ class TestBybitDuplicateActionPrevention:
         mock_trader.reset_mock()
 
         env.position.current_position = position
-        trade_info = env._execute_trade_if_needed(action_tuple)
+        trade_info = env._execute_trade_if_needed(action_tuple, current_price=50000.0)
 
         assert trade_info["executed"] is should_trade
         mock_trader.trade.assert_not_called()
@@ -347,7 +347,7 @@ class TestBybitDuplicateActionPrevention:
         mock_trader.reset_mock()
         env.position.current_position = initial_pos
 
-        env._execute_trade_if_needed(action_tuple)
+        env._execute_trade_if_needed(action_tuple, current_price=50000.0)
 
         mock_trader.close_position.assert_called_once()
         mock_trader.trade.assert_called_once()
@@ -393,7 +393,7 @@ class TestBybitSLTPCloseAction:
         """Close action must close an existing position."""
         env_with_close.position.current_position = 1
 
-        trade_info = env_with_close._execute_trade_if_needed(("close", None, None))
+        trade_info = env_with_close._execute_trade_if_needed(("close", None, None), current_price=50000.0)
 
         assert trade_info["executed"] is True
         assert trade_info["closed_position"] is True
@@ -404,7 +404,7 @@ class TestBybitSLTPCloseAction:
         """Close action with no position should be a no-op."""
         env_with_close.position.current_position = 0
 
-        trade_info = env_with_close._execute_trade_if_needed(("close", None, None))
+        trade_info = env_with_close._execute_trade_if_needed(("close", None, None), current_price=50000.0)
 
         assert trade_info["executed"] is False
         mock_env_trader.close_position.assert_not_called()
@@ -441,7 +441,7 @@ class TestBybitSLTPMarkPrice:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
             # Execute a long action with SL/TP
-            env._execute_trade_if_needed(("long", -0.02, 0.03))
+            env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=51000.0)
 
             call_kwargs = mock_env_trader.trade.call_args[1]
             # SL/TP should be based on mark price (51000), not candle close (50050)
@@ -571,7 +571,7 @@ class TestBybitSLTPNotionalTradeMode:
 
         with patch.object(notional_env, "_wait_for_next_timestamp"):
             notional_env.reset()
-            notional_env._execute_trade_if_needed(action_tuple)
+            notional_env._execute_trade_if_needed(action_tuple, current_price=50000.0)
 
             call_kwargs = mock_env_trader.trade.call_args[1]
             assert call_kwargs["side"] == expected_side
@@ -590,7 +590,7 @@ class TestBybitSLTPNotionalTradeMode:
         with patch.object(notional_env, "_wait_for_next_timestamp"):
             notional_env.reset()
             with pytest.raises(ValueError, match="unusable mark price"):
-                notional_env._execute_trade_if_needed(("long", -0.02, 0.03))
+                notional_env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=0.0)
 
             mock_env_trader.trade.assert_not_called()
 
@@ -619,7 +619,7 @@ class TestBybitSLTPNotionalTradeMode:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            env._execute_trade_if_needed(("long", -0.02, 0.03))
+            env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=50000.0)
 
             call_kwargs = mock_env_trader.trade.call_args[1]
             assert call_kwargs["quantity"] == pytest.approx(0.001, rel=1e-6)
@@ -667,7 +667,7 @@ class TestBybitSLTPNotionalTradeMode:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            env._execute_trade_if_needed(("long", -0.02, 0.03))
+            env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=50000.0)
 
             call_kwargs = mock_env_trader.trade.call_args[1]
             # margin_balance=1100 * fraction=0.1 * leverage=5 / price=50000 = 0.011
@@ -681,7 +681,7 @@ class TestBybitSLTPNotionalTradeMode:
             baseline_qty = mock_env_trader.trade.call_args[1]["quantity"]
             mock_env_trader.transaction_fee = 0.002
             mock_env_trader.trade.reset_mock()
-            env._execute_trade_if_needed(("long", -0.02, 0.03))
+            env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=50000.0)
             assert mock_env_trader.trade.call_args[1]["quantity"] < baseline_qty, (
                 "the env must reserve the trader's higher rate, sizing SMALLER than the "
                 "venue constant -- otherwise the venue refuses the open"
@@ -721,14 +721,14 @@ class TestBybitSLTPLockPosition:
             locked_env.reset()
 
             # Open long first
-            locked_env._execute_trade_if_needed(("long", -0.02, 0.03))
+            locked_env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=50000.0)
             mock_env_trader.trade.assert_called_once()
             locked_env.position.current_position = 1
 
             mock_env_trader.reset_mock()
 
             # Try to switch to short — should be ignored
-            trade_info = locked_env._execute_trade_if_needed(("short", 0.02, -0.03))
+            trade_info = locked_env._execute_trade_if_needed(("short", 0.02, -0.03), current_price=50000.0)
 
             assert trade_info["executed"] is False
             mock_env_trader.trade.assert_not_called()
@@ -741,7 +741,7 @@ class TestBybitSLTPLockPosition:
             locked_env.position.current_position = 1
             mock_env_trader.reset_mock()  # Clear calls from reset/init
 
-            trade_info = locked_env._execute_trade_if_needed(("close", None, None))
+            trade_info = locked_env._execute_trade_if_needed(("close", None, None), current_price=50000.0)
 
             assert trade_info["executed"] is False
             mock_env_trader.close_position.assert_not_called()
@@ -752,7 +752,7 @@ class TestBybitSLTPLockPosition:
             locked_env.reset()
             assert locked_env.position.current_position == 0
 
-            trade_info = locked_env._execute_trade_if_needed(("long", -0.02, 0.03))
+            trade_info = locked_env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=50000.0)
 
             mock_env_trader.trade.assert_called_once()
 
@@ -784,7 +784,7 @@ class TestBybitSLTPLockPosition:
             env.position.current_position = 1
 
             # Switch to short — should work (calls close + trade)
-            env._execute_trade_if_needed(("short", 0.02, -0.03))
+            env._execute_trade_if_needed(("short", 0.02, -0.03), current_price=50000.0)
             mock_env_trader.close_position.assert_called()
             mock_env_trader.trade.assert_called()
 

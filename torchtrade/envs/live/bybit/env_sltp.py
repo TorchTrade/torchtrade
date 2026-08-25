@@ -103,7 +103,9 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         action_tuple = self._resolve_action_tuple(tensordict)
 
         # Execute trade if needed (duplicate guard uses synced state)
-        trade_info = self._execute_trade_if_needed(action_tuple)
+        trade_info = self._execute_trade_if_needed(
+            action_tuple, current_price=current_price
+        )
         trade_info["position_closed"] = position_closed
 
         # Eagerly update position from trade result so the rest of this step
@@ -146,7 +148,8 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         return next_tensordict
 
     def _execute_trade_if_needed(
-        self, action_tuple: Tuple[Optional[str], Optional[float], Optional[float]]
+        self, action_tuple: Tuple[Optional[str], Optional[float], Optional[float]],
+        *, current_price: float,
     ) -> Dict:
         """Execute trade if position change is needed."""
         trade_info = {
@@ -192,14 +195,32 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
             return trade_info
 
         # Get current mark price (more accurate than candle close for bracket orders)
-        current_price = float(self._current_mark_price())
+        # Threaded from `_step`'s halted read, REQUIRED. Re-reading the mark here
+        # bypassed the halt policy, so a grace bar that actually priced a bracket died
+        # with a bare error instead of trading on cached state and truncating on budget.
+        # binance and bitget take the price from base_features and never had this read.
+        current_price = float(current_price)
+        # Re-validated at the seam that USES it, not just where it was read. Threading
+        # moved the read out of this method, and with it `_current_mark_price`'s
+        # `isfinite`/`<= 0` guard -- a 0.0 divides in the sizing path below.
+        if not math.isfinite(current_price) or current_price <= 0:
+            raise ValueError(
+                f"venue reported an unusable mark price ({current_price})"
+            )
 
         # Resolve quantity based on trade_mode
         if self.config.trade_mode == "fractional":
             # Size on total_margin_balance (equity), matching offline sizing and the non-SLTP
             # live path. Binance's total_wallet_balance excludes unrealized PnL and would under-size;
             # bitget/bybit/okx map both keys to equity, so the switch is a no-op there.
-            balance = float(self.trader.get_account_balance()["total_margin_balance"])
+            # Under `_halting` like the plain envs' sizing read (#295). This is the read
+            # that SIZES a bracket order, and it was left raw when the plain path was
+            # fixed -- the same "landed on some venues, not others" shape #288 is about.
+            balance = float(
+                self._halting(self.trader.get_account_balance, cache_key="balance")[
+                    "total_margin_balance"
+                ]
+            )
             # current_price already raised in _current_mark_price(); balance has
             # no such accessor, and `nan <= 0` is False (#347).
             if not math.isfinite(balance) or balance <= 0:

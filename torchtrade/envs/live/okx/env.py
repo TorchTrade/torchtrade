@@ -121,7 +121,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         # the mark read matter here too.
         status, position_status, current_price, position_size = self._acquire_pre_trade_state()
 
-        # No-op today (this env's _execute_trade_if_needed recomputes qty live and never reads
+        # No-op today (this env's _execute_trade_if_needed takes the threaded qty and never reads
         # current_action_level), but keeps the field consistent so adding a duplicate-action
         # guard here can't reintroduce the silent no-op that bit alpaca/binance/bitget.
         self._sync_position_from_exchange(position_status)

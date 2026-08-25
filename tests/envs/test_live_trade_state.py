@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from torchtrade.envs.core.state import PositionState
+from torchtrade.envs.core.state import PositionState, position_qty_from_status
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +212,9 @@ class TestTradeStateSync:
         trader = MockTrader(position_qty=0.0)
         env = ENV_FACTORIES[exchange](trader)
 
-        trade_info = env._execute_trade_if_needed(-1.0, current_qty=env._get_current_position_quantity(), current_price=env._current_mark_price())
+        trade_info = env._execute_trade_if_needed(-1.0, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
 
         assert trade_info["executed"] is True
         assert trade_info["success"] is True
@@ -223,7 +225,9 @@ class TestTradeStateSync:
         trader.trade_should_raise = True
         env = ENV_FACTORIES[exchange](trader)
 
-        trade_info = env._execute_fractional_action(-1.0, current_qty=env._get_current_position_quantity(), current_price=env._current_mark_price())
+        trade_info = env._execute_fractional_action(-1.0, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
 
         assert trade_info["executed"] is False
         assert trade_info["success"] is False
@@ -239,7 +243,9 @@ class TestTradeStateSync:
 
         # First attempt: trade raises
         trader.trade_should_raise = True
-        trade_info = env._execute_trade_if_needed(-1.0, current_qty=env._get_current_position_quantity(), current_price=env._current_mark_price())
+        trade_info = env._execute_trade_if_needed(-1.0, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
 
         # Simulate _step logic: don't update state on failure
         if trade_info["executed"] and trade_info.get("success") is not False:
@@ -249,7 +255,9 @@ class TestTradeStateSync:
 
         # Second attempt: trade succeeds -- guard must NOT block
         trader.trade_should_raise = False
-        trade_info2 = env._execute_trade_if_needed(-1.0, current_qty=env._get_current_position_quantity(), current_price=env._current_mark_price())
+        trade_info2 = env._execute_trade_if_needed(-1.0, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
 
         assert trade_info2["executed"] is True
         assert trade_info2["success"] is True
@@ -275,7 +283,9 @@ class TestTradeStateSync:
         trader.trade_should_fail = True
         env = ENV_FACTORIES[exchange](trader)
 
-        trade_info = env._execute_fractional_action(-1.0, current_qty=env._get_current_position_quantity(), current_price=env._current_mark_price())
+        trade_info = env._execute_fractional_action(-1.0, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
 
         assert trade_info["executed"] is True
         assert trade_info["success"] is False
@@ -295,7 +305,9 @@ class TestBinanceDirectionSwitch:
         trader.close_should_fail = True
         env = _make_binance_env(trader)
 
-        trade_info = env._execute_fractional_action(-1.0, current_qty=env._get_current_position_quantity(), current_price=env._current_mark_price())
+        trade_info = env._execute_fractional_action(-1.0, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
 
         assert trader.position_qty == 0.5
         assert len([t for t in trader.trades_executed if t["side"] == "SELL"]) == 0
@@ -316,7 +328,9 @@ class TestBinanceDirectionSwitch:
         env = _make_binance_env(trader)
         env.position.current_position = 1
 
-        env._execute_fractional_action(-1.0, current_qty=env._get_current_position_quantity(), current_price=env._current_mark_price())
+        env._execute_fractional_action(-1.0, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
 
         assert trader.position_qty == 0.0, "the close itself must have succeeded"
         assert env.position.current_position == 0, (
@@ -369,20 +383,28 @@ class TestRegressionIssue189:
         env = _make_binance_env(trader)
 
         # Step 1: SHORT succeeds
-        trade_info = env._execute_trade_if_needed(-1.0, current_qty=env._get_current_position_quantity(), current_price=env._current_mark_price())
+        trade_info = env._execute_trade_if_needed(-1.0, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
         if trade_info["executed"] and trade_info.get("success") is not False:
             env.position.current_action_level = -1.0
 
         assert env.position.current_action_level == -1.0
 
         # Step 2: SHORT again -- guard correctly blocks (same action level)
-        trade_info2 = env._execute_trade_if_needed(-1.0, current_qty=env._get_current_position_quantity(), current_price=env._current_mark_price())
+        trade_info2 = env._execute_trade_if_needed(-1.0, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
         assert trade_info2["executed"] is False
 
         # Step 3: Transition to FLAT, then SHORT works
-        trade_info3 = env._execute_trade_if_needed(0.0, current_qty=env._get_current_position_quantity(), current_price=env._current_mark_price())
+        trade_info3 = env._execute_trade_if_needed(0.0, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
         if trade_info3["executed"] and trade_info3.get("success") is not False:
             env.position.current_action_level = 0.0
 
-        trade_info4 = env._execute_trade_if_needed(-1.0, current_qty=env._get_current_position_quantity(), current_price=env._current_mark_price())
+        trade_info4 = env._execute_trade_if_needed(-1.0, current_qty=position_qty_from_status(
+                env.trader.get_status().get("position_status")),
+            current_price=env._current_mark_price())
         assert trade_info4["executed"] is True

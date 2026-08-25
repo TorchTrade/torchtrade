@@ -153,13 +153,25 @@ def test_every_futures_config_coerces_its_failure_policy(exchange, module):
 
 # --- #295: the grace period, and the truncation that ends it --------------------------
 
-def _real_binance_env(budget, position_status=None, **config_kw):
-    """A real BinanceFuturesTorchTradingEnv on mocks. Three copies of this existed."""
+VENUES = ["binance", "bitget", "bybit", "okx"]
+
+
+def _real_futures_env(budget, venue="binance", position_status=None, **config_kw):
+    """A real futures env on mocks, for any of the four venues.
+
+    Parametrised because round 3 fixed the sizing read on all four and tested it on
+    ONE -- reverting it on bitget/bybit/okx failed zero tests, which is the same
+    shape as the defect it was fixing.
+    """
+    import importlib
     from unittest.mock import MagicMock, patch
     import numpy as np
-    from torchtrade.envs.live.binance.env import (
-        BinanceFuturesTorchTradingEnv as Env, BinanceFuturesTradingEnvConfig as Config,
-    )
+
+    module = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
+    Env = next(v for k, v in vars(module).items()
+               if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
+    Config = next(v for k, v in vars(module).items()
+                  if k.endswith("TradingEnvConfig") and v.__module__ == module.__name__)
 
     observer = MagicMock()
     observer.get_keys.return_value = ["1m_10"]
@@ -176,6 +188,7 @@ def _real_binance_env(budget, position_status=None, **config_kw):
     trader.get_mark_price.return_value = 100.0
     trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
     trader.round_quantity.side_effect = lambda q: round(float(q), 3)
+    trader._round_amount.side_effect = lambda q: round(float(q), 3)   # bitget/okx spelling
     trader.trade.return_value = True
     trader.close_position.return_value = True
     trader.client.futures_exchange_info.return_value = {"symbols": [{
@@ -184,7 +197,14 @@ def _real_binance_env(budget, position_status=None, **config_kw):
                     {"filterType": "MIN_NOTIONAL", "notional": "10"}],
     }]}
 
-    config = Config(symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10],
+    symbol = "BTC-USDT-SWAP" if venue == "okx" else "BTCUSDT"
+    trader.get_status.return_value = {"position_status": position_status}
+    trader.client.futures_exchange_info.return_value = {"symbols": [{
+        "symbol": symbol,
+        "filters": [{"filterType": "LOT_SIZE", "stepSize": "0.001"},
+                    {"filterType": "MIN_NOTIONAL", "notional": "10"}],
+    }]}
+    config = Config(symbol=symbol, time_frames=["1m"], window_sizes=[10],
                     execute_on="1m", max_unknown_status_steps=budget,
                     close_position_on_init=False, **config_kw)
     with patch("time.sleep"), patch.object(Env, "_wait_for_next_timestamp"):
@@ -445,7 +465,7 @@ def test_an_open_position_is_frozen_but_flagged_through_a_grace_outage():
         unrealized_pnl_pct=0.0, mark_price=100.0, leverage=10,
         margin_mode="isolated", liquidation_price=91.0,
     )
-    env, trader = _real_binance_env(budget=3, position_status=open_long)
+    env, trader = _real_futures_env(budget=3, position_status=open_long)
 
     td = env.reset()
     td = env.step(td.set("action", torch.tensor(2)))["next"]
@@ -484,7 +504,7 @@ def test_a_new_episode_cannot_be_served_the_previous_one_s_account():
         unrealized_pnl_pct=0.0, mark_price=100.0, leverage=10,
         margin_mode="isolated", liquidation_price=91.0,
     )
-    env, trader = _real_binance_env(budget=3, position_status=open_long)
+    env, trader = _real_futures_env(budget=3, position_status=open_long)
     td = env.reset()
     env.step(td.set("action", torch.tensor(2)))
     assert env._last_confirmed_read, "setup: the cache should be populated"
@@ -533,7 +553,8 @@ def test_alpaca_reports_its_status_as_known_because_it_has_no_failure_policy():
         td = td.exclude("done", "terminated", "truncated", "reward")
 
 
-def test_a_grace_bar_can_still_SIZE_a_trade_with_the_venue_down():
+@pytest.mark.parametrize("venue", VENUES)
+def test_a_grace_bar_can_still_SIZE_a_trade_with_the_venue_down(venue):
     """Every other grace test holds the action constant, so sizing never ran.
 
     `_execute_trade_if_needed` early-returns when the action equals the current level, so
@@ -545,9 +566,16 @@ def test_a_grace_bar_can_still_SIZE_a_trade_with_the_venue_down():
     """
     import torch
 
-    env, trader = _real_binance_env(budget=3)
+    env, trader = _real_futures_env(budget=3, venue=venue)
+    # Index-by-VALUE, not by position: binance ships [-1, 0, 1] and the others
+    # [-1, -0.5, 0, 0.5, 1], so a hardcoded index 2 is "flat" on three of the four and
+    # takes the close path instead of the sizing path. That is exactly how this fix went
+    # untested on three venues in the first place.
+    flat = env.action_levels.index(0.0)
+    full_long = len(env.action_levels) - 1
+
     td = env.reset()
-    td = env.step(td.set("action", torch.tensor(1)))["next"]          # flat, confirmed
+    td = env.step(td.set("action", torch.tensor(flat)))["next"]       # flat, confirmed
 
     trader.get_status.side_effect = PositionUnknownError("venue unreachable")
     trader.get_mark_price.side_effect = PositionUnknownError("venue unreachable")
@@ -555,7 +583,74 @@ def test_a_grace_bar_can_still_SIZE_a_trade_with_the_venue_down():
 
     # CHANGE the action, so the early-return cannot hide the sizing path.
     nxt = env.step(td.exclude("done", "terminated", "truncated", "reward")
-                   .set("action", torch.tensor(2)))["next"]
+                   .set("action", torch.tensor(full_long)))["next"]
+
+    assert nxt["status_unknown"].item() == 1.0, "the bar must be flagged, not crash"
+    assert not bool(nxt["terminated"]), "an outage is never a terminated episode"
+
+
+@pytest.mark.parametrize("venue", VENUES)
+def test_an_sltp_grace_bar_can_still_size_a_bracket_with_the_venue_down(venue):
+    """No test drove an SLTP env through an outage at all, on any venue.
+
+    So when the sizing read was brought under `_halting` on the plain envs, the SLTP
+    envs' own `get_account_balance()` -- a separate line, in a separate file, doing the
+    same thing -- was simply not part of the change. A bare PositionUnknownError escaped
+    `_step` instead of the episode truncating, for `trade_mode="fractional"`, on all four
+    venues.
+
+    That is #288's thesis stated as a bug: the same fix landing on some copies and not
+    others, with nothing in the suite able to tell.
+    """
+    import importlib
+    from unittest.mock import MagicMock, patch
+    import numpy as np
+    import torch
+
+    module = importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp")
+    Env = next(v for k, v in vars(module).items()
+               if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
+    Config = next(v for k, v in vars(module).items()
+                  if k.endswith("TradingEnvConfig") and v.__module__ == module.__name__)
+    symbol = "BTC-USDT-SWAP" if venue == "okx" else "BTCUSDT"
+
+    observer = MagicMock()
+    observer.get_keys.return_value = ["1m_10"]
+    # base_features carries OHLC; SLTP prices its brackets off the close column.
+    observer.get_observations.side_effect = lambda **kw: {
+        "1m_10": np.zeros((10, 4), dtype=np.float32),
+        **({"base_features": np.full((10, 4), 100.0, dtype=np.float32)}
+           if kw.get("return_base_ohlc") else {}),
+    }
+    observer.get_features.return_value = {
+        "observation_features": list("abcd"), "original_features": []}
+    observer.reset.return_value = None
+    trader = MagicMock()
+    trader.get_account_balance.return_value = {
+        "available_balance": 1e4, "total_margin_balance": 1e4,
+        "total_wallet_balance": 1e4, "total_maintenance_margin": 0.0}
+    trader.get_status.return_value = {"position_status": None}
+    trader.get_mark_price.return_value = 100.0
+    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
+    trader.round_quantity.side_effect = lambda q: round(float(q), 3)
+    trader._round_amount.side_effect = lambda q: round(float(q), 3)
+
+    config = Config(symbol=symbol, time_frames=["1m"], window_sizes=[10],
+                    execute_on="1m", max_unknown_status_steps=3,
+                    trade_mode="fractional", position_fraction=0.5,
+                    close_position_on_init=False)
+    with patch("time.sleep"), patch.object(Env, "_wait_for_next_timestamp"):
+        env = Env(config=config, observer=observer, trader=trader)
+        td = env.reset()
+        td = env.step(td.set("action", torch.tensor(0)))["next"]      # HOLD, confirmed
+
+        trader.get_status.side_effect = PositionUnknownError("venue unreachable")
+        trader.get_mark_price.side_effect = PositionUnknownError("venue unreachable")
+        trader.get_account_balance.side_effect = PositionUnknownError("venue unreachable")
+
+        # A real bracket action, so the sizing path runs rather than the hold early-return.
+        nxt = env.step(td.exclude("done", "terminated", "truncated", "reward")
+                       .set("action", torch.tensor(1)))["next"]
 
     assert nxt["status_unknown"].item() == 1.0, "the bar must be flagged, not crash"
     assert not bool(nxt["terminated"]), "an outage is never a terminated episode"

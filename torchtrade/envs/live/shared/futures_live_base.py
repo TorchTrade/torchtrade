@@ -581,15 +581,6 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             )
         return equity
 
-    def _get_current_position_quantity(self) -> float:
-        """The signed size the exchange holds, dust read as flat.
-
-        One copy: binance, bitget and bybit each carried a byte-identical
-        `position.qty if position is not None else 0.0`, which returned the residual
-        rather than 0 and let `abs(current_qty) > 0` fire on a flat account (#283).
-        """
-        return position_qty_from_status(self.trader.get_status().get("position_status"))
-
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Reset the environment.
 
@@ -623,28 +614,24 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         # rather than a bare PositionUnknownError, which is what `except
         # LiveObservationHalt` and the FLATTEN policy were always documented to cover and
         # what the reset path actually bypassed until now.
-        def read_account():
-            balance = self.trader.get_account_balance()
-            status = self.trader.get_status()
-            return balance, status, position_direction_from_status(
-                status.get("position_status")
-            )
+        # Two `_halting` calls rather than one closure plus a manual cache seed: the
+        # balance goes through the same "balance" slot the sizing path uses, so
+        # `_last_confirmed_read` keeps exactly one writer. `_reset_outage_state` has just
+        # cleared it, so a failure here still raises -- an episode cannot start on cache.
+        balance = self._halting(self.trader.get_account_balance, cache_key="balance")
+        status = self._halting(self.trader.get_status)
 
-        balance, status, direction = self._halting(read_account)
-        # Seed the sizing cache from reset's CONFIRMED balance. Without this the grace
-        # period could not size a trade it had not already sized once: the "balance" slot
-        # is otherwise filled only by `_calculate_fractional_position`, so a policy that
-        # held through the healthy bars and wanted to open during the outage got a halt.
-        self._last_confirmed_read["balance"] = balance
         self.balance = balance.get("available_balance", 0)
         self.position.hold_counter = 0
-        self.position.current_position = direction
+        self.position.current_position = position_direction_from_status(
+            status.get("position_status")
+        )
 
         # Load-bearing for binance and bitget, whose _execute_trade_if_needed compares
         # `desired_action == self.position.current_action_level` and returns executed=False
         # on a match: without this, a position that predates the episode leaves a stale
         # level behind which the guard refuses the very trade that would close it (#243).
-        # Inert for bybit and okx, which recompute qty live and never read the field.
+        # Inert for bybit and okx, which take the threaded qty and never read the field.
         self._sync_action_level_after_reset()
 
         # advance_hold=False: hold_counter was just zeroed above; a reset must never

@@ -248,7 +248,14 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
             # Size on total_margin_balance (equity), matching offline sizing and the non-SLTP
             # live path. Binance's total_wallet_balance excludes unrealized PnL and would under-size;
             # bitget/bybit/okx map both keys to equity, so the switch is a no-op there.
-            balance = float(self.trader.get_account_balance()["total_margin_balance"])
+            # Under `_halting` like the plain envs' sizing read (#295). This is the read
+            # that SIZES a bracket order, and it was left raw when the plain path was
+            # fixed -- the same "landed on some venues, not others" shape #288 is about.
+            balance = float(
+                self._halting(self.trader.get_account_balance, cache_key="balance")[
+                    "total_margin_balance"
+                ]
+            )
             if not math.isfinite(balance) or balance <= 0:
                 logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
                 trade_info["success"] = False
