@@ -180,6 +180,9 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
                 logger.error(f"Close position failed for {self.config.symbol}: {e}")
                 return trade_info
             if success:
+                # A realised close moves equity; the cached balance is now wrong by the
+                # trade's P&L. SUCCESS only -- a failed close leaves the position (#295).
+                self._last_confirmed_read.pop("balance", None)
                 close_side = "sell" if self.position.current_position > 0 else "buy"
                 self.position.current_position = 0
                 self.active_stop_loss = 0.0
@@ -271,6 +274,9 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
                 return trade_info
             if not close_success:
                 return trade_info
+            # A realised close moves equity; the cached balance is now wrong by the
+            # trade's P&L. Reached only on success (#295).
+            self._last_confirmed_read.pop("balance", None)
             self.position.current_position = 0
 
         # Map position side to trade side

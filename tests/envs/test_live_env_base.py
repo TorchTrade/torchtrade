@@ -3843,3 +3843,51 @@ def test_every_sltp_config_shares_the_one_validated_post_init(config_cls):
         f"{config_cls.__name__} defines its own __post_init__; it must call super() or "
         f"it silently stops validating every field the shared one checks"
     )
+
+
+def test_every_successful_close_invalidates_the_cached_balance():
+    """A realised close moves equity, so the cached sizing balance is stale after it.
+
+    Seven close sites exist: the shared `_handle_close_action` (which the direction-switch
+    leg routes through) and six across the SLTP envs, in three different shapes. I patched
+    one and reported it done -- the exact "landed on some copies, not others" failure this
+    PR has now reproduced five times, that time while fixing an instance of it.
+
+    Structural, because the cost is invisible behaviourally: a stale balance sizes an
+    order the venue rejects on margin, many bars later, only during an outage.
+
+    Two functions are exempt BY ORDERING, not by oversight. `_halting`'s emergency FLATTEN
+    close runs when the venue is already unreadable -- the cache is what grace is standing
+    on. `_reset` clears the whole cache before it closes and re-seeds from a fresh read
+    after, so its balance already reflects the close.
+    """
+    import ast
+    import pathlib
+
+    EXEMPT = {"_halting", "_reset"}
+    root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
+    offenders = []
+    for path in sorted(root.glob("*/env_sltp.py")) + [
+        root / "shared" / "futures_live_base.py"
+    ]:
+        for fn in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(fn, ast.FunctionDef) or fn.name in EXEMPT:
+                continue
+            closes = [n for n in ast.walk(fn)
+                      if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                      and n.func.attr == "close_position"]
+            if not closes:
+                continue
+            invalidations = [n for n in ast.walk(fn)
+                             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                             and n.func.attr == "pop" and n.args
+                             and isinstance(n.args[0], ast.Constant)
+                             and n.args[0].value == "balance"]
+            if len(invalidations) < len(closes):
+                offenders.append(f"{path.parent.name}/{path.name}::{fn.name} "
+                                 f"({len(closes)} closes, {len(invalidations)} invalidations)")
+
+    assert not offenders, (
+        "a successful close leaves the cached sizing balance stale in: "
+        + "; ".join(offenders)
+    )

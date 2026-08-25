@@ -311,6 +311,9 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
                     return trade_info
                 if not close_success:
                     return trade_info
+                # A realised close moves equity; the cached balance is now wrong by the
+                # trade's P&L. Reached only on success (#295).
+                self._last_confirmed_read.pop("balance", None)
                 self.position.current_position = 0
 
         if side == "long":
